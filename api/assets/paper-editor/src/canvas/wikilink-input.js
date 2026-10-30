@@ -15,6 +15,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
+import { splitAlias } from "../wikilink-trigger.js";
 
 export const wikilinkInputKey = new PluginKey("bpWikilinkInput");
 
@@ -31,9 +32,7 @@ export function matchingRow(list, query) {
 }
 
 function bracketed(from, to, inner) {
-  const pipe = inner.indexOf("|");
-  const query = pipe === -1 ? inner : inner.slice(0, pipe);
-  const alias = pipe === -1 ? null : inner.slice(pipe + 1);
+  const { query, alias } = splitAlias(inner);
   return query && alias !== "" ? { from, to, inner, query, alias } : null;
 }
 

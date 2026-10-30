@@ -46,6 +46,7 @@ import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 import { WikilinkMenu } from "./wikilink-menu.js";
 import {
   parseOpenWikilink,
+  splitAlias,
   wikilinkReplaceRange,
   parseOpenTag,
   tagReplaceRange,
@@ -1040,14 +1041,20 @@ class BpPaperEditor extends HTMLElement {
     // Open (or refresh, as the query grows) the popup at the live caret rect,
     // and remember the PM range to replace on pick — anchored to the DOCUMENT
     // position (selection.from), not the block-local offset hit carries.
-    this._openWikilink(this._caretRect(), hit.query);
+    const { query, alias } = hit.trigger === "[[" ? splitAlias(hit.query) : { query: hit.query, alias: null };
+    this._openWikilink(this._caretRect(), query);
     this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query);
+    this._wlAlias = alias || null;
 
     // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
     // resolved batch is dropped unless it is still the latest request AND the
     // menu is still open — so an out-of-order or post-close response is ignored.
     const seq = ++this._wlSeq;
-    Promise.resolve(this._wikilinkSource(hit.query))
+    if (!query && alias != null) {
+      this._wikilink.setResults([]);
+      return true;
+    }
+    Promise.resolve(this._wikilinkSource(query))
       .then((list) => {
         if (seq !== this._wlSeq || !this._wikilink || !this._wikilink.isOpen()) {
           return;
@@ -1092,8 +1099,8 @@ class BpPaperEditor extends HTMLElement {
       .insertContentAt({ from: range.from, to: range.to }, [
         {
           type: "text",
-          text: candidate.title,
-          marks: [{ type: "wikilink", attrs: { target: candidate.title, docId: candidate.id } }],
+          text: this._wlAlias || candidate.title,
+          marks: [{ type: "wikilink", attrs: { target: candidate.title, docId: candidate.id, alias: this._wlAlias } }],
         },
         { type: "text", text: " " },
       ])

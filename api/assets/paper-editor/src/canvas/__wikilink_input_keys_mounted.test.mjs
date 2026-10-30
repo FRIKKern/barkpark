@@ -551,6 +551,17 @@ const ALIASED = "[[plan|the plan]] [[Nope|n]] [[|x]] [[Plan|]]";
 const PICKED = [{ words: "the plan", target: "Plan", docId: "n-plan", alias: "the plan" }];
 const docText = (editor) => editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n");
 
+await check("[[Plan|]] and [[|Plan]] ask nothing and stay text", async () => {
+  const { canvas, editor, asked } = await mount({ source: () => [] });
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "[[Plan|]] [[|Plan]]");
+  await tick(20);
+  assert.deepEqual(asked, []);
+  assert.ok(docText(editor).includes("[[Plan|]] [[|Plan]]"), docText(editor));
+  canvas.remove();
+});
+
 const doors = {
   "plain text": (editor) => paste(editor, ALIASED),
   "Shift paste as plain text": (editor) => {
@@ -676,6 +687,48 @@ await check("the picker is shut once the brackets close", async () => {
   assert.equal(canvas._wikilink.isOpen(), false);
   assert.equal(textOf(editor, "p1"), "Start Plan");
   canvas.remove();
+});
+
+await check("the [[ menu searches the title alone, and its pick links the words as an alias", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  type(editor, "[[plan|the plan");
+  await tick(10);
+  assert.equal(asked.at(-1), "plan");
+  assert.ok(asked.every((q) => !q.includes("|")), asked.join(", "));
+  key(editor, { key: "Enter" });
+  await tick(10);
+  assert.deepEqual(aliasLinks(editor), PICKED);
+  assert.equal(textOf(editor, "p1"), "Start the plan ");
+  canvas.remove();
+});
+
+await check("the [[ menu with no title before the | searches nothing, [[plan| picks with no alias, and @ keeps its whole query", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  type(editor, "[[");
+  await tick(10);
+  asked.length = 0;
+  type(editor, "|plan");
+  await tick(10);
+  assert.deepEqual(asked, []);
+  canvas.remove();
+  const again = await mount();
+  caret(again.editor, endOf(again.editor, 0));
+  type(again.editor, "@plan|x");
+  await tick(10);
+  assert.equal(again.asked.at(-1), "plan|x");
+  again.canvas.remove();
+  const empty = await mount();
+  caret(empty.editor, endOf(empty.editor, 0));
+  type(empty.editor, "[[plan|");
+  await tick(10);
+  key(empty.editor, { key: "Enter" });
+  await tick(10);
+  const marked = [];
+  empty.editor.state.doc.descendants((n) => { const m = n.isText && n.marks.find((k) => k.type.name === "wikilink"); if (m && m.attrs.docId === "n-plan") marked.push({ words: n.text, alias: m.attrs.alias }); });
+  assert.deepEqual(marked, [{ words: "Plan", alias: null }], "empty words pick the title with no alias");
+  empty.canvas.remove();
 });
 
 await check("a linked [[Plan]] paints its live title", async () => {

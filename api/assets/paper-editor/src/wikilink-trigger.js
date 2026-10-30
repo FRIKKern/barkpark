@@ -10,6 +10,18 @@
 // part the trigger logic can be proven correct without a browser.
 
 /**
+ * Split a `[[` query at its first `|` (contract 1.19.0): the title to search for, and the
+ * words the link shows (`null` when there is no `|`). `[[Title|words]]` asks for Title alone.
+ *
+ * @param {string} inner
+ * @returns {{query: string, alias: string | null}}
+ */
+export function splitAlias(inner) {
+  const pipe = inner.indexOf("|");
+  return pipe === -1 ? { query: inner, alias: null } : { query: inner.slice(0, pipe), alias: inner.slice(pipe + 1) };
+}
+
+/**
  * Parse the text BEFORE the caret for an open, same-line, unfinished `[[`
  * trigger. Returns `{ query, from, to }` (the live query string and the
  * inclusive `[[`…caret range to replace on pick) when the popup should be open,
