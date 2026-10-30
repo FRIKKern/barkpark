@@ -18,6 +18,7 @@ on:
       - "scripts/deploy-health-banner.test.sh"
       - "scripts/deploy-env-file.test.sh"
       - "scripts/deploy-admin-token-recovery.test.sh"
+      - "scripts/deploy-image.test.sh"
       - ".github/workflows/vendored-assets.yml"
   push:
     branches: [main]
@@ -27,6 +28,7 @@ on:
       - "scripts/deploy-health-banner.test.sh"
       - "scripts/deploy-env-file.test.sh"
       - "scripts/deploy-admin-token-recovery.test.sh"
+      - "scripts/deploy-image.test.sh"
       - ".github/workflows/vendored-assets.yml"
 
 concurrency:
@@ -64,3 +66,5 @@ jobs:
         run: bash scripts/deploy-env-file.test.sh
       - name: deploy.sh admin token recovery harness
         run: bash scripts/deploy-admin-token-recovery.test.sh
+      - name: deploy.sh image and from-source harness
+        run: bash scripts/deploy-image.test.sh
