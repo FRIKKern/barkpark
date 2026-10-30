@@ -176,6 +176,15 @@ try {
     assert.ok(textOf(editor, "p1").endsWith("go Plan now"), textOf(editor, "p1"));
   });
 
+  await check("a multi-line plain paste (the canvas's own soft-break paste) links on every line", async () => {
+    caret(editor, endOf(editor, 0));
+    paste(editor, " one [[Plan]]\ntwo [[plan]]");
+    await tick(10);
+    const p1 = editor.state.doc.child(0);
+    assert.equal(p1.content.content.some((n) => n.type.name === "hardBreak"), true, "the soft-break path ran");
+    assert.ok(p1.textContent.endsWith(" one Plantwo Plan"), p1.textContent);
+  });
+
   await check("Mod+Enter on plain text edits nothing, emits nothing, and stays free for the host", async () => {
     canvas.flushPendingChanges();
     await tick(350);
