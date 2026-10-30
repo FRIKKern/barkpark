@@ -98,6 +98,9 @@ func stubInstanceUp(t *testing.T) *upFake {
 		return f.reply(c)
 	}
 	instanceUpGet = func(context.Context, string) (int, error) { return f.readyz, nil }
+	// The org connection check sees Entra's sign-in redirect unless a test
+	// says otherwise with stubRedirect.
+	stubRedirect(t, 302, "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/authorize")
 	instanceUpSleep = func(time.Duration) {}
 	instanceUpSelf = func() (string, error) { return "bp", nil }
 	instanceUpConnect = func(_ *writer, _ globals, server, token string) error {
