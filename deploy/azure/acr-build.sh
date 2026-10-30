@@ -25,6 +25,8 @@ for tool in az git tar; do
   command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
 done
 
+# The image needs no Git LFS file, and the screenshots in LFS are 100 MB.
+export GIT_LFS_SKIP_SMUDGE=1
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -55,9 +57,9 @@ esac
 
 echo "Building $ACR.azurecr.io/barkpark:$TAG from commit $SHA" >&2
 VERSION=$(tr -d '[:space:]' <"$work/ctx/VERSION")
-az acr build -r "$ACR" -t "barkpark:$TAG" -f api/Dockerfile --timeout 3600 \
-  --build-arg "BARKPARK_BUILD_VERSION=$VERSION" --build-arg "BARKPARK_BUILD_COMMIT=$SHA" \
-  "$work/ctx" >&2
+# az reads the -f path from the current directory, so build from the context.
+(cd "$work/ctx" && az acr build -r "$ACR" -t "barkpark:$TAG" -f api/Dockerfile --timeout 3600 \
+  --build-arg "BARKPARK_BUILD_VERSION=$VERSION" --build-arg "BARKPARK_BUILD_COMMIT=$SHA" . >&2)
 
 LOGIN=$(az acr show -n "$ACR" --query loginServer -o tsv)
 echo "$LOGIN/barkpark:$TAG"

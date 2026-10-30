@@ -25,8 +25,8 @@ Postgres has no public endpoint and answers only inside the virtual network. The
 
 1. Access to the subscription for the person who deploys, and the resource providers that [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) lists.
 2. A resource group in the chosen region.
-3. The Entra app registration. Run `scripts/entra-app-register.sh` as a user who may create app registrations and groups, as [ENTRA.md](ENTRA.md#register-the-app-with-the-script) describes.
-4. An owners group. The script creates it, and Barkpark maps it to the `owner` role.
+3. The Entra app registration and the owners group, which Barkpark maps to `owner`. Either `main.bicep` with `entraEnabled=true` creates both in the deployment, as [ENTRA.md](ENTRA.md#create-the-app-with-the-bicep-template) describes, or `scripts/entra-app-register.sh` does, as [ENTRA.md](ENTRA.md#register-the-app-with-the-script) describes.
+4. Entra roles for the person who deploys: Application Administrator and Groups Administrator, which hold Graph `Application.ReadWrite.All` and `Group.ReadWrite.All`. With `entraEnabled=true`, `main.bicep` also grants its secret script identity the Graph permission `Application.ReadWrite.OwnedBy`, for this app only, which needs Privileged Role Administrator. Global Administrator covers all three.
 5. An editors group. Create it in Entra, assign it to the app, and map it to `member`.
 6. A host name. Without one, the app answers on its Container Apps default host. The host name becomes `PHX_HOST`, and passkeys stop working if it changes later.
 7. A [break-glass account](ENTRA.md#break-glass-account) that signs in without Entra, and a safe place for its password and TOTP secret.
@@ -51,7 +51,7 @@ The monthly cost in Norway East at the template's sizes is about USD 43 to 95, p
 |---|---|
 | Upgrades | Pin an image version, such as `ghcr.io/frikkern/barkpark:0.2.28`. The image never updates itself. To upgrade, note the time and the current tag, set `image` in `main.bicepparam`, run `az deployment group create` again and check `/readyz`. Migrations run when the new image starts. |
 | Roll back | Run the same command with the old tag. If the old image does not start on the migrated database, restore the database to the time you noted. |
-| Entra client secret | It expires after 1 or 2 years, and the script prints the date. Sign-ins stop on that date. Put the date in your calendar and rotate it before then with `--rotate-secret` and `bp org oidc-rotate-secret`. |
+| Entra client secret | It expires after 1 or 2 years, and the script prints the date. The deployment's secret lasts 1 year by default. Key Vault shows its expiry on `oidc-client-secret`. Sign-ins stop on that date. Put the date in your calendar and rotate it before then with `--rotate-secret` and `bp org oidc-rotate-secret`. |
 | Barkpark keys | Keep a copy in a password manager, apart from the backups. Rotate them as [the key rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) describes. Never change `BARKPARK_CLOAK_KEY`. |
 | Backups | `barkpark-backup` runs `bp instance backup` every day. Flexible Server also keeps point-in-time restore for the retention period. Turn on purge protection on the Key Vault. |
 | Restore drill | Once a month, run [the restore drill](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) and record the result. |

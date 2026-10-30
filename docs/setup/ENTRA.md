@@ -9,9 +9,21 @@ The redirect URI holds the organization slug: `https://<host>/v1/auth/oidc/<org>
 
 Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`. The script prints both URLs.
 
+## Create the app with the Bicep template
+
+On Container Apps, `main.bicep` can create the Entra side in the same deployment, without Entra ID P1. Add:
+
+```bash
+-p entraEnabled=true entraOrg=gyldendal entraOrgName=Gyldendal 'entraOwnerUpns=["owner@example.com"]'
+```
+
+`entra.bicep` then does script steps 1 to 4 below on the instance host, and adds the deploying user to the owners group. A deployment script writes a client secret for `entraSecretYears`, 1 by default, only to the Key Vault as `oidc-client-secret`. At its first boot the app makes the organization, the workspace link and the connection that the `bp org` commands below make, with `trust_idp_mfa` unless `entraTrustIdpMfa=false`. It never changes a connection that exists. The output `entraSignInUrl` is the sign-in URL. The deploying user needs the roles in [IT-HANDOVER.md](IT-HANDOVER.md#what-you-create).
+
+For a VM, `entra.bicep` deploys alone with `-p host=<host> org=<org>` and makes no secret. To add or rotate a secret, run the script with `--app-id <entraClientId>`, `--owners-group "<group name>"` and `--secret-file`.
+
 ## Register the app with the script
 
-Run the script with the Azure CLI, signed in with `az login` as a user who may create app registrations and groups:
+Run it with the Azure CLI as a user who may create app registrations and groups:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/entra-app-register.sh
@@ -19,11 +31,11 @@ bash entra-app-register.sh --host barkpark.example.com --org gyldendal \
   --secret-file ./entra-client-secret --add-owner owner@example.com --org-name Gyldendal
 ```
 
-The script finds the app by the name `Barkpark <org>` or `--name`, and the owners group by `Barkpark <org> owners` or `--owners-group`. Another instance in the tenant can own either. So the script stops when the app has no redirect URI on `--host`, or when a new app would reuse the group. Give a second instance names of its own. For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID.
+The script finds the app by `--app-id`, `--name` or the name `Barkpark <org>`, and the owners group by `--owners-group` or `Barkpark <org> owners`. Another instance can own either, so it stops when that app has no redirect URI on `--host`, or when a new app would reuse the group.
 
 The script does these steps and is safe to run again:
 
-1. It creates the app registration, or finds it by `--app-id` or by name. The app is single tenant (`AzureADMyOrg`) and has the redirect URI on the Web platform. A single-page application (SPA) redirect does not work, because Barkpark exchanges the code on the server with a client secret.
+1. It creates the app registration, or finds it by `--app-id` or by name. The app is single tenant (`AzureADMyOrg`) and has the redirect URI on the Web platform. A single-page application redirect does not work.
 2. It turns on the `groups` claim with group object ids, adds the optional `email` and `amr` claims to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent itself and retries until the tenant-wide consent holds all three scopes. It stops with an error after about a minute.
 3. It creates the service principal, which is the enterprise app that users sign in to.
 4. It creates the owners security group and adds each `--add-owner` user to it.
@@ -62,17 +74,17 @@ bp org oidc-update gyldendal --scopes "openid profile email" --yes
 
 Conditional Access needs Entra ID P1. Without P1, security defaults make each user register an authenticator at the first sign-in but do not ask for it at every sign-in. With `trust_idp_mfa` on a connection that has `--tenant_id`, Barkpark asks Entra for MFA with the OIDC `claims` parameter. On 2026-10-27, on a tenant with security defaults and no P1, Entra then asked a non-admin user for the code at every sign-in.
 
-Turn `trust_idp_mfa` on once a test sign-in works, then sign in again. A `TOTP code` step in the [tooling/entra-signin](../../tooling/entra-signin/README.md) output shows Entra asked for the code, and `idp_mfa: true` shows Barkpark counted it. [bp login --sso](#sign-the-bp-cli-in-with-sso) shows `idp_mfa` too. Neither needs P1 or the portal's Sign-in logs.
+Turn `trust_idp_mfa` on once a test sign-in works, then sign in again. A `TOTP code` step in the [tooling/entra-signin](../../tooling/entra-signin/README.md) output shows Entra asked for the code, and `idp_mfa: true` shows Barkpark counted it. [bp login --sso](#sign-the-bp-cli-in-with-sso) shows `idp_mfa` too.
 
 ## Removed users
 
-[ENTRA-ACCESS.md](ENTRA-ACCESS.md#removed-users) says what stops a removed user, including `require_group_match`.
+[ENTRA-ACCESS.md](ENTRA-ACCESS.md#removed-users) covers removed users, `require_group_match` and domain verification.
 
 ## The bootstrap owner
 
 `BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats the first owner on a fresh instance. Barkpark matches a sign-in to that owner on the ID token's `email` claim, ignoring case. Entra leaves out `email` for an account with no mailbox address. Set `BARKPARK_OIDC_EMAIL_FROM_UPN=on` so Barkpark matches on `preferred_username`, the UPN, when `email` is absent.
 
-The bootstrap owner does not need domain verification. The owner holds a seat in the default workspace, and that seat lets the organization's connection sign the owner in.
+The bootstrap owner needs no domain verification, because the owner's seat in the default workspace lets the connection sign the owner in.
 
 ## Break-glass account
 
@@ -87,15 +99,6 @@ bp login --sso --org gyldendal -s https://<host>
 ```
 
 bp opens the sign-in URL and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry, with `idp_mfa` under `-o json`. `--no-browser` prints the URL to open on the same machine. Commands such as `bp instance studio-token --workspace default` then run as the owner. `bp logout -s https://<host>` revokes that session.
-
-## Domain verification
-
-`bp org domain-add <org> <domain>` prints a TXT record value, `barkpark-verify=...`. Publish it as a TXT record on the domain itself, such as `gyldendal.no`, not on a subdomain. `bp org domain-verify <org> <domain>` then checks it. A verified domain does two things:
-
-- The sign-in page sends a user with an address in that domain to the organization's Entra sign-in.
-- The connection may sign in an existing Barkpark account with an address in that domain, even when the account holds no seat in the organization.
-
-Pensum does not need it when editors open the sign-in URL above and every account is created by its first Entra sign-in. Add it when existing accounts must move to Entra sign-in, or when editors start from the generic sign-in page.
 
 ## Users in many groups
 

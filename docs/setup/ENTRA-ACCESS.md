@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: entra-access-control | budget: 1200tok -->
 # Who keeps access with Entra sign-in
 
-This page belongs to [ENTRA.md](ENTRA.md). It covers removed users and the break-glass account. The steps were run on a staging instance on 2026-10-27.
+This page belongs to [ENTRA.md](ENTRA.md). It covers removed users, the break-glass account and domain verification. The steps were run on a staging instance on 2026-10-27.
 
 ## Removed users
 
@@ -31,3 +31,12 @@ An instance without outgoing mail cannot send a password reset link, so the owne
 4. `bp workspace member-add <email> --role admin` with the operator token invites the account. Only an owner can give `owner`. With the session token, `bp auth invitation-ls` shows the invitation and `bp auth invitation-accept <id>` takes the seat.
 
 Then sign in with `bp auth login <email> <password> --totp_code <code>`. While the organization allows only SSO, each such sign-in writes a `breakglass_login` audit event.
+
+## Domain verification
+
+`bp org domain-add <org> <domain>` prints a TXT record value, `barkpark-verify=...`. Publish it as a TXT record on the domain itself, such as `gyldendal.no`, not on a subdomain. `bp org domain-verify <org> <domain>` then checks it. A verified domain does two things:
+
+- The sign-in page sends a user with an address in that domain to the organization's Entra sign-in.
+- The connection may sign in an existing Barkpark account with an address in that domain, even when the account holds no seat in the organization.
+
+Pensum does not need it when editors open the sign-in URL above and every account is created by its first Entra sign-in. Add it when existing accounts must move to Entra sign-in, or when editors start from the generic sign-in page.
