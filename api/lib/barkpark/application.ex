@@ -233,6 +233,10 @@ defmodule Barkpark.Application do
           # Off unless BARKPARK_BOOTSTRAP_OWNER_EMAIL is set and no user exists.
           bootstrap_owner()
 
+          # Off unless BARKPARK_OIDC_BOOTSTRAP_ORG is set. Runs beside boot,
+          # because it reads the issuer's discovery document over the network.
+          oidc_bootstrap()
+
           # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
           # this is a no-op (active?/0 is false) and nothing is logged. When
           # active, warn loudly with every reachable reader URL so the operator
@@ -759,6 +763,17 @@ defmodule Barkpark.Application do
   rescue
     # Never take boot down: an unmigrated DB leaves the owner for the next boot.
     error -> Logger.warning("[BootstrapOwner] skipped: #{inspect(error)}")
+  end
+
+  defp oidc_bootstrap do
+    if Application.get_env(:barkpark, :oidc_bootstrap) do
+      Task.Supervisor.start_child(
+        Barkpark.TaskSupervisor,
+        &Barkpark.Sso.OidcBootstrap.run_with_retries/0
+      )
+    end
+  rescue
+    error -> Logger.warning("[OidcBootstrap] skipped: #{inspect(error)}")
   end
 
   defp check_pg_trgm do
