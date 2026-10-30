@@ -1,4 +1,4 @@
-// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0 and 1.18.0: a typed or pasted `[[Title]]` becomes
+// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0 to 1.19.0: a typed or pasted `[[Title]]` becomes
 // a document link only when wikilinkSource(Title) returns a row with that exact title (ignoring
 // case); Mod+Enter edits nothing and stays free for the host.
 // Run: node src/canvas/__wikilink_input_keys_mounted.test.mjs   (or: npm test)
@@ -421,19 +421,23 @@ for (const [name, text] of [
   canvas.remove();
 });
 
-await check("a Markdown paste keeps marks, its aliased [[Title|words]] stays text like a plain paste, and its links are one undo step", async () => {
+await check("a Markdown paste keeps marks and links an aliased [[Title|words]] as an alias pick, in one undo step", async () => {
   const { canvas, editor, asked } = await mount();
   caret(editor, endOf(editor, 0));
   asked.length = 0;
-  paste(editor, "# H\n\n**[[plan]]** and [[]] and [[Plan|the plan]]");
+  paste(editor, "# H\n\n**[[plan]]** and [[]] and [[Plan|Plan]] and [[Plan|the plan]]");
   await tick(20);
   const para = canvas.recoverySnapshot().blocks.find((b) => b.type === "paragraph" && JSON.stringify(b).includes("the plan"));
-  assert.deepEqual(para.content[0], { type: "wikilink", target: "Plan", children: [{ type: "strong", children: [{ type: "text", value: "Plan" }] }], docId: "n-plan" });
-  assert.deepEqual(para.content[1], { type: "text", value: " and [[]] and [[Plan|the plan]]" });
-  assert.deepEqual(asked.sort(), ["Plan|the plan", "plan"]);
-  assert.equal(links(editor).filter((l) => !l.docId).length, 0, "no link without a docId");
+  assert.deepEqual(para.content, [
+    { type: "wikilink", target: "Plan", children: [{ type: "strong", children: [{ type: "text", value: "Plan" }] }], docId: "n-plan" },
+    { type: "text", value: " and [[]] and " },
+    { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], alias: "Plan", docId: "n-plan" },
+    { type: "text", value: " and " },
+    { type: "wikilink", target: "Plan", children: [{ type: "text", value: "the plan" }], alias: "the plan", docId: "n-plan" },
+  ]);
+  assert.deepEqual(asked.map((q) => q.toLowerCase()), ["plan"], "one ask, for the title alone");
   editor.commands.undo();
-  assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes("[[plan]]"), "one undo brings the brackets back");
+  assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes("[[Plan|the plan]]"), "one undo brings the brackets back");
   canvas.remove();
 });
 
@@ -532,6 +536,96 @@ await check("a files-only paste lands the image and asks nothing", async () => {
   editor.state.doc.descendants((n) => { if (n.type.name === "bpImage") images.push(n.attrs.alt); });
   assert.deepEqual(images, ["pic"], "the image went in");
   assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+const aliasLinks = (editor) => {
+  const out = [];
+  editor.state.doc.descendants((n) => {
+    const m = n.isText && n.marks.find((k) => k.type.name === "wikilink");
+    if (m && m.attrs.alias != null) out.push({ words: n.text, target: m.attrs.target, docId: m.attrs.docId, alias: m.attrs.alias });
+  });
+  return out;
+};
+const ALIASED = "[[plan|the plan]] [[Nope|n]] [[|x]] [[Plan|]]";
+const PICKED = [{ words: "the plan", target: "Plan", docId: "n-plan", alias: "the plan" }];
+const docText = (editor) => editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n");
+
+const doors = {
+  "plain text": (editor) => paste(editor, ALIASED),
+  "Shift paste as plain text": (editor) => {
+    editor.view.input.shiftKey = true;
+    paste(editor, ALIASED, `<p><b>${ALIASED}</b></p>`);
+    editor.view.input.shiftKey = false;
+  },
+  "HTML": (editor) => paste(editor, ALIASED, `<p><i>${ALIASED}</i></p>`),
+  "an HTML table cell": (editor) => paste(editor, "x", `<table><tr><td>${ALIASED}</td></tr></table>`),
+  "Markdown": (editor) => paste(editor, `- ${ALIASED}`),
+  "typing": (editor, asked) => {
+    type(editor, "[[plan|the plan]");
+    asked.length = 0;
+    type(editor, "]");
+    const closing = [...asked];
+    type(editor, ALIASED.slice("[[plan|the plan]]".length));
+    return closing;
+  },
+};
+for (const [door, run] of Object.entries(doors)) await check(`${door}: [[plan|the plan]] links as an alias pick, asking for the title alone; unknown and half-empty forms stay text`, async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  const closing = run(editor, asked);
+  await tick(20);
+  assert.deepEqual(aliasLinks(editor), PICKED, docText(editor));
+  const text = docText(editor);
+  for (const left of ["[[Nope|n]]", "[[|x]]", "[[Plan|]]"]) assert.ok(text.includes(left), `${left} stays text: ${text}`);
+  if (door !== "typing") assert.deepEqual(asked.sort(), ["Nope", "plan"]);
+  else assert.deepEqual(closing, ["plan"], "the closing ]] asks for the title alone");
+  canvas.remove();
+});
+
+await check("the canvas's own copy and a Figure link an aliased [[Title|words]] as an alias pick too", async () => {
+  const blocks = [{ id: "p1", type: "paragraph", content: [{ type: "text", value: `Seed ${ALIASED}` }] }, BLOCKS[2]];
+  const { canvas, editor, asked } = await mount({ blocks });
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1 + "Seed ".length, 1 + "Seed ".length + ALIASED.length)));
+  const data = new Map();
+  const copy = new Event("copy", { bubbles: true, cancelable: true });
+  Object.defineProperty(copy, "clipboardData", { value: { setData: (k, v) => data.set(k, v), getData: (k) => data.get(k) || "", clearData: () => data.clear(), types: [] } });
+  editor.view.dom.dispatchEvent(copy);
+  assert.ok(data.get("text/html").includes("data-bp-fragment"));
+  caret(editor, endOf(editor, 1));
+  asked.length = 0;
+  paste(editor, data.get("text/plain"), data.get("text/html"));
+  await tick(20);
+  assert.deepEqual(aliasLinks(editor), PICKED);
+  assert.equal(textOf(editor, "p1"), `Seed ${ALIASED}`, "the copied source stays text");
+  assert.deepEqual(asked.sort(), ["Nope", "plan"]);
+  canvas.remove();
+  const frame = document.createElement("div");
+  frame.setAttribute("data-paper-container-kind", "figure");
+  document.body.appendChild(frame);
+  const fig = document.createElement("bp-paper-canvas");
+  fig.blocks = [{ id: "f1", type: "paragraph", content: [{ type: "text", value: "Caption " }] }];
+  fig.wikilinkSource = (q) => ROWS.filter((r) => r.title.toLowerCase().includes(q.toLowerCase()));
+  frame.appendChild(fig);
+  await tick(350);
+  caret(fig._editor, endOf(fig._editor, 0));
+  paste(fig._editor, ALIASED);
+  await tick(20);
+  assert.deepEqual(aliasLinks(fig._editor), PICKED);
+  frame.remove();
+});
+
+await check("an alias pick keeps its words when the title is renamed, and [[Plan]] beside it asks once", async () => {
+  const { canvas, editor, asked } = await mount();
+  canvas.wikilinkResolve = (id) => (id === "n-plan" ? { title: "Roadmap" } : null);
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "[[Plan]] and [[plan|the plan]]");
+  await tick(30);
+  assert.equal(asked.length, 1, JSON.stringify(asked));
+  assert.ok(canvas.querySelector('[data-bp-id="p1"]').textContent.includes("the plan"));
+  assert.deepEqual(aliasLinks(editor), PICKED);
   canvas.remove();
 });
 
