@@ -288,6 +288,30 @@ defmodule BarkparkWeb.DatasetControllerTest do
                json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
     end
 
+    test "a poll naming another dataset while a run on this name is live answers 404 and does not join it",
+         %{ws: ws, project: project, tokens: tokens} do
+      live = Tenancy.get_dataset(project, "j10-7").id
+      run = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(run, :kill) end)
+      key = {project.id, "j10-7"}
+      :ets.insert(Runs, {key, {:running, run}, live, 0})
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(
+                 delete_dataset(
+                   tokens.owner,
+                   ws,
+                   project,
+                   "j10-7?dataset_id=#{Ecto.UUID.generate()}"
+                 ),
+                 404
+               )
+
+      assert [{^key, {:running, ^run}, ^live, 0}] = :ets.lookup(Runs, key)
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      :ets.delete(Runs, key)
+    end
+
     test "another caller's DELETE reads the same run", %{ws: ws, project: project, tokens: tokens} do
       id = Tenancy.get_dataset(project, "j10-7").id
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
