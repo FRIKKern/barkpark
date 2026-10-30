@@ -179,7 +179,7 @@ import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsI
 // A document link's words painted live from the host's wikilinkResolve; see ./wikilink-titles.js.
 import { wikilinkTitles, refreshWikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
 // A typed or pasted [[Title]] that names a known document becomes a link; see ./wikilink-input.js.
-import { wikilinkInput } from "./wikilink-input.js";
+import { markdownWikilinksAsBrackets, wikilinkInput } from "./wikilink-input.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
@@ -3267,6 +3267,7 @@ class BpPaperCanvas extends HTMLElement {
     try {
       let blocks = markdownToBlocks(text);
       if (!blocks.length) return false;
+      if (typeof this._wikilinkSource === "function") blocks = markdownWikilinksAsBrackets(blocks);
       // A field admits only its vocabulary: a `> quote` becomes the field's quote
       // block (or a paragraph) instead of vetoing the whole paste.
       const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));

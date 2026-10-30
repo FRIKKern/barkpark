@@ -188,9 +188,12 @@ returns a row whose `title` equals `Title`, ignoring case, and that has an `id`.
 written as a `[[` pick writes it: the row's `title` as the words and `target`, its `id` as
 `docId`. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
 the pasted text (ignoring case), for at most 20 titles; later titles stay text. Only the paste
-event's own changes are read, so a server apply in the same task is not. Anything else leaves the text as it was: no matching row, a throw or a
-rejection, an edit to the brackets before the answer lands, text inside inline code or an
-existing link, and no `wikilinkSource`. Text that arrives any other way (`blocks`,
+event's own changes are read, so a server apply in the same task is not. A Markdown paste (a
+heading, list, quote, table, fence, rule or inline Markdown link) sends each un-aliased
+`[[Title]]` through the same rule; an aliased `[[Title|words]]` stays the link Markdown writes,
+with no `docId`, and so does every `[[Title]]` when there is no `wikilinkSource`. Anything else leaves the text as it was: no matching row, a throw or a
+rejection, an edit to the brackets before the answer lands, text inside inline code or a
+link (typed or pasted), and no `wikilinkSource`. Text that arrives any other way (`blocks`,
 `applyServerBlocks`, undo) is never asked about. The links of one typing or one paste land
 together, as one undo step after the text's own, so Mod+Z brings back the brackets.
 

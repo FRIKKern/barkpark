@@ -7,7 +7,8 @@
 // arrives any other way (a seed, a server edit, undo) is never converted.
 //
 // A paste asks once per distinct title (ignoring case), at most MAX_ASKS of them; the rest stay
-// text. Its links land together, as one undo step after the paste's own.
+// text. Its links land together, as one undo step after the paste's own. A Markdown paste writes
+// its un-aliased `[[Title]]` back as brackets first, so the same rule decides.
 
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -49,6 +50,15 @@ function changedRanges(tr) {
     ranges.push([rest.map(start, -1), rest.map(end, 1)]);
   }));
   return ranges;
+}
+
+const markdownWikilink = (node) => node.type === "wikilink" && node.alias == null;
+
+export function markdownWikilinksAsBrackets(value) {
+  if (Array.isArray(value)) return value.map(markdownWikilinksAsBrackets);
+  if (!value || typeof value !== "object") return value;
+  if (markdownWikilink(value)) return { type: "text", value: `[[${value.target}]]` };
+  return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, markdownWikilinksAsBrackets(v)]));
 }
 
 const LINKS_AND_CODE = ["wikilink", "link", "code"];
