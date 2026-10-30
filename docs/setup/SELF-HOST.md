@@ -112,14 +112,14 @@ To change a setting, edit `barkpark.env` and deploy again. [SELF-HOST-UPDATES.md
 
 ### Build the image from source
 
-To build the image without ghcr.io, make a registry and build a git ref in it, in about 15 minutes:
+To build the image without ghcr.io, make a registry and build a git ref in it, in about 10 minutes:
 
 ```bash
 ACR=$(az deployment group create -g "$RG" -n acr -f acr.bicep --query properties.outputs.acrName.value -o tsv)
 IMAGE=$(bash acr-build.sh "$ACR" <git ref> | tail -1)
 ```
 
-A third argument takes a git URL or a local clone. Then deploy with `-p image="$IMAGE" acrName="$ACR"`.
+A third argument takes a git URL or local clone. Deploy with `-p image="$IMAGE" acrName="$ACR"`.
 
 ## Pensum settings
 
