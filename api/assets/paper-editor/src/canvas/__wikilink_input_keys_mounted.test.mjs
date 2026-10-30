@@ -1,4 +1,4 @@
-// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0: a typed or pasted `[[Title]]` becomes
+// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0 and 1.18.0: a typed or pasted `[[Title]]` becomes
 // a document link only when wikilinkSource(Title) returns a row with that exact title (ignoring
 // case); Mod+Enter edits nothing and stays free for the host.
 // Run: node src/canvas/__wikilink_input_keys_mounted.test.mjs   (or: npm test)
@@ -363,6 +363,57 @@ await check("a server apply in the same task as a paste is never asked about", a
   await tick(20);
   assert.equal(textOf(editor, "p2"), "Server wrote [[Plan]] here.");
   assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a [[Plan]] in a pasted HTML table cell links; one pasted into inline code stays code and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x", "<table><tr><td>see [[Plan]]</td></tr></table>");
+  await tick(20);
+  const table = canvas.recoverySnapshot().blocks.find((b) => b.type === "table");
+  assert.deepEqual(table.rows[0][0][1], { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], docId: "n-plan" });
+  assert.deepEqual(asked, ["Plan"]);
+  let at = 0;
+  editor.state.doc.descendants((n, p) => { if (n.isText && n.marks.some((m) => m.type.name === "code")) at = p + 1; });
+  caret(editor, at);
+  asked.length = 0;
+  paste(editor, "[[Plan]]");
+  await tick(20);
+  assert.equal(textOf(editor, "p2"), "Code x[[Plan]]");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a paste reads only its own text: a [[Plan]] already in the body elsewhere stays text", async () => {
+  const blocks = [BLOCKS[0], { id: "p9", type: "paragraph", content: [{ type: "text", value: "Seed [[Plan]] here." }] }];
+  const { canvas, editor, asked } = await mount({ blocks });
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x [[Ærlig talt]]");
+  await tick(20);
+  assert.equal(textOf(editor, "p9"), "Seed [[Plan]] here.");
+  assert.deepEqual(asked, ["Ærlig talt"]);
+  assert.equal(textOf(editor, "p1"), "Start x Ærlig talt");
+  canvas.remove();
+});
+
+await check("undo and redo across a pasted link replay it without asking again", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  paste(editor, " go [[Plan]]");
+  await tick(20);
+  asked.length = 0;
+  const seen = [textOf(editor, "p1")];
+  for (const step of ["undo", "undo", "redo", "redo"]) {
+    editor.commands[step]();
+    seen.push(textOf(editor, "p1"));
+  }
+  await tick(20);
+  assert.deepEqual(seen, ["Start  go Plan", "Start  go [[Plan]]", "Start ", "Start  go [[Plan]]", "Start  go Plan"]);
+  assert.deepEqual(asked, []);
+  assert.equal(links(editor).filter((l) => l.docId === "n-plan").length, 1);
   canvas.remove();
 });
 

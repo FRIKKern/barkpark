@@ -1,4 +1,4 @@
-// wikilink-input.js — a typed or pasted `[[Title]]` becomes a document link (contract 1.17.0).
+// wikilink-input.js — a typed or pasted `[[Title]]` becomes a document link (contract 1.17.0, paste 1.18.0).
 //
 // Typing the closing `]]`, or pasting text that holds `[[Title]]`, asks the host's
 // `wikilinkSource(Title)`. Only a row whose title equals Title, ignoring case, turns the
