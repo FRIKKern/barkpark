@@ -257,6 +257,27 @@ defmodule BarkparkWeb.DatasetControllerTest do
                json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 404)
     end
 
+    test "a 503 names the step the delete stopped in", %{ws: ws, project: project, tokens: tokens} do
+      Repo.query!("""
+      CREATE FUNCTION ds_delete_deadlock() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'deadlock' USING ERRCODE = '40P01'; END $$ LANGUAGE plpgsql
+      """)
+
+      Repo.query!(
+        "CREATE TRIGGER ds_delete_deadlock BEFORE DELETE ON datasets FOR EACH ROW EXECUTE FUNCTION ds_delete_deadlock()"
+      )
+
+      assert %{
+               "error" => %{
+                 "details" => %{"reason" => "dataset_delete_contended", "steps" => steps}
+               }
+             } = json_response(until_answered(tokens.owner, ws, project, "j10-7"), 503)
+
+      assert %{"step" => "dataset", "ms" => ms} = List.last(steps)
+      assert is_integer(ms)
+      assert dataset?(project, "j10-7")
+    end
+
     defp until_done(key, tries \\ 200) do
       case :ets.lookup(Runs, key) do
         [{_, {:done, _}, _, _}] -> :ok

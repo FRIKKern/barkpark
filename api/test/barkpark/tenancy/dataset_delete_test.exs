@@ -482,6 +482,57 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     def refuse(_payload), do: {:halt, "refused"}
   end
 
+  describe "a deadlock" do
+    setup do
+      Repo.query!("CREATE SEQUENCE ds_delete_deadlocks")
+
+      Repo.query!("""
+      CREATE FUNCTION ds_delete_deadlock() RETURNS trigger AS $$
+      BEGIN
+        IF nextval('ds_delete_deadlocks') <= current_setting('ds_delete.deadlocks')::int THEN
+          RAISE EXCEPTION 'deadlock' USING ERRCODE = '40P01';
+        END IF;
+        RETURN OLD;
+      END $$ LANGUAGE plpgsql
+      """)
+
+      Repo.query!(
+        "CREATE TRIGGER ds_delete_deadlock BEFORE DELETE ON datasets FOR EACH ROW EXECUTE FUNCTION ds_delete_deadlock()"
+      )
+
+      :ok
+    end
+
+    test "is tried again, and the receipt times the attempt that finished",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-11", user)
+      Repo.query!("SET ds_delete.deadlocks = 2")
+
+      assert {:ok, %{steps: steps}} = Tenancy.delete_dataset(dataset)
+      assert Enum.count(steps, &(&1.step == "dataset")) == 1
+      refute Repo.get(Dataset, dataset.id)
+    end
+
+    test "answers :contended after 5 tries, stopped in the dataset step",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-12", user)
+      Repo.query!("SET ds_delete.deadlocks = 5")
+
+      assert {:error, {:delete_failed, :contended, steps}} = Tenancy.delete_dataset(dataset)
+      assert %{step: "dataset"} = List.last(steps)
+      assert Repo.get(Dataset, dataset.id)
+    end
+  end
+
+  test "progress/1 is empty for a process with no delete running, live or gone" do
+    assert DatasetDelete.progress(self()) == []
+
+    gone = spawn(fn -> :ok end)
+    ref = Process.monitor(gone)
+    assert_receive {:DOWN, ^ref, _, _, _}
+    assert DatasetDelete.progress(gone) == []
+  end
+
   test "a hook that halts a document delete answers its halt and leaves the dataset whole",
        %{ws: ws, project: project, user: user} = ctx do
     dataset = seed(ws, project, "j10-11", user)
