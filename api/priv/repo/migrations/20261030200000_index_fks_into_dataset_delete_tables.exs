@@ -7,21 +7,28 @@ defmodule Barkpark.Repo.Migrations.IndexFksIntoDatasetDeleteTables do
 
   Postgres checks a foreign key once per deleted parent row. With no index
   that leads with the referencing column, each check is a sequential scan of
-  the referencing table. `DELETE FROM datasets` cascades into `revisions`, and
-  every cascaded revision ran `UPDATE documents SET current_revision_id =
-  NULL` and the same for `released_revision_id` as two full scans of
-  `documents`. On guerrilla that one statement passed the 30 s
-  `statement_timeout`, so a 57-document e2e dataset answered 503
-  `dataset_delete_timeout` and rolled back. Locally, with 500 000 other
-  documents, the same statement took 354 s.
+  the referencing table. Two statements of the delete paid that per row:
+
+    * `DELETE FROM datasets` cascades into `revisions`, and every cascaded
+      revision ran `UPDATE documents SET current_revision_id = NULL` and the
+      same for `released_revision_id` as two full scans of `documents`.
+    * The `mutation_events` sweep cascades into `webhook_deliveries`, one full
+      scan per deleted event.
+
+  On guerrilla a 57-document e2e dataset delete answered 503
+  `dataset_delete_timeout` three times in a row: one statement passed the
+  30 s `statement_timeout`. Locally, with 500 000 other documents, 57
+  documents with 10 edits each took 354 s in `DELETE FROM datasets` alone.
 
   `dataset_delete_test.exs` keeps the class closed: any new foreign key into
   one of these tables fails it until it has an index.
 
-  Built CONCURRENTLY on its own connection with `statement_timeout = 0`, and an
-  INVALID leftover of a killed build is dropped first, as
-  `20261027020000_add_revisions_doc_history_index.exs` explains: `documents`,
-  `revisions` and `mutation_events` are on the write path of every mutation.
+  Built CONCURRENTLY on its own connection with `statement_timeout = 0`, as
+  `20261027020000_add_revisions_doc_history_index.exs` explains: `documents`
+  and `webhook_deliveries` are on the write path. A killed build leaves an
+  INVALID index and an unrecorded migration, so each index is dropped before
+  it is built: on a rerun every index of this name is a leftover of this
+  migration, valid or not.
   """
 
   @disable_ddl_transaction true
@@ -46,11 +53,9 @@ defmodule Barkpark.Repo.Migrations.IndexFksIntoDatasetDeleteTables do
 
       for {table, column} <- @indexes do
         name = "#{table}_#{column}_index"
-        drop_invalid_index(name)
+        repo().query!("DROP INDEX CONCURRENTLY IF EXISTS #{name}", [], timeout: :infinity)
 
-        repo().query!(
-          "CREATE INDEX CONCURRENTLY IF NOT EXISTS #{name} ON #{table} (#{column})",
-          [],
+        repo().query!("CREATE INDEX CONCURRENTLY #{name} ON #{table} (#{column})", [],
           timeout: :infinity
         )
       end
@@ -73,26 +78,5 @@ defmodule Barkpark.Repo.Migrations.IndexFksIntoDatasetDeleteTables do
 
       repo().query!("RESET statement_timeout", [], timeout: :infinity)
     end)
-  end
-
-  defp drop_invalid_index(name) do
-    %{rows: rows} =
-      repo().query!(
-        """
-        SELECT 1
-          FROM pg_index i
-          JOIN pg_class c ON c.oid = i.indexrelid
-          JOIN pg_namespace n ON n.oid = c.relnamespace
-         WHERE c.relname::text = $1
-           AND n.nspname = current_schema()
-           AND NOT i.indisvalid
-        """,
-        [name],
-        timeout: :infinity
-      )
-
-    if rows != [] do
-      repo().query!("DROP INDEX CONCURRENTLY IF EXISTS #{name}", [], timeout: :infinity)
-    end
   end
 end
