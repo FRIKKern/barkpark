@@ -103,6 +103,17 @@ defmodule Barkpark.Release do
   call — `statement_timeout` only; any other startup parameter is kept — and
   the previous env is restored afterwards, raise or not.
 
+  It also sets the repo's `:timeout` to `:infinity` for the same call.
+  `repo().checkout/1` with no options takes its `:timeout` from the repo
+  config (`Ecto.Adapters.SQL` appends the adapter meta's
+  `Keyword.take(config, [:timeout, ...])` to the caller's options), and
+  DBConnection disconnects a connection held past it (`DBConnection.Holder`,
+  default 15_000 ms). A `timeout: :infinity` on each query inside the checkout
+  does not move that deadline. On 2026-10-30 gyl's deploy failed with exit 13
+  when `20261027020000_add_revisions_doc_history_index` was cut off after
+  15 s while it built an index on a 1.9 GB `revisions` table
+  (test/barkpark/release/migrate_checkout_timeout_test.exs).
+
   Scope: it only reaches a repo that `fun` STARTS. A repo already running
   (the test node's sandbox repo) keeps the connections it has.
   """
@@ -118,7 +129,12 @@ defmodule Barkpark.Release do
     previous = Application.get_env(@app, repo)
     config = previous || []
     parameters = Keyword.put(config[:parameters] || [], :statement_timeout, "0")
-    Application.put_env(@app, repo, Keyword.put(config, :parameters, parameters))
+
+    Application.put_env(
+      @app,
+      repo,
+      config |> Keyword.put(:parameters, parameters) |> Keyword.put(:timeout, :infinity)
+    )
 
     try do
       fun.()
