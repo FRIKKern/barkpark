@@ -261,13 +261,21 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
     test "the census follows the block into helpers, attributes and rewrites" do
       source = """
+      defmodule Kinds do
+        @remote ~w(other)
+        def remote, do: @remote
+      end
       defmodule Fixture do
         @keys ~w(alpha beta)
         @kinds ["memo", "sketch"]
+        @remote Kinds.remote()
         def compose_block(%{"type" => "memo", "pinned" => true} = b, _style) do
+          copy = b
           {b["title"], Map.get(b, "body"), get_in(b, ["meta", "x"]), blank?(b, "tag")}
+          {copy["via_copy"], pick(b, "a")}
         end
         def compose_block(%{"type" => t} = b, _style) when t in @kinds, do: Map.fetch(b, "shared")
+        def compose_block(%{"type" => t} = b, _style) when t in @remote, do: b["remote_only"]
         def compose_block(%{"type" => "pad"} = b, style) do
           case b do
             %{"margin" => m} -> m
@@ -279,6 +287,8 @@ defmodule Barkpark.PortableDoc.SpecTest do
         end
         def compose_block(%{"type" => "other"} = b, _style), do: Map.get(b, "unused")
         defp blank?(b, key), do: Map.get(b, key) in [nil, ""]
+        defp pick(b, "a"), do: Map.get(b, "from_a")
+        defp pick(b, "z"), do: Map.get(b, "from_z")
         def inline(%{"type" => "text", "value" => v}), do: v
         def inline(%{"type" => "memo", "children" => c}), do: c
       end
@@ -286,13 +296,15 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
       reads = ComposeCensus.Reads.reads([source], ["memo", "sketch", "pad", "other"])
 
-      assert reads["memo"] == ["body", "meta", "pinned", "shared", "tag", "title"]
+      assert reads["memo"] ==
+               ["body", "from_a", "meta", "pinned", "shared", "tag", "title", "via_copy"]
+
       assert reads["sketch"] == ["shared", "wrong"]
 
       assert reads["pad"] ==
-               ["alpha", "beta", "body", "margin", "meta", "pinned", "shared", "size", "tag"]
+               ~w(alpha beta body from_a margin meta pinned shared size tag via_copy)
 
-      assert reads["other"] == ["unused"]
+      assert reads["other"] == ["remote_only", "unused"]
     end
   end
 
