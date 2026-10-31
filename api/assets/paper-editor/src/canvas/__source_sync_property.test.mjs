@@ -69,13 +69,15 @@ function rng(seed) {
   };
 }
 
-const textOf = (block) => block.type === "divider" ? ""
+const textOf = (block) => block.type === "divider" || block.type === "table" ? ""
   : block.type === "heading" ? block.text
   : block.type === "list" ? block.items[0][0].value
   : block.content[0].value;
 const withText = (block, text) => block.type === "heading" ? { ...block, text }
   : block.type === "list" ? { ...block, items: [[{ type: "text", value: text }]] }
   : { ...block, content: [{ type: "text", value: text }] };
+const typable = (block) => block.type !== "divider" && block.type !== "table" && !textOf(block).includes("\n");
+const TABLE = "| a | b |\n|---|---|\n| 1 | 2 |";
 
 function replay(server, op) {
   const at = (id) => server.findIndex((block) => block.id === id);
@@ -181,36 +183,53 @@ function runSeed(seed) {
 
   const user = clone(doc);
   const grow = random();
-  const texts = (blocks) => blocks.flatMap((block, j) => block.type === "divider" ? [] : [j]);
+  const texts = (blocks) => blocks.flatMap((block, j) => typable(block) ? [j] : []);
   if (grow < 0.4) {
     const j = pick(texts(user));
     user[j] = withText(user[j], textOf(user[j]) + word(1, 2));
   } else if (grow < 0.6) {
     user.splice(int(0, user.length), 0, { id: "born", type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
   }
+  if (random() < 0.3) {
+    const wrapped = random() < 0.5 ? { id: "wrapped", type: "table" } : { id: "wrapped", type: "paragraph", content: [{ type: "text", value: `${word(1, 3)}\n${word(1, 3)}${pick(["", "  "])}` }] };
+    user.splice(int(0, user.length), 0, wrapped);
+  }
   const prefix = (block) => block.type === "divider" ? pick(["---", "***", "___"]) : block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
   const prefixes = user.map(prefix);
-  const chunks = user.map((block, j) => prefixes[j] + textOf(block));
-  const gaps = chunks.slice(1).map(() => pick(["\n\n", "\n\n", "\n\n\n"]));
-  const lead = pick(["", "", "\n"]);
+  const chunks = user.map((block, j) => block.type === "table" ? TABLE : prefixes[j] + textOf(block));
+  const tight = (j) => (user[j].type === "heading" || user[j].type === "divider") && user[j + 1].type === "paragraph";
+  const gaps = chunks.slice(1).map((_, j) => pick(tight(j) ? ["\n", "\n\n", "\n\n\n"] : ["\n\n", "\n\n", "\n\n\n"]));
+  let lead = pick(["", "", "\n"]);
   let trail = pick(["", "", "\n"]);
-  const inGap = random() < 0.3;
-  const b = inGap ? int(0, user.length - 1) : pick(texts(user));
-  if (inGap && b < gaps.length) gaps[b] = "\n\n\n\n";
-  else if (inGap) trail = "\n\n";
+  const roll = random();
+  const mode = roll < 0.6 ? "text" : roll < 0.85 ? "gap" : "lead";
+  const b = mode === "gap" ? int(0, user.length - 1) : mode === "lead" ? 0 : pick(texts(user));
+  let gapAt = 0;
+  if (mode === "gap" && b < gaps.length) {
+    gaps[b] = "\n".repeat(int(2, 6));
+    gapAt = int(1, gaps[b].length - 1);
+  } else if (mode === "gap") {
+    trail = "\n".repeat(int(1, 4));
+    gapAt = int(1, trail.length);
+  } else if (mode === "lead") {
+    lead = "\n".repeat(int(1, 4));
+    gapAt = int(0, lead.length - 1);
+  }
   const typed = lead + chunks.map((chunk, j) => (j ? gaps[j - 1] : "") + chunk).join("") + trail;
   type(textarea, typed);
   canvas.flushPendingChanges();
   canvas.applyServerBlocks(clone(state.server));
   if (textarea.value !== typed) return `the echo of the writer's own save rewrote the textarea`;
   const mine = clone(state.server);
+  const committed = clone(canvas._sourceCommitBlocks);
   if (JSON.stringify(mine.map(textOf)) !== JSON.stringify(user.map(textOf))) return `the writer's save holds ${JSON.stringify(mine.map(textOf))}`;
 
   const blockStart = lead.length + chunks.slice(0, b).reduce((at, chunk, j) => at + chunk.length + gaps[j].length, 0) + prefixes[b].length;
   const caretText = textOf(user[b]);
   let from = int(0, caretText.length);
   let to = from;
-  if (inGap) from = to = caretText.length + 2;
+  if (mode === "gap") from = to = chunks[b].length - prefixes[b].length + gapAt;
+  else if (mode === "lead") from = to = gapAt - blockStart;
   else if (random() < 0.3) to = int(from, caretText.length);
   textarea.setSelectionRange(blockStart + from, blockStart + to, pick(["forward", "backward"]));
   const selected = caretText.slice(from, to);
@@ -221,11 +240,11 @@ function runSeed(seed) {
   const leavesText = (j) => texts(remote.filter((_, i) => i !== j)).length > 0;
   const deletable = others.filter(leavesText);
   const kinds = ["edit", "insert", "move", "move-caret"];
-  if (user[b].type !== "divider") kinds.push("edit-caret");
+  if (typable(user[b])) kinds.push("edit-caret");
   if (deletable.length) kinds.push("delete");
   if (leavesText(remote.findIndex((block) => block.id === bid))) kinds.push("delete-caret");
   const kind = pick(kinds);
-  const otherTexts = others.filter((j) => remote[j].type !== "divider");
+  const otherTexts = others.filter((j) => typable(remote[j]));
   if (kind === "edit" || kind === "edit-caret") {
     const j = kind === "edit-caret" || otherTexts.length === 0 ? remote.findIndex((block) => block.id === bid) : pick(otherTexts);
     const text = textOf(remote[j]);
@@ -249,30 +268,38 @@ function runSeed(seed) {
   state.server = clone(remote);
   state.batches = [];
   canvas.applyServerBlocks(clone(remote));
-  const where = `${kind}${inGap ? " gap" : ""} ${JSON.stringify(caretText)} [${from},${to}]`;
+  const where = `${kind}${mode === "text" ? "" : ` ${mode}`} ${JSON.stringify(caretText)} [${from},${to}]`;
   if (state.batches.length) return `${where}: the sync itself emitted ops ${JSON.stringify(state.batches)}`;
-  const shown = markdownToBlocks(textarea.value).map((block) => blocksToMarkdown([block]));
-  if (JSON.stringify(shown) !== JSON.stringify(remote.map((block) => blocksToMarkdown([block])))) {
+  const bare = (block) => blocksToMarkdown([sorted({ ...block, id: "" })]);
+  if (JSON.stringify(markdownToBlocks(textarea.value).map(bare)) !== JSON.stringify(remote.map(bare))) {
     return `${where}: the textarea does not show the remote doc: ${JSON.stringify(textarea.value)}`;
   }
   const v = textarea.value;
-  const starts = lineStarts(v);
-  const lineEnd = (k) => v.indexOf("\n", starts[k]) === -1 ? v.length : v.indexOf("\n", starts[k]);
   const userIndex = new Map(mine.map((block, j) => [block.id, j]));
   const untouched = (k) => userIndex.has(remote[k].id) && textOf(mine[userIndex.get(remote[k].id)]) === textOf(remote[k]);
-  const kept = (what, got, want) => got === want ? null
-    : `${where}: the remote change rewrote the writer's ${what} ${JSON.stringify(want)} as ${JSON.stringify(got)}: ${JSON.stringify(v)}`;
-  for (let k = 0; k < remote.length; k++) {
-    const j = userIndex.get(remote[k].id);
-    const broken = (untouched(k) && kept("block", v.slice(starts[k], lineEnd(k)), chunks[j])) ||
-      (k > 0 && untouched(k - 1) && untouched(k) && userIndex.get(remote[k - 1].id) === j - 1 &&
-        kept("gap", v.slice(lineEnd(k - 1), starts[k]), gaps[j - 1])) ||
-      (k === 0 && j === 0 && untouched(k) && kept("lead", v.slice(0, starts[0]), lead)) ||
-      (k === remote.length - 1 && j === chunks.length - 1 && untouched(k) && kept("trail", v.slice(lineEnd(k)), trail));
-    if (broken) return broken;
+  const gapAfter = (j) => j < gaps.length ? gaps[j] : trail;
+  const chunkOf = (i) => untouched(i) ? chunks[userIndex.get(remote[i].id)] : blocksToMarkdown([remote[i]]);
+  const sepOf = (i) => {
+    const j = userIndex.get(remote[i].id);
+    const last = i === remote.length - 1;
+    if (j === undefined) return last ? "" : "\n\n";
+    if (last) return gapAfter(j);
+    if (j >= gaps.length) return "\n\n";
+    const next = remote[i + 1];
+    const neighbours = untouched(i) && untouched(i + 1) && userIndex.get(next.id) === j + 1;
+    return gaps[j].length > 1 || neighbours ? gaps[j] : "\n\n";
+  };
+  const pieceStart = [];
+  let layout = lead;
+  remote.forEach((block, i) => {
+    pieceStart.push(layout.length);
+    layout += chunkOf(i) + sepOf(i);
+  });
+  if (v !== layout) {
+    return `${where}: the textarea holds ${JSON.stringify(v)}, not the writer's layout ${JSON.stringify(layout)} (unchanged blocks as typed, each gap with the block before it, the lead kept)`;
   }
 
-  const merged = mergeSourceText(typed, mine, remote);
+  const merged = mergeSourceText(typed, committed, canvas._sourceCommitBlocks);
   if (merged.text !== v) return `${where}: mergeSourceText gives ${JSON.stringify(merged.text)}, the textarea ${JSON.stringify(v)}`;
   for (let o = 0; o <= typed.length; o++) {
     for (const stay of [false, true]) {
@@ -284,32 +311,27 @@ function runSeed(seed) {
   const after = remote.find((block) => block.id === bid);
   const key = pick("xyz");
   const expected = clone(remote);
-  let born = -1;
   const k = remote.findIndex((block) => block.id === bid);
-  const gapKept = inGap && k !== -1 && untouched(k) &&
-    (b + 1 < mine.length ? remote[k + 1]?.id === mine[b + 1].id && untouched(k + 1) : k === remote.length - 1);
-  if (inGap) {
-    let want;
-    if (gapKept) {
-      want = lineEnd(k) + 2;
-      born = k + 1;
-      expected.splice(born, 0, { id: "", type: "paragraph", content: [{ type: "text", value: key }] });
-    } else {
+  let blank = -1;
+  if (mode === "lead") blank = gapAt;
+  else if (mode === "gap" && k !== -1 && (k === remote.length - 1 || b < gaps.length)) blank = pieceStart[k] + chunkOf(k).length + gapAt;
+  if (mode !== "text") {
+    let want = blank;
+    if (want === -1) {
       const order = [...mine.slice(0, b + 1).reverse(), ...mine.slice(b + 1)];
       const newcomers = remote.flatMap((block, i) => userIndex.has(block.id) ? [] : [i]);
       const target = [...order.map((block) => remote.findIndex((r) => r.id === block.id)), ...newcomers]
-        .find((i) => i !== -1 && remote[i].type !== "divider");
-      want = lineEnd(target);
-      expected[target] = withText(remote[target], textOf(remote[target]) + key);
+        .find((i) => i !== -1 && typable(remote[i]));
+      want = pieceStart[target] + chunkOf(target).length;
     }
     if (textarea.selectionStart !== want || textarea.selectionEnd !== want) {
-      return `${where}: a caret in the blank lines after the block maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not ${want}${gapKept ? " (the lines are kept)" : " (the end of the nearest block a letter can follow)"}: ${JSON.stringify(v)}`;
+      return `${where}: a caret on a blank line maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not ${want}${blank === -1 ? " (the end of the nearest block a letter can follow)" : " (its line travels with the block before it)"}: ${JSON.stringify(v)}`;
     }
   } else if (after) {
     const s = span(caretText, textOf(after));
     const [f, t] = mapSelection(s, from, to);
     const k = remote.indexOf(after);
-    const textStart = lineEnd(k) - textOf(after).length;
+    const textStart = pieceStart[k] + chunkOf(k).length - textOf(after).length;
     const want = [textStart + f, textStart + t];
     const got = [textarea.selectionStart, textarea.selectionEnd];
     if (got[0] !== want[0] || got[1] !== want[1]) {
@@ -321,9 +343,9 @@ function runSeed(seed) {
     const text = textOf(after);
     expected[k] = withText(after, text.slice(0, f) + key + text.slice(t));
   } else {
-    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find((block) => block.type !== "divider");
+    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find(typable);
     const k = remote.findIndex((block) => block.id === nearest.id);
-    const end = lineEnd(k);
+    const end = pieceStart[k] + chunkOf(k).length;
     if (textarea.selectionStart !== end || textarea.selectionEnd !== end) {
       return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the nearest block a letter can follow (${end})`;
     }
@@ -336,19 +358,21 @@ function runSeed(seed) {
   canvas.flushPendingChanges();
   if (state.refused.length) return `${where}: the server refused ${state.refused.join("; ")}`;
   const ops = state.batches.flat();
-  const inserts = ops.filter((op) => op.op === "insert-after" || op.op === "append-block");
-  const oneKey = born === -1
-    ? ops.length === 1 && ops[0].op === "patch-block"
-    : inserts.length === 1 && ops.every((op) => op === inserts[0] || op.op === "move-block");
-  if (!oneKey) return `${where}: one key emitted ${JSON.stringify(ops)}`;
-  if (born !== -1) expected[born].id = state.server[born]?.id;
-  if (JSON.stringify(sorted(state.server)) !== JSON.stringify(sorted(expected))) {
+  if (mode !== "text") {
+    const sig = (block) => JSON.stringify(sorted({ ...block, id: "" }));
+    const want = markdownToBlocks(v.slice(0, f) + key + v.slice(t)).map(sig);
+    if (JSON.stringify(state.server.map(sig)) !== JSON.stringify(want)) {
+      return `${where}: the server holds ${JSON.stringify(state.server.map(sig))}, not the layout's own result ${JSON.stringify(want)}`;
+    }
+  } else if (ops.length !== 1 || ops[0].op !== "patch-block") {
+    return `${where}: one key emitted ${JSON.stringify(ops)}`;
+  } else if (JSON.stringify(sorted(state.server)) !== JSON.stringify(sorted(expected))) {
     return `${where}: the server holds ${JSON.stringify(state.server.map(textOf))}, not ${JSON.stringify(expected.map(textOf))}`;
   }
   if (JSON.stringify(sorted(state.server)) !== JSON.stringify(sorted(canvas.blocks))) {
     return `${where}: the server and the canvas disagree`;
   }
-  return { passed: `${kind}${inGap ? " gap" : from === to ? "" : " selection"}` };
+  return { passed: `${kind}${mode !== "text" ? ` ${mode}` : from === to ? "" : " selection"}` };
 }
 
 const fails = [];

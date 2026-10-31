@@ -412,7 +412,7 @@ try {
     const reordered = [server[2], server[0], server[1]].map(clone);
     server.splice(0, server.length, ...clone(reordered));
     canvas.applyServerBlocks(clone(reordered));
-    assert.equal(textarea.value, "Third!\n\nFirst\n\nSecond", "the reorder shows up");
+    assert.equal(textarea.value, "Third!\n\nFirst\n\nSecond\n\n", "the reorder shows up, each gap moving with the block before it");
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [17, 17],
       "a remote reorder leaves a caret, still inside the block being typed in");
     value.press("z");
@@ -525,7 +525,7 @@ try {
     const external = [paragraph("x2", "Two"), paragraph("x1", "One")];
     server.splice(0, server.length, ...clone(external));
     canvas.applyServerBlocks(clone(external));
-    assert.equal(textarea.value, "Two\n\nOne", "a reordered block list shows up in the textarea");
+    assert.equal(textarea.value, "Two\n\nOne\n\n", "a reordered block list shows up in the textarea");
     value.type("Two\n\nOne\n\nFresh");
     canvas.flushPendingChanges();
     const fresh = batches.at(-1).find((op) => op.op === "insert-after");
@@ -587,9 +587,8 @@ try {
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [body + 2, body + 2], "the caret stays in the block it was in");
   }
 
-  // 11) A caret on a blank line above the first block stays there while that line is
-  //     kept; when a remote block lands on top, it goes to the end of the first block
-  //     a letter lengthens, so the next key can't touch the newcomer.
+  // 11) The blank lines above the first block are the writer's and always stay, so a
+  //     caret on them stays too, whatever the remote change does below.
   {
     const { canvas, server } = await mount([paragraph("e1", "One"), paragraph("e2", "Two")]);
     mounted.push(canvas);
@@ -604,8 +603,8 @@ try {
     const added = [paragraph("e0", "Zero"), ...clone(server)];
     server.splice(0, server.length, ...clone(added));
     canvas.applyServerBlocks(clone(added));
-    assert.equal(textarea.value, "Zero\n\nOne\n\nTwo");
-    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [9, 9]);
+    assert.equal(textarea.value, "\nZero\n\nOne\n\nTwo");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [0, 0]);
   }
   {
     const { canvas, server } = await mount([paragraph("e1", "One"), paragraph("e2", "Two")]);
@@ -637,14 +636,14 @@ try {
     const swapped = [paragraph("g0", "New"), paragraph("g1", "One")];
     server.splice(0, server.length, ...clone(swapped));
     canvas.applyServerBlocks(clone(swapped));
-    assert.equal(textarea.value, "New\n\nOne");
+    assert.equal(textarea.value, "New\n\nOne\n\n");
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [8, 8], "the caret goes to the end of One");
   }
 
   // 13) A caret in blank lines the writer opened after a block (review-24791's
-  //     probe3): it stays there while those lines are kept, so the next key starts
-  //     a new block; once the block after them is gone, it goes to the end of the
-  //     block before, never into the block that now follows.
+  //     probe3): the lines travel with the block before them, through a reorder
+  //     and through the removal of the block after them, and the caret stays on
+  //     them, so the next key starts a new block and never lands in a neighbour.
   {
     const { canvas, batches, server, inSync } = await mount([paragraph("g1", "One"), paragraph("g2", "Two"), paragraph("g3", "Three")]);
     mounted.push(canvas);
@@ -659,17 +658,85 @@ try {
     const reordered = [clone(server[2]), clone(server[0]), clone(server[1])];
     server.splice(0, server.length, ...clone(reordered));
     canvas.applyServerBlocks(clone(reordered));
-    assert.equal(textarea.value, "Three\n\nOne\n\n\n\nTwo");
+    assert.equal(textarea.value, "Three\n\nOne\n\n\n\nTwo\n\n");
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [12, 12], "the kept blank lines keep the caret");
     const removed = server.filter((block) => block.id !== "g2");
     server.splice(0, server.length, ...clone(removed));
     canvas.applyServerBlocks(clone(removed));
-    assert.equal(textarea.value, "Three\n\nOne");
-    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [10, 10], "it goes to the end of One");
+    assert.equal(textarea.value, "Three\n\nOne\n\n\n\n");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [12, 12], "the blank lines travel with One and keep the caret");
     value.press("!");
     canvas.flushPendingChanges();
-    assert.deepEqual(batches.at(-1), [{ op: "patch-block", id: "g1", patch: { content: [{ type: "text", value: "One!" }] } }]);
+    assert.deepEqual(liveTexts(canvas), ["Three", "One", "!"]);
+    assert.ok(batches.at(-1).every((op) => op.op !== "patch-block"), "no block takes the key");
     inSync("after a key in blank lines whose next block was removed");
+  }
+
+  // 14) A change that ends on a low surrogate both emoji share never leaves the caret
+  //     between the two halves of a pair (the save would hold a lone surrogate).
+  {
+    const { canvas, server, inSync } = await mount([paragraph("u1", "ab\u{1F600}")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+    const swapped = [paragraph("u1", "aZ\u{1FA00}")];
+    server.splice(0, server.length, ...clone(swapped));
+    canvas.applyServerBlocks(clone(swapped));
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [4, 4], "the caret goes past the whole pair");
+    value.press("z");
+    canvas.flushPendingChanges();
+    assert.deepEqual(liveTexts(canvas), ["aZ\u{1FA00}z"]);
+    inSync("after a key next to a swapped emoji");
+  }
+
+  // 15) A block Markdown can only write as a <!--bp:block--> line (a soft line break,
+  //     a table) keeps the lines the writer typed while another block changes, also
+  //     when the server sends every key sorted, as Barkpark's JSON does.
+  {
+    const { canvas, server, inSync } = await mount([paragraph("w1", "Top."), paragraph("w2", "Base."), paragraph("w3", "x")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    const typed = "Top.\n\n**first** line\nsecond line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nBase.";
+    value.type(typed);
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(sorted(server));
+    textarea.setSelectionRange(typed.length, typed.length);
+    const edited = clone(server);
+    edited[0] = paragraph(edited[0].id, "Top, edited.");
+    server.splice(0, server.length, ...clone(edited));
+    canvas.applyServerBlocks(sorted(edited));
+    assert.equal(textarea.value, typed.replace("Top.", "Top, edited."));
+    value.press("z");
+    canvas.flushPendingChanges();
+    assert.equal(liveTexts(canvas).at(-1), "Base.z");
+    inSync("after a key below blocks that need a <!--bp:block--> line");
+  }
+
+  // 16) A textarea of blank lines only: they all stay above a block the server puts
+  //     in, and the caret stays on its line.
+  {
+    const { canvas, batches, server, inSync } = await mount([paragraph("e1", "x")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("\n\n\n");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(2, 2);
+    const filled = [paragraph("e2", "New")];
+    server.splice(0, server.length, ...clone(filled));
+    canvas.applyServerBlocks(clone(filled));
+    assert.equal(textarea.value, "\n\n\nNew");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 2], "the caret stays on its blank line");
+    inSync("after a block fills a blank textarea");
   }
 
   console.log("mounted source-mode flush regression passed");
