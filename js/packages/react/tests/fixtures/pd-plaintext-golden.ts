@@ -83,7 +83,7 @@ export const PROSE_GOLDEN: Record<string, string> = {
   // `steps` precedent (a tab is a titled panel, same shape as a step)
   tabs: 'macOS\n\nbrew install barkpark\n\nLinux\n\ncurl -fsSL install.sh | sh',
   'paper-links':
-    'Continue reading\n\nPapers with useful context for this change.\n\nPaper authoring excellence\n\nA practical guide to publishing clear, useful Papers.\n\nSee the principles behind this example.',
+    'Continue reading\n\nPapers with useful context for this change.\n\nExample authoring guide\n\nA practical guide to publishing clear, useful Papers.\n\nSee the principles behind this example.',
 }
 
 /**
