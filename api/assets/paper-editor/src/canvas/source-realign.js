@@ -304,7 +304,6 @@ function through(before, after, at, stayBefore) {
   let tail = 0;
   while (tail < before.length - start && tail < after.length - start &&
     before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
-  if (start > 0 && /[\ud800-\udbff]/.test(before[start - 1])) start--;
   if (tail > 0 && /[\udc00-\udfff]/.test(before[before.length - tail])) tail--;
   if (at <= start && (stayBefore || at < before.length - tail)) return at;
   if (at >= before.length - tail) return at + after.length - before.length;
