@@ -1836,7 +1836,11 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # runs on every teardown path, raised or not. `PortReaper.reap/1` is that
       # rescued close plus a SIGKILL for a CLI that ignores EOF
       # (task-aa975de15eff4e6b); `teardown/1`'s reap-wait then sees it gone.
-      Barkpark.PortReaper.reap(port)
+      # The spawn pid rides along: a close handled before a queued `{:EXIT}`
+      # meets a port that already died on EPIPE and can no longer name its
+      # child. A live port still names its own; after an exit status the port is
+      # nil and this clause is not reached.
+      Barkpark.PortReaper.reap(port, state[:os_pid])
 
       teardown(state)
     end

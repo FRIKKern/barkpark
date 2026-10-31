@@ -144,4 +144,25 @@ defmodule Barkpark.StudioChat.ProviderPortEpipeTest do
     assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 5_000
     assert await_gone(path), "the CLI #{path} outlived its EPIPE"
   end
+
+  test "a close queued behind the write still kills the lingering CLI", %{dir: dir} do
+    # The close is handled before the port's queued `{:EXIT}`, so terminate/2
+    # reaps a port that already died and can no longer name its child.
+    {path, go} = stub(dir, 30)
+    on_exit(fn -> System.cmd("pkill", ["-9", "-f", path]) end)
+    Application.put_env(:barkpark, :claude_chat, command: {path, []})
+
+    {:ok, session} = ClaudeChat.start_session(%{sink: self(), mode: "plan"})
+    ref = Process.monitor(session)
+
+    :ok = :sys.suspend(session)
+    {:ok, _request_id} = ClaudeChat.initialize(session)
+    :ok = ClaudeChat.close(session)
+    File.write!(go, "")
+    :ok = await_queued_frames(session)
+    :ok = :sys.resume(session)
+
+    assert_receive {:DOWN, ^ref, :process, ^session, _}, 5_000
+    assert await_gone(path), "the CLI #{path} outlived a close queued ahead of its EXIT"
+  end
 end

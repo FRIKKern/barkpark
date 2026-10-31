@@ -113,4 +113,19 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
     refute reason == :timeout, "the handshake waited out its clock on a dead port"
     assert await_gone(path), "the app-server #{path} whose port died on EPIPE was orphaned"
   end
+
+  test "an app-server that exited is never signalled by its spawn pid" do
+    # Once the exit status arrives the child is gone and its pid may be reused,
+    # so the reap that follows must not carry it. The trace reads the pid the
+    # Session hands PortReaper.reap/2; the kill itself would hit nothing here.
+    path = stub("IFS= read -r line\nexit 3\n")
+    :erlang.trace_pattern({Barkpark.PortReaper, :reap, 2}, true, [:local])
+    :erlang.trace(self(), true, [:call, :set_on_spawn])
+
+    on_exit(fn -> :erlang.trace_pattern({Barkpark.PortReaper, :reap, 2}, false, [:local]) end)
+
+    assert {:error, _reason} = start(path)
+    assert_receive {:trace, _session, :call, {Barkpark.PortReaper, :reap, [_port, known]}}, 5_000
+    assert known == nil, "the Session reaped an exited app-server by its stale pid #{known}"
+  end
 end
