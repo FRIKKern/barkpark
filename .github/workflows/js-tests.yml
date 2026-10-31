@@ -33,6 +33,7 @@ on:
       # these two entries it passed the Elixir gate and never rendered a single
       # JS block. The mirrors agreeing is not the renderer agreeing.
       - "api/lib/barkpark/portable_doc/**"
+      - "api/priv/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - "api/test/support/fixtures/code-block-lang-parity.json"
@@ -87,6 +88,7 @@ on:
       # these two entries it passed the Elixir gate and never rendered a single
       # JS block. The mirrors agreeing is not the renderer agreeing.
       - "api/lib/barkpark/portable_doc/**"
+      - "api/priv/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - "api/test/support/fixtures/code-block-lang-parity.json"
@@ -328,6 +330,9 @@ jobs:
 
       - name: Build
         run: pnpm exec turbo run build ${{ steps.scope.outputs.filter }}
+
+      - name: "PortableDoc conformance (UNCACHED — the runner reads api/priv/portable_doc, which turbo's test inputs cannot name)"
+        run: pnpm --filter @barkpark/react exec vitest run tests/conformance.test.tsx
 
       # Drift gate: the committed generated types MUST equal a fresh regen from
       # the committed schema fixture. Network-free (`--from` reads the fixture —

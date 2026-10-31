@@ -1,0 +1,328 @@
+{
+  "renderer": "elixir",
+  "compare": "dom",
+  "pack_stamp": "ae93502b0562d13dd65822a515ce5280a8007269b08b511a6a2128538200b5e4",
+  "ran_at_sha": "afb406353fb4f542533533e7ab98d7524431f00f",
+  "rows": [
+    {
+      "type": "action",
+      "status": "pass"
+    },
+    {
+      "type": "api-endpoint",
+      "status": "pass"
+    },
+    {
+      "type": "arrayOf",
+      "status": "pass"
+    },
+    {
+      "type": "asciicast",
+      "status": "pass"
+    },
+    {
+      "type": "bar-chart",
+      "status": "pass"
+    },
+    {
+      "type": "blockquote",
+      "status": "pass"
+    },
+    {
+      "type": "byline",
+      "status": "pass"
+    },
+    {
+      "type": "callout",
+      "status": "pass"
+    },
+    {
+      "type": "card",
+      "status": "pass"
+    },
+    {
+      "type": "cards",
+      "status": "pass"
+    },
+    {
+      "type": "chart",
+      "status": "pass"
+    },
+    {
+      "type": "chat-approval",
+      "status": "pass"
+    },
+    {
+      "type": "chat-plan",
+      "status": "pass"
+    },
+    {
+      "type": "chat-question",
+      "status": "pass"
+    },
+    {
+      "type": "chat-thinking",
+      "status": "pass"
+    },
+    {
+      "type": "chat-todo",
+      "status": "pass"
+    },
+    {
+      "type": "chat-tool-diff",
+      "status": "pass"
+    },
+    {
+      "type": "code-tabs",
+      "status": "pass"
+    },
+    {
+      "type": "code",
+      "status": "pass"
+    },
+    {
+      "type": "codelist",
+      "status": "pass"
+    },
+    {
+      "type": "columns",
+      "status": "pass"
+    },
+    {
+      "type": "composite",
+      "status": "pass"
+    },
+    {
+      "type": "criteria-progress",
+      "status": "pass"
+    },
+    {
+      "type": "diagram",
+      "status": "pass"
+    },
+    {
+      "type": "diff",
+      "status": "pass"
+    },
+    {
+      "type": "divider",
+      "status": "pass"
+    },
+    {
+      "type": "duel",
+      "status": "pass"
+    },
+    {
+      "type": "embed",
+      "status": "pass"
+    },
+    {
+      "type": "equation",
+      "status": "pass"
+    },
+    {
+      "type": "expandable",
+      "status": "pass"
+    },
+    {
+      "type": "eyebrow",
+      "status": "pass"
+    },
+    {
+      "type": "field-boolean",
+      "status": "pass"
+    },
+    {
+      "type": "field-color",
+      "status": "pass"
+    },
+    {
+      "type": "field-datetime",
+      "status": "pass"
+    },
+    {
+      "type": "field-image",
+      "status": "pass"
+    },
+    {
+      "type": "field-number",
+      "status": "pass"
+    },
+    {
+      "type": "field-reference",
+      "status": "pass"
+    },
+    {
+      "type": "field-select",
+      "status": "pass"
+    },
+    {
+      "type": "field-slug",
+      "status": "pass"
+    },
+    {
+      "type": "field-string",
+      "status": "pass"
+    },
+    {
+      "type": "field-text",
+      "status": "pass"
+    },
+    {
+      "type": "figure",
+      "status": "pass"
+    },
+    {
+      "type": "filetree",
+      "status": "pass"
+    },
+    {
+      "type": "footnote",
+      "status": "pass"
+    },
+    {
+      "type": "form",
+      "status": "pass"
+    },
+    {
+      "type": "gauge-list",
+      "status": "pass"
+    },
+    {
+      "type": "heading",
+      "status": "pass"
+    },
+    {
+      "type": "heatmap",
+      "status": "pass"
+    },
+    {
+      "type": "image",
+      "status": "pass"
+    },
+    {
+      "type": "ingress",
+      "status": "pass"
+    },
+    {
+      "type": "lineage",
+      "status": "pass"
+    },
+    {
+      "type": "list",
+      "status": "pass"
+    },
+    {
+      "type": "localizedText",
+      "status": "pass"
+    },
+    {
+      "type": "note",
+      "status": "pass"
+    },
+    {
+      "type": "notes",
+      "status": "pass"
+    },
+    {
+      "type": "paper-links",
+      "status": "pass"
+    },
+    {
+      "type": "paragraph",
+      "status": "pass"
+    },
+    {
+      "type": "pipeline",
+      "status": "pass"
+    },
+    {
+      "type": "pre-gate-badge",
+      "status": "pass"
+    },
+    {
+      "type": "pullquote",
+      "status": "pass"
+    },
+    {
+      "type": "questionnaire",
+      "status": "pass"
+    },
+    {
+      "type": "roadmap",
+      "status": "pass"
+    },
+    {
+      "type": "route",
+      "status": "pass"
+    },
+    {
+      "type": "section",
+      "status": "pass"
+    },
+    {
+      "type": "sheet",
+      "status": "pass"
+    },
+    {
+      "type": "stage",
+      "status": "pass"
+    },
+    {
+      "type": "stat-grid",
+      "status": "pass"
+    },
+    {
+      "type": "stat",
+      "status": "pass"
+    },
+    {
+      "type": "stats",
+      "status": "pass"
+    },
+    {
+      "type": "status-legend",
+      "status": "pass"
+    },
+    {
+      "type": "steps",
+      "status": "pass"
+    },
+    {
+      "type": "table",
+      "status": "pass"
+    },
+    {
+      "type": "tabs",
+      "status": "pass"
+    },
+    {
+      "type": "task-board",
+      "status": "pass"
+    },
+    {
+      "type": "task-detail",
+      "status": "pass"
+    },
+    {
+      "type": "task-list",
+      "status": "pass"
+    },
+    {
+      "type": "tasks",
+      "status": "pass"
+    },
+    {
+      "type": "terminal",
+      "status": "pass"
+    },
+    {
+      "type": "toc",
+      "status": "pass"
+    },
+    {
+      "type": "video",
+      "status": "pass"
+    }
+  ]
+}

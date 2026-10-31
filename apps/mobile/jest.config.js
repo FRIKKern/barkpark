@@ -9,6 +9,7 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-url-polyfill|fast-text-encoding))',
   ],
+  transform: { '\\.mjs$': 'babel-jest' },
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   // GATE-HONESTY, not a slow-test allowance (mob-bl-jest-testtimeout): with no
   // explicit testTimeout every test rides jest's 5000 ms default, and a

@@ -1,0 +1,129 @@
+import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { Window } from 'happy-dom'
+import {
+  MISSING,
+  conform,
+  counts,
+  diffShapes,
+  diffWords,
+  goldenWords,
+  loadPack,
+  modeFromEnv,
+  settle,
+  shapeOf,
+  type Report,
+} from '../../../../api/priv/portable_doc/conformance/conformance.mjs'
+import { PortableDoc } from '../src/index'
+import { REGISTERED_TYPES } from '../src/blocks/registry'
+import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
+
+const OPT_IN = { ...fieldBlocks, ...embedBlocks() }
+const KNOWN = new Set([...REGISTERED_TYPES, ...Object.keys(OPT_IN)])
+
+function nodesOf(html: string): NodeList {
+  const doc = new Window().document
+  doc.body.innerHTML = html
+  const only = doc.body.children.length === 1 ? doc.body.children[0] : null
+  return (only?.classList.contains('bp-paper-surface')
+    ? only.childNodes
+    : doc.body.childNodes) as unknown as NodeList
+}
+
+function judge(golden: { type: string; input: unknown; expectedHtml: string }) {
+  if (!KNOWN.has(golden.type)) return MISSING
+  const actual = renderToStaticMarkup(
+    createElement(PortableDoc, { value: [golden.input], blocks: OPT_IN } as never),
+  )
+  return diffShapes(shapeOf(nodesOf(actual)), shapeOf(nodesOf(golden.expectedHtml)))
+}
+
+describe('@barkpark/react conformance against the golden pack', () => {
+  it('matches the committed conformance/react.json', async () => {
+    const report = await conform({ renderer: 'react', compare: 'dom', judge })
+    const problems = settle(report, modeFromEnv())
+    console.log('react', counts(report))
+    expect(problems).toEqual([])
+  })
+
+  it('refuses an absent pack', async () => {
+    await expect(
+      conform({ renderer: 'react', compare: 'dom', judge, pack: '/nonexistent-pack' }),
+    ).rejects.toThrow(/no golden pack/)
+  })
+})
+
+describe('the shared conformance normaliser', () => {
+  const shape = (html: string) => shapeOf(nodesOf(html))
+
+  it('ignores class order, attribute order, whitespace runs and comments', () => {
+    expect(
+      diffShapes(
+        shape('<div class="b a" data-x="1" role="note">  hi \n there <!-- c --></div>'),
+        shape('<div role="note" data-x="1" class="a b">hi there</div>'),
+      ),
+    ).toEqual([])
+  })
+
+  it('reds a wrong tag, class, attribute, style, text and child count', () => {
+    const golden = shape('<p class="a" data-k="1" style="color: red">x<b>y</b></p>')
+    const cases: [string, RegExp][] = [
+      ['<div class="a" data-k="1" style="color: red">x<b>y</b></div>', /<div> != <p>/],
+      ['<p class="b" data-k="1" style="color: red">x<b>y</b></p>', /class \{b\} != \{a\}/],
+      ['<p class="a" data-k="2" style="color: red">x<b>y</b></p>', /attr data-k "2" != "1"/],
+      ['<p class="a" data-k="1" style="color: blue">x<b>y</b></p>', /style color "blue" != "red"/],
+      ['<p class="a" data-k="1" style="color: red">z<b>y</b></p>', /"z" != "x"/],
+      ['<p class="a" data-k="1" style="color: red">x</p>', /1 children \[#text\] != 2/],
+    ]
+    for (const [actual, expected] of cases)
+      expect(diffShapes(shape(actual), golden).join('\n')).toMatch(expected)
+  })
+
+  it('compares words in order, ignoring case and edge punctuation', () => {
+    const words = goldenWords([
+      { tag: 'p', children: [{ text: 'Heads up' }, { text: '.' }, { text: 'Body, here' }] },
+    ])
+    expect(words).toEqual(['heads', 'up', 'body', 'here'])
+    expect(diffWords('│ HEADS up. body here │', words)).toEqual([])
+    expect(diffWords('body here heads up', words)).toEqual([
+      'word 3/4 "body" not found in order',
+      'word 4/4 "here" not found in order',
+    ])
+  })
+
+  it('refuses a pack with zero cases', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bp-conformance-'))
+    mkdirSync(join(dir, 'blocks'))
+    writeFileSync(join(dir, 'stamp.json'), '{}')
+    expect(() => loadPack(dir)).toThrow(/zero block cases/)
+  })
+
+  it('settle reports a stale stamp, a drifted row, a missing report and strict reds', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bp-conformance-'))
+    const path = join(dir, 'x.json')
+    const report: Report = {
+      renderer: 'x',
+      compare: 'dom',
+      pack_stamp: 'a',
+      ran_at_sha: 's',
+      rows: [{ type: 't', status: 'fail', diff: ['d'] }],
+    }
+    expect(settle(report, { path })).toEqual([
+      `${path} is not committed; run with CONFORMANCE_WRITE=1`,
+    ])
+    expect(settle(report, { path, write: true })).toEqual([])
+    expect(settle({ ...report, ran_at_sha: 'other' }, { path })).toEqual([])
+    expect(settle({ ...report, pack_stamp: 'b' }, { path }).join()).toMatch(
+      /pack_stamp: committed a != now b/,
+    )
+    expect(settle({ ...report, rows: [{ type: 't', status: 'pass' }] }, { path }).join()).toMatch(
+      /row t drifted/,
+    )
+    expect(settle(report, { path, strict: true })).toEqual(['strict: t is fail'])
+  })
+})
