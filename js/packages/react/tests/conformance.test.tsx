@@ -95,6 +95,8 @@ describe('the shared conformance normaliser', () => {
 
   it('keeps the space between inline siblings and trims only list edges', () => {
     expect(diffShapes(shape('<p>a<b>b</b>c</p>'), shape('<p>a <b>b</b> c</p>'))).not.toEqual([])
+    expect(diffShapes(shape('<p><b>a</b>b</p>'), shape('<p><b>a</b> b</p>'))).not.toEqual([])
+    expect(diffShapes(shape('<p>a<b>b</b></p>'), shape('<p>a <b>b</b></p>'))).not.toEqual([])
     expect(diffShapes(shape('<p>  a <b> b </b>  c </p>'), shape('<p>a <b>b</b> c</p>'))).toEqual([])
   })
 

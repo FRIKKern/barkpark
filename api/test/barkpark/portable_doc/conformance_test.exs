@@ -151,11 +151,13 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
   end
 
   test "the shape keeps the space between inline siblings and trims only list edges" do
-    assert [_ | _] =
-             Conformance.diff(
-               Conformance.shape("<p>a<b>b</b>c</p>"),
-               Conformance.shape("<p>a <b>b</b> c</p>")
-             )
+    for {glued, spaced} <- [
+          {"<p>a<b>b</b>c</p>", "<p>a <b>b</b> c</p>"},
+          {"<p><b>a</b>b</p>", "<p><b>a</b> b</p>"},
+          {"<p>a<b>b</b></p>", "<p>a <b>b</b></p>"}
+        ] do
+      assert Conformance.diff(Conformance.shape(glued), Conformance.shape(spaced)) != [], glued
+    end
 
     assert Conformance.diff(
              Conformance.shape("<p>  a <b> b </b>  c </p>"),
