@@ -574,35 +574,7 @@ export const showcaseContent: Block[] = [
       },
       {
         "type": "text",
-        "value": " inside it, "
-      },
-      {
-        "marks": [
-          {
-            "href": "https://example.com/mark",
-            "type": "link"
-          }
-        ],
-        "type": "text",
-        "value": "a marked link"
-      },
-      {
-        "type": "text",
-        "value": " and "
-      },
-      {
-        "children": [
-          {
-            "type": "text",
-            "value": "a link node"
-          }
-        ],
-        "href": "https://example.com/node",
-        "type": "link"
-      },
-      {
-        "type": "text",
-        "value": "."
+        "value": " inside it."
       }
     ],
     "type": "paragraph"
