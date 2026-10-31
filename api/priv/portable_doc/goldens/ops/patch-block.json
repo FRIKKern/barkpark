@@ -1,0 +1,92 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "id": "st-heading",
+        "level": 2,
+        "text": "Status",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "All systems operational."
+              }
+            ],
+            "id": "st-callout",
+            "title": "Degraded",
+            "tone": "success",
+            "type": "callout"
+          },
+          {
+            "id": "st-code",
+            "lang": "sh",
+            "type": "code",
+            "value": "curl https://example.com/health"
+          }
+        ],
+        "id": "st-body",
+        "title": "Services",
+        "type": "section"
+      }
+    ],
+    "preview": "Current system status.",
+    "title": "Status",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "id": "st-heading",
+        "level": 2,
+        "text": "Status",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "API latency is elevated."
+              }
+            ],
+            "id": "st-callout",
+            "title": "Degraded",
+            "tone": "warning",
+            "type": "callout"
+          },
+          {
+            "id": "st-code",
+            "lang": "sh",
+            "type": "code",
+            "value": "curl https://example.com/health"
+          }
+        ],
+        "id": "st-body",
+        "title": "Services",
+        "type": "section"
+      }
+    ],
+    "preview": "Current system status.",
+    "title": "Status",
+    "version": 1
+  },
+  "op": {
+    "id": "st-callout",
+    "ifRev": "7",
+    "op": "patch-block",
+    "patch": {
+      "content": [
+        {
+          "type": "text",
+          "value": "All systems operational."
+        }
+      ],
+      "tone": "success"
+    }
+  }
+}

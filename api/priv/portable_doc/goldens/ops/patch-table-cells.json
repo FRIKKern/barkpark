@@ -1,0 +1,312 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Plan"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Price"
+            }
+          ]
+        ],
+        "id": "pr-table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Basic"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Free"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Team"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Per seat"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      }
+    ],
+    "title": "Pricing",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Plan"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Price"
+            }
+          ]
+        ],
+        "id": "pr-table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Basic"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Free"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Team"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Paid"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      }
+    ],
+    "title": "Pricing",
+    "version": 1
+  },
+  "op": {
+    "cells": [
+      {
+        "area": "body",
+        "column": 1,
+        "content": [
+          {
+            "type": "text",
+            "value": "Per seat"
+          }
+        ],
+        "row": 1
+      }
+    ],
+    "id": "pr-table",
+    "op": "patch-table-cells",
+    "shape": {
+      "head": {
+        "row": {
+          "cells": [
+            "inline-array",
+            "inline-array"
+          ],
+          "kind": "array"
+        },
+        "state": "row"
+      },
+      "rows": [
+        {
+          "cells": [
+            "inline-array",
+            "inline-array"
+          ],
+          "kind": "array"
+        },
+        {
+          "cells": [
+            "inline-array",
+            "inline-array"
+          ],
+          "kind": "array"
+        }
+      ],
+      "v": 1
+    }
+  },
+  "tableProjections": {
+    "after": {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Plan"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Price"
+          }
+        ]
+      ],
+      "id": "pr-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Basic"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Free"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Team"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Per seat"
+            }
+          ]
+        ]
+      ],
+      "shape": {
+        "head": {
+          "row": {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          },
+          "state": "row"
+        },
+        "rows": [
+          {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          },
+          {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          }
+        ],
+        "v": 1
+      },
+      "type": "table"
+    },
+    "before": {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Plan"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Price"
+          }
+        ]
+      ],
+      "id": "pr-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Basic"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Free"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Team"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Paid"
+            }
+          ]
+        ]
+      ],
+      "shape": {
+        "head": {
+          "row": {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          },
+          "state": "row"
+        },
+        "rows": [
+          {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          },
+          {
+            "cells": [
+              "inline-array",
+              "inline-array"
+            ],
+            "kind": "array"
+          }
+        ],
+        "v": 1
+      },
+      "type": "table"
+    }
+  }
+}

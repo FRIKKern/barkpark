@@ -636,6 +636,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
         ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__ bp-card__ bp-dataviz)
 
+    assert reader_markup |> Enum.uniq() |> Enum.sort() ==
+             Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack.canvas_forbidden(),
+           "the golden pack's canvas-forbidden-classes list drifted from this gate — update Pack's @canvas_forbidden"
+
     offenders =
       reader_markup
       |> Enum.uniq()

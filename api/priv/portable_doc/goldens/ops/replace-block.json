@@ -1,0 +1,126 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "id": "g-heading",
+        "level": 1,
+        "text": "Guide",
+        "type": "heading"
+      },
+      {
+        "id": "g-steps",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Build the artifact"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Push to staging"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Promote to production"
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Each step is idempotent."
+              }
+            ],
+            "id": "g-detail-p",
+            "type": "paragraph"
+          }
+        ],
+        "id": "g-detail",
+        "title": "Details",
+        "type": "section"
+      }
+    ],
+    "preview": "How to deploy.",
+    "title": "Guide",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "id": "g-heading",
+        "level": 1,
+        "text": "Guide",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Run the deploy steps below."
+          }
+        ],
+        "id": "g-old",
+        "type": "paragraph"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Each step is idempotent."
+              }
+            ],
+            "id": "g-detail-p",
+            "type": "paragraph"
+          }
+        ],
+        "id": "g-detail",
+        "title": "Details",
+        "type": "section"
+      }
+    ],
+    "preview": "How to deploy.",
+    "title": "Guide",
+    "version": 1
+  },
+  "op": {
+    "block": {
+      "id": "g-steps",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Build the artifact"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Push to staging"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Promote to production"
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    "id": "g-old",
+    "op": "replace-block"
+  }
+}

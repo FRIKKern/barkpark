@@ -1,0 +1,87 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "id": "cl-heading",
+        "level": 1,
+        "text": "Changelog",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Opened heading levels to h1–h6."
+              }
+            ],
+            "id": "cl-kept",
+            "type": "paragraph"
+          }
+        ],
+        "id": "cl-section",
+        "title": "v0.4",
+        "type": "section"
+      },
+      {
+        "id": "cl-divider",
+        "type": "divider"
+      }
+    ],
+    "preview": "Recent changes.",
+    "title": "Changelog",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "id": "cl-heading",
+        "level": 1,
+        "text": "Changelog",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Opened heading levels to h1–h6."
+              }
+            ],
+            "id": "cl-kept",
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "The legacy export path is gone."
+              }
+            ],
+            "id": "cl-doomed",
+            "title": "Deprecated",
+            "tone": "danger",
+            "type": "callout"
+          }
+        ],
+        "id": "cl-section",
+        "title": "v0.4",
+        "type": "section"
+      },
+      {
+        "id": "cl-divider",
+        "type": "divider"
+      }
+    ],
+    "preview": "Recent changes.",
+    "title": "Changelog",
+    "version": 1
+  },
+  "op": {
+    "expectedVersion": "12",
+    "id": "cl-doomed",
+    "op": "remove-block"
+  }
+}

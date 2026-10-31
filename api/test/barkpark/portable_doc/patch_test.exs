@@ -3,17 +3,15 @@ defmodule Barkpark.PortableDoc.PatchTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Patch
+  alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack
 
-  # The golden fixtures under `api/test/support/fixtures/doc-patch-op/` ARE the
-  # source of truth for the block-tree op semantics — the same fixtures the
-  # `Barkpark.PortableDoc.Patch` @moduledoc pins the engine to. This suite is
-  # self-contained: it reads only that in-tree dir (no cross-repo absolute path,
-  # so it never breaks in CI / fresh clones).
-  @fixtures_dir Path.join(__DIR__, "../../support/fixtures/doc-patch-op")
+  # The golden pack's op fixtures (`api/priv/portable_doc/goldens/ops/`) ARE the
+  # cross-surface op contract: one per edit verb, read here and by the editor's
+  # `src/__op_fixtures.test.mjs`. An intent verb is lowered first, as every
+  # block-op write lowers it (`BlockOps.lower_editor_op/2`).
+  @fixtures_dir Path.join(Pack.dir(), "ops")
 
   describe "conformance — golden fixtures reproduce `after` from `before` + `op`" do
-    # One generated test per fixture file. The op contract's conformance rule:
-    # apply_patch(before, op) == after.
     for path <- Path.wildcard(Path.join(@fixtures_dir, "*.json")) do
       name = Path.basename(path, ".json")
 
@@ -21,12 +19,12 @@ defmodule Barkpark.PortableDoc.PatchTest do
         %{"before" => before, "op" => op, "after" => expected} =
           unquote(path) |> File.read!() |> Jason.decode!()
 
-        assert {:ok, after_doc} = Patch.apply_patch(before, op)
+        assert {:ok, after_doc} = Pack.apply_op(before, op)
         assert after_doc == expected
       end
     end
 
-    test "all five ops are covered by a fixture" do
+    test "all nine edit verbs are covered by a fixture" do
       ops =
         @fixtures_dir
         |> Path.join("*.json")
@@ -36,8 +34,11 @@ defmodule Barkpark.PortableDoc.PatchTest do
         end)
         |> Enum.sort()
 
+      assert ops == Enum.sort(Pack.verbs())
+
       assert ops ==
-               ["append-block", "insert-after", "patch-block", "remove-block", "replace-block"]
+               ~w(append-block insert-after move-block patch-block patch-card-body
+                  patch-table-cells patch-table-structure remove-block replace-block)
     end
   end
 

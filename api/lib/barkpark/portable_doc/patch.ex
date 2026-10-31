@@ -3,7 +3,7 @@ defmodule Barkpark.PortableDoc.Patch do
   Pure, immutable patch operations over a PortableDoc block tree. A STANDALONE
   Elixir patch engine — the single owner of the block-tree op semantics. Its
   behaviour is pinned by the golden fixtures in
-  `api/test/support/fixtures/doc-patch-op/`, which double as the cross-surface
+  `api/priv/portable_doc/goldens/ops/`, which double as the cross-surface
   op contract every producer (CLI/SDK/Studio) writes against.
 
   `apply_patch/2` is **pure**: it never mutates its input, performs no Repo

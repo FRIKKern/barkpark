@@ -59,7 +59,7 @@ function check(name, fn) {
 // sections):
 //   append-block  → concat block at END (dup id is an error)
 //   insert-after  → splice block immediately after afterId (absent → error;
-//                   dup block id → error)
+//                   dup block id → error); RECURSES into section children
 //   remove-block  → drop the block by id (absent → error); RECURSES into section
 //                   children (patch.ex resolves ids against the whole tree)
 //   move-block    → lift the block by id, splice after `after` (or head when
@@ -111,9 +111,9 @@ function applyOps(prevBlocks, ops) {
         if (op.block && op.block.id != null && idAt(op.block.id) !== -1) {
           throw new Error(`insert-after: duplicate id ${op.block.id}`);
         }
-        const at = idAt(op.afterId);
-        if (at === -1) throw new Error(`insert-after: afterId not found ${op.afterId}`);
-        blocks.splice(at + 1, 0, { ...op.block });
+        const next = transformAtId(blocks, op.afterId, (target) => [target, { ...op.block }]);
+        if (next == null) throw new Error(`insert-after: afterId not found ${op.afterId}`);
+        blocks = next;
         break;
       }
       case "remove-block": {
