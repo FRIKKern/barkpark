@@ -61,6 +61,30 @@ defmodule Barkpark.PortReaperTest do
              "— route it through Barkpark.PortReaper.reap/1 (task-aa975de15eff4e6b)"
   end
 
+  test "reap/2 kills the remembered pid of a port that died on EPIPE" do
+    # The child closes stdin and stays alive; the next write kills the PORT
+    # (EPIPE), after which Port.info/2 can no longer name the pid.
+    port =
+      Port.open({:spawn_executable, System.find_executable("bash")}, [
+        :binary,
+        :exit_status,
+        args: ["-c", "exec 0<&-; echo closed; exec sleep 30"]
+      ])
+
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+    on_exit(fn -> OsProcess.kill(os_pid) end)
+    assert_receive {^port, {:data, "closed\n"}}, 5_000
+    Process.flag(:trap_exit, true)
+    Port.command(port, "write into the closed pipe\n")
+    assert_receive {:EXIT, ^port, :epipe}, 5_000
+    assert PortReaper.os_pid(port) == nil
+
+    assert PortReaper.reap(port, os_pid) == :ok
+
+    assert OsProcess.gone_within?(os_pid),
+           "os pid #{os_pid} survived reap/2 after its port died on EPIPE"
+  end
+
   test "reap/1 on an already-closed port, or a non-port, never raises" do
     {port, _os_pid} = spawn_eof_ignorer()
     PortReaper.reap(port)

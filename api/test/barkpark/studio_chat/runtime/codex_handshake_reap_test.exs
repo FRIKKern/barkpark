@@ -2,7 +2,9 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
   @moduledoc """
   task-3d3f89e2966ea9d7, the handshake half: when `Codex.Session.start/1`'s
   startup handshake times out, the app-server's OS process must not outlive
-  it. Each stub writes its own PID first, so the test asks the OS.
+  it. Each stub runs from its own unique path, so the test asks the OS whether
+  anything still runs that path; the PID file each stub writes is only for
+  cleanup.
   """
   use ExUnit.Case, async: false
 
@@ -22,7 +24,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
       File.rm(pid_file)
     end)
 
-    {path, pid_file}
+    path
   end
 
   defp read_pid(pid_file) do
@@ -33,14 +35,18 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
     end
   end
 
-  defp alive?(pid), do: match?({_, 0}, System.cmd("kill", ["-0", pid], stderr_to_stdout: true))
+  defp running?(path),
+    do: match?({_, 0}, System.cmd("pgrep", ["-f", path], stderr_to_stdout: true))
 
-  # The kill is asynchronous; wait for the OS to agree, bounded.
-  defp await_gone(pid, deadline \\ System.monotonic_time(:millisecond) + 5_000) do
+  # The kill is asynchronous; wait for the OS to agree, bounded. Asking by path,
+  # not by the PID the stub writes, keeps this true for a stub killed before its
+  # first line ran: under load the 300 ms clock can fire before `sh` starts, and
+  # a missing PID file then failed the test with nothing left running.
+  defp await_gone(path, deadline \\ System.monotonic_time(:millisecond) + 5_000) do
     cond do
-      not alive?(pid) -> true
+      not running?(path) -> true
       System.monotonic_time(:millisecond) > deadline -> false
-      true -> Process.sleep(20) && await_gone(pid, deadline)
+      true -> Process.sleep(20) && await_gone(path, deadline)
     end
   end
 
@@ -52,20 +58,59 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
     # Reads (and ignores) every request, answers nothing, and then IGNORES the
     # EOF a port close gives it: only a real kill ends it, so a close-only
     # teardown cannot pass this test.
-    {path, pid_file} = stub("while IFS= read -r line; do :; done\nsleep 30\n")
+    path = stub("while IFS= read -r line; do :; done\nsleep 30\n")
 
     assert {:error, :timeout} = start(path)
-    assert {:ok, pid} = read_pid(pid_file)
-    assert await_gone(pid), "the timed-out app-server #{pid} was orphaned (still alive)"
+    assert await_gone(path), "the timed-out app-server #{path} was orphaned (still alive)"
   end
 
   test "an app-server that closed its stdin is reaped too, not left running" do
     # The Session's initialize write meets a closed pipe: the port dies (EPIPE)
     # before the handshake clock fires, so the port can no longer name its pid.
-    {path, pid_file} = stub("exec 0<&-\nsleep 30\n")
+    path = stub("exec 0<&-\nsleep 30\n")
 
     assert {:error, _reason} = start(path)
-    assert {:ok, pid} = read_pid(pid_file)
-    assert await_gone(pid), "the app-server #{pid} with a closed stdin was orphaned (still alive)"
+
+    assert await_gone(path),
+           "the app-server #{path} with a closed stdin was orphaned (still alive)"
+  end
+
+  test "an app-server that closes its stdin BEFORE the next write is reaped too" do
+    # The test above races: it meets EPIPE only when the stub closes stdin
+    # before the Session's first write, which happened on a loaded CI runner
+    # (main 9b76b4bfc9) and almost never on an idle one. This stub closes stdin
+    # and only THEN answers `initialize`, so the `initialized` write that
+    # follows always meets a closed pipe and the port dies before any reap can
+    # read its pid from it.
+    path = stub("IFS= read -r line\nexec 0<&-\necho '{\"id\":1,\"result\":{}}'\nsleep 30\n")
+
+    assert {:error, _reason} = start(path)
+    assert await_gone(path), "the app-server #{path} that closed stdin mid-handshake was orphaned"
+  end
+
+  test "a port that dies on EPIPE ends the handshake at once, not on the clock" do
+    # Stdin closes before the `account/read` answer, so the ONE write after it
+    # (the thread open) kills the port and nothing else is written: no crash
+    # stops the Session, only the port's exit signal can. On the clock it would
+    # run 10 s with the child alive and its pid going stale.
+    path =
+      stub(
+        "IFS= read -r line\necho '{\"id\":1,\"result\":{}}'\n" <>
+          "IFS= read -r line\nIFS= read -r line\nexec 0<&-\n" <>
+          "echo '{\"id\":2,\"result\":{\"requiresOpenaiAuth\":false}}'\nsleep 30\n"
+      )
+
+    result =
+      Session.start(%{
+        binary: path,
+        args: [],
+        sink: self(),
+        session_id: "reap",
+        timeout_ms: 10_000
+      })
+
+    assert {:error, reason} = result
+    refute reason == :timeout, "the handshake waited out its clock on a dead port"
+    assert await_gone(path), "the app-server #{path} whose port died on EPIPE was orphaned"
   end
 end

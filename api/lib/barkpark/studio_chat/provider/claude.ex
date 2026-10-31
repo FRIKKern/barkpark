@@ -1778,7 +1778,14 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # child's exit code is unknown, so the Recorder keeps a Cloud sandbox
     # binding, as for any non-integer status), and stops normally so
     # `terminate/2` cleans up.
+    #
+    # The child need NOT have exited: a CLI that closed its stdin and kept
+    # running meets the same EPIPE, and the dead port can no longer name it, so
+    # `terminate/2`'s reap would kill nothing and `teardown/1` only waits. The
+    # pid read at spawn still names it NOW, before any exit could free it for
+    # reuse, so it is killed here (`Barkpark.PortReaper.reap/2`).
     def handle_info({:EXIT, port, reason}, %{port: port} = state) do
+      Barkpark.PortReaper.reap(port, state[:os_pid])
       release_name(state)
       status = if is_atom(reason), do: reason, else: :crashed
       send(state.sink, {:claude_chat_exit, status, read_stderr_tail(state[:stderr_path])})
