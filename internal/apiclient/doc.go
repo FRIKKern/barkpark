@@ -439,8 +439,12 @@ func (d Doc) ClaimInfo() ClaimInfo {
 // presence of a worker key are ALL false positives for liveness; see
 // ClaimEpoch's comment for the measurement and for why the retained epoch must
 // stay exactly where it is.
+//
+// A CLOSED row keeps its worker too: close stamps `closed_by` onto the claim
+// and leaves the rest, so a stamped claim is the row's record of who did the
+// work, not a hold. The server's queue reads it the same way.
 func (c ClaimInfo) Live() bool {
-	return c.Present && strings.TrimSpace(c.Worker) != ""
+	return c.Present && strings.TrimSpace(c.Worker) != "" && c.ClosedBy == ""
 }
 
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,

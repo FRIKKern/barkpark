@@ -188,7 +188,8 @@ func readTaskClaims(raw []byte, id string, shape taskReadShape) (TaskClaimReport
 				continue
 			}
 			worker, _ := obj["worker"].(string)
-			if worker == "" {
+			closedBy, _ := obj["closed_by"].(string)
+			if worker == "" || closedBy != "" {
 				continue
 			}
 			report.Claimed++

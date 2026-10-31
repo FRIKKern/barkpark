@@ -178,15 +178,15 @@ type cmuxStatus struct {
 // this reported has_claim:true for a row nobody held and rendered `held by —`
 // with a live lease countdown beside it. Measured on guerrilla against a row
 // claimed and then released through the real verbs.
-// A CLOSED row keeps its worker too: close stamps `closed_by` onto the claim
-// and leaves the rest, lease timestamps included, so a done row read as held
-// with time left on it. A close-out stamp therefore means nobody holds it. The epoch is still read,
+// A CLOSED row keeps its worker too, lease timestamps included, so a done row
+// read as held with time left on it until Live() learned the close-out stamp.
+// The epoch is still read,
 // and still read from a released row, because it is the value the NEXT claim
 // increments; see apiclient.Doc.ClaimEpoch for why clearing it corrupts data.
 func (st *cmuxStatus) hydrateLease(doc apiclient.Doc) {
 	st.Lifecycle = doc.ContentString("lifecycle_status")
 	claim := doc.ClaimInfo()
-	st.HasClaim = claim.Live() && claim.ClosedBy == ""
+	st.HasClaim = claim.Live()
 	st.ClaimEpoch = claim.Epoch
 	st.ClaimWorker = claim.Worker
 	st.ReleasedAtISO = claim.ReleasedAt

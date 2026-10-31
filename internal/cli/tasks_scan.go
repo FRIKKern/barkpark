@@ -231,14 +231,15 @@ func taskScanRowMatcher(o taskScanOpts) func(json.RawMessage) bool {
 		var obj struct {
 			Assignee string `json:"assignee"`
 			Claim    *struct {
-				Worker string `json:"worker"`
+				Worker   string `json:"worker"`
+				ClosedBy string `json:"closed_by"`
 			} `json:"claim"`
 		}
 		if json.Unmarshal(row, &obj) != nil {
 			return false
 		}
 		holder := ""
-		if obj.Claim != nil {
+		if obj.Claim != nil && obj.Claim.ClosedBy == "" {
 			holder = strings.TrimSpace(obj.Claim.Worker)
 		}
 		if assignee != "" && strings.ToLower(strings.TrimSpace(obj.Assignee)) != assignee {

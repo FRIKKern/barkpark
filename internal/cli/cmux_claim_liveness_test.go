@@ -245,4 +245,16 @@ func TestCmuxStatusClosedClaimIsTheRecordNotAHold(t *testing.T) {
 	if !strings.Contains(got, "closed by drop-clock at 2026-10-31T15:03:29.563882Z (the claim stays on the row as its record; nobody holds it)") {
 		t.Errorf("a closed claim must name who closed it and when; rendered:\n%s", got)
 	}
+
+	buf.Reset()
+	out.output = "json"
+	emitCmuxStatusJSON(out, st)
+	var payload map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		t.Fatalf("status -o json not valid JSON: %v\n%s", err, buf.String())
+	}
+	if payload["has_claim"] != false || payload["closed_by"] != "drop-clock" || payload["closed_at"] != "2026-10-31T15:03:29.563882Z" {
+		t.Errorf("json must say has_claim false and who closed it when; got has_claim=%v closed_by=%v closed_at=%v",
+			payload["has_claim"], payload["closed_by"], payload["closed_at"])
+	}
 }

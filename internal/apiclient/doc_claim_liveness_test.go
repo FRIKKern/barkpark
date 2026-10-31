@@ -23,6 +23,18 @@ const realReleasedClaim = `{"epoch":2,"released_at":"2026-09-15T08:49:36.925818Z
 
 const realLiveClaim = `{"epoch":1,"lease_expires_at":"2026-09-15T09:39:27.618048Z","lease_seconds":2700,"ts_iso":"2026-09-15T08:54:27.618048Z","work_digest":"3748a7a4222d04cf","work_field_digests":{},"worker":"probe-r19w7"}`
 
+const realClosedClaim = `{"closed_at":"2026-10-31T15:03:29.563882Z","closed_by":"drop-clock","closed_session":"s_a27da76950c664eb","epoch":3,"lease_expires_at":"2026-10-31T15:39:06.843197Z","lease_seconds":2700,"ts_iso":"2026-10-31T14:54:06.843197Z","work_digest":"1ac324fbec49b368","work_field_digests":{},"worker":"drop-clock"}`
+
+func TestClaimInfoLiveIsFalseOnAClosedClaim(t *testing.T) {
+	closed := claimDoc(realClosedClaim).ClaimInfo()
+	if closed.Live() {
+		t.Errorf("a closed claim (closed_by=%q) reported Live()=true", closed.ClosedBy)
+	}
+	if closed.Worker != "drop-clock" || closed.ClosedAt != "2026-10-31T15:03:29.563882Z" {
+		t.Errorf("the closed claim must still name its worker and close time; got %+v", closed)
+	}
+}
+
 // ONLY THE WORKER VALUE DISCRIMINATES. claim != null, a non-zero epoch, and the
 // mere PRESENCE of a worker key are all true on a released row.
 func TestClaimInfoLiveIsDecidedByTheWorkerValueAlone(t *testing.T) {
