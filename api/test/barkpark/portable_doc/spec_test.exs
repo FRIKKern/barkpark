@@ -19,6 +19,15 @@ defmodule Barkpark.PortableDoc.SpecTest do
     tabs.tabs[].blocks terminal.blocks terminal.children
   )
 
+  @unauthored ~w(_code_label _paper_links _ref_title _render_opts unavailable)
+
+  @unread %{
+    {"card", "span"} =>
+      {"render/section_layout.ex", "read off every grid cell, whatever its type"},
+    {"task-list", "config"} => {"slots.ex", "declared by Slots.query_decl/1; nothing reads it"},
+    {"tasks", "config"} => {"slots.ex", "the task-list shape; nothing reads it"}
+  }
+
   @portable_doc Path.expand("../../../lib/barkpark/portable_doc", __DIR__)
   @compose_source File.read!(Path.join(@portable_doc, "render/compose.ex"))
   @reader_sources Path.wildcard(Path.join(@portable_doc, "render/*.ex")) ++
@@ -39,6 +48,11 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
     %{
       schema: schema,
+      reads:
+        ComposeCensus.Reads.reads(
+          Enum.map(@reader_sources, &File.read!/1),
+          ComposeCensus.types(@compose_source)
+        ),
       root: ExJsonSchema.Schema.resolve(schema),
       strict: ExJsonSchema.Schema.resolve(strict)
     }
@@ -174,17 +188,100 @@ defmodule Barkpark.PortableDoc.SpecTest do
                Tiers.by_tier() |> Map.keys() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
     end
 
-    test "every declared field is a key the reader names", %{schema: schema} do
-      literals =
-        Enum.reduce(@reader_sources, MapSet.new(), &MapSet.union(&2, string_literals(&1)))
+    test "each block's fields are the keys the reader reads on it, both ways", %{
+      schema: schema,
+      reads: reads
+    } do
+      assert field_differences(schema, reads) == []
+    end
 
-      unknown =
-        for {type, block} <- schema["definitions"]["blocks"],
-            field <- Map.keys(block["properties"]) -- ["id", "locked", "role", "type"],
-            not MapSet.member?(literals, field),
-            do: "#{type}.#{field}"
+    test "an alias spelling reads only fields its target declares", %{
+      schema: schema,
+      reads: reads
+    } do
+      blocks = schema["definitions"]["blocks"]
 
-      assert unknown == [], "fields no reader source names: #{inspect(unknown)}"
+      for {spelling, %{"x-alias-of" => target, "x-set" => set}} <-
+            schema["definitions"]["aliases"] do
+        declared = Map.keys(blocks[target]["properties"])
+        assert Map.keys(set) -- declared == [], "#{spelling} forces a field #{target} lacks"
+        assert (Map.fetch!(reads, spelling) -- @unauthored) -- declared == [], spelling
+      end
+    end
+
+    test "a field added to, dropped from or renamed in a reader names the block and field",
+         %{schema: schema, reads: reads} do
+      added = Map.update!(reads, "diagram", &["subtitle" | &1])
+      dropped = Map.update!(reads, "diagram", &(&1 -- ["caption"]))
+      renamed = Map.update!(reads, "asciicast", &["still" | &1 -- ["poster"]])
+
+      assert field_differences(schema, added) == [
+               "block diagram: field subtitle read by the reader but not in the schema"
+             ]
+
+      assert field_differences(schema, dropped) == [
+               "block diagram: field caption in the schema but the reader does not read it"
+             ]
+
+      assert field_differences(schema, renamed) == [
+               "block asciicast: field still read by the reader but not in the schema",
+               "block asciicast: field poster in the schema but the reader does not read it"
+             ]
+    end
+
+    test "each unread field is still named where the exception says, and still unread", %{
+      reads: reads
+    } do
+      for {{type, field}, {file, why}} <- @unread do
+        assert MapSet.member?(string_literals(Path.join(@portable_doc, file)), field),
+               "#{type}.#{field} (#{why}): #{file} no longer names it — drop the exception"
+
+        refute field in Map.fetch!(reads, type),
+               "#{type}.#{field} (#{why}): the census reads it now — drop the exception"
+      end
+    end
+
+    test "each unauthored key is one the reader injects" do
+      injected =
+        Enum.reduce(@reader_sources, MapSet.new(), &MapSet.union(&2, map_put_keys(&1)))
+
+      assert @unauthored -- MapSet.to_list(injected) == []
+    end
+
+    test "the census follows the block into helpers, attributes and rewrites" do
+      source = """
+      defmodule Fixture do
+        @keys ~w(alpha beta)
+        @kinds ["memo", "sketch"]
+        def compose_block(%{"type" => "memo", "pinned" => true} = b, _style) do
+          {b["title"], Map.get(b, "body"), get_in(b, ["meta", "x"]), blank?(b, "tag")}
+        end
+        def compose_block(%{"type" => t} = b, _style) when t in @kinds, do: Map.fetch(b, "shared")
+        def compose_block(%{"type" => "pad"} = b, style) do
+          case b do
+            %{"margin" => m} -> m
+            %{"type" => "sketch", "wrong" => w} -> w
+          end
+          %{"size" => s} = b
+          Enum.map(@keys, fn key -> Map.get(b, key) end)
+          compose_block(b |> Map.put("type", "memo") |> Map.put("title", "x"), style)
+        end
+        def compose_block(%{"type" => "other"} = b, _style), do: Map.get(b, "unused")
+        defp blank?(b, key), do: Map.get(b, key) in [nil, ""]
+        def inline(%{"type" => "text", "value" => v}), do: v
+        def inline(%{"type" => "memo", "children" => c}), do: c
+      end
+      """
+
+      reads = ComposeCensus.Reads.reads([source], ["memo", "sketch", "pad", "other"])
+
+      assert reads["memo"] == ["body", "meta", "pinned", "shared", "tag", "title"]
+      assert reads["sketch"] == ["shared", "wrong"]
+
+      assert reads["pad"] ==
+               ["alpha", "beta", "body", "margin", "meta", "pinned", "shared", "size", "tag"]
+
+      assert reads["other"] == ["unused"]
     end
   end
 
@@ -356,6 +453,43 @@ defmodule Barkpark.PortableDoc.SpecTest do
       two_key_count = Map.put(wire(good), "count", %{"min" => 1, "max" => 2})
       assert {:error, _} = ExJsonSchema.Validator.validate(root, two_key_count)
     end
+  end
+
+  defp field_differences(schema, reads) do
+    Enum.flat_map(Enum.sort(schema["definitions"]["blocks"]), fn {type, block} ->
+      declared = Map.keys(block["properties"])
+      read = Map.get(reads, type, []) -- @unauthored
+
+      unread =
+        for field <- Enum.sort(declared -- ["id", "locked", "role", "type"]),
+            field not in read,
+            not Map.has_key?(@unread, {type, field}),
+            do: "block #{type}: field #{field} in the schema but the reader does not read it"
+
+      for(
+        field <- Enum.sort(read -- declared),
+        do: "block #{type}: field #{field} read by the reader but not in the schema"
+      ) ++ unread
+    end)
+  end
+
+  defp map_put_keys(path) do
+    {_, acc} =
+      path
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk(MapSet.new(), fn
+        {{:., _, [{:__aliases__, _, [:Map]}, :put]}, _, args} = node, acc ->
+          case Enum.take(args, -2) do
+            [key, _] when is_binary(key) -> {node, MapSet.put(acc, key)}
+            _ -> {node, acc}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc
   end
 
   defp holes(:block, path), do: [{path, & &1}]
