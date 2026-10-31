@@ -356,7 +356,7 @@ import { fitBlocksToVocabulary, blocksNeedFitting, droppedNotice } from "./paste
 // these marks in P4: a pick inserts a wikilink/tag MARK, which runToOps emits as
 // a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "../marks.js";
-import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
+import { BUILD_SHA, CONTRACT_VERSION, DEBOUNCE_MS, EDITOR_VERSION, PLACEHOLDER } from "../contract.js";
 // How long after compositionend ProseMirror has read the committed text (it ends the
 // composition 20 ms after the event).
 const COMPOSE_SETTLE_MS = 50;
@@ -755,6 +755,10 @@ const triggerText = (block) =>
 const hasModifier = (event) => event.shiftKey || event.metaKey || event.ctrlKey || event.altKey;
 
 class BpPaperCanvas extends HTMLElement {
+  static CONTRACT_VERSION = CONTRACT_VERSION;
+  static EDITOR_VERSION = EDITOR_VERSION;
+  static BUILD_SHA = BUILD_SHA;
+
   static get observedAttributes() {
     return ["editable", "format-bubble"];
   }
@@ -2074,7 +2078,7 @@ class BpPaperCanvas extends HTMLElement {
     if (!insertInlineObject(this, this._editor, type)) return false;
     // TipTap's focus() takes the caret back on the next frame, after the popover
     // focused its first field: give it back (as _insertDeclaredObject does).
-    const dialog = this.inlineObjectDialog();
+    const dialog = this._inlineObjectDialog();
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
     }
@@ -2625,11 +2629,11 @@ class BpPaperCanvas extends HTMLElement {
     return withObjectOverrides(this._objectOverrides(), () => reconcileServerEcho(...args));
   }
 
-  inlineObjectVocabulary() {
+  _inlineObjectVocabulary() {
     return parseVocabulary(this.getAttribute("data-vocabulary"));
   }
 
-  inlineObjectDialog() {
+  _inlineObjectDialog() {
     // A host editor (editBlockObject) takes every object insert and edit; else the popover.
     if (this._editBlockObject) {
       if (!this._hostObjectDialog) this._hostObjectDialog = new HostObjectDialog((request) => this._editBlockObject(request));
@@ -2661,7 +2665,7 @@ class BpPaperCanvas extends HTMLElement {
 
   // The value the dialog just saved: the batch that carries it is the one a
   // refusal would name.
-  noteInlineObjectSave(values) {
+  _noteInlineObjectSave(values) {
     this._inlineSavePending = values;
   }
 
@@ -2681,7 +2685,7 @@ class BpPaperCanvas extends HTMLElement {
       }
     });
     if (at == null) return false;
-    const vocab = this.inlineObjectVocabulary();
+    const vocab = this._inlineObjectVocabulary();
     const kind = ((block ? vocab?.objects : vocab?.inlineObjects) || []).find((o) => o.name === values.type);
     const message = reason.replace(/^[^\s:]+: /, "");
     const error = { field: refusalField(reason, kind ? kind.fields : []), message };
@@ -4190,7 +4194,7 @@ class BpPaperCanvas extends HTMLElement {
     // The palette refocused the editor before running this command, and TipTap's
     // focus() takes the caret back on the next animation frame — after the dialog
     // focused its first field. Take it back to the dialog (task-040407b85629d22b).
-    const dialog = this.inlineObjectDialog();
+    const dialog = this._inlineObjectDialog();
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
     }
@@ -4341,7 +4345,7 @@ class BpPaperCanvas extends HTMLElement {
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
       serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
       // Declared inline objects: inserted at the caret, anywhere in prose.
-      inlineObjects: this.inlineObjectVocabulary()?.inlineObjects || [],
+      inlineObjects: this._inlineObjectVocabulary()?.inlineObjects || [],
       onInlineInsert: (name) => insertInlineObject(this, this._editor, name),
       // A declared object block wins over the same-named built-in insert
       // (task-441e0c1cc08acc5e, the palette twin of the slash rule).

@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.20.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.21.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,17 +6,20 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.20.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.21.0"` (also exported as `CONTRACT_VERSION`).
+Build identity, the Surface index of every name below, and the reach-ins hosts
+still make are at the end.
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert. 1.21.0 adds the `CONTRACT_VERSION`, `EDITOR_VERSION` and `BUILD_SHA` statics on both elements (Build identity), and declares what hosts already used: the editor's modes and members, the canvas's host attributes, rebase and resume-focus methods, paint holes, the DOM a host reads, and the pieces a host supplies.
 
 ## The element
 
 One custom element, `bp-paper-editor`, registered by the bundle. It edits **one**
-portable-doc block (paragraph / heading / list) in its own TipTap instance. The
+portable-doc block (paragraph / heading / list, or with `data-editor-mode` a card's
+body or a table's cells) in its own TipTap instance. The
 host mounts one element per block.
 
 ```html
@@ -32,10 +35,26 @@ Provide the block one of two equivalent ways:
 | Channel | Shape |
 |---|---|
 | `data-block` attribute | a JSON string of the portable-doc block |
-| `el.block` JS property | the block object (`el.block = {...}`) — also re-contents a mounted editor |
+| `block` property | the block object (`el.block = {...}`) — also re-contents a mounted editor |
 
 A malformed `data-block` JSON does **not** block the editor — it falls back to an
 empty paragraph and emits `bp-error` (below).
+
+| Attribute | Effect |
+|---|---|
+| `editable` | only the literal `"false"` mounts read-only. Observed: a later change toggles it |
+| `data-editor-mode` | read at connect. Absent or `"block"`: one paragraph, heading or list, sending `patch-block`. `"card-body"`: a card's body paragraph, sending `patch-card-body`. `"table"`: a table's cells, `block` being the server's table projection, sending `patch-table-cells` and `patch-table-structure` |
+
+| Member | Effect | Returns |
+|---|---|---|
+| `wikilinkSource` / `tagSource` | the `[[` and `#` menus' sources, as on the canvas (Host callbacks) | — |
+| `flushPendingChanges()` | send the debounced op now | `true` when it sent one |
+| `hasPendingChanges()` | a debounced op, or a table structure change not yet settled | boolean |
+| `resolveConflictWithServerBlock(block)` | the user's "use latest": drop the debounce and any draft and take `block` | `false` in table mode for another block's id, else `true` |
+| `applyTableProjection(value, { requestId, rev }?)` | table mode: the server's projection; while a structure change is in flight, only the echo of its request | `true` when taken |
+| `trackTableMutation(op, requestId)` | table mode: bind the host's request id to the `patch-table-structure` op in flight | `true` when bound |
+| `tableMutationResult(op, saved, result)` | table mode: that request's save result (`result.request_id` names it) | `true` when it matched |
+| `waitForTableSettlement()` | table mode: a Promise that settles `true` when a structure change lands, `false` when it is dropped | the Promise, or `null` with none pending |
 
 ## Outbound (editor → host)
 
@@ -44,22 +63,30 @@ All events are `bubbles: true, composed: true` (cross Shadow DOM). Detail shapes
 | Event | When | `detail` |
 |---|---|---|
 | `bp-ready` | once, at end of mount | `{ blockId, blockType, contractVersion }` |
-| `bp-op` | on debounced edit (300ms) | `{ op: "patch-block", id, patch }` |
+| `bp-op` | on debounced edit (300ms) | `{ op: "patch-block", id, patch }`, or an intent op by `data-editor-mode` (below) |
 | `bp-slash-insert` | slash-menu pick | `{ type, afterId, fieldName? }` |
 | `bp-slash-insert` | `> [!type]` callout shorthand | `{ type: "callout", afterId, tone, collapsible: true, collapsed }` |
-| `bp-error` | bad `data-block` JSON | `{ error, raw }` |
+| `bp-error` | bad `data-block` JSON; in card-body and table modes, a server shape the editor cannot edit (the draft stays, editing stops) | `{ error, raw }`, or `{ code, error }` with `code` `card_body_source_unsupported`, `table_source_unsupported` or `table_draft_incompatible` |
+| `bp-local-change` | card-body and table modes: each local edit, before the debounce | `{ token: null }`; a listener may set `token` |
+| `bp-noop` | card-body and table modes: the edit settled to no op | `{ token }`, what the host set on `bp-local-change` |
 
 `fieldName` is present only when the slash-menu item is field-bound; callout inserts carry `tone` (normalised tone string), `collapsible` (always `true`), and `collapsed` (boolean, `true` when the modifier is `-`).
 
 `bp-op` `patch` by block type (the frozen patch-block shape — `convert.js`):
 - paragraph → `{ content: [inline...] }`
-- heading → `{ text, level: 1|2|3 }`
+- heading → `{ text, level }`, `level` 1 to 6; a stored level outside them is shown at the nearest and kept
 - list → `{ ordered, items: [[inline...], ...] }`
+
+The three intent ops, by `data-editor-mode`:
+- `card-body` → `{ op: "patch-card-body", id, content: [inline...] }`, the body paragraph only, so a concurrent change to the card's title, media or action survives
+- `table` → `{ op: "patch-table-cells", id, shape, cells: [{ area: "head"|"body", row, column, content }] }` for typed cells
+- `table` → `{ op: "patch-table-structure", id, shape, action }` for the table's own row and column buttons; `action` is `add-row`, `add-column`, `add-header`, `remove-header`, `remove-row:i`, `up-row:i`, `down-row:i`, `remove-column:i`, `left-column:i` or `right-column:i`. The editor is read-only until its echo arrives
 
 ## Styling
 
-The bundle **self-injects** `bp-paper-editor.css` once (id-guarded `<link>`), so a
-bare embedder needs only the script tag. Hosts that already ship the rules (Studio
+The bundle **self-injects** `bp-paper-editor.css` once (`<link id="bp-paper-editor-styles"
+href="/assets/bp-paper-editor.css">`, a root-relative path), so a bare embedder on
+the origin that serves `/assets/` needs only the script tag. Hosts that already ship the rules (Studio
 inlines `.bp-paper-surface` CSS) set `window.BP_PAPER_EDITOR_NO_INJECT = true`
 before the bundle to opt out and avoid doubled rules. The stylesheet ships a
 `:root, :host` fallback for all `--paper-*` tokens (light default; dark via
@@ -83,6 +110,18 @@ ellipsis (1.17.0). A host themes it by setting `--paper-picker-*` on `:root`
 | `--paper-picker-bg` | key chips | `#fbfaf6` / `#1b1815` |
 | `--paper-picker-rule` / `--paper-picker-rule-soft` | key chip border / footer rule | `rgba(31, 26, 20, 0.08)` / `rgba(31, 26, 20, 0.04)`; dark `rgba(236, 230, 220, 0.10)` / `rgba(236, 230, 220, 0.05)` |
 | `--paper-picker-accent` | nothing yet; the picker's `--paper-accent` | `#a23925` / `#d97a5f` |
+
+A host themes the stylesheet with CSS custom properties on an ancestor or `:root`.
+These are the ones hosts set today; each unset keeps the stylesheet's own value:
+
+| Family | Tokens |
+|---|---|
+| colour | `--paper-accent`, `--paper-accent-soft`, `--paper-bg`, `--paper-bg-deep`, `--paper-chrome-bg`, `--paper-chrome-border`, `--paper-edit-hover`, `--paper-ink`, `--paper-ink-soft`, `--paper-ink-faint`, `--paper-ink-faint-line`, `--paper-reading-accent`, `--paper-rule`, `--paper-rule-soft`, `--bp-shadow-hsl` |
+| type | `--paper-font-serif`, `--paper-font-sans`, `--paper-font-mono`, `--paper-font-ui`, `--bp-body-size`, `--bp-body-lh`, `--bp-body-tracking`, `--bp-h1-size`, `--bp-h2-size`, `--bp-h2-lh`, `--bp-h2-tracking`, `--bp-h2-weight`, `--bp-h3-size`, `--bp-h3-lh`, `--bp-heading-weight` |
+| rhythm | `--bp-para-margin-top`, `--bp-li-gap`, `--bp-list-indent`, `--bp-section-beat`, `--bp-section-gap`, `--bp-section-rule`, `--bp-rule-hairline`, `--bp-air-callout`, `--bp-air-code`, `--bp-air-table`, `--bp-cols` |
+| code and images | `--bp-code-pad`, `--bp-code-radius`, `--bp-code-size`, `--bp-codeblock-lh`, `--bp-codeblock-margin`, `--bp-codeblock-pad`, `--bp-codeblock-radius`, `--bp-codeblock-size`, `--bp-pre-radius`, `--bp-img-radius` |
+| layout | `--bp-evidence-width`, `--bp-evidence-pull`, `--bp-evidence-band`, `--bp-evidence-band-max`, `--bp-evidence-fill`, `--bp-evidence-gutter`, `--bp-table-centre` |
+| tones | `--bp-tone-info-bg`, `--bp-tone-info-fg`, `--bp-tone-neutral-bg`, `--bp-tone-neutral-fg`, `--bp-tone-success-bg`, `--bp-tone-success-fg`, `--bp-tone-warning-bg`, `--bp-tone-warning-fg`, `--bp-tone-danger-bg`, `--bp-tone-danger-fg` |
 
 A host whose column is the text, with no wider evidence band (it sets
 `--bp-evidence-width: 100%; --bp-evidence-pull: 0px`), sets `--bp-table-centre: 0`
@@ -112,15 +151,30 @@ instance. Barkdown and Studio mount it.
 | `format-bubble` attribute | `"off"` hides the floating format bubble, for a host that draws its own toolbar (Toolbar commands). Observed: setting or clearing it after mount drops or brings back the bubble. With it off, Mod+K and the link card's Edit fire `bp-canvas-link-request` instead |
 | `block-cards` attribute | present: an image block is a card, as Sanity's block object: its file name and a … menu (Edit opens its alt, URL and width; Remove takes the block out, one undo step) over the picture. Absent: the picture alone. CSS only, so setting it after mount works at once (1.11.0). A declared object block (a field vocabulary's `of`, e.g. a callout) is a card too: a 33 px tile with its icon, its preview title, and a … with Edit (its own dialog) and Remove (1.12.0)  From 1.14.0 the link card is Sanity's annotation pill there: it follows the caret (not the pointer), shows above the link, names the annotation by its schema title (`blocks.annotations[].title`; else "Link", or "Internal Link" for a document link), and offers Edit and Remove, plus Open for a document link only |
 | `mention-trigger` attribute | the literal `"off"` (any other value, or none, keeps `@`): `@` stays plain text and only `[[` opens the `wikilinkSource` menu. Absent: `@` opens it too, at the block start or after a space or `(`/`[`, and the query runs to the caret across spaces (multi-word titles). Per element, and read on every keystroke, so setting it after mount works at once (1.16.0) |
-| `data-strings` attribute | on the canvas or an ancestor: a JSON map from the canvas's English words to the host's (`{"Link to page": "Link to note", "No matching pages": "No matching notes"}`); a word it leaves out stays English, and a map that is not JSON is ignored. Read when the canvas connects; one map serves the page. The picker's words are `Link to page` (its label, also the `#` menu's), `Searching…` and `No matching pages`, and its footer's `insert link`, `navigate` and `dismiss` |
+| `data-strings` attribute | on the canvas or an ancestor (`<bp-paper-editor>` reads it too): a JSON map from the canvas's English words to the host's (`{"Link to page": "Link to note", "No matching pages": "No matching notes"}`); a word it leaves out stays English, and a map that is not JSON is ignored. Read when the canvas connects; one map serves the page. The picker's words are `Link to page` (its label, also the `#` menu's), `Searching…` and `No matching pages`, and its footer's `insert link`, `navigate` and `dismiss` |
 | `data-field-caps` attribute | the type's Expectation as JSON, `{fieldName: max | null}`: a bound field block (one carrying `fieldName`) shows its n/max badge (the blocks bound to that name / the max; `n` alone when null) and an unbind × that emits one `patch-block {fieldName: null}`, as LiveView Beta's Properties row. Absent: field blocks unchanged (1.13.0) |
-| `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
+| `data-vocabulary` attribute | a field's block declaration (its `blocks`) as JSON: the slash menu and toolbar offer only what it declares, and an edit that brings in anything else (a node, heading level, list kind or mark) is a no-op. Read on every edit. Absent: nothing refused |
+| `data-constraints` attribute | a paper's constraint declarations as JSON (`[{ kind, role, presence, count, position, locked }]`): a remove or move that takes a kind below its count or out of its place is a no-op. Read on every edit |
+| `data-locked-tail` attribute | `"true"`: the block after this run is locked, so an edit that grows the run at its end is a no-op. Read on every edit |
+| `data-dataset`, `data-token`, `data-scope-prefix`, `data-picker-browse` attributes | the scope the canvas hands the picker elements it mounts (Host-supplied pieces): the dataset they search, the token the media picker uploads with, the API prefix they fetch under, and `"false"` to keep the value without a browser |
+| `data-media-strings`, `data-reference-strings` attributes | the `data-strings` the canvas gives each media and reference picker |
+| `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline. Read, it is that baseline (the run last seeded, acknowledged or applied), not the live document: `recoverySnapshot()` reads the live one |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
 | `liveRemote` property | `true` (strictly) applies server blocks while the author edits, block by block (Live remote blocks, 1.15.0). Default `false`: deferred until the author releases the editor |
 | `flushKeepsSource` property | `true` (strictly): `flushPendingChanges()` in Markdown source mode commits the text and keeps source mode open, and `applyServerBlocks` reaches a source textarea with no unsaved text (1.20.0). Default `false`: the flush leaves source mode and a server apply waits for the exit, as before 1.20.0 |
 
 All ten properties (`blocks`, `acknowledgedSaves`, `liveRemote` and the seven callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
+
+The canvas also reads these on an ancestor, or on a carrier element in its page:
+
+| Attribute | Where | Effect |
+|---|---|---|
+| `data-server-insert` | the canvas or an ancestor | present: terminal, stage, image and equation picks emit `bp-server-insert` (Outbound) |
+| `data-paper-container-kind` | nearest ancestor | `"figure"`: the run is a Figure's one content block (Enter cannot split or remove it, source mode is refused); `"document"`: the run is the paper's top level |
+| `data-paper-doc-key` | the nearest `.bp-paper-editor` ancestor | the document key `captureResumeFocus()` remembers and `restoreResumeFocus()` checks; with no such root, resume focus never arms |
+| `data-paper-masters` | an element inside the nearest `.bp-paper-editor` ancestor; ignored on a canvas with `data-vocabulary` | the paper's masters, `[{ id, title, tier, block_type }]`: each is a "Masters" row in the slash menu, picked as `bp-master-insert` |
+| `data-expected-fields` | first element carrying it in the document | the expected fields, `[{ name, type?, label?, max? }]`: an "EXPECTED" slash group whose picks insert a bound field block; a field drops out at its `max`, counted on `.bp-paper-edit-field[data-field-name]` |
 
 ### Host callbacks
 
@@ -221,7 +275,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 
 | Event | When | `detail` |
 |---|---|---|
-| `bp-ready` | once, after a successful mount (not on mount failure) | `{ blockCount }` |
+| `bp-ready` | once, after a successful mount (not on mount failure). A note's paint hole that mounts later sends its own from inside the canvas (Paint holes) | `{ blockCount }`; `null` from a paint hole |
 | `bp-canvas-ops` | on debounced edit (300ms), at an IME compositionend, or a flush/resend (`pagehide` flushes); while an IME composes, only the composing run is held back | `{ ops, seq?, conflictBlocks? }` |
 | `bp-noop` | an emit whose edits diff to zero ops | none |
 | `bp-canvas-open-link` | the hover card's Open, **cancelable** | `{ kind: "link"\|"wikilink", href, target, docId, alias }` (each `string \| null`) |
@@ -280,8 +334,10 @@ in-flight batch.
 | Method | Effect | Returns |
 |---|---|---|
 | `acknowledgeOps(seq, saved)` | `saved === true`: advance the baseline to the batch's snapshot and emit any queued edits. Anything else: keep the batch in flight for a byte-identical retry | `true` only when `saved === true` was applied |
-| `discardInflightOps(seq)` | drop the batch without advancing the baseline; the next diff carries the refused change. Queued edits emit now | `true` when dropped |
+| `discardInflightOps(seq, refusal?)` | drop the batch without advancing the baseline; the next diff carries the refused change. Queued edits emit now. `refusal` `{ reason }`: when the batch carried an inline object the field dialog just saved, the dialog opens again on it with `reason` on the field it names | `true` when dropped |
 | `resendPendingOps()` | nothing in flight: re-diff the live document against the saved baseline and emit. Never resends discarded ops verbatim | `true` when a batch was emitted |
+| `rebaseSafe(seq, serverBlocks)` | whether the in-flight batch `seq` can be resent unchanged on `serverBlocks`, a newer version another session saved: its ops address blocks by id and touch nothing that writer changed | boolean |
+| `localEditsRebaseSafe(serverBlocks)` | the same test over everything the canvas holds: the batch in flight and the edits not yet sent. `true` means no conflict to show yet | boolean |
 | `identifyOpsRequest(seq, requestId, previousRequestId = null)` | bind the host's request id to the in-flight batch, for matching its echo. Rebinding to a different id requires `previousRequestId` to name the current one | `true` when bound |
 
 Without `acknowledgedSaves` the canvas emits fire-and-forget batches and relies
@@ -301,6 +357,8 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `selectBlock(id)` | select the top-level image or object block `id` as a click on its card does (1.12.0); text typed onto a selected card on a `block-cards` canvas is dropped, Backspace/Delete still remove it | `true` when selected |
 | `refreshWikilinks()` | ask `wikilinkResolve` again for every document link, after a rename or a delete (1.17.0) | nothing |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
+| `captureResumeFocus()` | before the host makes the page inert or moves the canvas (a reconnect, a halt): remember that the author is typing here. Arms only in rich, editable mode with focus inside and a `.bp-paper-editor[data-paper-doc-key]` root; focus moving elsewhere cancels it | `true` when armed |
+| `restoreResumeFocus()` | after: put the caret back, only if armed, the same editor, root and document key, nothing inert, and focus on `<body>` | `true` when restored |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
 | `sourceMode` (getter) | whether the Markdown source textarea owns input (1.20.0) | boolean |
 
@@ -435,7 +493,7 @@ end whose block was replaced is found again by its Point, and an entry with an
 end whose block or path is gone is dropped silently. `color` is plain CSS color
 syntax (anything else is grey); `name` is text. Classes: `.bp-remote-caret`,
 `.bp-remote-caret__label`, `.bp-remote-selection`, colored by
-`--bp-remote-color`.
+`--bp-remote-color`, which the canvas sets on each from `color`.
 
 A host relays both halves through editor presence: post the event's `detail`
 as `selection` on `POST …/presence/:dataset/focus`, and hand the other
@@ -449,7 +507,7 @@ comments; the canvas paints their spans and keeps them on their text. Ends are
 
 | Method | Effect | Returns |
 |---|---|---|
-| `setCommentRanges(list)` | replace the set: `[{ id, anchor: Point, head: Point, active? }]`. Each paints `.bp-comment-range` over its span, plus `.bp-comment-range--active` when `active`. A span that resolves empty is skipped. `[]` clears; set before mount, it waits for the editor | nothing |
+| `setCommentRanges(list)` | replace the set: `[{ id, anchor: Point, head: Point, active? }]`. Each paints `.bp-comment-range` over its span, carrying `data-comment-id`, plus `.bp-comment-range--active` when `active`. A span that resolves empty is skipped. `[]` clears; set before mount, it waits for the editor | nothing |
 | `commentRanges()` | the live set as mapped through edits, in document order | `[{ id, anchor, head, text }]`, `anchor` the start and `head` the end; `text` is the span's plain text |
 | `commentsInSelection()` | the ranges the selection overlaps (a caret strictly inside one counts) | `string[]` of ids |
 
@@ -547,6 +605,121 @@ function connectCanvasOverHttp(canvas, { opsUrl, readUrl, readBlocks, rev, heade
 <!-- http-host:end -->
 
 `src/__canvas_http_host.test.mjs` runs this block against the real canvas.
+
+### DOM a host may read
+
+The canvas writes these for a host to read or select; every other class and
+attribute inside it is internal.
+
+| Attribute | On | Holds |
+|---|---|---|
+| `data-bp-id` | each top-level block's DOM | the block's id (`[data-bp-id="p-1"]`) |
+| `data-bp-role` | a locked block's DOM | its template role (`[data-bp-role="title"]`) |
+| `data-wikilink` | a document link's `span` | present; the span also carries `target` (the stored words), `docid` and `alias` |
+| `data-missing` | a document link's `span` | present while its target is gone (Host callbacks) |
+| `data-media-picker` | the canvas | present while `mediaPicker` is set |
+| `data-mount-failed` | the canvas | `"true"` after `bp-canvas-mount-failed` |
+| `data-comment-id` | a `.bp-comment-range` span | the range's `id` |
+| `data-bp-fleet-id` | a server-painted block's node | the block's id (Paint holes) |
+| `data-bp-fleet-body` | the paint hole inside it | present |
+
+Public classes: `.bp-remote-caret`, `.bp-remote-caret__label`, `.bp-remote-selection`
+(Shared carets), `.bp-comment-range`, `.bp-comment-range--active` (Comment ranges)
+and `.bp-canvas-mount-failed` (Outbound).
+
+### Paint holes
+
+Server-painted blocks (fleet blocks, notes, technical blocks, task lists, embeds and
+figures) render a hole the host fills with the reader's HTML:
+
+```
+<div data-bp-fleet-id="b7">            ← the block's node, keyed by id
+  <div data-bp-fleet-body> … </div>    ← the hole
+</div>
+```
+
+The host finds `[data-bp-fleet-id="<id>"] [data-bp-fleet-body]` and dispatches a
+cancelable `bp-fleet-paint` on the hole with `detail: { html, sourceBlock }`. A node
+that paints itself cancels it and paints `html` itself: a fleet block whose text edits
+in place, and a note (only when `sourceBlock` is the note it holds). If nobody
+cancels, the host sets the hole's `innerHTML`. Painting is display only: no op, no history, and the baseline never
+sees it. A note's hole that mounts after the host painted sends a detail-less
+`bp-ready` up through the canvas, so the host can paint again.
+
+## Host-supplied pieces
+
+What the bundle expects the page to provide. Without each, the named feature
+degrades and the rest works.
+
+| Piece | The canvas uses | Without it |
+|---|---|---|
+| `<bp-media-picker>` element | created for `field-image` blocks and card media, with attributes `value`, `dataset`, `scope-prefix`, `data-token`, `data-strings`, `chrome="ghost"`; reads and sets `value`, calls `openBrowser()` (true when the browser opened) then `openFileDialog()`, listens for a bubbling `bp-change` `{ value }` | an undefined element shows nothing to pick with |
+| `<bp-reference-picker>` element | created for `field-reference` blocks and embeds, with attributes `value`, `dataset`, `scope-prefix`, `ref-type`, `data-strings`; reads and sets `value`, listens for `bp-change` `{ value }` | the same |
+| `window.BarkparkPaperMermaid` | `runMermaid.call({ el })` on a diagram's figure, to draw its preview | the diagram shows its source only |
+| `data-strings` | the canvas's English words to the host's (Inbound) | English |
+| `/assets/bp-paper-editor.css` | the self-inject path (Styling) | set `BP_PAPER_EDITOR_NO_INJECT` and load the stylesheet yourself |
+
+The canvas also reaches into the pickers' own DOM: `.bp-mp-empty` and `.bp-mp-browse`
+(media) and `.bp-ref-search-input` (reference). A picker that renames them loses the
+canvas's focus handling.
+
+## Build identity
+
+Both element classes carry three statics:
+
+| Static | Value |
+|---|---|
+| `CONTRACT_VERSION` | this document's version, `"1.21.0"`. `<bp-paper-editor>` had it before 1.21.0 |
+| `EDITOR_VERSION` | `package.json`'s version (1.21.0) |
+| `BUILD_SHA` | 12 hex of the sha-256 over esbuild's version and every input file of the bundle (1.21.0). The same source builds the same bytes and sha; a change to a test leaves it alone. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
+
+```js
+const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-paper-canvas");
+```
+
+`src/contract.js` exports the same three.
+
+## Surface index
+
+Every name a host may use, by kind. CSS tokens are in Styling.
+`src/__contract_truth.test.mjs` fails when this table, `index.d.ts` and the
+element classes disagree: a public member of either class that is not here, a
+name here that `index.d.ts` lacks, or the other way round.
+
+| Kind | On | Names |
+|---|---|---|
+| static | both | `BUILD_SHA`, `CONTRACT_VERSION`, `EDITOR_VERSION` |
+| member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
+| member | editor | `applyTableProjection`, `block`, `flushPendingChanges`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `tableMutationResult`, `tagSource`, `trackTableMutation`, `waitForTableSettlement`, `wikilinkSource` |
+| attribute | canvas | `block-cards`, `data-constraints`, `data-dataset`, `data-field-caps`, `data-locked-tail`, `data-media-strings`, `data-picker-browse`, `data-reference-strings`, `data-scope-prefix`, `data-token`, `data-vocabulary`, `editable`, `format-bubble`, `mention-trigger` |
+| attribute | editor | `data-block`, `data-editor-mode`, `editable` |
+| ancestor attribute | canvas | `data-expected-fields`, `data-paper-container-kind`, `data-paper-doc-key`, `data-paper-masters`, `data-server-insert`, `data-strings` |
+| DOM attribute | canvas | `alias`, `data-bp-fleet-body`, `data-bp-fleet-id`, `data-bp-id`, `data-bp-role`, `data-comment-id`, `data-media-picker`, `data-missing`, `data-mount-failed`, `data-wikilink`, `docid`, `target` |
+| event | canvas | `bp-canvas-comment-click`, `bp-canvas-comment-ranges`, `bp-canvas-history`, `bp-canvas-link-request`, `bp-canvas-mount-failed`, `bp-canvas-node-failed`, `bp-canvas-open-link`, `bp-canvas-ops`, `bp-canvas-remote-held`, `bp-canvas-selection`, `bp-canvas-wikilink-click`, `bp-master-insert`, `bp-noop`, `bp-ready`, `bp-save-master`, `bp-selection-change`, `bp-server-insert` |
+| event | editor | `bp-error`, `bp-local-change`, `bp-noop`, `bp-op`, `bp-ready`, `bp-slash-insert` |
+| inbound event | canvas | `bp-change`, `bp-fleet-paint` |
+| global | window | `BarkparkPaperMermaid`, `BP_PAPER_EDITOR_NO_INJECT` |
+| class | canvas | `bp-canvas-mount-failed`, `bp-comment-range`, `bp-comment-range--active`, `bp-remote-caret`, `bp-remote-caret__label`, `bp-remote-selection` |
+
+## Known reach-ins, to remove in R2.3
+
+Hosts touch these today. They are not contract: they can change in any version,
+and none is made public here. Counts are from the census of each app's main branch
+on 2026-10-31.
+
+| Reach-in | Who | Where |
+|---|---|---|
+| `canvas._editor` (the TipTap editor: `state.doc`, `state.selection`) | Barkdown | `app/renderer/src/tabs/paper.js:162,413`; 136 uses in `app/tests` |
+| `[contenteditable="true"].editor.view.domObserver` `forceFlush()` / `flush()` | Barkever | `app/src/lib/canvas-load.ts:26` (the flush, pending and apply methods read unread typing since 1.15.0) |
+| `.ProseMirror` (focus, presence, styling) | Barkdown, Barkever, barkpark-studio | Barkdown `paper.js:22,127,663`, `index.js:813`, `paper-notion.css`; Barkever `editor.css:38`; barkpark-studio `PortableDocEditor.tsx:429`, `styles.css`, 47 lines in `e2e/` |
+| `[contenteditable="true"]` inside an element, to focus it | Studio | `bp-paper-editor-hooks.js:409,415`; `root.html.heex:5638` |
+| `bp-flush-node` dispatched on every `[data-bp-type]` node | Barkdown | `paper.js:67` (`flushPendingChanges()` does this) |
+| `[data-bp-id] > li:nth-child(n)` (a list item's DOM) | Barkever | `app/src/ui/BodyCanvas.tsx:157` |
+| internal classes restyled by host CSS | Studio, Barkdown, barkpark-studio | Studio `bp-paper-editor-shell.css` (175 classes, the editor half of the shell); Barkdown `paper-notion.css` (32) and `vendor/bp-paper-popups.css` (31): slash menu, format bubble, link preview, command palette, block handle and menu, code and note nodes; barkpark-studio `styles.css` (29): block handle and menu, field chrome, image and object cards, inline object dialog, link pill, format bubble, slash menu |
+| `.bp-paper-format` (the format bubble) as an Escape veto | Studio | `components.ex:829` `data-escape-veto` |
+| `textarea.bp-canvas-code-area` | Barkdown | `index.js:813` |
+| `.bp-canvas-readonly-chip` written into a paint hole | Studio | `bp-paper-editor-hooks.js:4533` |
+| `applyTaskPreviews(previews)`, probed with `typeof` | Studio | `bp-paper-editor-hooks.js:4500`; no element has it, so the call never runs |
 
 ## Invariants
 

@@ -57,7 +57,7 @@ import { normalizeTone } from "./tone.js";
 // the editor holds these nodes through a setContent->getJSON round-trip. Defined
 // in the DOM-free marks.js so the smoke harness can assert their schema.
 import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "./marks.js";
-import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
+import { BUILD_SHA, CONTRACT_VERSION, DEBOUNCE_MS, EDITOR_VERSION, PLACEHOLDER } from "./contract.js";
 import { OpaqueMark } from "./opaque-mark.js";
 import "./canvas/index.js";
 
@@ -91,6 +91,8 @@ function ensureStyles() {
 
 class BpPaperEditor extends HTMLElement {
   static CONTRACT_VERSION = CONTRACT_VERSION;
+  static EDITOR_VERSION = EDITOR_VERSION;
+  static BUILD_SHA = BUILD_SHA;
 
   // Observe `editable` so post-mount toggles route through attributeChangedCallback.
   static get observedAttributes() {
@@ -633,7 +635,7 @@ class BpPaperEditor extends HTMLElement {
     return true;
   }
 
-  requestTableStructure(action) {
+  _requestTableStructure(action) {
     if (this._editorMode !== "table" || !this._editor || !this._editable ||
         this._tableSourceError || this._tablePendingAction || this._tableStructureAwaiting ||
         !this._validTableAction(action)) return false;

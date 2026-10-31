@@ -185,7 +185,7 @@ try {
   });
 
   // A red above leaves the dialog open; it must not leak into the next checks.
-  if (dialog()) declared.inlineObjectDialog().close(false);
+  if (dialog()) declared._inlineObjectDialog().close(false);
   declared.remove();
   const builtin = await mount(null);
   const bEditor = builtin._editor;

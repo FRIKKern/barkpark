@@ -77,12 +77,12 @@ try {
     slashLine();
     assert.ok(slashOpen(canvas), "the slash menu opened on '/fakt'");
     canvas._chooseSlash({ group: "Blocks", type: "factBox", label: "Faktaboks", object: true });
-    assert.ok(canvas.inlineObjectDialog().isOpen(), "the popover is open");
+    assert.ok(canvas._inlineObjectDialog().isOpen(), "the popover is open");
     assert.equal(slashOpen(canvas), false);
     touch();
     await tick(20);
     assert.equal(slashOpen(canvas), false, "still closed after the update");
-    canvas.inlineObjectDialog().close();
+    canvas._inlineObjectDialog().close();
   });
 
   await check("behind a host editor: an update does not reopen it either", async () => {
@@ -92,7 +92,7 @@ try {
     assert.ok(slashOpen(canvas), "the slash menu opened on '/fakt'");
     canvas._chooseSlash({ group: "Blocks", type: "factBox", label: "Faktaboks", object: true });
     await tick(10);
-    assert.ok(canvas.inlineObjectDialog().isOpen(), "the host editor is asked");
+    assert.ok(canvas._inlineObjectDialog().isOpen(), "the host editor is asked");
     touch();
     await tick(20);
     assert.equal(slashOpen(canvas), false, "no slash menu behind the host editor");
