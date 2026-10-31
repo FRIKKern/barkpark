@@ -203,8 +203,8 @@ const MALFORMED = [
 for (const [, path, body] of MALFORMED) overlay.set(path, body);
 
 if (!CHROME) {
-  failures += skip("browser arms — no Chromium found.");
   console.log("      Set BP_CHROME=/path/to/chrome, or `npx @puppeteer/browsers install chrome-headless-shell`.");
+  process.exit(skip("browser arms — no Chromium found."));
 } else {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
