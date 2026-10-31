@@ -377,6 +377,11 @@ defmodule Barkpark.PortableDoc.SpecTest do
           {Access.get(b, "access_get"), Map.update(b, "updated", 0, & &1)}
           {Kernel.get_in(b, ["kernel_get_in"]), get_in(b, [Access.key("access_key")])}
           {__MODULE__.helper(b), defaulted(b), (fn %{"anon" => v} -> v end).(b)}
+
+          case b do
+            %{"present" => _} = c -> c["case_walk"]
+            _ -> nil
+          end
         end
         def helper(b), do: b["module_call"]
         defp defaulted(b, key \\\\ "default_arg"), do: Map.get(b, key)
@@ -390,8 +395,8 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
       assert reads["memo"] ==
                ~w(access_get access_key after_match anon attr_key cap_a cap_x case_bound
-                  case_pat default_arg kernel_get_in module_call take_a take_b take_lit
-                  updated via_delete via_merge via_put)
+                  case_pat case_walk default_arg kernel_get_in module_call present take_a
+                  take_b take_lit updated via_delete via_merge via_put)
     end
   end
 
