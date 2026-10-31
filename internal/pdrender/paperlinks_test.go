@@ -147,8 +147,8 @@ func TestPaperLinksSuppressesARestatedReason(t *testing.T) {
 	}
 
 	distinct := render(map[string]any{
-		"slug":        "paper-authoring-excellence",
-		"title":       "Paper authoring excellence",
+		"slug":        "example-authoring-guide",
+		"title":       "Example authoring guide",
 		"description": "A practical guide to publishing clear, useful Papers.",
 		"reason":      "See the principles behind this example.",
 	})

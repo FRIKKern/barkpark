@@ -60,6 +60,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   Do NOT hand-edit a mirror — re-run this task. The Elixir freshness + mirror-identity
   lock lives in `test/barkpark/portable_doc/render/pd_golden_parity_test.exs`.
+
+  ## The golden pack
+
+  The same run writes `api/priv/portable_doc/goldens/` — these goldens plus reader
+  pages, fragments, the email golden, the surface CSS, op fixtures and a stamp —
+  for renderers and editors outside Barkpark. See `GenPdParity.Pack`.
   """
 
   # LazyHTML is a :test-only dep (mix.exs) — the runtime guard at run/1 already
@@ -439,7 +445,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "chat-approval" => %{
       "type" => "chat-approval",
       "tool_name" => "Bash",
-      "summary" => "rm -rf api/_build/prod",
+      "summary" => "rm -rf build/cache",
       "approval_status" => "pending"
     },
     "chat-question" => %{
@@ -561,7 +567,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "title" => "Kommandoer som innhold",
           "value" => "22",
           "unit" => "kommandoer",
-          "source" => "https://jarl.no/prosjekter/scaffy"
+          "source" => "https://example.com/projects/scaffy"
         }
       ]
     },
@@ -773,8 +779,8 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "description" => "Papers with useful context for this change.",
       "refs" => [
         %{
-          "slug" => "paper-authoring-excellence",
-          "title" => "Paper authoring excellence",
+          "slug" => "example-authoring-guide",
+          "title" => "Example authoring guide",
           "description" => "A practical guide to publishing clear, useful Papers.",
           "reason" => "See the principles behind this example."
         }
@@ -867,27 +873,25 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.
   @alias_pairs [{"questionnaire", "form"}, {"stat-grid", "stats"}, {"task-list", "tasks"}]
 
-  # The ONE locale golden (task-8e96278fc4ee7097): the renderer's own words in
-  # Norwegian, rendered by BOTH renderers from the same map. Its inputs are the
-  # in-scope types whose output changes with `:locale` (one member per alias
-  # pair) plus a title-less collapsible callout (the tone-name fallback). It is
-  # named `*.locale-golden.json`, not `*.golden.json`, so the per-type census
-  # (80 types, one fixture each) is untouched.
-  @locale_goldens %{
-    "nb-NO" => [
-      "form",
-      "heatmap",
-      "paper-links",
-      "roadmap",
-      "route",
-      "stat",
-      "status-legend",
-      "task-board",
-      "task-detail",
-      "task-list",
-      "terminal"
-    ]
-  }
+  # The locale goldens (task-8e96278fc4ee7097): the renderer's own words in a
+  # locale, rendered by BOTH renderers from the same map. Their
+  # inputs are the in-scope types whose output changes with `:locale` (one
+  # member per alias pair) plus a title-less collapsible callout (the tone-name
+  # fallback). They are named `*.locale-golden.json`, not `*.golden.json`, so the
+  # per-type census (80 types, one fixture each) is untouched.
+  @locale_inputs [
+    "form",
+    "heatmap",
+    "paper-links",
+    "roadmap",
+    "route",
+    "stat",
+    "status-legend",
+    "task-board",
+    "task-detail",
+    "task-list",
+    "terminal"
+  ]
 
   @locale_extra_inputs [
     %{"type" => "callout", "tone" => "warning", "collapsible" => true, "text" => "Mind the gap."}
@@ -920,8 +924,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "Fixture filename for a type slug."
   def filename(type), do: "#{type}.golden.json"
 
-  @doc "The locales that carry a locale golden (each emits `<locale>.locale-golden.json`)."
-  def locales, do: @locale_goldens |> Map.keys() |> Enum.sort()
+  @doc """
+  The locales whose locale golden is mirrored (each emits `<locale>.locale-golden.json`):
+  every known locale but the default, whose words the per-type goldens already carry.
+  The golden pack carries every known locale.
+  """
+  def locales,
+    do: Enum.sort(Barkpark.Tenancy.known_locales() -- [Barkpark.Tenancy.default_locale()])
 
   @doc "Locale golden filename for a locale (`nb-NO.locale-golden.json`)."
   def locale_filename(locale), do: "#{locale}.locale-golden.json"
@@ -960,6 +969,8 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "gen_pd_parity: #{length(types())} type(s) × #{length(mirror_dirs())} mirror(s) written — " <>
         "re-run the parity test + `bash scripts/pd-parity-completeness.sh`."
     )
+
+    __MODULE__.Pack.write!()
   end
 
   @doc """
@@ -988,7 +999,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   JS renderer is handed so it emits the same words. Pure like `build/1`.
   """
   def build_locale(locale) do
-    inputs = Enum.map(Map.fetch!(@locale_goldens, locale), &input/1) ++ @locale_extra_inputs
+    inputs = Enum.map(@locale_inputs, &input/1) ++ @locale_extra_inputs
     html = Enum.map_join(inputs, &Render.render_block(&1, %{style: :article, locale: locale}))
 
     strings =

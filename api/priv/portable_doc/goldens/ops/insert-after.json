@@ -1,0 +1,128 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "id": "ob-heading",
+        "level": 1,
+        "text": "Onboarding",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Follow these to begin."
+              }
+            ],
+            "id": "ob-intro",
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "This takes about five minutes."
+              }
+            ],
+            "id": "ob-note",
+            "title": "Heads up",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "ob-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "Create an account"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Invite your team"
+                }
+              ]
+            ],
+            "ordered": true,
+            "type": "list"
+          }
+        ],
+        "id": "ob-steps",
+        "title": "Steps",
+        "type": "section"
+      }
+    ],
+    "preview": "Get set up in three steps.",
+    "title": "Onboarding",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "id": "ob-heading",
+        "level": 1,
+        "text": "Onboarding",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Follow these to begin."
+              }
+            ],
+            "id": "ob-intro",
+            "type": "paragraph"
+          },
+          {
+            "id": "ob-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "Create an account"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Invite your team"
+                }
+              ]
+            ],
+            "ordered": true,
+            "type": "list"
+          }
+        ],
+        "id": "ob-steps",
+        "title": "Steps",
+        "type": "section"
+      }
+    ],
+    "preview": "Get set up in three steps.",
+    "title": "Onboarding",
+    "version": 1
+  },
+  "op": {
+    "afterId": "ob-intro",
+    "block": {
+      "content": [
+        {
+          "type": "text",
+          "value": "This takes about five minutes."
+        }
+      ],
+      "id": "ob-note",
+      "title": "Heads up",
+      "tone": "info",
+      "type": "callout"
+    },
+    "op": "insert-after"
+  }
+}

@@ -3673,6 +3673,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp existing_paper_blocks(%Document{} = existing),
     do: get_in(existing.content || %{}, ["blocks"]) || []
 
+  @doc """
+  Lower one editor op to the `Patch` op every block-op write applies: the table
+  preflight, then the intent lowering (`patch-card-body`, `patch-table-cells` and
+  `patch-table-structure` become a `patch-block`; every other op passes through).
+  Pure, over raw authored blocks. The golden pack's op fixtures pin it.
+  """
+  def lower_editor_op(blocks, op) do
+    with :ok <- preflight_table_editor_ops(blocks, [op]), do: lower_editor_block_op(blocks, op)
+  end
+
   # Resolve which block an op affected (post-apply) plus its top-level position.
   # Identical to the former Barkpark.Papers.locate_affected/2, except the
   # append/insert clauses now read the STORED block out of `new_blocks` rather

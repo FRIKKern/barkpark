@@ -1,0 +1,98 @@
+{
+  "after": {
+    "blocks": [
+      {
+        "id": "pl-card",
+        "slots": {
+          "body": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "For teams of "
+                },
+                {
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "up to five"
+                    }
+                  ],
+                  "type": "strong"
+                },
+                {
+                  "type": "text",
+                  "value": "."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": [
+            {
+              "text": "Starter",
+              "type": "heading"
+            }
+          ]
+        },
+        "tone": "info",
+        "type": "card"
+      }
+    ],
+    "title": "Plans",
+    "version": 1
+  },
+  "before": {
+    "blocks": [
+      {
+        "id": "pl-card",
+        "slots": {
+          "body": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "For small teams."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": [
+            {
+              "text": "Starter",
+              "type": "heading"
+            }
+          ]
+        },
+        "tone": "info",
+        "type": "card"
+      }
+    ],
+    "title": "Plans",
+    "version": 1
+  },
+  "op": {
+    "content": [
+      {
+        "type": "text",
+        "value": "For teams of "
+      },
+      {
+        "children": [
+          {
+            "type": "text",
+            "value": "up to five"
+          }
+        ],
+        "type": "strong"
+      },
+      {
+        "type": "text",
+        "value": "."
+      }
+    ],
+    "id": "pl-card",
+    "op": "patch-card-body"
+  }
+}

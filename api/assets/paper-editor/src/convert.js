@@ -3,7 +3,7 @@
 // and round-trip these in plain Node.
 //
 // Exact shapes (verified against api/lib/barkpark/portable_doc/render.ex,
-// patch.ex, and the golden fixtures in test/support/fixtures/doc-patch-op/):
+// patch.ex, and the golden op fixtures in priv/portable_doc/goldens/ops/):
 //
 //   heading   : { id, type:"heading", level:1..6, text:"..." }   (flat string)
 //   paragraph : { id, type:"paragraph", content:[ inline... ] }
