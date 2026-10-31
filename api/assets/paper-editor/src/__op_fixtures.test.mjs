@@ -29,6 +29,12 @@ for (const verb of ["append-block", "insert-after", "patch-block", "replace-bloc
 assert.throws(() => applyOps(fixtures["insert-after"].before.blocks, [{ ...fixtures["insert-after"].op, afterId: "absent" }]),
   /afterId not found absent/, "insert-after: a missing anchor is an error, as in patch.ex");
 
+for (const [verb, nested] of [["insert-after", "ob-list"], ["append-block", "rn-intro"]]) {
+  const { before, op } = fixtures[verb];
+  assert.throws(() => applyOps(before.blocks, [{ ...op, block: { ...op.block, id: nested } }]),
+    new RegExp(`${verb}: duplicate id ${nested}`), `${verb}: an id already inside a section is a duplicate, as in patch.ex`);
+}
+
 const card = fixtures["patch-card-body"];
 const byId = (doc) => doc.blocks.find((block) => block.id === card.op.id);
 assert.deepEqual(buildCardBodyOp(cardBodyProjection(byId(card.after)).doc, byId(card.before)), card.op,

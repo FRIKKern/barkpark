@@ -1,5 +1,4 @@
 {
-  "barkpark_sha": "0c5f66313127eb9d0ec9055d47e826bd5ee84991",
   "files": {
     "blocks/action.golden.json": "5bde37b1cb3fd5ff82ee0efca094f3c365faf9ce42a7adfb818936bf9dcdbc9f",
     "blocks/api-endpoint.golden.json": "7277f99f4da5f250a0b2e8f32a4aff6b528a06d13e076f0918578dc8b1a2a9d6",
@@ -106,6 +105,13 @@
     "pages/light-nb-NO.html": "0562742bbef2f69bb4ac17ab8ca2c8333c477d0147aa8fa8a389017f1e3eefe0"
   },
   "gettext_sha256": "de63f394abbc7a12808fc6f34d7223d298659068265f5ddfac14b364588cd2cd",
+  "inputs": [
+    "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
+    "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+    "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.pack.ex",
+    "test/support/fixtures/nested-list-carriers.json"
+  ],
+  "inputs_sha256": "f212ade28935fb893306159ab8169279e8cd65e77846f54373a51275740f6eb6",
   "render_version": "b3e5fed0783c7124b09ddd0221b895a57e9b6382ab0c0a4b9802d8cc7d8ed05f",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }

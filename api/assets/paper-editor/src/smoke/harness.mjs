@@ -57,9 +57,11 @@ function check(name, fn) {
 // real fold bugs (a front-insert landing at END; an insert stranded by a later
 // move) passed green. Faithful op semantics (top-level only — S0 has no
 // sections):
-//   append-block  → concat block at END (dup id is an error)
+//   append-block  → concat block at END (an id already anywhere in the tree is an
+//                   error, patch.ex id_exists?)
 //   insert-after  → splice block immediately after afterId (absent → error;
-//                   dup block id → error); RECURSES into section children
+//                   an id already anywhere in the tree → error); RECURSES into
+//                   section children
 //   remove-block  → drop the block by id (absent → error); RECURSES into section
 //                   children (patch.ex resolves ids against the whole tree)
 //   move-block    → lift the block by id, splice after `after` (or head when
@@ -71,6 +73,8 @@ function check(name, fn) {
 function applyOps(prevBlocks, ops) {
   let blocks = (prevBlocks || []).map((b) => ({ ...b }));
   const idAt = (id) => blocks.findIndex((b) => b && b.id === id);
+  const idExists = (list, id) =>
+    (list || []).some((b) => b && (b.id === id || idExists(b.blocks, id)));
 
   // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the block
   // `id` at TOP LEVEL or nested inside any block's `blocks` (a section body) at any
@@ -101,14 +105,14 @@ function applyOps(prevBlocks, ops) {
   for (const op of ops) {
     switch (op.op) {
       case "append-block": {
-        if (op.block && op.block.id != null && idAt(op.block.id) !== -1) {
+        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`append-block: duplicate id ${op.block.id}`);
         }
         blocks = [...blocks, { ...op.block }];
         break;
       }
       case "insert-after": {
-        if (op.block && op.block.id != null && idAt(op.block.id) !== -1) {
+        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`insert-after: duplicate id ${op.block.id}`);
         }
         const next = transformAtId(blocks, op.afterId, (target) => [target, { ...op.block }]);

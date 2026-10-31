@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity` into
   `api/priv/portable_doc/goldens/`:
 
-      stamp.json                       render version, CSS + gettext hashes, sha, file hashes
+      stamp.json                       render version, CSS, gettext and input hashes, file hashes
       blocks/<type>.golden.json        the 80 per-type goldens (GenPdParity.build/1)
       locales/<locale>.locale-golden.json   one per known locale (GenPdParity.build_locale/1)
       pages/<theme>-<locale>.html      a full /papers reader page holding every in-scope type
@@ -18,8 +18,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
       canvas-forbidden-classes.json    reader literals the canvas JS must never write
       i18n/paper-canvas.<locale>.json  StudioLocale.component_strings(:paper_canvas)
 
-  `build/0` is pure over the repo (plus `git rev-parse HEAD` for the stamp), so
-  `golden_pack_test.exs` regenerates it in memory and compares bytes. The pack
+  `build/0` is pure over the repo, so `golden_pack_test.exs` regenerates it in
+  memory and compares bytes, `stamp.json` included. The stamp names only what
+  decides the bytes, never a commit: Barkpark squash-merges, so a branch sha
+  would dangle, and R1.5's sync records the merged sha in the public copy. The pack
   syncs to a public repo: every input is synthetic, and the freshness test refuses
   owner names and internal hostnames in any file.
   """
@@ -36,6 +38,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   @dir Path.join(@api, "priv/portable_doc/goldens")
   @surface Path.join(@api, "assets/paper-surface")
   @carriers Path.join(@api, "test/support/fixtures/nested-list-carriers.json")
+
+  @inputs Enum.sort([
+            "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
+            "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+            "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.pack.ex",
+            "test/support/fixtures/nested-list-carriers.json"
+          ])
 
   @themes ~w(light dark)
   @nonce "parity-nonce"
@@ -98,13 +107,21 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
     end
   end
 
+  @doc """
+  The files whose bytes, beyond the render source, the Stylesheet and the gettext
+  catalogues, decide the pack: the generators holding the corpus and the op
+  fixtures, and the carrier fixture. Relative to `api/`, in hash order.
+  """
+  def inputs, do: @inputs
+
   @doc "The stamp for a set of pack files (stamp.json excluded)."
   def stamp(files) do
     %{
       "render_version" => Render.body_html_render_version(),
       "stylesheet_sha256" => sha256(Stylesheet.css()),
       "gettext_sha256" => gettext_sha256(),
-      "barkpark_sha" => git_sha(),
+      "inputs" => @inputs,
+      "inputs_sha256" => inputs_sha256(),
       "files" => Map.new(files, fn {path, bytes} -> {path, sha256(bytes)} end)
     }
   end
@@ -248,15 +265,21 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
     |> Base.encode16(case: :lower)
   end
 
-  defp git_sha do
-    {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @api)
-    String.trim(sha)
+  defp inputs_sha256 do
+    @inputs
+    |> Enum.reduce(:crypto.hash_init(:sha256), fn name, acc ->
+      :crypto.hash_update(acc, name <> "\0" <> File.read!(Path.join(@api, name)))
+    end)
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
   end
 
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
   # Erlang orders a map of more than 32 keys by hash, which can move between OTP
-  # releases; the pack sorts every key path that holds one.
+  # releases, so every map the pack encodes gets its keys sorted, nested maps
+  # included. A map inside a list is left as it comes: the pack holds none large
+  # enough to matter.
   defp json(term), do: Jason.encode!(ordered(term), pretty: true) <> "\n"
 
   defp ordered(map) when is_map(map) do
