@@ -2,7 +2,7 @@
   "renderer": "editor-canvas",
   "compare": "dom",
   "pack_stamp": "ae93502b0562d13dd65822a515ce5280a8007269b08b511a6a2128538200b5e4",
-  "ran_at_sha": "afb406353fb4f542533533e7ab98d7524431f00f",
+  "ran_at_sha": "429d02dd52a10d04b92972c22609a7893e7af01b",
   "rows": [
     {
       "type": "action",
@@ -21,6 +21,7 @@
     },
     {
       "type": "asciicast",
+      "via": "host-paint",
       "status": "pass"
     },
     {
@@ -42,8 +43,9 @@
       "type": "callout",
       "status": "fail",
       "diff": [
+        "root > div.bp-callout.bp-callout--info[0]: 2 children [span,div.bp-callout__body] != 3 [strong,#text,span]",
         "root > div.bp-callout.bp-callout--info[0] > strong[0]: <span> != <strong>",
-        "root > div.bp-callout.bp-callout--info[0] > span[1]: <div> != <span>"
+        "root > div.bp-callout.bp-callout--info[0] > #text[1]: <div> != \" \""
       ]
     },
     {
@@ -58,11 +60,33 @@
     },
     {
       "type": "cards",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__t[0]: attr aria-label=\"Card title\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__t[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__t[0]: attr role=\"textbox\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__t[0]: style cursor=\"text\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__d[1]: attr aria-label=\"Card body\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__d[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__d[1]: attr role=\"textbox\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--info[0] > div.bp-card__d[1]: style cursor=\"text\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--warn[1] > div.bp-card__t[0]: attr aria-label=\"Card title\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--warn[1] > div.bp-card__t[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--warn[1] > div.bp-card__t[0]: attr role=\"textbox\" extra",
+        "root > div.bp-cards[0] > div.bp-card.bp-card--warn[1] > div.bp-card__t[0]: style cursor=\"text\" extra",
+        "… 4 more"
+      ]
     },
     {
       "type": "chart",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-chart[0] > div.bp-chart__t[0]: attr aria-label=\"Chart caption\" extra",
+        "root > div.bp-chart[0] > div.bp-chart__t[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-chart[0] > div.bp-chart__t[0]: attr role=\"textbox\" extra",
+        "root > div.bp-chart[0] > div.bp-chart__t[0]: style cursor=\"text\" extra",
+        "root > div.bp-chart[0] > div.bp-chart__legend[2] > span.bp-chart__key[0] > #text[1]: <span> != \"Covered\""
+      ]
     },
     {
       "type": "chat-approval",
@@ -107,7 +131,7 @@
         "root > pre.bp-codeblock[0]: style padding=\"var(--bp-codeblock-pad, 0.9rem 1.1rem)\" missing",
         "root > pre.bp-codeblock[0]: style white-space=\"pre\" missing",
         "root > pre.bp-codeblock[0]: 3 children [input,code,textarea] != 1 [#text]",
-        "root > pre.bp-codeblock[0] > #text[0]: <input> != \"def hello do :world end\""
+        "root > pre.bp-codeblock[0] > #text[0]: <input> != \"def hello do\n  :world\nend\""
       ]
     },
     {
@@ -140,7 +164,19 @@
     },
     {
       "type": "diff",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-diff.text-xs[0] > div[1] > #text[0]: <span> != \"lib/render/compose.ex\"",
+        "root > div.bp-diff.text-xs[0] > div[2] > #text[0]: <span> != \"@@ -1,4 +1,5 @@\"",
+        "root > div.bp-diff.text-xs[0] > div[3] > #text[0]: <span> != \"defmodule Render.Compose do\"",
+        "root > div.bp-diff.text-xs[0] > div[4]: 2 children [#text,span] != 1 [#text]",
+        "root > div.bp-diff.text-xs[0] > div[4] > #text[0]: \"- \" != \"- def compose(block), do: starter(block)\"",
+        "root > div.bp-diff.text-xs[0] > div[5]: 2 children [#text,span] != 1 [#text]",
+        "root > div.bp-diff.text-xs[0] > div[5] > #text[0]: \"+ \" != \"+ def compose(block), do: grown(block)\"",
+        "root > div.bp-diff.text-xs[0] > div[6]: 2 children [#text,span] != 1 [#text]",
+        "root > div.bp-diff.text-xs[0] > div[6] > #text[0]: \"+ \" != \"+ defp grown(block), do: block\"",
+        "root > div.bp-diff.text-xs[0] > div[7] > #text[0]: <span> != \"end\""
+      ]
     },
     {
       "type": "divider",
@@ -159,7 +195,22 @@
     },
     {
       "type": "duel",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th.bp-duel__th--a[1]: attr aria-label=\"Legend A\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th.bp-duel__th--a[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th.bp-duel__th--a[1]: attr role=\"textbox\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th.bp-duel__th--a[1]: style cursor=\"text\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th[2]: attr aria-label=\"Legend B\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th[2]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th[2]: attr role=\"textbox\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > thead[0] > tr[0] > th.bp-duel__th[2]: style cursor=\"text\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > tbody[1] > tr.bp-duel__row[0] > th.bp-duel__label[0] > #text[0]: <span> != \"add-error-shape\"",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > tbody[1] > tr.bp-duel__row[0] > th.bp-duel__label[0] > span.bp-duel__delta[1]: attr aria-label=\"Row delta\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > tbody[1] > tr.bp-duel__row[0] > th.bp-duel__label[0] > span.bp-duel__delta[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-duel[0] > table.bp-duel__table[0] > tbody[1] > tr.bp-duel__row[0] > th.bp-duel__label[0] > span.bp-duel__delta[1]: attr role=\"textbox\" extra",
+        "… 22 more"
+      ]
     },
     {
       "type": "embed",
@@ -302,6 +353,7 @@
     },
     {
       "type": "figure",
+      "via": "host-paint",
       "status": "fail",
       "diff": [
         "root > figure[0]: <p> != <figure>"
@@ -309,7 +361,22 @@
     },
     {
       "type": "filetree",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-filetree.text-xs[0] > div[0]: attr aria-label=\"File tree line 1\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[0]: attr role=\"textbox\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[0]: style cursor=\"text\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[1]: attr aria-label=\"File tree line 2\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[1]: attr role=\"textbox\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[1]: style cursor=\"text\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[2]: attr aria-label=\"File tree line 3\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[2]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[2]: attr role=\"textbox\" extra",
+        "root > div.bp-filetree.text-xs[0] > div[2]: style cursor=\"text\" extra",
+        "… 8 more"
+      ]
     },
     {
       "type": "footnote",
@@ -320,7 +387,22 @@
     },
     {
       "type": "form",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr aria-label=\"Question\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr aria-multiline=\"false\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr role=\"textbox\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: style cursor=\"text\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > legend[0]: attr aria-label=\"Question\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > legend[0]: attr aria-multiline=\"false\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > legend[0]: attr role=\"textbox\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > legend[0]: style cursor=\"text\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > div.bp-form-opts[1] > label.bp-form-opt[0] > span[2]: attr aria-label=\"Option\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > div.bp-form-opts[1] > label.bp-form-opt[0] > span[2]: attr aria-multiline=\"false\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > div.bp-form-opts[1] > label.bp-form-opt[0] > span[2]: attr role=\"textbox\" extra",
+        "root > section.bp-form.bp-form-grill[0] > fieldset.bp-form-q--single.bp-form-question[1] > div.bp-form-opts[1] > label.bp-form-opt[0] > span[2]: style cursor=\"text\" extra",
+        "… 32 more"
+      ]
     },
     {
       "type": "gauge-list",
@@ -347,7 +429,22 @@
     },
     {
       "type": "lineage",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__overline[0]: attr aria-label=\"Entry kicker\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__overline[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__overline[0]: attr role=\"textbox\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__overline[0]: style cursor=\"text\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__title[1]: attr aria-label=\"Entry title\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__title[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__title[1]: attr role=\"textbox\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__title[1]: style cursor=\"text\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__value[2] > #text[0]: <span> != \"335\"",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__value[2] > span.bp-lineage__unit[1]: attr aria-label=\"Entry unit\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__value[2] > span.bp-lineage__unit[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-lineage[0] > ol.bp-lineage__nodes[0] > li.bp-lineage__node[0] > div.bp-lineage__value[2] > span.bp-lineage__unit[1]: attr role=\"textbox\" extra",
+        "… 30 more"
+      ]
     },
     {
       "type": "list",
@@ -369,13 +466,29 @@
         "root > div.bp-note[0] > span.bp-note__k[0]: class {} != {bp-note__k}",
         "root > div.bp-note[0] > span.bp-note__k[0] > #text[0]: <span> != \"Note\"",
         "root > div.bp-note[0] > div.bp-note__d[1]: class {} != {bp-note__d}",
+        "root > div.bp-note[0] > div.bp-note__d[1]: 3 children [span,#text,span] != 2 [b,#text]",
         "root > div.bp-note[0] > div.bp-note__d[1] > b[0]: <span> != <b>",
-        "root > div.bp-note[0] > div.bp-note__d[1] > #text[1]: <span> != \"A single annotated row.\""
+        "root > div.bp-note[0] > div.bp-note__d[1] > #text[1]: \" \" != \" A single annotated row.\""
       ]
     },
     {
       "type": "notes",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-notes[0] > div.bp-note[0] > span.bp-note__k[0]: attr aria-label=\"Note label\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > span.bp-note__k[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > span.bp-note__k[0]: attr role=\"textbox\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > span.bp-note__k[0]: style cursor=\"text\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1]: 3 children [b,#text,span] != 2 [b,#text]",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1] > b[0]: attr aria-label=\"Note lead\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1] > b[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1] > b[0]: attr role=\"textbox\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1] > b[0]: style cursor=\"text\" extra",
+        "root > div.bp-notes[0] > div.bp-note[0] > div.bp-note__d[1] > #text[1]: \" \" != \" The board updates live.\"",
+        "root > div.bp-notes[0] > div.bp-note[1] > span.bp-note__k[0]: attr aria-label=\"Note label\" extra",
+        "root > div.bp-notes[0] > div.bp-note[1] > span.bp-note__k[0]: attr aria-multiline=\"false\" extra",
+        "… 8 more"
+      ]
     },
     {
       "type": "paper-links",
@@ -394,7 +507,22 @@
     },
     {
       "type": "pipeline",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__k[0]: attr aria-label=\"Stage kind\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__k[0]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__k[0]: attr role=\"textbox\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__k[0]: style cursor=\"text\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__t[1]: attr aria-label=\"Stage title\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__t[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__t[1]: attr role=\"textbox\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__t[1]: style cursor=\"text\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__d[2]: attr aria-label=\"Stage detail\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__d[2]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__d[2]: attr role=\"textbox\" extra",
+        "root > div.bp-pipe-scroll[0] > div.bp-pipe[0] > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__d[2]: style cursor=\"text\" extra",
+        "… 28 more"
+      ]
     },
     {
       "type": "pre-gate-badge",
@@ -406,10 +534,21 @@
     },
     {
       "type": "questionnaire",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr aria-label=\"Question\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr aria-multiline=\"false\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: attr role=\"textbox\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--yesno.bp-form-question[0] > legend[0]: style cursor=\"text\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--text.bp-form-question[1] > legend[0]: attr aria-label=\"Question\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--text.bp-form-question[1] > legend[0]: attr aria-multiline=\"false\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--text.bp-form-question[1] > legend[0]: attr role=\"textbox\" extra",
+        "root > section.bp-form.bp-form-questionnaire[0] > fieldset.bp-form-q--text.bp-form-question[1] > legend[0]: style cursor=\"text\" extra"
+      ]
     },
     {
       "type": "roadmap",
+      "via": "host-paint",
       "status": "pass"
     },
     {
@@ -446,18 +585,50 @@
     },
     {
       "type": "stat-grid",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__v[0] > #text[0]: <span> != \"5\"",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr aria-label=\"Stat label\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr role=\"textbox\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: style cursor=\"text\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__v[0] > #text[0]: <span> != \"3\"",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[1]: attr aria-label=\"Stat label\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[1]: attr role=\"textbox\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[1]: style cursor=\"text\" extra"
+      ]
     },
     {
       "type": "stat",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-stat[0] > div.bp-stat__v[1] > #text[0]: <span> != \"71\"",
+        "root > div.bp-stat[0] > div.bp-stat__l[3]: attr aria-label=\"Stat label\" extra",
+        "root > div.bp-stat[0] > div.bp-stat__l[3]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-stat[0] > div.bp-stat__l[3]: attr role=\"textbox\" extra",
+        "root > div.bp-stat[0] > div.bp-stat__l[3]: style cursor=\"text\" extra"
+      ]
     },
     {
       "type": "stats",
-      "status": "pass"
+      "status": "fail",
+      "diff": [
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__v[0] > #text[0]: <span> != \"42\"",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr aria-label=\"Stat label\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: attr role=\"textbox\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[0] > div.bp-stat__l[1]: style cursor=\"text\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__v[0] > #text[0]: <span> != \"3\"",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[2]: attr aria-label=\"Stat label\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[2]: attr aria-multiline=\"false\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[2]: attr role=\"textbox\" extra",
+        "root > div.bp-stats[0] > div.bp-stat[1] > div.bp-stat__l[2]: style cursor=\"text\" extra"
+      ]
     },
     {
       "type": "status-legend",
+      "via": "host-paint",
       "status": "pass"
     },
     {
@@ -490,18 +661,22 @@
     },
     {
       "type": "task-board",
+      "via": "host-paint",
       "status": "pass"
     },
     {
       "type": "task-detail",
+      "via": "host-paint",
       "status": "pass"
     },
     {
       "type": "task-list",
+      "via": "host-paint",
       "status": "pass"
     },
     {
       "type": "tasks",
+      "via": "host-paint",
       "status": "pass"
     },
     {

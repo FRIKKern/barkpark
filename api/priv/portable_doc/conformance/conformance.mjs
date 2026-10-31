@@ -6,9 +6,9 @@ import { join } from "node:path";
 export const HERE = import.meta.dirname ?? __dirname;
 export const PACK = join(HERE, "..", "goldens");
 export const MISSING = Symbol("missing");
+export const UNCHECKED = Symbol("unchecked");
 
-const VARIABLE_ATTRS = new Set(["href", "src", "srcset", "poster", "id"]);
-const SIZING_HINT_TAGS = new Set(["img", "video", "audio", "iframe", "source", "embed", "canvas", "object"]);
+const VERBATIM_TAGS = new Set(["pre", "textarea"]);
 const DIFF_CAP = 12;
 
 export function loadPack(dir = PACK) {
@@ -27,7 +27,8 @@ export function packStamp(dir = PACK) {
   return createHash("sha256").update(readFileSync(join(dir, "stamp.json"))).digest("hex");
 }
 
-const squash = (s) => s.replace(/\s+/g, " ").trim();
+const runs = (s) => s.replace(/\s+/g, " ");
+const squash = (s) => runs(s).trim();
 
 function parseStyle(raw) {
   const out = {};
@@ -40,37 +41,37 @@ function parseStyle(raw) {
   return out;
 }
 
-function element(el) {
+function element(el, verbatim) {
   const tag = el.localName.toLowerCase();
   const attrs = {};
   for (const { name, value } of Array.from(el.attributes)) {
     const key = name.toLowerCase();
-    if (key === "class" || key === "style" || VARIABLE_ATTRS.has(key)) continue;
-    if ((key === "width" || key === "height") && SIZING_HINT_TAGS.has(tag)) continue;
-    attrs[key] = squash(value);
+    if (key !== "class" && key !== "style") attrs[key] = squash(value);
   }
   const classes = [...new Set(el.classList)].sort();
   const children = tag === "template" && el.content ? el.content.childNodes : el.childNodes;
-  return { tag, classes, attrs, style: parseStyle(el.getAttribute("style")), children: shapeOf(children) };
+  return { tag, classes, attrs, style: parseStyle(el.getAttribute("style")), children: nodesOf(children, verbatim || VERBATIM_TAGS.has(tag)) };
 }
 
-export function shapeOf(nodes) {
+function nodesOf(nodes, verbatim) {
   const out = [];
-  let text = "";
-  const flush = () => {
-    if (squash(text)) out.push({ text: squash(text) });
-    text = "";
-  };
   for (const node of Array.from(nodes)) {
-    if (node.nodeType === 3) text += node.nodeValue;
-    else if (node.nodeType === 1) {
-      flush();
-      out.push(element(node));
-    }
+    const last = out.at(-1);
+    if (node.nodeType === 3 && last && "text" in last) last.text += node.nodeValue;
+    else if (node.nodeType === 3) out.push({ text: node.nodeValue });
+    else if (node.nodeType === 1) out.push(element(node, verbatim));
   }
-  flush();
-  return out;
+  if (verbatim) return out.filter((n) => n.text !== "");
+  out.forEach((n, i) => {
+    if (!("text" in n)) return;
+    n.text = runs(n.text);
+    if (i === 0) n.text = n.text.trimStart();
+    if (i === out.length - 1) n.text = n.text.trimEnd();
+  });
+  return out.filter((n) => n.text !== "");
 }
+
+export const shapeOf = (nodes) => nodesOf(nodes, false);
 
 const label = (n) => ("text" in n ? "#text" : n.classes.length ? `${n.tag}.${n.classes.join(".")}` : n.tag);
 
@@ -123,6 +124,7 @@ export function goldenWords(shape) {
 }
 
 export function diffWords(actualText, expected) {
+  if (expected.length === 0) return UNCHECKED;
   const seen = words(actualText);
   const out = [];
   let at = 0;
@@ -136,9 +138,12 @@ export function diffWords(actualText, expected) {
 
 function row(type, verdict) {
   if (verdict === MISSING) return { type, status: "missing" };
-  if (verdict.length === 0) return { type, status: "pass" };
-  const diff = verdict.length > DIFF_CAP ? [...verdict.slice(0, DIFF_CAP), `… ${verdict.length - DIFF_CAP} more`] : verdict;
-  return { type, status: "fail", diff };
+  if (verdict === UNCHECKED) return { type, status: "unchecked" };
+  const { via, diff } = Array.isArray(verdict) ? { diff: verdict } : verdict;
+  const tag = via ? { type, via } : { type };
+  if (diff.length === 0) return { ...tag, status: "pass" };
+  const capped = diff.length > DIFF_CAP ? [...diff.slice(0, DIFF_CAP), `… ${diff.length - DIFF_CAP} more`] : diff;
+  return { ...tag, status: "fail", diff: capped };
 }
 
 function headSha() {
@@ -177,7 +182,7 @@ export function settle(report, { write = false, strict = false, path = reportPat
 }
 
 export function counts(report) {
-  const c = { pass: 0, fail: 0, missing: 0 };
+  const c = { pass: 0, fail: 0, missing: 0, unchecked: 0 };
   for (const r of report.rows) c[r.status]++;
   return c;
 }
@@ -189,7 +194,7 @@ export async function cli(options) {
     const report = await conform(options);
     const problems = settle(report, modeFromEnv());
     const c = counts(report);
-    console.log(`${report.renderer}: ${c.pass} pass, ${c.fail} fail, ${c.missing} missing of ${report.rows.length}`);
+    console.log(`${report.renderer}: ${c.pass} pass, ${c.fail} fail, ${c.missing} missing, ${c.unchecked} unchecked of ${report.rows.length}`);
     for (const p of problems) console.error(p);
     process.exitCode = problems.length ? 1 : 0;
   } catch (e) {

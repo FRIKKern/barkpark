@@ -129,28 +129,32 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 		return conformanceRow{Type: c.Type, Status: "missing"}
 	}
 	blocks, err := Decode([]byte("[" + string(c.Input) + "]"))
-	var diff []string
 	if err != nil {
-		diff = []string{"decode: " + err.Error()}
-	} else {
-		text := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()}))
-		diff = diffWords(text, goldenWords(c.Shape))
+		return conformanceVerdict(c.Type, []string{"decode: " + err.Error()})
 	}
-	if len(diff) == 0 {
-		return conformanceRow{Type: c.Type, Status: "pass"}
+	expected := goldenWords(c.Shape)
+	if len(expected) == 0 {
+		return conformanceRow{Type: c.Type, Status: "unchecked"}
 	}
-	if len(diff) > conformanceDiffCap {
-		diff = append(diff[:conformanceDiffCap], fmt.Sprintf("… %d more", len(diff)-conformanceDiffCap))
-	}
-	return conformanceRow{Type: c.Type, Status: "fail", Diff: diff}
+	text := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()}))
+	return conformanceVerdict(c.Type, diffWords(text, expected))
 }
 
-func runConformance(pack string) (conformanceReport, error) {
+func conformanceVerdict(typ string, diff []string) conformanceRow {
+	if len(diff) == 0 {
+		return conformanceRow{Type: typ, Status: "pass"}
+	}
+	if len(diff) > conformanceDiffCap {
+		diff = append(diff[:conformanceDiffCap:conformanceDiffCap], fmt.Sprintf("… %d more", len(diff)-conformanceDiffCap))
+	}
+	return conformanceRow{Type: typ, Status: "fail", Diff: diff}
+}
+
+func runConformance(pack string, reg *Registry) (conformanceReport, error) {
 	stamp, cases, err := loadGoldenPack(pack)
 	if err != nil {
 		return conformanceReport{}, err
 	}
-	reg := DefaultRegistry(LightTheme())
 	probe := goldenCase{Type: "conformance-unknown", Input: json.RawMessage(`{"type":"conformance-unknown"}`)}
 	if r := conformanceRowFor(reg, probe); r.Status != "missing" {
 		return conformanceReport{}, fmt.Errorf("the runner cannot see a missing type: an unknown block read as %s", r.Status)
@@ -173,8 +177,17 @@ func conformanceDrift(committed, report conformanceReport) []string {
 	if committed.Renderer != report.Renderer || committed.Compare != report.Compare {
 		out = append(out, fmt.Sprintf("renderer/compare: committed %s/%s", committed.Renderer, committed.Compare))
 	}
-	if !reflect.DeepEqual(committed.Rows, report.Rows) {
-		out = append(out, "rows drifted from "+conformanceOut+"; rerun with CONFORMANCE_WRITE=1")
+	before := map[string]conformanceRow{}
+	for _, r := range committed.Rows {
+		before[r.Type] = r
+	}
+	for _, r := range report.Rows {
+		if b, ok := before[r.Type]; !ok || !reflect.DeepEqual(b, r) {
+			out = append(out, fmt.Sprintf("row %s drifted: committed %+v now %+v; rerun with CONFORMANCE_WRITE=1", r.Type, b, r))
+		}
+	}
+	if len(committed.Rows) != len(report.Rows) {
+		out = append(out, fmt.Sprintf("committed %d rows, pack has %d", len(committed.Rows), len(report.Rows)))
 	}
 	return out
 }
@@ -193,10 +206,45 @@ func TestConformanceDriftRedsAStaleStampARowAndARenderer(t *testing.T) {
 			t.Errorf("a changed %s did not drift", name)
 		}
 	}
+	if d := conformanceDrift(report, flipped); !strings.HasPrefix(d[0], "row t drifted") {
+		t.Errorf("a drifted row is not named: %v", d)
+	}
+}
+
+func TestConformanceVerdictCapsTheDiffAtTwelveLines(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 13; i++ {
+		lines = append(lines, fmt.Sprintf("d%d", i))
+	}
+	if r := conformanceVerdict("t", lines); r.Status != "fail" || len(r.Diff) != 13 || r.Diff[11] != "d12" || r.Diff[12] != "… 1 more" {
+		t.Errorf("13 diff lines: %+v", r)
+	}
+	if r := conformanceVerdict("t", lines[:12]); !reflect.DeepEqual(r.Diff, lines[:12]) {
+		t.Errorf("12 diff lines: %+v", r)
+	}
+	if r := conformanceVerdict("t", nil); r.Status != "pass" {
+		t.Errorf("no diff: %+v", r)
+	}
+}
+
+func TestConformanceRefusesARunnerThatCannotSeeMissing(t *testing.T) {
+	reg := DefaultRegistry(LightTheme())
+	reg.blocks["conformance-unknown"] = reg.blocks["paragraph"]
+	if _, err := runConformance(conformancePack, reg); err == nil || !strings.Contains(err.Error(), "cannot see a missing type") {
+		t.Errorf("a registry that renders the probe ran: %v", err)
+	}
+}
+
+func TestConformanceNeverPassesACaseWithNoWords(t *testing.T) {
+	reg := DefaultRegistry(LightTheme())
+	r := conformanceRowFor(reg, goldenCase{Type: "divider", Input: json.RawMessage(`{"type":"divider"}`), Shape: []json.RawMessage{json.RawMessage(`{"tag":"hr","children":[]}`)}})
+	if r.Status != "unchecked" {
+		t.Errorf("a case with no golden words read %s", r.Status)
+	}
 }
 
 func TestConformance(t *testing.T) {
-	report, err := runConformance(conformancePack)
+	report, err := runConformance(conformancePack, DefaultRegistry(LightTheme()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +252,7 @@ func TestConformance(t *testing.T) {
 	for _, r := range report.Rows {
 		counts[r.Status]++
 	}
-	t.Logf("pdrender: %d pass, %d fail, %d missing of %d", counts["pass"], counts["fail"], counts["missing"], len(report.Rows))
+	t.Logf("pdrender: %d pass, %d fail, %d missing, %d unchecked of %d", counts["pass"], counts["fail"], counts["missing"], counts["unchecked"], len(report.Rows))
 
 	if os.Getenv("CONFORMANCE_WRITE") == "1" {
 		var buf bytes.Buffer
@@ -240,14 +288,14 @@ func TestConformance(t *testing.T) {
 }
 
 func TestConformanceRefusesAnEmptyPack(t *testing.T) {
-	if _, err := runConformance(filepath.Join(t.TempDir(), "absent")); err == nil {
+	if _, err := runConformance(filepath.Join(t.TempDir(), "absent"), DefaultRegistry(LightTheme())); err == nil {
 		t.Error("an absent pack ran")
 	}
 	empty := t.TempDir()
 	if err := os.WriteFile(filepath.Join(empty, "stamp.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runConformance(empty); err == nil || !strings.Contains(err.Error(), "zero block cases") {
+	if _, err := runConformance(empty, DefaultRegistry(LightTheme())); err == nil || !strings.Contains(err.Error(), "zero block cases") {
 		t.Errorf("a pack with zero cases ran: %v", err)
 	}
 }

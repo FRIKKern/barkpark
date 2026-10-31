@@ -31,17 +31,25 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
     assert Conformance.settle(report, false, true) == []
   end
 
-  test "check mode reds a stale stamp and a drifted row" do
+  test "check mode reds a stale stamp and names a drifted row" do
     report = Conformance.report()
     assert [_] = Conformance.settle(%{report | pack_stamp: "stale"}, false, false)
     [first | rest] = report.rows
 
-    assert [_] =
+    assert [drift] =
              Conformance.settle(
                %{report | rows: [%{first | status: :missing} | rest]},
                false,
                false
              )
+
+    assert drift =~ "row #{first.type} drifted"
+  end
+
+  test "a reader that renders the unknown-type probe refuses to run" do
+    assert_raise RuntimeError, ~r/cannot see a missing type/, fn ->
+      Conformance.report(Conformance.pack_dir(), fn _ -> "<p>drawn</p>" end)
+    end
   end
 
   test "a fail row carries at most 12 diff lines and counts the rest" do
@@ -54,6 +62,12 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
 
   test "every renderer in this repo has a committed report" do
     assert Enum.sort(Map.keys(committed())) == @renderers
+  end
+
+  test "only the Elixir reader is marked the reference the goldens were built from" do
+    for {name, report} <- committed() do
+      assert Map.get(report, "reference", false) == (name == "elixir"), name
+    end
   end
 
   test "every committed report carries the pack's current stamp" do
@@ -77,8 +91,10 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
              "conformance/#{name}.json rows != pack types"
 
       for row <- report["rows"] do
-        assert row["status"] in ~w(pass fail missing)
+        assert row["status"] in ~w(pass fail missing unchecked)
         assert row["status"] == "fail" == match?([_ | _], row["diff"])
+        assert row["status"] != "unchecked" or report["compare"] == "text"
+        assert Map.get(row, "via", "host-paint") == "host-paint"
       end
     end
   end
@@ -110,21 +126,41 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
            ) == []
   end
 
-  test "the shape skips href, src, srcset, poster and id, and width/height on media only" do
-    assert Conformance.diff(
-             Conformance.shape(~s(<a href="/a" id="x" poster="p" srcset="s">t</a>)),
-             Conformance.shape(~s(<a href="/b" id="y">t</a>))
-           ) == []
+  test "the shape compares every attribute: URLs, ids and media sizes included" do
+    for {actual, golden, line} <- [
+          {~s(<a href="/a">t</a>), ~s(<a href="/b">t</a>),
+           ~s(root > a[0]: attr href "/a" != "/b")},
+          {~s(<a id="x">t</a>), ~s(<a id="y">t</a>), ~s(root > a[0]: attr id "x" != "y")},
+          {~s(<img alt="a">), ~s(<img src="s" alt="a">), ~s(root > img[0]: attr src="s" missing)},
+          {~s(<img width="1">), ~s(<img width="3">), ~s(root > img[0]: attr width "1" != "3")}
+        ] do
+      assert Conformance.diff(Conformance.shape(actual), Conformance.shape(golden)) == [line]
+    end
+  end
+
+  test "the shape keeps text inside pre and textarea exactly as written" do
+    golden = Conformance.shape("<pre><code>a\n  b</code></pre>")
+    assert [_] = Conformance.diff(Conformance.shape("<pre><code>a b</code></pre>"), golden)
+    assert [_] = Conformance.diff(Conformance.shape("<pre><code>a\nb</code></pre>"), golden)
+
+    assert [_] =
+             Conformance.diff(
+               Conformance.shape("<textarea>a  b</textarea>"),
+               Conformance.shape("<textarea>a b</textarea>")
+             )
+  end
+
+  test "the shape keeps the space between inline siblings and trims only list edges" do
+    assert [_ | _] =
+             Conformance.diff(
+               Conformance.shape("<p>a<b>b</b>c</p>"),
+               Conformance.shape("<p>a <b>b</b> c</p>")
+             )
 
     assert Conformance.diff(
-             Conformance.shape(~s(<img width="1" height="2" alt="a">)),
-             Conformance.shape(~s(<img width="3" height="4" alt="a">))
+             Conformance.shape("<p>  a <b> b </b>  c </p>"),
+             Conformance.shape("<p>a <b>b</b> c</p>")
            ) == []
-
-    assert Conformance.diff(
-             Conformance.shape(~s(<svg width="1" height="1"></svg>)),
-             Conformance.shape(~s(<svg width="2" height="1"></svg>))
-           ) == [~s(root > svg[0]: attr width "1" != "2")]
   end
 
   test "the shape merges text split by a comment into one leaf" do

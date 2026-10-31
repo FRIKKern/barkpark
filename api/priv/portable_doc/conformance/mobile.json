@@ -2,7 +2,7 @@
   "renderer": "mobile",
   "compare": "text",
   "pack_stamp": "ae93502b0562d13dd65822a515ce5280a8007269b08b511a6a2128538200b5e4",
-  "ran_at_sha": "afb406353fb4f542533533e7ab98d7524431f00f",
+  "ran_at_sha": "429d02dd52a10d04b92972c22609a7893e7af01b",
   "rows": [
     {
       "type": "action",
@@ -135,7 +135,7 @@
     },
     {
       "type": "divider",
-      "status": "pass"
+      "status": "unchecked"
     },
     {
       "type": "duel",
@@ -227,7 +227,7 @@
     },
     {
       "type": "image",
-      "status": "pass"
+      "status": "unchecked"
     },
     {
       "type": "ingress",
@@ -396,7 +396,7 @@
     },
     {
       "type": "video",
-      "status": "pass"
+      "status": "unchecked"
     }
   ]
 }

@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Window } from 'happy-dom'
 import {
   MISSING,
+  UNCHECKED,
   cli,
   conform,
   counts,
@@ -72,28 +73,29 @@ describe('the shared conformance normaliser', () => {
     ).toEqual([])
   })
 
-  it('skips href, src, srcset, poster and id, and width/height on media only', () => {
+  it('compares every attribute: URLs, ids and media sizes included', () => {
+    const cases: [string, string, string][] = [
+      ['<a href="/a">t</a>', '<a href="/b">t</a>', 'root > a[0]: attr href "/a" != "/b"'],
+      ['<a id="x">t</a>', '<a id="y">t</a>', 'root > a[0]: attr id "x" != "y"'],
+      ['<img alt="a">', '<img src="s" alt="a">', 'root > img[0]: attr src="s" missing'],
+      ['<img width="1">', '<img width="3">', 'root > img[0]: attr width "1" != "3"'],
+    ]
+    for (const [actual, golden, line] of cases)
+      expect(diffShapes(shape(actual), shape(golden))).toEqual([line])
+  })
+
+  it('keeps text inside pre and textarea exactly as written', () => {
+    const golden = shape('<pre><code>a\n  b</code></pre>')
+    expect(diffShapes(shape('<pre><code>a b</code></pre>'), golden)).toHaveLength(1)
+    expect(diffShapes(shape('<pre><code>a\nb</code></pre>'), golden)).toHaveLength(1)
     expect(
-      diffShapes(
-        shape('<a href="/a" id="x" poster="p" srcset="s">t</a>'),
-        shape('<a href="/b" id="y">t</a>'),
-      ),
-    ).toEqual([])
-    expect(
-      diffShapes(
-        shape('<img width="1" height="2" alt="a">'),
-        shape('<img width="3" height="4" alt="a">'),
-      ),
-    ).toEqual([])
-    expect(
-      diffShapes(
-        shape('<svg width="1" height="1"></svg>'),
-        shape('<svg width="2" height="1"></svg>'),
-      ),
-    ).toEqual(['root > svg[0]: attr width "1" != "2"'])
-    expect(diffShapes(shape('<svg height="1"></svg>'), shape('<svg height="2"></svg>'))).toEqual([
-      'root > svg[0]: attr height "1" != "2"',
-    ])
+      diffShapes(shape('<textarea>a  b</textarea>'), shape('<textarea>a b</textarea>')),
+    ).toHaveLength(1)
+  })
+
+  it('keeps the space between inline siblings and trims only list edges', () => {
+    expect(diffShapes(shape('<p>a<b>b</b>c</p>'), shape('<p>a <b>b</b> c</p>'))).not.toEqual([])
+    expect(diffShapes(shape('<p>  a <b> b </b>  c </p>'), shape('<p>a <b>b</b> c</p>'))).toEqual([])
   })
 
   it('merges text split by a comment into one leaf', () => {
@@ -124,6 +126,36 @@ describe('the shared conformance normaliser', () => {
       'word 3/4 "body" not found in order',
       'word 4/4 "here" not found in order',
     ])
+  })
+
+  it('never passes a text case with no golden words, whatever the render drew', () => {
+    expect(diffWords('', [])).toBe(UNCHECKED)
+    expect(diffWords('anything at all', [])).toBe(UNCHECKED)
+  })
+
+  it('writes unchecked rows and labels host-painted rows', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bp-conformance-'))
+    mkdirSync(join(dir, 'blocks'))
+    writeFileSync(join(dir, 'stamp.json'), '{}')
+    for (const t of ['a', 'b', 'c'])
+      writeFileSync(join(dir, 'blocks', `${t}.golden.json`), JSON.stringify({ type: t }))
+    const verdicts: Record<string, unknown> = {
+      a: UNCHECKED,
+      b: { via: 'host-paint', diff: [] },
+      c: { via: 'host-paint', diff: ['d'] },
+    }
+    const report = await conform({
+      renderer: 'x',
+      compare: 'text',
+      pack: dir,
+      judge: (g) => (verdicts[g.type] ?? MISSING) as never,
+    })
+    expect(report.rows).toEqual([
+      { type: 'a', status: 'unchecked' },
+      { type: 'b', via: 'host-paint', status: 'pass' },
+      { type: 'c', via: 'host-paint', status: 'fail', diff: ['d'] },
+    ])
+    expect(counts(report)).toEqual({ pass: 1, fail: 1, missing: 0, unchecked: 1 })
   })
 
   it('reads the text of an HTML string, decoding the three entities pdrender escapes', () => {

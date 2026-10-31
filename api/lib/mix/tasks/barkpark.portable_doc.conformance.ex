@@ -18,8 +18,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
   alias Barkpark.PortableDoc.Render
 
   @portable_doc Path.expand("../../../priv/portable_doc", __DIR__)
-  @variable_attrs ~w(href src srcset poster id)
-  @sizing_hint_tags ~w(img video audio iframe source embed canvas object)
+  @verbatim_tags ~w(pre textarea)
   @diff_cap 12
 
   def pack_dir, do: Path.join(@portable_doc, "goldens")
@@ -46,14 +45,17 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     if problems != [], do: exit({:shutdown, 1})
   end
 
-  def report(dir \\ pack_dir()) do
+  def report(dir \\ pack_dir(), render \\ &Render.render_block(&1, %{style: :article})) do
     {stamp, cases} = load_pack!(dir)
 
-    case row(%{
-           "type" => "conformance-unknown",
-           "input" => %{"type" => "conformance-unknown"},
-           "expectedHtml" => ""
-         }) do
+    case row(
+           %{
+             "type" => "conformance-unknown",
+             "input" => %{"type" => "conformance-unknown"},
+             "expectedHtml" => ""
+           },
+           render
+         ) do
       %{status: :missing} -> :ok
       r -> raise "the runner cannot see a missing type: an unknown block read as #{r.status}"
     end
@@ -61,9 +63,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     %{
       renderer: "elixir",
       compare: "dom",
+      reference: true,
       pack_stamp: stamp,
       ran_at_sha: head_sha(),
-      rows: Enum.map(cases, &row/1)
+      rows: Enum.map(cases, &row(&1, render))
     }
   end
 
@@ -92,9 +95,25 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
           committed = path |> File.read!() |> Jason.decode!()
           fresh = report |> encode() |> Jason.decode!()
 
-          for key <- ~w(renderer compare pack_stamp rows),
-              committed[key] != fresh[key],
-              do: "#{key} drifted from #{path}; rerun with CONFORMANCE_WRITE=1"
+          before = Map.new(committed["rows"], &{&1["type"], &1})
+
+          for(
+            key <- ~w(renderer compare reference pack_stamp),
+            committed[key] != fresh[key],
+            do: "#{key}: committed #{inspect(committed[key])} != now #{inspect(fresh[key])}"
+          ) ++
+            for(
+              r <- fresh["rows"],
+              before[r["type"]] != r,
+              do:
+                "row #{r["type"]} drifted: committed #{inspect(before[r["type"]])} now #{inspect(r)}"
+            ) ++
+            if(length(committed["rows"]) != length(fresh["rows"]),
+              do: [
+                "committed #{length(committed["rows"])} rows, pack has #{length(fresh["rows"])}"
+              ],
+              else: []
+            )
       end
 
     drift ++
@@ -117,6 +136,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     Jason.OrderedObject.new(
       renderer: report.renderer,
       compare: report.compare,
+      reference: report.reference,
       pack_stamp: report.pack_stamp,
       ran_at_sha: report.ran_at_sha,
       rows: rows
@@ -125,8 +145,8 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     |> Kernel.<>("\n")
   end
 
-  defp row(%{"type" => type, "input" => input, "expectedHtml" => golden}) do
-    case shape(Render.render_block(input, %{style: :article})) do
+  defp row(%{"type" => type, "input" => input, "expectedHtml" => golden}, render) do
+    case shape(render.(input)) do
       [%{classes: ["bp-unknown-block"]}] -> %{type: type, status: :missing}
       actual -> verdict(type, diff(actual, shape(golden)))
     end
@@ -150,25 +170,35 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     end
   end
 
-  def shape(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> nodes()
+  def shape(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> nodes(false)
 
-  defp nodes(tree) do
-    tree
-    |> Enum.reject(&match?({:comment, _}, &1))
-    |> Enum.chunk_by(&is_binary/1)
-    |> Enum.flat_map(fn
-      [t | _] = texts when is_binary(t) ->
-        case squash(Enum.join(texts)) do
-          "" -> []
-          text -> [%{text: text}]
-        end
+  defp nodes(tree, verbatim?) do
+    merged =
+      tree
+      |> Enum.reject(&match?({:comment, _}, &1))
+      |> Enum.chunk_by(&is_binary/1)
+      |> Enum.flat_map(fn
+        [t | _] = texts when is_binary(t) -> [%{text: Enum.join(texts)}]
+        elements -> Enum.map(elements, &element(&1, verbatim?))
+      end)
 
-      elements ->
-        Enum.map(elements, &element/1)
+    last = length(merged) - 1
+
+    merged
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {%{text: t}, i} when not verbatim? -> %{text: edge_trim(runs(t), i == 0, i == last)}
+      {n, _} -> n
     end)
+    |> Enum.reject(&(&1 == %{text: ""}))
   end
 
-  defp element({tag, attrs, children}) do
+  defp edge_trim(t, first?, last?) do
+    t = if first?, do: String.trim_leading(t), else: t
+    if last?, do: String.trim_trailing(t), else: t
+  end
+
+  defp element({tag, attrs, children}, verbatim?) do
     tag = String.downcase(tag)
     attrs = Enum.map(attrs, fn {k, v} -> {String.downcase(k), v} end)
 
@@ -176,25 +206,16 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
       tag: tag,
       classes:
         attrs |> attr("class") |> String.split(~r/\s+/u, trim: true) |> Enum.uniq() |> Enum.sort(),
-      attrs:
-        for(
-          {k, v} <- attrs,
-          k not in ["class", "style"],
-          not variable?(tag, k),
-          into: %{},
-          do: {k, squash(v)}
-        ),
+      attrs: for({k, v} <- attrs, k not in ["class", "style"], into: %{}, do: {k, squash(v)}),
       style: parse_style(attr(attrs, "style")),
-      children: nodes(children)
+      children: nodes(children, verbatim? or tag in @verbatim_tags)
     }
   end
 
   defp attr(attrs, name), do: Enum.find_value(attrs, "", fn {k, v} -> k == name && v end)
 
-  defp variable?(tag, k),
-    do: k in @variable_attrs or (k in ~w(width height) and tag in @sizing_hint_tags)
-
-  defp squash(s), do: s |> String.replace(~r/\s+/u, " ") |> String.trim()
+  defp runs(s), do: String.replace(s, ~r/\s+/u, " ")
+  defp squash(s), do: s |> runs() |> String.trim()
 
   defp parse_style(raw) do
     for decl <- String.split(raw, ";"),

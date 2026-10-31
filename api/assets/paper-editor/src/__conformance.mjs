@@ -22,13 +22,20 @@ const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"))
 const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id"];
 const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls";
 
-function unpaint(root, type) {
-  for (const atom of root.querySelectorAll("[data-bp-fleet-id]")) {
-    const hole = atom.querySelector("[data-bp-fleet-body]");
-    if (!hole) continue;
-    hole.innerHTML = fragments[type];
-    atom.replaceWith(...hole.childNodes);
+function paint(canvas, block) {
+  let hostPainted = false;
+  for (const hole of canvas.querySelectorAll("[data-bp-fleet-body]")) {
+    const html = fragments[block.type];
+    if (hole.dispatchEvent(new CustomEvent("bp-fleet-paint", { detail: { html, sourceBlock: block }, cancelable: true }))) {
+      hole.innerHTML = html;
+      hostPainted = true;
+    }
   }
+  return hostPainted;
+}
+
+function unwrapFleet(root) {
+  for (const atom of root.querySelectorAll("[data-bp-fleet-id]")) atom.replaceWith(...atom.querySelector("[data-bp-fleet-body]").childNodes);
 }
 
 function strip(root) {
@@ -47,18 +54,23 @@ function fragment(html) {
 }
 
 async function judge(golden) {
-  if (runToTiptap([golden.input]).content.every((n) => n.type === "bpOpaque")) return MISSING;
+  const { content } = runToTiptap([golden.input]);
+  if (content.length > 0 && content.every((n) => n.type === "bpOpaque")) return MISSING;
+  const block = { ...golden.input, id: "conformance" };
   const canvas = document.createElement("bp-paper-canvas");
-  canvas.blocks = [{ ...golden.input, id: "conformance" }];
+  canvas.blocks = [block];
   document.body.append(canvas);
   try {
     await new Promise((r) => setTimeout(r, 0));
     const pm = canvas.querySelector(".ProseMirror");
     if (!pm) return [`canvas mounted no editor for ${golden.type}`];
+    const hostPainted = paint(canvas, block);
+    await new Promise((r) => setTimeout(r, 0));
     const root = pm.cloneNode(true);
-    unpaint(root, golden.type);
+    unwrapFleet(root);
     strip(root);
-    return diffShapes(shapeOf(root.childNodes), shapeOf(fragment(golden.expectedHtml)));
+    const diff = diffShapes(shapeOf(root.childNodes), shapeOf(fragment(golden.expectedHtml)));
+    return hostPainted ? { via: "host-paint", diff } : diff;
   } finally {
     canvas.remove();
   }
