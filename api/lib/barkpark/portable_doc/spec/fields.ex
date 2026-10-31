@@ -7,7 +7,9 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
   A field's shape is a shorthand `Spec` expands: `:string`, `:integer`,
   `:number`, `:boolean`, `:object`, `:array`, `:any`, `:scalar` (string or
   number), `:inline` (inline nodes), `:block`, `:blocks`, `{:array, shape}`,
-  `{:object, %{field => shape}}`, `{:any_of, [shape]}`.
+  `{:object, %{field => shape}}`, `{:any_of, [shape]}`, `{:integer, min, max}`,
+  `{:enum, [value]}`, and `{:typeless, type}` (that type's fields on a map with
+  no `"type"`, which the reader fills in).
 
   Keys the server injects before rendering (`_render_opts`, `_paper_links`,
   `_code_label`, `_ref_title`) and the read-time `unavailable` marker are not
@@ -15,7 +17,8 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
 
   `id`, `role` and `locked` ride every block and are added by `Spec`.
 
-  `aliases/0` lists the spellings the reader rewrites to a canonical type.
+  `aliases/0` maps each spelling the reader rewrites to `{type, set}`: the
+  canonical type and the fields the rewrite forces, overriding what is stored.
   """
 
   @fields %{
@@ -48,7 +51,12 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "card" => %{
       "slots" =>
         {:object,
-         %{"action" => :blocks, "body" => :blocks, "media" => :blocks, "title" => :blocks}},
+         %{
+           "action" => :blocks,
+           "body" => :blocks,
+           "media" => {:array, {:any_of, [:block, {:typeless, "image"}]}},
+           "title" => :blocks
+         }},
       "span" => :integer,
       "tone" => :string
     },
@@ -71,7 +79,14 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "chat-thinking" => %{"tokens" => :integer},
     "chat-todo" => %{"todos" => {:array, :object}},
     "chat-tool-diff" => %{"input" => :object},
-    "code" => %{"emphasis" => {:array, :object}, "lang" => :string, "value" => :string},
+    "code" => %{
+      "code" => {:any_of, [:string, :inline]},
+      "content" => {:any_of, [:string, :inline]},
+      "emphasis" => {:array, :object},
+      "lang" => :string,
+      "text" => {:any_of, [:string, :inline]},
+      "value" => {:any_of, [:string, :inline]}
+    },
     "code-tabs" => %{"syncKey" => :string, "tabs" => {:array, :object}},
     "codelist" => %{"label" => :string, "value" => :scalar},
     "columns" => %{"columns" => {:array, :blocks}},
@@ -120,7 +135,7 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "heading" => %{
       "align" => :string,
       "content" => :inline,
-      "level" => :integer,
+      "level" => {:any_of, [{:integer, 1, 6}, {:enum, ~w(1 2 3 4 5 6)}]},
       "text" => :string
     },
     "heatmap" => %{
@@ -133,10 +148,28 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "rowLabels" => {:array, :string},
       "values" => :boolean
     },
-    "image" => %{"alt" => :string, "height" => :number, "src" => :string, "width" => :number},
+    "image" => %{"alt" => :string, "height" => :scalar, "src" => :string, "width" => :scalar},
     "ingress" => %{"content" => :inline, "text" => :string},
     "lineage" => %{"nodes" => {:array, :object}, "sourceDefault" => :string},
-    "list" => %{"items" => :array, "ordered" => :boolean, "start" => :integer, "task" => :boolean},
+    "list" => %{
+      "items" =>
+        {:array,
+         {:any_of,
+          [
+            :inline,
+            :scalar,
+            {:object,
+             %{
+               "checked" => :boolean,
+               "children" => :blocks,
+               "content" => :inline,
+               "text" => :string
+             }}
+          ]}},
+      "ordered" => :boolean,
+      "start" => :integer,
+      "task" => :boolean
+    },
     "localizedText" => %{"label" => :string, "languages" => {:array, :string}, "value" => :object},
     "master-ref" => %{"master" => :string, "version" => :string},
     "note" => %{
@@ -210,7 +243,10 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "stat-grid" => %{"items" => {:array, :object}, "sourceDefault" => :string},
     "stats" => %{"items" => {:array, :object}, "sourceDefault" => :string},
     "status-legend" => %{},
-    "steps" => %{"steps" => {:array, {:object, %{"blocks" => :blocks, "title" => :string}}}},
+    "steps" => %{
+      "steps" =>
+        {:array, {:object, %{"blocks" => :blocks, "children" => :blocks, "title" => :string}}}
+    },
     "table" => %{
       "cols" => {:array, :object},
       "columns" => :array,
@@ -257,16 +293,16 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
   }
 
   @aliases %{
-    "bulletList" => "list",
-    "bullet_list" => "list",
-    "bulleted-list" => "list",
-    "bulleted_list" => "list",
-    "h1" => "heading",
-    "h2" => "heading",
-    "h3" => "heading",
-    "numbered_list" => "list",
-    "ordered-list" => "list",
-    "quote" => "blockquote"
+    "bulletList" => {"list", %{}},
+    "bullet_list" => {"list", %{}},
+    "bulleted-list" => {"list", %{}},
+    "bulleted_list" => {"list", %{}},
+    "h1" => {"heading", %{"level" => 1}},
+    "h2" => {"heading", %{"level" => 2}},
+    "h3" => {"heading", %{"level" => 3}},
+    "numbered_list" => {"list", %{"ordered" => true}},
+    "ordered-list" => {"list", %{"ordered" => true}},
+    "quote" => {"blockquote", %{}}
   }
 
   def all, do: @fields

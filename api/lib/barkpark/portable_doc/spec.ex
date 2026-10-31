@@ -20,8 +20,13 @@ defmodule Barkpark.PortableDoc.Spec do
 
   def json, do: Jason.encode!(ordered(schema()), pretty: true) <> "\n"
 
-  def schema do
-    blocks = Map.new(Fields.all(), fn {type, fields} -> {type, block(type, fields)} end)
+  def schema(fields \\ Fields.all(), aliases \\ Fields.aliases()) do
+    blocks = Map.new(fields, fn {type, own} -> {type, block(type, own, fields)} end)
+
+    alias_defs =
+      Map.new(aliases, fn {spelling, {target, set}} ->
+        {spelling, alias_block(spelling, target, set, Map.fetch!(blocks, target))}
+      end)
 
     %{
       "$schema" => "http://json-schema.org/draft-07/schema#",
@@ -30,26 +35,18 @@ defmodule Barkpark.PortableDoc.Spec do
       "description" =>
         "One block of a PortableDoc document. Every type the Barkpark reader renders is " <>
           "under definitions.blocks with its fields and its composition tier (x-tier). " <>
-          "x-aliases maps the other spellings the reader accepts to their type. " <>
-          "definitions.constraints.declaration is the vocabulary a document type uses to " <>
-          "declare its structure.",
+          "definitions.aliases holds the other spellings the reader accepts: each names " <>
+          "its type (x-alias-of) and the fields the spelling forces (x-set), which " <>
+          "override any stored value. definitions.constraints.declaration is the " <>
+          "vocabulary a document type uses to declare its structure.",
       "type" => "object",
       "required" => ["type"],
-      "properties" => %{
-        "type" => %{"enum" => Enum.sort(Map.keys(blocks) ++ Map.keys(Fields.aliases()))}
-      },
+      "properties" => %{"type" => %{"enum" => Enum.sort(Map.keys(blocks) ++ Map.keys(aliases))}},
       "allOf" =>
-        for type <- Enum.sort(Map.keys(blocks)) do
-          %{
-            "if" => %{
-              "properties" => %{"type" => %{"enum" => spellings(type)}},
-              "required" => ["type"]
-            },
-            "then" => %{"$ref" => "#/definitions/blocks/#{type}"}
-          }
-        end,
-      "x-aliases" => Fields.aliases(),
+        dispatch(blocks, "#/definitions/blocks/") ++
+          dispatch(alias_defs, "#/definitions/aliases/"),
       "definitions" => %{
+        "aliases" => alias_defs,
         "blocks" => blocks,
         "inline" => %{
           "description" =>
@@ -63,37 +60,80 @@ defmodule Barkpark.PortableDoc.Spec do
     }
   end
 
-  defp block(type, fields) do
-    properties =
-      @common
-      |> Map.merge(fields)
-      |> Map.new(fn {name, shape} -> {name, expand(shape)} end)
-      |> Map.put("type", %{"enum" => spellings(type)})
+  defp dispatch(defs, pointer) do
+    for name <- Enum.sort(Map.keys(defs)) do
+      %{
+        "if" => %{"properties" => %{"type" => %{"const" => name}}, "required" => ["type"]},
+        "then" => %{"$ref" => pointer <> name}
+      }
+    end
+  end
 
-    %{"type" => "object", "x-tier" => Atom.to_string(tier!(type)), "properties" => properties}
+  defp block(type, own, fields) do
+    %{
+      "type" => "object",
+      "x-tier" => Atom.to_string(tier!(type)),
+      "properties" => properties(own, fields) |> Map.put("type", %{"const" => type})
+    }
+  end
+
+  defp alias_block(spelling, target, set, target_block) do
+    forced =
+      Map.new(set, fn {field, _} ->
+        {field, %{"description" => "Set by the spelling; a stored value is ignored."}}
+      end)
+
+    %{
+      target_block
+      | "properties" =>
+          target_block["properties"]
+          |> Map.merge(forced)
+          |> Map.put("type", %{"const" => spelling})
+    }
+    |> Map.merge(%{"x-alias-of" => target, "x-set" => set})
+  end
+
+  defp properties(own, fields) do
+    @common
+    |> Map.merge(own)
+    |> Map.new(fn {name, shape} -> {name, expand(shape, fields)} end)
   end
 
   defp tier!(type),
     do: Tiers.tier_of(type) || raise(ArgumentError, "#{type} has no tier in Tiers")
 
-  defp spellings(type) do
-    aliases = for {spelling, ^type} <- Fields.aliases(), do: spelling
-    Enum.sort([type | aliases])
+  defp expand(:any, _fields), do: %{}
+  defp expand(:scalar, _fields), do: %{"type" => ["string", "number"]}
+
+  defp expand(:inline, _fields),
+    do: %{"type" => "array", "items" => %{"$ref" => "#/definitions/inline"}}
+
+  defp expand(:block, _fields), do: %{"$ref" => "#"}
+  defp expand(:blocks, _fields), do: %{"type" => "array", "items" => %{"$ref" => "#"}}
+  defp expand({:array, item}, fields), do: %{"type" => "array", "items" => expand(item, fields)}
+
+  defp expand({:object, own}, fields),
+    do: %{
+      "type" => "object",
+      "properties" => Map.new(own, fn {k, v} -> {k, expand(v, fields)} end)
+    }
+
+  defp expand({:any_of, shapes}, fields), do: %{"anyOf" => Enum.map(shapes, &expand(&1, fields))}
+
+  defp expand({:integer, min, max}, _fields),
+    do: %{"type" => "integer", "minimum" => min, "maximum" => max}
+
+  defp expand({:enum, values}, _fields), do: %{"enum" => values}
+
+  defp expand({:typeless, type}, fields) do
+    %{
+      "type" => "object",
+      "not" => %{"required" => ["type"]},
+      "properties" => properties(Map.fetch!(fields, type), fields)
+    }
   end
 
-  defp expand(:any), do: %{}
-  defp expand(:scalar), do: %{"type" => ["string", "number"]}
-  defp expand(:inline), do: %{"type" => "array", "items" => %{"$ref" => "#/definitions/inline"}}
-  defp expand(:block), do: %{"$ref" => "#"}
-  defp expand(:blocks), do: %{"type" => "array", "items" => %{"$ref" => "#"}}
-  defp expand({:array, item}), do: %{"type" => "array", "items" => expand(item)}
-
-  defp expand({:object, fields}),
-    do: %{"type" => "object", "properties" => Map.new(fields, fn {k, v} -> {k, expand(v)} end)}
-
-  defp expand({:any_of, shapes}), do: %{"anyOf" => Enum.map(shapes, &expand/1)}
-
-  defp expand(type) when type in [:string, :integer, :number, :boolean, :object, :array],
+  defp expand(type, _fields) when type in [:string, :integer, :number, :boolean, :object, :array],
     do: %{"type" => Atom.to_string(type)}
 
   defp constraints do

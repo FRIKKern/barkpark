@@ -9,7 +9,8 @@ defmodule Barkpark.PortableDoc.ComposeCensus do
 
   An alias is a variable-guard clause (`t == "x"` or `t in @attr`) whose body
   rewrites `"type"` with `Map.put/3` before composing again. It has no tier of
-  its own; it borrows its target's. A variable-guard clause that does not rewrite
+  its own; it borrows its target's. `aliases/1` gives `{target, forced}`, where
+  `forced` names every other key the body `Map.put`s over the stored block. A variable-guard clause that does not rewrite
   `"type"` (the task `unavailable` overlay) is neither.
 
   Shared by `tiers_test.exs` and `spec_test.exs`. Each passes the source in, so
@@ -34,10 +35,13 @@ defmodule Barkpark.PortableDoc.ComposeCensus do
         {:ok, {var, _, ctx}} when is_atom(var) and is_atom(ctx) <- [
           head |> call_of() |> first_arg_type()
         ],
-        target <- List.wrap(type_rewrite(body)),
+        puts = collect(body, &map_put/1),
+        target <- List.wrap(type_rewrite(puts)),
         spelling <- alias_spellings(guard_of(head), var, attrs),
         into: %{},
-        do: {spelling, target}
+        do:
+          {spelling,
+           {target, puts |> Enum.map(&elem(&1, 0)) |> Enum.reject(&(&1 == "type")) |> Enum.sort()}}
   end
 
   defp clauses(ast) do
@@ -111,21 +115,21 @@ defmodule Barkpark.PortableDoc.ComposeCensus do
     end)
   end
 
-  defp type_rewrite(body) do
-    case collect(body, &map_put_type/1) do
+  defp type_rewrite(puts) do
+    case for({"type", target} <- puts, is_binary(target), do: target) do
       [] -> nil
       [target] -> target
     end
   end
 
-  defp map_put_type({{:., _, [{:__aliases__, _, [:Map]}, :put]}, _, args}) do
+  defp map_put({{:., _, [{:__aliases__, _, [:Map]}, :put]}, _, args}) do
     case Enum.take(args, -2) do
-      ["type", target] when is_binary(target) -> [target]
+      [key, value] when is_binary(key) -> [{key, value}]
       _ -> nil
     end
   end
 
-  defp map_put_type(_node), do: nil
+  defp map_put(_node), do: nil
 
   defp list_attributes(ast) do
     {_, acc} =

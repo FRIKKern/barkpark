@@ -4,8 +4,20 @@ defmodule Barkpark.PortableDoc.SpecTest do
   import ExUnit.CaptureIO
 
   alias Barkpark.Content.Papers.Template
-  alias Barkpark.PortableDoc.{ComposeCensus, Spec, Tiers}
+  alias Barkpark.PortableDoc.{ComposeCensus, Render, Spec, Tiers}
+  alias Barkpark.PortableDoc.Spec.Fields
   alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity
+
+  @host ~r/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:cloud|com|net|org|io|no|dev|app|local|internal)\b/i
+  @ip ~r/\b\d{1,3}(?:\.\d{1,3}){3}\b/
+
+  @holes ~w(
+    callout.slots.body card.slots.action card.slots.body card.slots.media[] card.slots.title
+    columns.columns[] expandable.blocks expandable.children figure.child list.items[].children
+    note.slots.body note.slots.label note.slots.lead section.blocks stage.slots.detail
+    stage.slots.kind stage.slots.title steps.steps[].blocks steps.steps[].children
+    tabs.tabs[].blocks terminal.blocks terminal.children
+  )
 
   @portable_doc Path.expand("../../../lib/barkpark/portable_doc", __DIR__)
   @compose_source File.read!(Path.join(@portable_doc, "render/compose.ex"))
@@ -17,7 +29,19 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
   setup_all do
     schema = Spec.schema()
-    %{schema: schema, root: ExJsonSchema.Schema.resolve(schema)}
+
+    strict =
+      update_in(schema, ["definitions", "blocks"], fn blocks ->
+        Map.new(blocks, fn {type, block} ->
+          {type, Map.put(block, "additionalProperties", false)}
+        end)
+      end)
+
+    %{
+      schema: schema,
+      root: ExJsonSchema.Schema.resolve(schema),
+      strict: ExJsonSchema.Schema.resolve(strict)
+    }
   end
 
   describe "the generated file" do
@@ -45,9 +69,23 @@ defmodule Barkpark.PortableDoc.SpecTest do
       assert unsorted == [], "objects with unsorted keys: #{inspect(unsorted)}"
     end
 
-    test "names no host but json-schema.org" do
-      urls = Regex.scan(~r{[a-z]+://[^"\s]+}, Spec.json()) |> List.flatten() |> Enum.uniq()
+    test "names no URL, host or IP address but json-schema.org" do
+      json = Spec.json()
+      urls = Regex.scan(~r{[a-z]+://[^"\s]+}, json) |> List.flatten() |> Enum.uniq()
       assert urls == ["http://json-schema.org/draft-07/schema#"]
+
+      hosts =
+        Regex.scan(@host, json)
+        |> List.flatten()
+        |> Enum.uniq()
+
+      assert hosts == ["json-schema.org"]
+      assert Regex.scan(@ip, json) == []
+    end
+
+    test "the host scan sees a bare hostname and an IP address" do
+      assert Regex.match?(@host, "at guerrilla.barkpark.cloud now")
+      assert Regex.match?(@ip, "box 157.180.90.121 here")
     end
   end
 
@@ -71,8 +109,32 @@ defmodule Barkpark.PortableDoc.SpecTest do
     } do
       reader = ComposeCensus.aliases(@compose_source)
       assert map_size(reader) > 0
-      assert schema["x-aliases"] == reader
-      assert Enum.all?(Map.values(reader), &Map.has_key?(schema["definitions"]["blocks"], &1))
+
+      spec =
+        Map.new(schema["definitions"]["aliases"], fn {spelling, block} ->
+          {spelling, {block["x-alias-of"], block["x-set"] |> Map.keys() |> Enum.sort()}}
+        end)
+
+      assert spec == reader
+    end
+
+    test "an alias renders as its target with x-set applied over the stored fields", %{
+      schema: schema
+    } do
+      for {spelling, %{"x-alias-of" => target, "x-set" => set}} <-
+            schema["definitions"]["aliases"] do
+        stored =
+          Map.merge(GenPdParity.input(target), Map.new(set, fn {k, v} -> {k, other(v)} end))
+
+        as_alias = render(Map.put(stored, "type", spelling))
+
+        assert as_alias == render(Map.merge(stored, set)), spelling
+
+        if set != %{} do
+          assert as_alias != render(stored),
+                 "#{spelling}: x-set changes nothing, so it pins nothing"
+        end
+      end
     end
 
     test "the census reads aliases only off clauses that rewrite the type" do
@@ -82,7 +144,7 @@ defmodule Barkpark.PortableDoc.SpecTest do
         @overlay ~w(tasks)
         def compose_block(%{"type" => "heading"} = b, style), do: {b, style}
         def compose_block(%{"type" => t} = b, style) when t in @spellings,
-          do: compose_block(b |> Map.put("type", "heading"), style)
+          do: compose_block(b |> Map.put("type", "heading") |> Map.put("level", 4), style)
         def compose_block(%{"type" => t} = b, style) when t == "title",
           do: compose_block(Map.put(b, "type", "heading"), style)
         def compose_block(%{"type" => t, "unavailable" => true} = b, style) when t in @overlay,
@@ -93,9 +155,9 @@ defmodule Barkpark.PortableDoc.SpecTest do
       assert ComposeCensus.types(source) == ["heading"]
 
       assert ComposeCensus.aliases(source) == %{
-               "h4" => "heading",
-               "h5" => "heading",
-               "title" => "heading"
+               "h4" => {"heading", ["level"]},
+               "h5" => {"heading", ["level"]},
+               "title" => {"heading", []}
              }
     end
 
@@ -133,25 +195,87 @@ defmodule Barkpark.PortableDoc.SpecTest do
       end
     end
 
-    test "every field the pd-parity corpus uses is declared on its block", %{schema: schema} do
-      strict =
-        update_in(schema, ["definitions", "blocks"], fn blocks ->
-          Map.new(blocks, fn {type, block} ->
-            {type, Map.put(block, "additionalProperties", false)}
-          end)
-        end)
-        |> ExJsonSchema.Schema.resolve()
-
+    test "every field the pd-parity corpus uses is declared on its block", %{strict: strict} do
       for type <- GenPdParity.types() do
         assert ExJsonSchema.Validator.validate(strict, GenPdParity.input(type)) == :ok, type
       end
     end
 
-    test "an alias spelling validates as its target", %{root: root} do
+    test "an alias spelling validates as its target, with forced fields free", %{root: root} do
       assert ExJsonSchema.Validator.validate(root, %{"type" => "h2", "text" => "Two"}) == :ok
+      assert ExJsonSchema.Validator.validate(root, %{"type" => "h2", "level" => "two"}) == :ok
+      assert {:error, _} = ExJsonSchema.Validator.validate(root, %{"type" => "h2", "text" => 2})
+    end
 
-      assert {:error, _} =
-               ExJsonSchema.Validator.validate(root, %{"type" => "h2", "level" => "two"})
+    test "every nested-block slot checks its child", %{root: root} do
+      holes =
+        for {type, own} <- Fields.all(),
+            {field, shape} <- own,
+            {path, hole} <- holes(shape, field),
+            do: {type, path, hole}
+
+      assert holes |> Enum.map(fn {type, path, _} -> "#{type}.#{path}" end) |> Enum.sort() ==
+               @holes
+
+      for {type, path, hole} <- holes do
+        at = "#{type}.#{path}"
+        field = path |> String.split([".", "["]) |> hd()
+        good = %{"type" => type, field => hole.(%{"type" => "divider"})}
+        bad = %{"type" => type, field => hole.(%{"type" => "hologram"})}
+        assert ExJsonSchema.Validator.validate(root, good) == :ok, at
+        assert match?({:error, _}, ExJsonSchema.Validator.validate(root, bad)), at
+      end
+    end
+
+    test "a typeless card media element is an image without a type", %{root: root} do
+      card = fn media -> %{"type" => "card", "slots" => %{"media" => [media]}} end
+
+      assert ExJsonSchema.Validator.validate(root, card.(%{"src" => "a.png", "alt" => "A"})) ==
+               :ok
+
+      assert {:error, _} = ExJsonSchema.Validator.validate(root, card.(%{"src" => 5}))
+    end
+
+    test "fields the reader takes in more than one shape", %{strict: root} do
+      ok = fn block ->
+        assert ExJsonSchema.Validator.validate(root, block) == :ok, inspect(block)
+      end
+
+      bad = fn block ->
+        assert match?({:error, _}, ExJsonSchema.Validator.validate(root, block)), inspect(block)
+      end
+
+      ok.(%{"type" => "heading", "level" => "6"})
+      ok.(%{"type" => "heading", "level" => 1})
+      bad.(%{"type" => "heading", "level" => 99})
+      bad.(%{"type" => "heading", "level" => "7"})
+      ok.(%{"type" => "code", "code" => "x = 1"})
+      ok.(%{"type" => "code", "content" => [%{"type" => "text", "value" => "x"}]})
+      ok.(%{"type" => "image", "width" => "640"})
+
+      ok.(%{
+        "type" => "list",
+        "items" => [
+          "plain",
+          [%{"type" => "text", "value" => "x"}],
+          %{"text" => "t", "checked" => true}
+        ]
+      })
+    end
+
+    test "the common id, role and locked fields are typed", %{root: root} do
+      ok = %{"type" => "divider", "id" => "b1", "role" => "rule", "locked" => true}
+      assert ExJsonSchema.Validator.validate(root, ok) == :ok
+
+      for {k, v} <- [{"id", 1}, {"role", 2}, {"locked", "yes"}] do
+        assert match?({:error, _}, ExJsonSchema.Validator.validate(root, Map.put(ok, k, v))), k
+      end
+    end
+
+    test "a type with no tier refuses to generate" do
+      assert_raise ArgumentError, ~r/hologram has no tier/, fn ->
+        Spec.schema(%{"hologram" => %{}}, %{})
+      end
     end
 
     test "an unknown type, a missing type and a wrong field type fail", %{root: root} do
@@ -161,7 +285,7 @@ defmodule Barkpark.PortableDoc.SpecTest do
       assert {:error, _} =
                ExJsonSchema.Validator.validate(root, %{"type" => "heading", "level" => "two"})
 
-      nested = %{"type" => "section", "blocks" => [%{"type" => "image", "width" => "wide"}]}
+      nested = %{"type" => "section", "blocks" => [%{"type" => "heading", "level" => "two"}]}
       assert {:error, _} = ExJsonSchema.Validator.validate(root, nested)
     end
   end
@@ -228,8 +352,31 @@ defmodule Barkpark.PortableDoc.SpecTest do
           ] do
         assert match?({:error, _}, ExJsonSchema.Validator.validate(root, wire(bad))), inspect(bad)
       end
+
+      two_key_count = Map.put(wire(good), "count", %{"min" => 1, "max" => 2})
+      assert {:error, _} = ExJsonSchema.Validator.validate(root, two_key_count)
     end
   end
+
+  defp holes(:block, path), do: [{path, & &1}]
+  defp holes(:blocks, path), do: [{path, &[&1]}]
+
+  defp holes({:array, shape}, path),
+    do: for({p, h} <- holes(shape, path <> "[]"), do: {p, fn c -> [h.(c)] end})
+
+  defp holes({:object, own}, path) do
+    for {k, shape} <- own,
+        {p, h} <- holes(shape, "#{path}.#{k}"),
+        do: {p, fn c -> %{k => h.(c)} end}
+  end
+
+  defp holes({:any_of, shapes}, path), do: Enum.flat_map(shapes, &holes(&1, path))
+  defp holes(_shape, _path), do: []
+
+  defp render(block), do: Render.render_block(block, %{style: :article})
+
+  defp other(v) when is_boolean(v), do: not v
+  defp other(v) when is_integer(v), do: rem(v, 6) + 1
 
   defp declaration_root(schema) do
     schema

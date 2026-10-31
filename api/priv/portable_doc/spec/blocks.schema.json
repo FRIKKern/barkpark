@@ -6,9 +6,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "action"
-            ]
+            "const": "action"
           }
         },
         "required": [
@@ -23,9 +21,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "api-endpoint"
-            ]
+            "const": "api-endpoint"
           }
         },
         "required": [
@@ -40,9 +36,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "arrayOf"
-            ]
+            "const": "arrayOf"
           }
         },
         "required": [
@@ -57,9 +51,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "asciicast"
-            ]
+            "const": "asciicast"
           }
         },
         "required": [
@@ -74,9 +66,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "bar-chart"
-            ]
+            "const": "bar-chart"
           }
         },
         "required": [
@@ -91,10 +81,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "blockquote",
-              "quote"
-            ]
+            "const": "blockquote"
           }
         },
         "required": [
@@ -109,9 +96,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "byline"
-            ]
+            "const": "byline"
           }
         },
         "required": [
@@ -126,9 +111,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "callout"
-            ]
+            "const": "callout"
           }
         },
         "required": [
@@ -143,9 +126,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "card"
-            ]
+            "const": "card"
           }
         },
         "required": [
@@ -160,9 +141,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "cards"
-            ]
+            "const": "cards"
           }
         },
         "required": [
@@ -177,9 +156,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chart"
-            ]
+            "const": "chart"
           }
         },
         "required": [
@@ -194,9 +171,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-approval"
-            ]
+            "const": "chat-approval"
           }
         },
         "required": [
@@ -211,9 +186,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-plan"
-            ]
+            "const": "chat-plan"
           }
         },
         "required": [
@@ -228,9 +201,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-question"
-            ]
+            "const": "chat-question"
           }
         },
         "required": [
@@ -245,9 +216,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-thinking"
-            ]
+            "const": "chat-thinking"
           }
         },
         "required": [
@@ -262,9 +231,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-todo"
-            ]
+            "const": "chat-todo"
           }
         },
         "required": [
@@ -279,9 +246,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "chat-tool-diff"
-            ]
+            "const": "chat-tool-diff"
           }
         },
         "required": [
@@ -296,9 +261,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "code"
-            ]
+            "const": "code"
           }
         },
         "required": [
@@ -313,9 +276,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "code-tabs"
-            ]
+            "const": "code-tabs"
           }
         },
         "required": [
@@ -330,9 +291,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "codelist"
-            ]
+            "const": "codelist"
           }
         },
         "required": [
@@ -347,9 +306,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "columns"
-            ]
+            "const": "columns"
           }
         },
         "required": [
@@ -364,9 +321,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "composite"
-            ]
+            "const": "composite"
           }
         },
         "required": [
@@ -381,9 +336,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "criteria-progress"
-            ]
+            "const": "criteria-progress"
           }
         },
         "required": [
@@ -398,9 +351,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "diagram"
-            ]
+            "const": "diagram"
           }
         },
         "required": [
@@ -415,9 +366,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "diff"
-            ]
+            "const": "diff"
           }
         },
         "required": [
@@ -432,9 +381,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "divider"
-            ]
+            "const": "divider"
           }
         },
         "required": [
@@ -449,9 +396,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "duel"
-            ]
+            "const": "duel"
           }
         },
         "required": [
@@ -466,9 +411,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "embed"
-            ]
+            "const": "embed"
           }
         },
         "required": [
@@ -483,9 +426,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "equation"
-            ]
+            "const": "equation"
           }
         },
         "required": [
@@ -500,9 +441,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "expandable"
-            ]
+            "const": "expandable"
           }
         },
         "required": [
@@ -517,9 +456,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "eyebrow"
-            ]
+            "const": "eyebrow"
           }
         },
         "required": [
@@ -534,9 +471,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-boolean"
-            ]
+            "const": "field-boolean"
           }
         },
         "required": [
@@ -551,9 +486,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-color"
-            ]
+            "const": "field-color"
           }
         },
         "required": [
@@ -568,9 +501,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-datetime"
-            ]
+            "const": "field-datetime"
           }
         },
         "required": [
@@ -585,9 +516,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-image"
-            ]
+            "const": "field-image"
           }
         },
         "required": [
@@ -602,9 +531,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-number"
-            ]
+            "const": "field-number"
           }
         },
         "required": [
@@ -619,9 +546,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-reference"
-            ]
+            "const": "field-reference"
           }
         },
         "required": [
@@ -636,9 +561,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-select"
-            ]
+            "const": "field-select"
           }
         },
         "required": [
@@ -653,9 +576,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-slug"
-            ]
+            "const": "field-slug"
           }
         },
         "required": [
@@ -670,9 +591,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-string"
-            ]
+            "const": "field-string"
           }
         },
         "required": [
@@ -687,9 +606,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "field-text"
-            ]
+            "const": "field-text"
           }
         },
         "required": [
@@ -704,9 +621,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "figure"
-            ]
+            "const": "figure"
           }
         },
         "required": [
@@ -721,9 +636,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "filetree"
-            ]
+            "const": "filetree"
           }
         },
         "required": [
@@ -738,9 +651,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "footnote"
-            ]
+            "const": "footnote"
           }
         },
         "required": [
@@ -755,9 +666,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "form"
-            ]
+            "const": "form"
           }
         },
         "required": [
@@ -772,9 +681,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "gauge-list"
-            ]
+            "const": "gauge-list"
           }
         },
         "required": [
@@ -789,12 +696,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "h1",
-              "h2",
-              "h3",
-              "heading"
-            ]
+            "const": "heading"
           }
         },
         "required": [
@@ -809,9 +711,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "heatmap"
-            ]
+            "const": "heatmap"
           }
         },
         "required": [
@@ -826,9 +726,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "image"
-            ]
+            "const": "image"
           }
         },
         "required": [
@@ -843,9 +741,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "ingress"
-            ]
+            "const": "ingress"
           }
         },
         "required": [
@@ -860,9 +756,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "lineage"
-            ]
+            "const": "lineage"
           }
         },
         "required": [
@@ -877,15 +771,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "bulletList",
-              "bullet_list",
-              "bulleted-list",
-              "bulleted_list",
-              "list",
-              "numbered_list",
-              "ordered-list"
-            ]
+            "const": "list"
           }
         },
         "required": [
@@ -900,9 +786,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "localizedText"
-            ]
+            "const": "localizedText"
           }
         },
         "required": [
@@ -917,9 +801,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "master-ref"
-            ]
+            "const": "master-ref"
           }
         },
         "required": [
@@ -934,9 +816,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "note"
-            ]
+            "const": "note"
           }
         },
         "required": [
@@ -951,9 +831,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "notes"
-            ]
+            "const": "notes"
           }
         },
         "required": [
@@ -968,9 +846,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "paper-links"
-            ]
+            "const": "paper-links"
           }
         },
         "required": [
@@ -985,9 +861,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "paragraph"
-            ]
+            "const": "paragraph"
           }
         },
         "required": [
@@ -1002,9 +876,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "pipeline"
-            ]
+            "const": "pipeline"
           }
         },
         "required": [
@@ -1019,9 +891,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "pre-gate-badge"
-            ]
+            "const": "pre-gate-badge"
           }
         },
         "required": [
@@ -1036,9 +906,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "pullquote"
-            ]
+            "const": "pullquote"
           }
         },
         "required": [
@@ -1053,9 +921,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "questionnaire"
-            ]
+            "const": "questionnaire"
           }
         },
         "required": [
@@ -1070,9 +936,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "roadmap"
-            ]
+            "const": "roadmap"
           }
         },
         "required": [
@@ -1087,9 +951,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "route"
-            ]
+            "const": "route"
           }
         },
         "required": [
@@ -1104,9 +966,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "section"
-            ]
+            "const": "section"
           }
         },
         "required": [
@@ -1121,9 +981,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "sheet"
-            ]
+            "const": "sheet"
           }
         },
         "required": [
@@ -1138,9 +996,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "stage"
-            ]
+            "const": "stage"
           }
         },
         "required": [
@@ -1155,9 +1011,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "stat"
-            ]
+            "const": "stat"
           }
         },
         "required": [
@@ -1172,9 +1026,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "stat-grid"
-            ]
+            "const": "stat-grid"
           }
         },
         "required": [
@@ -1189,9 +1041,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "stats"
-            ]
+            "const": "stats"
           }
         },
         "required": [
@@ -1206,9 +1056,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "status-legend"
-            ]
+            "const": "status-legend"
           }
         },
         "required": [
@@ -1223,9 +1071,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "steps"
-            ]
+            "const": "steps"
           }
         },
         "required": [
@@ -1240,9 +1086,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "table"
-            ]
+            "const": "table"
           }
         },
         "required": [
@@ -1257,9 +1101,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "tabs"
-            ]
+            "const": "tabs"
           }
         },
         "required": [
@@ -1274,9 +1116,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "task-board"
-            ]
+            "const": "task-board"
           }
         },
         "required": [
@@ -1291,9 +1131,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "task-detail"
-            ]
+            "const": "task-detail"
           }
         },
         "required": [
@@ -1308,9 +1146,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "task-list"
-            ]
+            "const": "task-list"
           }
         },
         "required": [
@@ -1325,9 +1161,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "tasks"
-            ]
+            "const": "tasks"
           }
         },
         "required": [
@@ -1342,9 +1176,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "terminal"
-            ]
+            "const": "terminal"
           }
         },
         "required": [
@@ -1359,9 +1191,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "toc"
-            ]
+            "const": "toc"
           }
         },
         "required": [
@@ -1376,9 +1206,7 @@
       "if": {
         "properties": {
           "type": {
-            "enum": [
-              "video"
-            ]
+            "const": "video"
           }
         },
         "required": [
@@ -1388,9 +1216,737 @@
       "then": {
         "$ref": "#/definitions/blocks/video"
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "bulletList"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/bulletList"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "bullet_list"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/bullet_list"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "bulleted-list"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/bulleted-list"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "bulleted_list"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/bulleted_list"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "h1"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/h1"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "h2"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/h2"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "h3"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/h3"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "numbered_list"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/numbered_list"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ordered-list"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/ordered-list"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "quote"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/aliases/quote"
+      }
     }
   ],
   "definitions": {
+    "aliases": {
+      "bulletList": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "bulletList"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {},
+        "x-tier": "element"
+      },
+      "bullet_list": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "bullet_list"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {},
+        "x-tier": "element"
+      },
+      "bulleted-list": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "bulleted-list"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {},
+        "x-tier": "element"
+      },
+      "bulleted_list": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "bulleted_list"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {},
+        "x-tier": "element"
+      },
+      "h1": {
+        "properties": {
+          "align": {
+            "type": "string"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/definitions/inline"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "level": {
+            "description": "Set by the spelling; a stored value is ignored."
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "h1"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "heading",
+        "x-set": {
+          "level": 1
+        },
+        "x-tier": "element"
+      },
+      "h2": {
+        "properties": {
+          "align": {
+            "type": "string"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/definitions/inline"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "level": {
+            "description": "Set by the spelling; a stored value is ignored."
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "h2"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "heading",
+        "x-set": {
+          "level": 2
+        },
+        "x-tier": "element"
+      },
+      "h3": {
+        "properties": {
+          "align": {
+            "type": "string"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/definitions/inline"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "level": {
+            "description": "Set by the spelling; a stored value is ignored."
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "h3"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "heading",
+        "x-set": {
+          "level": 3
+        },
+        "x-tier": "element"
+      },
+      "numbered_list": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "description": "Set by the spelling; a stored value is ignored."
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "numbered_list"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {
+          "ordered": true
+        },
+        "x-tier": "element"
+      },
+      "ordered-list": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "ordered": {
+            "description": "Set by the spelling; a stored value is ignored."
+          },
+          "role": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "task": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "ordered-list"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "list",
+        "x-set": {
+          "ordered": true
+        },
+        "x-tier": "element"
+      },
+      "quote": {
+        "properties": {
+          "attribution": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "string"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/definitions/inline"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "quote"
+          }
+        },
+        "type": "object",
+        "x-alias-of": "blockquote",
+        "x-set": {},
+        "x-tier": "element"
+      }
+    },
     "blocks": {
       "action": {
         "properties": {
@@ -1413,9 +1969,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "action"
-            ]
+            "const": "action"
           }
         },
         "type": "object",
@@ -1445,9 +1999,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "api-endpoint"
-            ]
+            "const": "api-endpoint"
           }
         },
         "type": "object",
@@ -1468,9 +2020,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "arrayOf"
-            ]
+            "const": "arrayOf"
           },
           "value": {
             "type": "array"
@@ -1503,9 +2053,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "asciicast"
-            ]
+            "const": "asciicast"
           }
         },
         "type": "object",
@@ -1532,9 +2080,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "bar-chart"
-            ]
+            "const": "bar-chart"
           },
           "values": {
             "type": "boolean"
@@ -1570,10 +2116,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "blockquote",
-              "quote"
-            ]
+            "const": "blockquote"
           }
         },
         "type": "object",
@@ -1597,9 +2140,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "byline"
-            ]
+            "const": "byline"
           }
         },
         "type": "object",
@@ -1649,9 +2190,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "callout"
-            ]
+            "const": "callout"
           }
         },
         "type": "object",
@@ -1684,7 +2223,48 @@
               },
               "media": {
                 "items": {
-                  "$ref": "#"
+                  "anyOf": [
+                    {
+                      "$ref": "#"
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      "properties": {
+                        "alt": {
+                          "type": "string"
+                        },
+                        "height": {
+                          "type": [
+                            "string",
+                            "number"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "locked": {
+                          "type": "boolean"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "src": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": [
+                            "string",
+                            "number"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
                 },
                 "type": "array"
               },
@@ -1704,9 +2284,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "card"
-            ]
+            "const": "card"
           }
         },
         "type": "object",
@@ -1730,9 +2308,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "cards"
-            ]
+            "const": "cards"
           }
         },
         "type": "object",
@@ -1771,9 +2347,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "chart"
-            ]
+            "const": "chart"
           }
         },
         "type": "object",
@@ -1800,9 +2374,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "chat-approval"
-            ]
+            "const": "chat-approval"
           }
         },
         "type": "object",
@@ -1829,9 +2401,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "chat-plan"
-            ]
+            "const": "chat-plan"
           }
         },
         "type": "object",
@@ -1858,9 +2428,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "chat-question"
-            ]
+            "const": "chat-question"
           }
         },
         "type": "object",
@@ -1881,9 +2449,7 @@
             "type": "integer"
           },
           "type": {
-            "enum": [
-              "chat-thinking"
-            ]
+            "const": "chat-thinking"
           }
         },
         "type": "object",
@@ -1907,9 +2473,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "chat-todo"
-            ]
+            "const": "chat-todo"
           }
         },
         "type": "object",
@@ -1930,9 +2494,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "chat-tool-diff"
-            ]
+            "const": "chat-tool-diff"
           }
         },
         "type": "object",
@@ -1940,6 +2502,32 @@
       },
       "code": {
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/definitions/inline"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/definitions/inline"
+                },
+                "type": "array"
+              }
+            ]
+          },
           "emphasis": {
             "items": {
               "type": "object"
@@ -1958,13 +2546,34 @@
           "role": {
             "type": "string"
           },
-          "type": {
-            "enum": [
-              "code"
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/definitions/inline"
+                },
+                "type": "array"
+              }
             ]
           },
+          "type": {
+            "const": "code"
+          },
           "value": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/definitions/inline"
+                },
+                "type": "array"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1991,9 +2600,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "code-tabs"
-            ]
+            "const": "code-tabs"
           }
         },
         "type": "object",
@@ -2014,9 +2621,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "codelist"
-            ]
+            "const": "codelist"
           },
           "value": {
             "type": [
@@ -2049,9 +2654,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "columns"
-            ]
+            "const": "columns"
           }
         },
         "type": "object",
@@ -2078,9 +2681,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "composite"
-            ]
+            "const": "composite"
           },
           "value": {
             "type": "object"
@@ -2110,9 +2711,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "criteria-progress"
-            ]
+            "const": "criteria-progress"
           }
         },
         "type": "object",
@@ -2136,9 +2735,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "diagram"
-            ]
+            "const": "diagram"
           }
         },
         "type": "object",
@@ -2165,9 +2762,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "diff"
-            ]
+            "const": "diff"
           }
         },
         "type": "object",
@@ -2185,9 +2780,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "divider"
-            ]
+            "const": "divider"
           }
         },
         "type": "object",
@@ -2220,9 +2813,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "duel"
-            ]
+            "const": "duel"
           }
         },
         "type": "object",
@@ -2243,9 +2834,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "embed"
-            ]
+            "const": "embed"
           }
         },
         "type": "object",
@@ -2269,9 +2858,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "equation"
-            ]
+            "const": "equation"
           }
         },
         "type": "object",
@@ -2307,9 +2894,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "expandable"
-            ]
+            "const": "expandable"
           }
         },
         "type": "object",
@@ -2336,9 +2921,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "eyebrow"
-            ]
+            "const": "eyebrow"
           }
         },
         "type": "object",
@@ -2359,9 +2942,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-boolean"
-            ]
+            "const": "field-boolean"
           },
           "value": {
             "type": "boolean"
@@ -2385,9 +2966,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-color"
-            ]
+            "const": "field-color"
           },
           "value": {
             "type": "string"
@@ -2411,9 +2990,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-datetime"
-            ]
+            "const": "field-datetime"
           },
           "value": {
             "type": "string"
@@ -2437,9 +3014,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-image"
-            ]
+            "const": "field-image"
           },
           "value": {
             "anyOf": [
@@ -2470,9 +3045,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-number"
-            ]
+            "const": "field-number"
           },
           "unit": {
             "type": "string"
@@ -2502,9 +3075,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-reference"
-            ]
+            "const": "field-reference"
           },
           "value": {
             "anyOf": [
@@ -2538,9 +3109,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-select"
-            ]
+            "const": "field-select"
           },
           "value": {
             "type": [
@@ -2567,9 +3136,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-slug"
-            ]
+            "const": "field-slug"
           },
           "value": {
             "type": "string"
@@ -2593,9 +3160,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-string"
-            ]
+            "const": "field-string"
           },
           "value": {
             "type": "string"
@@ -2619,9 +3184,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "field-text"
-            ]
+            "const": "field-text"
           },
           "value": {
             "type": "string"
@@ -2648,9 +3211,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "figure"
-            ]
+            "const": "figure"
           }
         },
         "type": "object",
@@ -2674,9 +3235,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "filetree"
-            ]
+            "const": "filetree"
           }
         },
         "type": "object",
@@ -2700,9 +3259,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "footnote"
-            ]
+            "const": "footnote"
           }
         },
         "type": "object",
@@ -2729,9 +3286,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "form"
-            ]
+            "const": "form"
           }
         },
         "type": "object",
@@ -2770,9 +3325,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "gauge-list"
-            ]
+            "const": "gauge-list"
           }
         },
         "type": "object",
@@ -2793,7 +3346,23 @@
             "type": "string"
           },
           "level": {
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 6,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "5",
+                  "6"
+                ]
+              }
+            ]
           },
           "locked": {
             "type": "boolean"
@@ -2805,12 +3374,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "h1",
-              "h2",
-              "h3",
-              "heading"
-            ]
+            "const": "heading"
           }
         },
         "type": "object",
@@ -2858,9 +3422,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "heatmap"
-            ]
+            "const": "heatmap"
           },
           "values": {
             "type": "boolean"
@@ -2875,7 +3437,10 @@
             "type": "string"
           },
           "height": {
-            "type": "number"
+            "type": [
+              "string",
+              "number"
+            ]
           },
           "id": {
             "type": "string"
@@ -2890,12 +3455,13 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "image"
-            ]
+            "const": "image"
           },
           "width": {
-            "type": "number"
+            "type": [
+              "string",
+              "number"
+            ]
           }
         },
         "type": "object",
@@ -2922,9 +3488,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "ingress"
-            ]
+            "const": "ingress"
           }
         },
         "type": "object",
@@ -2951,9 +3515,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "lineage"
-            ]
+            "const": "lineage"
           }
         },
         "type": "object",
@@ -2965,6 +3527,45 @@
             "type": "string"
           },
           "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/definitions/inline"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                {
+                  "properties": {
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "children": {
+                      "items": {
+                        "$ref": "#"
+                      },
+                      "type": "array"
+                    },
+                    "content": {
+                      "items": {
+                        "$ref": "#/definitions/inline"
+                      },
+                      "type": "array"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
             "type": "array"
           },
           "locked": {
@@ -2983,15 +3584,7 @@
             "type": "boolean"
           },
           "type": {
-            "enum": [
-              "bulletList",
-              "bullet_list",
-              "bulleted-list",
-              "bulleted_list",
-              "list",
-              "numbered_list",
-              "ordered-list"
-            ]
+            "const": "list"
           }
         },
         "type": "object",
@@ -3018,9 +3611,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "localizedText"
-            ]
+            "const": "localizedText"
           },
           "value": {
             "type": "object"
@@ -3044,9 +3635,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "master-ref"
-            ]
+            "const": "master-ref"
           },
           "version": {
             "type": "string"
@@ -3099,9 +3688,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "note"
-            ]
+            "const": "note"
           }
         },
         "type": "object",
@@ -3125,9 +3712,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "notes"
-            ]
+            "const": "notes"
           }
         },
         "type": "object",
@@ -3160,9 +3745,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "paper-links"
-            ]
+            "const": "paper-links"
           }
         },
         "type": "object",
@@ -3192,9 +3775,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "paragraph"
-            ]
+            "const": "paragraph"
           }
         },
         "type": "object",
@@ -3218,9 +3799,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "pipeline"
-            ]
+            "const": "pipeline"
           }
         },
         "type": "object",
@@ -3250,9 +3829,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "pre-gate-badge"
-            ]
+            "const": "pre-gate-badge"
           }
         },
         "type": "object",
@@ -3279,9 +3856,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "pullquote"
-            ]
+            "const": "pullquote"
           }
         },
         "type": "object",
@@ -3308,9 +3883,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "questionnaire"
-            ]
+            "const": "questionnaire"
           }
         },
         "type": "object",
@@ -3352,9 +3925,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "roadmap"
-            ]
+            "const": "roadmap"
           }
         },
         "type": "object",
@@ -3390,9 +3961,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "route"
-            ]
+            "const": "route"
           }
         },
         "type": "object",
@@ -3422,9 +3991,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "section"
-            ]
+            "const": "section"
           },
           "variant": {
             "type": "string"
@@ -3451,9 +4018,7 @@
             "type": "object"
           },
           "type": {
-            "enum": [
-              "sheet"
-            ]
+            "const": "sheet"
           }
         },
         "type": "object",
@@ -3516,9 +4081,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "stage"
-            ]
+            "const": "stage"
           }
         },
         "type": "object",
@@ -3566,9 +4129,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "stat"
-            ]
+            "const": "stat"
           },
           "unit": {
             "type": "string"
@@ -3607,9 +4168,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "stat-grid"
-            ]
+            "const": "stat-grid"
           }
         },
         "type": "object",
@@ -3636,9 +4195,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "stats"
-            ]
+            "const": "stats"
           }
         },
         "type": "object",
@@ -3656,9 +4213,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "status-legend"
-            ]
+            "const": "status-legend"
           }
         },
         "type": "object",
@@ -3684,6 +4239,12 @@
                   },
                   "type": "array"
                 },
+                "children": {
+                  "items": {
+                    "$ref": "#"
+                  },
+                  "type": "array"
+                },
                 "title": {
                   "type": "string"
                 }
@@ -3693,9 +4254,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "steps"
-            ]
+            "const": "steps"
           }
         },
         "type": "object",
@@ -3747,9 +4306,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "table"
-            ]
+            "const": "table"
           }
         },
         "type": "object",
@@ -3784,9 +4341,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "tabs"
-            ]
+            "const": "tabs"
           }
         },
         "type": "object",
@@ -3813,9 +4368,7 @@
             "type": "array"
           },
           "type": {
-            "enum": [
-              "task-board"
-            ]
+            "const": "task-board"
           }
         },
         "type": "object",
@@ -3839,9 +4392,7 @@
             "type": "object"
           },
           "type": {
-            "enum": [
-              "task-detail"
-            ]
+            "const": "task-detail"
           }
         },
         "type": "object",
@@ -3874,9 +4425,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "task-list"
-            ]
+            "const": "task-list"
           }
         },
         "type": "object",
@@ -3909,9 +4458,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "tasks"
-            ]
+            "const": "tasks"
           }
         },
         "type": "object",
@@ -3950,9 +4497,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "terminal"
-            ]
+            "const": "terminal"
           }
         },
         "type": "object",
@@ -3985,9 +4530,7 @@
             "type": "boolean"
           },
           "type": {
-            "enum": [
-              "toc"
-            ]
+            "const": "toc"
           }
         },
         "type": "object",
@@ -4020,9 +4563,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "video"
-            ]
+            "const": "video"
           }
         },
         "type": "object",
@@ -4224,7 +4765,7 @@
       "type": "object"
     }
   },
-  "description": "One block of a PortableDoc document. Every type the Barkpark reader renders is under definitions.blocks with its fields and its composition tier (x-tier). x-aliases maps the other spellings the reader accepts to their type. definitions.constraints.declaration is the vocabulary a document type uses to declare its structure.",
+  "description": "One block of a PortableDoc document. Every type the Barkpark reader renders is under definitions.blocks with its fields and its composition tier (x-tier). definitions.aliases holds the other spellings the reader accepts: each names its type (x-alias-of) and the fields the spelling forces (x-set), which override any stored value. definitions.constraints.declaration is the vocabulary a document type uses to declare its structure.",
   "properties": {
     "type": {
       "enum": [
@@ -4326,17 +4867,5 @@
     "type"
   ],
   "title": "PortableDoc block",
-  "type": "object",
-  "x-aliases": {
-    "bulletList": "list",
-    "bullet_list": "list",
-    "bulleted-list": "list",
-    "bulleted_list": "list",
-    "h1": "heading",
-    "h2": "heading",
-    "h3": "heading",
-    "numbered_list": "list",
-    "ordered-list": "list",
-    "quote": "blockquote"
-  }
+  "type": "object"
 }
