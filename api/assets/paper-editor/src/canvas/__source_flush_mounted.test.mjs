@@ -159,7 +159,8 @@ try {
     canvas.resolveConflictWithServerBlocks([paragraph("d9", "Resolved")]);
     assert.equal(textarea.value, "One\n\nTwo, typed", "a conflict resolution does not touch the textarea");
     canvas.resolveConflictWithServerBlocks([paragraph("d7", "Other"), paragraph("d8", "More")]);
-    assert.equal(textarea.value, "One\n\nTwo, typed", "nor one that replaces every block");
+    canvas.resolveConflictWithServerBlocks([paragraph("d8", "More"), paragraph("d7", "Other")]);
+    assert.equal(textarea.value, "One\n\nTwo, typed", "nor one that reorders the blocks (the setContent path)");
   }
 
   // 1) A flush saves the source text and source mode stays open with its caret,
@@ -530,6 +531,15 @@ try {
     const fresh = batches.at(-1).find((op) => op.op === "insert-after");
     assert.ok(fresh && fresh.block.id !== born, "the id the external change removed is not reused for a new block");
     inSync("after an external apply that reordered the blocks");
+    canvas.applyServerBlocks(clone(server));
+    const dropped = server.filter((block) => block.id !== "x1");
+    server.splice(0, server.length, ...clone(dropped));
+    canvas.applyServerBlocks(clone(dropped));
+    value.type(`${textarea.value}\n\nNewer`);
+    canvas.flushPendingChanges();
+    const newer = batches.at(-1).find((op) => op.op === "insert-after");
+    assert.ok(newer && newer.block.id !== "x1", "nor is a block the session opened with, once the server removed it");
+    inSync("after an external apply that removed a block the session opened with");
   }
   {
     const { canvas, server } = await mount([paragraph("l1", "Live")]);
