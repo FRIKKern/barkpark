@@ -18,6 +18,13 @@ defmodule Barkpark.Tasks.AmendmentConfirmation do
   needs its own confirmation, and amending A → B → A cannot resurrect the
   confirmation the first A received.
 
+  WORKER IDS ARE COMPARED NORMALIZED (`same_worker?/2`): trimmed, case-folded
+  and stripped of invisible format characters. A worker id arrives raw from the
+  caller, so a byte-for-byte compare let `Builder`, `"builder "` or `builder`
+  with a zero-width space confirm `builder`'s own wording. This stops a hasty
+  amender, not a determined one: a confirm under any OTHER name still passes,
+  because the ledger trusts the worker name it is given.
+
   Only the LAST amendment matters. If W amended and then V amended again, V is
   now the worker who moved the bar and W reading V's wording is the second pair
   of eyes for it.
@@ -42,6 +49,11 @@ defmodule Barkpark.Tasks.AmendmentConfirmation do
   end
 
   def awaiting_amender(_entry), do: nil
+
+  @doc "Whether two worker ids name the same worker, compared normalized."
+  @spec same_worker?(term(), term()) :: boolean()
+  def same_worker?(a, b) when is_binary(a) and is_binary(b), do: normalize(a) == normalize(b)
+  def same_worker?(_a, _b), do: false
 
   @doc "The worker who made the criterion's last amendment, or `nil`."
   @spec last_amender(term()) :: String.t() | nil
@@ -68,7 +80,8 @@ defmodule Barkpark.Tasks.AmendmentConfirmation do
     list
     |> Enum.with_index()
     |> Enum.filter(fn {entry, _index} ->
-      is_map(entry) and Map.get(entry, "met") == true and awaiting_amender(entry) == worker
+      is_map(entry) and Map.get(entry, "met") == true and
+        same_worker?(awaiting_amender(entry), worker)
     end)
     |> Enum.map(fn {_entry, index} -> index end)
   end
@@ -79,9 +92,16 @@ defmodule Barkpark.Tasks.AmendmentConfirmation do
     entry
     |> list("confirmations")
     |> Enum.any?(fn
-      %{"amendment" => ^count, "worker" => worker} -> worker != amender
+      %{"amendment" => ^count, "worker" => worker} -> not same_worker?(worker, amender)
       _ -> false
     end)
+  end
+
+  defp normalize(worker) do
+    worker
+    |> String.replace(~r/\p{Cf}/u, "")
+    |> String.trim()
+    |> String.downcase()
   end
 
   defp list(entry, key) do

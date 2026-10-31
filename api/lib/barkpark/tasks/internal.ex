@@ -739,8 +739,10 @@ defmodule Barkpark.Tasks.Internal do
           # The amender confirming their own wording is the one pair of eyes
           # this verb exists to add a second to.
           confirms?(update) and
-              AmendmentConfirmation.last_amender(entry) ==
-                get_in(update, ["confirmation", "worker"]) ->
+              AmendmentConfirmation.same_worker?(
+                AmendmentConfirmation.last_amender(entry),
+                get_in(update, ["confirmation", "worker"])
+              ) ->
             {:error, :self_confirmation}
 
           true ->

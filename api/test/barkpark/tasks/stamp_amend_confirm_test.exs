@@ -185,6 +185,37 @@ defmodule Barkpark.Tasks.StampAmendConfirmTest do
     end
   end
 
+  describe "the stamp gate compares worker ids normalized" do
+    test "a holder whose name is a variant of the amender's is still the amender",
+         %{task: task, doc_id: doc_id, scope: scope} do
+      {:ok, _} =
+        Close.close(task.id, "builder",
+          observed_epoch: reload(task).content["claim"]["epoch"],
+          lifecycle_status: "blocked",
+          reason: "handing over"
+        )
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "Reviewer ",
+          observed_epoch: 0,
+          criterion: 0,
+          criterion_text: @c0,
+          observed_rev: reload(task).rev,
+          outcome: {:amend, {@new_c0, "the old wording missed tables"}}
+        )
+
+      {:ok, reclaimed} = Tasks.claim_by_id(doc_id, "reviewer", scope)
+
+      assert {:error, {:amendment_unconfirmed, [0]}} =
+               Stamp.stamp(task.id, "reviewer",
+                 observed_epoch: reclaimed.content["claim"]["epoch"],
+                 criterion: 0,
+                 criterion_text: @new_c0,
+                 outcome: {:met, @evidence}
+               )
+    end
+  end
+
   describe "--confirm-amendment refusals (each writes nothing)" do
     test "the amender cannot confirm their own wording", %{task: task, epoch: epoch} do
       amend!(task, epoch)
@@ -192,6 +223,32 @@ defmodule Barkpark.Tasks.StampAmendConfirmTest do
 
       assert {:error, :self_confirmation} = confirm(task, "builder")
       assert reload(task).rev == rev
+    end
+
+    for alias_name <- ["Builder", "builder ", " builder", "builder\u200b", "BUILDER\u00ad"] do
+      test "the amender cannot confirm as #{inspect(alias_name)} either", %{
+        task: task,
+        epoch: epoch
+      } do
+        amend!(task, epoch)
+
+        assert {:error, :self_confirmation} = confirm(task, unquote(alias_name))
+        assert {:error, {:amendment_unconfirmed, [0]}} = met(task, epoch)
+      end
+    end
+
+    test "a stored confirmation under a variant of the amender's name does not count" do
+      entry = %{
+        "criterion" => @c0,
+        "met" => true,
+        "amendments" => [%{"worker" => "builder"}],
+        "confirmations" => [%{"worker" => " Builder\u200b", "amendment" => 1}]
+      }
+
+      assert AmendmentConfirmation.awaiting_amender(entry) == "builder"
+      assert AmendmentConfirmation.self_amended_met([entry], "BUILDER ") == [0]
+      refute AmendmentConfirmation.same_worker?("builder", "reviewer")
+      refute AmendmentConfirmation.same_worker?(nil, "builder")
     end
 
     test "a never-amended criterion has nothing to confirm", %{task: task} do

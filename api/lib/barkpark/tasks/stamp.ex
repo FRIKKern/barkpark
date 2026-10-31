@@ -735,9 +735,12 @@ defmodule Barkpark.Tasks.Stamp do
       |> Map.get("acceptance_criteria")
       |> Criteria.at(index)
 
-    if AmendmentConfirmation.awaiting_amender(entry) == worker_id,
-      do: {:error, {:amendment_unconfirmed, [index]}},
-      else: :ok
+    if AmendmentConfirmation.same_worker?(
+         AmendmentConfirmation.awaiting_amender(entry),
+         worker_id
+       ),
+       do: {:error, {:amendment_unconfirmed, [index]}},
+       else: :ok
   end
 
   defp check_amendment_confirmed(_doc, _update, _tag, _worker_id), do: :ok
