@@ -335,3 +335,23 @@ func TestTaskCloseReceipt_MatchingReasonPrintsNoDivergenceLine(t *testing.T) {
 		t.Errorf("the divergence line fired on a close whose reason DID land; out:\n%s", out)
 	}
 }
+
+// ARM 6 — a done row keeps its claim map as the record of who closed it
+// (`claim.closed_by`, `claim.closed_at`), so the receipt of an ordinary close
+// must not call that worker its HOLDER. Filed from task-e9c6aa61af536112: every
+// clean close printed "claim still held by <worker>" on a done row.
+func TestTaskCloseReceipt_ClosedClaimIsTheRecordNotAHold(t *testing.T) {
+	closeReceiptServer(t, 0, "done")
+
+	out, code := captureExecuteCode(t, []string{"task", "close", "bp-task-x", "w", "9", "done", "shipped"})
+
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 — the store holds the seal; out:\n%s", code, out)
+	}
+	if strings.Contains(out, "still held") {
+		t.Errorf("a done row whose claim carries closed_by is reported as still held; out:\n%s", out)
+	}
+	if !strings.Contains(out, "closed by w (the claim stays on the row as its record; nobody holds it)") {
+		t.Errorf("the receipt does not name who closed the row; out:\n%s", out)
+	}
+}

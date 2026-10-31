@@ -152,6 +152,8 @@ type cmuxStatus struct {
 	ClaimEpoch   int
 	Lifecycle    string
 	ClaimedAtISO string
+	ClosedBy     string
+	ClosedAtISO  string
 	ExpiresISO   string
 	// ReleasedAtISO is claim.released_at — set only on a row that WAS held and
 	// was released. It is the breadcrumb that tells a reader the retained epoch
@@ -175,7 +177,10 @@ type cmuxStatus struct {
 // bool. It used to come from ClaimEpoch, and a released row kept its epoch, so
 // this reported has_claim:true for a row nobody held and rendered `held by —`
 // with a live lease countdown beside it. Measured on guerrilla against a row
-// claimed and then released through the real verbs. The epoch is still read,
+// claimed and then released through the real verbs.
+// A CLOSED row keeps its worker too, lease timestamps included, so a done row
+// read as held with time left on it until Live() learned the close-out stamp.
+// The epoch is still read,
 // and still read from a released row, because it is the value the NEXT claim
 // increments; see apiclient.Doc.ClaimEpoch for why clearing it corrupts data.
 func (st *cmuxStatus) hydrateLease(doc apiclient.Doc) {
@@ -185,6 +190,8 @@ func (st *cmuxStatus) hydrateLease(doc apiclient.Doc) {
 	st.ClaimEpoch = claim.Epoch
 	st.ClaimWorker = claim.Worker
 	st.ReleasedAtISO = claim.ReleasedAt
+	st.ClosedBy = claim.ClosedBy
+	st.ClosedAtISO = claim.ClosedAt
 	if raw, ok := doc.Extra["claim"]; ok {
 		var c struct {
 			TsISO     string `json:"ts_iso"`
@@ -235,6 +242,9 @@ func renderCmuxStatus(out *writer, st cmuxStatus) int {
 // visible and explains it, so no reader files "a released row should not keep an
 // epoch" as a cleanup; apiclient.Doc.ClaimEpoch documents why that is corruption.
 func (st cmuxStatus) noClaimDetail() string {
+	if st.ClosedBy != "" {
+		return fmt.Sprintf(" · closed by %s at %s (the claim stays on the row as its record; nobody holds it)", st.ClosedBy, st.ClosedAtISO)
+	}
 	if st.ReleasedAtISO == "" {
 		return ""
 	}
@@ -300,6 +310,8 @@ func emitCmuxStatusJSON(out *writer, st cmuxStatus) int {
 		"claimed_at":         st.ClaimedAtISO,
 		"expires_at":         st.ExpiresISO,
 		"released_at":        st.ReleasedAtISO,
+		"closed_by":          st.ClosedBy,
+		"closed_at":          st.ClosedAtISO,
 		"lifecycle":          st.Lifecycle,
 		"lease_ttl_seconds":  ttl,
 	}

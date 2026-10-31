@@ -126,6 +126,26 @@ func TestCloseTaskRefusesAReleasedRowAndSendsNothing(t *testing.T) {
 	}
 }
 
+const deskClosedClaim = `{
+  "closed_at": "2026-10-31T15:03:29.563882Z",
+  "closed_by": "drop-clock",
+  "epoch": 3,
+  "lease_expires_at": "2026-10-31T15:39:06.843197Z",
+  "ts_iso": "2026-10-31T14:54:06.843197Z",
+  "worker": "drop-clock"
+}`
+
+func TestCloseTaskRefusesAClosedRowAndNamesWhoClosedIt(t *testing.T) {
+	p := driveClose(t, deskDocWithClaim("task-8cfd8f13451adff6", deskClosedClaim))
+
+	if p.posted {
+		t.Errorf("a closed row's claim passed the close guard and POSTed %s %s", p.path, p.body)
+	}
+	if !p.statusIs || !strings.Contains(p.status, "closed by drop-clock at 2026-10-31T15:03:29.563882Z") {
+		t.Errorf("the refusal must name who closed it and when; statusErr=%v msg=%q", p.statusIs, p.status)
+	}
+}
+
 // THE SECOND ARM. A guard that refuses EVERYTHING passes the test above and is
 // a worse bug than the one it replaces. Deleting ClaimInfo.Live's worker-value
 // read (returning false unconditionally) REDS THIS.

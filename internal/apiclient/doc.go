@@ -391,6 +391,10 @@ type ClaimInfo struct {
 	Epoch      int
 	ReleasedAt string
 	ExpiredAt  string
+	// ClosedBy is the close-out stamp: the server keeps the claim map on every
+	// close and writes `closed_by` + `closed_at` onto it, worker and all.
+	ClosedBy string
+	ClosedAt string
 }
 
 // ClaimInfo decodes this document's claim object. Absent, null, or
@@ -398,10 +402,12 @@ type ClaimInfo struct {
 // decodes to Worker:"" (a genuinely vacant claim), which callers must tell
 // apart from Present:false (no claim object was ever written).
 func (d Doc) ClaimInfo() ClaimInfo {
-	raw, ok := d.Extra["claim"]
-	if !ok {
-		return ClaimInfo{}
-	}
+	return ClaimInfoOf(d.Extra["claim"])
+}
+
+// ClaimInfoOf decodes one raw claim object, so a reader holding a row's JSON
+// asks Live() the same question a Doc does.
+func ClaimInfoOf(raw json.RawMessage) ClaimInfo {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return ClaimInfo{}
 	}
@@ -410,11 +416,13 @@ func (d Doc) ClaimInfo() ClaimInfo {
 		Epoch      int     `json:"epoch"`
 		ReleasedAt string  `json:"released_at"`
 		ExpiredAt  string  `json:"expired_at"`
+		ClosedBy   string  `json:"closed_by"`
+		ClosedAt   string  `json:"closed_at"`
 	}
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return ClaimInfo{}
 	}
-	info := ClaimInfo{Present: true, Epoch: c.Epoch, ReleasedAt: c.ReleasedAt, ExpiredAt: c.ExpiredAt}
+	info := ClaimInfo{Present: true, Epoch: c.Epoch, ReleasedAt: c.ReleasedAt, ExpiredAt: c.ExpiredAt, ClosedBy: c.ClosedBy, ClosedAt: c.ClosedAt}
 	if c.Worker != nil {
 		info.Worker = *c.Worker
 	}
@@ -433,8 +441,13 @@ func (d Doc) ClaimInfo() ClaimInfo {
 // presence of a worker key are ALL false positives for liveness; see
 // ClaimEpoch's comment for the measurement and for why the retained epoch must
 // stay exactly where it is.
+//
+// A CLOSED row keeps its worker too: close stamps `closed_by` and `closed_at`
+// onto the claim and leaves the rest, so a stamped claim is the row's record of
+// who did the work, not a hold. Either stamp settles it, as in the server's
+// queue (queue.ex 4a).
 func (c ClaimInfo) Live() bool {
-	return c.Present && strings.TrimSpace(c.Worker) != ""
+	return c.Present && strings.TrimSpace(c.Worker) != "" && c.ClosedBy == "" && c.ClosedAt == ""
 }
 
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,

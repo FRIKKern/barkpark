@@ -273,8 +273,7 @@ func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, 
 		}
 		return v + "; reopen it with `bp task stage <id> open` first, then claim"
 	}
-	hasWorker := claim.Present && claim.Worker != ""
-	if !hasWorker {
+	if !claim.Live() {
 		if gate.gating() {
 			v := fmt.Sprintf("queue_gate state is %q — this row is gated by its AUTHOR, not by readiness, and no retry will change that", gate.State)
 			if gate.Reason != "" {

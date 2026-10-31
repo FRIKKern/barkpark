@@ -572,14 +572,25 @@ func reportCloseReasonReplaced(out *writer, req closeRequest, readback apiclient
 // storedSealSummary describes the row AS STORED. The criteria count rides along
 // because close writes criteria in the same atomic update, so a seal that landed
 // while the criteria did not is visible rather than merely possible.
+//
+// A claim that carries the close-out stamp is the row's record, not a hold:
+// `Tasks.Close.apply_close_update` keeps the claim map on every close (see
+// closeClaimIsLive), so naming its worker as the HOLDER of a done row told
+// every closer their seal had half-landed when it had not.
 func storedSealSummary(stored taskboard.SealRow) string {
 	seal := stored.LifecycleStatus
 	if seal == "" {
 		seal = "<the server named no lifecycle_status>"
 	}
 	s := fmt.Sprintf("lifecycle_status=%s  criteria %d/%d met", seal, stored.Met, stored.Total)
-	if stored.ClaimWorker != "" {
+	switch {
+	case stored.ClaimWorker == "":
+	case stored.ClosedBy == "":
 		s += fmt.Sprintf("  claim still held by %s", stored.ClaimWorker)
+	case stored.ClosedBy == stored.ClaimWorker:
+		s += fmt.Sprintf("  closed by %s (the claim stays on the row as its record; nobody holds it)", stored.ClosedBy)
+	default:
+		s += fmt.Sprintf("  claimed by %s, closed by %s (the claim stays on the row as its record; nobody holds it)", stored.ClaimWorker, stored.ClosedBy)
 	}
 	return s
 }

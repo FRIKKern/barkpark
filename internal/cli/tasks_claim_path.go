@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -183,16 +184,13 @@ func readTaskClaims(raw []byte, id string, shape taskReadShape) (TaskClaimReport
 				continue
 			}
 			report.ClaimKeyPresent++
-			obj, ok := claim.(map[string]any)
-			if !ok {
-				continue
-			}
-			worker, _ := obj["worker"].(string)
-			if worker == "" {
+			raw, _ := json.Marshal(claim)
+			info := apiclient.ClaimInfoOf(raw)
+			if !info.Live() {
 				continue
 			}
 			report.Claimed++
-			report.Workers = append(report.Workers, worker)
+			report.Workers = append(report.Workers, info.Worker)
 		}
 	}
 

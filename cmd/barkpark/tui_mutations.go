@@ -403,6 +403,9 @@ func (m *model) closeTask(doc *Doc) {
 // old ClaimEpoch guard called a released row claimed. Naming the release is
 // what turns "not claimed" from a puzzle into an instruction.
 func notClaimedStatus(claim apiclient.ClaimInfo) string {
+	if claim.Present && claim.ClosedBy != "" {
+		return "closed by " + claim.ClosedBy + " at " + claim.ClosedAt + " — the claim stays on the row as its record; nobody holds it"
+	}
 	if claim.Present && claim.ReleasedAt != "" {
 		return "released at " + claim.ReleasedAt + " — its epoch is retained for the NEXT claim, not for you; claim first (c)"
 	}

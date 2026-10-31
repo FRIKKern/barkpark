@@ -36,6 +36,11 @@ type SealRow struct {
 	// when the close released it. A close that seals the row but leaves a live
 	// claim behind has half-landed.
 	ClaimWorker string
+	// ClosedBy is the close-out stamp on that claim: the worker the close sealed
+	// the row as. The server keeps the claim map on every close and stamps
+	// `closed_by` + `closed_at` onto it, so a claim that carries one is the row's
+	// record of who did the work, not a lease anybody still holds.
+	ClosedBy string
 }
 
 // FetchSeal re-reads task docID and decodes the post-close state, alongside the
@@ -68,10 +73,12 @@ func FetchSeal(c *apiclient.Client, docID string) (SealRow, apiclient.TaskReadba
 		}
 	}
 	var claim struct {
-		Worker string `json:"worker"`
+		Worker   string `json:"worker"`
+		ClosedBy string `json:"closed_by"`
 	}
 	if len(rb.Claim) > 0 && json.Unmarshal(rb.Claim, &claim) == nil {
 		row.ClaimWorker = claim.Worker
+		row.ClosedBy = claim.ClosedBy
 	}
 	return row, rb, nil
 }

@@ -1379,10 +1379,10 @@ func (m Model) taskByID(id string) (Task, bool) {
 }
 
 // hasLiveClaim reports whether a task currently holds a claim (a present claim
-// with a non-empty worker — a swept lease clears the worker). Only such a task
-// can be closed.
+// with a non-empty worker — a swept lease clears the worker — and no close-out
+// stamp). Only such a task can be closed.
 func hasLiveClaim(t Task) bool {
-	return t.Claim != nil && t.Claim.Worker != ""
+	return t.Claim != nil && t.Claim.Worker != "" && !t.Claim.Closed
 }
 
 // claimBlockedReason explains, in plain words, why a non-ready row cannot be

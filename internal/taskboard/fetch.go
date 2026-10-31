@@ -741,6 +741,7 @@ type claimWire struct {
 	// a detail field feeding the enrichment control's stratification, so a
 	// malformed value must degrade to "" rather than fail the whole list decode.
 	ClosedBy json.RawMessage `json:"closed_by"`
+	ClosedAt json.RawMessage `json:"closed_at"`
 	// Now is the D9 pulse — content.claim.now {"text","ts","criterion"?}.
 	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
 	// no-pulse instead of failing the whole list decode.
@@ -838,7 +839,8 @@ func (w taskWire) toTask() Task {
 			at = w.Claim.ClaimedAt
 		}
 		t.Claim = &Claim{Worker: w.Claim.Worker, Epoch: w.Claim.Epoch, ClaimedAt: at,
-			Now: decodePulse(w.Claim.Now), LeaseSeconds: decodeLeaseSeconds(w.Claim.LeaseSeconds)}
+			Now: decodePulse(w.Claim.Now), LeaseSeconds: decodeLeaseSeconds(w.Claim.LeaseSeconds),
+			Closed: rawString(w.Claim.ClosedBy) != "" || rawString(w.Claim.ClosedAt) != ""}
 	}
 	// criteria_progress is OMITTED when absent (wire contract), so a nil
 	// pointer stays a nil Criteria — never a misleading 0/0.

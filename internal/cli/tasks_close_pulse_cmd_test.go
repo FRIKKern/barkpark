@@ -213,3 +213,27 @@ func TestRenderPulseVerdict_DraftRowRefusesTheGreen(t *testing.T) {
 		t.Fatalf("a pulse confirmed only on a DRAFT exited 0; output:\n%s", buf())
 	}
 }
+
+// The summary names a claim's worker as its HOLDER only while the claim carries
+// no close-out stamp; a stamped claim is the record of who did the work.
+func TestStoredSealSummary_ClaimIsAHoldOnlyWithoutACloseOutStamp(t *testing.T) {
+	row := func(worker, closedBy string) taskboard.SealRow {
+		r := closeStoredBacked()
+		r.ClaimWorker, r.ClosedBy = worker, closedBy
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		row  taskboard.SealRow
+		want string
+	}{
+		{"no claim", row("", ""), "lifecycle_status=done  criteria 3/3 met"},
+		{"a claim with no close-out stamp", row("go-internal", ""), "lifecycle_status=done  criteria 3/3 met  claim still held by go-internal"},
+		{"closed by its own worker", row("go-internal", "go-internal"), "lifecycle_status=done  criteria 3/3 met  closed by go-internal (the claim stays on the row as its record; nobody holds it)"},
+		{"closed over someone else's claim", row("someone-else", "go-internal"), "lifecycle_status=done  criteria 3/3 met  claimed by someone-else, closed by go-internal (the claim stays on the row as its record; nobody holds it)"},
+	} {
+		if got := storedSealSummary(tc.row); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}

@@ -86,6 +86,10 @@ type Claim struct {
 	// and the board falls back to defaultClaimLeaseTTL (2700s), the same server
 	// default, NEVER to a client-invented number (task-f30dab8c54c605e6).
 	LeaseSeconds int
+	// Closed is true when the claim carries a close-out stamp (closed_by or
+	// closed_at). Close keeps the worker as the row's record, so Closed is what
+	// says nobody holds it.
+	Closed bool
 }
 
 // ClaimPulse is the decoded content.claim.now — {"text","ts","criterion"?}
