@@ -39,7 +39,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { exitRig, skip } from "../__rig.mjs";
+import { exitRig, skip, tally } from "../__rig.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -48,21 +48,11 @@ const REPO = join(HERE, "../../../../..");
 const HARNESS_DIR = "api/assets/paper-editor/src/canvas";
 const REAL_FIXTURE = "./__fixtures/paper-mechanical-spacing-doctrine.json";
 
-let failures = 0;
-let passes = 0;
+const rig = tally();
 // Every arm is awaited. The static server below lives IN THIS PROCESS, so a
 // synchronous child_process call would block the event loop and Chromium would
 // hang forever on a request node can never answer — measured, not theorised.
-const check = async (name, fn) => {
-  try {
-    await fn();
-    passes++;
-    console.log(`PASS  ${name}`);
-  } catch (e) {
-    failures++;
-    console.log(`FAIL  ${name}\n      ${e.message}`);
-  }
-};
+const check = rig.checkAsync;
 
 // ── 1. chrome ────────────────────────────────────────────────────────────────
 
@@ -294,5 +284,5 @@ if (!CHROME) {
   }
 }
 
-console.log(failures === 0 ? "\nOK  __harness_generic_run.mjs" : `\n${failures} FAILING  __harness_generic_run.mjs`);
-exitRig(passes, failures);
+console.log(rig.failures === 0 ? "\nOK  __harness_generic_run.mjs" : `\n${rig.failures} FAILING  __harness_generic_run.mjs`);
+exitRig(rig.passes, rig.failures);

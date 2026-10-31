@@ -1,11 +1,12 @@
 // __rig.test.mjs — the rig exit rule (__rig.mjs) holds, and every rig uses it.
 //
 // 1. skip() exits 0 locally and 1 under BP_REQUIRE_CHROME=1; exitRig() exits 1
-//    on zero PASS and on any failure.
+//    on zero PASS and on any failure; tally() counts every PASS and every FAIL.
 // 2. A predicate, not a list: every file under src/ that looks for a browser
 //    (names BP_CHROME) imports __rig.mjs, exits through exitRig(), never prints
-//    SKIP by hand and never calls process.exit(0) or sets process.exitCode. A
-//    new rig that skips green, or ends on its own exit code, reds.
+//    SKIP by hand, never calls process.exit(0) or sets process.exitCode, and
+//    keeps no PASS counter of its own. A new rig that skips green, ends on its
+//    own exit code, or counts its own passes, reds.
 //
 // Run: node src/__rig.test.mjs   (or: npm test)
 
@@ -14,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tally } from "./__rig.mjs";
 
 const SRC = fileURLToPath(new URL(".", import.meta.url));
 const RIG = new URL("./__rig.mjs", import.meta.url).href;
@@ -41,6 +43,30 @@ assert.match(run('skip("x")').out, /^SKIP  x$/m);
 assert.match(run('skip("x")', { BP_REQUIRE_CHROME: "1" }).out, /^FAIL  BP_REQUIRE_CHROME=1/m);
 assert.match(run("exitRig(0, 0)").out, /^FAIL  0 PASS/m);
 
+const printed = [];
+const log = console.log;
+console.log = (line) => printed.push(line);
+let t, quiet, returned;
+try {
+  t = tally();
+  t.check("a", () => {});
+  t.check("b", () => { throw new Error("boom"); });
+  t.record("c", true);
+  t.record("d", false, "why");
+  await t.checkAsync("e", async () => {});
+  await t.checkAsync("f", async () => { throw new Error("late"); });
+  quiet = tally({ verbose: false });
+  quiet.check("g", () => {});
+  quiet.check("h", () => { throw new Error("loud"); });
+  returned = [quiet.record("x", false), quiet.record("y", true)];
+} finally {
+  console.log = log;
+}
+assert.deepEqual([t.passes, t.failures], [3, 3], "tally counts every PASS and every FAIL");
+assert.deepEqual([quiet.passes, quiet.failures], [2, 2], "a quiet tally still counts its passes");
+assert.deepEqual(printed, ["PASS  a", "FAIL  b\n      boom", "PASS  c", "FAIL  d\n      why", "PASS  e", "FAIL  f\n      late", "FAIL  h\n      loud", "FAIL  x"]);
+assert.deepEqual(returned, [false, true], "record returns its verdict");
+
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(join(dir, e.name)) : /\.m?js$/.test(e.name) ? [join(dir, e.name)] : [],
@@ -58,6 +84,7 @@ const broken = rigs.flatMap(({ f, src }) => [
   ...(/\bexitRig\(/.test(src) ? [] : [`${f}: does not exit through exitRig()`]),
   ...(/process\.exit\((?!skip\()/.test(src) ? [`${f}: calls process.exit outside skip()`] : []),
   ...(/process\.exitCode/.test(src) ? [`${f}: sets process.exitCode`] : []),
+  ...(/\blet passes\b|\bpasses\s*(\+\+|\+=)/.test(src) ? [`${f}: counts its own passes instead of tally()`] : []),
   ...(/console\.log\([`"']SKIP/.test(src) ? [`${f}: prints SKIP by hand instead of skip()`] : []),
 ]);
 assert.deepEqual(broken, [], "every rig exits through __rig.mjs");

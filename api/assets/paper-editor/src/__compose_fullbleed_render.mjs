@@ -66,7 +66,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { exitRig, skip } from "./__rig.mjs";
+import { exitRig, skip, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, "../../../..");
@@ -234,12 +234,8 @@ document.getElementById('__out').textContent = 'RESULT' + JSON.stringify(out);
   return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
 }
 
-let failures = 0;
-let passes = 0;
-const check = (name, fn) => {
-  try { fn(); passes++; if (VERBOSE) console.log(`PASS  ${name}`); }
-  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
-};
+const rig = tally({ verbose: VERBOSE });
+const check = rig.check;
 const r2 = (n) => (n === null ? "—" : Math.round(n * 100) / 100);
 
 const missing = Object.keys(FAMILIES).filter((f) => !golden(f));
@@ -397,5 +393,5 @@ console.log(
       "         consistent answer."
     : "ARBITER: the reader does NOT uniformly stretch — read the rows above before changing pdrender.",
 );
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-exitRig(passes, failures);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);

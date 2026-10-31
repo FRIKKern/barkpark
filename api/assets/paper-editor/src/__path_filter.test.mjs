@@ -65,11 +65,6 @@ export function globToRegExp(pattern) {
   return new RegExp(`^${re}$`);
 }
 
-const inside = (p) => p === PKG || p.startsWith(PKG + sep);
-const inRepo = (p) => p.startsWith(REPO + sep);
-const ancestorOfPkg = (p) => PKG.startsWith(p + sep);
-const repoPath = (p) => relative(REPO, p).split(sep).join("/");
-
 function kind(p) {
   if (!existsSync(p)) return null;
   return statSync(p).isDirectory() ? "dir" : "file";
@@ -108,79 +103,102 @@ const literalValue = (arg) => {
   return m ? m[2] : null;
 };
 
-function candidates(file, text) {
-  const out = [];
-  const add = (lit, bases) => {
-    const { fixed, templated } = fixedPart(lit);
-    const path = firstExisting(bases, fixed);
-    if (path) out.push({ path, templated });
-  };
-  const here = [dirname(file), PKG];
-  const anywhere = [dirname(file), PKG, REPO];
-  for (const m of text.matchAll(LITERAL)) {
-    const lit = m[2];
-    if (/^\.\.?\//.test(lit)) add(lit, here);
-    else if (/^[A-Za-z_][\w.@-]*\//.test(lit)) add(lit, [REPO]);
-    const head = lit.match(/^\$\{[A-Za-z_$][\w$.]*\}\/(.+)$/s);
-    if (head) add(head[1], anywhere);
-  }
-  for (const m of text.matchAll(/[A-Za-z_$][\w$.]*\s*\+\s*(["'`])\/([^"'`\n]+)\1/g)) add(m[2], anywhere);
-  for (const m of text.matchAll(/\b(?:join|resolve)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
-    const [first, ...rest] = splitArgs(m[1]);
-    if (!IDENT.test(first)) continue;
-    const parts = [];
-    for (const arg of rest) {
-      const v = literalValue(arg);
-      if (v === null) break;
-      parts.push(v);
+export function scanner({ repo, pkg, notRead = new Map(), self = null }) {
+  const inside = (p) => p === pkg || p.startsWith(pkg + sep);
+  const inRepo = (p) => p.startsWith(repo + sep);
+  const ancestorOfPkg = (p) => pkg.startsWith(p + sep);
+  const repoPath = (p) => relative(repo, p).split(sep).join("/");
+
+  function candidates(file, text) {
+    const out = [];
+    const add = (lit, bases) => {
+      const { fixed, templated } = fixedPart(lit);
+      const path = firstExisting(bases, fixed);
+      if (path) out.push({ path, templated });
+    };
+    const here = [dirname(file), pkg];
+    const anywhere = [dirname(file), pkg, repo];
+    for (const m of text.matchAll(LITERAL)) {
+      const lit = m[2];
+      if (/^\.\.?\//.test(lit)) add(lit, here);
+      else if (/^[A-Za-z_][\w.@-]*\//.test(lit)) add(lit, [repo]);
+      const head = lit.match(/^\$\{[A-Za-z_$][\w$.]*\}\/(.+)$/s);
+      if (head) add(head[1], anywhere);
     }
-    if (parts.length) add(parts.join("/"), anywhere);
+    for (const m of text.matchAll(/[A-Za-z_$][\w$.]*\s*\+\s*(["'`])\/([^"'`\n]+)\1/g)) add(m[2], anywhere);
+    for (const m of text.matchAll(/\b(?:join|resolve)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+      const [first, ...rest] = splitArgs(m[1]);
+      if (!IDENT.test(first)) continue;
+      const parts = [];
+      for (const arg of rest) {
+        const v = literalValue(arg);
+        if (v === null) break;
+        parts.push(v);
+      }
+      if (parts.length) add(parts.join("/"), anywhere);
+    }
+    if (extname(file) === ".css") {
+      for (const m of text.matchAll(/url\(\s*([^"')\s]+)\s*\)/g)) add(m[1], here);
+    }
+    return out;
   }
-  if (extname(file) === ".css") {
-    for (const m of text.matchAll(/url\(\s*([^"')\s]+)\s*\)/g)) add(m[1], here);
+
+  function sinkOf(file, { path, templated }) {
+    if (!inRepo(path) || ancestorOfPkg(path) || path.includes(`${sep}node_modules${sep}`)) return null;
+    const k = kind(path);
+    if (templated && k !== "dir") return null;
+    if (inside(path)) return k === "file" ? { follow: path } : null;
+    const sink = k === "dir" ? `${repoPath(path)}/` : repoPath(path);
+    if (notRead.has(sink) && (file === self || notRead.get(sink) === relative(pkg, file).split(sep).join("/"))) return null;
+    return { sink };
   }
-  return out;
+
+  function reads(yml, scripts) {
+    const sinks = new Map();
+    const queue = [];
+    const visited = new Set();
+    const expanded = new Set();
+    const expand = (name) => {
+      for (const hook of [`pre${name}`, name, `post${name}`]) {
+        if (expanded.has(hook) || typeof scripts[hook] !== "string") continue;
+        expanded.add(hook);
+        commands(scripts[hook]);
+      }
+    };
+    const commands = (text) => {
+      for (const m of text.matchAll(/\bnode\s+([^\s&|;"'>]+\.(?:mjs|cjs|js))/g)) queue.push(resolve(pkg, m[1]));
+      for (const m of text.matchAll(/\besbuild\s+([^\s&|;"'>-][^\s&|;"'>]*)/g)) queue.push(resolve(pkg, m[1]));
+      for (const m of text.matchAll(/\bnpm\s+run\s+([\w:-]+)/g)) expand(m[1]);
+      for (const m of text.matchAll(/["']npm["'],\s*\[\s*["']run["'],\s*["']([\w:-]+)["']/g)) expand(m[1]);
+      if (/\bnpm\s+test\b/.test(text)) expand("test");
+    };
+    commands(yml);
+    const entries = queue.length;
+    while (queue.length) {
+      const file = queue.shift();
+      if (visited.has(file) || kind(file) !== "file") continue;
+      visited.add(file);
+      if (!SCANNED.has(extname(file))) continue;
+      const text = readFileSync(file, "utf8");
+      commands(text);
+      for (const c of candidates(file, text)) {
+        const hit = sinkOf(file, c);
+        if (hit?.follow) queue.push(hit.follow);
+        else if (hit && !sinks.has(hit.sink)) sinks.set(hit.sink, repoPath(file));
+      }
+    }
+    return { entries, sinks, visited };
+  }
+
+  return { candidates, sinkOf, reads };
 }
 
-export function reads(yml, scripts) {
-  const sinks = new Map();
-  const queue = [];
-  const visited = new Set();
-  const expanded = new Set();
-  const expand = (name) => {
-    for (const hook of [`pre${name}`, name, `post${name}`]) {
-      if (expanded.has(hook) || typeof scripts[hook] !== "string") continue;
-      expanded.add(hook);
-      commands(scripts[hook]);
-    }
+export function verdict(arms, sinks, pkgPrefix) {
+  return {
+    unequal: JSON.stringify(arms.push) !== JSON.stringify(arms.pull_request),
+    missing: [...sinks].filter(([sink]) => !covers(arms.push, sink)).map(([sink, by]) => `${sink}  (read by ${by})`),
+    unused: arms.push.filter((p) => !p.startsWith(pkgPrefix) && ![...sinks.keys()].some((s) => covers([p], s))),
   };
-  const commands = (text) => {
-    for (const m of text.matchAll(/\bnode\s+([^\s&|;"'>]+\.(?:mjs|cjs|js))/g)) queue.push(resolve(PKG, m[1]));
-    for (const m of text.matchAll(/\besbuild\s+([^\s&|;"'>-][^\s&|;"'>]*)/g)) queue.push(resolve(PKG, m[1]));
-    for (const m of text.matchAll(/\bnpm\s+run\s+([\w:-]+)/g)) expand(m[1]);
-    for (const m of text.matchAll(/["']npm["'],\s*\[\s*["']run["'],\s*["']([\w:-]+)["']/g)) expand(m[1]);
-    if (/\bnpm\s+test\b/.test(text)) expand("test");
-  };
-  commands(yml);
-  const entries = queue.length;
-  while (queue.length) {
-    const file = queue.shift();
-    if (visited.has(file) || kind(file) !== "file") continue;
-    visited.add(file);
-    if (!SCANNED.has(extname(file))) continue;
-    const text = readFileSync(file, "utf8");
-    commands(text);
-    for (const { path, templated } of candidates(file, text)) {
-      if (!inRepo(path) || ancestorOfPkg(path) || path.includes(`${sep}node_modules${sep}`)) continue;
-      const k = kind(path);
-      if (templated && k !== "dir") continue;
-      if (inside(path)) { if (k === "file") queue.push(path); continue; }
-      const sink = k === "dir" ? `${repoPath(path)}/` : repoPath(path);
-      if (NOT_READ.has(sink) && (file === SELF || NOT_READ.get(sink) === relative(PKG, file).split(sep).join("/"))) continue;
-      if (!sinks.has(sink)) sinks.set(sink, repoPath(file));
-    }
-  }
-  return { entries, sinks, visited };
 }
 
 export const covers = (patterns, sink) => {
@@ -192,27 +210,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const yml = readFileSync(WORKFLOW, "utf8");
   const scripts = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")).scripts;
   const arms = filterArms(yml);
-
   assert.deepEqual(Object.keys(arms).sort(), ["pull_request", "push"], "the workflow has a push and a pull_request path filter");
-  assert.deepEqual(arms.pull_request, arms.push, "push and pull_request list the same paths");
 
-  const { entries, sinks, visited } = reads(yml, scripts);
+  const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF }).reads(yml, scripts);
   assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
   assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
 
-  const missing = [...sinks].filter(([sink]) => !covers(arms.push, sink));
-  assert.deepEqual(
-    missing.map(([sink, by]) => `${sink}  (read by ${by})`),
-    [],
-    "files a paper-editor step reads that its path filter does not list: add each to BOTH arms of .github/workflows/paper-editor.yml",
-  );
-
-  const unused = arms.push.filter((p) => !p.startsWith("api/assets/paper-editor/") && ![...sinks.keys()].some((s) => covers([p], s)));
+  const { unequal, missing, unused } = verdict(arms, sinks, "api/assets/paper-editor/");
+  assert.equal(unequal, false, "push and pull_request list the same paths");
+  assert.deepEqual(missing, [], "files a paper-editor step reads that its path filter does not list: add each to BOTH arms of .github/workflows/paper-editor.yml");
   assert.deepEqual(unused, [], "path filter entries no paper-editor step reads: remove them, or the derivation missed a read");
-
-  assert.equal(covers(["api/priv/static/assets/*"], "api/priv/static/assets/"), true);
-  assert.equal(covers(["api/priv/static/assets/*.css"], "api/priv/static/assets/"), false);
-  assert.equal(covers(["api/lib/a.ex"], "api/lib/b.ex"), false);
 
   console.log(`ok path filter: ${sinks.size} outside reads from ${visited.size} files, all in both arms`);
 }

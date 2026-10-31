@@ -18,7 +18,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { exitRig, skip } from "../__rig.mjs";
+import { exitRig, skip, tally } from "../__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASSETS = join(HERE, "../../../../priv/static/assets");
@@ -92,13 +92,8 @@ function measure(width, strings) {
 }
 
 const LONG = { "insert link": "sett inn lenke til notatet", navigate: "bla gjennom resultatene", dismiss: "lukk uten å velge noe" };
-let failures = 0;
-let passes = 0;
-const check = (name, ok, got) => {
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `\n      ${JSON.stringify(got)}`}`);
-  if (ok) passes += 1;
-  else failures += 1;
-};
+const rig = tally();
+const check = (name, ok, got) => rig.record(name, ok, JSON.stringify(got));
 
 for (const width of WIDTHS) {
   const r = measure(width, {});
@@ -110,5 +105,5 @@ for (const width of WIDTHS) {
   check(`a host's longer words keep the footer on one line at ${width} px`, long.lines === 1, long);
 }
 
-console.log(failures ? `\n${failures} failing` : "\nall pass");
-exitRig(passes, failures);
+console.log(rig.failures ? `\n${rig.failures} failing` : "\nall pass");
+exitRig(rig.passes, rig.failures);

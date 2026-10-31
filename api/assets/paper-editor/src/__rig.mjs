@@ -7,6 +7,9 @@
 //                       failure count.
 //   exitRig(p, f)       exits 1 on any failure, and on ZERO passes: a rig that
 //                       ran no case is broken, not clean.
+//   tally({ verbose })  the one PASS/FAIL counter rigs share: check(name, fn),
+//                       checkAsync(name, fn), record(name, ok, detail). PASS
+//                       lines print only when verbose; FAIL lines always.
 //
 // Locally, with no browser, a SKIP still exits 0: `npm test` and the render
 // scripts stay runnable on a machine that has none.
@@ -26,4 +29,30 @@ export function exitRig(passes, failures) {
     process.exit(1);
   }
   process.exit(failures === 0 ? 0 : 1);
+}
+
+export function tally({ verbose = true } = {}) {
+  const t = {
+    passes: 0,
+    failures: 0,
+    record(name, ok, detail) {
+      if (ok) {
+        t.passes += 1;
+        if (verbose) console.log(`PASS  ${name}`);
+      } else {
+        t.failures += 1;
+        console.log(`FAIL  ${name}${detail === undefined ? "" : `\n      ${detail}`}`);
+      }
+      return ok;
+    },
+    check(name, fn) {
+      try { fn(); } catch (e) { return t.record(name, false, e.message); }
+      return t.record(name, true);
+    },
+    async checkAsync(name, fn) {
+      try { await fn(); } catch (e) { return t.record(name, false, e.message); }
+      return t.record(name, true);
+    },
+  };
+  return t;
 }

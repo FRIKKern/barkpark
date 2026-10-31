@@ -50,7 +50,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { exitRig } from "./__rig.mjs";
+import { exitRig, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const surface = readFileSync(
@@ -58,12 +58,8 @@ const surface = readFileSync(
   "utf8",
 );
 
-let failures = 0;
-let passes = 0;
-function check(name, fn) {
-  try { fn(); passes++; console.log(`PASS  ${name}`); }
-  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
-}
+const rig = tally();
+const check = rig.check;
 
 // Returns the declaration block of the rule whose selector list STARTS with the
 // given text. Anchoring on the whole selector list matters here: a bare
@@ -144,5 +140,5 @@ for (const role of ["bp-role-ingress", "bp-role-pullquote"]) {
   });
 }
 
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-exitRig(passes, failures);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);
