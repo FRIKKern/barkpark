@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Window } from 'happy-dom'
 import {
   MISSING,
+  cli,
   conform,
   counts,
   diffShapes,
@@ -144,6 +145,24 @@ describe('the shared conformance normaliser', () => {
     await expect(conform({ renderer: 'x', compare: 'dom', judge: () => [] })).rejects.toThrow(
       /cannot see a missing type/,
     )
+  })
+
+  it('cli exits 1 on no pack or a report that is not committed, 0 on a clean check', async () => {
+    const before = process.exitCode
+    const env = { ...process.env }
+    delete process.env.CONFORMANCE_WRITE
+    delete process.env.CONFORMANCE_STRICT
+    try {
+      await cli({ renderer: 'react', compare: 'dom', judge, pack: '/nonexistent-pack' })
+      expect(process.exitCode).toBe(1)
+      await cli({ renderer: 'conformance-uncommitted', compare: 'dom', judge })
+      expect(process.exitCode).toBe(1)
+      await cli({ renderer: 'react', compare: 'dom', judge })
+      expect(process.exitCode).toBe(0)
+    } finally {
+      process.exitCode = before
+      Object.assign(process.env, env)
+    }
   })
 
   it('settle reports a stale stamp, a drifted row, a missing report and strict reds', () => {

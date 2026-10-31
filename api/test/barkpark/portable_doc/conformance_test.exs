@@ -24,6 +24,13 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
     assert Conformance.settle(Conformance.report(), false, false) == []
   end
 
+  test "strict mode reds every row that is not a pass" do
+    report = Conformance.report()
+    red = %{report | rows: [%{type: "t", status: :missing} | report.rows]}
+    assert "strict: t is missing" in Conformance.settle(red, false, true)
+    assert Conformance.settle(report, false, true) == []
+  end
+
   test "every renderer in this repo has a committed report" do
     assert Enum.sort(Map.keys(committed())) == @renderers
   end
