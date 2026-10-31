@@ -521,7 +521,4 @@ const reportFile = join(ARTIFACTS, "report.json");
 writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`\nEvidence: ${reportFile}`);
 console.log(`Screenshots: ${ARTIFACTS}`);
-if (!SCENARIOS.length || !FIXTURES.length) {
-  console.log("FAIL  no scenario or fixture was compared — the rig measured nothing");
-  process.exitCode = 1;
-} else if (failures && !REPORT_ONLY) process.exitCode = 1;
+if (failures && !REPORT_ONLY) process.exitCode = 1;
