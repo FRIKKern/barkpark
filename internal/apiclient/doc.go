@@ -391,6 +391,10 @@ type ClaimInfo struct {
 	Epoch      int
 	ReleasedAt string
 	ExpiredAt  string
+	// ClosedBy is the close-out stamp: the server keeps the claim map on every
+	// close and writes `closed_by` + `closed_at` onto it, worker and all.
+	ClosedBy string
+	ClosedAt string
 }
 
 // ClaimInfo decodes this document's claim object. Absent, null, or
@@ -410,11 +414,13 @@ func (d Doc) ClaimInfo() ClaimInfo {
 		Epoch      int     `json:"epoch"`
 		ReleasedAt string  `json:"released_at"`
 		ExpiredAt  string  `json:"expired_at"`
+		ClosedBy   string  `json:"closed_by"`
+		ClosedAt   string  `json:"closed_at"`
 	}
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return ClaimInfo{}
 	}
-	info := ClaimInfo{Present: true, Epoch: c.Epoch, ReleasedAt: c.ReleasedAt, ExpiredAt: c.ExpiredAt}
+	info := ClaimInfo{Present: true, Epoch: c.Epoch, ReleasedAt: c.ReleasedAt, ExpiredAt: c.ExpiredAt, ClosedBy: c.ClosedBy, ClosedAt: c.ClosedAt}
 	if c.Worker != nil {
 		info.Worker = *c.Worker
 	}

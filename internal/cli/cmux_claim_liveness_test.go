@@ -205,3 +205,44 @@ func TestCmuxStatusNeverClaimedRowAlsoReachesTheNoLiveClaimBranch(t *testing.T) 
 		t.Errorf("a never-claimed row has no retained epoch to name; rendered:\n%s", got)
 	}
 }
+
+// closedClaim is task-8cfd8f13451adff6's claim after `bp task close … done`,
+// verbatim. The close kept the worker, the pulse line and a lease_expires_at
+// still in the future, and added closed_by / closed_at / closed_session.
+const closedClaim = `{
+  "closed_at": "2026-10-31T15:03:29.563882Z",
+  "closed_by": "drop-clock",
+  "closed_session": "s_a27da76950c664eb",
+  "epoch": 3,
+  "lease_expires_at": "2026-10-31T15:39:06.843197Z",
+  "lease_seconds": 2700,
+  "now": {"text": "dbebf36 in review", "ts": "2026-10-31T14:54:06.843197Z"},
+  "session": "s_a27da76950c664eb",
+  "session_origin": "s_a27da76950c664eb",
+  "ts_iso": "2026-10-31T14:54:06.843197Z",
+  "work_digest": "1ac324fbec49b368",
+  "work_field_digests": {"acceptance_criteria": "7d1d4f7a25d78dfc", "brief": "015c6b4437ac0465", "description": "19236ad87642eae5", "title": "442aace47e57421b"},
+  "worker": "drop-clock"
+}`
+
+// A done row's claim names its worker and carries the close-out stamp. It is
+// the record of who closed it, so status must not render it as held.
+func TestCmuxStatusClosedClaimIsTheRecordNotAHold(t *testing.T) {
+	st := cmuxStatus{Worker: "w", Task: "task-8cfd8f13451adff6"}
+	st.hydrateLease(docWithClaim(t, closedClaim, "done"))
+
+	if st.HasClaim {
+		t.Fatalf("a closed claim (closed_by=drop-clock) must not report held, got HasClaim=true")
+	}
+	var buf bytes.Buffer
+	out := newWriter(&buf, &buf)
+	out.output = "table"
+	renderCmuxStatus(out, st)
+	got := buf.String()
+	if strings.Contains(got, "held by") {
+		t.Errorf("a closed claim rendered as held; rendered:\n%s", got)
+	}
+	if !strings.Contains(got, "closed by drop-clock at 2026-10-31T15:03:29.563882Z (the claim stays on the row as its record; nobody holds it)") {
+		t.Errorf("a closed claim must name who closed it and when; rendered:\n%s", got)
+	}
+}
