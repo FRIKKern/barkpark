@@ -335,6 +335,7 @@ defmodule Barkpark.PortableDoc.SpecTest do
         @k "attr_key"
         @keys ~w(take_a take_b)
         @caps ~w(cap_a)
+        @kinds ~w(diagram)
         def hydrate(blocks) do
           Enum.map(blocks, fn block ->
             with %{"type" => "sheet", "ref" => _} <- block, do: tab(block)
@@ -384,14 +385,30 @@ defmodule Barkpark.PortableDoc.SpecTest do
           end
         end
         def helper(b), do: b["module_call"]
+        def in_list(b), do: if(Map.get(b, "type") in ["diagram"], do: b["in_list"])
+        def in_attr(b), do: if(b["type"] in @kinds, do: b["in_attr"])
+        def strict(b), do: if(b["type"] === "diagram", do: b["strict_eq"])
+        def negated(b), do: if(not (b["type"] == "sheet"), do: b["negated"])
+        def either(b), do: if(b["type"] == "diagram" or b["type"] == "sheet", do: b["either"])
+        def dispatch(%{"type" => "relay"} = b), do: dispatch(Map.put(b, "type", "sheet"))
+        def dispatch(%{"type" => "sheet"} = b) do
+          _ = b["hop_one"]
+          dispatch(Map.put(b, "type", "diagram"))
+        end
+        def dispatch(%{"type" => "diagram"} = b), do: b["hop_two"]
         defp defaulted(b, key \\\\ "default_arg"), do: Map.get(b, key)
       end
       """
 
-      reads = ComposeCensus.Reads.reads([source], ["sheet", "memo", "diagram"])
+      reads = ComposeCensus.Reads.reads([source], ["sheet", "memo", "diagram", "relay"])
 
-      assert reads["sheet"] == ~w(case_type_branch if_branch ref with_body)
-      assert reads["diagram"] == ~w(cond_branch fn_body)
+      assert reads["sheet"] ==
+               ~w(case_type_branch either hop_one hop_two if_branch ref with_body)
+
+      assert reads["diagram"] ==
+               ~w(cond_branch either fn_body hop_two in_attr in_list strict_eq)
+
+      assert reads["relay"] == ~w(hop_one hop_two)
 
       assert reads["memo"] ==
                ~w(access_get access_key after_match anon attr_key cap_a cap_x case_bound

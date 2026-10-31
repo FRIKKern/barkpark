@@ -10,7 +10,8 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
     * a `case`, `fn`, `with`, `for` or `=` pattern with one, over the clause body,
       the rest of the `with`/`for`, or the statements after the `=`;
     * an `if`, `cond` or `case` that tests `Map.get(b, "type")` or `b["type"]`
-      against a literal, over the branch it guards.
+      with `==`, `===` or `in` (a literal list or attribute), over the branch it
+      guards; tests joined by `and`/`or` each count, a test under `not` does not.
 
   The pattern's other literal keys are reads of that type, and so is every read of
   the variables the entry binds (and of the matched variable): `Map.get/fetch/
@@ -31,7 +32,8 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   Not seen: a block passed inside a map, tuple or keyword argument; a key built at
   run time (interpolation, concatenation, a computed variable); a read of a child
   block in a list (`SectionLayout`'s grid cells); a helper outside the sources given;
-  a type test joined by `or`. Inside an entry, a nested type test does not narrow.
+  a type test by `!=` or `unless` (the `else` branch), or on the type held in a
+  variable. Inside an entry, a nested type test does not narrow.
 
   `reads/2` takes the source strings and the rendered types (`ComposeCensus.types/1`)
   and returns `%{type => [key]}`.
@@ -118,14 +120,14 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   end
 
   defp entries({:if, _, [test, branches]}, types, mod, index) when is_list(branches) do
-    for {var, literal} <- type_tests(test),
+    for {var, literal} <- type_tests(test, mod, index),
         literal in types,
         do: {literal, walk(branches[:do], start(literal, [var], mod, index))}
   end
 
   defp entries({:cond, _, [[do: clauses]]}, types, mod, index) do
     for {:->, _, [[test], body]} <- clauses,
-        {var, literal} <- type_tests(test),
+        {var, literal} <- type_tests(test, mod, index),
         literal in types,
         do: {literal, walk(body, start(literal, [var], mod, index))}
   end
@@ -158,19 +160,25 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   defp matched_var({var, _, ctx}) when is_atom(var) and is_atom(ctx), do: [var]
   defp matched_var(_value), do: []
 
-  defp type_tests(test) do
-    collect(test, fn
-      {:==, _, [a, b]} ->
-        case {type_read(a), type_read(b)} do
-          {{:ok, var}, _} when is_binary(b) -> [{var, b}]
-          {_, {:ok, var}} when is_binary(a) -> [{var, a}]
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end)
+  defp type_tests({op, _, [a, b]}, _mod, _index) when op in [:==, :===] do
+    case {type_read(a), type_read(b)} do
+      {{:ok, var}, _} when is_binary(b) -> [{var, b}]
+      {_, {:ok, var}} when is_binary(a) -> [{var, a}]
+      _ -> []
+    end
   end
+
+  defp type_tests({:in, _, [value, list]}, mod, index) do
+    case type_read(value) do
+      {:ok, var} -> for type <- List.wrap(strings(list, mod, index)), do: {var, type}
+      :error -> []
+    end
+  end
+
+  defp type_tests({op, _, [a, b]}, mod, index) when op in [:and, :&&, :or, :||],
+    do: type_tests(a, mod, index) ++ type_tests(b, mod, index)
+
+  defp type_tests(_test, _mod, _index), do: []
 
   defp type_read({{:., _, [{:__aliases__, _, [:Map]}, :get]}, _, [{var, _, ctx}, "type" | _]})
        when is_atom(var) and is_atom(ctx),
@@ -511,11 +519,12 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   end
 
   defp call(target, fun, args, w) do
-    visit =
-      {target, fun, length(args), Enum.map(args, &(track(&1, w.vars) != nil)),
-       Enum.map(args, &given(&1, w))}
+    tracks =
+      for {arg, pos} <- Enum.with_index(args), track = track(arg, w.vars), track, do: {pos, track}
 
-    if Enum.any?(elem(visit, 3)) and not MapSet.member?(w.seen, visit) do
+    visit = {target, fun, length(args), tracks, Enum.map(args, &given(&1, w)), w.type}
+
+    if tracks != [] and not MapSet.member?(w.seen, visit) do
       w = %{w | mod: target, seen: MapSet.put(w.seen, visit)}
 
       for {params, guard, body} <- Map.get(w.index[target].defs, {fun, length(args)}, []),
