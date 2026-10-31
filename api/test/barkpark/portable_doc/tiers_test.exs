@@ -1,7 +1,7 @@
 defmodule Barkpark.PortableDoc.TiersTest do
   use ExUnit.Case, async: true
 
-  alias Barkpark.PortableDoc.Tiers
+  alias Barkpark.PortableDoc.{ComposeCensus, Tiers}
 
   describe "tier_of/1" do
     test "classifies representative types per tier" do
@@ -96,98 +96,20 @@ defmodule Barkpark.PortableDoc.TiersTest do
     # code forbidding a legal Elixir form because a TEST's regex could not parse
     # it — a fence around the instrument instead of a fix.
     #
-    # The extractor now quotes the source and reads ONLY `def compose_block/2,3`
-    # clause heads, so nothing outside a clause head can move the number.
-    # Everything else is UNCHANGED, deliberately: a type is named either by a
-    # literal `"type" => "x"` in the first-argument map pattern, or by a literal
-    # `t in ["x", "y"]` guard over the variable that pattern binds. On compose.ex
-    # as of this commit the two extractors agree exactly — 80 types, empty set
-    # difference both ways — so this is a re-anchoring, not a re-count.
+    # The extractor (`Barkpark.PortableDoc.ComposeCensus`, shared with
+    # spec_test.exs) quotes the source and reads ONLY `def compose_block/2,3`
+    # clause heads, so nothing outside a clause head can move the number. A type
+    # is named either by a literal `"type" => "x"` in the first-argument map
+    # pattern, or by a literal `t in ["x", "y"]` guard over the variable that
+    # pattern binds.
     #
-    # The `t == "x"` and `t in @attr` variable-guard forms stay OUT, as they were
-    # before: that is compose.ex's documented ALIAS form (see its comments above
+    # The `t == "x"` and `t in @attr` variable-guard forms stay OUT: that is
+    # compose.ex's documented ALIAS form (see its comments above
     # @unordered_list_aliases and @heading_aliases). An alias has no tier of its
     # own — it borrows its target's — so it is not a member of this set.
     defp renderable_types, do: @compose_path |> File.read!() |> compose_block_clause_types()
 
-    defp compose_block_clause_types(source) do
-      source
-      |> Code.string_to_quoted!()
-      |> compose_block_clause_heads()
-      |> Enum.flat_map(&clause_head_types/1)
-      |> Enum.uniq()
-      |> Enum.sort()
-    end
-
-    defp compose_block_clause_heads(ast) do
-      {_, heads} =
-        Macro.prewalk(ast, [], fn
-          {:def, _, [head | _]} = node, acc -> {node, [head | acc]}
-          node, acc -> {node, acc}
-        end)
-
-      Enum.filter(heads, fn head ->
-        match?(
-          {:compose_block, _, args} when is_list(args) and length(args) in [2, 3],
-          call_of(head)
-        )
-      end)
-    end
-
-    defp call_of({:when, _, [call, _guard]}), do: call
-    defp call_of(call), do: call
-
-    defp guard_of({:when, _, [_call, guard]}), do: guard
-    defp guard_of(_head), do: nil
-
-    defp clause_head_types(head) do
-      {:compose_block, _, args} = call_of(head)
-
-      case type_pattern(hd(args)) do
-        {:ok, literal} when is_binary(literal) ->
-          [literal]
-
-        {:ok, {var, _, ctx}} when is_atom(var) and is_atom(ctx) ->
-          guard_literals(guard_of(head), var)
-
-        _ ->
-          []
-      end
-    end
-
-    # the first argument is `%{"type" => …}`, or `%{"type" => …} = b`
-    defp type_pattern({:=, _, parts}) do
-      Enum.find_value(parts, :error, fn part ->
-        case type_pattern(part) do
-          {:ok, value} -> {:ok, value}
-          :error -> nil
-        end
-      end)
-    end
-
-    defp type_pattern({:%{}, _, pairs}) when is_list(pairs) do
-      case List.keyfind(pairs, "type", 0) do
-        {"type", value} -> {:ok, value}
-        nil -> :error
-      end
-    end
-
-    defp type_pattern(_other), do: :error
-
-    defp guard_literals(nil, _var), do: []
-
-    defp guard_literals(guard, var) do
-      {_, acc} =
-        Macro.prewalk(guard, [], fn
-          {:in, _, [{^var, _, _}, list]} = node, acc when is_list(list) ->
-            {node, acc ++ Enum.filter(list, &is_binary/1)}
-
-          node, acc ->
-            {node, acc}
-        end)
-
-      acc
-    end
+    defp compose_block_clause_types(source), do: ComposeCensus.types(source)
 
     # The RETIRED file-wide regex, kept for exactly one purpose: it is the
     # control arm. A test below feeds it the same fixtures as the extractor and
