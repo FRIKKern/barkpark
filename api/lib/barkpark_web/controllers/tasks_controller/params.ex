@@ -2169,6 +2169,9 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:criteria_raised_on_abandon, indices}) when is_list(indices),
     do: "criteria_raised_on_abandon:#{Enum.join(indices, ",")}"
 
+  def reason_to_string({:amendment_unconfirmed, indices}) when is_list(indices),
+    do: "amendment_unconfirmed:#{Enum.join(indices, ",")}"
+
   def reason_to_string({:acknowledgement_unposted, issue}),
     do: "acknowledgement_unposted:#{issue || "?"}"
 
@@ -2243,8 +2246,9 @@ defmodule BarkparkWeb.TasksController.Params do
   # command rather than the rule it broke.
   def criteria_hint(:observed_rev_required, :stamp),
     do:
-      ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
-        ~s|a withdrawal, an amendment or a post-close --miss against. Pin the rev you read instead: re-read with | <>
+      ~s|this stamp is fenced by the rev you read, not by an epoch: a withdrawal, an amendment or a post-close | <>
+        ~s|--miss on a row with no live claim (closed, cancelled or released), and a --confirm-amendment on any | <>
+        ~s|row, since the confirmer is not the holder. Pin the rev you read: re-read with | <>
         ~s|`bp task get <id> -o json`, take .doc.rev, and re-run with --observed-rev <rev>. Nothing was | <>
         ~s|written. Neither verb touches the seal, the close_reason or the original evidence: a withdrawal | <>
         ~s|lowers the met flag and appends a signed record naming who withdrew it and why, and a --miss | <>
@@ -2304,6 +2308,36 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|happened would only mislead the next reader. If you meant a DIFFERENT criterion, check the | <>
         ~s|index: --criterion N is 0-BASED, so the first criterion is 0. If you meant to lower a met | <>
         ~s|flag rather than fix the sentence, that is --withdraw --note "…".|
+
+  # THE SECOND-EYES REFUSALS (task-e9c6aa61af536112). The amender is blocked
+  # until somebody else acts, so the refusal names the exact command that
+  # somebody else runs.
+  def criteria_hint({:amendment_unconfirmed, indices}, surface)
+      when is_list(indices) and surface in [:stamp, :close] do
+    n = Enum.join(indices, ", ")
+    i = List.first(indices)
+
+    ~s|you amended the wording of criterion #{n} (0-BASED), so you cannot | <>
+      ~s|#{if surface == :stamp, do: "stamp it met", else: "close done over it met"} until a DIFFERENT | <>
+      ~s|worker confirms the new wording. Nothing was written. The worker who moved the bar is not the | <>
+      ~s|second pair of eyes on it. Ask a reviewer to read the row and run: | <>
+      ~s|bp task get <id> -o json \| jq -r '.doc.content.acceptance_criteria[#{i}].criterion' > crit.txt; | <>
+      ~s|bp task stamp <id> <reviewer> 0 --criterion #{i} --confirm-amendment --criterion-text-file crit.txt | <>
+      ~s|--note "<what you checked>" --observed-rev <.doc.rev>. | <>
+      ~s|Then re-run this #{if surface == :stamp, do: "stamp", else: "close"}. There is no override, on purpose.|
+  end
+
+  def criteria_hint(:self_confirmation, :stamp),
+    do:
+      ~s|you made the last amendment of this criterion, so you cannot confirm it: a confirmation is the | <>
+        ~s|SECOND pair of eyes on new wording, and the amender is the first. Nothing was written. A different | <>
+        ~s|worker runs the same command under their own worker id.|
+
+  def criteria_hint(:nothing_to_confirm, :stamp),
+    do:
+      ~s|this criterion has never been amended, so there is no new wording to confirm and nothing was | <>
+        ~s|written. --confirm-amendment vouches for a criterion rewritten by --amend. Check the index: | <>
+        ~s|--criterion N is 0-BASED, so the first criterion is 0.|
 
   def criteria_hint(:criterion_not_met, :stamp),
     do:
@@ -2915,14 +2949,18 @@ defmodule BarkparkWeb.TasksController.Params do
     miss = stamp_flag?(Map.get(params, "miss"))
     withdraw = stamp_flag?(Map.get(params, "withdraw"))
     amend = stamp_flag?(Map.get(params, "amend"))
+
+    confirm =
+      stamp_flag?(Map.get(params, "confirm_amendment") || Map.get(params, "confirm-amendment"))
+
     criterion_text = stamp_criterion_text(params)
     amended_criterion = stamp_amended_criterion(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
-        Enum.count([met, miss, withdraw, amend], & &1) > 1 ->
+        Enum.count([met, miss, withdraw, amend, confirm], & &1) > 1 ->
           {:error, :invalid_stamp,
-           "pass exactly one of --met / --miss / --withdraw / --amend, not two"}
+           "pass exactly one of --met / --miss / --withdraw / --amend / --confirm-amendment, not two"}
 
         met ->
           case Map.get(params, "evidence") do
@@ -2975,13 +3013,24 @@ defmodule BarkparkWeb.TasksController.Params do
               {:ok, index, {:amend, {amended_criterion, note}}, criterion_text}
           end
 
+        confirm ->
+          case Map.get(params, "note") do
+            n when is_binary(n) and n != "" ->
+              {:ok, index, {:confirm, n}, criterion_text}
+
+            _ ->
+              {:error, :invalid_stamp,
+               "--confirm-amendment requires non-empty --note (what you checked in the new wording)"}
+          end
+
         # A body that carries `met=false` and nothing else names no verb at
         # all. Say so with the withdrawal in the sentence, because "met: false"
         # is precisely what a caller reaches for when they mean to withdraw.
         true ->
           {:error, :invalid_stamp,
-           "pass one of --met (with --evidence), --miss (with --note), --withdraw (with --note) " <>
-             "or --amend (with --amended-criterion-file and --note). " <>
+           "pass one of --met (with --evidence), --miss (with --note), --withdraw (with --note), " <>
+             "--amend (with --amended-criterion-file and --note) " <>
+             "or --confirm-amendment (with --note). " <>
              "A met:true -> met:false patch is NOT accepted here: --withdraw is the verb that lowers " <>
              "a met flag, and it signs the correction instead of erasing the proof. A criterion-TEXT " <>
              "patch is not accepted here either: --amend is the verb that corrects wording, and it " <>

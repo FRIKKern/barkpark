@@ -99,6 +99,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
+  alias Barkpark.Tasks.AmendmentConfirmation
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
@@ -596,6 +597,8 @@ defmodule Barkpark.Tasks.Close do
                          overrides.criteria,
                          overrides.acknowledgement
                        ),
+                     :ok <-
+                       check_amendments_confirmed(doc, new_status, criteria, landed, worker_id),
                      # LAST of the honesty gates on purpose. It fires ONLY on a
                      # row D289 cannot see (zero criteria), so its order relative
                      # to D289 is immaterial for correctness — but a caller whose
@@ -983,6 +986,38 @@ defmodule Barkpark.Tasks.Close do
     |> Enum.uniq_by(&Map.get(&1, "index"))
     |> Enum.sort_by(&Map.get(&1, "index"))
   end
+
+  # THE SECOND-EYES GATE, CLOSE SIDE (task-e9c6aa61af536112). Stamp refuses
+  # the amender's --met while their amendment is unconfirmed; this covers the
+  # other order. A worker who stamps met FIRST and amends AFTER leaves met=true
+  # on wording only they have seen, and a `done` close would seal it. Read from
+  # the criteria AS THIS CLOSE LEAVES THEM — payload and merge-gate autostamp
+  # both merged in — so neither can route around it. No override: the fix is
+  # another worker's `--confirm-amendment`, and an escape would make the second
+  # pair of eyes optional again.
+  defp check_amendments_confirmed(
+         %Document{content: content} = doc,
+         "done",
+         criteria,
+         landed,
+         worker_id
+       ) do
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+    updates = criteria ++ autostamp_merge_gate(doc, criteria, worker_id, "done", landed, ts_iso)
+
+    merged =
+      case merge_criteria(content || %{}, updates) do
+        {:ok, merged} -> merged
+        {:error, _reason} -> content || %{}
+      end
+
+    case AmendmentConfirmation.self_amended_met(Map.get(merged, "acceptance_criteria"), worker_id) do
+      [] -> :ok
+      indices -> {:error, {:amendment_unconfirmed, indices}}
+    end
+  end
+
+  defp check_amendments_confirmed(_doc, _status, _criteria, _landed, _worker_id), do: :ok
 
   # ACKNOWLEDGEMENT GATE — the reporter loop.
   #

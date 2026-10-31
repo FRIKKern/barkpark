@@ -318,6 +318,9 @@ type stampRequest struct {
 	// read-back confirms against amended instead (see stampMismatches).
 	amend   bool
 	amended string
+	// confirm is the second pair of eyes on amended wording: it moves nothing,
+	// so the read-back confirms it by the recorded confirmation alone.
+	confirm bool
 	// pin is the author-typed `--expect` expectation, or nil. It is the ONE
 	// field here the row cannot supply, which is why the read-back's alignment
 	// check (stampMismatches) is keyed on it rather than on --criterion-text.
@@ -368,6 +371,7 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 		withdraw: last("withdraw") == "true",
 		amend:    last("amend") == "true",
 		amended:  last("amended-criterion"),
+		confirm:  last("confirm-amendment") == "true",
 	}, true
 }
 
@@ -595,7 +599,7 @@ func stampMissFieldRefusal(sa stampArgs) (string, string) {
 	// server's, which reports it as a USAGE error). Firing here would relabel a
 	// two-verb command line as a miss-field mistake and move its exit code —
 	// TestTaskStampExit_LostLeaseAndBadCommandLineDiffer measures exactly that.
-	if !sa.miss || sa.met || sa.withdraw || sa.amend {
+	if !sa.miss || sa.met || sa.withdraw || sa.amend || sa.confirm {
 		return "", ""
 	}
 	if sa.hasEvidence {
@@ -723,6 +727,11 @@ func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string 
 	// records its reason while met stays true would reproduce the exact defect
 	// the verb was built to end — a board reading MET with the correction
 	// visible only to someone who opens the row and reads prose.
+	if req.confirm {
+		if note := strings.TrimSpace(req.note); note != "" && !hasConfirmationNote(stored, note) {
+			out = append(out, "the store carries no confirmation with that note — the amended wording is still unconfirmed")
+		}
+	}
 	if req.withdraw {
 		if stored.Met {
 			out = append(out, "met is still TRUE in the store — the withdrawal did not lower the lock, so every board still counts this criterion as proven")
@@ -740,6 +749,17 @@ func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string 
 func hasWithdrawalNote(stored taskboard.CriterionItem, note string) bool {
 	for _, w := range stored.Withdrawals {
 		if strings.TrimSpace(w.Note) == note {
+			return true
+		}
+	}
+	return false
+}
+
+// hasConfirmationNote reports whether the stored row carries a confirmation
+// with this note (the server keeps every one).
+func hasConfirmationNote(stored taskboard.CriterionItem, note string) bool {
+	for _, c := range stored.Confirmations {
+		if strings.TrimSpace(c.Note) == note {
 			return true
 		}
 	}
@@ -769,6 +789,7 @@ type stampArgs struct {
 	miss          bool
 	withdraw      bool
 	amend         bool
+	confirm       bool
 	// expect is the AUTHOR-TYPED pin, verbatim as it was typed
 	// (`<index>:<first words>`), or "" when none was given. It is the one value
 	// in this struct that does not come from the row being stamped — see
@@ -858,6 +879,8 @@ func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) 
 			sa.withdraw = true
 		case "--amend":
 			sa.amend = true
+		case "--confirm-amendment":
+			sa.confirm = true
 		case "--criterion":
 			if n, err := strconv.Atoi(strings.TrimSpace(spaceVal())); err == nil {
 				sa.criterion = &n
@@ -967,6 +990,8 @@ func stampEchoLine(sa stampArgs) string {
 	case sa.amend:
 		// The text quoted after this line is the wording being REPLACED.
 		outcome = "AMEND the wording (met and evidence are pinned) — replacing"
+	case sa.confirm:
+		outcome = "CONFIRM the amended wording (met and evidence are pinned)"
 	}
 	line := fmt.Sprintf("→ criterion index %d (0-based) = criterion #%d as boards/rubric number them → %s", idx, idx+1, outcome)
 	if t := strings.TrimSpace(sa.criterionText); t != "" {

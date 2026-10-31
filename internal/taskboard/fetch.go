@@ -924,11 +924,12 @@ func decodeCriterion(raw json.RawMessage) CriterionItem {
 	crit, _ := m["criterion"].(string)
 	ev, _ := m["evidence"].(string)
 	return CriterionItem{
-		Criterion:   crit,
-		Met:         m["met"] == true,
-		Evidence:    ev,
-		Attempts:    decodeAttempts(m["attempts"]),
-		Withdrawals: decodeWithdrawals(m["withdrawals"]),
+		Criterion:     crit,
+		Met:           m["met"] == true,
+		Evidence:      ev,
+		Attempts:      decodeAttempts(m["attempts"]),
+		Withdrawals:   decodeWithdrawals(m["withdrawals"]),
+		Confirmations: decodeAttempts(m["confirmations"]),
 	}
 }
 
