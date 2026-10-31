@@ -20,8 +20,9 @@
 //         BP_NARROW_WIDTHS=390,320    viewports to test
 //         BP_NARROW_VERBOSE=1         print every case, not just failures
 //
-// NO CHROMIUM, NO FAILURE. When no browser is found this prints SKIP and exits
-// 0. It is deliberately NOT in `npm test`: the suite must stay runnable on a
+// NO CHROMIUM, NO FAILURE — locally. When no browser is found this prints SKIP
+// and exits 0, unless BP_REQUIRE_CHROME=1 (CI), where a SKIP exits 1; a run
+// with zero PASS exits 1 either way (__rig.mjs). It is deliberately NOT in `npm test`: the suite must stay runnable on a
 // machine with no browser, and a gate that cannot run everywhere is a gate
 // people learn to ignore.
 //
@@ -56,6 +57,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
+import { exitRig, skip, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, "../../../..");
@@ -93,9 +95,8 @@ function findChrome() {
 
 const CHROME = findChrome();
 if (!CHROME) {
-  console.log("SKIP  __narrow_render.mjs — no Chromium found.");
   console.log("      Set BP_CHROME=/path/to/chrome, or `npx @puppeteer/browsers install chrome-headless-shell`.");
-  process.exit(0);
+  process.exit(skip("__narrow_render.mjs — no Chromium found."));
 }
 
 // ── 1. the page under test ───────────────────────────────────────────────────
@@ -159,17 +160,14 @@ document.getElementById('__out').textContent = 'RESULT' + JSON.stringify({
   return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
 }
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); if (VERBOSE) console.log(`PASS  ${name}`); }
-  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
-};
+const rig = tally({ verbose: VERBOSE });
+const check = rig.check;
 
 // ── 2. corpus 1: the real emitter's frozen HTML ──────────────────────────────
 
 const goldenDir = join(REPO, "js/packages/react/tests/fixtures/pd-golden");
 if (!existsSync(goldenDir)) {
-  console.log("SKIP  golden corpus — js/packages/react/tests/fixtures/pd-golden is absent.");
+  rig.failures += skip("golden corpus — js/packages/react/tests/fixtures/pd-golden is absent.");
 } else {
   const names = readdirSync(goldenDir).filter((f) => f.endsWith(".golden.json"));
   for (const width of WIDTHS) {
@@ -325,5 +323,5 @@ for (const width of WIDTHS) {
   });
 }
 
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);

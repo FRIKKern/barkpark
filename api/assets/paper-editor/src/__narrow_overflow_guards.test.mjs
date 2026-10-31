@@ -83,21 +83,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { exitRig, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const readRepo = (rel) => readFileSync(join(__dirname, "../../../..", rel), "utf8");
 
-let failures = 0;
-function check(name, fn) {
-  try {
-    fn();
-    console.log(`PASS  ${name}`);
-  } catch (e) {
-    failures++;
-    console.log(`FAIL  ${name}`);
-    console.log(`      ${e.message}`);
-  }
-}
+const rig = tally();
+const check = rig.check;
 
 const surface = readRepo("api/assets/paper-surface/paper-surface.css");
 
@@ -305,5 +297,5 @@ check("running prose (p, li) carries a long-token break guard", () => {
   );
 });
 
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);

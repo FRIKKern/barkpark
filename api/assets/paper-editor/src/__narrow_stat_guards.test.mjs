@@ -99,6 +99,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { exitRig, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const surface = readFileSync(
@@ -106,11 +107,8 @@ const surface = readFileSync(
   "utf8",
 );
 
-let failures = 0;
-function check(name, fn) {
-  try { fn(); console.log(`PASS  ${name}`); }
-  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
-}
+const rig = tally();
+const check = rig.check;
 
 // The first `.selector { ... }` block. `.bp-stat__v` and `.bp-stat__l` are each
 // declared exactly once, so first-match is the rule — but the assertion below
@@ -262,5 +260,5 @@ check(".bp-stats still lays out on a 140px auto-fit floor", () => {
   );
 });
 
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);

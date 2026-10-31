@@ -38,88 +38,53 @@ on:
     branches: [main]
     paths:
       - "api/assets/paper-editor/**"
-      # the reading surface several src/ suites assert against — see the header
+      # Every file a step of this workflow reads from outside the folder above.
+      # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
+      # walks every entry point this workflow runs, collects each path literal
+      # they read, and reds when one is not matched here, or when an entry
+      # here matches nothing they read. Both arms must stay identical.
+      # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
-      - "api/priv/static/assets/bp-paper-editor.bundle.js"
-      - "api/priv/static/assets/bp-paper-editor.css"
-      - "api/priv/static/assets/bp-paper-surface.css"
-      # Files the unit tests READ from outside api/assets/paper-editor. A move of a
-      # sink without this line goes blind: #16022 lifted the Studio inline CSS out
-      # of root.html.heex and main was red for 14 h with no run to say so.
-      - "api/priv/static/assets/bp-paper-editor-shell.css"
-      - "api/lib/barkpark_web/layouts/root.html.heex"
-      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
-      # reader's own clauses every run, so a tone added here must run this job.
+      # __modal_focus_guard.test.mjs scans every script in this folder, so a
+      # new one must trigger too; it also holds the built bundle and css.
+      - "api/priv/static/assets/*"
       - "api/lib/barkpark/portable_doc/render/walk.ex"
-      # corpus 1 of the rendered sweep below — a golden fixture added or
-      # re-frozen here is a new block this workflow must render, and without
-      # this line the job that renders it cannot see it.
-      - "js/packages/react/tests/fixtures/pd-golden/**"
-      # Every other file a suite under src/ READS from outside this tree
-      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
-      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
-      # read, add its sink here in BOTH arms. Re-derive the list with
-      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
-      # plus the join(REPO, "...") literals, and diff it against these lines.
-      - "api/priv/static/assets/bp-paper-editor-hooks.js"
-      - "api/priv/static/assets/bp-media-picker.js"
-      - "api/priv/static/assets/bp-media-picker.css"
-      - "api/priv/static/assets/bp-reference-picker.js"
-      - "api/priv/static/assets/bp-asset-browser.js"
-      - "api/priv/static/assets/bp-search-intel.js"
-      - "api/priv/static/assets/phoenix.js"
-      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/components/studio_components/nav.ex"
+      - "api/lib/barkpark_web/components/studio_components/panes.ex"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/layouts/root.html.heex"
       - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - "api/test/support/fixtures/paper-editor/**"
-      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "api/test/support/fixtures/pd-parity/**"
+      - "js/packages/react/tests/fixtures/pd-golden/**"
       - "web/public/bp-paper-editor.bundle.js"
-      # shipped in the npm package beside the bundle (scripts/pack-stage.mjs)
-      - "api/priv/static/assets/bp-paper-mermaid.js"
       - "LICENSE"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
       - "api/assets/paper-editor/**"
+      # Every file a step of this workflow reads from outside the folder above.
+      # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
+      # walks every entry point this workflow runs, collects each path literal
+      # they read, and reds when one is not matched here, or when an entry
+      # here matches nothing they read. Both arms must stay identical.
+      # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
-      - "api/priv/static/assets/bp-paper-editor.bundle.js"
-      - "api/priv/static/assets/bp-paper-editor.css"
-      - "api/priv/static/assets/bp-paper-surface.css"
-      # Files the unit tests READ from outside api/assets/paper-editor. A move of a
-      # sink without this line goes blind: #16022 lifted the Studio inline CSS out
-      # of root.html.heex and main was red for 14 h with no run to say so.
-      - "api/priv/static/assets/bp-paper-editor-shell.css"
-      - "api/lib/barkpark_web/layouts/root.html.heex"
-      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
-      # reader's own clauses every run, so a tone added here must run this job.
+      # __modal_focus_guard.test.mjs scans every script in this folder, so a
+      # new one must trigger too; it also holds the built bundle and css.
+      - "api/priv/static/assets/*"
       - "api/lib/barkpark/portable_doc/render/walk.ex"
-      # corpus 1 of the rendered sweep below — a golden fixture added or
-      # re-frozen here is a new block this workflow must render, and without
-      # this line the job that renders it cannot see it.
-      - "js/packages/react/tests/fixtures/pd-golden/**"
-      # Every other file a suite under src/ READS from outside this tree
-      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
-      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
-      # read, add its sink here in BOTH arms. Re-derive the list with
-      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
-      # plus the join(REPO, "...") literals, and diff it against these lines.
-      - "api/priv/static/assets/bp-paper-editor-hooks.js"
-      - "api/priv/static/assets/bp-media-picker.js"
-      - "api/priv/static/assets/bp-media-picker.css"
-      - "api/priv/static/assets/bp-reference-picker.js"
-      - "api/priv/static/assets/bp-asset-browser.js"
-      - "api/priv/static/assets/bp-search-intel.js"
-      - "api/priv/static/assets/phoenix.js"
-      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/components/studio_components/nav.ex"
+      - "api/lib/barkpark_web/components/studio_components/panes.ex"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/layouts/root.html.heex"
       - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - "api/test/support/fixtures/paper-editor/**"
-      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "api/test/support/fixtures/pd-parity/**"
+      - "js/packages/react/tests/fixtures/pd-golden/**"
       - "web/public/bp-paper-editor.bundle.js"
-      # shipped in the npm package beside the bundle (scripts/pack-stage.mjs)
-      - "api/priv/static/assets/bp-paper-mermaid.js"
       - "LICENSE"
       - ".github/workflows/paper-editor.yml"
 
@@ -212,6 +177,10 @@ jobs:
   narrow-render:
     name: Narrow-viewport rendered sweep
     runs-on: ubuntu-latest
+    env:
+      # Every rig here exits 1 on a SKIP and on zero PASS (src/__rig.mjs), so a
+      # lost browser reds even a step whose output checks below miss it.
+      BP_REQUIRE_CHROME: "1"
     defaults:
       run:
         working-directory: api/assets/paper-editor

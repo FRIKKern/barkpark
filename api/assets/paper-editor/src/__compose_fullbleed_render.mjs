@@ -57,7 +57,8 @@
 //   Env:  BP_CHROME=/path/to/chrome     pin the binary
 //         BP_FULLBLEED_VERBOSE=1        print the full measurement table
 //
-// NO CHROMIUM, NO FAILURE: prints SKIP and exits 0, like __narrow_render.mjs.
+// NO CHROMIUM, NO FAILURE — locally: prints SKIP and exits 0, like
+// __narrow_render.mjs, and exits 1 under BP_REQUIRE_CHROME=1 (__rig.mjs).
 // Opt-in, not in `npm test`, for the same reason.
 
 import { readFileSync, readdirSync, writeFileSync, mkdtempSync, existsSync } from "node:fs";
@@ -65,6 +66,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
+import { exitRig, skip, tally } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, "../../../..");
@@ -104,9 +106,8 @@ function findChrome() {
 
 const CHROME = findChrome();
 if (!CHROME) {
-  console.log("SKIP  __compose_fullbleed_render.mjs — no Chromium found.");
   console.log("      Set BP_CHROME=/path/to/chrome, or `npx @puppeteer/browsers install chrome-headless-shell`.");
-  process.exit(0);
+  process.exit(skip("__compose_fullbleed_render.mjs — no Chromium found."));
 }
 
 const surfaceCss = readFileSync(join(REPO, "api/assets/paper-surface/paper-surface.css"), "utf8");
@@ -233,18 +234,14 @@ document.getElementById('__out').textContent = 'RESULT' + JSON.stringify(out);
   return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
 }
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); if (VERBOSE) console.log(`PASS  ${name}`); }
-  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
-};
+const rig = tally({ verbose: VERBOSE });
+const check = rig.check;
 const r2 = (n) => (n === null ? "—" : Math.round(n * 100) / 100);
 
 const missing = Object.keys(FAMILIES).filter((f) => !golden(f));
 if (missing.length) {
-  console.log(`SKIP  __compose_fullbleed_render.mjs — golden HTML absent for: ${missing.join(", ")}`);
   console.log(`      expected under ${goldenDir}`);
-  process.exit(0);
+  process.exit(skip(`__compose_fullbleed_render.mjs — golden HTML absent for: ${missing.join(", ")}`));
 }
 
 // ── 1. the measurement table ─────────────────────────────────────────────────
@@ -396,5 +393,5 @@ console.log(
       "         consistent answer."
     : "ARBITER: the reader does NOT uniformly stretch — read the rows above before changing pdrender.",
 );
-console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(rig.failures === 0 ? "\nALL PASS" : `\n${rig.failures} FAILURE(S)`);
+exitRig(rig.passes, rig.failures);

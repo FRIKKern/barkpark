@@ -35,7 +35,7 @@
 //   BP_PARITY_PLANT='sel{decl}'      append a rule to the Edit pages only — the
 //                                    planted-change proof that the matrix can red
 //   BP_PARITY_REPORT_ONLY=1          print everything, never exit non-zero
-//   BP_PARITY_REQUIRE_CHROME=1       no Chromium is a failure, not a SKIP (CI)
+//   BP_REQUIRE_CHROME=1              no Chromium is a failure, not a SKIP (CI)
 //   BP_PARITY_RENDER_API=/path/api   render with a separately compiled api tree
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -44,6 +44,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
 import { AXES, diffSurface, classify, staleEntries } from "./view-edit-parity-compare.js";
+import { exitRig, skip } from "./__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../../../..");
@@ -142,8 +143,7 @@ function findChrome() {
 
 const CHROME = findChrome();
 if (!CHROME) {
-  console.log("SKIP  view/edit parity matrix — no Chromium executable found");
-  process.exit(process.env.BP_PARITY_REQUIRE_CHROME === "1" ? 1 : 0);
+  process.exit(skip("view/edit parity matrix — no Chromium executable found"));
 }
 
 // One `mix run` renders the reader layout, the per-fixture reader fragments
@@ -473,7 +473,4 @@ writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`Evidence: ${reportFile}`);
 
 // A matrix that compared nothing measured nothing.
-if (compared === 0) {
-  console.log("FAIL  no owner pairs were compared — the matrix measured nothing");
-  process.exitCode = 1;
-} else if ((unexpectedCount || stale.length) && !REPORT_ONLY) process.exitCode = 1;
+exitRig(compared, (unexpectedCount || stale.length) && !REPORT_ONLY ? 1 : 0);
