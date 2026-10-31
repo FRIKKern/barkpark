@@ -219,9 +219,12 @@ export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
 // an unchanged block it keeps its place in that block wherever the block moved; in a
 // changed block it maps through the change (before it, it stays; at or after its
 // end, it moves with the text; inside it, it goes to the end of the new text, or
-// stays before an insertion at its own place when `stayBefore`); in a deleted block
-// it goes to the end of the nearest block a typed letter only lengthens (a divider
-// or a closed fence would turn into something else), looking back first.
+// stays before an insertion at its own place when `stayBefore`). An offset in the
+// blank lines after a block, or above the first one, keeps its place while those
+// lines are kept as typed; otherwise it goes to the end of that block. In a deleted
+// block, or when that block is one a typed letter would turn into something else (a
+// divider, a closed fence), it goes to the end of the nearest block a letter only
+// lengthens, looking back first.
 export function mergeSourceText(text, before, blocks) {
   const { blocks: parsed, spans } = markdownToBlockSpans(text);
   const offsets = [0];
@@ -249,16 +252,23 @@ export function mergeSourceText(text, before, blocks) {
   });
   const last = pieces[pieces.length - 1];
   if (last.own && last.k === parsed.length - 1) out += text.slice(end(last.k));
+  const lengthens = (i) => blocksToMarkdown(markdownToBlocks(pieces[i].text + "x")) === sig(blocks[i]) + "x";
+  const landNear = (k) => {
+    const near = pieces.map((piece, i) => i).sort((x, y) => rank(pieces[x].k, k) - rank(pieces[y].k, k));
+    const i = near.find(lengthens) ?? near[0];
+    return at[i] + pieces[i].text.length;
+  };
   const map = (offset, stayBefore) => {
     let k = -1;
     while (k + 1 < parsed.length && start(k + 1) <= offset) k++;
-    if (k === -1) return 0;
+    if (k === -1) return pieces[0].own && pieces[0].k === 0 ? offset : landNear(0);
     const j = pieces.findIndex((piece) => piece.k === k);
-    if (j === -1) {
-      const near = pieces.map((piece, i) => i)
-        .sort((x, y) => rank(pieces[x].k, k) - rank(pieces[y].k, k));
-      const i = near.find((i) => blocksToMarkdown(markdownToBlocks(pieces[i].text + "x")) === sig(blocks[i]) + "x") ?? near[0];
-      return at[i] + pieces[i].text.length;
+    if (j === -1) return landNear(k);
+    if (offset > end(k)) {
+      const next = pieces[j + 1];
+      const gapKept = pieces[j].own && (next ? next.own && next.k === k + 1 : k === parsed.length - 1);
+      if (gapKept) return at[j] + offset - start(k);
+      return lengthens(j) ? at[j] + pieces[j].text.length : landNear(k);
     }
     const own = text.slice(start(k), end(k));
     return at[j] + through(sig(parsed[k]), pieces[j].text, through(own, sig(parsed[k]), offset - start(k), stayBefore), stayBefore);

@@ -587,7 +587,9 @@ try {
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [body + 2, body + 2], "the caret stays in the block it was in");
   }
 
-  // 11) A caret on a blank line before the first block stays at the top.
+  // 11) A caret on a blank line above the first block stays there while that line is
+  //     kept; when a remote block lands on top, it goes to the end of the first block
+  //     a letter lengthens, so the next key can't touch the newcomer.
   {
     const { canvas, server } = await mount([paragraph("e1", "One"), paragraph("e2", "Two")]);
     mounted.push(canvas);
@@ -603,7 +605,24 @@ try {
     server.splice(0, server.length, ...clone(added));
     canvas.applyServerBlocks(clone(added));
     assert.equal(textarea.value, "Zero\n\nOne\n\nTwo");
-    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [0, 0]);
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [9, 9]);
+  }
+  {
+    const { canvas, server } = await mount([paragraph("e1", "One"), paragraph("e2", "Two")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("\n\nOne\n\nTwo");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(1, 1);
+    const edited = [clone(server[0]), paragraph("e2", "Two, elsewhere")];
+    server.splice(0, server.length, ...clone(edited));
+    canvas.applyServerBlocks(clone(edited));
+    assert.equal(textarea.value, "\n\nOne\n\nTwo, elsewhere");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [1, 1], "a kept blank line above keeps its caret");
   }
 
   // 12) One remote change deletes the caret's block and adds another: the caret goes
@@ -620,6 +639,37 @@ try {
     canvas.applyServerBlocks(clone(swapped));
     assert.equal(textarea.value, "New\n\nOne");
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [8, 8], "the caret goes to the end of One");
+  }
+
+  // 13) A caret in blank lines the writer opened after a block (review-24791's
+  //     probe3): it stays there while those lines are kept, so the next key starts
+  //     a new block; once the block after them is gone, it goes to the end of the
+  //     block before, never into the block that now follows.
+  {
+    const { canvas, batches, server, inSync } = await mount([paragraph("g1", "One"), paragraph("g2", "Two"), paragraph("g3", "Three")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("One\n\n\n\nTwo\n\nThree");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(5, 5);
+    const reordered = [clone(server[2]), clone(server[0]), clone(server[1])];
+    server.splice(0, server.length, ...clone(reordered));
+    canvas.applyServerBlocks(clone(reordered));
+    assert.equal(textarea.value, "Three\n\nOne\n\n\n\nTwo");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [12, 12], "the kept blank lines keep the caret");
+    const removed = server.filter((block) => block.id !== "g2");
+    server.splice(0, server.length, ...clone(removed));
+    canvas.applyServerBlocks(clone(removed));
+    assert.equal(textarea.value, "Three\n\nOne");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [10, 10], "it goes to the end of One");
+    value.press("!");
+    canvas.flushPendingChanges();
+    assert.deepEqual(batches.at(-1), [{ op: "patch-block", id: "g1", patch: { content: [{ type: "text", value: "One!" }] } }]);
+    inSync("after a key in blank lines whose next block was removed");
   }
 
   console.log("mounted source-mode flush regression passed");
