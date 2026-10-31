@@ -37,6 +37,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
+import { skip } from "./__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../../../..");
@@ -225,8 +226,7 @@ function findChrome() {
 
 const CHROME = findChrome();
 if (!CHROME) {
-  console.log("SKIP  reader/canvas rendered parity — no Chromium executable found");
-  process.exit(0);
+  process.exit(skip("reader/canvas rendered parity — no Chromium executable found"));
 }
 
 function renderReaderPage() {
@@ -521,4 +521,7 @@ const reportFile = join(ARTIFACTS, "report.json");
 writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`\nEvidence: ${reportFile}`);
 console.log(`Screenshots: ${ARTIFACTS}`);
-if (failures && !REPORT_ONLY) process.exitCode = 1;
+if (!SCENARIOS.length || !FIXTURES.length) {
+  console.log("FAIL  no scenario or fixture was compared — the rig measured nothing");
+  process.exitCode = 1;
+} else if (failures && !REPORT_ONLY) process.exitCode = 1;

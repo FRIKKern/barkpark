@@ -270,7 +270,7 @@ jobs:
         run: bash scripts/file-ci-failure-issue.sh
 
   view-edit-parity:
-    name: View/Edit parity matrix (BP_PARITY_REQUIRE_CHROME=1)
+    name: View/Edit parity matrix (BP_REQUIRE_CHROME=1)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -287,7 +287,7 @@ jobs:
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
       # No Chromium is a FAILURE here, not a SKIP: without this the instrument
       # prints SKIP and exits 0, and the job would be green having measured nothing.
-      BP_PARITY_REQUIRE_CHROME: "1"
+      BP_REQUIRE_CHROME: "1"
     defaults:
       run:
         working-directory: api

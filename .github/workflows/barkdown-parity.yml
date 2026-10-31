@@ -84,7 +84,8 @@ jobs:
         working-directory: barkdown
         run: |
           npm ci
-          cd app && npm ci && npm run build
+          npx playwright install ffmpeg
+          cd app && npm ci && npx install-electron --no && npm run build
       - name: Parity rows
         working-directory: barkdown/app
         env:

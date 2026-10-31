@@ -11,13 +11,14 @@
 //   Env:  BP_CHROME=/path/to/chrome
 // It needs no node_modules: the narrow-render job runs it without `npm ci`.
 //
-// No Chromium prints SKIP and exits 0, like __narrow_render.mjs; CI installs one and refuses a SKIP.
+// No Chromium prints SKIP and exits 0, like __narrow_render.mjs; CI sets BP_REQUIRE_CHROME=1, where a SKIP exits 1.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { exitRig, skip } from "../__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASSETS = join(HERE, "../../../../priv/static/assets");
@@ -45,8 +46,7 @@ function findChrome() {
 
 const CHROME = findChrome();
 if (!CHROME) {
-  console.log("SKIP  __picker_footer_render.mjs — no Chromium found. Set BP_CHROME or install chrome-headless-shell.");
-  process.exit(0);
+  process.exit(skip("__picker_footer_render.mjs — no Chromium found. Set BP_CHROME or install chrome-headless-shell."));
 }
 
 const css = readFileSync(join(ASSETS, "bp-paper-editor.css"), "utf8");
@@ -93,9 +93,11 @@ function measure(width, strings) {
 
 const LONG = { "insert link": "sett inn lenke til notatet", navigate: "bla gjennom resultatene", dismiss: "lukk uten å velge noe" };
 let failures = 0;
+let passes = 0;
 const check = (name, ok, got) => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `\n      ${JSON.stringify(got)}`}`);
-  if (!ok) failures += 1;
+  if (ok) passes += 1;
+  else failures += 1;
 };
 
 for (const width of WIDTHS) {
@@ -109,4 +111,4 @@ for (const width of WIDTHS) {
 }
 
 console.log(failures ? `\n${failures} failing` : "\nall pass");
-process.exit(failures ? 1 : 0);
+exitRig(passes, failures);

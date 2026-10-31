@@ -36,6 +36,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { exitRig } from "./__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const surface = readFileSync(
@@ -44,8 +45,9 @@ const surface = readFileSync(
 );
 
 let failures = 0;
+let passes = 0;
 function check(name, fn) {
-  try { fn(); console.log(`PASS  ${name}`); }
+  try { fn(); passes++; console.log(`PASS  ${name}`); }
   catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
@@ -125,4 +127,4 @@ for (const [selector, px] of [
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+exitRig(passes, failures);
