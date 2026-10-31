@@ -1,7 +1,8 @@
 // Property test for contract 1.20.0 (flushKeepsSource): a remote change that lands
 // while Markdown source mode is open, followed by one key, saves exactly "the remote
 // change plus that one key". Each seed builds a random doc, types it with its own
-// list markers, flushes and takes the echo, puts a caret or a selection in one block,
+// spelling (list markers, heading spaces, blank lines), sometimes with a block added
+// or a word longer, flushes and takes the echo, puts a caret or a selection in one block,
 // applies a random remote change (edit, insert, delete or reorder; before, at, inside
 // or after the caret), presses one key and flushes. Every batch replays on a
 // patch.ex-shaped server. The caret maps through the change: before it, it stays;
@@ -169,13 +170,20 @@ function runSeed(seed) {
   textarea.focus();
 
   const user = clone(doc);
-  if (random() < 0.5) {
+  const grow = random();
+  if (grow < 0.4) {
     const j = int(0, user.length - 1);
     user[j] = withText(user[j], textOf(user[j]) + word(1, 2));
+  } else if (grow < 0.6) {
+    user.splice(int(0, user.length), 0, { id: "born", type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
   }
-  const prefix = (block) => block.type === "heading" ? "## " : block.type === "list" ? pick(["* ", "- "]) : "";
+  const prefix = (block) => block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
   const prefixes = user.map(prefix);
-  const typed = user.map((block, j) => prefixes[j] + textOf(block)).join("\n\n");
+  const chunks = user.map((block, j) => prefixes[j] + textOf(block));
+  const gaps = chunks.slice(1).map(() => pick(["\n\n", "\n\n", "\n\n\n"]));
+  const lead = pick(["", "", "\n"]);
+  const trail = pick(["", "", "\n"]);
+  const typed = lead + chunks.map((chunk, j) => (j ? gaps[j - 1] : "") + chunk).join("") + trail;
   type(textarea, typed);
   canvas.flushPendingChanges();
   canvas.applyServerBlocks(clone(state.server));
@@ -184,7 +192,7 @@ function runSeed(seed) {
   if (JSON.stringify(mine.map(textOf)) !== JSON.stringify(user.map(textOf))) return `the writer's save holds ${JSON.stringify(mine.map(textOf))}`;
 
   const b = int(0, user.length - 1);
-  const blockStart = user.slice(0, b).reduce((at, block, j) => at + prefixes[j].length + textOf(block).length + 2, 0) + prefixes[b].length;
+  const blockStart = lead.length + chunks.slice(0, b).reduce((at, chunk, j) => at + chunk.length + gaps[j].length, 0) + prefixes[b].length;
   const caretText = textOf(user[b]);
   let from = int(0, caretText.length);
   let to = from;
@@ -227,12 +235,21 @@ function runSeed(seed) {
   if (JSON.stringify(shown) !== JSON.stringify(remote.map((block) => blocksToMarkdown([block])))) {
     return `${where}: the textarea does not show the remote doc: ${JSON.stringify(textarea.value)}`;
   }
+  const v = textarea.value;
+  const starts = lineStarts(v);
+  const lineEnd = (k) => v.indexOf("\n", starts[k]) === -1 ? v.length : v.indexOf("\n", starts[k]);
   const userIndex = new Map(mine.map((block, j) => [block.id, j]));
-  for (const block of remote) {
-    const j = userIndex.get(block.id);
-    if (j !== undefined && prefixes[j] && textOf(user[j]) === textOf(block) && !textarea.value.includes(prefixes[j] + textOf(block))) {
-      return `${where}: the remote change rewrote the writer's ${JSON.stringify(prefixes[j])} on a block it did not touch: ${JSON.stringify(textarea.value)}`;
-    }
+  const untouched = (k) => userIndex.has(remote[k].id) && textOf(mine[userIndex.get(remote[k].id)]) === textOf(remote[k]);
+  const kept = (what, got, want) => got === want ? null
+    : `${where}: the remote change rewrote the writer's ${what} ${JSON.stringify(want)} as ${JSON.stringify(got)}: ${JSON.stringify(v)}`;
+  for (let k = 0; k < remote.length; k++) {
+    const j = userIndex.get(remote[k].id);
+    const broken = (untouched(k) && kept("block", v.slice(starts[k], lineEnd(k)), chunks[j])) ||
+      (k > 0 && untouched(k - 1) && untouched(k) && userIndex.get(remote[k - 1].id) === j - 1 &&
+        kept("gap", v.slice(lineEnd(k - 1), starts[k]), gaps[j - 1])) ||
+      (k === 0 && j === 0 && untouched(k) && kept("lead", v.slice(0, starts[0]), lead)) ||
+      (k === remote.length - 1 && j === chunks.length - 1 && untouched(k) && kept("trail", v.slice(lineEnd(k)), trail));
+    if (broken) return broken;
   }
 
   const after = remote.find((block) => block.id === bid);
@@ -242,7 +259,7 @@ function runSeed(seed) {
     const s = span(caretText, textOf(after));
     const [f, t] = mapSelection(s, from, to);
     const k = remote.indexOf(after);
-    const textStart = lineStarts(textarea.value)[k] + (after.type === "heading" ? 3 : after.type === "list" ? 2 : 0);
+    const textStart = lineEnd(k) - textOf(after).length;
     const want = [textStart + f, textStart + t];
     const got = [textarea.selectionStart, textarea.selectionEnd];
     if (got[0] !== want[0] || got[1] !== want[1]) {
@@ -255,14 +272,14 @@ function runSeed(seed) {
     expected[k] = withText(after, text.slice(0, f) + key + text.slice(t));
   } else {
     const k = b > 0 ? remote.findIndex((block) => block.id === mine[b - 1].id) : 0;
-    const end = lineStarts(textarea.value)[k] + blocksToMarkdown([remote[k]]).length;
+    const end = lineEnd(k);
     if (textarea.selectionStart !== end || textarea.selectionEnd !== end) {
       return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the block before it (${end})`;
     }
     expected[k] = withText(remote[k], textOf(remote[k]) + key);
   }
 
-  const [f, t, v] = [textarea.selectionStart, textarea.selectionEnd, textarea.value];
+  const [f, t] = [textarea.selectionStart, textarea.selectionEnd];
   type(textarea, v.slice(0, f) + key + v.slice(t));
   textarea.setSelectionRange(f + 1, f + 1);
   canvas.flushPendingChanges();

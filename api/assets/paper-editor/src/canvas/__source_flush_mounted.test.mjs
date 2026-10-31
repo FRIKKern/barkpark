@@ -8,7 +8,8 @@
 // flush replays on a server to exactly the canvas's blocks (a kind change is a remove
 // and an insert, never a typeless patch), and an external apply while the textarea
 // holds no unsaved text shows up in the textarea instead of being reverted by the
-// next flush. `sourceMode` reports the mode.
+// next flush. `sourceMode` reports the mode. __source_sync_property covers a remote
+// change plus one key over random docs.
 
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -148,13 +149,17 @@ try {
     const textarea = canvas.querySelector(".bp-canvas-source");
     canvas.applyServerBlocks([paragraph("d1", "One, from elsewhere"), paragraph("d2", "Two, typed")]);
     assert.equal(textarea.value, "One\n\nTwo, typed", "the apply waits while source mode is open");
+    assert.deepEqual(liveTexts(canvas), ["One", "Two, typed"], "the hidden rich editor waits too");
     document.dispatchEvent(new window.FocusEvent("focusout"));
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(textarea.value, "One\n\nTwo, typed", "a focus release does not apply it either");
+    assert.deepEqual(liveTexts(canvas), ["One", "Two, typed"], "nor to the hidden rich editor");
     canvas.blocks = [paragraph("d9", "Reseeded")];
     assert.equal(textarea.value, "One\n\nTwo, typed", "a reseed does not touch the textarea");
     canvas.resolveConflictWithServerBlocks([paragraph("d9", "Resolved")]);
     assert.equal(textarea.value, "One\n\nTwo, typed", "a conflict resolution does not touch the textarea");
+    canvas.resolveConflictWithServerBlocks([paragraph("d7", "Other"), paragraph("d8", "More")]);
+    assert.equal(textarea.value, "One\n\nTwo, typed", "nor one that replaces every block");
   }
 
   // 1) A flush saves the source text and source mode stays open with its caret,
@@ -545,6 +550,50 @@ try {
     assert.deepEqual(markdownToBlocks(">[!e]O").map((block) => block.type), ["blockquote"]);
     assert.deepEqual(markdownToBlocks("> [!note]\n> a\n>[!e]O").map((block) => [block.type, block.content?.map((run) => run.value).join("")]),
       [["callout", "a\n[!e]O"]], "a non-header `>[!e]O` line stays in the callout body");
+  }
+
+  // 10) A clamp that put back a locked title the writer deleted leaves the textarea
+  //     one block short of what it was saved as; a remote change after it still
+  //     finds the block the caret is in.
+  {
+    const title = { id: "t0", type: "heading", level: 1, role: "title", locked: true, text: "Doctrine" };
+    const { canvas, server } = await mount([title, paragraph("t1", "Body"), paragraph("t2", "Tail")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("Body\n\nTail");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    assert.equal(textarea.value, "Body\n\nTail");
+    assert.equal(canvas.blocks[0].id, "t0", "the clamp kept the locked title");
+    textarea.setSelectionRange(2, 2);
+    const remote = [clone(server[0]), clone(server[1]), paragraph("t2", "Tail, elsewhere")];
+    server.splice(0, server.length, ...clone(remote));
+    canvas.applyServerBlocks(clone(remote));
+    assert.match(textarea.value, /\n\nBody\n\nTail, elsewhere$/);
+    const body = textarea.value.indexOf("Body");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [body + 2, body + 2], "the caret stays in the block it was in");
+  }
+
+  // 11) A caret on a blank line before the first block stays at the top.
+  {
+    const { canvas, server } = await mount([paragraph("e1", "One"), paragraph("e2", "Two")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("\nOne\n\nTwo");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(0, 0);
+    const added = [paragraph("e0", "Zero"), ...clone(server)];
+    server.splice(0, server.length, ...clone(added));
+    canvas.applyServerBlocks(clone(added));
+    assert.equal(textarea.value, "Zero\n\nOne\n\nTwo");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [0, 0]);
   }
 
   console.log("mounted source-mode flush regression passed");

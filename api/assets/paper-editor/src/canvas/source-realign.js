@@ -185,29 +185,31 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 //   • body edits (non-locked blocks)      → preserved unchanged.
 //
 // REALIGN across source commits (1.20.0). A source session commits many times, so
-// a parsed block has two possible donors: the ENTER baseline (enterBlocks) and the
-// LAST commit (lastBlocks). The enter baseline goes first: a block a half-typed
-// construct swallowed in an earlier commit gets its original id back. Then every
-// block still holding a freshly minted id is realigned against the blocks born in
-// this session (in the last commit, not in the enter baseline; the first pass never
-// hands out their ids), so a born block keeps the id it was sent with (a patch-block, not remove +
-// insert on every flush). With one commit (lastBlocks = the enter baseline) the
-// second pass has no donors, so this is realignBlockIds exactly.
+// a parsed block has two possible donors: the LAST commit (lastBlocks) and the
+// ENTER baseline (enterBlocks). The last commit goes first: it is the text the
+// writer is typing on, so a block born in this session keeps the id it was sent
+// with (a patch-block, not remove + insert on every flush), and a block typed into
+// never trades ids with its neighbour. Then every block still holding a freshly
+// minted id is realigned against the enter blocks the last commit lacks, so a block
+// a half-typed construct swallowed in an earlier commit gets its original id back.
+// With one commit (lastBlocks = the enter baseline) the second pass has no donors,
+// so this is realignBlockIds exactly.
 export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
-  const first = realignBlockIds(enterBlocks, parsedBlocks);
-  const enterIds = new Set(enterBlocks.map((b) => b.id));
-  const born = first.flatMap((b, i) => (enterIds.has(b.id) ? [] : [i]));
-  if (born.length === 0) return first;
-  const donors = lastBlocks.filter((b) => !enterIds.has(b.id));
-  const again = realignBlockIds(donors, born.map((i) => first[i]));
-  born.forEach((i, k) => { first[i] = again[k]; });
+  const first = realignBlockIds(lastBlocks, parsedBlocks);
+  const lastIds = new Set(lastBlocks.map((b) => b.id));
+  const fresh = first.flatMap((b, i) => (lastIds.has(b.id) ? [] : [i]));
+  if (fresh.length === 0) return first;
+  const donors = enterBlocks.filter((b) => !lastIds.has(b.id));
+  const again = realignBlockIds(donors, fresh.map((i) => first[i]));
+  fresh.forEach((i, k) => { first[i] = again[k]; });
   return first;
 }
 
 // The source text for `blocks` that keeps the writer's own text (1.20.0). `before`
-// holds the ids of the blocks `text` shows, in order. Each block whose id and
-// Markdown are unchanged keeps its original lines, and two such blocks that were
-// neighbours keep the text between them; every other block is written as
+// are the blocks `text` was last saved as; realignBlockIds gives each block of
+// `text` its id (the clamp of a locked title can make the two differ). Each block
+// whose id and Markdown are unchanged keeps its original lines, and two such blocks
+// that were neighbours keep the text between them; every other block is written as
 // blocksToMarkdown writes it. A block keeps its lines only if they end it on their
 // own (an unclosed fence runs to the end of the text and would swallow whatever the
 // merge puts after it). So a server change rewrites only the blocks it touched, and
@@ -226,8 +228,7 @@ export function mergeSourceText(text, before, blocks) {
   const start = (k) => offsets[spans[k][0]];
   const end = (k) => offsets[spans[k][1]] - 1;
   const sig = (block) => blocksToMarkdown([block]);
-  const ids = parsed.length === before.length ? before.map((block) => block.id) : [];
-  const was = new Map(ids.map((id, k) => [id, k]));
+  const was = new Map(realignBlockIds(before, parsed).map((block, k) => [block.id, k]));
   const endsItself = (k) => {
     const alone = markdownToBlocks(text.slice(start(k), end(k)) + "\n\n.");
     return alone.length === 2 && sig(alone[0]) === sig(parsed[k]);
@@ -237,7 +238,7 @@ export function mergeSourceText(text, before, blocks) {
     const own = k !== -1 && sig(parsed[k]) === sig(block) && endsItself(k);
     return { k, own, text: own ? text.slice(start(k), end(k)) : sig(block) };
   });
-  let out = pieces[0]?.own && pieces[0].k === 0 ? text.slice(0, start(0)) : "";
+  let out = pieces[0].own && pieces[0].k === 0 ? text.slice(0, start(0)) : "";
   const at = [];
   pieces.forEach((piece, j) => {
     const prev = pieces[j - 1];
@@ -246,9 +247,8 @@ export function mergeSourceText(text, before, blocks) {
     out += piece.text;
   });
   const last = pieces[pieces.length - 1];
-  if (last?.own && last.k === parsed.length - 1) out += text.slice(end(last.k));
+  if (last.own && last.k === parsed.length - 1) out += text.slice(end(last.k));
   const map = (offset, stayBefore) => {
-    if (pieces.length === 0) return 0;
     let k = -1;
     while (k + 1 < parsed.length && start(k + 1) <= offset) k++;
     if (k === -1) return 0;
@@ -265,7 +265,6 @@ export function mergeSourceText(text, before, blocks) {
 }
 
 function through(before, after, at, stayBefore) {
-  if (before === after) return at;
   let start = 0;
   while (start < before.length && start < after.length && before[start] === after[start]) start++;
   let tail = 0;
