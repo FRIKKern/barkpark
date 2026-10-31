@@ -125,6 +125,10 @@ type CriterionItem struct {
 	// proof was refuted at least once — read it before trusting Evidence, which
 	// is deliberately the SUPERSEDED text on a withdrawn row.
 	Withdrawals []CriterionWithdrawal
+	// Confirmations are the second pairs of eyes on amended wording:
+	// `bp task stamp --confirm-amendment` appends {note,ts,worker} here, the
+	// same shape as an attempt.
+	Confirmations []CriterionAttempt
 	// MarkedMissed is the honest miss as the BOARD PROJECTION reports it.
 	// `?view=board` carries `content_digest.criteria_marks` — one character per
 	// criterion, "m"/"a"/"o" — instead of the criteria themselves, so a row

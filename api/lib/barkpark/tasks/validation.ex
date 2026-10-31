@@ -102,7 +102,8 @@ defmodule Barkpark.Tasks.Validation do
   # declared key set of an acceptance_criteria entry. Derived from the code
   # that reads and writes entries, not from a guess — `criterion`/`met`/
   # `evidence` (this rule), `attempts`, `withdrawals`, `amendments`
-  # (`Tasks.Internal` stamp --miss / --withdraw / --amend), `discharge_marks`
+  # (`Tasks.Internal` stamp --miss / --withdraw / --amend), `confirmations`
+  # (stamp --confirm-amendment, `Tasks.AmendmentConfirmation`), `discharge_marks`
   # (`Tasks.Discharge`), `ack_gate` (stamp --ack_gate), `merge_gate`
   # (`Tasks.Close` autostamp), `merge_discharges` (`Tasks.Landed.merge_discharges?/1`,
   # the author's explicit merge veto), and `weight` (declared by ruling; 89 live
@@ -111,7 +112,7 @@ defmodule Barkpark.Tasks.Validation do
   # `" met": false` (a leading space) sat beside `met: true` on a live row.
   # Any other key is REFUSED, naming the key and this set, so a writer fixes
   # its write in one try. A new declared key is added HERE, with its reader.
-  @criterion_keys ~w(criterion met evidence attempts merge_gate merge_discharges withdrawals amendments discharge_marks ack_gate weight)
+  @criterion_keys ~w(criterion met evidence attempts merge_gate merge_discharges withdrawals amendments confirmations discharge_marks ack_gate weight)
 
   # @canonical capability:task-acceptance-criteria-shape aka:criterion,met,evidence,is_map,unstampable doc:docs/setup/TASK-SYSTEM.md
   @spec criteria_violation(list()) :: nil | String.t()

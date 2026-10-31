@@ -299,6 +299,15 @@ var codeExit = map[string]int{
 	"invalid_criteria":           exitValidation,
 	"evidence_required":          exitValidation,
 	"observed_rev_required":      exitValidation,
+	// The second-eyes gate (task-e9c6aa61af536112). VALIDATION, not conflict:
+	// nothing moved under the caller, and re-sending can never succeed until a
+	// DIFFERENT worker acts — the amender's stamp/close waits for another
+	// worker's --confirm-amendment, and a self-confirm or a confirm of a
+	// never-amended criterion is a different request. amendment_unconfirmed is
+	// minted with a `:<indices>` suffix and reaches this table by family.
+	"amendment_unconfirmed": exitValidation,
+	"self_confirmation":     exitValidation,
+	"nothing_to_confirm":    exitValidation,
 	// CONFLICT, not validation: the close lost a concurrent rev-CAS race
 	// (tasks/close.ex — the fenced write matched 0 rows). The world moved under
 	// the caller, so re-reading and re-sending is exactly the right reflex —

@@ -1993,6 +1993,13 @@ defmodule BarkparkWeb.TasksController do
   #                                          fence as withdraw: holder+epoch on an
   #                                          in_progress row, observed_rev on any
   #                                          other.
+  #   confirm_amendment=true + note=<non-empty>
+  #                                        → a DIFFERENT worker vouches for the
+  #                                          amended wording
+  #                                          (task-e9c6aa61af536112). Until one
+  #                                          does, the amender's met=true is
+  #                                          409 amendment_unconfirmed.
+  #                                          observed_rev on every row.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc

@@ -10,6 +10,7 @@ defmodule Barkpark.Tasks.Internal do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.AmendmentConfirmation
   alias Barkpark.Tasks.BriefMirror
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
@@ -417,6 +418,10 @@ defmodule Barkpark.Tasks.Internal do
   #     "worker"}` LOWERS `met` to false and APPENDS the record to the entry's
   #     `withdrawals` list, snapshotting the evidence it supersedes. See the
   #     WITHDRAWAL block below.
+  #   * confirmation (`stamp --confirm-amendment`, task-e9c6aa61af536112):
+  #     `"confirmation" => %{"note","ts","worker"}` APPENDS to the entry's
+  #     `confirmations` list, bound to the amendment it confirms, and PINS
+  #     `met`. See `Tasks.AmendmentConfirmation`.
   #
   # The stored `criterion` text is touched by exactly ONE update kind — the
   # AMENDMENT (`"amendment"` + `"amended_criterion"`, task-a1df012e89b1e289) —
@@ -605,6 +610,11 @@ defmodule Barkpark.Tasks.Internal do
       amends?(update) ->
         {:error, :criteria_index_out_of_range}
 
+      # A CONFIRMATION CANNOT SEED either: a row that does not exist carries
+      # no amendment to confirm.
+      confirms?(update) ->
+        {:error, :criteria_index_out_of_range}
+
       not guarded?(text) ->
         {:error, :criteria_index_out_of_range}
 
@@ -716,6 +726,23 @@ defmodule Barkpark.Tasks.Internal do
           amends?(update) and Map.get(update, "amended_criterion") == Map.get(entry, "criterion") ->
             {:error, :criterion_unchanged}
 
+          # ── THE CONFIRMATION'S THREE GUARDS (task-e9c6aa61af536112) ───────
+          #
+          # The text CAS IS the confirmation: the confirmer proves they read
+          # the wording they vouch for by passing it byte for byte.
+          confirms?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          confirms?(update) and AmendmentConfirmation.last_amender(entry) == nil ->
+            {:error, :nothing_to_confirm}
+
+          # The amender confirming their own wording is the one pair of eyes
+          # this verb exists to add a second to.
+          confirms?(update) and
+              AmendmentConfirmation.last_amender(entry) ==
+                get_in(update, ["confirmation", "worker"]) ->
+            {:error, :self_confirmation}
+
           true ->
             with {:ok, entry} <- apply_entry_update(entry, update) do
               {:ok, List.replace_at(list, index, entry), seeded}
@@ -753,6 +780,7 @@ defmodule Barkpark.Tasks.Internal do
   # An amendment PINS met to its stored value (see apply_entry_update below), so
   # it flips nothing in either direction and cannot fabricate a done.
   defp flips_met_true?(%{"amendment" => %{}}), do: false
+  defp flips_met_true?(%{"confirmation" => %{}}), do: false
   defp flips_met_true?(update), do: Map.get(update, "met", true) == true
 
   # A withdrawal is discriminated by its `"withdrawal"` record, never by the
@@ -767,6 +795,9 @@ defmodule Barkpark.Tasks.Internal do
   # amendment, it is a malformed one.
   defp amends?(%{"amendment" => %{}}), do: true
   defp amends?(_update), do: false
+
+  defp confirms?(%{"confirmation" => %{}}), do: true
+  defp confirms?(_update), do: false
 
   # Replacement wording only counts when it has words. `nil`, a non-string and
   # a whitespace-only string are all "no wording", so none of them can reach the
@@ -851,6 +882,24 @@ defmodule Barkpark.Tasks.Internal do
      |> Map.put("met", Map.get(entry, "met") == true)
      |> Map.put("criterion", new_text)
      |> Map.put("amendments", amendments ++ [record])}
+  end
+
+  # CONFIRMATION PATH (task-e9c6aa61af536112): append the signed record, bound
+  # to the amendment it confirms by the amendment COUNT at confirm time, and
+  # PIN met. It vouches for the QUESTION; it never moves the verdict.
+  defp apply_entry_update(entry, %{"confirmation" => %{} = record}) do
+    confirmations =
+      case Map.get(entry, "confirmations") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    record = Map.put(record, "amendment", AmendmentConfirmation.amendment_count(entry))
+
+    {:ok,
+     entry
+     |> Map.put("met", Map.get(entry, "met") == true)
+     |> Map.put("confirmations", confirmations ++ [record])}
   end
 
   # Met/evidence path (close-time semantics — see merge_criteria/2 above).

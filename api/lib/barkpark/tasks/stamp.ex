@@ -199,6 +199,7 @@ defmodule Barkpark.Tasks.Stamp do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.AmendmentConfirmation
   alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -289,7 +290,9 @@ defmodule Barkpark.Tasks.Stamp do
   `:note_required`, `:invalid_criteria`, `:merge_gated_criterion`,
   `:branch_only_evidence`,
   `:observed_rev_required`, `:criterion_not_met`,
-  `:amended_criterion_required`, `:criterion_unchanged`.
+  `:amended_criterion_required`, `:criterion_unchanged`,
+  `{:amendment_unconfirmed, [index]}`, `:nothing_to_confirm`,
+  `:self_confirmation`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
@@ -423,6 +426,23 @@ defmodule Barkpark.Tasks.Stamp do
   defp build_update(_index, {:amend, _malformed}, _worker, _text),
     do: {:error, :invalid_criteria}
 
+  # The confirmation update (task-e9c6aa61af536112). The note says what the
+  # confirmer checked; `merge_criteria` binds the record to the amendment it
+  # confirms, because only it can see the stored row.
+  defp build_update(index, {:confirm, note}, worker, text) when is_binary(note) do
+    if String.trim(note) == "" do
+      {:error, :note_required}
+    else
+      record = %{
+        "note" => note,
+        "ts" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "worker" => worker
+      }
+
+      {:ok, put_guard(%{"index" => index, "confirmation" => record}, text), "confirmed"}
+    end
+  end
+
   defp build_update(_index, _outcome, _worker, _text), do: {:error, :invalid_criteria}
 
   # THE BACKFILL DOOR (task-66cc8ad999fa5a24). `--ack-gate` rides a `--miss`
@@ -485,6 +505,7 @@ defmodule Barkpark.Tasks.Stamp do
 
           %Document{} = doc ->
             with :ok <- authorize(doc, worker_id, observed_epoch, observed_rev, result_tag),
+                 :ok <- check_amendment_confirmed(doc, update, result_tag, worker_id),
                  {:ok, override} <-
                    check_merge_gate(doc, update, result_tag, merge_gated, worker_id,
                      caller_token_id: caller_token_id
@@ -515,6 +536,11 @@ defmodule Barkpark.Tasks.Stamp do
                           # string-matching the result tag.
                           if result_tag == "amended",
                             do: Map.put(p, "amended", true),
+                            else: p
+                        end)
+                        |> then(fn p ->
+                          if result_tag == "confirmed",
+                            do: Map.put(p, "amendment_confirmed", true),
                             else: p
                         end)
                         |> then(fn p ->
@@ -689,6 +715,33 @@ defmodule Barkpark.Tasks.Stamp do
     check_observed_rev(doc, observed_rev)
   end
 
+  # A CONFIRMATION comes from a worker who by definition is not the one who
+  # amended, so on a live row it is almost never the holder. It answers to the
+  # rev the caller READ on every row, live or sealed, and never to the epoch,
+  # which it does not bump: the holder's own stamps and close are undisturbed.
+  defp authorize(%Document{} = doc, _worker_id, _observed_epoch, observed_rev, "confirmed") do
+    check_observed_rev(doc, observed_rev)
+  end
+
+  # THE SECOND-EYES GATE (task-e9c6aa61af536112). A met-flip by the worker
+  # whose amendment of this criterion is still unconfirmed is refused, read from
+  # the STORED entry inside the lock. An index that does not resolve falls
+  # through to `merge_criteria`, which owns that taxonomy.
+  defp check_amendment_confirmed(%Document{content: content}, update, "met", worker_id) do
+    index = Map.get(update, "index")
+
+    entry =
+      (content || %{})
+      |> Map.get("acceptance_criteria")
+      |> Criteria.at(index)
+
+    if AmendmentConfirmation.awaiting_amender(entry) == worker_id,
+      do: {:error, {:amendment_unconfirmed, [index]}},
+      else: :ok
+  end
+
+  defp check_amendment_confirmed(_doc, _update, _tag, _worker_id), do: :ok
+
   # THE READ-BEFORE-WRITE FENCE, shared by the sealed-row withdrawal (D745) and
   # the post-close attempt (task-d68754135a6a9f66): you cannot annotate a row
   # you did not read. Same CAS close already spells `--set observed_rev=...`.
@@ -783,6 +836,10 @@ defmodule Barkpark.Tasks.Stamp do
   # wrong must be correctable by the reviewer who found it wrong, without a
   # lead-only override, and there is nothing to confess.
   defp check_merge_gate(_doc, _update, "amended", _merge_gated, _worker_id, _opts),
+    do: {:ok, nil}
+
+  # A confirmation moves no lock either.
+  defp check_merge_gate(_doc, _update, "confirmed", _merge_gated, _worker_id, _opts),
     do: {:ok, nil}
 
   defp check_merge_gate(%Document{content: content}, update, _tag, merge_gated, worker_id, opts) do
