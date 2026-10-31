@@ -229,7 +229,7 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "title" => :string,
       "variant" => :string
     },
-    "sheet" => %{"ref" => :string, "snapshot" => :object},
+    "sheet" => %{"ref" => :string, "snapshot" => :object, "tab" => :integer},
     "stage" => %{
       "detail" => :string,
       "files" => :array,

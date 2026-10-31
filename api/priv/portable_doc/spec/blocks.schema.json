@@ -4032,6 +4032,9 @@
           "snapshot": {
             "type": "object"
           },
+          "tab": {
+            "type": "integer"
+          },
           "type": {
             "const": "sheet"
           }

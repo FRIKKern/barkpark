@@ -28,6 +28,10 @@ defmodule Barkpark.PortableDoc.SpecTest do
     {"tasks", "config"} => {"slots.ex", "the task-list shape; nothing reads it"}
   }
 
+  @undeclared %{
+    "order" => {"render/section_layout.ex", "read off every grid cell; no block declares it"}
+  }
+
   @portable_doc Path.expand("../../../lib/barkpark/portable_doc", __DIR__)
   @compose_source File.read!(Path.join(@portable_doc, "render/compose.ex"))
   @reader_sources Path.wildcard(Path.join(@portable_doc, "render/*.ex")) ++
@@ -240,16 +244,34 @@ defmodule Barkpark.PortableDoc.SpecTest do
              ]
     end
 
-    test "each unread field is still named where the exception says, and still unread", %{
-      reads: reads
-    } do
-      for {{type, field}, {file, why}} <- @unread do
-        assert MapSet.member?(string_literals(Path.join(@portable_doc, file)), field),
-               "#{type}.#{field} (#{why}): #{file} no longer names it — drop the exception"
+    test "each exception still holds; every stale one is named", %{schema: schema, reads: reads} do
+      blocks = schema["definitions"]["blocks"]
+      names? = &MapSet.member?(string_literals(Path.join(@portable_doc, &1)), &2)
+      read_by = fn field -> for {type, keys} <- reads, blocks[type], field in keys, do: type end
 
-        refute field in Map.fetch!(reads, type),
-               "#{type}.#{field} (#{why}): the census reads it now — drop the exception"
+      declared_by = fn field ->
+        for {type, block} <- blocks, Map.has_key?(block["properties"], field), do: type
       end
+
+      unread =
+        for {{type, field}, {file, why}} <- @unread,
+            {true, how} <- [
+              {not names?.(file, field), "#{file} no longer names it"},
+              {field in Map.fetch!(reads, type), "the census reads it now"}
+            ],
+            do: "#{type}.#{field} (#{why}): #{how} — drop the exception"
+
+      undeclared =
+        for {field, {file, why}} <- @undeclared,
+            {true, how} <- [
+              {not names?.(file, field), "#{file} no longer names it"},
+              {declared_by.(field) != [], "#{Enum.join(declared_by.(field), ", ")} declares it"},
+              {read_by.(field) != [],
+               "the census reads it on #{Enum.join(read_by.(field), ", ")}"}
+            ],
+            do: "#{field} (#{why}): #{how} — drop the exception"
+
+      assert unread ++ undeclared == []
     end
 
     test "each unauthored key is one the reader injects" do
@@ -305,6 +327,71 @@ defmodule Barkpark.PortableDoc.SpecTest do
                ~w(alpha beta body from_a margin meta pinned shared size tag via_copy)
 
       assert reads["other"] == ["remote_only", "unused"]
+    end
+
+    test "the census walks scoped entries and the less common read shapes" do
+      source = """
+      defmodule Scoped do
+        @k "attr_key"
+        @keys ~w(take_a take_b)
+        @caps ~w(cap_a)
+        def hydrate(blocks) do
+          Enum.map(blocks, fn block ->
+            with %{"type" => "sheet", "ref" => _} <- block, do: tab(block)
+          end)
+        end
+        def tab(block), do: Map.get(block, "with_body")
+        def refresh(block) do
+          if is_map(block) and Map.get(block, "type") == "sheet", do: block["if_branch"]
+        end
+        def by_type(b) do
+          case Map.get(b, "type") do
+            "sheet" -> b["case_type_branch"]
+            _ -> nil
+          end
+        end
+        def classify(b) do
+          case b do
+            %{"type" => "memo", "case_pat" => _} = d -> d["case_bound"]
+            _ -> nil
+          end
+        end
+        def later(b) do
+          %{"type" => "memo"} = b
+          b["after_match"]
+        end
+        def each(blocks), do: Enum.map(blocks, fn %{"type" => "diagram"} = blk -> blk["fn_body"] end)
+        def pick(b) do
+          cond do
+            b["type"] == "diagram" -> Map.get(b, "cond_branch")
+            true -> nil
+          end
+        end
+        def compose_block(%{"type" => "memo"} = b, _style) do
+          d = Map.put(b, "put_key", 1)
+          e = Map.merge(b, %{})
+          f = b |> Map.delete("y")
+          {b[@k], Map.take(b, ~w(take_lit)), Map.take(b, @keys)}
+          {Enum.map(@caps, &Map.get(b, &1)), Enum.find_value(~w(cap_x), &b[&1])}
+          {d["via_put"], d["put_key"], e["via_merge"], f["via_delete"]}
+          {Access.get(b, "access_get"), Map.update(b, "updated", 0, & &1)}
+          {Kernel.get_in(b, ["kernel_get_in"]), get_in(b, [Access.key("access_key")])}
+          {__MODULE__.helper(b), defaulted(b), (fn %{"anon" => v} -> v end).(b)}
+        end
+        def helper(b), do: b["module_call"]
+        defp defaulted(b, key \\\\ "default_arg"), do: Map.get(b, key)
+      end
+      """
+
+      reads = ComposeCensus.Reads.reads([source], ["sheet", "memo", "diagram"])
+
+      assert reads["sheet"] == ~w(case_type_branch if_branch ref with_body)
+      assert reads["diagram"] == ~w(cond_branch fn_body)
+
+      assert reads["memo"] ==
+               ~w(access_get access_key after_match anon attr_key cap_a cap_x case_bound
+                  case_pat default_arg kernel_get_in module_call take_a take_b take_lit
+                  updated via_delete via_merge via_put)
     end
   end
 

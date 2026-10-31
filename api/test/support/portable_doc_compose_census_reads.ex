@@ -3,33 +3,48 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   The top-level fields the reader reads on each block type, read off the reader's
   own source.
 
-  An entry is a function clause whose first parameter is a map pattern with a
-  `"type"` key (a literal, a module attribute, or a variable its guard narrows with
-  `in` or `==`), or a `case`/`fn`/`=`/`<-` pattern with one. Its other literal keys
-  are reads of those types, and so is every read of the variable the clause binds:
-  `Map.get/fetch/has_key?/take`, `b["k"]`, `get_in`, a `case`, `=` or `<-` match,
-  and every call the variable is passed to, followed into the callee's clauses
-  whose own `"type"` pattern admits the type, with string arguments carried in
-  (`blank_field?(b, "src")` reads `src`). A key bound by `Enum.*` or `for` over a
-  literal list or attribute is each of its strings. A block passed on through
-  `Map.put(b, "type", t)` is followed as `t`, and a key it `Map.put`s is not read.
+  An entry binds a block of a known type:
+
+    * a function clause whose first parameter is a map pattern with a `"type"` key
+      (a literal, a module attribute, or a variable its guard narrows with `in`/`==`);
+    * a `case`, `fn`, `with`, `for` or `=` pattern with one, over the clause body,
+      the rest of the `with`/`for`, or the statements after the `=`;
+    * an `if`, `cond` or `case` that tests `Map.get(b, "type")` or `b["type"]`
+      against a literal, over the branch it guards.
+
+  The pattern's other literal keys are reads of that type, and so is every read of
+  the variables the entry binds (and of the matched variable): `Map.get/fetch/
+  has_key?/pop/update/take`, `b["k"]`, `Access.get`, `get_in` (also through
+  `Access.key/1`), a `case`, `=` or `<-` match, and every call the variable is passed
+  to, followed into the callee's clauses whose own `"type"` pattern admits the type
+  (also `__MODULE__.f/n`, an inline `(fn … end).(b)` and a default argument), with
+  string arguments carried in (`blank_field?(b, "src")` reads `src`). A key may be
+  a literal, a module attribute, or bound by `Enum.*` (a `fn` or a capture) or `for`
+  over a literal list or attribute. A block passed on, or rebound, through
+  `Map.put/put_new/delete/merge/drop` is still the block; `Map.put(b, "type", t)`
+  is followed as `t`, and a key it `Map.put`s is not read.
 
   A function or `case` whose clauses also match a type the reader does not render
   (an inline node: `text`, `link`, `code` marks) dispatches on something else, so
   it is no entry.
 
+  Not seen: a block passed inside a map, tuple or keyword argument; a key built at
+  run time (interpolation, concatenation, a computed variable); a read of a child
+  block in a list (`SectionLayout`'s grid cells); a helper outside the sources given;
+  a type test joined by `or`. Inside an entry, a nested type test does not narrow.
+
   `reads/2` takes the source strings and the rendered types (`ComposeCensus.types/1`)
   and returns `%{type => [key]}`.
   """
 
-  @map_reads [:get, :fetch, :fetch!, :has_key?, :pop, :get_lazy]
+  @map_reads [:get, :fetch, :fetch!, :has_key?, :pop, :get_lazy, :update, :update!]
   @map_passes [:put, :put_new, :delete, :merge, :drop]
   @forms [:=, :., :__aliases__, :fn, :->, :when, :%{}, :{}, :__block__, :@, :&, :<<>>, :"::"]
 
   def reads(sources, types) do
     index = sources |> Enum.flat_map(&modules/1) |> Map.new()
 
-    (heads(index, types) ++ inline(index, types))
+    (heads(index, types) ++ scoped(index, types))
     |> Enum.reduce(%{}, fn {type, keys}, acc ->
       Map.update(acc, type, MapSet.new(keys), &MapSet.union(&1, MapSet.new(keys)))
     end)
@@ -44,34 +59,128 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
         {matched, keys, vars} = param(first, guard, mod, index),
         is_list(matched),
         type <- matched do
-      w = %{vars: vars, env: %{}, type: type, mod: mod, index: index, seen: MapSet.new()}
+      w = start(type, vars, mod, index)
       {type, keys ++ walk(body, %{w | env: literal_env(args, guard, w)})}
     end
   end
 
-  defp inline(index, types) do
+  defp scoped(index, types) do
     for {mod, %{defs: defs}} <- index,
         {_, clauses} <- defs,
         {_, _, body} <- clauses,
-        group <- collect(body, &patterns/1),
-        not foreign?(group, types),
-        pattern <- group,
-        {call, guard} = split_head(pattern),
-        {matched, keys, _} = param(call, guard, mod, index),
-        is_list(matched),
-        type <- matched,
-        do: {type, keys}
+        entry <- collect(body, &entries(&1, types, mod, index)),
+        do: entry
   end
 
-  defp patterns({op, _, [pattern, _]}) when op in [:=, :<-], do: [[pattern]]
+  defp entries({:case, _, [value, [do: clauses]]}, types, mod, index) do
+    case type_read(value) do
+      {:ok, var} ->
+        for {:->, _, [[literal], body]} <- clauses,
+            literal in types,
+            do: {literal, walk(body, start(literal, [var], mod, index))}
 
-  defp patterns({:case, _, [_, [do: clauses]]}),
-    do: [for({:->, _, [[pattern], _]} <- clauses, do: pattern)]
+      :error ->
+        patterns = for {:->, _, [[pattern], _]} <- clauses, do: pattern
 
-  defp patterns({:fn, _, clauses}),
-    do: [for({:->, _, [[pattern | _], _]} <- clauses, do: pattern)]
+        unless foreign?(patterns, types) do
+          for {:->, _, [[pattern], body]} <- clauses,
+              entry <- bind(pattern, body, matched_var(value), mod, index),
+              do: entry
+        end
+    end
+  end
 
-  defp patterns(_node), do: nil
+  defp entries({:fn, _, clauses}, types, mod, index) do
+    patterns = for {:->, _, [[pattern | _], _]} <- clauses, do: pattern
+
+    unless foreign?(patterns, types) do
+      for {:->, _, [[pattern | _], body]} <- clauses,
+          entry <- bind(pattern, body, [], mod, index),
+          do: entry
+    end
+  end
+
+  defp entries({form, _, args}, _types, mod, index)
+       when form in [:with, :for] and is_list(args) do
+    {steps, opts} = Enum.split_while(args, &(not Keyword.keyword?(&1)))
+
+    for {{:<-, _, [pattern, value]}, i} <- Enum.with_index(steps),
+        rest = Enum.drop(steps, i + 1) ++ [List.first(opts)],
+        entry <-
+          bind(pattern, rest, if(form == :with, do: matched_var(value), else: []), mod, index),
+        do: entry
+  end
+
+  defp entries({:__block__, _, statements}, _types, mod, index) do
+    for {{:=, _, [pattern, value]}, i} <- Enum.with_index(statements),
+        entry <- bind(pattern, Enum.drop(statements, i + 1), matched_var(value), mod, index),
+        do: entry
+  end
+
+  defp entries({:if, _, [test, branches]}, types, mod, index) when is_list(branches) do
+    for {var, literal} <- type_tests(test),
+        literal in types,
+        do: {literal, walk(branches[:do], start(literal, [var], mod, index))}
+  end
+
+  defp entries({:cond, _, [[do: clauses]]}, types, mod, index) do
+    for {:->, _, [[test], body]} <- clauses,
+        {var, literal} <- type_tests(test),
+        literal in types,
+        do: {literal, walk(body, start(literal, [var], mod, index))}
+  end
+
+  defp entries(_node, _types, _mod, _index), do: nil
+
+  defp bind(pattern, body, matched, mod, index) do
+    {call, guard} = split_head(pattern)
+
+    case param(call, guard, mod, index) do
+      {types, keys, vars} when is_list(types) ->
+        for type <- types,
+            do: {type, keys ++ walk(body, start(type, vars ++ matched, mod, index))}
+
+      _ ->
+        []
+    end
+  end
+
+  defp start(type, vars, mod, index),
+    do: %{
+      vars: Map.new(vars, &{&1, []}),
+      env: %{},
+      type: type,
+      mod: mod,
+      index: index,
+      seen: MapSet.new()
+    }
+
+  defp matched_var({var, _, ctx}) when is_atom(var) and is_atom(ctx), do: [var]
+  defp matched_var(_value), do: []
+
+  defp type_tests(test) do
+    collect(test, fn
+      {:==, _, [a, b]} ->
+        case {type_read(a), type_read(b)} do
+          {{:ok, var}, _} when is_binary(b) -> [{var, b}]
+          {_, {:ok, var}} when is_binary(a) -> [{var, a}]
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp type_read({{:., _, [{:__aliases__, _, [:Map]}, :get]}, _, [{var, _, ctx}, "type" | _]})
+       when is_atom(var) and is_atom(ctx),
+       do: {:ok, var}
+
+  defp type_read({{:., _, [Access, :get]}, _, [{var, _, ctx}, "type"]})
+       when is_atom(var) and is_atom(ctx),
+       do: {:ok, var}
+
+  defp type_read(_value), do: :error
 
   defp first_param({[first | _], _, _}), do: first
   defp first_param(_clause), do: nil
@@ -136,7 +245,9 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
             put_def(acc, name, [], guard, body)
 
           {name, _, args} when is_atom(name) and is_list(args) ->
-            Enum.reduce(arities(args), acc, &put_def(&2, name, &1, guard, body))
+            Enum.reduce(arities(args, body), acc, fn {args, body}, acc ->
+              put_def(acc, name, args, guard, body)
+            end)
 
           _ ->
             acc
@@ -159,10 +270,23 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   defp split_head({:when, _, [call, guard]}), do: {call, guard}
   defp split_head(call), do: {call, nil}
 
-  defp arities(args) do
+  defp arities(args, body) do
+    defaults = for {:\\, _, [{var, _, ctx}, default]} <- args, is_atom(ctx), do: {var, default}
     full = Enum.map(args, &strip_default/1)
-    defaults = Enum.count(args, &match?({:\\, _, _}, &1))
-    for drop <- 0..defaults, do: Enum.take(full, length(full) - drop)
+
+    for drop <- 0..length(defaults) do
+      filled = defaults |> Enum.take(-drop) |> Map.new()
+      {Enum.take(full, length(full) - drop), fill(body, filled)}
+    end
+  end
+
+  defp fill(body, filled) when filled == %{}, do: body
+
+  defp fill(body, filled) do
+    Macro.prewalk(body, fn
+      {var, _, ctx} = node when is_atom(var) and is_atom(ctx) -> Map.get(filled, var, node)
+      node -> node
+    end)
   end
 
   defp strip_default({:\\, _, [param, _default]}), do: param
@@ -256,7 +380,7 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   end
 
   defp walk(body, w) do
-    w = %{w | vars: aliases(body, MapSet.new(w.vars))}
+    w = %{w | vars: aliases(body, w.vars)}
     collect(body, &read(&1, w))
   end
 
@@ -264,13 +388,16 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
     more =
       collect(body, fn
         {op, _, [pattern, value]} when op in [:=, :<-] ->
-          if tracked?(value, vars), do: bound(pattern), else: nil
+          case track(value, vars) do
+            {_, forced} -> for var <- bound(pattern), do: {var, forced}
+            nil -> nil
+          end
 
         _ ->
           nil
       end)
 
-    grown = MapSet.union(vars, MapSet.new(more))
+    grown = Map.merge(Map.new(more), vars)
     if grown == vars, do: vars, else: aliases(body, grown)
   end
 
@@ -280,35 +407,38 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
 
   defp read({{:., _, [{:__aliases__, _, [:Map]}, fun]}, _, [value, key | _]}, w)
        when fun in @map_reads,
-       do: if(tracked?(value, w.vars), do: keys(key, w.env))
+       do: on(value, keys(key, w), w)
 
   defp read({{:., _, [{:__aliases__, _, [:Map]}, :take]}, _, [value, list]}, w),
-    do: if(tracked?(value, w.vars), do: Enum.filter(List.wrap(list), &is_binary/1))
+    do: on(value, strings(list, w.mod, w.index), w)
 
-  defp read({{:., _, [Access, :get]}, _, [value, key]}, w),
-    do: if(tracked?(value, w.vars), do: keys(key, w.env))
+  defp read({{:., _, [Access, :get]}, _, [value, key | _]}, w), do: on(value, keys(key, w), w)
 
-  defp read({:get_in, _, [value, [key | _]]}, w),
-    do: if(tracked?(value, w.vars), do: keys(key, w.env))
+  defp read({{:., _, [{:__aliases__, _, [:Access]}, :get]}, _, [value, key | _]}, w),
+    do: on(value, keys(key, w), w)
+
+  defp read({:get_in, _, [value, [key | _]]}, w), do: on(value, keys(key, w), w)
+
+  defp read({{:., _, [{:__aliases__, _, [:Kernel]}, :get_in]}, _, [value, [key | _]]}, w),
+    do: on(value, keys(key, w), w)
 
   defp read({:case, _, [value, [do: clauses]]}, w) do
     if tracked?(value, w.vars) do
-      for {:->, _, [[pattern], _]} <- clauses,
+      for {:->, _, [[pattern], body]} <- clauses,
           {call, guard} = split_head(pattern),
-          {types, keys, _} = param(call, guard, w.mod, w.index),
+          {types, keys, vars} = param(call, guard, w.mod, w.index),
           admits?(types, w.type),
-          key <- keys,
+          key <- keys ++ walk(body, %{w | vars: Map.merge(w.vars, Map.new(vars, &{&1, []}))}),
           do: key
     end
   end
 
-  defp read({op, _, [pattern, value]}, w) when op in [:=, :<-] do
-    if tracked?(value, w.vars), do: elem(param(pattern, nil, w.mod, w.index), 1)
-  end
+  defp read({op, _, [pattern, value]}, w) when op in [:=, :<-],
+    do: on(value, elem(param(pattern, nil, w.mod, w.index), 1), w)
 
   defp read({{:., _, [{:__aliases__, _, [:Enum]}, _]}, _, [list | rest]}, w) do
-    for {:fn, _, [{:->, _, [[{key, _, ctx} | _], body]}]} <- rest,
-        is_atom(key) and is_atom(ctx),
+    for fun <- rest,
+        {key, body} <- List.wrap(element_fun(fun)),
         found <- List.wrap(bound_walk(list, key, body, w)),
         do: found
   end
@@ -316,6 +446,17 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   defp read({:for, _, [{:<-, _, [{key, _, ctx}, list]} | rest]}, w)
        when is_atom(key) and is_atom(ctx),
        do: bound_walk(list, key, rest, w)
+
+  defp read({{:., _, [{:fn, _, clauses}]}, _, args}, w) do
+    for {:->, _, [params, body]} <- clauses,
+        {params, guard} = fn_head(params),
+        length(params) == length(args),
+        key <- clause(params, guard, body, args, w),
+        do: key
+  end
+
+  defp read({{:., _, [{:__MODULE__, _, _}, fun]}, _, args}, w) when is_list(args),
+    do: call(w.mod, fun, args, w)
 
   defp read({{:., _, [{:__aliases__, _, parts}, fun]}, _, args}, w) when is_list(args) do
     case short(w.index, List.last(parts)) do
@@ -335,6 +476,33 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
 
   defp read(_node, _w), do: nil
 
+  defp on({var, _, ctx} = value, keys, w) when is_atom(var) and is_atom(ctx) do
+    if tracked?(value, w.vars), do: List.wrap(keys) -- Map.fetch!(w.vars, var)
+  end
+
+  defp on(_value, _keys, _w), do: nil
+
+  defp element_fun({:fn, _, [{:->, _, [[{key, _, ctx} | _], body]}]})
+       when is_atom(key) and is_atom(ctx),
+       do: {key, body}
+
+  defp element_fun({:&, _, [body]}) when not is_tuple(body) or elem(body, 0) != :/ do
+    key = :capture_arg
+
+    {key,
+     Macro.prewalk(body, fn
+       {:&, _, [1]} -> {key, [], nil}
+       node -> node
+     end)}
+  end
+
+  defp element_fun(_fun), do: nil
+
+  defp fn_head([{:when, _, params_and_guard}]),
+    do: {Enum.drop(params_and_guard, -1), List.last(params_and_guard)}
+
+  defp fn_head(params), do: {params, nil}
+
   defp bound_walk(list, key, body, w) do
     case strings(list, w.mod, w.index) do
       [_ | _] = values -> walk(body, %{w | env: Map.put(w.env, key, values)})
@@ -343,28 +511,51 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
   end
 
   defp call(target, fun, args, w) do
-    tracks =
-      for {arg, pos} <- Enum.with_index(args), track = track(arg, w.vars), track, do: {pos, track}
+    visit =
+      {target, fun, length(args), Enum.map(args, &(track(&1, w.vars) != nil)),
+       Enum.map(args, &given(&1, w))}
 
-    passed = Enum.map(tracks, &elem(&1, 0))
-    type = Enum.find_value(tracks, w.type, fn {_, {override, _}} -> override end)
-    forced = Enum.flat_map(tracks, fn {_, {_, forced}} -> forced end)
-    given = Enum.map(args, &given(&1, w.env))
-    visit = {target, fun, length(args), passed, given, type}
-
-    if passed != [] and not MapSet.member?(w.seen, visit) do
-      w = %{w | type: type, mod: target, seen: MapSet.put(w.seen, visit)}
+    if Enum.any?(elem(visit, 3)) and not MapSet.member?(w.seen, visit) do
+      w = %{w | mod: target, seen: MapSet.put(w.seen, visit)}
 
       for {params, guard, body} <- Map.get(w.index[target].defs, {fun, length(args)}, []),
-          applies?(params, given),
-          key <- clause(params, guard, body, passed, given, w),
-          key not in forced,
+          key <- clause(params, guard, body, args, w),
           do: key
     end
   end
 
+  defp clause(params, guard, body, args, w) do
+    tracks =
+      for {arg, pos} <- Enum.with_index(args), track = track(arg, w.vars), track, do: {pos, track}
+
+    type = Enum.find_value(tracks, w.type, fn {_, {override, _}} -> override end)
+    forced = Enum.flat_map(tracks, fn {_, {_, forced}} -> forced end)
+    given = Enum.map(args, &given(&1, w))
+    tracked = for {pos, _} <- tracks, do: param(Enum.at(params, pos), guard, w.mod, w.index)
+
+    if tracks != [] and applies?(params, given) and
+         Enum.all?(tracked, fn {types, _, _} -> admits?(types, type) end) do
+      carried =
+        for {{var, _, ctx}, values} <- Enum.zip(params, given),
+            is_atom(var) and is_atom(ctx) and is_list(values),
+            into: %{},
+            do: {var, values}
+
+      vars = for {_, _, vars} <- tracked, var <- vars, into: %{}, do: {var, []}
+      w = %{w | type: type, env: carried, vars: vars}
+
+      keys =
+        Enum.flat_map(tracked, &elem(&1, 1)) ++
+          walk(body, %{w | env: literal_env(params, guard, w)})
+
+      keys -- forced
+    else
+      []
+    end
+  end
+
   defp track({var, _, ctx} = value, vars) when is_atom(var) and is_atom(ctx),
-    do: if(tracked?(value, vars), do: {nil, []})
+    do: if(tracked?(value, vars), do: {nil, Map.fetch!(vars, var)})
 
   defp track({{:., _, [{:__aliases__, _, [:Map]}, fun]}, _, [inner | rest]}, vars)
        when fun in @map_passes do
@@ -379,9 +570,9 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
 
   defp track(_value, _vars), do: nil
 
-  defp given(value, _env) when is_binary(value), do: [value]
-  defp given({var, _, ctx}, env) when is_atom(var) and is_atom(ctx), do: Map.get(env, var)
-  defp given(_value, _env), do: nil
+  defp given(value, _w) when is_binary(value), do: [value]
+  defp given({var, _, ctx}, w) when is_atom(var) and is_atom(ctx), do: Map.get(w.env, var)
+  defp given(_value, _w), do: nil
 
   defp applies?(params, given) do
     params
@@ -392,36 +583,20 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
     end)
   end
 
-  defp clause(params, guard, body, passed, given, w) do
-    tracked = for pos <- passed, do: param(Enum.at(params, pos), guard, w.mod, w.index)
-
-    if Enum.all?(tracked, fn {types, _, _} -> admits?(types, w.type) end) do
-      carried =
-        for {{var, _, ctx}, values} <- Enum.zip(params, given),
-            is_atom(var) and is_atom(ctx) and is_list(values),
-            into: %{},
-            do: {var, values}
-
-      w = %{w | env: carried, vars: Enum.flat_map(tracked, &elem(&1, 2))}
-
-      Enum.flat_map(tracked, &elem(&1, 1)) ++
-        walk(body, %{w | env: literal_env(params, guard, w)})
-    else
-      []
-    end
-  end
-
   defp admits?(types, type) when is_list(types), do: type in types
   defp admits?(_any_or_untyped, _type), do: true
 
   defp tracked?({var, _, ctx}, vars) when is_atom(var) and is_atom(ctx),
-    do: MapSet.member?(vars, var)
+    do: Map.has_key?(vars, var)
 
   defp tracked?(_value, _vars), do: false
 
-  defp keys(key, _env) when is_binary(key), do: [key]
-  defp keys({var, _, ctx}, env) when is_atom(var) and is_atom(ctx), do: Map.get(env, var)
-  defp keys(_key, _env), do: nil
+  defp keys(key, _w) when is_binary(key), do: [key]
+  defp keys({var, _, ctx}, w) when is_atom(var) and is_atom(ctx), do: Map.get(w.env, var)
+
+  defp keys({{:., _, [{:__aliases__, _, [:Access]}, :key]}, _, [key | _]}, w), do: keys(key, w)
+
+  defp keys(key, w), do: strings(key, w.mod, w.index)
 
   defp short(index, last) do
     name = to_string(last)
