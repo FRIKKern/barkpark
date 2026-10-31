@@ -39,6 +39,7 @@ export function loadPack(dir?: string): { stamp: string; cases: GoldenCase[] }
 export function packStamp(dir?: string): string
 export function shapeOf(nodes: ArrayLike<unknown>): ShapeNode[]
 export function diffShapes(actual: ShapeNode[], golden: ShapeNode[]): string[]
+export function htmlText(html: string): string
 export function goldenWords(shape: unknown[]): string[]
 export function diffWords(actualText: string, expected: string[]): string[]
 export function conform(options: ConformOptions): Promise<Report>

@@ -113,6 +113,8 @@ const words = (s) =>
     .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
     .filter(Boolean);
 
+export const htmlText = (html) => html.replace(/<[^>]*>/g, "").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+
 export function goldenWords(shape) {
   const leaves = [];
   const walk = (nodes) => nodes.forEach((n) => ("text" in n ? leaves.push(n.text) : walk(n.children)));

@@ -31,6 +31,27 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
     assert Conformance.settle(report, false, true) == []
   end
 
+  test "check mode reds a stale stamp and a drifted row" do
+    report = Conformance.report()
+    assert [_] = Conformance.settle(%{report | pack_stamp: "stale"}, false, false)
+    [first | rest] = report.rows
+
+    assert [_] =
+             Conformance.settle(
+               %{report | rows: [%{first | status: :missing} | rest]},
+               false,
+               false
+             )
+  end
+
+  test "a fail row carries at most 12 diff lines and counts the rest" do
+    lines = Enum.map(1..13, &"d#{&1}")
+    assert %{status: :fail, diff: diff} = Conformance.verdict("t", lines)
+    assert diff == Enum.take(lines, 12) ++ ["… 1 more"]
+    assert Conformance.verdict("t", Enum.take(lines, 12)).diff == Enum.take(lines, 12)
+    assert Conformance.verdict("t", []) == %{type: "t", status: :pass}
+  end
+
   test "every renderer in this repo has a committed report" do
     assert Enum.sort(Map.keys(committed())) == @renderers
   end

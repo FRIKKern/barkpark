@@ -13,6 +13,7 @@ import {
   diffShapes,
   diffWords,
   goldenWords,
+  htmlText,
   loadPack,
   modeFromEnv,
   settle,
@@ -123,6 +124,12 @@ describe('the shared conformance normaliser', () => {
       'word 3/4 "body" not found in order',
       'word 4/4 "here" not found in order',
     ])
+  })
+
+  it('reads the text of an HTML string, decoding the three entities pdrender escapes', () => {
+    expect(htmlText('<pre class="x">a &amp;lt; <b>b</b> &lt;c&gt; &amp; d</pre>')).toBe(
+      'a &lt; b <c> & d',
+    )
   })
 
   it('refuses a pack with zero cases', () => {

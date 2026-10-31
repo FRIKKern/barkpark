@@ -132,16 +132,16 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
     end
   end
 
-  defp verdict(type, []), do: %{type: type, status: :pass}
+  def verdict(type, []), do: %{type: type, status: :pass}
 
-  defp verdict(type, diffs) when length(diffs) > @diff_cap,
+  def verdict(type, diffs) when length(diffs) > @diff_cap,
     do: %{
       type: type,
       status: :fail,
       diff: Enum.take(diffs, @diff_cap) ++ ["… #{length(diffs) - @diff_cap} more"]
     }
 
-  defp verdict(type, diffs), do: %{type: type, status: :fail, diff: diffs}
+  def verdict(type, diffs), do: %{type: type, status: :fail, diff: diffs}
 
   defp head_sha do
     case System.cmd("git", ["rev-parse", "HEAD"], cd: @portable_doc, stderr_to_stdout: true) do

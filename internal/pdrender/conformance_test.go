@@ -165,6 +165,36 @@ func runConformance(pack string) (conformanceReport, error) {
 	return report, nil
 }
 
+func conformanceDrift(committed, report conformanceReport) []string {
+	var out []string
+	if committed.PackStamp != report.PackStamp {
+		out = append(out, fmt.Sprintf("pack_stamp: committed %s != now %s", committed.PackStamp, report.PackStamp))
+	}
+	if committed.Renderer != report.Renderer || committed.Compare != report.Compare {
+		out = append(out, fmt.Sprintf("renderer/compare: committed %s/%s", committed.Renderer, committed.Compare))
+	}
+	if !reflect.DeepEqual(committed.Rows, report.Rows) {
+		out = append(out, "rows drifted from "+conformanceOut+"; rerun with CONFORMANCE_WRITE=1")
+	}
+	return out
+}
+
+func TestConformanceDriftRedsAStaleStampARowAndARenderer(t *testing.T) {
+	report := conformanceReport{Renderer: "pdrender", Compare: "text", PackStamp: "a", Rows: []conformanceRow{{Type: "t", Status: "pass"}}}
+	if d := conformanceDrift(report, report); d != nil {
+		t.Errorf("an identical report drifted: %v", d)
+	}
+	stale, flipped, renamed := report, report, report
+	stale.PackStamp = "b"
+	flipped.Rows = []conformanceRow{{Type: "t", Status: "fail", Diff: []string{"d"}}}
+	renamed.Compare = "dom"
+	for name, r := range map[string]conformanceReport{"stamp": stale, "row": flipped, "compare": renamed} {
+		if len(conformanceDrift(report, r)) != 1 {
+			t.Errorf("a changed %s did not drift", name)
+		}
+	}
+}
+
 func TestConformance(t *testing.T) {
 	report, err := runConformance(conformancePack)
 	if err != nil {
@@ -196,14 +226,8 @@ func TestConformance(t *testing.T) {
 		if err := json.Unmarshal(raw, &committed); err != nil {
 			t.Fatal(err)
 		}
-		if committed.PackStamp != report.PackStamp {
-			t.Errorf("pack_stamp: committed %s != now %s", committed.PackStamp, report.PackStamp)
-		}
-		if committed.Renderer != report.Renderer || committed.Compare != report.Compare {
-			t.Errorf("renderer/compare: committed %s/%s", committed.Renderer, committed.Compare)
-		}
-		if !reflect.DeepEqual(committed.Rows, report.Rows) {
-			t.Errorf("rows drifted from %s; rerun with CONFORMANCE_WRITE=1", conformanceOut)
+		for _, d := range conformanceDrift(committed, report) {
+			t.Error(d)
 		}
 	}
 	if os.Getenv("CONFORMANCE_STRICT") == "1" {
