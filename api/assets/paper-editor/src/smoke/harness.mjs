@@ -74,7 +74,7 @@ function applyOps(prevBlocks, ops) {
   let blocks = (prevBlocks || []).map((b) => ({ ...b }));
   const idAt = (id) => blocks.findIndex((b) => b && b.id === id);
   const idExists = (list, id) =>
-    (list || []).some((b) => b && (b.id === id || idExists(b.blocks, id)));
+    Array.isArray(list) && list.some((b) => b && (b.id === id || idExists(b.blocks, id)));
 
   // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the block
   // `id` at TOP LEVEL or nested inside any block's `blocks` (a section body) at any
