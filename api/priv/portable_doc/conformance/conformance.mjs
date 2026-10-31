@@ -56,13 +56,13 @@ function element(el) {
 
 export function shapeOf(nodes) {
   const out = [];
-  let text = null;
+  let text = "";
   const flush = () => {
-    if (text !== null && squash(text)) out.push({ text: squash(text) });
-    text = null;
+    if (squash(text)) out.push({ text: squash(text) });
+    text = "";
   };
   for (const node of Array.from(nodes)) {
-    if (node.nodeType === 3) text = (text ?? "") + node.nodeValue;
+    if (node.nodeType === 3) text += node.nodeValue;
     else if (node.nodeType === 1) {
       flush();
       out.push(element(node));
