@@ -195,10 +195,10 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 // second pass has no donors, so this is realignBlockIds exactly.
 export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
   const first = realignBlockIds(enterBlocks, parsedBlocks);
-  const enterIds = new Set((enterBlocks || []).map((b) => b.id));
+  const enterIds = new Set(enterBlocks.map((b) => b.id));
   const born = first.flatMap((b, i) => (enterIds.has(b.id) ? [] : [i]));
   if (born.length === 0) return first;
-  const donors = (lastBlocks || []).filter((b) => !enterIds.has(b.id));
+  const donors = lastBlocks.filter((b) => !enterIds.has(b.id));
   const again = realignBlockIds(donors, born.map((i) => first[i]));
   born.forEach((i, k) => { first[i] = again[k]; });
   return first;

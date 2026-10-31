@@ -4608,15 +4608,13 @@ class BpPaperCanvas extends HTMLElement {
     const md = blocksToMarkdown(blocks);
     const ta = this._sourceEl;
     const old = ta.value;
-    if (old !== md) {
-      let start = 0;
-      while (start < old.length && start < md.length && old[start] === md[start]) start++;
-      let end = 0;
-      while (end < old.length - start && end < md.length - start &&
-        old[old.length - 1 - end] === md[md.length - 1 - end]) end++;
-      ta.setRangeText(md.slice(start, md.length - end), start, old.length - end, "preserve");
-      this._sizeSourceTextarea();
-    }
+    let start = 0;
+    while (start < old.length && start < md.length && old[start] === md[start]) start++;
+    let end = 0;
+    while (end < old.length - start && end < md.length - start &&
+      old[old.length - 1 - end] === md[md.length - 1 - end]) end++;
+    ta.setRangeText(md.slice(start, md.length - end), start, old.length - end, "preserve");
+    this._sizeSourceTextarea();
     this._sourceOriginalMd = md;
   }
 
