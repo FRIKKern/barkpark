@@ -201,31 +201,42 @@ defmodule Barkpark.PortableDoc.SpecTest do
     } do
       blocks = schema["definitions"]["blocks"]
 
-      for {spelling, %{"x-alias-of" => target, "x-set" => set}} <-
-            schema["definitions"]["aliases"] do
-        declared = Map.keys(blocks[target]["properties"])
-        assert Map.keys(set) -- declared == [], "#{spelling} forces a field #{target} lacks"
-        assert (Map.fetch!(reads, spelling) -- @unauthored) -- declared == [], spelling
-      end
+      differences =
+        for {spelling, %{"x-alias-of" => target, "x-set" => set}} <-
+              Enum.sort(schema["definitions"]["aliases"]),
+            declared = Map.keys(blocks[target]["properties"]),
+            {field, how} <-
+              Enum.map(Map.keys(set) -- declared, &{&1, "forced"}) ++
+                Enum.map((Map.fetch!(reads, spelling) -- @unauthored) -- declared, &{&1, "read"}),
+            do:
+              "alias #{spelling}: field #{field} #{how} by the reader but not in #{target}'s schema"
+
+      assert differences == []
     end
 
-    test "a field added to, dropped from or renamed in a reader names the block and field",
-         %{schema: schema, reads: reads} do
-      added = Map.update!(reads, "diagram", &["subtitle" | &1])
-      dropped = Map.update!(reads, "diagram", &(&1 -- ["caption"]))
-      renamed = Map.update!(reads, "asciicast", &["still" | &1 -- ["poster"]])
+    test "a field added to, dropped from or renamed in a reader names the block and field" do
+      block = fn fields ->
+        %{"properties" => Map.new(fields ++ ~w(id locked role type), &{&1, %{}})}
+      end
 
-      assert field_differences(schema, added) == [
-               "block diagram: field subtitle read by the reader but not in the schema"
-             ]
+      schema = %{
+        "definitions" => %{
+          "blocks" => %{"card" => block.(~w(span tone)), "diagram" => block.(~w(caption source))}
+        }
+      }
 
-      assert field_differences(schema, dropped) == [
-               "block diagram: field caption in the schema but the reader does not read it"
-             ]
+      reads = %{"card" => ["tone"], "diagram" => ["_render_opts", "caption", "source"]}
+      assert field_differences(schema, reads) == []
 
-      assert field_differences(schema, renamed) == [
-               "block asciicast: field still read by the reader but not in the schema",
-               "block asciicast: field poster in the schema but the reader does not read it"
+      assert field_differences(schema, %{reads | "diagram" => ["subtitle" | reads["diagram"]]}) ==
+               ["block diagram: field subtitle read by the reader but not in the schema"]
+
+      assert field_differences(schema, %{reads | "diagram" => ["source"]}) ==
+               ["block diagram: field caption in the schema but the reader does not read it"]
+
+      assert field_differences(schema, %{reads | "diagram" => ["caption", "graph"]}) == [
+               "block diagram: field graph read by the reader but not in the schema",
+               "block diagram: field source in the schema but the reader does not read it"
              ]
     end
 
