@@ -7,7 +7,8 @@
 // or after the caret), presses one key and flushes. Every batch replays on a
 // patch.ex-shaped server. The caret maps through the change: before it, it stays;
 // at or after its end, it moves with the text; inside it, it goes to the end of the
-// new text; in a deleted block, it goes to the end of the block before it. A
+// new text; in a deleted block, it goes to the end of the nearest block before it a
+// letter can follow (not a divider), else of the nearest one after it. A
 // selection the change did not touch keeps exactly its text; one the change touched
 // collapses where its end went. Nothing else is ever selected. SEEDS overrides the
 // seed count; SEED runs one seed.
@@ -62,7 +63,8 @@ function rng(seed) {
   };
 }
 
-const textOf = (block) => block.type === "heading" ? block.text
+const textOf = (block) => block.type === "divider" ? ""
+  : block.type === "heading" ? block.text
   : block.type === "list" ? block.items[0][0].value
   : block.content[0].value;
 const withText = (block, text) => block.type === "heading" ? { ...block, text }
@@ -153,13 +155,15 @@ function runSeed(seed) {
 
   let hasList = false;
   const doc = Array.from({ length: int(1, 5) }, () => {
-    const kind = pick(hasList ? ["paragraph", "paragraph", "heading"] : ["paragraph", "paragraph", "heading", "list"]);
+    const kind = pick(hasList ? ["paragraph", "paragraph", "heading", "divider"] : ["paragraph", "paragraph", "heading", "list", "divider"]);
     if (kind === "list") hasList = true;
+    if (kind === "divider") return { id: id(), type: "divider" };
     const base = kind === "heading" ? { id: id(), type: "heading", level: 2, text: "" }
       : kind === "list" ? { id: id(), type: "list", ordered: false, items: [] }
       : { id: id(), type: "paragraph", content: [] };
     return withText(base, word(1, 4));
   });
+  if (doc.every((block) => block.type === "divider")) doc.push({ id: id(), type: "paragraph", content: [{ type: "text", value: word(1, 4) }] });
 
   if (canvas.sourceMode) canvas.toggleSourceMode();
   canvas.blocks = clone(doc);
@@ -171,13 +175,14 @@ function runSeed(seed) {
 
   const user = clone(doc);
   const grow = random();
+  const texts = (blocks) => blocks.flatMap((block, j) => block.type === "divider" ? [] : [j]);
   if (grow < 0.4) {
-    const j = int(0, user.length - 1);
+    const j = pick(texts(user));
     user[j] = withText(user[j], textOf(user[j]) + word(1, 2));
   } else if (grow < 0.6) {
     user.splice(int(0, user.length), 0, { id: "born", type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
   }
-  const prefix = (block) => block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
+  const prefix = (block) => block.type === "divider" ? pick(["---", "***", "___"]) : block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
   const prefixes = user.map(prefix);
   const chunks = user.map((block, j) => prefixes[j] + textOf(block));
   const gaps = chunks.slice(1).map(() => pick(["\n\n", "\n\n", "\n\n\n"]));
@@ -191,7 +196,7 @@ function runSeed(seed) {
   const mine = clone(state.server);
   if (JSON.stringify(mine.map(textOf)) !== JSON.stringify(user.map(textOf))) return `the writer's save holds ${JSON.stringify(mine.map(textOf))}`;
 
-  const b = int(0, user.length - 1);
+  const b = pick(texts(user));
   const blockStart = lead.length + chunks.slice(0, b).reduce((at, chunk, j) => at + chunk.length + gaps[j].length, 0) + prefixes[b].length;
   const caretText = textOf(user[b]);
   let from = int(0, caretText.length);
@@ -202,12 +207,14 @@ function runSeed(seed) {
 
   const remote = clone(state.server);
   const kinds = ["edit", "edit-caret", "insert", "move", "move-caret"];
-  if (remote.length > 1) kinds.push("delete", "delete-caret");
+  if (remote.length > 1) kinds.push("delete");
+  if (texts(remote).length > 1) kinds.push("delete-caret");
   const kind = pick(kinds);
   const bid = mine[b].id;
   const others = remote.map((block, j) => j).filter((j) => remote[j].id !== bid);
+  const otherTexts = others.filter((j) => remote[j].type !== "divider");
   if (kind === "edit" || kind === "edit-caret") {
-    const j = kind === "edit-caret" || others.length === 0 ? remote.findIndex((block) => block.id === bid) : pick(others);
+    const j = kind === "edit-caret" || otherTexts.length === 0 ? remote.findIndex((block) => block.id === bid) : pick(otherTexts);
     const text = textOf(remote[j]);
     let next = text;
     while (next === text || next.length === 0) {
@@ -271,10 +278,11 @@ function runSeed(seed) {
     const text = textOf(after);
     expected[k] = withText(after, text.slice(0, f) + key + text.slice(t));
   } else {
-    const k = b > 0 ? remote.findIndex((block) => block.id === mine[b - 1].id) : 0;
+    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find((block) => block.type !== "divider");
+    const k = remote.findIndex((block) => block.id === nearest.id);
     const end = lineEnd(k);
     if (textarea.selectionStart !== end || textarea.selectionEnd !== end) {
-      return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the block before it (${end})`;
+      return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the nearest block a letter can follow (${end})`;
     }
     expected[k] = withText(remote[k], textOf(remote[k]) + key);
   }

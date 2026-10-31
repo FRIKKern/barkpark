@@ -220,7 +220,8 @@ export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
 // changed block it maps through the change (before it, it stays; at or after its
 // end, it moves with the text; inside it, it goes to the end of the new text, or
 // stays before an insertion at its own place when `stayBefore`); in a deleted block
-// it goes to the end of the block before it, or of the first block.
+// it goes to the end of the nearest block a typed letter only lengthens (a divider
+// or a closed fence would turn into something else), looking back first.
 export function mergeSourceText(text, before, blocks) {
   const { blocks: parsed, spans } = markdownToBlockSpans(text);
   const offsets = [0];
@@ -254,14 +255,22 @@ export function mergeSourceText(text, before, blocks) {
     if (k === -1) return 0;
     const j = pieces.findIndex((piece) => piece.k === k);
     if (j === -1) {
-      const prior = pieces.reduce((best, piece, i) => piece.k !== -1 && piece.k < k && (best === -1 || piece.k > pieces[best].k) ? i : best, -1);
-      const i = prior === -1 ? 0 : prior;
+      const near = pieces.map((piece, i) => i)
+        .sort((x, y) => rank(pieces[x].k, k) - rank(pieces[y].k, k));
+      const i = near.find((i) => blocksToMarkdown(markdownToBlocks(pieces[i].text + "x")) === sig(blocks[i]) + "x") ?? near[0];
       return at[i] + pieces[i].text.length;
     }
     const own = text.slice(start(k), end(k));
     return at[j] + through(sig(parsed[k]), pieces[j].text, through(own, sig(parsed[k]), offset - start(k), stayBefore), stayBefore);
   };
   return { text: out, map };
+}
+
+// Which block a caret from deleted block `k` goes to first: the blocks before it,
+// nearest first, then the ones after it, then the new ones.
+function rank(from, k) {
+  if (from === -1) return Number.MAX_SAFE_INTEGER;
+  return from < k ? k - from : from;
 }
 
 function through(before, after, at, stayBefore) {
