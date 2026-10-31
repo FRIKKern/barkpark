@@ -35,6 +35,7 @@ try {
     ["ROOT + \"/x\" concat", 'readFileSync(root + "/fx/lib/a.ex")', ["fx/lib/a.ex"]],
     ["multi-part join", 'readFileSync(join(root, "fx", "lib", "a.ex"))', ["fx/lib/a.ex"]],
     ["join with a non-literal tail is a folder", 'readFileSync(join(root, "fx", "lib", name))', ["fx/lib/"]],
+    ["join with a non-literal in the middle is a folder", 'readFileSync(join(root, "fx", "lib", name, "a.ex"))', ["fx/lib/"]],
     ["bare template hole is a folder", "readFileSync(`fx/lib/${n}.ex`)", ["fx/lib/"]],
     ["relative template hole is a folder", "readFileSync(new URL(`../../../lib/${n}.ex`, import.meta.url))", ["fx/lib/"]],
     ["a template whose fixed part is a file is not a read", "x(`../../../lib/a.ex/${n}`)", []],
@@ -92,13 +93,23 @@ try {
     unused: ["fx/lib/stale.ex"],
   });
 
+  put("fx/assets/ed/src/runner.mjs", 'execFileSync("npm", ["run", "x"]);');
+  put("fx/assets/ed/src/x.mjs", 'readFileSync(new URL("../../../lib/c.ex", import.meta.url));');
+  const viaNpmRun = scanner({ repo, pkg }).reads("run: node src/runner.mjs", { x: "node src/x.mjs" });
+  assert.deepEqual([...viaNpmRun.sinks.keys()], ["fx/lib/c.ex"], "a script reached only through execFileSync(\"npm\", [\"run\", …]) is followed");
+
+  put("fx/assets/ed/src/only-built.js", 'readFileSync(new URL("../../../lib/b.ex", import.meta.url));');
+  const viaEsbuild = scanner({ repo, pkg }).reads("run: npm run build", { build: "esbuild src/only-built.js --bundle --outfile=dist/x.js" });
+  assert.deepEqual([...viaEsbuild.sinks.keys()], ["fx/lib/b.ex"], "an esbuild entry is followed");
+
+  assert.equal(covers(["fx/lib/"], "fx/lib/"), false, "a filter entry without a glob does not cover a new file in the folder");
   assert.equal(covers(["fx/priv/static/assets/*"], "fx/priv/static/assets/"), true);
   assert.equal(covers(["fx/priv/static/assets/*.css"], "fx/priv/static/assets/"), false);
   assert.equal(covers(["fx/lib/**"], "fx/lib/x/y.ex"), true);
   assert.equal(covers(["fx/lib/*"], "fx/lib/x/y.ex"), false);
   assert.equal(covers(["fx/lib/a.ex"], "fx/lib/b.ex"), false);
 
-  console.log(`ok path filter scanner: ${shapes.length + 5} read shapes, a walk through hooks and imports, and the verdict on a synthetic tree`);
+  console.log(`ok path filter scanner: ${shapes.length + 7} read shapes, a walk through hooks and imports, and the verdict on a synthetic tree`);
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
