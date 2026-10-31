@@ -522,7 +522,13 @@ defmodule Barkpark.PortableDoc.ComposeCensus.Reads do
     tracks =
       for {arg, pos} <- Enum.with_index(args), track = track(arg, w.vars), track, do: {pos, track}
 
-    visit = {target, fun, length(args), tracks, Enum.map(args, &given(&1, w)), w.type}
+    type = Enum.find_value(tracks, w.type, fn {_, {override, _}} -> override end)
+
+    forced =
+      tracks |> Enum.flat_map(fn {_, {_, forced}} -> forced end) |> Enum.uniq() |> Enum.sort()
+
+    passed = Enum.map(tracks, &elem(&1, 0))
+    visit = {target, fun, length(args), passed, type, forced, Enum.map(args, &given(&1, w))}
 
     if tracks != [] and not MapSet.member?(w.seen, visit) do
       w = %{w | mod: target, seen: MapSet.put(w.seen, visit)}
