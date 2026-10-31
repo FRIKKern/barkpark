@@ -10,7 +10,7 @@
 // source baseline ids so runToOps emits a PATCH for an in-place edit (not a
 // remove+insert storm) and NO op for an unchanged block.
 
-import { blocksToMarkdown } from "../markdown.js";
+import { blocksToMarkdown, markdownToBlocks, markdownToBlockSpans } from "../markdown.js";
 import { idCarriesKind } from "./run-convert.js";
 
 // Structural deep clone of a block array — DOM/Node-API-free. Used to snapshot the
@@ -202,6 +202,78 @@ export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
   const again = realignBlockIds(donors, born.map((i) => first[i]));
   born.forEach((i, k) => { first[i] = again[k]; });
   return first;
+}
+
+// The source text for `blocks` that keeps the writer's own text (1.20.0). `before`
+// holds the ids of the blocks `text` shows, in order. Each block whose id and
+// Markdown are unchanged keeps its original lines, and two such blocks that were
+// neighbours keep the text between them; every other block is written as
+// blocksToMarkdown writes it. A block keeps its lines only if they end it on their
+// own (an unclosed fence runs to the end of the text and would swallow whatever the
+// merge puts after it). So a server change rewrites only the blocks it touched, and
+// `* item` or `__bold__` the writer typed elsewhere stays as typed.
+//
+// `map(at, stayBefore)` moves an offset of `text` into the new text by block id: in
+// an unchanged block it keeps its place in that block wherever the block moved; in a
+// changed block it maps through the change (before it, it stays; at or after its
+// end, it moves with the text; inside it, it goes to the end of the new text, or
+// stays before an insertion at its own place when `stayBefore`); in a deleted block
+// it goes to the end of the block before it, or of the first block.
+export function mergeSourceText(text, before, blocks) {
+  const { blocks: parsed, spans } = markdownToBlockSpans(text);
+  const offsets = [0];
+  for (const line of text.split("\n")) offsets.push(offsets[offsets.length - 1] + line.length + 1);
+  const start = (k) => offsets[spans[k][0]];
+  const end = (k) => offsets[spans[k][1]] - 1;
+  const sig = (block) => blocksToMarkdown([block]);
+  const ids = parsed.length === before.length ? before.map((block) => block.id) : [];
+  const was = new Map(ids.map((id, k) => [id, k]));
+  const endsItself = (k) => {
+    const alone = markdownToBlocks(text.slice(start(k), end(k)) + "\n\n.");
+    return alone.length === 2 && sig(alone[0]) === sig(parsed[k]);
+  };
+  const pieces = blocks.map((block) => {
+    const k = was.get(block.id) ?? -1;
+    const own = k !== -1 && sig(parsed[k]) === sig(block) && endsItself(k);
+    return { k, own, text: own ? text.slice(start(k), end(k)) : sig(block) };
+  });
+  let out = pieces[0]?.own && pieces[0].k === 0 ? text.slice(0, start(0)) : "";
+  const at = [];
+  pieces.forEach((piece, j) => {
+    const prev = pieces[j - 1];
+    if (j > 0) out += prev.own && piece.own && piece.k === prev.k + 1 ? text.slice(end(prev.k), start(piece.k)) : "\n\n";
+    at.push(out.length);
+    out += piece.text;
+  });
+  const last = pieces[pieces.length - 1];
+  if (last?.own && last.k === parsed.length - 1) out += text.slice(end(last.k));
+  const map = (offset, stayBefore) => {
+    if (pieces.length === 0) return 0;
+    let k = -1;
+    while (k + 1 < parsed.length && start(k + 1) <= offset) k++;
+    if (k === -1) return 0;
+    const j = pieces.findIndex((piece) => piece.k === k);
+    if (j === -1) {
+      const prior = pieces.reduce((best, piece, i) => piece.k !== -1 && piece.k < k && (best === -1 || piece.k > pieces[best].k) ? i : best, -1);
+      const i = prior === -1 ? 0 : prior;
+      return at[i] + pieces[i].text.length;
+    }
+    const own = text.slice(start(k), end(k));
+    return at[j] + through(sig(parsed[k]), pieces[j].text, through(own, sig(parsed[k]), offset - start(k), stayBefore), stayBefore);
+  };
+  return { text: out, map };
+}
+
+function through(before, after, at, stayBefore) {
+  if (before === after) return at;
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let tail = 0;
+  while (tail < before.length - start && tail < after.length - start &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  if (at <= start && (stayBefore || at < before.length - tail)) return at;
+  if (at >= before.length - tail) return at + after.length - before.length;
+  return after.length - tail;
 }
 
 // Additive (D3): a baseline with NO leading locked block returns `realigned`

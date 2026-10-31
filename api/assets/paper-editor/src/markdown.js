@@ -683,12 +683,21 @@ function escapeBlockLeader(line) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function markdownToBlocks(md) {
+  return markdownToBlockSpans(md).blocks;
+}
+
+// The same parse, plus where each block came from: spans[k] = [first, next) LINE
+// indices of blocks[k] in md.split("\n") (1.20.0: a source sync keeps the writer's
+// own text for the blocks a server change did not touch). Every pass of the loop
+// pushes one block or skips one blank line, so the loop's update records the span.
+export function markdownToBlockSpans(md) {
   const text = typeof md === "string" ? md : "";
   const lines = text.split("\n");
   const blocks = [];
+  const spans = [];
   let i = 0;
 
-  while (i < lines.length) {
+  for (let from = 0; i < lines.length; blocks.length > spans.length && spans.push([from, i]), from = i) {
     let line = lines[i];
 
     // Skip blank separator lines between blocks.
@@ -797,7 +806,7 @@ export function markdownToBlocks(md) {
     i = next;
   }
 
-  return blocks;
+  return { blocks, spans };
 }
 
 // ── sentinel parse ───────────────────────────────────────────────────────────

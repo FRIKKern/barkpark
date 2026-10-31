@@ -325,6 +325,7 @@ import {
   realignAcrossCommits,
   clampLockedPrefix,
   deepCloneBlocks,
+  mergeSourceText,
 } from "./source-realign.js";
 // pdd-t2: the PURE doctrine template-lock veto predicate — wired into the editor's
 // filterTransaction below so a locked mandated block (title @0 / featured @1) can
@@ -4599,21 +4600,31 @@ class BpPaperCanvas extends HTMLElement {
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the
   // hidden rich editor while source mode is open: show it in the textarea and make it
   // the new baseline, or the next commit would diff the stale text against it and
-  // send the external change back reverted. Only the changed span of the textarea is
-  // replaced (setRangeText "preserve"), so a caret before or after it stays put.
+  // send the external change back reverted. mergeSourceText rewrites only the blocks
+  // the change touched and maps each end of the selection by block id, and only the
+  // span between the first and last changed character is replaced. A selection is
+  // kept only while it still holds the same text; otherwise it collapses where its
+  // end went. So a caret stays a caret, follows the block it is in, and the next key
+  // never overwrites text the writer did not select.
   _syncSourceText() {
     const blocks = deepCloneBlocks(docToBlocks(normalizeCanvasDoc(this._editor.getJSON())));
-    this._sourceBaselineBlocks = blocks;
-    this._sourceCommitBlocks = blocks;
-    const md = blocksToMarkdown(blocks);
     const ta = this._sourceEl;
     const old = ta.value;
+    const { text: md, map } = mergeSourceText(old, this._sourceCommitBlocks, blocks);
+    this._sourceBaselineBlocks = blocks;
+    this._sourceCommitBlocks = blocks;
     let start = 0;
     while (start < old.length && start < md.length && old[start] === md[start]) start++;
-    let end = 0;
-    while (end < old.length - start && end < md.length - start &&
-      old[old.length - 1 - end] === md[md.length - 1 - end]) end++;
-    ta.setRangeText(md.slice(start, md.length - end), start, old.length - end, "preserve");
+    let tail = 0;
+    while (tail < old.length - start && tail < md.length - start &&
+      old[old.length - 1 - tail] === md[md.length - 1 - tail]) tail++;
+    const [from, to, direction] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+    const head = map(from, false);
+    const end = map(to, true);
+    const keep = from < to && head < end && md.slice(head, end) === old.slice(from, to);
+    const caret = map(to, false);
+    ta.setRangeText(md.slice(start, md.length - tail), start, old.length - tail);
+    ta.setSelectionRange(keep ? head : caret, keep ? end : caret, direction);
     this._sizeSourceTextarea();
     this._sourceOriginalMd = md;
   }
@@ -5008,7 +5019,7 @@ class BpPaperCanvas extends HTMLElement {
       }
       if (tr.docChanged) this._editor.view.dispatch(tr);
       this._restSelectionOffAtom();
-      if (this._mode === "source") this._syncSourceText();
+      if (this._mode === "source" && this._flushKeepsSource) this._syncSourceText();
       this._consumePendingFocus();
       return;
     }
@@ -5023,7 +5034,7 @@ class BpPaperCanvas extends HTMLElement {
       .run();
     this._restoreCaret(caret);
     this._restSelectionOffAtom();
-    if (this._mode === "source") this._syncSourceText();
+    if (this._mode === "source" && this._flushKeepsSource) this._syncSourceText();
     this._consumePendingFocus();
   }
 

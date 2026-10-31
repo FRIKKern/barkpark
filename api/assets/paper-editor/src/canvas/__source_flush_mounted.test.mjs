@@ -120,7 +120,14 @@ function watchValueWrites(textarea) {
     get() { return descriptor.get.call(this); },
     set(v) { writes.push(v); descriptor.set.call(this, v); },
   });
-  return { writes, type(v) { descriptor.set.call(textarea, v); textarea.dispatchEvent(new window.Event("input", { bubbles: true })); } };
+  const type = (v) => { descriptor.set.call(textarea, v); textarea.dispatchEvent(new window.Event("input", { bubbles: true })); };
+  // One key at the selection, as a browser does: it replaces what is selected.
+  const press = (key) => {
+    const [from, to, text] = [textarea.selectionStart, textarea.selectionEnd, textarea.value];
+    type(text.slice(0, from) + key + text.slice(to));
+    textarea.setSelectionRange(from + key.length, from + key.length);
+  };
+  return { writes, type, press };
 }
 
 const mounted = [];
@@ -146,6 +153,8 @@ try {
     assert.equal(textarea.value, "One\n\nTwo, typed", "a focus release does not apply it either");
     canvas.blocks = [paragraph("d9", "Reseeded")];
     assert.equal(textarea.value, "One\n\nTwo, typed", "a reseed does not touch the textarea");
+    canvas.resolveConflictWithServerBlocks([paragraph("d9", "Resolved")]);
+    assert.equal(textarea.value, "One\n\nTwo, typed", "a conflict resolution does not touch the textarea");
   }
 
   // 1) A flush saves the source text and source mode stays open with its caret,
@@ -379,6 +388,98 @@ try {
     canvas.applyServerBlocks(clone(other));
     assert.equal(textarea.value, "Alpha\n\nBeta! unsaved", "unsaved text in the textarea is never overwritten");
     assert.equal(canvas.hasPendingChanges(), true);
+  }
+
+  // 6b) The sync never turns a caret into a selection the next key overwrites, and it
+  //     rewrites only the blocks the server change touched.
+  {
+    const { canvas, batches, server, inSync } = await mount([paragraph("r1", "First"), paragraph("r2", "Second"), paragraph("r3", "Third")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("First\n\nSecond\n\nThird!");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(9, 9);
+    const reordered = [server[2], server[0], server[1]].map(clone);
+    server.splice(0, server.length, ...clone(reordered));
+    canvas.applyServerBlocks(clone(reordered));
+    assert.equal(textarea.value, "Third!\n\nFirst\n\nSecond", "the reorder shows up");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [17, 17],
+      "a remote reorder leaves a caret, still inside the block being typed in");
+    value.press("z");
+    canvas.flushPendingChanges();
+    assert.deepEqual(batches.at(-1), [{ op: "patch-block", id: "r2", patch: { content: [{ type: "text", value: "Sezcond" }] } }],
+      "one key after a remote reorder patches the block it was typed in, and removes nothing");
+    inSync("after one key on a remote reorder");
+  }
+  {
+    const { canvas, batches, server, inSync } = await mount([paragraph("w1", "Alpha beta")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("Alpha beta.");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(10, 10);
+    const word = [paragraph("w1", "Alpha gamma.")];
+    server.splice(0, server.length, ...clone(word));
+    canvas.applyServerBlocks(clone(word));
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [11, 11], "a caret at the end of a remote word change moves past it");
+    value.press("!");
+    canvas.flushPendingChanges();
+    assert.deepEqual(liveTexts(canvas), ["Alpha gamma!."], "the next key keeps the remote word");
+    inSync("after one key on a remote word change");
+
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(8, 8);
+    const inside = [paragraph("w1", "Alpha delta!.")];
+    server.splice(0, server.length, ...clone(inside));
+    canvas.applyServerBlocks(clone(inside));
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [10, 10], "a caret inside the changed span goes to its end");
+
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(0, 5, "backward");
+    const after = [paragraph("w1", "Alpha delta!. More")];
+    server.splice(0, server.length, ...clone(after));
+    canvas.applyServerBlocks(clone(after));
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection], [0, 5, "backward"],
+      "a selection before the change keeps its ends and its direction");
+  }
+  {
+    const { canvas, server } = await mount([paragraph("c1", "Top"), { id: "c2", type: "list", items: [[{ type: "text", value: "star" }]] }]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    value.type("Top\n\n* star __under__ item");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    const top = [paragraph("c1", "Top, from elsewhere"), clone(server[1])];
+    server.splice(0, server.length, ...clone(top));
+    canvas.applyServerBlocks(clone(top));
+    assert.equal(textarea.value, "Top, from elsewhere\n\n* star __under__ item",
+      "a remote edit to one block keeps the writer's own text in the others");
+    assert.equal(canvas.hasPendingChanges(), false);
+  }
+  {
+    const { canvas, server } = await mount([paragraph("f1", "One")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    watchValueWrites(textarea).type("One\n\n```\ncode");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    const added = [...clone(server), paragraph("f9", "Added elsewhere")];
+    server.splice(0, server.length, ...clone(added));
+    canvas.applyServerBlocks(clone(added));
+    assert.equal(textarea.value, "One\n\n```\ncode\n```\n\nAdded elsewhere",
+      "an unclosed fence is closed before a block the server put after it, so it cannot swallow that block");
+    assert.deepEqual(markdownToBlocks(textarea.value).map((block) => block.type), ["paragraph", "code", "paragraph"]);
   }
 
   // 7) A host reseed (`blocks =`) while source mode is open shows the new run in the
