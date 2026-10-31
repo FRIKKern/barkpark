@@ -14,7 +14,7 @@ const DIFF_CAP = 12;
 export function loadPack(dir = PACK) {
   const stampPath = join(dir, "stamp.json");
   const blocksDir = join(dir, "blocks");
-  if (!existsSync(stampPath) || !existsSync(blocksDir)) throw new Error(`no golden pack at ${dir}`);
+  if (!existsSync(stampPath)) throw new Error(`no golden pack at ${dir}`);
   const cases = readdirSync(blocksDir)
     .filter((f) => f.endsWith(".golden.json"))
     .sort()
@@ -47,9 +47,9 @@ function element(el) {
     const key = name.toLowerCase();
     if (key === "class" || key === "style" || VARIABLE_ATTRS.has(key)) continue;
     if ((key === "width" || key === "height") && SIZING_HINT_TAGS.has(tag)) continue;
-    attrs[key] = squash(value ?? "");
+    attrs[key] = squash(value);
   }
-  const classes = [...new Set((el.getAttribute("class") || "").split(/\s+/).filter(Boolean))].sort();
+  const classes = [...new Set(el.classList)].sort();
   const children = tag === "template" && el.content ? el.content.childNodes : el.childNodes;
   return { tag, classes, attrs, style: parseStyle(el.getAttribute("style")), children: shapeOf(children) };
 }
@@ -149,6 +149,8 @@ function headSha() {
 
 export async function conform({ renderer, compare, judge, pack = PACK }) {
   const { stamp, cases } = loadPack(pack);
+  const probe = { type: "conformance-unknown", input: { type: "conformance-unknown" }, expectedHtml: "", shape: [] };
+  if ((await judge(probe)) !== MISSING) throw new Error("the runner cannot see a missing type: an unknown block did not read as missing");
   const rows = [];
   for (const c of cases) rows.push(row(c.type, await judge(c)));
   return { renderer, compare, pack_stamp: stamp, ran_at_sha: headSha(), rows };

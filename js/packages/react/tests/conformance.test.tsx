@@ -70,6 +70,34 @@ describe('the shared conformance normaliser', () => {
     ).toEqual([])
   })
 
+  it('skips href, src, srcset, poster and id, and width/height on media only', () => {
+    expect(
+      diffShapes(
+        shape('<a href="/a" id="x" poster="p" srcset="s">t</a>'),
+        shape('<a href="/b" id="y">t</a>'),
+      ),
+    ).toEqual([])
+    expect(
+      diffShapes(
+        shape('<img width="1" height="2" alt="a">'),
+        shape('<img width="3" height="4" alt="a">'),
+      ),
+    ).toEqual([])
+    expect(
+      diffShapes(
+        shape('<svg width="1" height="1"></svg>'),
+        shape('<svg width="2" height="1"></svg>'),
+      ),
+    ).toEqual(['root > svg[0]: attr width "1" != "2"'])
+    expect(diffShapes(shape('<svg height="1"></svg>'), shape('<svg height="2"></svg>'))).toEqual([
+      'root > svg[0]: attr height "1" != "2"',
+    ])
+  })
+
+  it('merges text split by a comment into one leaf', () => {
+    expect(shape('<p>a<!-- -->b</p>')).toEqual(shape('<p>ab</p>'))
+  })
+
   it('reds a wrong tag, class, attribute, style, text and child count', () => {
     const golden = shape('<p class="a" data-k="1" style="color: red">x<b>y</b></p>')
     const cases: [string, RegExp][] = [
@@ -101,6 +129,21 @@ describe('the shared conformance normaliser', () => {
     mkdirSync(join(dir, 'blocks'))
     writeFileSync(join(dir, 'stamp.json'), '{}')
     expect(() => loadPack(dir)).toThrow(/zero block cases/)
+  })
+
+  it('reads only blocks/*.golden.json from the pack', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bp-conformance-'))
+    mkdirSync(join(dir, 'blocks'))
+    writeFileSync(join(dir, 'stamp.json'), '{}')
+    writeFileSync(join(dir, 'blocks', 'p.golden.json'), '{"type":"p"}')
+    writeFileSync(join(dir, 'blocks', 'notes.golden.json.bak'), '{"type":"bak"}')
+    expect(loadPack(dir).cases.map((c) => c.type)).toEqual(['p'])
+  })
+
+  it('refuses a runner that cannot report missing', async () => {
+    await expect(conform({ renderer: 'x', compare: 'dom', judge: () => [] })).rejects.toThrow(
+      /cannot see a missing type/,
+    )
   })
 
   it('settle reports a stale stamp, a drifted row, a missing report and strict reds', () => {

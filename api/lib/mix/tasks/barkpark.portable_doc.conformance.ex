@@ -49,6 +49,15 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.Conformance do
   def report(dir \\ pack_dir()) do
     {stamp, cases} = load_pack!(dir)
 
+    case row(%{
+           "type" => "conformance-unknown",
+           "input" => %{"type" => "conformance-unknown"},
+           "expectedHtml" => ""
+         }) do
+      %{status: :missing} -> :ok
+      r -> raise "the runner cannot see a missing type: an unknown block read as #{r.status}"
+    end
+
     %{
       renderer: "elixir",
       compare: "dom",

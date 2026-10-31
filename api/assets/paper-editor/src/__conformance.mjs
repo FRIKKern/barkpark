@@ -26,7 +26,7 @@ function unpaint(root, type) {
   for (const atom of root.querySelectorAll("[data-bp-fleet-id]")) {
     const hole = atom.querySelector("[data-bp-fleet-body]");
     if (!hole) continue;
-    hole.innerHTML = fragments[type] ?? "";
+    hole.innerHTML = fragments[type];
     atom.replaceWith(...hole.childNodes);
   }
 }

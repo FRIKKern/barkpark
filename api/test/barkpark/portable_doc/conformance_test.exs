@@ -82,6 +82,27 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
            ) == []
   end
 
+  test "the shape skips href, src, srcset, poster and id, and width/height on media only" do
+    assert Conformance.diff(
+             Conformance.shape(~s(<a href="/a" id="x" poster="p" srcset="s">t</a>)),
+             Conformance.shape(~s(<a href="/b" id="y">t</a>))
+           ) == []
+
+    assert Conformance.diff(
+             Conformance.shape(~s(<img width="1" height="2" alt="a">)),
+             Conformance.shape(~s(<img width="3" height="4" alt="a">))
+           ) == []
+
+    assert Conformance.diff(
+             Conformance.shape(~s(<svg width="1" height="1"></svg>)),
+             Conformance.shape(~s(<svg width="2" height="1"></svg>))
+           ) == [~s(root > svg[0]: attr width "1" != "2")]
+  end
+
+  test "the shape merges text split by a comment into one leaf" do
+    assert Conformance.shape("<p>a<!-- -->b</p>") == Conformance.shape("<p>ab</p>")
+  end
+
   test "the shape reds a wrong tag, class, attribute, style, text and child count" do
     golden = Conformance.shape(~s(<p class="a" data-k="1" style="color: red">x<b>y</b></p>))
 

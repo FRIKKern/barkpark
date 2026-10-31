@@ -151,6 +151,10 @@ func runConformance(pack string) (conformanceReport, error) {
 		return conformanceReport{}, err
 	}
 	reg := DefaultRegistry(LightTheme())
+	probe := goldenCase{Type: "conformance-unknown", Input: json.RawMessage(`{"type":"conformance-unknown"}`)}
+	if r := conformanceRowFor(reg, probe); r.Status != "missing" {
+		return conformanceReport{}, fmt.Errorf("the runner cannot see a missing type: an unknown block read as %s", r.Status)
+	}
 	report := conformanceReport{Renderer: "pdrender", Compare: "text", PackStamp: stamp, RanAtSha: "unknown"}
 	if sha, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
 		report.RanAtSha = strings.TrimSpace(string(sha))
