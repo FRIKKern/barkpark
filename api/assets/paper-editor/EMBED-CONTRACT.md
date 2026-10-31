@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.19.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.20.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.19.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.20.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert.
 
 ## The element
 
@@ -117,6 +117,7 @@ instance. Barkdown and Studio mount it.
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
 | `liveRemote` property | `true` (strictly) applies server blocks while the author edits, block by block (Live remote blocks, 1.15.0). Default `false`: deferred until the author releases the editor |
+| `flushKeepsSource` property | `true` (strictly): `flushPendingChanges()` in Markdown source mode commits the text and keeps source mode open, and `applyServerBlocks` reaches a source textarea with no unsaved text (1.20.0). Default `false`: the flush leaves source mode and a server apply waits for the exit, as before 1.20.0 |
 
 All ten properties (`blocks`, `acknowledgedSaves`, `liveRemote` and the seven callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
@@ -290,10 +291,10 @@ on `applyServerBlocks` echoes to advance its baseline.
 
 | Method | Effect | Returns |
 |---|---|---|
-| `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing (with `liveRemote`, applied block by block instead: Live remote blocks); recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. Reads unread DOM typing first. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
+| `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing (with `liveRemote`, applied block by block instead: Live remote blocks); with `flushKeepsSource`, in source mode deferred only while the textarea holds unsaved text, otherwise the textarea shows the change: only the blocks it touched are rewritten (the writer's own Markdown stays as typed elsewhere), each end of the selection moves with its block by id (through a change to that block: before it stays, after it moves with the text, inside it goes to the change's end; in a deleted block, to the end of the nearest block a typed letter only lengthens, looking back first; in blank lines above the first block it stays; in blank lines after a block, it stays in them as they travel with that block; never between the halves of a surrogate pair). The writer's blank lines above the first block always stay; those after the last block always travel with it, plus one blank line when a block now follows; those after any other block travel with it when they hold a blank line, when the next block is kept and still its neighbour, or when it ends the text, a selection is kept only while it holds the same text and otherwise collapses where its end went, and the textarea's native undo history is reset (1.20.0); recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. Reads unread DOM typing first. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
 | `applyServerBlocksIfIdle(blocks)` | apply now only if nothing is focused, composing, in source mode or pending. Throws `TypeError` on a non-array when it would apply | `true` when applied |
 | `resolveConflictWithServerBlocks(blocks)` | the user's "use latest": drop pending and in-flight state and take `blocks` | nothing |
-| `flushPendingChanges()` | commit node-view inputs, unread DOM typing and any debounced edit, or the text committed around an open IME composition (or leave source mode) now | `true` when it emitted a batch |
+| `flushPendingChanges()` | commit node-view inputs, unread DOM typing and any debounced edit, or the text committed around an open IME composition, now. In source mode it parses the Markdown, sends the change and leaves source mode; with `flushKeepsSource` source mode stays open with the textarea, its caret, selection and native undo untouched, and a block keeps its id across flushes, including a block first typed in source mode (1.20.0). A block whose kind changes into one it cannot be turned into (a paragraph an open fence makes code) is removed and inserted, not patched | `true` when it emitted a batch |
 | `hasPendingChanges()` | reads unread DOM typing first; then debounced, in-flight, queued, an open IME composition, unsaved source text or a pending note | boolean |
 | `recoverySnapshot()` | the live document for a reconnect halt | `{ mode: "rich"\|"markdown", blocks?, raw_source?, raw_editor_document?, serialization_error? }` |
 | `focusBlock(id)` | place the caret in the top-level block `id`; an id not yet in the run is retried on the next external apply within 5s | `true` when placed |
@@ -301,6 +302,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `refreshWikilinks()` | ask `wikilinkResolve` again for every document link, after a rename or a delete (1.17.0) | nothing |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
+| `sourceMode` (getter) | whether the Markdown source textarea owns input (1.20.0) | boolean |
 
 Unread DOM typing: when a keystroke and a focus change fall in one task,
 ProseMirror's blur leaves the DOM change unread for 20 ms. `flushPendingChanges`,

@@ -322,9 +322,10 @@ import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
 // the source baseline so a surviving block keeps its id and runToOps emits a PATCH
 // (not remove+insert) for an in-place edit. See ./source-realign.js.
 import {
-  realignBlockIds,
+  realignAcrossCommits,
   clampLockedPrefix,
   deepCloneBlocks,
+  mergeSourceText,
 } from "./source-realign.js";
 // pdd-t2: the PURE doctrine template-lock veto predicate — wired into the editor's
 // filterTransaction below so a locked mandated block (title @0 / featured @1) can
@@ -800,6 +801,9 @@ class BpPaperCanvas extends HTMLElement {
     // block by block. Held blocks already reported: id -> the remote block's JSON.
     this._liveRemote = false;
     this._heldRemote = new Map();
+    // flushKeepsSource (1.20.0): opt in to a source-mode flush that commits the
+    // Markdown and keeps source mode open. Default false: the flush leaves source mode.
+    this._flushKeepsSource = false;
     // Bound listeners for the deferred-apply release (added only while a
     // server echo is queued; removed once applied). Kept as fields so the
     // exact same function identity is removed.
@@ -885,9 +889,13 @@ class BpPaperCanvas extends HTMLElement {
     // PATCH (not remove+insert) for an in-place text edit. The NO-EDIT exit short-
     // circuits before any of this (md unchanged → restore untouched, ZERO ops).
     this._sourceBaselineBlocks = null;
-    // The exact markdown shown on ENTER (blocksToMarkdown of the baseline). The
-    // NO-EDIT guard compares the textarea value against THIS string verbatim: equal
-    // → the toggle is provably op-free (no re-parse, no setContent, no caret churn).
+    // The blocks of the last source commit (1.20.0): the second id donor, after the
+    // enter baseline, so a block born in this session keeps its id (_commitSource).
+    this._sourceCommitBlocks = null;
+    // The markdown the rich document holds: shown on ENTER (blocksToMarkdown of the
+    // baseline), then the text of the last source commit (_commitSource). The NO-EDIT
+    // guard compares the textarea value against THIS string verbatim: equal → the
+    // flush or toggle is provably op-free (no re-parse, no setContent, no caret churn).
     this._sourceOriginalMd = "";
     // Bound listener for the textarea's own Mod-Shift-m (toggle BACK to rich) +
     // Escape — kept as a field so the exact identity is removed on cleanup.
@@ -1787,6 +1795,7 @@ class BpPaperCanvas extends HTMLElement {
     // leaks). Reset the mode bookkeeping; the editor.destroy() below frees the rest.
     this._teardownSourceEl();
     this._sourceBaselineBlocks = null;
+    this._sourceCommitBlocks = null;
     this._sourceOriginalMd = "";
     this._mode = "rich";
     this._richFocusIntentVersion += 1;
@@ -1808,7 +1817,10 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor || !this._editable) return false;
 
     if (this._mode === "source") {
-      return this._exitSourceMode();
+      if (!this._flushKeepsSource) return this._exitSourceMode();
+      // flushKeepsSource: the Markdown is committed in place (1.20.0).
+      const md = this._sourceEl.value;
+      return md === this._sourceOriginalMd ? false : this._commitSource(md);
     }
 
     // Node-view controls (code, captions, field inputs, and component editors)
@@ -2151,7 +2163,7 @@ class BpPaperCanvas extends HTMLElement {
         const baseline = this._sourceBaselineBlocks || [];
         const blocks = clampLockedPrefix(
           baseline,
-          realignBlockIds(baseline, markdownToBlocks(rawSource)),
+          realignAcrossCommits(baseline, this._sourceCommitBlocks, markdownToBlocks(rawSource)),
         );
         return {
           mode: "markdown",
@@ -4450,6 +4462,7 @@ class BpPaperCanvas extends HTMLElement {
     const liveDoc = normalizeCanvasDoc(this._editor.getJSON());
     const L0 = docToBlocks(liveDoc);
     this._sourceBaselineBlocks = deepCloneBlocks(L0);
+    this._sourceCommitBlocks = this._sourceBaselineBlocks;
     const md0 = blocksToMarkdown(this._sourceBaselineBlocks);
     this._sourceOriginalMd = md0;
 
@@ -4509,22 +4522,10 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // EXIT source mode → back to the rich editor.
-  //   NO EDIT  (textarea value === the stashed original md): restore the rich editor
-  //            UNTOUCHED — no re-parse, no setContent, ZERO ops. The diff baseline and
-  //            caret are exactly as they were before entering.
-  //   EDITED   : parse the markdown back to blocks (L1), REALIGN ids against the LIVE
-  //            baseline (L0) so surviving blocks keep their ids, then:
-  //              (1) apply L1 to the editor via setContent(runToTiptap(L1), FALSE) —
-  //                  the `false` means NO auto-emit (so onUpdate → _emitOps does NOT
-  //                  fire and re-diff from this._blocks/C); and
-  //              (2) dispatch ONLY the source-mode diff = runToOps(L0, L1) ourselves.
-  //            This is the crux: the pre-source edits (L0−C) are ALREADY in flight
-  //            (emitted on enter / by the debounce). Re-running _emitOps would diff
-  //            from C and re-emit L0−C as DUPLICATE structural ops (a re-emitted
-  //            insert-after for an already-inserted id can double-insert). By diffing
-  //            L0→L1 explicitly and suppressing the auto-emit, only the GENUINE source
-  //            edits go out. this._blocks (C) is left alone; the echoes (pre-source +
-  //            source) advance it normally on their own clock.
+  //   NO EDIT  (textarea value === _sourceOriginalMd, the markdown the rich document
+  //            already holds): restore the rich editor UNTOUCHED — no re-parse, no
+  //            setContent, ZERO ops.
+  //   EDITED   : _commitSource(md) — the same commit a source-mode flush runs.
   // Either way the textarea + its listener are torn down and the rich editor reshown.
   _exitSourceMode() {
     let emitted = false;
@@ -4538,54 +4539,12 @@ class BpPaperCanvas extends HTMLElement {
       if (this._mount) this._mount.style.display = "";
       this._mode = "rich";
 
-      if (edited) {
-        // L1 = the blocks after the user edited the markdown: parse it (fresh minted
-        // ids) then REALIGN against L0 (the live-doc baseline) so a surviving block
-        // keeps its id → runToOps emits a PATCH (not remove+insert) for an in-place
-        // edit. L0 = this._sourceBaselineBlocks (captured from the LIVE doc on enter).
-        const L0 = this._sourceBaselineBlocks;
-        // Realign parsed ids onto the baseline, then CLAMP the locked template
-        // prefix (D4's felt half for source mode): a source-mode DELETE / MOVE /
-        // retype of the locked title is reconstructed away so the client view
-        // can't diverge from the server (which vetoes the same op with
-        // {:locked_block, id, op}) — while a same-type CONTENT edit (a retitle)
-        // rides through as the patch-block the server accepts, exactly like a
-        // rich-mode retitle (locks are placement locks, not content locks).
-        // Additive — a template-free run is returned untouched, so a lock-free
-        // paper stays byte-identical (D3).
-        const L1 = clampLockedPrefix(
-          L0,
-          realignBlockIds(L0, markdownToBlocks(md)),
-        );
-        // ONE projection of L1, used for BOTH the editor content and the emitted diff,
-        // so the rich editor and the ops it sends are derived from the exact same doc.
-        const L1Doc = this._rt(L1);
-
-        // (1) Apply L1 to the editor WITHOUT auto-emit (setContent second arg = false).
-        // The rich editor now shows L1; onUpdate does NOT fire, so _emitOps never runs
-        // and never re-diffs from C. addToHistory:false so the source-mode reflow is
-        // not a separate undo step on top of the user's own edits.
-        this._editor
-          .chain()
-          .setContent(L1Doc, { emitUpdate: false })
-          .command(({ tr }) => {
-            tr.setMeta("addToHistory", false);
-            return true;
-          })
-          .run();
-
-        // (2) Feed the new live document through the normal one-in-flight path.
-        // If an earlier rich batch is pending, source changes wait behind it and
-        // are diffed from that batch's acknowledged after-state.
-        // Use the normal one-in-flight path. If a rich batch is still pending,
-        // this marks the source result dirty and emits its incremental delta only
-        // after that earlier batch is acknowledged.
-        emitted = this._emitOps();
-      }
-      // else NO EDIT: the rich editor was never touched — the live doc, the diff
-      // baseline, and the caret are exactly as they were. ZERO ops by construction.
+      if (edited) emitted = this._commitSource(md);
+      // else NO EDIT: the rich editor already holds this markdown — the live doc, the
+      // diff baseline, and the caret stay as they are. ZERO ops by construction.
 
       this._sourceBaselineBlocks = null;
+      this._sourceCommitBlocks = null;
       this._sourceOriginalMd = "";
       try {
         this._editor.commands.focus();
@@ -4603,6 +4562,76 @@ class BpPaperCanvas extends HTMLElement {
       this._flushPendingServerBlocks();
     }
     return emitted;
+  }
+
+  // COMMIT the source Markdown into the hidden rich editor and send the change,
+  // without touching the textarea (its value, caret, selection and native undo stay).
+  //   L1 = the markdown parsed, ids REALIGNED (realignAcrossCommits) first against L0
+  //        (this._sourceBaselineBlocks, the live doc captured on ENTER), then against
+  //        the last commit (this._sourceCommitBlocks), so a surviving block keeps its id
+  //        and runToOps emits a PATCH for an in-place edit, then the locked template
+  //        prefix is CLAMPED (a source delete, move or retype of a locked block is
+  //        undone; a content edit rides through). L0 first gives a block back its id
+  //        when a half-typed construct (an unclosed fence) swallowed it in an earlier
+  //        commit; the last commit second keeps the id of a block born in this
+  //        session. _emitOps sends with preserveNewIds, so those ids go out as sent.
+  //   (1) setContent(L1) WITHOUT auto-emit and outside history: onUpdate does not
+  //       re-diff from C, and the reflow is not an undo step of its own.
+  //   (2) _emitOps sends L1 through the normal one-in-flight path: if an earlier batch
+  //       is pending, the source result waits and goes as its incremental delta.
+  // _sourceOriginalMd then holds this markdown, so an unchanged textarea is a no-op
+  // for the next flush and for exit.
+  _commitSource(md) {
+    const L0 = this._sourceBaselineBlocks;
+    const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
+    this._editor
+      .chain()
+      .setContent(this._rt(L1), { emitUpdate: false })
+      .command(({ tr }) => {
+        tr.setMeta("addToHistory", false);
+        return true;
+      })
+      .run();
+    this._sourceOriginalMd = md;
+    this._sourceCommitBlocks = L1;
+    return this._emitOps();
+  }
+
+  // An external apply (applyServerBlocks, a queued release, a reseed) landed in the
+  // hidden rich editor while source mode is open: show it in the textarea and make it
+  // the new baseline, or the next commit would diff the stale text against it and
+  // send the external change back reverted. mergeSourceText rewrites only the blocks
+  // the change touched and maps each end of the selection by block id, and only the
+  // span between the first and last changed character is replaced. A selection is
+  // kept only while it still holds the same text; otherwise it collapses where its
+  // end went. So a caret stays a caret, follows the block it is in, and the next key
+  // never overwrites text the writer did not select.
+  _syncSourceText() {
+    const blocks = deepCloneBlocks(docToBlocks(normalizeCanvasDoc(this._editor.getJSON())));
+    const ta = this._sourceEl;
+    const old = ta.value;
+    const { text: md, map } = mergeSourceText(old, this._sourceCommitBlocks, blocks);
+    this._sourceBaselineBlocks = blocks;
+    this._sourceCommitBlocks = blocks;
+    let start = 0;
+    while (start < old.length && start < md.length && old[start] === md[start]) start++;
+    let tail = 0;
+    while (tail < old.length - start && tail < md.length - start &&
+      old[old.length - 1 - tail] === md[md.length - 1 - tail]) tail++;
+    const [from, to, direction] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+    const head = map(from, false);
+    const end = map(to, true);
+    const keep = from < to && head < end && md.slice(head, end) === old.slice(from, to);
+    const caret = map(to, false);
+    ta.setRangeText(md.slice(start, md.length - tail), start, old.length - tail);
+    ta.setSelectionRange(keep ? head : caret, keep ? end : caret, direction);
+    this._sizeSourceTextarea();
+    this._sourceOriginalMd = md;
+  }
+
+  // True while the Markdown source textarea owns input (1.20.0).
+  get sourceMode() {
+    return this._mode === "source";
   }
 
   // Grow the source textarea to fit its content (no internal scroll). Best-effort —
@@ -4803,6 +4832,7 @@ class BpPaperCanvas extends HTMLElement {
       this._queueServerBlocks(next);
     } else {
       this._blocks = next;
+      this._clearPendingServerBlocks();
       this._programmaticApply = true;
       try {
         this._applyExternalContent(next);
@@ -4935,7 +4965,9 @@ class BpPaperCanvas extends HTMLElement {
   // external edit lands once the user is back in rich.
   _isEditingNow() {
     if (!this._editor) return false;
-    if (this._mode === "source") return true;
+    // With flushKeepsSource, source mode is editing only while the textarea holds text
+    // not yet committed (1.20.0); without it, for as long as source mode is open.
+    if (this._mode === "source") return !this._flushKeepsSource || this._sourceEl?.value !== this._sourceOriginalMd;
     const composing = !!(this._editor.view && this._editor.view.composing);
     const noteIslandFocused = this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]');
     return this._editor.isFocused || noteIslandFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
@@ -4988,6 +5020,7 @@ class BpPaperCanvas extends HTMLElement {
       }
       if (tr.docChanged) this._editor.view.dispatch(tr);
       this._restSelectionOffAtom();
+      if (this._mode === "source" && this._flushKeepsSource) this._syncSourceText();
       this._consumePendingFocus();
       return;
     }
@@ -5002,6 +5035,7 @@ class BpPaperCanvas extends HTMLElement {
       .run();
     this._restoreCaret(caret);
     this._restSelectionOffAtom();
+    if (this._mode === "source" && this._flushKeepsSource) this._syncSourceText();
     this._consumePendingFocus();
   }
 
@@ -5452,7 +5486,7 @@ class BpPaperCanvas extends HTMLElement {
     // be delivered after the server echo armed this listener; applying at that
     // point would overwrite the draft before its debounce gets a chance to emit.
     if (this._editor && this._editor.view && this._editor.view.composing) return;
-    if (this._mode === "source") return;
+    if (this._mode === "source" && (!this._flushKeepsSource || this._sourceEl?.value !== this._sourceOriginalMd)) return;
     if (this._editor && this._editor.isFocused) return;
     if (this._bubble?.hasFocus()) return;
     if (this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]')) return;
@@ -5526,6 +5560,7 @@ class BpPaperCanvas extends HTMLElement {
       this._restoreCaret(caret);
       this._restSelectionOffAtom();
       this._verifyPainted("seed");
+      if (this._mode === "source" && this._flushKeepsSource) this._syncSourceText();
       this._consumePendingFocus();
     }
   }
@@ -5619,6 +5654,17 @@ class BpPaperCanvas extends HTMLElement {
 
   get liveRemote() {
     return this._liveRemote;
+  }
+
+  // `true` (strictly): flushPendingChanges() in source mode commits the Markdown and
+  // keeps source mode open, and a server apply reaches a textarea with no unsaved
+  // text (1.20.0). Default false: the flush leaves source mode, as before 1.20.0.
+  set flushKeepsSource(value) {
+    this._flushKeepsSource = value === true;
+  }
+
+  get flushKeepsSource() {
+    return this._flushKeepsSource;
   }
 
   get acknowledgedSaves() {

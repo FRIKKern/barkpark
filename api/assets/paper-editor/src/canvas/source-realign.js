@@ -10,7 +10,15 @@
 // source baseline ids so runToOps emits a PATCH for an in-place edit (not a
 // remove+insert storm) and NO op for an unchanged block.
 
-import { blocksToMarkdown } from "../markdown.js";
+import { blocksToMarkdown, markdownToBlocks, markdownToBlockSpans } from "../markdown.js";
+import { idCarriesKind } from "./run-convert.js";
+
+// A block's Markdown without its id. A <!--bp:block--> line holds the id, and a
+// block the writer typed (a soft line break, a table) parses under a minted one, so
+// every "is it the same block" check compares this.
+function contentSig(block) {
+  return blocksToMarkdown([{ ...block, id: "" }]);
+}
 
 // Structural deep clone of a block array — DOM/Node-API-free. Used to snapshot the
 // source baseline so a later parse + realign never mutates the live this._blocks.
@@ -42,11 +50,11 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
   const parsed = Array.isArray(parsedBlocks) ? parsedBlocks : [];
   if (parsed.length === 0) return parsed;
 
-  // Per-block signature: the markdown of that single block. Identical md ⇒ an
-  // identical block (the converter is a fixed point), so this keys the anchors.
-  const sig = (b) => blocksToMarkdown([b]);
-  const baseSig = baseline.map(sig);
-  const parsedSig = parsed.map(sig);
+  // Per-block signature: the markdown of that single block, without its id.
+  // Identical md ⇒ an identical block (the converter is a fixed point), so this
+  // keys the anchors.
+  const baseSig = baseline.map(contentSig);
+  const parsedSig = parsed.map(contentSig);
 
   // LCS DP over the two signature sequences.
   const n = baseSig.length;
@@ -95,12 +103,16 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
   let baseCursor = 0; // next baseline index to consider as a positional donor
 
   // Nearest unconsumed baseline index AT OR AFTER `from`, optionally requiring a
-  // matching signature and an upper bound. Returns -1 when none. This is the single
+  // matching signature, an upper bound and a kind the donor's id can carry over to
+  // `block` (idCarriesKind: a paragraph a half-typed fence turned into code is a new
+  // block, not a typeless patch the server would merge into the paragraph). Returns
+  // -1 when none. This is the single
   // positional-nearest rule shared by the anchor (duplicate) and non-anchor branches.
-  const nearestDonor = (from, sig, upper) => {
+  const nearestDonor = (from, sig, upper, block) => {
     for (let bi = from; bi < upper; bi++) {
       if (consumed.has(bi)) continue;
       if (sig != null && baseSig[bi] !== sig) continue;
+      if (block && !idCarriesKind(baseline[bi], block)) continue;
       return bi;
     }
     return -1;
@@ -135,7 +147,7 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
         break;
       }
     }
-    const donor = nearestDonor(baseCursor, null, nextAnchorBase);
+    const donor = nearestDonor(baseCursor, null, nextAnchorBase, parsed[k]);
     if (donor !== -1) {
       out[k].id = baseline[donor].id;
       consumed.add(donor);
@@ -179,6 +191,126 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 //     a fresh id — never silent data loss;
 //   • body edits (non-locked blocks)      → preserved unchanged.
 //
+// REALIGN across source commits (1.20.0). A source session commits many times, so
+// a parsed block has two possible donors: the LAST commit (lastBlocks) and the
+// ENTER baseline (enterBlocks). The last commit goes first: it is the text the
+// writer is typing on, so a block born in this session keeps the id it was sent
+// with (a patch-block, not remove + insert on every flush), and a block typed into
+// never trades ids with its neighbour. Then every block still holding a freshly
+// minted id is realigned against the enter blocks the last commit lacks, so a block
+// a half-typed construct swallowed in an earlier commit gets its original id back.
+// With one commit (lastBlocks = the enter baseline) the second pass has no donors,
+// so this is realignBlockIds exactly.
+export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
+  const first = realignBlockIds(lastBlocks, parsedBlocks);
+  const lastIds = new Set(lastBlocks.map((b) => b.id));
+  const fresh = first.flatMap((b, i) => (lastIds.has(b.id) ? [] : [i]));
+  if (fresh.length === 0) return first;
+  const donors = enterBlocks.filter((b) => !lastIds.has(b.id));
+  const again = realignBlockIds(donors, fresh.map((i) => first[i]));
+  fresh.forEach((i, k) => { first[i] = again[k]; });
+  return first;
+}
+
+// The source text for `blocks` that keeps the writer's own text (1.20.0). `before`
+// are the blocks `text` was last saved as; realignBlockIds gives each block of
+// `text` its id (the clamp of a locked title can make the two differ). Each block
+// whose id and Markdown are unchanged keeps its original lines; every other block is
+// written as blocksToMarkdown writes it. A block keeps its lines only if they end it
+// on their own (an unclosed fence runs to the end of the text and would swallow
+// whatever the merge puts after it). So a server change rewrites only the blocks it
+// touched, and `* item` or `__bold__` the writer typed elsewhere stays as typed.
+//
+// The writer's blank lines stay with the block above them: the lines above the first
+// block always stay; the lines after the last block always travel with it, plus one
+// blank line when a block now follows it; the lines after any other block travel
+// with it when they hold a blank line, when the next block is kept and still its
+// neighbour, or when it ends the text. Elsewhere a block is followed by one blank
+// line, and a new last block by none. So a caret on a blank line the writer opened
+// stays on a blank line, and the next key starts a new block.
+//
+// `map(at, stayBefore)` moves an offset of `text` into the new text by block id: in
+// an unchanged block it keeps its place in that block wherever the block moved; in a
+// changed block it maps through the change (before it, it stays; at or after its
+// end, it moves with the text; inside it, it goes to the end of the new text, or
+// stays before an insertion at its own place when `stayBefore`), and never between
+// the halves of a surrogate pair. An offset above the first block stays; one in the
+// blank lines after a block keeps its place in them (lines that hold an offset hold a
+// blank line, so they always travel). In a deleted block it goes to the end of the
+// nearest block a typed letter only lengthens (not a divider, not a closed fence),
+// looking back first.
+export function mergeSourceText(text, before, blocks) {
+  const { blocks: parsed, spans } = markdownToBlockSpans(text);
+  const offsets = [0];
+  for (const line of text.split("\n")) offsets.push(offsets[offsets.length - 1] + line.length + 1);
+  const start = (k) => offsets[spans[k][0]];
+  const end = (k) => offsets[spans[k][1]] - 1;
+  const sig = (block) => blocksToMarkdown([block]);
+  const was = new Map(realignBlockIds(before, parsed).map((block, k) => [block.id, k]));
+  const endsItself = (k) => {
+    const alone = markdownToBlocks(text.slice(start(k), end(k)) + "\n\n.");
+    return alone.length === 2 && contentSig(alone[0]) === contentSig(parsed[k]);
+  };
+  const pieces = blocks.map((block) => {
+    const k = was.get(block.id) ?? -1;
+    const own = k !== -1 && contentSig(parsed[k]) === contentSig(block) && endsItself(k);
+    return { k, own, text: own ? text.slice(start(k), end(k)) : sig(block) };
+  });
+  const gapAfter = (k) => text.slice(end(k), k + 1 < parsed.length ? start(k + 1) : text.length);
+  const seps = pieces.map((piece, j) => {
+    const next = pieces[j + 1];
+    if (piece.k === -1) return next ? "\n\n" : "";
+    const gap = gapAfter(piece.k);
+    if (piece.k + 1 === parsed.length) return next ? gap + "\n\n" : gap;
+    const travels = !next || gap.split("\n").length > 2 || (piece.own && next.own && next.k === piece.k + 1);
+    return travels ? gap : "\n\n";
+  });
+  const lead = parsed.length ? text.slice(0, start(0)) : text;
+  let out = lead;
+  const at = [];
+  pieces.forEach((piece, j) => {
+    at.push(out.length);
+    out += piece.text + seps[j];
+  });
+  const lengthens = (i) => blocksToMarkdown(markdownToBlocks(pieces[i].text + "x")) === sig(blocks[i]) + "x";
+  const landNear = (k) => {
+    const near = pieces.map((piece, i) => i).sort((x, y) => rank(pieces[x].k, k) - rank(pieces[y].k, k));
+    const i = near.find(lengthens) ?? near[0];
+    return at[i] + pieces[i].text.length;
+  };
+  const map = (offset, stayBefore) => {
+    let k = -1;
+    while (k + 1 < parsed.length && start(k + 1) <= offset) k++;
+    if (k === -1) return offset;
+    const j = pieces.findIndex((piece) => piece.k === k);
+    if (j === -1) return landNear(k);
+    if (offset > end(k)) return at[j] + pieces[j].text.length + offset - end(k);
+    const own = text.slice(start(k), end(k));
+    return at[j] + through(sig(parsed[k]), pieces[j].text, through(own, sig(parsed[k]), offset - start(k), stayBefore), stayBefore);
+  };
+  return { text: out, map };
+}
+
+// Which block a caret from deleted block `k` goes to first: the blocks before it,
+// nearest first, then the ones after it, then the new ones.
+function rank(from, k) {
+  if (from === -1) return Number.MAX_SAFE_INTEGER;
+  return from < k ? k - from : from;
+}
+
+function through(before, after, at, stayBefore) {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let tail = 0;
+  while (tail < before.length - start && tail < after.length - start &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  if (start > 0 && /[\ud800-\udbff]/.test(before[start - 1])) start--;
+  if (tail > 0 && /[\udc00-\udfff]/.test(before[before.length - tail])) tail--;
+  if (at <= start && (stayBefore || at < before.length - tail)) return at;
+  if (at >= before.length - tail) return at + after.length - before.length;
+  return after.length - tail;
+}
+
 // Additive (D3): a baseline with NO leading locked block returns `realigned`
 // untouched — a template-free paper's source round-trip stays byte-identical.
 export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
@@ -225,12 +357,11 @@ export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
   // same-text block the user already had in the body keeps its baseline id and
   // is never touched.
   const baselineIds = new Set(baseline.map((b) => b && b.id));
-  const sig = (b) => blocksToMarkdown([b]);
   for (const base of prefix) {
     if (takers.has(base.id)) continue;
-    const baseSig = sig(base);
+    const baseSig = contentSig(base);
     const copyAt = tail.findIndex(
-      (b) => b && !baselineIds.has(b.id) && sig(b) === baseSig,
+      (b) => b && !baselineIds.has(b.id) && contentSig(b) === baseSig,
     );
     if (copyAt !== -1) tail = tail.slice(0, copyAt).concat(tail.slice(copyAt + 1));
   }

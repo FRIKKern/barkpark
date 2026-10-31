@@ -97,6 +97,7 @@ try {
     patch: { content: [{ type: "text", value: "Source mode final text" }] },
   }]], "the source edit emits synchronously with its original block id");
   assert.equal(source._mode, "rich", "flush commits source text into the live rich document");
+  assert.equal(source.sourceMode, false, "without flushKeepsSource the flush leaves source mode");
   assert.equal(source.querySelector(".bp-canvas-source"), null, "the source textarea is consumed");
   assert.equal(
     source._editor.getJSON().content[0].content[0].text,

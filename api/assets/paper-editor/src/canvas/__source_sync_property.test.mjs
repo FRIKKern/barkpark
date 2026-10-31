@@ -1,0 +1,414 @@
+// Property test for contract 1.20.0 (flushKeepsSource): a remote change that lands
+// while Markdown source mode is open, followed by one key, saves exactly "the remote
+// change plus that one key". Each seed builds a random doc, types it with its own
+// spelling (list markers, heading spaces, blank lines), sometimes with a block added
+// or a word longer, flushes and takes the echo, puts a caret or a selection in one block,
+// applies a random remote change (edit, insert, delete or reorder; before, at, inside
+// or after the caret), presses one key and flushes. Every batch replays on a
+// patch.ex-shaped server. The caret maps through the change: before it, it stays;
+// at or after its end, it moves with the text; inside it, it goes to the end of the
+// new text; in a deleted block, it goes to the end of the nearest block before it a
+// letter can follow (not a divider), else of the nearest one after it. A
+// selection the change did not touch keeps exactly its text; one the change touched
+// collapses where its end went. Nothing else is ever selected. A caret in blank lines
+// after a block stays there while those lines are kept (the key then starts a new
+// block); otherwise it goes to the end of that block, or of the nearest block a letter
+// can follow. Every offset of the old text maps inside the new one. (runToOps sends a
+// block inserted mid-doc as an insert plus a move of its neighbour; the server ends
+// the same.) SEEDS overrides the
+// seed count; SEED runs one seed.
+
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+
+const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
+  pretendToBeVisual: true,
+  url: "http://localhost/",
+});
+const { window } = dom;
+for (const name of [
+  "customElements", "CustomEvent", "document", "DOMParser", "Element", "Event",
+  "EventTarget", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node",
+  "NodeFilter", "Selection", "Text",
+]) {
+  globalThis[name] = window[name];
+}
+globalThis.window = window;
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: window.navigator });
+globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+globalThis.CSS ||= { escape: (value) => String(value) };
+window.BP_PAPER_EDITOR_NO_INJECT = true;
+window.Range.prototype.getClientRects ||= () => [];
+window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+
+const { markdownToBlocks, blocksToMarkdown } = await import("../markdown.js");
+const { mergeSourceText } = await import("./source-realign.js");
+await import("../index.js");
+await import("./index.js");
+
+const SEEDS = Number(process.env.SEEDS || 3000);
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const sorted = (value) => Array.isArray(value)
+  ? value.map(sorted)
+  : value && typeof value === "object"
+    ? Object.fromEntries(Object.keys(value).sort()
+      .filter((key) => !(key === "lang" && value[key] === ""))
+      .map((key) => [key, sorted(value[key])]))
+    : value;
+
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const textOf = (block) => block.type === "divider" || block.type === "table" || block.type === "code" ? ""
+  : block.type === "heading" ? block.text
+  : block.type === "list" ? block.items[0][0].value
+  : block.content[0].value;
+const withText = (block, text) => block.type === "heading" ? { ...block, text }
+  : block.type === "list" ? { ...block, items: [[{ type: "text", value: text }]] }
+  : { ...block, content: [{ type: "text", value: text }] };
+const typable = (block) => ["paragraph", "heading", "list"].includes(block.type) && /^[^<\n]*$/.test(blocksToMarkdown([block]));
+const letterFollows = (block) => typable(block) || block.type === "list";
+
+function replay(server, op) {
+  const at = (id) => server.findIndex((block) => block.id === id);
+  const need = (id) => {
+    const index = at(id);
+    if (index === -1) throw new Error(`${op.op} names ${id}, which the server does not hold`);
+    return index;
+  };
+  if (op.op === "patch-block") {
+    const index = need(op.id);
+    server[index] = { ...server[index], ...clone(op.patch) };
+  } else if (op.op === "replace-block") server[need(op.id)] = clone(op.block);
+  else if (op.op === "remove-block") server.splice(need(op.id), 1);
+  else if (op.op === "insert-after") {
+    if (at(op.block.id) !== -1) throw new Error(`insert-after re-inserts ${op.block.id}`);
+    server.splice(op.afterId == null ? 0 : need(op.afterId) + 1, 0, clone(op.block));
+  } else if (op.op === "append-block") {
+    if (at(op.block.id) !== -1) throw new Error(`append-block re-inserts ${op.block.id}`);
+    server.push(clone(op.block));
+  } else if (op.op === "move-block") {
+    const [block] = server.splice(need(op.id), 1);
+    server.splice(op.after == null ? 0 : need(op.after) + 1, 0, block);
+  } else throw new Error(`unexpected op ${op.op}`);
+}
+
+// The caret through a text change from `before` to `after` (one span, found by
+// trimming the common prefix and suffix).
+function span(before, after) {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let tail = 0;
+  while (tail < before.length - start && tail < after.length - start &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  return { start, oldEnd: before.length - tail, newEnd: after.length - tail, delta: after.length - before.length };
+}
+function lineStarts(text) {
+  const starts = [];
+  let at = 0;
+  for (const line of text.split("\n")) {
+    if (line) starts.push(at);
+    at += line.length + 1;
+  }
+  return starts;
+}
+function mapSelection(s, from, to) {
+  const caret = (at) => at >= s.oldEnd ? at + s.delta : at <= s.start ? at : s.newEnd;
+  const hit = (from < s.oldEnd && to > s.start) || (from < s.start && s.start < to);
+  if (from === to || hit) return [caret(to), caret(to)];
+  return [caret(from), to <= s.start ? to : to + s.delta];
+}
+
+const canvas = document.createElement("bp-paper-canvas");
+canvas.acknowledgedSaves = true;
+canvas.flushKeepsSource = true;
+canvas.blocks = [{ id: "seed-0", type: "paragraph", content: [{ type: "text", value: "start" }] }];
+const state = { server: [], batches: [], refused: [] };
+canvas.addEventListener("bp-canvas-ops", (event) => {
+  state.batches.push(event.detail.ops);
+  try {
+    for (const op of event.detail.ops) replay(state.server, op);
+  } catch (error) {
+    state.refused.push(error.message);
+  }
+  canvas.acknowledgeOps(event.detail.seq, true);
+});
+document.body.appendChild(canvas);
+await new Promise((resolve) => setTimeout(resolve, 350));
+
+const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+const type = (textarea, value) => {
+  valueSetter.call(textarea, value);
+  textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+};
+
+function runSeed(seed) {
+  const random = rng(seed);
+  const pick = (list) => list[Math.floor(random() * list.length)];
+  const int = (lo, hi) => lo + Math.floor(random() * (hi - lo + 1));
+  const alphabet = random() < 0.5 ? "ab" : "abcdefghij";
+  const word = (lo, hi) => Array.from({ length: int(lo, hi) }, () => pick(alphabet)).join("");
+  let fresh = 0;
+  const id = () => `s${seed}-${fresh++}`;
+
+  let hasList = false;
+  const doc = Array.from({ length: int(1, 5) }, () => {
+    const kind = pick(hasList ? ["paragraph", "paragraph", "heading", "divider"] : ["paragraph", "paragraph", "heading", "list", "divider"]);
+    if (kind === "list") hasList = true;
+    if (kind === "divider") return { id: id(), type: "divider" };
+    const base = kind === "heading" ? { id: id(), type: "heading", level: 2, text: "" }
+      : kind === "list" ? { id: id(), type: "list", ordered: false, items: [] }
+      : { id: id(), type: "paragraph", content: [] };
+    return withText(base, word(1, 4));
+  });
+  if (doc.every((block) => block.type === "divider")) doc.push({ id: id(), type: "paragraph", content: [{ type: "text", value: word(1, 4) }] });
+
+  if (canvas.sourceMode) canvas.toggleSourceMode();
+  canvas.blocks = clone(doc);
+  state.server = clone(doc);
+  state.refused = [];
+  canvas.toggleSourceMode();
+  const textarea = canvas.querySelector(".bp-canvas-source");
+  textarea.focus();
+
+  const user = clone(doc);
+  const grow = random();
+  const texts = (blocks) => blocks.flatMap((block, j) => typable(block) ? [j] : []);
+  if (grow < 0.4) {
+    const j = pick(texts(user));
+    user[j] = withText(user[j], textOf(user[j]) + word(1, 2));
+  } else if (grow < 0.6) {
+    user.splice(int(0, user.length), 0, { id: "born", type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
+  }
+  const spelledAs = new Map();
+  if (random() < 0.3) {
+    const spellings = [
+      `${word(1, 3)}\n${word(1, 3)}`,
+      `${word(1, 3)}  \n${word(1, 3)}`,
+      "| a | b |\n|---|---|\n| 1 | 2 |",
+      `\`\`\`\n${word(1, 3)}\n\n${word(1, 3)}\n\`\`\``,
+    ];
+    if (!hasList) spellings.push(`* ${word(1, 3)}\n* ${word(1, 3)}`);
+    const spelling = pick(spellings);
+    const wrapped = { ...markdownToBlocks(spelling)[0], id: "wrapped" };
+    spelledAs.set(wrapped, spelling);
+    user.splice(int(0, user.length), 0, wrapped);
+  }
+  const prefix = (block) => block.type === "divider" ? pick(["---", "***", "___"]) : block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
+  const prefixes = user.map(prefix);
+  const chunks = user.map((block, j) => spelledAs.get(block) ?? prefixes[j] + textOf(block));
+  const tight = (j) => (user[j].type === "heading" || user[j].type === "divider") && user[j + 1].type === "paragraph";
+  const gaps = chunks.slice(1).map((_, j) => pick(tight(j) ? ["\n", "\n\n", "\n\n\n"] : ["\n\n", "\n\n", "\n\n\n"]));
+  let lead = pick(["", "", "\n"]);
+  let trail = pick(["", "", "\n"]);
+  const roll = random();
+  const mode = roll < 0.6 ? "text" : roll < 0.85 ? "gap" : "lead";
+  const b = mode === "gap" ? int(0, user.length - 1) : mode === "lead" ? 0 : pick(texts(user));
+  let gapAt = 0;
+  if (mode === "gap" && b < gaps.length) {
+    gaps[b] = "\n".repeat(int(2, 6));
+    gapAt = int(1, gaps[b].length - 1);
+  } else if (mode === "gap") {
+    trail = "\n".repeat(int(1, 4));
+    gapAt = int(1, trail.length);
+  } else if (mode === "lead") {
+    lead = "\n".repeat(int(1, 4));
+    gapAt = int(0, lead.length - 1);
+  }
+  const typed = lead + chunks.map((chunk, j) => (j ? gaps[j - 1] : "") + chunk).join("") + trail;
+  type(textarea, typed);
+  canvas.flushPendingChanges();
+  canvas.applyServerBlocks(clone(state.server));
+  if (textarea.value !== typed) return `the echo of the writer's own save rewrote the textarea`;
+  const mine = clone(state.server);
+  const committed = clone(canvas._sourceCommitBlocks);
+  if (JSON.stringify(mine.map(textOf)) !== JSON.stringify(user.map(textOf))) return `the writer's save holds ${JSON.stringify(mine.map(textOf))}`;
+
+  const blockStart = lead.length + chunks.slice(0, b).reduce((at, chunk, j) => at + chunk.length + gaps[j].length, 0) + prefixes[b].length;
+  const caretText = textOf(user[b]);
+  let from = int(0, caretText.length);
+  let to = from;
+  if (mode === "gap") from = to = chunks[b].length - prefixes[b].length + gapAt;
+  else if (mode === "lead") from = to = gapAt - blockStart;
+  else if (random() < 0.3) to = int(from, caretText.length);
+  textarea.setSelectionRange(blockStart + from, blockStart + to, pick(["forward", "backward"]));
+  const selected = caretText.slice(from, to);
+
+  const remote = clone(state.server);
+  const bid = mine[b].id;
+  const others = remote.map((block, j) => j).filter((j) => remote[j].id !== bid);
+  const leavesText = (j) => texts(remote.filter((_, i) => i !== j)).length > 0;
+  const deletable = others.filter(leavesText);
+  const kinds = ["edit", "insert", "move", "move-caret"];
+  if (typable(user[b])) kinds.push("edit-caret");
+  if (deletable.length) kinds.push("delete");
+  if (leavesText(remote.findIndex((block) => block.id === bid))) kinds.push("delete-caret");
+  const kind = pick(kinds);
+  const otherTexts = others.filter((j) => typable(remote[j]));
+  if (kind === "edit" || kind === "edit-caret") {
+    const j = kind === "edit-caret" || otherTexts.length === 0 ? remote.findIndex((block) => block.id === bid) : pick(otherTexts);
+    const text = textOf(remote[j]);
+    let next = text;
+    while (next === text || next.length === 0) {
+      const anchor = remote[j].id === bid ? pick([0, from, to, text.length, int(0, text.length)]) : int(0, text.length);
+      const a = Math.max(0, Math.min(anchor - int(0, 2), text.length));
+      const z = Math.min(text.length, Math.max(a, anchor + int(0, 2)));
+      next = text.slice(0, a) + word(0, 2) + text.slice(z);
+    }
+    remote[j] = withText(remote[j], next);
+  } else if (kind === "insert") {
+    remote.splice(int(0, remote.length), 0, { id: id(), type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
+  } else if (kind === "delete" || kind === "delete-caret") {
+    remote.splice(kind === "delete-caret" ? remote.findIndex((block) => block.id === bid) : pick(deletable), 1);
+  } else {
+    const j = kind === "move-caret" || others.length === 0 ? remote.findIndex((block) => block.id === bid) : pick(others);
+    const [moved] = remote.splice(j, 1);
+    remote.splice(int(0, remote.length), 0, moved);
+  }
+  state.server = clone(remote);
+  state.batches = [];
+  canvas.applyServerBlocks(clone(remote));
+  const where = `${kind}${mode === "text" ? "" : ` ${mode}`} ${JSON.stringify(caretText)} [${from},${to}]`;
+  if (state.batches.length) return `${where}: the sync itself emitted ops ${JSON.stringify(state.batches)}`;
+  const bare = (block) => blocksToMarkdown([sorted({ ...block, id: "" })]);
+  if (JSON.stringify(markdownToBlocks(textarea.value).map(bare)) !== JSON.stringify(remote.map(bare))) {
+    return `${where}: the textarea does not show the remote doc: ${JSON.stringify(textarea.value)}`;
+  }
+  const v = textarea.value;
+  const userIndex = new Map(mine.map((block, j) => [block.id, j]));
+  const untouched = (k) => userIndex.has(remote[k].id) && textOf(mine[userIndex.get(remote[k].id)]) === textOf(remote[k]);
+  const gapAfter = (j) => j < gaps.length ? gaps[j] : trail;
+  const chunkOf = (i) => untouched(i) ? chunks[userIndex.get(remote[i].id)] : blocksToMarkdown([remote[i]]);
+  const sepOf = (i) => {
+    const j = userIndex.get(remote[i].id);
+    const last = i === remote.length - 1;
+    if (j === undefined) return last ? "" : "\n\n";
+    if (last) return gapAfter(j);
+    if (j >= gaps.length) return trail + "\n\n";
+    const next = remote[i + 1];
+    const neighbours = untouched(i) && untouched(i + 1) && userIndex.get(next.id) === j + 1;
+    return gaps[j].length > 1 || neighbours ? gaps[j] : "\n\n";
+  };
+  const pieceStart = [];
+  let layout = lead;
+  remote.forEach((block, i) => {
+    pieceStart.push(layout.length);
+    layout += chunkOf(i) + sepOf(i);
+  });
+  if (v !== layout) {
+    return `${where}: the textarea holds ${JSON.stringify(v)}, not the writer's layout ${JSON.stringify(layout)} (unchanged blocks as typed, each gap with the block before it, the lead kept)`;
+  }
+
+  const merged = mergeSourceText(typed, committed, canvas._sourceCommitBlocks);
+  if (merged.text !== v) return `${where}: mergeSourceText gives ${JSON.stringify(merged.text)}, the textarea ${JSON.stringify(v)}`;
+  for (let o = 0; o <= typed.length; o++) {
+    for (const stay of [false, true]) {
+      const m = merged.map(o, stay);
+      if (!(m >= 0 && m <= v.length)) return `${where}: offset ${o} of ${JSON.stringify(typed)} maps to ${m}, outside ${JSON.stringify(v)}`;
+    }
+  }
+
+  const after = remote.find((block) => block.id === bid);
+  const key = pick("xyz");
+  const expected = clone(remote);
+  const k = remote.findIndex((block) => block.id === bid);
+  let blank = -1;
+  if (mode === "lead") blank = gapAt;
+  else if (mode === "gap" && k !== -1) blank = pieceStart[k] + chunkOf(k).length + gapAt;
+  if (mode !== "text") {
+    let want = blank;
+    if (want === -1) {
+      const order = [...mine.slice(0, b + 1).reverse(), ...mine.slice(b + 1)];
+      const newcomers = remote.flatMap((block, i) => userIndex.has(block.id) ? [] : [i]);
+      const target = [...order.map((block) => remote.findIndex((r) => r.id === block.id)), ...newcomers]
+        .find((i) => i !== -1 && letterFollows(remote[i]));
+      want = pieceStart[target] + chunkOf(target).length;
+    }
+    if (textarea.selectionStart !== want || textarea.selectionEnd !== want) {
+      return `${where}: a caret on a blank line maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not ${want}${blank === -1 ? " (the end of the nearest block a letter can follow)" : " (its line travels with the block before it)"}: ${JSON.stringify(v)}`;
+    }
+  } else if (after) {
+    const s = span(caretText, textOf(after));
+    const [f, t] = mapSelection(s, from, to);
+    const k = remote.indexOf(after);
+    const textStart = pieceStart[k] + chunkOf(k).length - textOf(after).length;
+    const want = [textStart + f, textStart + t];
+    const got = [textarea.selectionStart, textarea.selectionEnd];
+    if (got[0] !== want[0] || got[1] !== want[1]) {
+      return `${where}: the selection maps to ${JSON.stringify(got)}, not ${JSON.stringify(want)} (text ${JSON.stringify(textarea.value)})`;
+    }
+    if (f !== t && textarea.value.slice(got[0], got[1]) !== selected) {
+      return `${where}: the selection now holds ${JSON.stringify(textarea.value.slice(got[0], got[1]))}, not the writer's ${JSON.stringify(selected)}`;
+    }
+    const text = textOf(after);
+    expected[k] = withText(after, text.slice(0, f) + key + text.slice(t));
+  } else {
+    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find(letterFollows);
+    const k = remote.findIndex((block) => block.id === nearest.id);
+    const end = pieceStart[k] + chunkOf(k).length;
+    if (textarea.selectionStart !== end || textarea.selectionEnd !== end) {
+      return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the nearest block a letter can follow (${end})`;
+    }
+    expected[k] = remote[k].type === "list"
+      ? { ...remote[k], items: [...remote[k].items.slice(0, -1), [{ ...remote[k].items.at(-1)[0], value: remote[k].items.at(-1)[0].value + key }]] }
+      : withText(remote[k], textOf(remote[k]) + key);
+  }
+
+  const [f, t] = [textarea.selectionStart, textarea.selectionEnd];
+  type(textarea, v.slice(0, f) + key + v.slice(t));
+  textarea.setSelectionRange(f + 1, f + 1);
+  canvas.flushPendingChanges();
+  if (state.refused.length) return `${where}: the server refused ${state.refused.join("; ")}`;
+  const ops = state.batches.flat();
+  if (mode !== "text") {
+    const sig = (block) => JSON.stringify(sorted({ ...block, id: "" }));
+    const want = markdownToBlocks(v.slice(0, f) + key + v.slice(t)).map(sig);
+    if (JSON.stringify(state.server.map(sig)) !== JSON.stringify(want)) {
+      return `${where}: the server holds ${JSON.stringify(state.server.map(sig))}, not the layout's own result ${JSON.stringify(want)}`;
+    }
+  } else if (ops.length !== 1 || ops[0].op !== "patch-block") {
+    return `${where}: one key emitted ${JSON.stringify(ops)}`;
+  } else if (JSON.stringify(sorted(state.server)) !== JSON.stringify(sorted(expected))) {
+    return `${where}: the server holds ${JSON.stringify(state.server.map(textOf))}, not ${JSON.stringify(expected.map(textOf))}`;
+  }
+  if (JSON.stringify(sorted(state.server)) !== JSON.stringify(sorted(canvas.blocks))) {
+    return `${where}: the server and the canvas disagree`;
+  }
+  return { passed: `${kind}${mode !== "text" ? ` ${mode}` : from === to ? "" : " selection"}` };
+}
+
+const fails = [];
+let ran = 0;
+const passed = {};
+for (let seed = Number(process.env.SEED || 1); seed <= (process.env.SEED ? Number(process.env.SEED) : SEEDS); seed++) {
+  let failure;
+  try {
+    failure = runSeed(seed);
+  } catch (error) {
+    failure = `threw ${error.stack?.split("\n").slice(0, 3).join(" | ")}`;
+  }
+  ran++;
+  if (typeof failure === "string") fails.push(`seed ${seed}: ${failure}`);
+  else passed[failure.passed] = (passed[failure.passed] || 0) + 1;
+}
+const byKind = {};
+for (const line of fails) {
+  const kind = line.split(": ")[1]?.split(" ")[0];
+  byKind[kind] = (byKind[kind] || 0) + 1;
+}
+console.log(`source sync property: ${ran} seeds, ${fails.length} failed ${JSON.stringify(byKind)}, passed ${JSON.stringify(passed)}`);
+for (const line of fails.slice(0, 8)) console.log(line);
+canvas.remove();
+assert.equal(fails.length, 0, `${fails.length} of ${ran} seeds break "the remote change plus exactly that one key"`);
+console.log("source sync property: ok");
+process.exit(0);

@@ -683,12 +683,21 @@ function escapeBlockLeader(line) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function markdownToBlocks(md) {
+  return markdownToBlockSpans(md).blocks;
+}
+
+// The same parse, plus where each block came from: spans[k] = [first, next) LINE
+// indices of blocks[k] in md.split("\n") (1.20.0: a source sync keeps the writer's
+// own text for the blocks a server change did not touch). Every pass of the loop
+// pushes one block or skips one blank line, so the loop's update records the span.
+export function markdownToBlockSpans(md) {
   const text = typeof md === "string" ? md : "";
   const lines = text.split("\n");
   const blocks = [];
+  const spans = [];
   let i = 0;
 
-  while (i < lines.length) {
+  for (let from = 0; i < lines.length; blocks.length > spans.length && spans.push([from, i]), from = i) {
     let line = lines[i];
 
     // Skip blank separator lines between blocks.
@@ -797,7 +806,7 @@ export function markdownToBlocks(md) {
     i = next;
   }
 
-  return blocks;
+  return { blocks, spans };
 }
 
 // ── sentinel parse ───────────────────────────────────────────────────────────
@@ -920,7 +929,8 @@ function scanCallout(lines, i, head) {
     const bm = /^>\s?(.*)$/.exec(l);
     if (!bm) break;
     // A nested callout header inside the body ends THIS callout (rare; keep simple).
-    if (/^>\s*\[!\w+\]/.test(l)) break;
+    // The same grammar the dispatcher uses: a `>[!x]y` that is no header stays body.
+    if (matchCalloutHeader(l)) break;
     bodyLines.push(bm[1]);
     j += 1;
   }
@@ -940,7 +950,10 @@ function scanBlockquote(lines, i) {
     const l = lines[j];
     const bm = /^>\s?(.*)$/.exec(l);
     if (!bm) break;
-    if (/^>\s*\[!\w+\]/.test(l)) break; // a callout header starts a new block
+    // A callout header starts a new block. The same grammar the dispatcher uses, so
+    // the first line (never a header here) is always consumed: `>[!e]O` once broke
+    // here at j === i and the parse loop never advanced.
+    if (matchCalloutHeader(l)) break;
     bodyLines.push(bm[1]);
     j += 1;
   }

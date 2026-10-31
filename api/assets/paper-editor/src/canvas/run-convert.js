@@ -123,6 +123,15 @@ function blockKind(block) {
   return LIST_KIND_ALIASES.has(t) ? "list" : t;
 }
 
+// True when one id may carry `prev` over to `next`: the same kind, or two kinds
+// runToOps turns into each other with a replace-block. Any other kind change is a
+// different block (a remove and an insert), since patch-block cannot change `type`.
+export function idCarriesKind(prev, next) {
+  const a = blockKind(prev);
+  const b = blockKind(next);
+  return a === b || (CONVERTIBLE_KINDS.has(a) && CONVERTIBLE_KINDS.has(b));
+}
+
 // The `table` block as FOUR hand-rolled NESTED nodes (bpTable > bpTableRow >
 // bpTableHeaderCell|bpTableCell; see table-node.js). UNLIKE every other canvas node,
 // the TABLE is a container of PM structure, not a leaf/atom/inline body — its data
