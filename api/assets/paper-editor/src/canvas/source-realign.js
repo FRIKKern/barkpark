@@ -13,6 +13,13 @@
 import { blocksToMarkdown, markdownToBlocks, markdownToBlockSpans } from "../markdown.js";
 import { idCarriesKind } from "./run-convert.js";
 
+// A block's Markdown without its id. A <!--bp:block--> line holds the id, and a
+// block the writer typed (a soft line break, a table) parses under a minted one, so
+// every "is it the same block" check compares this.
+function contentSig(block) {
+  return blocksToMarkdown([{ ...block, id: "" }]);
+}
+
 // Structural deep clone of a block array — DOM/Node-API-free. Used to snapshot the
 // source baseline so a later parse + realign never mutates the live this._blocks.
 export function deepCloneBlocks(blocks) {
@@ -43,11 +50,11 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
   const parsed = Array.isArray(parsedBlocks) ? parsedBlocks : [];
   if (parsed.length === 0) return parsed;
 
-  // Per-block signature: the markdown of that single block. Identical md ⇒ an
-  // identical block (the converter is a fixed point), so this keys the anchors.
-  const sig = (b) => blocksToMarkdown([b]);
-  const baseSig = baseline.map(sig);
-  const parsedSig = parsed.map(sig);
+  // Per-block signature: the markdown of that single block, without its id.
+  // Identical md ⇒ an identical block (the converter is a fixed point), so this
+  // keys the anchors.
+  const baseSig = baseline.map(contentSig);
+  const parsedSig = parsed.map(contentSig);
 
   // LCS DP over the two signature sequences.
   const n = baseSig.length;
@@ -236,15 +243,14 @@ export function mergeSourceText(text, before, blocks) {
   const start = (k) => offsets[spans[k][0]];
   const end = (k) => offsets[spans[k][1]] - 1;
   const sig = (block) => blocksToMarkdown([block]);
-  const same = (a, b) => sig({ ...a, id: b.id }) === sig(b);
   const was = new Map(realignBlockIds(before, parsed).map((block, k) => [block.id, k]));
   const endsItself = (k) => {
     const alone = markdownToBlocks(text.slice(start(k), end(k)) + "\n\n.");
-    return alone.length === 2 && same(alone[0], parsed[k]);
+    return alone.length === 2 && contentSig(alone[0]) === contentSig(parsed[k]);
   };
   const pieces = blocks.map((block) => {
     const k = was.get(block.id) ?? -1;
-    const own = k !== -1 && same(parsed[k], block) && endsItself(k);
+    const own = k !== -1 && contentSig(parsed[k]) === contentSig(block) && endsItself(k);
     return { k, own, text: own ? text.slice(start(k), end(k)) : sig(block) };
   });
   const gapAfter = (k) => text.slice(end(k), k + 1 < parsed.length ? start(k + 1) : text.length);
@@ -351,12 +357,11 @@ export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
   // same-text block the user already had in the body keeps its baseline id and
   // is never touched.
   const baselineIds = new Set(baseline.map((b) => b && b.id));
-  const sig = (b) => blocksToMarkdown([b]);
   for (const base of prefix) {
     if (takers.has(base.id)) continue;
-    const baseSig = sig(base);
+    const baseSig = contentSig(base);
     const copyAt = tail.findIndex(
-      (b) => b && !baselineIds.has(b.id) && sig(b) === baseSig,
+      (b) => b && !baselineIds.has(b.id) && contentSig(b) === baseSig,
     );
     if (copyAt !== -1) tail = tail.slice(0, copyAt).concat(tail.slice(copyAt + 1));
   }

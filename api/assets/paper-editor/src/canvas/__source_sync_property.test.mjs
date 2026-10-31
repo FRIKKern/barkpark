@@ -69,15 +69,15 @@ function rng(seed) {
   };
 }
 
-const textOf = (block) => block.type === "divider" || block.type === "table" ? ""
+const textOf = (block) => block.type === "divider" || block.type === "table" || block.type === "code" ? ""
   : block.type === "heading" ? block.text
   : block.type === "list" ? block.items[0][0].value
   : block.content[0].value;
 const withText = (block, text) => block.type === "heading" ? { ...block, text }
   : block.type === "list" ? { ...block, items: [[{ type: "text", value: text }]] }
   : { ...block, content: [{ type: "text", value: text }] };
-const typable = (block) => block.type !== "divider" && block.type !== "table" && !textOf(block).includes("\n");
-const TABLE = "| a | b |\n|---|---|\n| 1 | 2 |";
+const typable = (block) => ["paragraph", "heading", "list"].includes(block.type) && /^[^<\n]*$/.test(blocksToMarkdown([block]));
+const letterFollows = (block) => typable(block) || block.type === "list";
 
 function replay(server, op) {
   const at = (id) => server.findIndex((block) => block.id === id);
@@ -190,13 +190,23 @@ function runSeed(seed) {
   } else if (grow < 0.6) {
     user.splice(int(0, user.length), 0, { id: "born", type: "paragraph", content: [{ type: "text", value: word(1, 3) }] });
   }
+  const spelledAs = new Map();
   if (random() < 0.3) {
-    const wrapped = random() < 0.5 ? { id: "wrapped", type: "table" } : { id: "wrapped", type: "paragraph", content: [{ type: "text", value: `${word(1, 3)}\n${word(1, 3)}${pick(["", "  "])}` }] };
+    const spellings = [
+      `${word(1, 3)}\n${word(1, 3)}`,
+      `${word(1, 3)}  \n${word(1, 3)}`,
+      "| a | b |\n|---|---|\n| 1 | 2 |",
+      `\`\`\`\n${word(1, 3)}\n\n${word(1, 3)}\n\`\`\``,
+    ];
+    if (!hasList) spellings.push(`* ${word(1, 3)}\n* ${word(1, 3)}`);
+    const spelling = pick(spellings);
+    const wrapped = { ...markdownToBlocks(spelling)[0], id: "wrapped" };
+    spelledAs.set(wrapped, spelling);
     user.splice(int(0, user.length), 0, wrapped);
   }
   const prefix = (block) => block.type === "divider" ? pick(["---", "***", "___"]) : block.type === "heading" ? pick(["## ", "##   "]) : block.type === "list" ? pick(["* ", "- ", "*   "]) : "";
   const prefixes = user.map(prefix);
-  const chunks = user.map((block, j) => block.type === "table" ? TABLE : prefixes[j] + textOf(block));
+  const chunks = user.map((block, j) => spelledAs.get(block) ?? prefixes[j] + textOf(block));
   const tight = (j) => (user[j].type === "heading" || user[j].type === "divider") && user[j + 1].type === "paragraph";
   const gaps = chunks.slice(1).map((_, j) => pick(tight(j) ? ["\n", "\n\n", "\n\n\n"] : ["\n\n", "\n\n", "\n\n\n"]));
   let lead = pick(["", "", "\n"]);
@@ -321,7 +331,7 @@ function runSeed(seed) {
       const order = [...mine.slice(0, b + 1).reverse(), ...mine.slice(b + 1)];
       const newcomers = remote.flatMap((block, i) => userIndex.has(block.id) ? [] : [i]);
       const target = [...order.map((block) => remote.findIndex((r) => r.id === block.id)), ...newcomers]
-        .find((i) => i !== -1 && typable(remote[i]));
+        .find((i) => i !== -1 && letterFollows(remote[i]));
       want = pieceStart[target] + chunkOf(target).length;
     }
     if (textarea.selectionStart !== want || textarea.selectionEnd !== want) {
@@ -343,13 +353,15 @@ function runSeed(seed) {
     const text = textOf(after);
     expected[k] = withText(after, text.slice(0, f) + key + text.slice(t));
   } else {
-    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find(typable);
+    const nearest = [...mine.slice(0, b).reverse(), ...mine.slice(b + 1)].find(letterFollows);
     const k = remote.findIndex((block) => block.id === nearest.id);
     const end = pieceStart[k] + chunkOf(k).length;
     if (textarea.selectionStart !== end || textarea.selectionEnd !== end) {
       return `${where}: the writer's block was deleted and the selection maps to ${JSON.stringify([textarea.selectionStart, textarea.selectionEnd])}, not the end of the nearest block a letter can follow (${end})`;
     }
-    expected[k] = withText(remote[k], textOf(remote[k]) + key);
+    expected[k] = remote[k].type === "list"
+      ? { ...remote[k], items: [...remote[k].items.slice(0, -1), [{ ...remote[k].items.at(-1)[0], value: remote[k].items.at(-1)[0].value + key }]] }
+      : withText(remote[k], textOf(remote[k]) + key);
   }
 
   const [f, t] = [textarea.selectionStart, textarea.selectionEnd];

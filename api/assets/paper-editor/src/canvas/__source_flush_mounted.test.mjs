@@ -739,6 +739,25 @@ try {
     inSync("after a block fills a blank textarea");
   }
 
+  // 17) A block typed next to one Markdown writes as a <!--bp:block--> line is an
+  //     insert: the other block keeps its id and is not patched.
+  {
+    const { canvas, batches, inSync } = await mount([paragraph("v1", "Top."), paragraph("v2", "first line\nsecond line"), paragraph("v3", "Base.")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("Top.\n\nfirst line\nsecond line\n\nBase.");
+    canvas.flushPendingChanges();
+    batches.length = 0;
+    value.type("Top.\n\nNew.\n\nfirst line\nsecond line\n\nBase.");
+    canvas.flushPendingChanges();
+    assert.deepEqual(batches.flat().map((op) => op.op), ["insert-after"]);
+    assert.deepEqual(canvas.blocks.map((block) => block.id).filter((id) => id.startsWith("v")), ["v1", "v2", "v3"]);
+    inSync("after a block typed next to a soft-wrapped one");
+  }
+
   console.log("mounted source-mode flush regression passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
