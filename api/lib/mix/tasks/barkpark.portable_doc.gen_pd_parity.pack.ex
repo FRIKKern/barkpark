@@ -249,14 +249,14 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   end
 
   defp git_sha do
-    case System.cmd("git", ["rev-parse", "HEAD"], cd: @api, stderr_to_stdout: true) do
-      {sha, 0} -> String.trim(sha)
-      {out, _} -> raise "golden pack: git rev-parse HEAD failed: #{out}"
-    end
+    {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @api)
+    String.trim(sha)
   end
 
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
+  # Erlang orders a map of more than 32 keys by hash, which can move between OTP
+  # releases; the pack sorts every key path that holds one.
   defp json(term), do: Jason.encode!(ordered(term), pretty: true) <> "\n"
 
   defp ordered(map) when is_map(map) do
@@ -266,7 +266,6 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
     |> Jason.OrderedObject.new()
   end
 
-  defp ordered(list) when is_list(list), do: Enum.map(list, &ordered/1)
   defp ordered(other), do: other
 
   defp text(value), do: [%{"type" => "text", "value" => value}]

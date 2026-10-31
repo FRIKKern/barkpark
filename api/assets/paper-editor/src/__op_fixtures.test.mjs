@@ -26,6 +26,9 @@ for (const verb of ["append-block", "insert-after", "patch-block", "replace-bloc
   assert.deepEqual(applyOps(before.blocks, [op]), after.blocks, `${verb}: the editor's patch.ex fold lands on the server's after`);
 }
 
+assert.throws(() => applyOps(fixtures["insert-after"].before.blocks, [{ ...fixtures["insert-after"].op, afterId: "absent" }]),
+  /afterId not found absent/, "insert-after: a missing anchor is an error, as in patch.ex");
+
 const card = fixtures["patch-card-body"];
 const byId = (doc) => doc.blocks.find((block) => block.id === card.op.id);
 assert.deepEqual(buildCardBodyOp(cardBodyProjection(byId(card.after)).doc, byId(card.before)), card.op,
