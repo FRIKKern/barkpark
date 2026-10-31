@@ -12,7 +12,7 @@ Barkpark answers GROQ on Sanity's query API URLs, so a `@sanity/client` or `next
 | `query` | GROQ text; GET query string or POST body `{"query", "params"}` |
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
-| `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as its base; `raw` stacked or a lone other value → 400 |
+| `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as base; `raw` stacked, a lone other value, non-`raw` on v1 → 400 |
 | `returnQuery` | `false` leaves `query` out |
 | `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
