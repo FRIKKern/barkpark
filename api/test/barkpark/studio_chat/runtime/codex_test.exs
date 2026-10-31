@@ -286,6 +286,11 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
     assert Port.info(port) == nil, "port must be closed on buffer breach"
 
+    # The session lives on after the breach, so the pid it reaped must not ride
+    # into its final reap: by then it may name an unrelated process.
+    assert :sys.get_state(runtime.runtime).os_pid == nil,
+           "the session kept the reaped app-server's pid past the breach"
+
     # The port being closed proves only that the BEAM let go (GH #6681). This stub
     # cannot notice EOF and cannot die to EPIPE, so it is gone if and only if the
     # overflow path SIGNALLED it — revert the kill in `reap_port/1` and this reds

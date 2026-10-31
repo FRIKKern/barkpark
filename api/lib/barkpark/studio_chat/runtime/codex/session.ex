@@ -112,6 +112,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
       {:ok,
        %{
          port: port,
+         os_pid: Barkpark.PortReaper.os_pid(port),
          sink: sink,
          sink_ref: sink_ref,
          buffer: "",
@@ -222,7 +223,19 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     state = emit(state, Protocol.process_failed(context(state), status))
     reply_all_pending(state.pending, {:error, {:process_exit, status}})
-    {:stop, {:app_server_exit, status}, %{state | pending: %{}}}
+    {:stop, {:app_server_exit, status}, %{state | pending: %{}, os_pid: nil}}
+  end
+
+  # The port died WITHOUT an exit status: a write met a child that closed its
+  # stdin (EPIPE), and the child may still be running. Stop now, while the pid
+  # read at spawn still names that child, so terminate/2 can kill it. Waiting
+  # for a request clock to fire would leave the child running meanwhile, and a
+  # pid kept for long after its port died could be recycled. `:normal` is our
+  # own close (overflow), which has already reaped.
+  def handle_info({:EXIT, port, reason}, %{port: port} = state) when reason != :normal do
+    state = emit(state, Protocol.process_failed(context(state), reason))
+    reply_all_pending(state.pending, {:error, {:process_exit, reason}})
+    {:stop, {:app_server_exit, reason}, %{state | pending: %{}}}
   end
 
   def handle_info({:request_timeout, id}, state) do
@@ -243,14 +256,14 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{port: port} = state) do
+  def terminate(_reason, state) do
     # The rescue is CONFINED to reap_port (below), never wrapped around this
     # whole body (task-95b4b28a56583b1c, twin of task-2f44ed9d10be629f). A
     # whole-body rescue here swallowed a raise out of reap_port AND skipped
     # `cleanup_task_token`, so the session's task-hands credential stayed live
     # past the session that minted it. The revoke must not depend on whether
     # the statement before it raised.
-    reap_port(port)
+    reap_port(state)
     cleanup_task_token(state[:task_token])
     :ok
   end
@@ -278,7 +291,9 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   #
   # The mechanism now lives in `Barkpark.PortReaper.reap/1`, shared with every
   # other site that closes a spawned program's port (task-aa975de15eff4e6b).
-  defp reap_port(port), do: Barkpark.PortReaper.reap(port)
+  # The pid read at spawn rides along for a port that died on EPIPE and can no
+  # longer name its child (`Barkpark.PortReaper.reap/2`).
+  defp reap_port(state), do: Barkpark.PortReaper.reap(state.port, state[:os_pid])
 
   defp consume_line("", state), do: state
 
@@ -515,9 +530,9 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   # drop the buffer, and fail every pending caller closed — mirroring the
   # malformed-JSONL path (a Protocol failure event + fail_pending).
   defp overflow(state, byte_size) do
-    reap_port(state.port)
+    reap_port(state)
 
-    state
+    %{state | os_pid: nil}
     |> emit(Protocol.buffer_overflow(context(state), byte_size))
     |> fail_pending(:buffer_overflow)
     |> Map.put(:buffer, "")

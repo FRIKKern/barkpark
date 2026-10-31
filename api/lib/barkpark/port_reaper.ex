@@ -18,16 +18,26 @@ defmodule Barkpark.PortReaper do
     3. SIGKILL the pid, best-effort. The child has usually already exited on EOF,
        in which case `kill` just reports "no such process".
 
+  Step 1 has one hole: a port that already DIED cannot name its pid. A write
+  into a child that closed its stdin kills the port (EPIPE) while the child keeps
+  running, so `reap/1` on that port kills nothing. `reap/2` takes the pid the
+  owner read while the port was open and uses it ONLY when the port cannot name
+  one; the owner must forget that pid the moment it learns the child exited
+  (an `{:exit_status, _}`, or its own reap), so a recycled pid is never signalled.
+
   Never raises. This is the ONE place in `api/lib` that calls `Port.close/1`:
   every site that owns a spawned program goes through here.
   """
 
   @doc """
-  Close `port` and SIGKILL its OS process. Returns `:ok` whatever happened.
+  Close `port` and SIGKILL its OS process: the pid the port names, else
+  `known_os_pid`. Returns `:ok` whatever happened.
   """
-  @spec reap(port() | term()) :: :ok
-  def reap(port) when is_port(port) do
-    os_pid = os_pid(port)
+  @spec reap(port() | term(), pos_integer() | nil) :: :ok
+  def reap(port, known_os_pid \\ nil)
+
+  def reap(port, known_os_pid) when is_port(port) do
+    os_pid = os_pid(port) || known_os_pid
 
     try do
       Port.close(port)
@@ -40,7 +50,7 @@ defmodule Barkpark.PortReaper do
     kill(os_pid)
   end
 
-  def reap(_not_a_port), do: :ok
+  def reap(_not_a_port, _known_os_pid), do: :ok
 
   @doc """
   The OS pid behind an OPEN port, or nil (closed port, not a spawned program).

@@ -50,7 +50,7 @@ defmodule Barkpark.StudioChat.ProviderPortEpipeTest do
 
   # Closes its stdin at once, waits for `go`, prints two frames, then lingers so
   # the port is still open (child alive, stdin closed) when the Session writes.
-  defp stub(dir) do
+  defp stub(dir, linger \\ 2) do
     path = Path.join(dir, "stub.sh")
     go = Path.join(dir, "go")
 
@@ -60,7 +60,7 @@ defmodule Barkpark.StudioChat.ProviderPortEpipeTest do
     while [ ! -f '#{go}' ]; do sleep 0.01; done
     printf '%s\\n' '{"type":"bp_sandbox","subtype":"created","sandbox_id":"sbx-epipe"}'
     printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
-    sleep 2
+    sleep #{linger}
     """)
 
     File.chmod!(path, 0o755)
@@ -110,5 +110,59 @@ defmodule Barkpark.StudioChat.ProviderPortEpipeTest do
     assert_receive {:claude_chat_event, %{"type" => "result"}}, 5_000
     assert_receive {:claude_chat_exit, :epipe, _stderr_tail}, 5_000
     assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 5_000
+  end
+
+  defp running?(path),
+    do: match?({_, 0}, System.cmd("pgrep", ["-f", path], stderr_to_stdout: true))
+
+  defp await_gone(path, deadline \\ System.monotonic_time(:millisecond) + 5_000) do
+    cond do
+      not running?(path) -> true
+      System.monotonic_time(:millisecond) > deadline -> false
+      true -> Process.sleep(20) && await_gone(path, deadline)
+    end
+  end
+
+  test "a CLI that closed its stdin and keeps running is killed when the write kills its port",
+       %{dir: dir} do
+    # The dead port can no longer name its child, so only the pid the Session
+    # read at spawn can end a CLI that lingers 30 s past its EPIPE.
+    {path, go} = stub(dir, 30)
+    on_exit(fn -> System.cmd("pkill", ["-9", "-f", path]) end)
+    Application.put_env(:barkpark, :claude_chat, command: {path, []})
+
+    {:ok, session} = ClaudeChat.start_session(%{sink: self(), mode: "plan"})
+    ref = Process.monitor(session)
+
+    :ok = :sys.suspend(session)
+    {:ok, _request_id} = ClaudeChat.initialize(session)
+    File.write!(go, "")
+    :ok = await_queued_frames(session)
+    :ok = :sys.resume(session)
+
+    assert_receive {:claude_chat_exit, :epipe, _stderr_tail}, 5_000
+    assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 5_000
+    assert await_gone(path), "the CLI #{path} outlived its EPIPE"
+  end
+
+  test "a close queued behind the write still kills the lingering CLI", %{dir: dir} do
+    # The close is handled before the port's queued `{:EXIT}`, so terminate/2
+    # reaps a port that already died and can no longer name its child.
+    {path, go} = stub(dir, 30)
+    on_exit(fn -> System.cmd("pkill", ["-9", "-f", path]) end)
+    Application.put_env(:barkpark, :claude_chat, command: {path, []})
+
+    {:ok, session} = ClaudeChat.start_session(%{sink: self(), mode: "plan"})
+    ref = Process.monitor(session)
+
+    :ok = :sys.suspend(session)
+    {:ok, _request_id} = ClaudeChat.initialize(session)
+    :ok = ClaudeChat.close(session)
+    File.write!(go, "")
+    :ok = await_queued_frames(session)
+    :ok = :sys.resume(session)
+
+    assert_receive {:DOWN, ^ref, :process, ^session, _}, 5_000
+    assert await_gone(path), "the CLI #{path} outlived a close queued ahead of its EXIT"
   end
 end
