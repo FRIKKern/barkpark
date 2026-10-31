@@ -294,7 +294,7 @@ function runSeed(seed) {
     const last = i === remote.length - 1;
     if (j === undefined) return last ? "" : "\n\n";
     if (last) return gapAfter(j);
-    if (j >= gaps.length) return "\n\n";
+    if (j >= gaps.length) return trail + "\n\n";
     const next = remote[i + 1];
     const neighbours = untouched(i) && untouched(i + 1) && userIndex.get(next.id) === j + 1;
     return gaps[j].length > 1 || neighbours ? gaps[j] : "\n\n";
@@ -324,7 +324,7 @@ function runSeed(seed) {
   const k = remote.findIndex((block) => block.id === bid);
   let blank = -1;
   if (mode === "lead") blank = gapAt;
-  else if (mode === "gap" && k !== -1 && (k === remote.length - 1 || b < gaps.length)) blank = pieceStart[k] + chunkOf(k).length + gapAt;
+  else if (mode === "gap" && k !== -1) blank = pieceStart[k] + chunkOf(k).length + gapAt;
   if (mode !== "text") {
     let want = blank;
     if (want === -1) {

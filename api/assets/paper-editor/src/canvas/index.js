@@ -4832,6 +4832,7 @@ class BpPaperCanvas extends HTMLElement {
       this._queueServerBlocks(next);
     } else {
       this._blocks = next;
+      this._clearPendingServerBlocks();
       this._programmaticApply = true;
       try {
         this._applyExternalContent(next);

@@ -758,6 +758,62 @@ try {
     inSync("after a block typed next to a soft-wrapped one");
   }
 
+  // 18) A remote that applies at once drops an older one still queued: the writer
+  //     typed (so the first was held), typed back to the saved text, then a newer
+  //     remote applied; a blur must not bring the held one back.
+  {
+    const { canvas, server, inSync } = await mount([paragraph("k1", "One"), paragraph("k2", "Two")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    const saved = textarea.value;
+    value.type(saved.replace("Two", "Two!"));
+    const held = clone(server);
+    held[0] = paragraph("k1", "Uno");
+    server.splice(0, server.length, ...clone(held));
+    canvas.applyServerBlocks(clone(held));
+    assert.equal(textarea.value, "One\n\nTwo!", "the remote waits while the textarea holds unsaved text");
+    value.type(saved);
+    const newer = [...clone(held), paragraph("k3", "Three")];
+    server.splice(0, server.length, ...clone(newer));
+    canvas.applyServerBlocks(clone(newer));
+    assert.equal(textarea.value, "Uno\n\nTwo\n\nThree");
+    textarea.blur();
+    document.dispatchEvent(new window.FocusEvent("focusout"));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    assert.equal(textarea.value, "Uno\n\nTwo\n\nThree", "the held remote does not come back");
+    inSync("after a blur that found nothing held");
+  }
+
+  // 19) Blank lines after the last block travel with it when a block lands after it
+  //     (review-24788 T1, T2): the caret stays on its blank line, and the key starts
+  //     a new block between the two.
+  for (const edited of [false, true]) {
+    const { canvas, server, inSync } = await mount([paragraph("t1", "One"), paragraph("t2", "Two")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const value = watchValueWrites(textarea);
+    textarea.focus();
+    value.type("One\n\nTwo\n\n\n");
+    canvas.flushPendingChanges();
+    canvas.applyServerBlocks(clone(server));
+    textarea.setSelectionRange(11, 11);
+    const appended = [clone(server[0]), edited ? paragraph(server[1].id, "Two!") : clone(server[1]), paragraph("t3", "Three")];
+    server.splice(0, server.length, ...clone(appended));
+    canvas.applyServerBlocks(clone(appended));
+    const two = edited ? "Two!" : "Two";
+    assert.equal(textarea.value, `One\n\n${two}\n\n\n\n\nThree`);
+    const caret = 5 + two.length + 3;
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [caret, caret], "the caret stays on its blank line");
+    value.press("z");
+    canvas.flushPendingChanges();
+    assert.deepEqual(liveTexts(canvas), ["One", two, "z", "Three"]);
+    inSync(`after a key on the trailing blank lines${edited ? " of an edited block" : ""}`);
+  }
+
   console.log("mounted source-mode flush regression passed");
 } finally {
   for (const canvas of mounted) canvas.remove();

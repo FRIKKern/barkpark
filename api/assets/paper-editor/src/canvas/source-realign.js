@@ -222,9 +222,12 @@ export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
 // touched, and `* item` or `__bold__` the writer typed elsewhere stays as typed.
 //
 // The writer's blank lines stay with the block above them: the lines above the first
-// block always stay; the lines after a block travel with it when they hold a blank
-// line, when the next block is kept and still its neighbour, or when it ends the
-// text. Elsewhere a block is followed by one blank line, and a new last block by none.
+// block always stay; the lines after the last block always travel with it, plus one
+// blank line when a block now follows it; the lines after any other block travel
+// with it when they hold a blank line, when the next block is kept and still its
+// neighbour, or when it ends the text. Elsewhere a block is followed by one blank
+// line, and a new last block by none. So a caret on a blank line the writer opened
+// stays on a blank line, and the next key starts a new block.
 //
 // `map(at, stayBefore)` moves an offset of `text` into the new text by block id: in
 // an unchanged block it keeps its place in that block wherever the block moved; in a
@@ -232,10 +235,10 @@ export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
 // end, it moves with the text; inside it, it goes to the end of the new text, or
 // stays before an insertion at its own place when `stayBefore`), and never between
 // the halves of a surrogate pair. An offset above the first block stays; one in the
-// lines after a block keeps its place in them while they travel, and otherwise goes
-// to the end of that block. In a deleted block, or when that block is one a typed
-// letter would turn into something else (a divider, a closed fence), it goes to the
-// end of the nearest block a letter only lengthens, looking back first.
+// blank lines after a block keeps its place in them (lines that hold an offset hold a
+// blank line, so they always travel). In a deleted block it goes to the end of the
+// nearest block a typed letter only lengthens (not a divider, not a closed fence),
+// looking back first.
 export function mergeSourceText(text, before, blocks) {
   const { blocks: parsed, spans } = markdownToBlockSpans(text);
   const offsets = [0];
@@ -256,18 +259,18 @@ export function mergeSourceText(text, before, blocks) {
   const gapAfter = (k) => text.slice(end(k), k + 1 < parsed.length ? start(k + 1) : text.length);
   const seps = pieces.map((piece, j) => {
     const next = pieces[j + 1];
-    if (piece.k === -1) return { text: next ? "\n\n" : "", own: false };
+    if (piece.k === -1) return next ? "\n\n" : "";
     const gap = gapAfter(piece.k);
-    const inner = piece.k + 1 < parsed.length;
-    const travels = !next || (inner && (gap.split("\n").length > 2 || (piece.own && next.own && next.k === piece.k + 1)));
-    return travels ? { text: gap, own: true } : { text: "\n\n", own: false };
+    if (piece.k + 1 === parsed.length) return next ? gap + "\n\n" : gap;
+    const travels = !next || gap.split("\n").length > 2 || (piece.own && next.own && next.k === piece.k + 1);
+    return travels ? gap : "\n\n";
   });
   const lead = parsed.length ? text.slice(0, start(0)) : text;
   let out = lead;
   const at = [];
   pieces.forEach((piece, j) => {
     at.push(out.length);
-    out += piece.text + seps[j].text;
+    out += piece.text + seps[j];
   });
   const lengthens = (i) => blocksToMarkdown(markdownToBlocks(pieces[i].text + "x")) === sig(blocks[i]) + "x";
   const landNear = (k) => {
@@ -281,10 +284,7 @@ export function mergeSourceText(text, before, blocks) {
     if (k === -1) return offset;
     const j = pieces.findIndex((piece) => piece.k === k);
     if (j === -1) return landNear(k);
-    if (offset > end(k)) {
-      if (seps[j].own) return at[j] + pieces[j].text.length + offset - end(k);
-      return lengthens(j) ? at[j] + pieces[j].text.length : landNear(k);
-    }
+    if (offset > end(k)) return at[j] + pieces[j].text.length + offset - end(k);
     const own = text.slice(start(k), end(k));
     return at[j] + through(sig(parsed[k]), pieces[j].text, through(own, sig(parsed[k]), offset - start(k), stayBefore), stayBefore);
   };
