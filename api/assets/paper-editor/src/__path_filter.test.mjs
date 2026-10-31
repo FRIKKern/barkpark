@@ -8,11 +8,13 @@
 //   1. entry points: every `node <file>`, `npm test` and `npm run <script>` in
 //      the workflow, expanded through package.json (pre/post hooks, nested
 //      `npm run`, `esbuild <entry>`);
-//   2. from each reachable file, every string literal that resolves to an
-//      existing path (against the file's folder, the package root, and the
-//      repo root for `join(X, "a/b")`): inside the package it is followed,
-//      outside it is a sink. A literal folder, or the fixed prefix of a
-//      template literal, is a folder sink: a new file in it must trigger too.
+//   2. from each reachable file, every path it names that exists: "./x" and
+//      "../x" literals, bare repo paths ("api/x"), `${ROOT}/x` templates,
+//      ROOT + "/x" concats, join/resolve(ROOT, "a", "b/c", …), and CSS url(x).
+//      Each resolves against the file's folder, the package root and the repo
+//      root, first hit wins. Inside the package it is followed, outside it is a
+//      sink. A folder, or the fixed prefix before a template hole, is a folder
+//      sink: a new file in it must trigger too.
 // Every sink must match a pattern in BOTH arms, and both arms must be equal.
 //
 // Run: node src/__path_filter.test.mjs   (or: npm test)
@@ -77,22 +79,65 @@ function firstExisting(bases, lit) {
   return bases.map((base) => resolve(base, lit)).find((p) => existsSync(p));
 }
 
+const LITERAL = /(["'`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
+const IDENT = /^[A-Za-z_$][\w$.]*$/;
+
+function fixedPart(lit) {
+  const hole = lit.indexOf("${");
+  const fixed = hole < 0 ? lit : lit.slice(0, lit.lastIndexOf("/", hole) + 1);
+  return { fixed: fixed.replace(/[?#].*$/, ""), templated: hole >= 0 };
+}
+
+function splitArgs(inner) {
+  const args = [];
+  let depth = 0, quote = null, start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (quote) { if (c === "\\") i++; else if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) { args.push(inner.slice(start, i).trim()); start = i + 1; }
+  }
+  args.push(inner.slice(start).trim());
+  return args;
+}
+
+const literalValue = (arg) => {
+  const m = arg.match(/^(["'`])([\s\S]*)\1$/);
+  return m ? m[2] : null;
+};
+
 function candidates(file, text) {
   const out = [];
-  for (const m of text.matchAll(/(["'`])((?:\.\.?\/)[^"'`\n]*?)\1/g)) {
-    let lit = m[2];
-    const hole = lit.indexOf("${");
-    if (hole >= 0) lit = lit.slice(0, lit.lastIndexOf("/", hole) + 1);
-    const path = firstExisting([dirname(file), PKG], lit.replace(/[?#].*$/, ""));
-    if (path) out.push({ path, templated: hole >= 0 });
+  const add = (lit, bases) => {
+    const { fixed, templated } = fixedPart(lit);
+    const path = firstExisting(bases, fixed);
+    if (path) out.push({ path, templated });
+  };
+  const here = [dirname(file), PKG];
+  const anywhere = [dirname(file), PKG, REPO];
+  for (const m of text.matchAll(LITERAL)) {
+    const lit = m[2];
+    if (/^\.\.?\//.test(lit)) add(lit, here);
+    else if (/^[A-Za-z_][\w.@-]*\//.test(lit)) add(lit, [REPO]);
+    const head = lit.match(/^\$\{[A-Za-z_$][\w$.]*\}\/(.+)$/s);
+    if (head) add(head[1], anywhere);
   }
-  for (const m of text.matchAll(/\b(?:join|resolve)\(\s*[A-Za-z_$][\w$.]*\s*,\s*(["'`])([A-Za-z_.][^"'`$\n]*)\1/g)) {
-    const path = firstExisting([dirname(file), PKG, REPO], m[2]);
-    if (path) out.push({ path, templated: false });
+  for (const m of text.matchAll(/[A-Za-z_$][\w$.]*\s*\+\s*(["'`])\/([^"'`\n]+)\1/g)) add(m[2], anywhere);
+  for (const m of text.matchAll(/\b(?:join|resolve)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+    const [first, ...rest] = splitArgs(m[1]);
+    if (!IDENT.test(first)) continue;
+    const parts = [];
+    for (const arg of rest) {
+      const v = literalValue(arg);
+      if (v === null) break;
+      parts.push(v);
+    }
+    if (parts.length) add(parts.join("/"), anywhere);
   }
-  for (const m of text.matchAll(/(["'`])([A-Za-z_][\w.@-]*\/[^"'`$\s]*)\1/g)) {
-    const path = firstExisting([REPO], m[2]);
-    if (path) out.push({ path, templated: false });
+  if (extname(file) === ".css") {
+    for (const m of text.matchAll(/url\(\s*([^"')\s]+)\s*\)/g)) add(m[1], here);
   }
   return out;
 }

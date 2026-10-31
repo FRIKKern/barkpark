@@ -3,8 +3,9 @@
 // 1. skip() exits 0 locally and 1 under BP_REQUIRE_CHROME=1; exitRig() exits 1
 //    on zero PASS and on any failure.
 // 2. A predicate, not a list: every file under src/ that looks for a browser
-//    (names BP_CHROME) imports __rig.mjs, never prints SKIP by hand and never
-//    calls process.exit(0). A new rig that skips green without a browser reds.
+//    (names BP_CHROME) imports __rig.mjs, exits through exitRig(), never prints
+//    SKIP by hand and never calls process.exit(0) or sets process.exitCode. A
+//    new rig that skips green, or ends on its own exit code, reds.
 //
 // Run: node src/__rig.test.mjs   (or: npm test)
 
@@ -54,7 +55,9 @@ assert.ok(rigs.length >= 6, `found ${rigs.length} rigs that look for a browser; 
 
 const broken = rigs.flatMap(({ f, src }) => [
   ...(/from "\.{1,2}\/(?:\.\.\/)*__rig\.mjs"/.test(src) ? [] : [`${f}: does not import __rig.mjs`]),
-  ...(/process\.exit\(0\)/.test(src) ? [`${f}: calls process.exit(0)`] : []),
+  ...(/\bexitRig\(/.test(src) ? [] : [`${f}: does not exit through exitRig()`]),
+  ...(/process\.exit\((?!skip\()/.test(src) ? [`${f}: calls process.exit outside skip()`] : []),
+  ...(/process\.exitCode/.test(src) ? [`${f}: sets process.exitCode`] : []),
   ...(/console\.log\([`"']SKIP/.test(src) ? [`${f}: prints SKIP by hand instead of skip()`] : []),
 ]);
 assert.deepEqual(broken, [], "every rig exits through __rig.mjs");

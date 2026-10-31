@@ -37,7 +37,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
-import { skip } from "./__rig.mjs";
+import { exitRig, skip } from "./__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../../../..");
@@ -474,6 +474,7 @@ const report = {
   fixtureCount: FIXTURES.length, fixtures: FIXTURES.map(({ id, block }) => ({ id, type: block.type })), scenarios: {},
 };
 let failures = 0;
+let compared = 0;
 
 for (const scenario of SCENARIOS) {
   const reader = runPage("reader", scenario);
@@ -503,6 +504,7 @@ for (const scenario of SCENARIOS) {
     }
   }
   failures += differences.length;
+  compared += FIXTURES.length - differences.filter((d) => d.field === "mounted").length;
   report.scenarios[scenario.name] = {
     readerScreenshot: join(ARTIFACTS, `${scenario.name}-reader.png`),
     canvasScreenshot: join(ARTIFACTS, `${scenario.name}-canvas.png`),
@@ -521,4 +523,4 @@ const reportFile = join(ARTIFACTS, "report.json");
 writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`\nEvidence: ${reportFile}`);
 console.log(`Screenshots: ${ARTIFACTS}`);
-if (failures && !REPORT_ONLY) process.exitCode = 1;
+exitRig(compared, failures && !REPORT_ONLY ? failures : 0);

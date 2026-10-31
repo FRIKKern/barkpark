@@ -44,7 +44,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
 import { AXES, diffSurface, classify, staleEntries } from "./view-edit-parity-compare.js";
-import { skip } from "./__rig.mjs";
+import { exitRig, skip } from "./__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../../../..");
@@ -473,7 +473,5 @@ writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`Evidence: ${reportFile}`);
 
 // A matrix that compared nothing measured nothing.
-if (compared === 0) {
-  console.log("FAIL  no owner pairs were compared — the matrix measured nothing");
-  process.exitCode = 1;
-} else if ((unexpectedCount || stale.length) && !REPORT_ONLY) process.exitCode = 1;
+if (compared === 0) console.log("FAIL  no owner pairs were compared — the matrix measured nothing");
+exitRig(compared, (unexpectedCount || stale.length) && !REPORT_ONLY ? 1 : 0);
