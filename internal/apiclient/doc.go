@@ -402,10 +402,12 @@ type ClaimInfo struct {
 // decodes to Worker:"" (a genuinely vacant claim), which callers must tell
 // apart from Present:false (no claim object was ever written).
 func (d Doc) ClaimInfo() ClaimInfo {
-	raw, ok := d.Extra["claim"]
-	if !ok {
-		return ClaimInfo{}
-	}
+	return ClaimInfoOf(d.Extra["claim"])
+}
+
+// ClaimInfoOf decodes one raw claim object, so a reader holding a row's JSON
+// asks Live() the same question a Doc does.
+func ClaimInfoOf(raw json.RawMessage) ClaimInfo {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return ClaimInfo{}
 	}
@@ -440,11 +442,12 @@ func (d Doc) ClaimInfo() ClaimInfo {
 // ClaimEpoch's comment for the measurement and for why the retained epoch must
 // stay exactly where it is.
 //
-// A CLOSED row keeps its worker too: close stamps `closed_by` onto the claim
-// and leaves the rest, so a stamped claim is the row's record of who did the
-// work, not a hold. The server's queue reads it the same way.
+// A CLOSED row keeps its worker too: close stamps `closed_by` and `closed_at`
+// onto the claim and leaves the rest, so a stamped claim is the row's record of
+// who did the work, not a hold. Either stamp settles it, as in the server's
+// queue (queue.ex 4a).
 func (c ClaimInfo) Live() bool {
-	return c.Present && strings.TrimSpace(c.Worker) != "" && c.ClosedBy == ""
+	return c.Present && strings.TrimSpace(c.Worker) != "" && c.ClosedBy == "" && c.ClosedAt == ""
 }
 
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,

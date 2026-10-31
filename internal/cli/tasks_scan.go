@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // THE FOREIGN-CLAIM SCAN (cchi-w67-bl-bp-task-ls-has-no-status-filter…).
@@ -229,18 +231,15 @@ func taskScanRowMatcher(o taskScanOpts) func(json.RawMessage) bool {
 	claimedBy := strings.ToLower(o.claimedBy)
 	return func(row json.RawMessage) bool {
 		var obj struct {
-			Assignee string `json:"assignee"`
-			Claim    *struct {
-				Worker   string `json:"worker"`
-				ClosedBy string `json:"closed_by"`
-			} `json:"claim"`
+			Assignee string          `json:"assignee"`
+			Claim    json.RawMessage `json:"claim"`
 		}
 		if json.Unmarshal(row, &obj) != nil {
 			return false
 		}
 		holder := ""
-		if obj.Claim != nil && obj.Claim.ClosedBy == "" {
-			holder = strings.TrimSpace(obj.Claim.Worker)
+		if claim := apiclient.ClaimInfoOf(obj.Claim); claim.Live() {
+			holder = strings.TrimSpace(claim.Worker)
 		}
 		if assignee != "" && strings.ToLower(strings.TrimSpace(obj.Assignee)) != assignee {
 			return false
