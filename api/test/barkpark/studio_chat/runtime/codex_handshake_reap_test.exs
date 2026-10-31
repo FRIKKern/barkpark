@@ -119,7 +119,10 @@ defmodule Barkpark.StudioChat.Runtime.CodexHandshakeReapTest do
     # so the reap that follows must not carry it. The trace reads the pid the
     # Session hands PortReaper.reap/2; the kill itself would hit nothing here.
     path = stub("IFS= read -r line\nexit 3\n")
-    :erlang.trace_pattern({Barkpark.PortReaper, :reap, 2}, true, [:local])
+    # A trace pattern binds only to LOADED code: in a VM where nothing has
+    # called PortReaper yet it matches nothing and no trace ever arrives.
+    Code.ensure_loaded!(Barkpark.PortReaper)
+    assert :erlang.trace_pattern({Barkpark.PortReaper, :reap, 2}, true, [:local]) == 1
     :erlang.trace(self(), true, [:call, :set_on_spawn])
 
     on_exit(fn -> :erlang.trace_pattern({Barkpark.PortReaper, :reap, 2}, false, [:local]) end)
