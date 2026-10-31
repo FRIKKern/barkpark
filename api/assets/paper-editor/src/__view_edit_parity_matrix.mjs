@@ -473,5 +473,4 @@ writeFileSync(reportFile, JSON.stringify(report, null, 2) + "\n");
 console.log(`Evidence: ${reportFile}`);
 
 // A matrix that compared nothing measured nothing.
-if (compared === 0) console.log("FAIL  no owner pairs were compared — the matrix measured nothing");
 exitRig(compared, (unexpectedCount || stale.length) && !REPORT_ONLY ? 1 : 0);

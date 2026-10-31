@@ -488,6 +488,7 @@ for (const scenario of SCENARIOS) {
       failures++;
       continue;
     }
+    compared += 1;
     for (const path of numericPaths) {
       const rv = get(r, path);
       const cv = get(c, path);
@@ -504,7 +505,6 @@ for (const scenario of SCENARIOS) {
     }
   }
   failures += differences.length;
-  compared += FIXTURES.length - differences.filter((d) => d.field === "mounted").length;
   report.scenarios[scenario.name] = {
     readerScreenshot: join(ARTIFACTS, `${scenario.name}-reader.png`),
     canvasScreenshot: join(ARTIFACTS, `${scenario.name}-canvas.png`),
