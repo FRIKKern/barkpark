@@ -606,6 +606,22 @@ try {
     assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [0, 0]);
   }
 
+  // 12) One remote change deletes the caret's block and adds another: the caret goes
+  //     to the block that was before it, not into the newcomer.
+  {
+    const { canvas, server } = await mount([paragraph("g1", "One"), paragraph("g2", "Two")]);
+    mounted.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    textarea.focus();
+    textarea.setSelectionRange(6, 6);
+    const swapped = [paragraph("g0", "New"), paragraph("g1", "One")];
+    server.splice(0, server.length, ...clone(swapped));
+    canvas.applyServerBlocks(clone(swapped));
+    assert.equal(textarea.value, "New\n\nOne");
+    assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [8, 8], "the caret goes to the end of One");
+  }
+
   console.log("mounted source-mode flush regression passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
