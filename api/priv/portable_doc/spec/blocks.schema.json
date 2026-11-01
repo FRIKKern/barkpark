@@ -2608,6 +2608,9 @@
       },
       "codelist": {
         "properties": {
+          "codelistId": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -2616,6 +2619,9 @@
           },
           "locked": {
             "type": "boolean"
+          },
+          "plugin": {
+            "type": "string"
           },
           "role": {
             "type": "string"
@@ -3070,6 +3076,9 @@
           },
           "locked": {
             "type": "boolean"
+          },
+          "refType": {
+            "type": "string"
           },
           "role": {
             "type": "string"
@@ -3646,6 +3655,12 @@
       },
       "note": {
         "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/definitions/inline"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -4016,6 +4031,9 @@
           },
           "snapshot": {
             "type": "object"
+          },
+          "tab": {
+            "type": "integer"
           },
           "type": {
             "const": "sheet"

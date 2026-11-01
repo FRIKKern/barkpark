@@ -19,6 +19,19 @@ defmodule Barkpark.PortableDoc.SpecTest do
     tabs.tabs[].blocks terminal.blocks terminal.children
   )
 
+  @unauthored ~w(_code_label _paper_links _ref_title _render_opts unavailable)
+
+  @unread %{
+    {"card", "span"} =>
+      {"render/section_layout.ex", "read off every grid cell, whatever its type"},
+    {"task-list", "config"} => {"slots.ex", "declared by Slots.query_decl/1; nothing reads it"},
+    {"tasks", "config"} => {"slots.ex", "the task-list shape; nothing reads it"}
+  }
+
+  @undeclared %{
+    "order" => {"render/section_layout.ex", "read off every grid cell; no block declares it"}
+  }
+
   @portable_doc Path.expand("../../../lib/barkpark/portable_doc", __DIR__)
   @compose_source File.read!(Path.join(@portable_doc, "render/compose.ex"))
   @reader_sources Path.wildcard(Path.join(@portable_doc, "render/*.ex")) ++
@@ -39,6 +52,11 @@ defmodule Barkpark.PortableDoc.SpecTest do
 
     %{
       schema: schema,
+      reads:
+        ComposeCensus.Reads.reads(
+          Enum.map(@reader_sources, &File.read!/1),
+          ComposeCensus.types(@compose_source)
+        ),
       root: ExJsonSchema.Schema.resolve(schema),
       strict: ExJsonSchema.Schema.resolve(strict)
     }
@@ -174,17 +192,228 @@ defmodule Barkpark.PortableDoc.SpecTest do
                Tiers.by_tier() |> Map.keys() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
     end
 
-    test "every declared field is a key the reader names", %{schema: schema} do
-      literals =
-        Enum.reduce(@reader_sources, MapSet.new(), &MapSet.union(&2, string_literals(&1)))
+    test "each block's fields are the keys the reader reads on it, both ways", %{
+      schema: schema,
+      reads: reads
+    } do
+      assert field_differences(schema, reads) == []
+    end
 
-      unknown =
-        for {type, block} <- schema["definitions"]["blocks"],
-            field <- Map.keys(block["properties"]) -- ["id", "locked", "role", "type"],
-            not MapSet.member?(literals, field),
-            do: "#{type}.#{field}"
+    test "an alias spelling reads only fields its target declares", %{
+      schema: schema,
+      reads: reads
+    } do
+      blocks = schema["definitions"]["blocks"]
 
-      assert unknown == [], "fields no reader source names: #{inspect(unknown)}"
+      differences =
+        for {spelling, %{"x-alias-of" => target, "x-set" => set}} <-
+              Enum.sort(schema["definitions"]["aliases"]),
+            declared = Map.keys(blocks[target]["properties"]),
+            {field, how} <-
+              Enum.map(Map.keys(set) -- declared, &{&1, "forced"}) ++
+                Enum.map((Map.fetch!(reads, spelling) -- @unauthored) -- declared, &{&1, "read"}),
+            do:
+              "alias #{spelling}: field #{field} #{how} by the reader but not in #{target}'s schema"
+
+      assert differences == []
+    end
+
+    test "a field added to, dropped from or renamed in a reader names the block and field" do
+      block = fn fields ->
+        %{"properties" => Map.new(fields ++ ~w(id locked role type), &{&1, %{}})}
+      end
+
+      schema = %{
+        "definitions" => %{
+          "blocks" => %{"card" => block.(~w(span tone)), "diagram" => block.(~w(caption source))}
+        }
+      }
+
+      reads = %{"card" => ["tone"], "diagram" => ["_render_opts", "caption", "source"]}
+      assert field_differences(schema, reads) == []
+
+      assert field_differences(schema, %{reads | "diagram" => ["subtitle" | reads["diagram"]]}) ==
+               ["block diagram: field subtitle read by the reader but not in the schema"]
+
+      assert field_differences(schema, %{reads | "diagram" => ["source"]}) ==
+               ["block diagram: field caption in the schema but the reader does not read it"]
+
+      assert field_differences(schema, %{reads | "diagram" => ["caption", "graph"]}) == [
+               "block diagram: field graph read by the reader but not in the schema",
+               "block diagram: field source in the schema but the reader does not read it"
+             ]
+    end
+
+    test "each exception still holds; every stale one is named", %{schema: schema, reads: reads} do
+      blocks = schema["definitions"]["blocks"]
+      names? = &MapSet.member?(string_literals(Path.join(@portable_doc, &1)), &2)
+      read_by = fn field -> for {type, keys} <- reads, blocks[type], field in keys, do: type end
+
+      declared_by = fn field ->
+        for {type, block} <- blocks, Map.has_key?(block["properties"], field), do: type
+      end
+
+      unread =
+        for {{type, field}, {file, why}} <- @unread,
+            {true, how} <- [
+              {not names?.(file, field), "#{file} no longer names it"},
+              {field in Map.fetch!(reads, type), "the census reads it now"}
+            ],
+            do: "#{type}.#{field} (#{why}): #{how} — drop the exception"
+
+      undeclared =
+        for {field, {file, why}} <- @undeclared,
+            {true, how} <- [
+              {not names?.(file, field), "#{file} no longer names it"},
+              {declared_by.(field) != [], "#{Enum.join(declared_by.(field), ", ")} declares it"},
+              {read_by.(field) != [],
+               "the census reads it on #{Enum.join(read_by.(field), ", ")}"}
+            ],
+            do: "#{field} (#{why}): #{how} — drop the exception"
+
+      assert unread ++ undeclared == []
+    end
+
+    test "each unauthored key is one the reader injects" do
+      injected =
+        Enum.reduce(@reader_sources, MapSet.new(), &MapSet.union(&2, map_put_keys(&1)))
+
+      assert @unauthored -- MapSet.to_list(injected) == []
+    end
+
+    test "the census follows the block into helpers, attributes and rewrites" do
+      source = """
+      defmodule Kinds do
+        @remote ~w(other)
+        def remote, do: @remote
+      end
+      defmodule Fixture do
+        @keys ~w(alpha beta)
+        @kinds ["memo", "sketch"]
+        @remote Kinds.remote()
+        def compose_block(%{"type" => "memo", "pinned" => true} = b, _style) do
+          copy = b
+          {b["title"], Map.get(b, "body"), get_in(b, ["meta", "x"]), blank?(b, "tag")}
+          {copy["via_copy"], pick(b, "a")}
+        end
+        def compose_block(%{"type" => t} = b, _style) when t in @kinds, do: Map.fetch(b, "shared")
+        def compose_block(%{"type" => t} = b, _style) when t in @remote, do: b["remote_only"]
+        def compose_block(%{"type" => "pad"} = b, style) do
+          case b do
+            %{"margin" => m} -> m
+            %{"type" => "sketch", "wrong" => w} -> w
+          end
+          %{"size" => s} = b
+          Enum.map(@keys, fn key -> Map.get(b, key) end)
+          compose_block(b |> Map.put("type", "memo") |> Map.put("title", "x"), style)
+        end
+        def compose_block(%{"type" => "other"} = b, _style), do: Map.get(b, "unused")
+        defp blank?(b, key), do: Map.get(b, key) in [nil, ""]
+        defp pick(b, "a"), do: Map.get(b, "from_a")
+        defp pick(b, "z"), do: Map.get(b, "from_z")
+        def inline(%{"type" => "text", "value" => v}), do: v
+        def inline(%{"type" => "memo", "children" => c}), do: c
+      end
+      """
+
+      reads = ComposeCensus.Reads.reads([source], ["memo", "sketch", "pad", "other"])
+
+      assert reads["memo"] ==
+               ["body", "from_a", "meta", "pinned", "shared", "tag", "title", "via_copy"]
+
+      assert reads["sketch"] == ["shared", "wrong"]
+
+      assert reads["pad"] ==
+               ~w(alpha beta body from_a margin meta pinned shared size tag via_copy)
+
+      assert reads["other"] == ["remote_only", "unused"]
+    end
+
+    test "the census walks scoped entries and the less common read shapes" do
+      source = """
+      defmodule Scoped do
+        @k "attr_key"
+        @keys ~w(take_a take_b)
+        @caps ~w(cap_a)
+        @kinds ~w(diagram)
+        def hydrate(blocks) do
+          Enum.map(blocks, fn block ->
+            with %{"type" => "sheet", "ref" => _} <- block, do: tab(block)
+          end)
+        end
+        def tab(block), do: Map.get(block, "with_body")
+        def refresh(block) do
+          if is_map(block) and Map.get(block, "type") == "sheet", do: block["if_branch"]
+        end
+        def by_type(b) do
+          case Map.get(b, "type") do
+            "sheet" -> b["case_type_branch"]
+            _ -> nil
+          end
+        end
+        def classify(b) do
+          case b do
+            %{"type" => "memo", "case_pat" => _} = d -> d["case_bound"]
+            _ -> nil
+          end
+        end
+        def later(b) do
+          %{"type" => "memo"} = b
+          b["after_match"]
+        end
+        def each(blocks), do: Enum.map(blocks, fn %{"type" => "diagram"} = blk -> blk["fn_body"] end)
+        def pick(b) do
+          cond do
+            b["type"] == "diagram" -> Map.get(b, "cond_branch")
+            true -> nil
+          end
+        end
+        def compose_block(%{"type" => "memo"} = b, _style) do
+          d = Map.put(b, "put_key", 1)
+          e = Map.merge(b, %{})
+          f = b |> Map.delete("y")
+          {b[@k], Map.take(b, ~w(take_lit)), Map.take(b, @keys)}
+          {Enum.map(@caps, &Map.get(b, &1)), Enum.find_value(~w(cap_x), &b[&1])}
+          {d["via_put"], d["put_key"], e["via_merge"], f["via_delete"]}
+          {Access.get(b, "access_get"), Map.update(b, "updated", 0, & &1)}
+          {Kernel.get_in(b, ["kernel_get_in"]), get_in(b, [Access.key("access_key")])}
+          {__MODULE__.helper(b), defaulted(b), (fn %{"anon" => v} -> v end).(b)}
+
+          case b do
+            %{"present" => _} = c -> c["case_walk"]
+            _ -> nil
+          end
+        end
+        def helper(b), do: b["module_call"]
+        def in_list(b), do: if(Map.get(b, "type") in ["diagram"], do: b["in_list"])
+        def in_attr(b), do: if(b["type"] in @kinds, do: b["in_attr"])
+        def strict(b), do: if(b["type"] === "diagram", do: b["strict_eq"])
+        def negated(b), do: if(not (b["type"] == "sheet"), do: b["negated"])
+        def either(b), do: if(b["type"] == "diagram" or b["type"] == "sheet", do: b["either"])
+        def dispatch(%{"type" => "relay"} = b), do: dispatch(Map.put(b, "type", "sheet"))
+        def dispatch(%{"type" => "sheet"} = b) do
+          _ = b["hop_one"]
+          dispatch(Map.put(b, "type", "diagram"))
+        end
+        def dispatch(%{"type" => "diagram"} = b), do: b["hop_two"]
+        defp defaulted(b, key \\\\ "default_arg"), do: Map.get(b, key)
+      end
+      """
+
+      reads = ComposeCensus.Reads.reads([source], ["sheet", "memo", "diagram", "relay"])
+
+      assert reads["sheet"] ==
+               ~w(case_type_branch either hop_one hop_two if_branch ref with_body)
+
+      assert reads["diagram"] ==
+               ~w(cond_branch either fn_body hop_two in_attr in_list strict_eq)
+
+      assert reads["relay"] == ~w(hop_one hop_two)
+
+      assert reads["memo"] ==
+               ~w(access_get access_key after_match anon attr_key cap_a cap_x case_bound
+                  case_pat case_walk default_arg kernel_get_in module_call present take_a
+                  take_b take_lit updated via_delete via_merge via_put)
     end
   end
 
@@ -356,6 +585,43 @@ defmodule Barkpark.PortableDoc.SpecTest do
       two_key_count = Map.put(wire(good), "count", %{"min" => 1, "max" => 2})
       assert {:error, _} = ExJsonSchema.Validator.validate(root, two_key_count)
     end
+  end
+
+  defp field_differences(schema, reads) do
+    Enum.flat_map(Enum.sort(schema["definitions"]["blocks"]), fn {type, block} ->
+      declared = Map.keys(block["properties"])
+      read = Map.get(reads, type, []) -- @unauthored
+
+      unread =
+        for field <- Enum.sort(declared -- ["id", "locked", "role", "type"]),
+            field not in read,
+            not Map.has_key?(@unread, {type, field}),
+            do: "block #{type}: field #{field} in the schema but the reader does not read it"
+
+      for(
+        field <- Enum.sort(read -- declared),
+        do: "block #{type}: field #{field} read by the reader but not in the schema"
+      ) ++ unread
+    end)
+  end
+
+  defp map_put_keys(path) do
+    {_, acc} =
+      path
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk(MapSet.new(), fn
+        {{:., _, [{:__aliases__, _, [:Map]}, :put]}, _, args} = node, acc ->
+          case Enum.take(args, -2) do
+            [key, _] when is_binary(key) -> {node, MapSet.put(acc, key)}
+            _ -> {node, acc}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc
   end
 
   defp holes(:block, path), do: [{path, & &1}]
