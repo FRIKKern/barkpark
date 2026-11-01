@@ -1,0 +1,32 @@
+{
+  "expect": [
+    {
+      "code": "duplicate_block_id",
+      "path": "/blocks/0/columns/1/0/id"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "id": "cols",
+        "type": "columns",
+        "columns": [
+          [
+            {
+              "id": "cell",
+              "type": "paragraph",
+              "text": "Left."
+            }
+          ],
+          [
+            {
+              "id": "cell",
+              "type": "paragraph",
+              "text": "Right."
+            }
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "expect": [
+    {
+      "code": "duplicate_block_id",
+      "path": "/blocks/0/blocks/0/id"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "id": "body",
+        "type": "section",
+        "blocks": [
+          {
+            "id": "body",
+            "type": "paragraph",
+            "text": "Inside."
+          }
+        ]
+      }
+    ]
+  }
+}

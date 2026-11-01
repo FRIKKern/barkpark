@@ -1,0 +1,31 @@
+{
+  "expect": [
+    {
+      "code": "portable_text_block",
+      "path": "/blocks/0/slots/media/0"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "card",
+        "slots": {
+          "media": [
+            {
+              "_type": "block",
+              "_key": "k1",
+              "style": "normal",
+              "markDefs": [],
+              "children": [
+                {
+                  "_type": "span",
+                  "text": "In a card."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

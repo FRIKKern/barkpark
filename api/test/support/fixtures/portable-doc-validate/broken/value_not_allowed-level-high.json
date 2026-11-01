@@ -1,0 +1,17 @@
+{
+  "expect": [
+    {
+      "code": "value_not_allowed",
+      "path": "/blocks/0/level"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "heading",
+        "level": 7,
+        "text": "Too deep"
+      }
+    ]
+  }
+}

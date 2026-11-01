@@ -1,0 +1,14 @@
+{
+  "blocks": [
+    {
+      "id": "",
+      "type": "paragraph",
+      "text": "Blank ids are minted on write, so they never collide."
+    },
+    {
+      "id": "",
+      "type": "paragraph",
+      "text": "Second blank."
+    }
+  ]
+}

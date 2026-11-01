@@ -1,0 +1,19 @@
+{
+  "expect": [
+    {
+      "code": "unknown_block_type",
+      "path": "/blocks/0/child/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "figure",
+        "caption": "A carousel",
+        "child": {
+          "type": "carousel"
+        }
+      }
+    ]
+  }
+}

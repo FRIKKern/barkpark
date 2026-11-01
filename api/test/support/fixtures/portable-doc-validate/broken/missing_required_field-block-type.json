@@ -1,0 +1,16 @@
+{
+  "expect": [
+    {
+      "code": "missing_required_field",
+      "path": "/blocks/0/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "id": "a",
+        "text": "A block with no type."
+      }
+    ]
+  }
+}

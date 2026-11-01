@@ -1,0 +1,16 @@
+{
+  "expect": [
+    {
+      "code": "wrong_field_type",
+      "path": "/blocks/0/text"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": 5
+      }
+    ]
+  }
+}

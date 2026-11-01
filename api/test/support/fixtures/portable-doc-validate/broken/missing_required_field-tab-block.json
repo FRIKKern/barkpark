@@ -1,0 +1,25 @@
+{
+  "expect": [
+    {
+      "code": "missing_required_field",
+      "path": "/blocks/0/tabs/0/blocks/0/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "tabs",
+        "tabs": [
+          {
+            "label": "One",
+            "blocks": [
+              {
+                "text": "No type in a tab."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

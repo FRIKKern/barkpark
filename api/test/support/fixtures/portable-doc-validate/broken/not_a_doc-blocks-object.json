@@ -1,0 +1,14 @@
+{
+  "expect": [
+    {
+      "code": "not_a_doc",
+      "path": "/blocks"
+    }
+  ],
+  "doc": {
+    "blocks": {
+      "type": "paragraph",
+      "text": "One block, not a list."
+    }
+  }
+}

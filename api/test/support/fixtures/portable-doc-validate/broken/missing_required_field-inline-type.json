@@ -1,0 +1,24 @@
+{
+  "expect": [
+    {
+      "code": "missing_required_field",
+      "path": "/blocks/0/content/1/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "Fine, "
+          },
+          {
+            "value": "no type."
+          }
+        ]
+      }
+    ]
+  }
+}

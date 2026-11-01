@@ -1,0 +1,25 @@
+{
+  "blocks": [
+    {
+      "type": "h2",
+      "text": "Alias heading"
+    },
+    {
+      "type": "bulletList",
+      "items": [
+        "One",
+        "Two"
+      ]
+    },
+    {
+      "type": "ordered-list",
+      "items": [
+        "First"
+      ]
+    },
+    {
+      "type": "quote",
+      "text": "Alias quote"
+    }
+  ]
+}

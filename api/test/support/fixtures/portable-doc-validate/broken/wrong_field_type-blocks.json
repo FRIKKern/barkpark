@@ -1,0 +1,17 @@
+{
+  "expect": [
+    {
+      "code": "wrong_field_type",
+      "path": "/blocks/0/blocks"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "section",
+        "title": "Body",
+        "blocks": "Not a list."
+      }
+    ]
+  }
+}

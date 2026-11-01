@@ -1,0 +1,45 @@
+FRIKKern/portable-doc e84921c08f3e81b9a8732aacaa200049ca970d17
+fixtures/broken and fixtures/valid, copied byte for byte. The lines below are
+git -C portable-doc ls-tree -r e84921c08f3e81b9a8732aacaa200049ca970d17 fixtures/broken fixtures/valid
+
+100644 blob 57b8ccb26fb147705ca409b6478f8bedbcc3492b	fixtures/broken/block_not_object-bare-array.json
+100644 blob 5c75ac5d0f77ee09e177c4b7c2c971aa409ae17b	fixtures/broken/block_not_object-column.json
+100644 blob 98b05dd6295fdb548efc22f7a931ac6515994e6d	fixtures/broken/block_not_object-section.json
+100644 blob de6047820b0ed7c3f4f575073686fdae1cb6d2f7	fixtures/broken/block_not_object-top.json
+100644 blob c49c4212e00ea3a4cd36ad74b0c23e968656df01	fixtures/broken/duplicate_block_id-columns.json
+100644 blob 2390479ae7a5612b7b2633f4ae9a260d7eb6d9d6	fixtures/broken/duplicate_block_id-section.json
+100644 blob 99b57cbd9314eb688e2872715354fc95be11195f	fixtures/broken/duplicate_block_id-top.json
+100644 blob b4b29a76afe17cc2fd00bef80f43c6437a0d9bc3	fixtures/broken/missing_required_field-block-type.json
+100644 blob 51766731a1990b5a8f3459baa020ba9a530b9ae3	fixtures/broken/missing_required_field-inline-type.json
+100644 blob 5effb065affface07ee927c33c6e05d175775ea2	fixtures/broken/missing_required_field-tab-block.json
+100644 blob 24ce83720ad070c2910f788728b79dbc8e46f5d7	fixtures/broken/mixed-three-codes.json
+100644 blob 0130eee8ad33a47fa0008427b76343bde5249595	fixtures/broken/not_a_doc-blocks-object.json
+100644 blob 3ad7a18bbfc495a013d9937e723ab4c0aa8bf3b2	fixtures/broken/not_a_doc-no-blocks.json
+100644 blob d05f1c5e26faa5992ea74a919097931317062b97	fixtures/broken/not_a_doc-string.json
+100644 blob 8a665521e61e41ce753158278d936d3f230f4535	fixtures/broken/portable_text_block-card-media.json
+100644 blob dae47eff13c4b2238f90d436d52f9ebc13ad5bc0	fixtures/broken/portable_text_block-children-only.json
+100644 blob d837d266591a71079fb5a3c9c985a1c1294d569b	fixtures/broken/portable_text_block-list-item.json
+100644 blob e93710c29c292f11833d571d8c0dd067612be293	fixtures/broken/portable_text_block-listitem-only.json
+100644 blob e519c49bbaa8ed283a3be2254eaa7b703aff53bb	fixtures/broken/portable_text_block-markdefs-only.json
+100644 blob 2cfbe667a00974a965c42b428d907a0ba4845507	fixtures/broken/portable_text_block-section.json
+100644 blob 96c23adacd3eb2d1fa1b04ec7dc0a40060434298	fixtures/broken/portable_text_block-top.json
+100644 blob 248f60c154d02af4e3b9a4ef26738a62e7fc6b2f	fixtures/broken/too_deep-sections.json
+100644 blob 87afaaf6db449a138e9a3eed92bbc9f3fd895f1d	fixtures/broken/unknown_block_type-figure-child.json
+100644 blob eb78a04b6c8b871d188d95301c53da0317c097f8	fixtures/broken/unknown_block_type-not-a-string.json
+100644 blob f9cb06a32a45a03056403e899d51fccba29d0a88	fixtures/broken/unknown_block_type-top.json
+100644 blob 18056a4ca5150a1f276a53719260da7f55a4055b	fixtures/broken/value_not_allowed-level-high.json
+100644 blob 13a04a67a8586d79a0398418af9f6d5a7c1138f4	fixtures/broken/value_not_allowed-level-string.json
+100644 blob 4dd248e6929a624f15837907b5aa7d0460dce66b	fixtures/broken/value_not_allowed-level-zero.json
+100644 blob 83041eec8bc5c032423db3af79813944676a553c	fixtures/broken/wrong_field_type-blocks.json
+100644 blob 4687beae626310579e4bb4f7639d3c0f2337732d	fixtures/broken/wrong_field_type-heading-level.json
+100644 blob d45be97d355eaed5835f2ac5f9cc7bca3305a8c2	fixtures/broken/wrong_field_type-id.json
+100644 blob 705163de862ec0717b29e0adfb00acd6975fd20d	fixtures/broken/wrong_field_type-list-item.json
+100644 blob 3df015f705a4ca5e03617ca1642f33895f6562a8	fixtures/broken/wrong_field_type-text.json
+100644 blob 4ddd88801aeeb80cf4a456dfc1b0b74d2d4159ba	fixtures/valid/aliases.json
+100644 blob e53aab36d67c40e904859d0e66440c6567f0542a	fixtures/valid/bare-array.json
+100644 blob e4eb40e429d8a4fe8b4fc398e8e604f5c7850dde	fixtures/valid/blank-ids.json
+100644 blob e77c03e0de17828e3bde78b09db15c4a68f70bb4	fixtures/valid/card-media.json
+100644 blob cf541632c4324d5660fd273bfb2aca936f451f64	fixtures/valid/envelope.json
+100644 blob 5550e59484a9f50f750fc9b1113f14bbb86f5d9b	fixtures/valid/heading-levels.json
+100644 blob 9c4ff33e95f725ab9ae057f4f2b2681d2c9e0dd3	fixtures/valid/nested-containers.json
+100644 blob a4e2b444c7ce17fea5feb6c548323c48332fa9a1	fixtures/valid/open-fields.json

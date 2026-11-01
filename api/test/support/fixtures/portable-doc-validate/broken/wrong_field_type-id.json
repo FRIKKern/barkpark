@@ -1,0 +1,18 @@
+{
+  "expect": [
+    {
+      "code": "wrong_field_type",
+      "path": "/blocks/0/id"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "id": 12,
+        "type": "heading",
+        "level": 2,
+        "text": "Numbered id"
+      }
+    ]
+  }
+}

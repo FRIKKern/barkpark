@@ -1,0 +1,21 @@
+{
+  "expect": [
+    {
+      "code": "unknown_block_type",
+      "path": "/blocks/0/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "container",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Dropped by every reader."
+          }
+        ]
+      }
+    ]
+  }
+}

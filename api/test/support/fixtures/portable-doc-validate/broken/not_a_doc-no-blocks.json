@@ -1,0 +1,12 @@
+{
+  "expect": [
+    {
+      "code": "not_a_doc",
+      "path": "/blocks"
+    }
+  ],
+  "doc": {
+    "title": "Notes",
+    "version": 1
+  }
+}
