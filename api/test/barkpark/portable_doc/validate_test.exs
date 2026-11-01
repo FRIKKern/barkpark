@@ -447,6 +447,43 @@ defmodule Barkpark.PortableDoc.ValidateTest do
                )
     end
 
+    test "anyOf picks the first passing shape, else the first whose JS typeof fits (JS)" do
+      schema =
+        Schema.compile(%{
+          "type" => "object",
+          "properties" => %{
+            "n" => %{"anyOf" => [%{"enum" => [nil]}, %{"type" => "string"}]},
+            "c" => %{"anyOf" => [%{"const" => "a"}, %{"type" => "integer"}]},
+            "e" => %{"anyOf" => []},
+            "t" => %{"type" => []},
+            "o" => %{
+              "anyOf" => [
+                %{"type" => "object", "required" => ["a"]},
+                %{"type" => "object", "required" => ["b"]}
+              ]
+            }
+          }
+        })
+
+      cases = [
+        {%{"n" => %{}}, ["value_not_allowed /blocks/0/n"]},
+        {%{"n" => []}, ["value_not_allowed /blocks/0/n"]},
+        {%{"n" => 1}, ["wrong_field_type /blocks/0/n"]},
+        {%{"c" => "b"}, ["value_not_allowed /blocks/0/c"]},
+        {%{"c" => 1.5}, ["wrong_field_type /blocks/0/c"]},
+        {%{"c" => 2}, []},
+        {%{"e" => 1}, ["wrong_field_type /blocks/0/e"]},
+        {%{"t" => "x"}, ["wrong_field_type /blocks/0/t"]},
+        {%{"o" => %{}}, ["missing_required_field /blocks/0/o/a"]},
+        {%{"o" => %{"b" => 1}}, []}
+      ]
+
+      for {block, expected} <- cases do
+        got = %{"blocks" => [block]} |> Validate.validate(schema) |> pairs()
+        assert {block, Enum.map(got, fn {c, p} -> "#{c} #{p}" end)} == {block, expected}
+      end
+    end
+
     test "keeps the order of a schema decoded with ordered objects" do
       json = ~s({"type":"object","properties":{"z":{"type":"string"},"a":{"type":"string"}}})
       schema = Schema.compile(Jason.decode!(json, objects: :ordered_objects))
