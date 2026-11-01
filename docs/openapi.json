@@ -4546,11 +4546,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "additionalProperties": false,
+                  "properties": {
+                    "html": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "html"
+                  ],
+                  "type": "object"
                 }
               }
             },
-            "description": "Mutation applied."
+            "description": "The reader's HTML; nothing stored."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The body is not JSON (malformed)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4558,11 +4577,15 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "payload_too_large: the body is over 2 MiB. render_too_large: the HTML would pass 16 MiB."
           },
           "422": {
             "$ref": "#/components/responses/ValidationFailed"

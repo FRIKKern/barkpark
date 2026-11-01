@@ -391,9 +391,13 @@ defmodule Barkpark.Plugins.Bulldocs do
       (mark one intent drained). WRITES.
     * `render` — `POST /v1/plugins/bulldocs/render` (R4.4a): a `{blocks:[…]}`
       body validated, then rendered to the reader's HTML. Stores nothing; a
-      broken doc is a 422 with every violation. Declared `writes: true` all the
-      same: the manifest's rule (PDS-D302) is that every non-GET command says it
-      writes, so an MCP client asks before calling it.
+      broken doc is a 422 with every violation. The body is capped at 2 MiB
+      (413 `payload_too_large`) and HTML past 16 MiB is a 413
+      `render_too_large`. Declared `writes: true` all the same: the manifest's
+      rule (PDS-D302) is that every non-GET command says it writes, and `bp`
+      sends a body only for a writing command. The cost: on a prod host a
+      non-TTY `bp bulldocs render` needs `--yes`, and `bp mcp` marks the tool
+      destructive (task-50676048afc6a313 keys the body on the method instead).
 
   No `get`/`ls` paper verb is declared: the paper reader at `/papers/:slug` is a
   LiveView (`:public_root`), not a JSON API route, so there is no honest flat
