@@ -190,7 +190,7 @@ defmodule Barkpark.PortableDoc.Validate do
   defp check_all_of(acc, value, node, path, depth, schema),
     do: Enum.reduce(node.all_of, acc, &check(value, &1, path, depth, schema, &2))
 
-  defp check_if_then(acc, value, %{if: if_node, then: then} = _node, path, depth, schema)
+  defp check_if_then(acc, value, %{if: if_node, then: then}, path, depth, schema)
        when if_node != nil and then != nil do
     if passes?(trial(value, if_node, path, depth, schema)),
       do: check(value, then, path, depth, schema, acc),
@@ -213,14 +213,10 @@ defmodule Barkpark.PortableDoc.Validate do
 
   defp check_not(acc, _value, %{not: nil}, _path, _depth, _schema), do: acc
 
-  defp check_not(acc, value, %{not: not_node}, path, depth, schema),
-    do:
-      error_if(
-        acc,
-        passes?(trial(value, not_node, path, depth, schema)),
-        :value_not_allowed,
-        path
-      )
+  defp check_not(acc, value, %{not: not_node}, path, depth, schema) do
+    forbidden = passes?(trial(value, not_node, path, depth, schema))
+    error_if(acc, forbidden, :value_not_allowed, path)
+  end
 
   defp accepts?(node, value, schema) do
     target = deref(node, schema)
