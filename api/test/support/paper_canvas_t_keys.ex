@@ -8,12 +8,16 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   `const` object, a function's `return`, a `for … of` over a literal list, a
   parameter of a wrapper (followed to every call of that wrapper), or a property
   (`item.label`, `this._eyebrow`, a destructured `{ label }`), followed to every
-  `label: …` entry and `.label = …` assignment in the same file. A `const` may
-  come from another editor file through an `import`.
+  `label: …` entry and `.label = …` assignment in the same file. A constructor's
+  `{ label }` is also followed to every `new Class({ label: … })` and
+  `super({ label: … })` in a file that imports the class. A `const` or a wrapper
+  may come from another editor file through an `import`, renamed or not.
 
-  `scan/1` answers `%{keys:, sites:}`; each site is a `t` call with the keys it
-  reaches and the branches it could not follow. A site that reaches no key is
-  one this reading cannot see.
+  `scan/1` answers `%{keys:, patterns:, sites:, escapes:}`; each site is a `t`
+  call with the keys it reaches (a template with `${…}` as `{:pattern, regex}`)
+  and the branches it could not follow. An escape is a use of `t` this reading
+  cannot follow at all: `t` stored, passed or called through `.call`, or
+  i18n.js imported other than as `{ … }`.
   """
 
   alias BarkparkWeb.JsTokens
@@ -50,12 +54,101 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
     Process.delete(__MODULE__)
     all = Enum.flat_map(sites, & &1.keys)
 
+    escapes =
+      for {file, %{source: source, tree: tree}} <- Enum.sort(files),
+          escape <- imports_apart(source) ++ escapes(tree, i18n_aliases(source), nil, []),
+          do: Map.put(escape, :file, file)
+
     %{
       keys: all |> Enum.filter(&is_binary/1) |> MapSet.new(),
       patterns: all |> Enum.reject(&is_binary/1) |> Enum.map(&elem(&1, 1)) |> Enum.uniq(),
-      sites: sites
+      sites: sites,
+      escapes: escapes
     }
   end
+
+  # `t` can only be read where it is called: an i18n.js import that is not
+  # `import { … }`, or `t` passed, stored or called through `.call`, is a way in
+  # this reading does not follow.
+  defp imports_apart(source) do
+    mentions = Regex.scan(~r/["'](?:\.\.?\/)+i18n\.js["']/, source) |> length()
+    named = Regex.scan(@i18n_import, source) |> length()
+    if mentions > named, do: [%{line: 0, why: "i18n.js imported other than as { … }"}], else: []
+  end
+
+  defp escapes(tokens, aliases, prev, acc), do: escapes(tokens, aliases, prev, MapSet.new(), acc)
+
+  defp escapes([], _aliases, _prev, _shadowed, acc), do: acc
+
+  defp escapes([{:id, "import", _}, {:group, "{", _, _} | rest], aliases, _prev, shadowed, acc),
+    do: escapes(rest, aliases, nil, shadowed, acc)
+
+  # A local `let t`, `const { t }`, `(t) =>` or `t =>` hides the import for the rest of its block.
+  defp escapes([{:id, kind, _}, {:id, name, _} = tok | rest], aliases, _prev, shadowed, acc)
+       when kind in ["let", "const", "var"],
+       do: escapes(rest, aliases, tok, MapSet.put(shadowed, name), acc)
+
+  defp escapes(
+         [{:id, kind, _}, {:group, open, pattern, _} = tok | rest],
+         aliases,
+         _p,
+         shadowed,
+         acc
+       )
+       when kind in ["let", "const", "var"] and open in ["{", "["],
+       do: escapes(rest, aliases, tok, MapSet.union(shadowed, declared(pattern)), acc)
+
+  defp escapes(
+         [{:group, "(", params, _} = tok, {:p, "=>", _} = arrow | rest],
+         aliases,
+         _p,
+         shadowed,
+         acc
+       ),
+       do: escapes([arrow | rest], aliases, tok, MapSet.union(shadowed, declared(params)), acc)
+
+  defp escapes([{:id, name, _} = tok, {:p, "=>", _} = arrow | rest], aliases, _p, shadowed, acc),
+    do: escapes([arrow | rest], aliases, tok, MapSet.put(shadowed, name), acc)
+
+  defp escapes([{:group, _, children, _} = tok | rest], aliases, _prev, shadowed, acc),
+    do: escapes(rest, aliases, tok, shadowed, escapes(children, aliases, nil, shadowed, acc))
+
+  defp escapes([{:tpl, parts, _} = tok | rest], aliases, _prev, shadowed, acc) do
+    acc =
+      Enum.reduce(for({:expr, e} <- parts, do: e), acc, &escapes(&1, aliases, nil, shadowed, &2))
+
+    escapes(rest, aliases, tok, shadowed, acc)
+  end
+
+  defp escapes([{:id, name, line} = tok | rest], aliases, prev, shadowed, acc) do
+    loose? =
+      name in aliases and not MapSet.member?(shadowed, name) and
+        not match?({:p, dot, _} when dot in [".", "?."], prev) and
+        not match?([{:group, "(", _, _} | _], rest)
+
+    acc =
+      if loose?,
+        do: [%{line: line, why: "#{name} used other than as #{name}(…)"} | acc],
+        else: acc
+
+    escapes(rest, aliases, tok, shadowed, acc)
+  end
+
+  defp escapes([tok | rest], aliases, _prev, shadowed, acc),
+    do: escapes(rest, aliases, tok, shadowed, acc)
+
+  defp declared(tokens),
+    do:
+      for(
+        tok <- tokens,
+        name <- declared_names(tok),
+        into: MapSet.new(),
+        do: name
+      )
+
+  defp declared_names({:id, name, _}), do: [name]
+  defp declared_names({:group, _, children, _}), do: Enum.flat_map(children, &declared_names/1)
+  defp declared_names(_tok), do: []
 
   def i18n_aliases(source) do
     for [names] <- Regex.scan(@i18n_import, source, capture: :all_but_first),
@@ -80,8 +173,12 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
            entries: [],
            assigns: [],
            t_calls: [],
+           ctor_args: [],
+           aliases: i18n_aliases(source),
            imports: imports(source),
-           modules: modules(source, file)
+           modules: modules(source, file),
+           classes: names(~r/\bclass\s+([\w$]+)/, source),
+           extends: names(~r/\bclass\s+[\w$]+\s+extends\s+([\w$]+)/, source)
          })}
       end)
 
@@ -96,6 +193,14 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
     }
   end
 
+  defp names(regex, source),
+    do:
+      for(
+        [name] <- Regex.scan(regex, source, capture: :all_but_first),
+        into: MapSet.new(),
+        do: name
+      )
+
   defp modules(source, file) do
     for [path] <- Regex.scan(~r/from\s*["'](\.\.?\/[^"']+)["']/, source, capture: :all_but_first),
         into: MapSet.new(),
@@ -105,10 +210,10 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   defp imports(source) do
     for [names] <- Regex.scan(~r/import\s*\{([^}]*)\}\s*from/, source, capture: :all_but_first),
         part <- String.split(names, ","),
-        name = part |> String.split(~r/\s+as\s+/) |> hd() |> String.trim(),
-        name != "",
-        into: MapSet.new(),
-        do: name
+        [exported | local] = part |> String.split(~r/\s+as\s+/) |> Enum.map(&String.trim/1),
+        exported != "",
+        into: %{},
+        do: {List.first(local, exported), exported}
   end
 
   # Walk a token list; `scopes` is the stack of enclosing functions, innermost first.
@@ -272,6 +377,15 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
     %{acc | assigns: [{prop, expr, file, scopes} | acc.assigns]}
   end
 
+  defp note([{:id, "new", _}, {:id, cls, _}, {:group, "(", args, _} | _], _file, scopes, acc),
+    do: %{acc | ctor_args: [{{:new, cls}, first_arg(args), scopes} | acc.ctor_args]}
+
+  defp note([{:id, "super", _}, {:group, "(", args, _} | _], _file, scopes, acc),
+    do: %{acc | ctor_args: [{:super, first_arg(args), scopes} | acc.ctor_args]}
+
+  defp note([{:id, _name, _}, {:group, "(", _args, _}, {:group, "{", _, _} | _], _file, _s, acc),
+    do: acc
+
   defp note([{:id, name, line}, {:group, "(", args, _} | _], _file, scopes, acc) do
     %{
       acc
@@ -338,18 +452,24 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   defp term([{:str, "", _}], _ctx, _index, _seen), do: {[], []}
   defp term([{:str, value, _}], _ctx, _index, _seen), do: {[value], []}
 
-  defp term([{:tpl, parts, line}], {file, _}, _index, _seen) do
+  defp term([{:tpl, parts, _line}], _ctx, _index, _seen) do
     if Enum.all?(parts, &is_binary/1),
       do: {[Enum.join(parts)], []},
-      else: {[{:pattern, pattern(parts)}], [{file, line, "a template literal with ${…}"}]}
+      else: {[{:pattern, pattern(parts)}], []}
   end
 
   defp term([{:group, "(", inner, _}], ctx, index, seen), do: resolve(inner, ctx, index, seen)
 
+  defp term([{:id, word, _}], _ctx, _index, _seen) when word in ~w(null undefined true false),
+    do: {[], []}
+
   defp term([{:id, name, line}], ctx, index, seen), do: identifier(name, line, ctx, index, seen)
 
-  defp term([{:id, name, line}, {:group, "(", _args, _}], ctx, index, seen),
-    do: returns(name, line, ctx, index, seen)
+  defp term([{:id, name, line}, {:group, "(", args, _}], {file, _} = ctx, index, seen) do
+    if name in index.files[file].aliases,
+      do: resolve(first_arg(args), ctx, index, seen),
+      else: returns(name, line, ctx, index, seen)
+  end
 
   defp term(expr, ctx, index, seen) do
     case Enum.reverse(expr) do
@@ -415,27 +535,54 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   defp property(prop, {file, _} = ctx, index, seen),
     do: memo({:property, prop, file}, fn -> harvest(prop, ctx, index, seen) end)
 
-  defp harvest(prop, {file, _}, index, seen) do
-    sources =
-      for {value, ^file, sscopes} <-
-            Map.get(index.entries, prop, []) ++ Map.get(index.assigns, prop, []),
-          do: {value, file, sscopes}
+  defp harvest(prop, {file, _}, index, seen),
+    do: follow(same_file(prop, file, index), prop, file, index, seen)
 
-    case sources do
-      [] ->
-        {[], [{file, 0, "property #{prop}: no entry or assignment in this file"}]}
+  # A constructor's `{ prop }`: also every `prop:` passed to `new Class({…})` or
+  # `super({…})` in a file that imports the class.
+  defp constructed(prop, {file, _}, index, seen) do
+    classes = index.files[file].classes
 
-      sources ->
-        sources
-        |> Enum.map(fn {value, sfile, sscopes} ->
-          resolve(value, {sfile, sscopes}, index, seen)
-        end)
-        |> merge()
-    end
+    passed =
+      for {cfile, ci} <- index.files,
+          cfile != file,
+          MapSet.member?(ci.modules, file),
+          {callee, arg, cscopes} <- ci.ctor_args,
+          constructs?(callee, ci, classes),
+          [{:group, "{", children, _}] <- [strip(arg)],
+          {^prop, value} <- entries(children),
+          do: {value, cfile, cscopes}
+
+    follow(same_file(prop, file, index) ++ passed, prop, file, index, seen)
   end
+
+  defp constructs?({:new, cls}, ci, classes), do: MapSet.member?(classes, ci.imports[cls])
+
+  defp constructs?(:super, ci, classes),
+    do: Enum.any?(ci.extends, &MapSet.member?(classes, ci.imports[&1]))
+
+  defp same_file(prop, file, index),
+    do:
+      for(
+        {value, ^file, sscopes} <-
+          Map.get(index.entries, prop, []) ++ Map.get(index.assigns, prop, []),
+        do: {value, file, sscopes}
+      )
+
+  defp follow([], prop, file, _index, _seen),
+    do: {[], [{file, 0, "property #{prop}: no entry or assignment in this file"}]}
+
+  defp follow(sources, _prop, _file, index, seen),
+    do:
+      sources
+      |> Enum.map(fn {value, sfile, sscopes} -> resolve(value, {sfile, sscopes}, index, seen) end)
+      |> merge()
 
   defp identifier(name, line, {file, scopes} = ctx, index, seen) do
     case param(name, scopes) do
+      {:props, %{name: "constructor"}} ->
+        memo({:constructed, name, file}, fn -> constructed(name, ctx, index, seen) end)
+
       {:props, _fun} ->
         property(name, ctx, index, seen)
 
@@ -528,9 +675,9 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   defp callers(fun, i, file, _outer, index, seen, line) do
     callers =
       for {cfile, findex} <- index.files,
-          cfile == file or MapSet.member?(findex.imports, fun.name),
+          local = if(cfile == file, do: [fun.name], else: local_names(findex, fun.name)),
           {name, args, cscopes} <- findex.calls,
-          name == fun.name,
+          name in local,
           arg = Enum.at(split(args, ","), i),
           do: {arg, {cfile, cscopes}}
 
@@ -542,6 +689,9 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
         callers |> Enum.map(fn {arg, cctx} -> resolve(arg, cctx, index, seen) end) |> merge()
     end
   end
+
+  defp local_names(findex, exported),
+    do: for({local, ^exported} <- findex.imports, do: local)
 
   defp returns(name, line, {file, _scopes}, index, seen) do
     case Map.get(index.files[file].fns, name) do
@@ -579,13 +729,15 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   end
 
   defp imported(name, file, index) do
-    if MapSet.member?(index.files[file].imports, name) do
-      for mod <- index.files[file].modules,
-          %{consts: consts} <- [index.files[mod]],
-          {expr, []} <- Map.get(consts, name, []),
-          do: {expr, mod, []}
-    else
-      []
+    case Map.fetch(index.files[file].imports, name) do
+      {:ok, exported} ->
+        for mod <- index.files[file].modules,
+            %{consts: consts} <- [index.files[mod]],
+            {expr, []} <- Map.get(consts, exported, []),
+            do: {expr, mod, []}
+
+      :error ->
+        []
     end
   end
 
