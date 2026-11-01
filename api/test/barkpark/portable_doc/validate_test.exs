@@ -484,6 +484,35 @@ defmodule Barkpark.PortableDoc.ValidateTest do
       end
     end
 
+    test "const and enum compare numbers as JS ===, and $ref unescapes ~1 and ~0 (JS)" do
+      schema =
+        Schema.compile(%{
+          "type" => "object",
+          "properties" => %{
+            "k" => %{"const" => 1},
+            "e" => %{"enum" => [1, 2]},
+            "s" => %{"$ref" => "#/definitions/a~1b"},
+            "t" => %{"$ref" => "#/definitions/c~0d"}
+          },
+          "definitions" => %{"a/b" => %{"type" => "string"}, "c~d" => %{"type" => "integer"}}
+        })
+
+      cases = [
+        {%{"k" => 1.0}, []},
+        {%{"k" => 2}, ["value_not_allowed /blocks/0/k"]},
+        {%{"e" => 2.0}, []},
+        {%{"e" => 3}, ["value_not_allowed /blocks/0/e"]},
+        {%{"s" => "x", "t" => 1}, []},
+        {%{"s" => 1, "t" => "x"},
+         ["wrong_field_type /blocks/0/s", "wrong_field_type /blocks/0/t"]}
+      ]
+
+      for {block, expected} <- cases do
+        got = %{"blocks" => [block]} |> Validate.validate(schema) |> pairs()
+        assert {block, Enum.map(got, fn {c, p} -> "#{c} #{p}" end)} == {block, expected}
+      end
+    end
+
     test "keeps the order of a schema decoded with ordered objects" do
       json = ~s({"type":"object","properties":{"z":{"type":"string"},"a":{"type":"string"}}})
       schema = Schema.compile(Jason.decode!(json, objects: :ordered_objects))
