@@ -2,7 +2,8 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
   @moduledoc """
   The fields the reader reads on each block type, for the published JSON Schema
   (`Barkpark.PortableDoc.Spec`). One entry per type `render/compose.ex` renders;
-  `spec_test.exs` fails when this map and the reader disagree on the type set.
+  `spec_test.exs` fails when this map and the reader disagree on the type set or
+  on a type's fields (`ComposeCensus.Reads` reads them off the reader's source).
 
   A field's shape is a shorthand `Spec` expands: `:string`, `:integer`,
   `:number`, `:boolean`, `:object`, `:array`, `:any`, `:scalar` (string or
@@ -88,7 +89,12 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "value" => {:any_of, [:string, :inline]}
     },
     "code-tabs" => %{"syncKey" => :string, "tabs" => {:array, :object}},
-    "codelist" => %{"label" => :string, "value" => :scalar},
+    "codelist" => %{
+      "codelistId" => :string,
+      "label" => :string,
+      "plugin" => :string,
+      "value" => :scalar
+    },
     "columns" => %{"columns" => {:array, :blocks}},
     "composite" => %{"fields" => {:array, :object}, "label" => :string, "value" => :object},
     "criteria-progress" => %{"detail" => :string, "rows" => {:array, :object}},
@@ -115,7 +121,11 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "field-datetime" => %{"label" => :string, "value" => :string},
     "field-image" => %{"label" => :string, "value" => {:any_of, [:string, :object]}},
     "field-number" => %{"label" => :string, "unit" => :string, "value" => :scalar},
-    "field-reference" => %{"label" => :string, "value" => {:any_of, [:string, :object]}},
+    "field-reference" => %{
+      "label" => :string,
+      "refType" => :string,
+      "value" => {:any_of, [:string, :object]}
+    },
     "field-select" => %{"label" => :string, "options" => :array, "value" => :scalar},
     "field-slug" => %{"label" => :string, "value" => :string},
     "field-string" => %{"label" => :string, "value" => :string},
@@ -173,6 +183,7 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
     "localizedText" => %{"label" => :string, "languages" => {:array, :string}, "value" => :object},
     "master-ref" => %{"master" => :string, "version" => :string},
     "note" => %{
+      "content" => :inline,
       "label" => :string,
       "lead" => :string,
       "slots" => {:object, %{"body" => :blocks, "label" => :blocks, "lead" => :blocks}},
@@ -218,7 +229,7 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "title" => :string,
       "variant" => :string
     },
-    "sheet" => %{"ref" => :string, "snapshot" => :object},
+    "sheet" => %{"ref" => :string, "snapshot" => :object, "tab" => :integer},
     "stage" => %{
       "detail" => :string,
       "files" => :array,
