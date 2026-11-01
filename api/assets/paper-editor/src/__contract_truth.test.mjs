@@ -162,14 +162,14 @@ check("every declared global is read by the source", () => {
 const known = (name) => declaredNames.has(name) || EDITOR_INTERNAL.has(name) || REACH_INS.includes(name);
 
 check("every event the source dispatches is declared, editor-internal or a reach-in", () => {
-  const events = new Set([...js.matchAll(/new\s+CustomEvent\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]));
-  assert.ok(events.size > 0, "found no dispatched events");
-  assert.deepEqual([...events].filter((e) => !known(e)).sort(), []);
-  assert.equal([...js.matchAll(/new\s+CustomEvent\(\s*(?!["'`])/g)].length, 0, "a CustomEvent whose name is not a literal");
+  const literal = [...js.matchAll(/new\s+CustomEvent\(\s*(["'`])([\w-]+)\1/g)].map((m) => m[2]);
+  assert.ok(literal.length > 0, "found no dispatched events");
+  assert.equal(literal.length, [...js.matchAll(/new\s+CustomEvent\(/g)].length, "a CustomEvent whose name is not a plain literal");
+  assert.deepEqual([...new Set(literal)].filter((e) => !known(e)).sort(), []);
 });
 
 check("every attribute and class the source reads off an ancestor or the document is declared, editor-internal or a reach-in", () => {
-  const selectors = [...js.matchAll(/(?:\.closest|document\.querySelector(?:All)?)\(\s*(["'`])([^"'`]*)\1/g)].map((m) => m[2]);
+  const selectors = [...js.matchAll(/(?:\.closest|document\.querySelector(?:All)?)\(\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
   const rules = [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => m[1].split(",").map((part) => part.trim()));
   const leading = rules.flatMap((rule) => /^(?::root|html|:host|body)?((?:\[[^\]]+\])+)(?=[\s>~+]|$)/.exec(rule)?.[1] ?? []);
   const read = new Set([...selectors, ...leading].flatMap((sel) => [...sel.matchAll(/\[(data-[\w-]+)|\.(bp-[\w-]+)/g)].map((m) => m[1] ?? m[2])));
