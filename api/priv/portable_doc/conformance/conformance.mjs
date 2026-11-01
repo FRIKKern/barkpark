@@ -61,7 +61,7 @@ function nodesOf(nodes, verbatim) {
     else if (node.nodeType === 3) out.push({ text: node.nodeValue });
     else if (node.nodeType === 1) out.push(element(node, verbatim));
   }
-  if (verbatim) return out.filter((n) => n.text !== "");
+  if (verbatim) return out;
   out.forEach((n, i) => {
     if (!("text" in n)) return;
     n.text = runs(n.text);

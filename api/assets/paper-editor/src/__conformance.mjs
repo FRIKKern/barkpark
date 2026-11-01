@@ -76,5 +76,10 @@ async function judge(golden) {
   }
 }
 
+const stripProbe = document.createElement("div");
+stripProbe.innerHTML = '<span class="x-bp-canvas-y xProseMirror bp-canvas-z ProseMirror-z"></span>';
+strip(stripProbe);
+if (stripProbe.firstChild.className !== "x-bp-canvas-y xProseMirror") throw new Error(`strip touched reader classes: ${stripProbe.firstChild.className}`);
+
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
 window.close();
