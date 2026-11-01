@@ -216,6 +216,10 @@ defmodule BarkparkWeb.PaperCanvasTKeysTest do
       settings.t;
       function local() { let t = 1; return t + 1; }
       const pick = (t) => t.name;
+      const after = t;
+      const run = (t) => { return t.y; };
+      const again = t;
+      [1].map(t => t.z, t);
       t("Fine");
       """)
 
@@ -225,7 +229,15 @@ defmodule BarkparkWeb.PaperCanvasTKeysTest do
       """)
 
       assert Enum.map(PaperCanvasTKeys.scan(dir).escapes, &{&1.file, &1.line}) |> Enum.sort() ==
-               [{"a.js", 2}, {"a.js", 3}, {"a.js", 4}, {"b.js", 0}]
+               [
+                 {"a.js", 2},
+                 {"a.js", 3},
+                 {"a.js", 4},
+                 {"a.js", 8},
+                 {"a.js", 10},
+                 {"a.js", 11},
+                 {"b.js", 0}
+               ]
     end
 
     test "a key it cannot follow is a miss, never a guess", %{dir: dir} do

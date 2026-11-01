@@ -83,7 +83,7 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
   defp escapes([{:id, "import", _}, {:group, "{", _, _} | rest], aliases, _prev, shadowed, acc),
     do: escapes(rest, aliases, nil, shadowed, acc)
 
-  # A local `let t`, `const { t }`, `(t) =>` or `t =>` hides the import for the rest of its block.
+  # A local `let t` or `const { t }` hides the import for the rest of its block.
   defp escapes([{:id, kind, _}, {:id, name, _} = tok | rest], aliases, _prev, shadowed, acc)
        when kind in ["let", "const", "var"],
        do: escapes(rest, aliases, tok, MapSet.put(shadowed, name), acc)
@@ -99,16 +99,16 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
        do: escapes(rest, aliases, tok, MapSet.union(shadowed, declared(pattern)), acc)
 
   defp escapes(
-         [{:group, "(", params, _} = tok, {:p, "=>", _} = arrow | rest],
+         [{:group, "(", params, _} = tok, {:p, "=>", _} | rest],
          aliases,
          _p,
          shadowed,
          acc
        ),
-       do: escapes([arrow | rest], aliases, tok, MapSet.union(shadowed, declared(params)), acc)
+       do: arrow_escapes(rest, declared(params), aliases, tok, shadowed, acc)
 
-  defp escapes([{:id, name, _} = tok, {:p, "=>", _} = arrow | rest], aliases, _p, shadowed, acc),
-    do: escapes([arrow | rest], aliases, tok, MapSet.put(shadowed, name), acc)
+  defp escapes([{:id, name, _} = tok, {:p, "=>", _} | rest], aliases, _p, shadowed, acc),
+    do: arrow_escapes(rest, MapSet.new([name]), aliases, tok, shadowed, acc)
 
   defp escapes([{:group, _, children, _} = tok | rest], aliases, _prev, shadowed, acc),
     do: escapes(rest, aliases, tok, shadowed, escapes(children, aliases, nil, shadowed, acc))
@@ -136,6 +136,19 @@ defmodule BarkparkWeb.PaperCanvasTKeys do
 
   defp escapes([tok | rest], aliases, _prev, shadowed, acc),
     do: escapes(rest, aliases, tok, shadowed, acc)
+
+  # An arrow's parameters hide the import inside its body only.
+  defp arrow_escapes(tokens, params, aliases, tok, shadowed, acc) do
+    {body, rest} = arrow_body(tokens)
+    acc = escapes(body, aliases, nil, MapSet.union(shadowed, params), acc)
+    escapes(rest, aliases, tok, shadowed, acc)
+  end
+
+  defp arrow_body(tokens) do
+    {expr, after_expr} = statement(tokens)
+    {body, tail} = Enum.split_while(expr, &(not match?({:p, ",", _}, &1)))
+    {body, tail ++ after_expr}
+  end
 
   defp declared(tokens),
     do:
