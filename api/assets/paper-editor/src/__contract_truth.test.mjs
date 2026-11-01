@@ -3,15 +3,18 @@
 // index.d.ts and EMBED-CONTRACT.md's "Surface index" are read by
 // src/contract-surface.mjs. It fails when:
 //   - index.d.ts and EMBED-CONTRACT.md disagree, either way;
-//   - either element has a public prototype member, own instance property or
-//     static (no leading `_`) that is not declared, or lacks a declared member;
-//   - a declared event is never dispatched (inbound: never listened for), or a
-//     declared attribute, class, token or global never appears in the source,
-//     comments stripped, matched on name boundaries;
-//   - the source dispatches an event, or reads a data-* attribute or bp-* class off
-//     an ancestor or the document (closest, document.querySelector, a CSS selector
-//     that starts with an attribute), that is neither declared nor listed below as
-//     editor-internal or a reach-in EMBED-CONTRACT.md names;
+//   - either element has a public prototype member, static, or own property on
+//     a newly created or a connected (mounted) element (no leading `_`) that is
+//     not declared, or lacks a declared member;
+//   - a declared event is never dispatched (inbound: never listened for), a
+//     declared DOM attribute is never written, or a declared attribute, class,
+//     token or global never appears in the source, comments stripped, matched on
+//     name boundaries;
+//   - the source dispatches an event, listens for a bp-* event by a literal name,
+//     or reads a data-* attribute or bp-* class off an ancestor or the document
+//     (closest, document.querySelector, a CSS selector that starts with an
+//     attribute), that is neither declared nor listed below as editor-internal or
+//     a reach-in EMBED-CONTRACT.md names;
 //   - an upstream token in Styling is no longer read by the stylesheet;
 //   - the committed bundle's statics are not this source's versions and BUILD_SHA.
 // It does not read the hosts.
@@ -92,7 +95,17 @@ const LIFECYCLE = new Set(["constructor", "connectedCallback", "disconnectedCall
 const STATIC_BUILTINS = new Set(["length", "name", "prototype", "observedAttributes"]);
 const publicMembers = (cls) => Object.getOwnPropertyNames(cls.prototype).filter((n) => !n.startsWith("_") && !LIFECYCLE.has(n));
 const publicStatics = (cls) => Object.getOwnPropertyNames(cls).filter((n) => !n.startsWith("_") && !STATIC_BUILTINS.has(n));
-const publicInstance = (tag) => Object.getOwnPropertyNames(window.document.createElement(tag)).filter((n) => !n.startsWith("_"));
+const ownPublic = (el) => Object.getOwnPropertyNames(el).filter((n) => !n.startsWith("_"));
+const instances = {};
+for (const tag of ["bp-paper-canvas", "bp-paper-editor"]) {
+  const created = window.document.createElement(tag);
+  const connected = window.document.createElement(tag);
+  if (tag === "bp-paper-editor") connected.setAttribute("data-block", JSON.stringify({ id: "p1", type: "paragraph", content: [] }));
+  window.document.body.append(connected);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  instances[tag] = { created: ownPublic(created), connected: ownPublic(connected), mounted: !!connected.querySelector("[contenteditable]") };
+  connected.remove();
+}
 
 for (const [tag, element] of [["bp-paper-canvas", "canvas"], ["bp-paper-editor", "editor"]]) {
   const cls = window.customElements.get(tag);
@@ -100,8 +113,9 @@ for (const [tag, element] of [["bp-paper-canvas", "canvas"], ["bp-paper-editor",
   check(`every public member of <${tag}> is declared`, () => {
     assert.deepEqual(publicMembers(cls).filter((n) => !declared.has(n)).sort(), []);
   });
-  check(`every public own property of a new <${tag}> is declared`, () => {
-    assert.deepEqual(publicInstance(tag).filter((n) => !declared.has(n)).sort(), []);
+  check(`every public own property of a newly created and of a connected <${tag}> is declared`, () => {
+    assert.ok(instances[tag].mounted, "the connected element did not mount");
+    assert.deepEqual([...new Set([...instances[tag].created, ...instances[tag].connected])].filter((n) => !declared.has(n)).sort(), []);
   });
   check(`<${tag}> has every member declared for it`, () => {
     assert.deepEqual([...declared].filter((n) => !(n in cls.prototype)).sort(), []);
@@ -166,6 +180,12 @@ check("every event the source dispatches is declared, editor-internal or a reach
   assert.ok(literal.length > 0, "found no dispatched events");
   assert.equal(literal.length, [...js.matchAll(/new\s+CustomEvent\(/g)].length, "a CustomEvent whose name is not a plain literal");
   assert.deepEqual([...new Set(literal)].filter((e) => !known(e)).sort(), []);
+});
+
+check("every bp-* event the source listens for by a literal name is declared, editor-internal or a reach-in", () => {
+  const heard = new Set([...js.matchAll(/addEventListener\(\s*["'`](bp-[\w-]+)["'`]/g)].map((m) => m[1]));
+  assert.ok(heard.has("bp-fleet-paint"), "found no bp-* listeners");
+  assert.deepEqual([...heard].filter((e) => !known(e)).sort(), []);
 });
 
 check("every attribute and class the source reads off an ancestor or the document is declared, editor-internal or a reach-in", () => {

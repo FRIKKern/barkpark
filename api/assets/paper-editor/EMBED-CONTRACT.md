@@ -706,15 +706,17 @@ Every name a host may use, by kind. CSS tokens are in Styling.
 
 - this table and `index.d.ts` disagree, either way (tokens: every backticked
   `--paper-*`/`--bp-*` name in this file against `BpPaperThemeToken`);
-- either element has a public prototype member, own instance property or static
-  (no leading `_`) that is not declared, or lacks a declared member;
-- a declared event is never dispatched (inbound: never listened for), or a declared
-  attribute, class, token or global never appears in the source with comments
-  stripped, matched on name boundaries;
-- the source dispatches an event, or reads a `data-*` attribute or `bp-*` class off
-  an ancestor or the document (`closest(…)`, `document.querySelector(…)`, a CSS
-  selector that starts with an attribute), that is neither declared nor on the
-  test's short list of editor-internal names and the reach-ins below;
+- either element has a public prototype member, static, or own property on a newly
+  created or a connected (mounted) element (no leading `_`) that is not declared,
+  or lacks a declared member;
+- a declared event is never dispatched (inbound: never listened for), a declared
+  DOM attribute is never written, or a declared attribute, class, token or global
+  never appears in the source with comments stripped, matched on name boundaries;
+- the source dispatches an event, listens for a `bp-*` event by a literal name, or
+  reads a `data-*` attribute or `bp-*` class off an ancestor or the document
+  (`closest(…)`, `document.querySelector(…)`, a CSS selector that starts with an
+  attribute), that is neither declared nor on the test's short list of
+  editor-internal names and the reach-ins below;
 - an upstream token in Styling is no longer read by the stylesheet.
 
 It does not read the hosts: a host that starts using a new member or an internal
@@ -764,7 +766,7 @@ on 2026-10-31.
 | `canvas._editor` (the TipTap editor: `state.doc`, `state.selection`) | Barkdown | `app/renderer/src/tabs/paper.js:162,413`; 136 uses in `app/tests` |
 | `[contenteditable="true"].editor.view.domObserver` `forceFlush()` / `flush()` | Barkever | `app/src/lib/canvas-load.ts:26` (the flush, pending and apply methods read unread typing since 1.15.0) |
 | `.ProseMirror` (focus, presence, styling) | Barkdown, Barkever, barkpark-studio | Barkdown `paper.js:22,127,663`, `index.js:813`, `paper-notion.css`; Barkever `editor.css:38`; barkpark-studio `PortableDocEditor.tsx:429`, `styles.css`, 47 lines in `e2e/` |
-| `[contenteditable="true"]` inside an element, to focus it | Studio, Barkever | Studio `bp-paper-editor-hooks.js:409,415`, `root.html.heex:5638`; Barkever `app/src/ui/BodyCanvas.tsx:32` |
+| `[contenteditable="true"]` inside an element, to focus it | Studio, Barkever | Studio `bp-paper-editor-hooks.js:409,415`, `root.html.heex:5638`; Barkever `app/src/ui/BodyCanvas.tsx:33` |
 | `bp-flush-node` dispatched on every `[data-bp-type]` node | Barkdown | `paper.js:67` (`flushPendingChanges()` does this) |
 | `[data-bp-id] > li:nth-child(n)` (a list item's DOM) | Barkever | `app/src/ui/BodyCanvas.tsx:157` |
 | internal classes restyled by host CSS | Studio, Barkdown, barkpark-studio | Studio `bp-paper-editor-shell.css` (175 classes, the editor half of the shell); Barkdown `paper-notion.css` (32) and `vendor/bp-paper-popups.css` (31): slash menu, format bubble, link preview, command palette, block handle and menu, code and note nodes; barkpark-studio `styles.css` (29): block handle and menu, field chrome, image and object cards, inline object dialog, link pill, format bubble, slash menu |
