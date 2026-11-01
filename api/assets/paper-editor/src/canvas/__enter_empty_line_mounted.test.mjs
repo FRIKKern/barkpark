@@ -77,7 +77,7 @@ function type(editor, chars) {
   }
 }
 
-async function mount(blocks) {
+async function mount(blocks, kind) {
   const canvas = document.createElement("bp-paper-canvas");
   canvas.acknowledgedSaves = true;
   canvas.blocks = clone(blocks);
@@ -88,7 +88,10 @@ async function mount(blocks) {
     canvas.acknowledgeOps(event.detail.seq, true);
     canvas.applyServerBlocks(clone(state.server), { mode: "own" });
   });
-  document.body.appendChild(canvas);
+  const wrapper = document.createElement("div");
+  if (kind) wrapper.dataset.paperContainerKind = kind;
+  wrapper.appendChild(canvas);
+  document.body.appendChild(wrapper);
   await tick(350);
   canvas._editor.view.focus();
   return { canvas, editor: canvas._editor, state };
@@ -127,7 +130,7 @@ await scene("six Enters at the end of a line: one empty line in the doc, on scre
     assert.deepEqual(texts(state.server), ["Alpha", "Beta"]);
     assert.equal(editor.state.selection.$from.parent.textContent, "Alpha", "the caret is back on the line above");
   } finally {
-    canvas.remove();
+    canvas.parentNode.remove();
   }
 });
 
@@ -144,7 +147,7 @@ await scene("six Enters on an empty line: nothing changes and nothing is sent", 
     await saved(canvas);
     assert.deepEqual(texts(state.server), ["Alpha", "Beta"], "one Backspace leaves it");
   } finally {
-    canvas.remove();
+    canvas.parentNode.remove();
   }
 });
 
@@ -160,7 +163,7 @@ await scene("Enter at the start of a line under an empty line does nothing", asy
     await saved(canvas);
     assert.deepEqual(texts(state.server), ["Alpha", "", "Very Beta"], "the caret stayed at the start of Beta");
   } finally {
-    canvas.remove();
+    canvas.parentNode.remove();
   }
 });
 
@@ -177,7 +180,7 @@ await scene("Enter at the end of a line above an empty line moves the caret into
     await saved(canvas);
     assert.deepEqual(texts(state.server), ["Alpha", "Gamma", "Beta"]);
   } finally {
-    canvas.remove();
+    canvas.parentNode.remove();
   }
 });
 
@@ -191,7 +194,29 @@ await scene("a heading follows the same rule", async () => {
     assert.deepEqual(lines(editor), ["Alpha", "Gamma", "Beta"]);
     assert.equal(state.server.length, 3);
   } finally {
-    canvas.remove();
+    canvas.parentNode.remove();
+  }
+});
+
+await scene("in Studio the document canvas follows the rule and a section's own canvas keeps its Enter", async () => {
+  const studio = await mount(RUN, "document");
+  try {
+    caretAt(studio.editor, "Alpha", 5);
+    for (let i = 0; i < 6; i++) press(studio.editor, "Enter");
+    await saved(studio.canvas);
+    assert.deepEqual(texts(studio.state.server), ["Alpha", "", "Beta"]);
+  } finally {
+    studio.canvas.parentNode.remove();
+  }
+  const section = await mount([p("p-day", "Left at six.")], "section");
+  try {
+    caretAt(section.editor, "Left at six.", 12);
+    press(section.editor, "Enter");
+    press(section.editor, "Enter");
+    await saved(section.canvas);
+    assert.deepEqual(lines(section.editor), ["Left at six.", "", ""]);
+  } finally {
+    section.canvas.parentNode.remove();
   }
 });
 
@@ -209,7 +234,7 @@ await scene("untouched: Enter mid-text splits, Enter at the start under text add
     await saved(flat.canvas);
     assert.equal(flat.editor.state.doc.child(0).lastChild.type.name, "hardBreak", "Shift-Enter inserts a line break");
   } finally {
-    flat.canvas.remove();
+    flat.canvas.parentNode.remove();
   }
   const list = await mount([p("p-a", "Alpha"), { id: "l-1", type: "list", style: "bullet", items: ["One"] }]);
   try {
@@ -220,7 +245,7 @@ await scene("untouched: Enter mid-text splits, Enter at the start under text add
     assert.deepEqual(lines(list.editor), ["Alpha", "One", ""], "the second Enter leaves the list for a new paragraph");
     assert.equal(list.editor.state.doc.lastChild.type.name, "paragraph");
   } finally {
-    list.canvas.remove();
+    list.canvas.parentNode.remove();
   }
   const section = await mount([{ id: "s-day", type: "section", title: "Day", blocks: [p("p-day", "Left at six.")] }]);
   try {
@@ -230,7 +255,7 @@ await scene("untouched: Enter mid-text splits, Enter at the start under text add
     await saved(section.canvas);
     assert.deepEqual(lines(section.editor), ["Left at six.", "", ""], "a nested empty line is shown, so Enter adds lines there");
   } finally {
-    section.canvas.remove();
+    section.canvas.parentNode.remove();
   }
 });
 

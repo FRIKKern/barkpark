@@ -13,8 +13,11 @@ const isEmptyProse = (node) => !!node && ["paragraph", "ingress"].includes(node.
 // every one the caret leaves, so a second one was invisible state: six Enters
 // showed one line and took six Backspaces to leave. On an empty line Enter does
 // nothing; at the start of a line under an empty one it does nothing; at the end
-// of a line above an empty one it moves the caret there. Lists, nested blocks,
-// Shift-Enter and the menus (handled before keymaps) are untouched.
+// of a line above an empty one it moves the caret there. Lists, nested blocks
+// (inline, or a container's own canvas in Studio), Shift-Enter and the menus
+// (handled before keymaps) are untouched.
+const isDocumentCanvas = (host) => ["document", undefined].includes(host.closest("[data-paper-container-kind]")?.dataset.paperContainerKind);
+
 function enterBesideEmptyProse(editor) {
   const { selection, doc } = editor.state;
   if (!(selection instanceof TextSelection) || !selection.empty) return false;
@@ -35,7 +38,7 @@ export function restingScaffolds(host) {
   return Extension.create({
     name: "restingScaffolds",
     addKeyboardShortcuts() {
-      return { Enter: ({ editor }) => enterBesideEmptyProse(editor) };
+      return { Enter: ({ editor }) => isDocumentCanvas(host) && enterBesideEmptyProse(editor) };
     },
     addProseMirrorPlugins() {
       const editor = this.editor;
