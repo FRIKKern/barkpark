@@ -19,11 +19,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [treeArg, commit] = process.argv.slice(2);
-const tree = resolve(treeArg ?? "");
-if (process.argv.length !== 4 || !/^[0-9a-f]{10}$/.test(commit) || !existsSync(resolve(tree, "src/contract.js"))) {
+if (process.argv.length !== 4 || !/^[0-9a-f]{10}$/.test(commit) || !existsSync(resolve(treeArg, "src/contract.js"))) {
   console.error("usage: node scripts/record-replay.mjs <paper-editor tree> <commit: 10 hex>");
   process.exit(2);
 }
+const tree = resolve(treeArg);
 const load = (rel) => import(pathToFileURL(resolve(tree, rel)).href);
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
