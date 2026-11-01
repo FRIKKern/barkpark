@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [treeArg, commit] = process.argv.slice(2);
-if (!treeArg || !commit) {
+if (process.argv.length !== 4) {
   console.error("usage: node scripts/record-replay.mjs <paper-editor tree> <commit>");
   process.exit(2);
 }
@@ -77,11 +77,10 @@ function endOf(editor, index) {
   return at;
 }
 function find(editor, words) {
-  let at = null;
+  let at;
   editor.state.doc.descendants((node, pos) => {
-    if (at == null && node.isText && node.text.includes(words)) at = pos + node.text.indexOf(words);
+    if (node.isText && node.text.includes(words)) at = pos + node.text.indexOf(words);
   });
-  if (at == null) throw new Error(`no "${words}" in the document`);
   return { from: at, to: at + words.length };
 }
 function type(editor, chars) {
@@ -92,11 +91,10 @@ function type(editor, chars) {
     if (!handled) view.dispatch(view.state.tr.insertText(char, from, to));
   }
 }
-function paste(editor, plain, html = "") {
+function paste(editor, plain) {
   const event = new Event("paste", { bubbles: true, cancelable: true });
-  const types = html ? ["text/html", "text/plain"] : ["text/plain"];
   Object.defineProperty(event, "clipboardData", {
-    value: { types, getData: (t) => (t === "text/plain" ? plain : t === "text/html" ? html : ""), files: [] },
+    value: { types: ["text/plain"], getData: (t) => (t === "text/plain" ? plain : ""), files: [] },
   });
   editor.view.dom.dispatchEvent(event);
 }
@@ -301,13 +299,7 @@ const scenes = [
 ];
 
 const recorded = [];
-for (const scene of scenes) {
-  try {
-    recorded.push(await scene());
-  } catch (e) {
-    recorded.push({ error: String(e && e.stack || e) });
-  }
-}
+for (const scene of scenes) recorded.push(await scene());
 
 process.stdout.write(JSON.stringify({
   contract: CONTRACT_VERSION,
