@@ -154,9 +154,9 @@ export interface BpCanvasReadyDetail {
 export interface BpPaperBuildInfo {
   /** This contract's version, as EMBED-CONTRACT.md's title. */
   readonly CONTRACT_VERSION: string;
-  /** 1.21.0: package.json's version. */
+  /** Since 1.21.0: the npm package version (package.json `version`, today "1.0.0"); not bumped per contract release. */
   readonly EDITOR_VERSION: string;
-  /** 1.21.0: 12 hex of the sha-256 over esbuild's version and the bundle's input files; null unbuilt. */
+  /** Since 1.21.0: 12 hex of the sha-256 over esbuild's version and the bundle's input files; null unbuilt. Build options are not hashed: `build` and `build:dev` give the same sha. */
   readonly BUILD_SHA: string | null;
 }
 export interface BpPaperEditorConstructor extends BpPaperBuildInfo {
@@ -307,6 +307,14 @@ export interface BpPaperAncestorAttributes {
   "data-paper-masters"?: string;
   /** A carrier element: the expected fields, `[{ name, type?, label?, max? }]`, as JSON. */
   "data-expected-fields"?: string;
+  /** On the element or an ancestor (`<html>` in most hosts): the stylesheet's dark or light theme. */
+  "data-theme"?: "dark" | "light";
+  /** On an ancestor: the accent family the stylesheet paints with. */
+  "data-bp-theme"?: "iris" | "fjord" | "evergreen" | "ember" | "charple";
+  /** On an ancestor: `"legacy"` keeps the reader's legacy palette, so embeds get no `.bp-paper-surface` island. */
+  "data-paper-palette"?: "article" | "legacy";
+  /** On a `.bp-paper-edit-field`: its field name; the slash menu counts the field blocks on screen by it. */
+  "data-field-name"?: string;
 }
 
 /** Attributes the canvas writes for a host to read or select. */
@@ -346,6 +354,9 @@ export type BpPaperPublicClass =
   | "bp-comment-range--active"
   | "bp-canvas-mount-failed";
 
+/** Host classes the canvas reads: a `.bp-paper-editor` root (resume focus, masters, `data-paper-doc-key`) and `.bp-paper-edit-field` (with `data-field-name`). */
+export type BpPaperHostClass = "bp-paper-editor" | "bp-paper-edit-field";
+
 /** CSS custom properties a host sets to theme the editor's stylesheet. */
 export type BpPaperThemeToken =
   | "--paper-accent"
@@ -354,6 +365,7 @@ export type BpPaperThemeToken =
   | "--paper-bg-deep"
   | "--paper-chrome-bg"
   | "--paper-chrome-border"
+  | "--paper-danger"
   | "--paper-edit-hover"
   | "--paper-font-mono"
   | "--paper-font-sans"

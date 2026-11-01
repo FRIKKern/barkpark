@@ -59,6 +59,7 @@ export function declaredInTypes(dts) {
     return [...dts.slice(at, dts.indexOf(";", at)).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   };
   add("class", "canvas", union("BpPaperPublicClass"));
+  add("host class", "canvas", union("BpPaperHostClass"));
   add("token", "css", union("BpPaperThemeToken"));
   return keys;
 }

@@ -112,11 +112,12 @@ ellipsis (1.17.0). A host themes it by setting `--paper-picker-*` on `:root`
 | `--paper-picker-accent` | nothing yet; the picker's `--paper-accent` | `#a23925` / `#d97a5f` |
 
 A host themes the stylesheet with CSS custom properties on an ancestor or `:root`.
-These are the ones hosts set today; each unset keeps the stylesheet's own value:
+These are the contract's tokens; each unset keeps the stylesheet's own value. Every
+`--paper-*` and `--bp-*` token a host set on 2026-10-31 is here:
 
 | Family | Tokens |
 |---|---|
-| colour | `--paper-accent`, `--paper-accent-soft`, `--paper-bg`, `--paper-bg-deep`, `--paper-chrome-bg`, `--paper-chrome-border`, `--paper-edit-hover`, `--paper-ink`, `--paper-ink-soft`, `--paper-ink-faint`, `--paper-ink-faint-line`, `--paper-reading-accent`, `--paper-rule`, `--paper-rule-soft`, `--bp-shadow-hsl` |
+| colour | `--paper-accent`, `--paper-accent-soft`, `--paper-bg`, `--paper-bg-deep`, `--paper-chrome-bg`, `--paper-chrome-border`, `--paper-danger`, `--paper-edit-hover`, `--paper-ink`, `--paper-ink-soft`, `--paper-ink-faint`, `--paper-ink-faint-line`, `--paper-reading-accent`, `--paper-rule`, `--paper-rule-soft`, `--bp-shadow-hsl` |
 | type | `--paper-font-serif`, `--paper-font-sans`, `--paper-font-mono`, `--paper-font-ui`, `--bp-body-size`, `--bp-body-lh`, `--bp-body-tracking`, `--bp-h1-size`, `--bp-h2-size`, `--bp-h2-lh`, `--bp-h2-tracking`, `--bp-h2-weight`, `--bp-h3-size`, `--bp-h3-lh`, `--bp-heading-weight` |
 | rhythm | `--bp-para-margin-top`, `--bp-li-gap`, `--bp-list-indent`, `--bp-section-beat`, `--bp-section-gap`, `--bp-section-rule`, `--bp-rule-hairline`, `--bp-air-callout`, `--bp-air-code`, `--bp-air-table`, `--bp-cols` |
 | code and images | `--bp-code-pad`, `--bp-code-radius`, `--bp-code-size`, `--bp-codeblock-lh`, `--bp-codeblock-margin`, `--bp-codeblock-pad`, `--bp-codeblock-radius`, `--bp-codeblock-size`, `--bp-pre-radius`, `--bp-img-radius` |
@@ -127,6 +128,17 @@ A host whose column is the text, with no wider evidence band (it sets
 `--bp-evidence-width: 100%; --bp-evidence-pull: 0px`), sets `--bp-table-centre: 0`
 to start tables at the text's left edge instead of centred (default `1`: papers'
 layout).
+
+The stylesheet also falls back to upstream tokens that hosts set for their own
+pages. They are not contract: a host may stop setting them, and the stylesheet may
+stop reading them, in any version. Hosts set these on 2026-10-31:
+
+| Upstream token | Set by |
+|---|---|
+| `--tok-reading-font` | the reader, Barkdown, Barkever, barkpark-studio |
+| `--tok-air-*`, `--tok-reading-*` (sizes, line heights, tracking, weights), `--tok-section-*` | Barkdown |
+| `--dur-1`, `--font-mono` | Studio, the reader, web |
+| `--danger`, `--danger-hsl`, `--info-hsl`, `--muted-surface`, `--ok`, `--ok-hsl`, `--st-danger`, `--st-info`, `--st-ok`, `--st-warn`, `--warn-hsl` | Studio |
 
 ## `<bp-paper-canvas>`
 
@@ -175,6 +187,14 @@ The canvas also reads these on an ancestor, or on a carrier element in its page:
 | `data-paper-doc-key` | the nearest `.bp-paper-editor` ancestor | the document key `captureResumeFocus()` remembers and `restoreResumeFocus()` checks; with no such root, resume focus never arms |
 | `data-paper-masters` | an element inside the nearest `.bp-paper-editor` ancestor; ignored on a canvas with `data-vocabulary` | the paper's masters, `[{ id, title, tier, block_type }]`: each is a "Masters" row in the slash menu, picked as `bp-master-insert` |
 | `data-expected-fields` | first element carrying it in the document | the expected fields, `[{ name, type?, label?, max? }]`: an "EXPECTED" slash group whose picks insert a bound field block; a field drops out at its `max`, counted on `.bp-paper-edit-field[data-field-name]` |
+| `data-field-name` | on each `.bp-paper-edit-field` in the document | the field's name; the slash menu counts the field blocks on screen by it |
+| `data-theme` | the canvas or an ancestor (`<html>` in most hosts) | `"dark"` or `"light"`: the stylesheet's theme (Styling) |
+| `data-bp-theme` | an ancestor | `"iris"`, `"fjord"`, `"evergreen"`, `"ember"` or `"charple"`: the accent family the stylesheet paints with |
+| `data-paper-palette` | an ancestor | `"legacy"`: the public reader keeps its legacy palette, so embeds and the stylesheet paint no `.bp-paper-surface` island; `"article"` or absent: they do |
+
+Two host classes carry these: `.bp-paper-editor`, the root a host renders around the
+canvas (resume focus, masters, `data-paper-doc-key`), and `.bp-paper-edit-field`, a
+bound field's wrapper (`data-field-name`).
 
 ### Host callbacks
 
@@ -670,8 +690,8 @@ Both element classes carry three statics:
 | Static | Value |
 |---|---|
 | `CONTRACT_VERSION` | this document's version, `"1.21.0"`. `<bp-paper-editor>` had it before 1.21.0 |
-| `EDITOR_VERSION` | `package.json`'s version (1.21.0) |
-| `BUILD_SHA` | 12 hex of the sha-256 over esbuild's version and every input file of the bundle (1.21.0). The same source builds the same bytes and sha; a change to a test leaves it alone. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
+| `EDITOR_VERSION` | since 1.21.0: the npm package version, `package.json`'s `version` (today `"1.0.0"`). It is not bumped per contract release |
+| `BUILD_SHA` | since 1.21.0: 12 hex of the sha-256 over esbuild's version and every input file of the bundle. The same source builds the same bytes and sha; a change to a test leaves it alone. Build options are not hashed: `npm run build` and `npm run build:dev` give the same sha and different bytes. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
 
 ```js
 const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-paper-canvas");
@@ -682,9 +702,23 @@ const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-p
 ## Surface index
 
 Every name a host may use, by kind. CSS tokens are in Styling.
-`src/__contract_truth.test.mjs` fails when this table, `index.d.ts` and the
-element classes disagree: a public member of either class that is not here, a
-name here that `index.d.ts` lacks, or the other way round.
+`src/__contract_truth.test.mjs` fails when:
+
+- this table and `index.d.ts` disagree, either way (tokens: every backticked
+  `--paper-*`/`--bp-*` name in this file against `BpPaperThemeToken`);
+- either element has a public prototype member, own instance property or static
+  (no leading `_`) that is not declared, or lacks a declared member;
+- a declared event is never dispatched (inbound: never listened for), or a declared
+  attribute, class, token or global never appears in the source with comments
+  stripped, matched on name boundaries;
+- the source dispatches an event, or reads a `data-*` attribute or `bp-*` class off
+  an ancestor or the document (`closest(…)`, `document.querySelector(…)`, a CSS
+  selector that starts with an attribute), that is neither declared nor on the
+  test's short list of editor-internal names and the reach-ins below;
+- an upstream token in Styling is no longer read by the stylesheet.
+
+It does not read the hosts: a host that starts using a new member or an internal
+goes unnoticed until the next census.
 
 | Kind | On | Names |
 |---|---|---|
@@ -693,13 +727,14 @@ name here that `index.d.ts` lacks, or the other way round.
 | member | editor | `applyTableProjection`, `block`, `flushPendingChanges`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `tableMutationResult`, `tagSource`, `trackTableMutation`, `waitForTableSettlement`, `wikilinkSource` |
 | attribute | canvas | `block-cards`, `data-constraints`, `data-dataset`, `data-field-caps`, `data-locked-tail`, `data-media-strings`, `data-picker-browse`, `data-reference-strings`, `data-scope-prefix`, `data-token`, `data-vocabulary`, `editable`, `format-bubble`, `mention-trigger` |
 | attribute | editor | `data-block`, `data-editor-mode`, `editable` |
-| ancestor attribute | canvas | `data-expected-fields`, `data-paper-container-kind`, `data-paper-doc-key`, `data-paper-masters`, `data-server-insert`, `data-strings` |
+| ancestor attribute | canvas | `data-bp-theme`, `data-expected-fields`, `data-field-name`, `data-paper-container-kind`, `data-paper-doc-key`, `data-paper-masters`, `data-paper-palette`, `data-server-insert`, `data-strings`, `data-theme` |
 | DOM attribute | canvas | `alias`, `data-bp-fleet-body`, `data-bp-fleet-id`, `data-bp-id`, `data-bp-role`, `data-comment-id`, `data-media-picker`, `data-missing`, `data-mount-failed`, `data-wikilink`, `docid`, `target` |
 | event | canvas | `bp-canvas-comment-click`, `bp-canvas-comment-ranges`, `bp-canvas-history`, `bp-canvas-link-request`, `bp-canvas-mount-failed`, `bp-canvas-node-failed`, `bp-canvas-open-link`, `bp-canvas-ops`, `bp-canvas-remote-held`, `bp-canvas-selection`, `bp-canvas-wikilink-click`, `bp-master-insert`, `bp-noop`, `bp-ready`, `bp-save-master`, `bp-selection-change`, `bp-server-insert` |
 | event | editor | `bp-error`, `bp-local-change`, `bp-noop`, `bp-op`, `bp-ready`, `bp-slash-insert` |
 | inbound event | canvas | `bp-change`, `bp-fleet-paint` |
 | global | window | `BarkparkPaperMermaid`, `BP_PAPER_EDITOR_NO_INJECT` |
 | class | canvas | `bp-canvas-mount-failed`, `bp-comment-range`, `bp-comment-range--active`, `bp-remote-caret`, `bp-remote-caret__label`, `bp-remote-selection` |
+| host class | canvas | `bp-paper-edit-field`, `bp-paper-editor` |
 
 ## Known reach-ins, to remove in R2.3
 
@@ -712,7 +747,7 @@ on 2026-10-31.
 | `canvas._editor` (the TipTap editor: `state.doc`, `state.selection`) | Barkdown | `app/renderer/src/tabs/paper.js:162,413`; 136 uses in `app/tests` |
 | `[contenteditable="true"].editor.view.domObserver` `forceFlush()` / `flush()` | Barkever | `app/src/lib/canvas-load.ts:26` (the flush, pending and apply methods read unread typing since 1.15.0) |
 | `.ProseMirror` (focus, presence, styling) | Barkdown, Barkever, barkpark-studio | Barkdown `paper.js:22,127,663`, `index.js:813`, `paper-notion.css`; Barkever `editor.css:38`; barkpark-studio `PortableDocEditor.tsx:429`, `styles.css`, 47 lines in `e2e/` |
-| `[contenteditable="true"]` inside an element, to focus it | Studio | `bp-paper-editor-hooks.js:409,415`; `root.html.heex:5638` |
+| `[contenteditable="true"]` inside an element, to focus it | Studio, Barkever | Studio `bp-paper-editor-hooks.js:409,415`, `root.html.heex:5638`; Barkever `app/src/ui/BodyCanvas.tsx:32` |
 | `bp-flush-node` dispatched on every `[data-bp-type]` node | Barkdown | `paper.js:67` (`flushPendingChanges()` does this) |
 | `[data-bp-id] > li:nth-child(n)` (a list item's DOM) | Barkever | `app/src/ui/BodyCanvas.tsx:157` |
 | internal classes restyled by host CSS | Studio, Barkdown, barkpark-studio | Studio `bp-paper-editor-shell.css` (175 classes, the editor half of the shell); Barkdown `paper-notion.css` (32) and `vendor/bp-paper-popups.css` (31): slash menu, format bubble, link preview, command palette, block handle and menu, code and note nodes; barkpark-studio `styles.css` (29): block handle and menu, field chrome, image and object cards, inline object dialog, link pill, format bubble, slash menu |
@@ -720,6 +755,13 @@ on 2026-10-31.
 | `textarea.bp-canvas-code-area` | Barkdown | `index.js:813` |
 | `.bp-canvas-readonly-chip` written into a paint hole | Studio | `bp-paper-editor-hooks.js:4533` |
 | `applyTaskPreviews(previews)`, probed with `typeof` | Studio | `bp-paper-editor-hooks.js:4500`; no element has it, so the call never runs |
+
+The other way round, the editor's stylesheet styles host DOM it does not own:
+
+| Reach-in | Host | Where |
+|---|---|---|
+| `[data-block-id]`: dark-mode overrides for server-painted blocks | Studio, the reader | `src/styles.css` |
+| `[data-bp-paper-conflict]`: the conflict banner | Studio (`bp-paper-editor-hooks.js`) | `src/styles.css` |
 
 ## Invariants
 
