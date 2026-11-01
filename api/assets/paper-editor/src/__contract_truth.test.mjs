@@ -139,6 +139,18 @@ check("every declared attribute, class and token appears in the source", () => {
   assert.deepEqual(all.filter((n) => !appears(n)).sort(), []);
 });
 
+const camel = (name) => name.replace(/^data-/, "").replace(/-(\w)/g, (_, c) => c.toUpperCase());
+const written = (name) => new RegExp([
+  `(?:set|toggle)Attribute\\(\\s*["'\`]${escape(name)}["'\`]`,
+  `["'\`]${escape(name)}["'\`]\\s*:`,
+  `(?<![\\w-])${escape(name)}=["'\`$]`,
+  ...(name.startsWith("data-") ? [`\\.dataset\\.${camel(name)}\\s*=(?!=)`, `internalLinkMark\\(\\s*["'\`]${escape(name.slice(5))}["'\`]`] : []),
+].join("|")).test(js) || new RegExp(`(?<![\\w-])${escape(name)}\\s*:\\s*\\{\\s*default`, "i").test(js);
+
+check("every declared DOM attribute is written by the source", () => {
+  assert.deepEqual(names("DOM attribute", "canvas").filter((n) => !written(n)).sort(), []);
+});
+
 check("every declared host class appears in the source", () => {
   assert.deepEqual(names("host class", "canvas").filter((n) => !appears(n)).sort(), []);
 });
