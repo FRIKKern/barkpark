@@ -584,6 +584,27 @@ function figurePastePlan(slice) {
 // the phantom nested ones. This keeps S0's runToOps used verbatim, with a doc
 // shaped exactly the way it was tested against.
 function normalizeCanvasDoc(doc) {
+  // ── DEDUP bpIds at EVERY depth: an Enter-SPLIT clones the origin block's attrs ──
+  //
+  // ProseMirror's splitBlock (the Enter keymap) copies the source node's attrs
+  // into the new half — INCLUDING bpId. So a split yields TWO nodes carrying the
+  // SAME bpId: two top-level blocks, or two children of one section / expandable /
+  // step / tab. runToOps keys edits by id, and patch.ex refuses a batch whose
+  // blocks repeat an id (duplicate_id, task-42d085f7431b8417). The split half is
+  // genuinely NEW, so the SECOND-and-later occurrence of any bpId (document order)
+  // must read as new: null its bpId so the projection mints a fresh id — at the
+  // top level runToOps' "split → insert-after(minted id)" path, inside a container
+  // the container's own child mint. The FIRST occurrence keeps the id (it's the
+  // surviving origin block).
+  const seen = new Set();
+  const dedupe = (node) => {
+    const id = node.attrs && node.attrs.bpId;
+    if (id != null && seen.has(id)) node.attrs = { ...node.attrs, bpId: null };
+    else if (id != null) seen.add(id);
+    (node.content || []).forEach(dedupe);
+  };
+  (doc.content || []).forEach(dedupe);
+
   const stripNested = (node) => {
     if (node && node.attrs) {
       // ProseMirror toJSON retains each live attrs object by reference.
@@ -622,28 +643,6 @@ function normalizeCanvasDoc(doc) {
   // themselves (their null bpId is the new-block signal runToOps needs).
   (doc.content || []).forEach((top) => {
     (top.content || []).forEach(stripNested);
-  });
-
-  // ── DEDUP top-level bpIds: an Enter-SPLIT clones the origin block's attrs ──
-  //
-  // ProseMirror's splitBlock (the Enter keymap) copies the source node's attrs
-  // into the new half — INCLUDING bpId. So a split yields TWO top-level nodes
-  // carrying the SAME bpId. runToOps assumes each surviving prev id appears at
-  // most once (it keys edits by id); a duplicate makes it emit a self-move and
-  // conflicting patches for that id. The split block is genuinely NEW, so the
-  // SECOND-and-later occurrence of any bpId must read as new: null its bpId so
-  // runToOps mints a fresh id — exactly S0's "split → insert-after(minted id)"
-  // path. The FIRST occurrence keeps the id (it's the surviving origin block).
-  const seen = new Set();
-  (doc.content || []).forEach((top) => {
-    const id = top.attrs && top.attrs.bpId;
-    if (id == null) return;
-    if (seen.has(id)) {
-      // A clone of an already-seen id — strip its stamp so it diffs as NEW.
-      top.attrs = { ...top.attrs, bpId: null };
-    } else {
-      seen.add(id);
-    }
   });
 
   return doc;
@@ -4894,22 +4893,18 @@ class BpPaperCanvas extends HTMLElement {
   // nodes participate in the walk so positions cannot drift between siblings.
   _stampMaterializedIds(stableDoc, { dryRun = false } = {}) {
     if (!this._editor || !stableDoc) return false;
-    // Nothing to stamp unless some live node has no id, or repeats a top-level id
-    // (the two cases the walk below acts on). Typing into stamped blocks has
+    // Nothing to stamp unless some live node has no id, or repeats an id at any
+    // depth (the two cases the walk below acts on). Typing into stamped blocks has
     // neither, and flattening the whole projection per keystroke was the emit's
     // largest remaining cost (task-fb938eb8be3bce48).
     let candidate = false;
-    const seenTop = new Set();
-    const liveDoc = this._editor.state.doc;
-    liveDoc.descendants((node, _pos, parent) => {
+    const seenIds = new Set();
+    this._editor.state.doc.descendants((node) => {
       if (candidate) return false;
       if (node.isText) return false;
       const id = node.attrs?.bpId;
-      if (id == null) candidate = true;
-      else if (parent === liveDoc) {
-        if (seenTop.has(id)) candidate = true;
-        seenTop.add(id);
-      }
+      if (id == null || seenIds.has(id)) candidate = true;
+      seenIds.add(id);
       return !candidate;
     });
     if (!candidate) return false;
@@ -4926,18 +4921,18 @@ class BpPaperCanvas extends HTMLElement {
     const tr = state.tr;
     let index = 0;
     let mutated = false;
-    const topIds = new Set();
-    state.doc.descendants((node, pos, parent) => {
+    const ids = new Set();
+    state.doc.descendants((node, pos) => {
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
-      // Enter inherits the original paragraph's attrs. normalizeCanvasDoc
-      // treats only the second top-level occurrence as new; materialize its
-      // projected ID too, otherwise every subsequent save/read mints it again.
-      // Keep the first occurrence and all unrelated/nested identities intact.
+      // Enter inherits the original paragraph's attrs, at the top level and inside
+      // a container alike. normalizeCanvasDoc treats the second occurrence as new;
+      // materialize its projected ID too, otherwise every subsequent save/read
+      // mints it again. Keep the first occurrence and all unrelated identities.
       const id = node.attrs?.bpId;
-      const duplicateTopId = parent === state.doc && id != null && topIds.has(id);
-      if (parent === state.doc && id != null) topIds.add(id);
-      if (!node.isText && (id == null || duplicateTopId) && stableId != null) {
+      const duplicateId = id != null && ids.has(id);
+      if (id != null) ids.add(id);
+      if (!node.isText && (id == null || duplicateId) && stableId != null) {
         const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
         if (node.type.name === "note") {
           // Keep pre-save label/lead AttrSteps mapped to this same note.
