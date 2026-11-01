@@ -1,8 +1,9 @@
 // __focus_resync_queued_mounted.test.mjs — the same race as
 // __focus_resync_keeps_caret_mounted, with the DOM caret already away from the canvas's
 // caret when focus lands (as after a click or Tab), so every prosemirror-view version
-// queues the resync. A move after focus must survive it; with no move, the resync still
-// puts the canvas's caret in the DOM. On focus, prosemirror-view queues a 20 ms
+// queues the resync. A move after focus must survive it; with no move, the canvas's caret
+// ends where it was (jsdom shows that end state only: the resync's own write is masked by
+// the flush, so this check does not pin it). On focus, prosemirror-view queues a 20 ms
 // timer that writes its own selection over the DOM when the two differ. Under fast
 // input Chrome runs key events first, so the timer can fire after an ArrowUp moved the
 // DOM caret but before selectionchange told ProseMirror: the old caret came back and
@@ -96,7 +97,7 @@ try {
   check("a move after focus: the DOM caret stays on the line ArrowUp moved it to", () => assert.equal(moved.dom, "x"));
   check("a move after focus: the canvas's caret is there too", () => assert.equal(moved.canvas, "x"));
   const still = await focusAwayThen(() => {});
-  check("no move after focus: the resync puts the canvas's caret (end of the second line) in the DOM", () => assert.deepEqual([still.dom, still.offset], ["Buy packing tape", 16]));
+  check("no move after focus: the caret ends where the canvas had it (end of the second line)", () => assert.deepEqual([still.dom, still.offset], ["Buy packing tape", 16]));
 } catch (e) {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.stack}`);
