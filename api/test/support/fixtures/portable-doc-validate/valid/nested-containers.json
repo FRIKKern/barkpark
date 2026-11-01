@@ -1,0 +1,33 @@
+{
+  "blocks": [
+    {
+      "id": "s",
+      "type": "section",
+      "blocks": [
+        {
+          "id": "t",
+          "type": "tabs",
+          "tabs": [
+            {
+              "label": "A",
+              "blocks": [
+                {
+                  "id": "e",
+                  "type": "expandable",
+                  "summary": "More",
+                  "children": [
+                    {
+                      "id": "deep",
+                      "type": "paragraph",
+                      "text": "Deep."
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

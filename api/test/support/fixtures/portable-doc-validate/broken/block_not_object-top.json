@@ -1,0 +1,13 @@
+{
+  "expect": [
+    {
+      "code": "block_not_object",
+      "path": "/blocks/0"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      "A loose string where a block goes."
+    ]
+  }
+}

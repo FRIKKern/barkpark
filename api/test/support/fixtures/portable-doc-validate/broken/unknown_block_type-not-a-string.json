@@ -1,0 +1,16 @@
+{
+  "expect": [
+    {
+      "code": "unknown_block_type",
+      "path": "/blocks/0/type"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": 7,
+        "text": "Seven."
+      }
+    ]
+  }
+}

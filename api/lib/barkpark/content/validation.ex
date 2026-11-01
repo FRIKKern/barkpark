@@ -127,7 +127,7 @@ defmodule Barkpark.Content.Validation do
   alias Barkpark.Content.{PortableTextValidation, RichTextFormat}
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.SchemaDefinition.{Field, Parsed}
-  alias Barkpark.PortableDoc.FieldVocabulary
+  alias Barkpark.PortableDoc.{FieldVocabulary, Validate}
 
   @typedoc "One finding, ready for a caller that renders its own sentence per code."
   @type finding :: %{path: String.t(), message: String.t(), code: atom(), params: map()}
@@ -819,7 +819,7 @@ defmodule Barkpark.Content.Validation do
     if get_in_field(field, "type") == "richText" and portable_doc_field?(field) do
       value
       |> richtext_blocks()
-      |> Enum.filter(&portable_text_block?/1)
+      |> Enum.filter(&Validate.portable_text_block?/1)
       |> Enum.map(fn _ ->
         "Sanity Portable Text block (_type/children/markDefs), not a PortableDoc block"
       end)
@@ -1193,7 +1193,7 @@ defmodule Barkpark.Content.Validation do
     blocks
     |> Enum.with_index()
     |> Enum.flat_map(fn {block, idx} ->
-      if portable_text_block?(block) do
+      if Validate.portable_text_block?(block) do
         shape(level, [
           {"#{path}/#{idx}",
            "Sanity Portable Text block (_type/children/markDefs), not a PortableDoc block",
@@ -1204,21 +1204,6 @@ defmodule Barkpark.Content.Validation do
       end
     end)
   end
-
-  # Sanity's Portable Text block shape: `_type: "block"` plus at least one of
-  # its other signature keys (`children`, `markDefs`, `listItem`) — never all
-  # three required, since a minimal/empty PT block can lack `markDefs` or
-  # `listItem`. PortableDoc's OWN block convention keys on `"type"` (no
-  # underscore; see `walk_field/4`'s object-block-vocabulary clause above),
-  # so a genuine PortableDoc block never has a `"_type"` key at all — no
-  # overlap, no false positive on an ordinary block this field's own
-  # vocabulary declares.
-  defp portable_text_block?(%{"_type" => "block"} = block) do
-    Map.has_key?(block, "children") or Map.has_key?(block, "markDefs") or
-      Map.has_key?(block, "listItem")
-  end
-
-  defp portable_text_block?(_), do: false
 
   # One item of a several-named-member-types `arrayOf` (task-b3ebbd3ab1575e2a) —
   # the typed branch of the "arrayOf" `walk_field/4` clause above, kept out of

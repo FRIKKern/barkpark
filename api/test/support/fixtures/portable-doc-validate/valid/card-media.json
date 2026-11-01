@@ -1,0 +1,27 @@
+{
+  "blocks": [
+    {
+      "id": "card",
+      "type": "card",
+      "slots": {
+        "title": [
+          {
+            "type": "heading",
+            "level": 3,
+            "text": "Card"
+          }
+        ],
+        "media": [
+          {
+            "src": "https://example.com/a.png",
+            "alt": "A typeless media item"
+          },
+          {
+            "type": "image",
+            "src": "https://example.com/b.png"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "expect": [
+    {
+      "code": "not_a_doc",
+      "path": ""
+    }
+  ],
+  "doc": "Just a sentence."
+}

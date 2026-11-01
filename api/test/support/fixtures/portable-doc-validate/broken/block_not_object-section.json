@@ -1,0 +1,23 @@
+{
+  "expect": [
+    {
+      "code": "block_not_object",
+      "path": "/blocks/0/blocks/1"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "id": "s",
+        "type": "section",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Fine."
+          },
+          null
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "expect": [
+    {
+      "code": "block_not_object",
+      "path": "/blocks/0"
+    },
+    {
+      "code": "unknown_block_type",
+      "path": "/blocks/1/type"
+    },
+    {
+      "code": "value_not_allowed",
+      "path": "/blocks/2/level"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      "loose",
+      {
+        "type": "nope"
+      },
+      {
+        "type": "heading",
+        "level": 9,
+        "text": "Nine"
+      }
+    ]
+  }
+}

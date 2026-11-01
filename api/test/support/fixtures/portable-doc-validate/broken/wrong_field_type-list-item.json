@@ -1,0 +1,19 @@
+{
+  "expect": [
+    {
+      "code": "wrong_field_type",
+      "path": "/blocks/0/items/1"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "list",
+        "items": [
+          "One",
+          true
+        ]
+      }
+    ]
+  }
+}

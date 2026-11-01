@@ -1,0 +1,23 @@
+{
+  "expect": [
+    {
+      "code": "portable_text_block",
+      "path": "/blocks/0"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "_type": "block",
+        "_key": "k1",
+        "style": "normal",
+        "children": [
+          {
+            "_type": "span",
+            "text": "Only children."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "expect": [
+    {
+      "code": "portable_text_block",
+      "path": "/blocks/0/items/1"
+    }
+  ],
+  "doc": {
+    "blocks": [
+      {
+        "type": "list",
+        "items": [
+          "Fine.",
+          {
+            "_type": "block",
+            "_key": "k1",
+            "style": "normal",
+            "listItem": "bullet",
+            "children": [
+              {
+                "_type": "span",
+                "text": "A bullet."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

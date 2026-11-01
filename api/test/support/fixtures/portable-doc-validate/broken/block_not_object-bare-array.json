@@ -1,0 +1,15 @@
+{
+  "expect": [
+    {
+      "code": "block_not_object",
+      "path": "/1"
+    }
+  ],
+  "doc": [
+    {
+      "type": "paragraph",
+      "text": "A doc may be the blocks array itself."
+    },
+    7
+  ]
+}

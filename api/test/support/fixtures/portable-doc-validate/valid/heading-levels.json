@@ -1,0 +1,19 @@
+{
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "One"
+    },
+    {
+      "type": "heading",
+      "level": 6,
+      "text": "Six"
+    },
+    {
+      "type": "heading",
+      "level": "3",
+      "text": "String three"
+    }
+  ]
+}
