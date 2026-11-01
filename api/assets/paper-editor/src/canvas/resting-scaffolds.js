@@ -6,12 +6,37 @@ import { t } from "../i18n.js";
 // Whole sentences, so a translation never has to agree with a node type name.
 const EMPTY_LABELS = { paragraph: "Edit empty paragraph", ingress: "Edit empty ingress" };
 
+const isEmptyProse = (node) => !!node && ["paragraph", "ingress"].includes(node.type.name) && node.content.size === 0;
+
+// Enter never makes two empty prose lines touch at the top level
+// (task-be261d669280dc9e). The reader shows no empty line and the canvas hides
+// every one the caret leaves, so a second one was invisible state: six Enters
+// showed one line and took six Backspaces to leave. On an empty line Enter does
+// nothing; at the start of a line under an empty one it does nothing; at the end
+// of a line above an empty one it moves the caret there. Lists, nested blocks,
+// Shift-Enter and the menus (handled before keymaps) are untouched.
+function enterBesideEmptyProse(editor) {
+  const { selection, doc } = editor.state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const { $from } = selection;
+  if ($from.depth !== 1 || !$from.parent.isTextblock) return false;
+  if (isEmptyProse($from.parent)) return true;
+  const index = $from.index(0);
+  if ($from.parentOffset === 0 && isEmptyProse(doc.maybeChild(index - 1))) return true;
+  if ($from.parentOffset !== $from.parent.content.size || !isEmptyProse(doc.maybeChild(index + 1))) return false;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, $from.after() + 1)).scrollIntoView());
+  return true;
+}
+
 // Reader-suppressed scaffolds stay in the document and history. Only their
 // resting presentation collapses; a keyboard-reachable gutter button selects
 // the original native node, immediately restoring its normal editing surface.
 export function restingScaffolds(host) {
   return Extension.create({
     name: "restingScaffolds",
+    addKeyboardShortcuts() {
+      return { Enter: ({ editor }) => enterBesideEmptyProse(editor) };
+    },
     addProseMirrorPlugins() {
       const editor = this.editor;
       return [new Plugin({
@@ -46,7 +71,7 @@ export function restingScaffolds(host) {
               group = [];
             };
             state.doc.forEach((node, pos, index) => {
-              const empty = ["paragraph", "ingress"].includes(node.type.name) && node.content.size === 0;
+              const empty = isEmptyProse(node);
               const next = state.doc.maybeChild(index + 1);
               const divider = root && node.type.name === "divider" && next?.type.name === "heading" && next.attrs.level === 2;
               // Late host hydration maps the initial empty document selection to
