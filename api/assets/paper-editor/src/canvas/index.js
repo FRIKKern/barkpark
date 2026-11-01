@@ -82,6 +82,8 @@ import {
   hasOverlappingOps,
   opsRebaseSafe,
   pendingUploadIndexes,
+  blockParents,
+  holdsNodeIds,
 
   withObjectOverrides,
 } from "./run-convert.js";
@@ -90,7 +92,7 @@ import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
 import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
-import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
+import { exactClipboardSerializer, exactSliceFromClipboard, sliceWithFreshIds } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -365,6 +367,9 @@ import { OpaqueMark } from "../opaque-mark.js";
 // How long a focusBlock(id) for a block that has not arrived yet stays armed.
 const PENDING_FOCUS_MS = 5000;
 
+// The key that makes a drag copy instead of move, as prosemirror-view reads it.
+const DRAG_COPY_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "altKey" : "ctrlKey";
+
 // Left is the model's "no alignment" (convert.js stores only center/right; run-convert
 // treats left and absent as one), so Edit paints it as NO alignment too. Stock TextAlign
 // writes an inline `text-align: left` for its default on every paragraph and heading,
@@ -562,6 +567,39 @@ function figurePastePlan(slice) {
   return { inline: new Slice(Fragment.from(paragraph.content), 0, 0) };
 }
 
+// Which copy of a bpId keeps it (task-42d085f7431b8417). ProseMirror's splitBlock
+// copies the source node's attrs, bpId included, so an Enter leaves two nodes with
+// one id: two top-level blocks, or two children of one section / expandable / step /
+// tab. A drop or paste can put a copy anywhere else. runToOps keys edits by id and
+// patch.ex refuses a batch that repeats one, so every copy but one reads as new
+// (bpId null) and the projection mints it a fresh id, which _stampMaterializedIds
+// writes back. The keeper is the copy still where the id was (`prevBlocks`, the
+// diff's baseline), preferring the top level, else the first. A top-level node whose
+// id was only ever nested reads as new as well: runToOps mints for it, and the live
+// doc has to carry the id the server got. Only ids the projection keeps count: a
+// column's children and a list's paragraphs carry none (holdsNodeIds).
+function freshenRepeatedIds(doc, prevBlocks) {
+  const was = prevBlocks ? blockParents(prevBlocks) : new Map();
+  const copies = new Map();
+  const walk = (nodes, parent) => {
+    for (const node of nodes || []) {
+      const id = node.attrs && node.attrs.bpId;
+      if (id != null) copies.set(id, [...(copies.get(id) || []), { node, parent }]);
+      if (holdsNodeIds(node)) walk(node.content, id ?? node);
+    }
+  };
+  walk(doc.content, null);
+  for (const [id, found] of copies) {
+    const parents = was.get(id);
+    const placed = parents && !parents.has(null) ? found.filter((copy) => copy.parent !== null) : found;
+    if (found.length === 1 && placed.length === 1) continue;
+    const stayed = placed.filter((copy) => parents && parents.has(copy.parent));
+    const pool = stayed.length ? stayed : placed;
+    const keeper = pool.find((copy) => copy.parent === null) || pool[0];
+    for (const copy of found) if (copy !== keeper) copy.node.attrs = { ...copy.node.attrs, bpId: null };
+  }
+}
+
 // Strip null-valued bpId/bpType from NON-top-level nodes before the diff.
 //
 // Why this exists: BpAttrs declares bpId/bpType GLOBALLY on the `paragraph`
@@ -583,27 +621,8 @@ function figurePastePlan(slice) {
 // a freshly-typed/split block runToOps must mint an id for. We only ever strip
 // the phantom nested ones. This keeps S0's runToOps used verbatim, with a doc
 // shaped exactly the way it was tested against.
-function normalizeCanvasDoc(doc) {
-  // ── DEDUP bpIds at EVERY depth: an Enter-SPLIT clones the origin block's attrs ──
-  //
-  // ProseMirror's splitBlock (the Enter keymap) copies the source node's attrs
-  // into the new half — INCLUDING bpId. So a split yields TWO nodes carrying the
-  // SAME bpId: two top-level blocks, or two children of one section / expandable /
-  // step / tab. runToOps keys edits by id, and patch.ex refuses a batch whose
-  // blocks repeat an id (duplicate_id, task-42d085f7431b8417). The split half is
-  // genuinely NEW, so the SECOND-and-later occurrence of any bpId (document order)
-  // must read as new: null its bpId so the projection mints a fresh id — at the
-  // top level runToOps' "split → insert-after(minted id)" path, inside a container
-  // the container's own child mint. The FIRST occurrence keeps the id (it's the
-  // surviving origin block).
-  const seen = new Set();
-  const dedupe = (node) => {
-    const id = node.attrs && node.attrs.bpId;
-    if (id != null && seen.has(id)) node.attrs = { ...node.attrs, bpId: null };
-    else if (id != null) seen.add(id);
-    (node.content || []).forEach(dedupe);
-  };
-  (doc.content || []).forEach(dedupe);
+function normalizeCanvasDoc(doc, prevBlocks = null) {
+  freshenRepeatedIds(doc, prevBlocks);
 
   const stripNested = (node) => {
     if (node && node.attrs) {
@@ -1383,6 +1402,7 @@ class BpPaperCanvas extends HTMLElement {
         handleDOMEvents: {
           keydown: (view, event) => this._modEnterForHost(view, event) || this._escapeForHost(view, event),
           beforeinput: (_view, event) => this._swallowModEnter(event),
+          drop: (view, event) => this._noteDropMoves(view, event),
         },
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
         // The canvas's own copy carries the exact fragment, so its paste rebuilds
@@ -1399,8 +1419,9 @@ class BpPaperCanvas extends HTMLElement {
           this._pasteImagesLeftOut = count;
           return clean;
         },
-        // A field canvas fits the pasted slice to its vocabulary, node by node.
-        transformPasted: (slice) => this._fitPastedSlice(slice),
+        // A copy of a block this doc holds reads as new (clipboard-slice.js); then
+        // a field canvas fits the pasted slice to its vocabulary, node by node.
+        transformPasted: (slice, view) => this._fitPastedSlice(this._dropMoves ? slice : sliceWithFreshIds(view.state.schema, slice, view.state.doc)),
         // Image files dropped onto the canvas land as image nodes at the drop point
         // and upload through the host's mediaUploader (see _insertImageFiles).
         handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
@@ -2289,7 +2310,7 @@ class BpPaperCanvas extends HTMLElement {
       if (!source) { this._armComposeEndEmit(); return false; }
     }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
-    const nextDoc = normalizeCanvasDoc(source ? source.toJSON() : this._editor.getJSON());
+    const nextDoc = normalizeCanvasDoc(source ? source.toJSON() : this._editor.getJSON(), diffBaseline);
     // The fast path (task-fb938eb8be3bce48): a top-level node that is the SAME
     // ProseMirror node object it was at the last acknowledged emit is unchanged
     // since then, and when the baseline is exactly that emit's after-state its
@@ -2320,8 +2341,8 @@ class BpPaperCanvas extends HTMLElement {
     // document before another edit can diff, otherwise each cumulative diff
     // invents a different id for the same inserted paragraph.
     // An id stamp is a transaction, and one mid-composition can break the IME: wait.
-    if (composing && this._stampMaterializedIds(stableDoc, { dryRun: true })) { this._armComposeEndEmit(); return false; }
-    this._stampMaterializedIds(stableDoc);
+    if (composing && this._stampMaterializedIds(stableDoc, nextDoc, { dryRun: true })) { this._armComposeEndEmit(); return false; }
+    this._stampMaterializedIds(stableDoc, nextDoc);
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
@@ -3347,6 +3368,16 @@ class BpPaperCanvas extends HTMLElement {
   // each block becomes the nearest shape the field admits (paste-vocabulary.js),
   // marks the field lacks are unwrapped, and whatever had nothing to keep (an
   // image) is named in a notice that stays until the person moves on.
+  // Whether this drop moves blocks within this canvas, decided the way
+  // ProseMirror's own drop does (the copy modifier), so a moved block keeps its id
+  // and a copy-drop's copy reads as new. ProseMirror reads the slice right after
+  // this handler, in the same event.
+  _noteDropMoves(view, event) {
+    this._dropMoves = !!view.dragging && !event[DRAG_COPY_KEY];
+    queueMicrotask(() => { this._dropMoves = false; });
+    return false;
+  }
+
   _fitPastedSlice(slice) {
     const imagesLeftOut = this._pasteImagesLeftOut || 0;
     this._pasteImagesLeftOut = 0;
@@ -4891,48 +4922,32 @@ class BpPaperCanvas extends HTMLElement {
   // node, including editable descendants inside section/container nodes. The
   // stable projection has the same preorder shape as the live document; text
   // nodes participate in the walk so positions cannot drift between siblings.
-  _stampMaterializedIds(stableDoc, { dryRun = false } = {}) {
+  _stampMaterializedIds(stableDoc, nextDoc, { dryRun = false } = {}) {
     if (!this._editor || !stableDoc) return false;
-    // Nothing to stamp unless some live node has no id, or repeats an id at any
-    // depth (the two cases the walk below acts on). Typing into stamped blocks has
-    // neither, and flattening the whole projection per keystroke was the emit's
-    // largest remaining cost (task-fb938eb8be3bce48).
-    let candidate = false;
-    const seenIds = new Set();
-    this._editor.state.doc.descendants((node) => {
-      if (candidate) return false;
-      if (node.isText) return false;
-      const id = node.attrs?.bpId;
-      if (id == null || seenIds.has(id)) candidate = true;
-      seenIds.add(id);
-      return !candidate;
-    });
-    if (!candidate) return false;
-    const stableNodes = [];
-    const collect = (nodes) => {
+    // A node is stamped when the diff read it as new: no id, or a copy
+    // normalizeCanvasDoc cleared (freshenRepeatedIds). Typing into stamped blocks
+    // has neither, and flattening the whole projection per keystroke was the
+    // emit's largest remaining cost (task-fb938eb8be3bce48).
+    const flatten = (nodes, out = []) => {
       for (const node of nodes || []) {
-        stableNodes.push(node);
-        collect(node.content);
+        out.push(node);
+        flatten(node.content, out);
       }
+      return out;
     };
-    collect(stableDoc.content);
+    const diffed = flatten(nextDoc.content);
+    if (!diffed.some((node) => node.type !== "text" && node.attrs?.bpId == null)) return false;
+    const stableNodes = flatten(stableDoc.content);
 
     const { state, view } = this._editor;
     const tr = state.tr;
     let index = 0;
     let mutated = false;
-    const ids = new Set();
     state.doc.descendants((node, pos) => {
+      const diffedId = diffed[index]?.attrs?.bpId;
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
-      // Enter inherits the original paragraph's attrs, at the top level and inside
-      // a container alike. normalizeCanvasDoc treats the second occurrence as new;
-      // materialize its projected ID too, otherwise every subsequent save/read
-      // mints it again. Keep the first occurrence and all unrelated identities.
-      const id = node.attrs?.bpId;
-      const duplicateId = id != null && ids.has(id);
-      if (id != null) ids.add(id);
-      if (!node.isText && (id == null || duplicateId) && stableId != null) {
+      if (!node.isText && diffedId == null && stableId != null) {
         const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
         if (node.type.name === "note") {
           // Keep pre-save label/lead AttrSteps mapped to this same note.

@@ -1526,6 +1526,26 @@ function walkBlockIds(blocks, sink) {
   }
 }
 
+// Every block id → the ids of the blocks holding it (null: the top level), over
+// walkBlockIds' scope. A set, because a legacy doc can hold one id in two places.
+export function blockParents(blocks, parent = null, out = new Map()) {
+  for (const block of blocks || []) {
+    if (!block) continue;
+    if (block.id != null) out.set(block.id, (out.get(block.id) || new Set()).add(parent));
+    for (const key of ["blocks", "children", "steps", "tabs"]) {
+      if (Array.isArray(block[key])) blockParents(block[key], block.id, out);
+    }
+  }
+  return out;
+}
+
+// A getJSON node whose children carry block ids the projection keeps: a container
+// (section, expandable, steps, tabs, columns) or a steps / tabs row. A column's own
+// children and a list's paragraphs carry none.
+export function holdsNodeIds(node) {
+  return (isCanvasContainerNode(node.type) || CANVAS_ROW_NODE_NAMES.has(node.type)) && Array.isArray(node.content);
+}
+
 // Walk a canvas NODE tree (descend a bpSection node's content at any depth), adding
 // every node.attrs.bpId into `sink`.
 function walkNodeIds(nodes, sink) {
@@ -1533,9 +1553,7 @@ function walkNodeIds(nodes, sink) {
     if (!node) continue;
     const id = node.attrs && node.attrs.bpId;
     if (id != null) sink.add(id);
-    if ((isCanvasContainerNode(node.type) || CANVAS_ROW_NODE_NAMES.has(node.type)) && Array.isArray(node.content)) {
-      walkNodeIds(node.content, sink);
-    }
+    if (holdsNodeIds(node)) walkNodeIds(node.content, sink);
   }
 }
 

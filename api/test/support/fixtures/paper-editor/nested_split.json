@@ -312,6 +312,13 @@
             }
           ]
         }
+      ],
+      "typed": [
+        "Left",
+        "Late at six.",
+        "Fog lifted.",
+        "",
+        "Rain."
       ]
     },
     {
@@ -593,6 +600,13 @@
             }
           ]
         }
+      ],
+      "typed": [
+        "Left",
+        "Late at six.",
+        "Fog lifted.",
+        "",
+        "Rain."
       ]
     },
     {
@@ -986,6 +1000,13 @@
             }
           ]
         }
+      ],
+      "typed": [
+        "Left",
+        "Late at six.",
+        "Fog lifted.",
+        "",
+        "Rain."
       ]
     },
     {
@@ -1379,6 +1400,13 @@
             }
           ]
         }
+      ],
+      "typed": [
+        "Left",
+        "Late at six.",
+        "Fog lifted.",
+        "",
+        "Rain."
       ]
     },
     {
@@ -1628,6 +1656,811 @@
             }
           ]
         }
+      ],
+      "typed": [
+        "Left",
+        "Late at six.",
+        "Fog lifted.",
+        "",
+        "Rain."
+      ]
+    },
+    {
+      "scene": "copy-to-top",
+      "before": [
+        {
+          "id": "p-a",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Alpha."
+            }
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-a",
+            "block": {
+              "id": "c-split-21",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "c-split-21",
+            "after": null
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "c-split-21",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "c-split-21",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Left at six. Typed."
+            }
+          ]
+        },
+        {
+          "id": "p-a",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Alpha."
+            }
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Left at six. Typed.",
+        "Left at six."
+      ]
+    },
+    {
+      "scene": "copy-in-section",
+      "before": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            },
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left at six."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-a",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Alpha."
+                    }
+                  ]
+                },
+                {
+                  "id": "c-split-22",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left at six."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-day",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            },
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            },
+            {
+              "id": "c-split-22",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Left at six. Typed.",
+        "Left at six."
+      ]
+    },
+    {
+      "scene": "move-to-top",
+      "before": [
+        {
+          "id": "p-a",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Alpha."
+            }
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            },
+            {
+              "id": "p-two",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Fog."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-a",
+            "block": {
+              "id": "c-split-23",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "c-split-23",
+            "after": null
+          },
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-two",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Fog."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "c-split-23",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "c-split-23",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Left at six. Typed."
+            }
+          ]
+        },
+        {
+          "id": "p-a",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Alpha."
+            }
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-two",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Fog."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Left at six. Typed."
+      ]
+    },
+    {
+      "scene": "paste-above",
+      "before": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            },
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-a",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Alpha.Copied one."
+                    }
+                  ]
+                },
+                {
+                  "id": "c-split-24",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Copied two."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left at six."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "c-split-24",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Copied two. More."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha.Copied one."
+                }
+              ]
+            },
+            {
+              "id": "c-split-24",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Copied two. More."
+                }
+              ]
+            },
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Copied two. More.",
+        "Left at six."
+      ]
+    },
+    {
+      "scene": "paste-into-column",
+      "before": [
+        {
+          "id": "col1",
+          "type": "columns",
+          "columns": [
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Left"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Right"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "p-x",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Original X."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "col1",
+            "patch": {
+              "columns": [
+                [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "LeftCopied one."
+                      }
+                    ]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "Copied two."
+                      }
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "Right"
+                      }
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-x",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Original X. More."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "col1",
+          "type": "columns",
+          "columns": [
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "LeftCopied one."
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Copied two."
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Right"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "p-x",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Original X. More."
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Original X. More."
+      ]
+    },
+    {
+      "scene": "paste-into-section",
+      "before": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-x",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Original X."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-a",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Alpha.Copied one."
+                    }
+                  ]
+                },
+                {
+                  "id": "c-split-25",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Copied two."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-x",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Original X. More."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha.Copied one."
+                }
+              ]
+            },
+            {
+              "id": "c-split-25",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Copied two."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-x",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Original X. More."
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Original X. More.",
+        "Copied two."
       ]
     }
   ]

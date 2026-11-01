@@ -72,8 +72,7 @@ export function exactSliceFromClipboard(schema, event, doc = null) {
     if (raw.length > MAX_HTML) return null;
     const json = JSON.parse(raw);
     if (!Array.isArray(json) || !json.every((n) => admissible(schema, n))) return null;
-    const taken = new Set();
-    if (doc) doc.descendants((n) => { if (n.attrs && typeof n.attrs.bpId === "string") taken.add(n.attrs.bpId); });
+    const taken = doc ? idsIn(doc) : new Set();
     const nodes = json.map((n) => {
       const node = schema.nodeFromJSON(withIdsChecked(n, taken));
       node.check();
@@ -89,6 +88,22 @@ export function exactSliceFromClipboard(schema, event, doc = null) {
     // Malformed, or refused by nodeFromJSON / check().
     return null;
   }
+}
+
+// Any pasted or dropped slice, under the same id rule: a copy of a block this
+// document holds reads as new, while a cut (the id is gone from the document) keeps
+// its id. A drag that moves blocks within this canvas keeps them (the caller skips it).
+export function sliceWithFreshIds(schema, slice, doc) {
+  const json = slice.toJSON();
+  if (!json) return slice;
+  const taken = idsIn(doc);
+  return Slice.fromJSON(schema, { ...json, content: json.content.map((n) => withIdsChecked(n, taken)) });
+}
+
+function idsIn(doc) {
+  const taken = new Set();
+  doc.descendants((n) => { if (n.attrs && typeof n.attrs.bpId === "string") taken.add(n.attrs.bpId); });
+  return taken;
 }
 
 // Check 2 and 3: known node and mark types only, and no unsafe attribute string.

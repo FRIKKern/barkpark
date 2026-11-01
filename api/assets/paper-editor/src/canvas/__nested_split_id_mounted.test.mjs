@@ -11,6 +11,11 @@
 // canvas mounted on the folded blocks (the reload) shows every typed character, and
 // the minted id is written back so the next batch does not mint it again.
 //
+// The same holds for every other way a copy or a move of a block lands across depths
+// (review of #25040): a copy above its original, a paste into a column or a section,
+// a nested paragraph moved to the top level, a doc that already repeats an id. The
+// original keeps its id, and the live doc never carries an id the server lacks.
+//
 // The batches are recorded, minted ids normalised, into
 // api/test/support/fixtures/paper-editor/nested_split.json; patch_nested_split_test.exs
 // folds that file through Patch and the canvas batch write. NESTED_SPLIT_WRITE=1
@@ -48,6 +53,7 @@ window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right
 await import("./index.js");
 const { applyOps } = await import("../smoke/harness.mjs");
 const { TextSelection } = await import("@tiptap/pm/state");
+const { Fragment, Slice } = await import("@tiptap/pm/model");
 
 const FIXTURE = new URL("../../../../test/support/fixtures/paper-editor/nested_split.json", import.meta.url);
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,6 +122,30 @@ function fold(blocks, ops) {
   const next = applyOps(blocks, ops);
   assert.deepEqual(repeated(ids(next)), [], `no block id repeats after ${JSON.stringify(ops.map((op) => op.op))}`);
   return next;
+}
+
+function paste(editor, html, plain) {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: { types: ["text/html", "text/plain"], getData: (t) => (t === "text/html" ? html : plain), files: [] },
+  });
+  editor.view.dom.dispatchEvent(event);
+}
+const COPIES = (id) => `<p data-bp-id="${id}" data-bp-type="paragraph">Copied one.</p><p data-bp-id="${id}" data-bp-type="paragraph">Copied two.</p>`;
+function textblockAt(doc, text) {
+  let found = null;
+  doc.descendants((node, pos) => { if (!found && node.isTextblock && node.textContent === text) found = { node, pos }; });
+  assert.ok(found, `a line reads "${text}"`);
+  return found;
+}
+// What a drop leaves when its slice kept the ids: `copy` inserts the block again
+// before the line `before`, otherwise the block moves there.
+function place(editor, text, before, { copy }) {
+  const { node, pos } = textblockAt(editor.state.doc, text);
+  let tr = editor.state.tr;
+  if (!copy) tr = tr.delete(pos, pos + node.nodeSize);
+  tr = tr.replaceRange(textblockAt(tr.doc, before).pos, textblockAt(tr.doc, before).pos, new Slice(Fragment.from(node), 0, 0));
+  editor.view.dispatch(tr);
 }
 
 async function mount(blocks, host) {
@@ -236,7 +266,7 @@ for (const { name, blocks } of SCENES) {
         assert.ok(text.includes(typed), `"${typed}" is saved (have ${JSON.stringify(text)})`);
       }
       assert.deepEqual(await reloaded(server), lines(editor), "a reload shows exactly what the author saw");
-      recorded.push({ scene: name, before: clone(blocks), batches, client_after: clone(canvas.blocks) });
+      recorded.push({ scene: name, before: clone(blocks), batches, client_after: clone(canvas.blocks), typed: ["Left", "Late at six.", "Fog lifted.", "", "Rain."] });
     } finally {
       canvas.remove();
     }
@@ -309,6 +339,122 @@ await scene("section: pasted paragraphs that carry an id already in the doc get 
     canvas.remove();
   }
 });
+
+// A copy or a move of a block, by paste or by what a drop leaves, then typing.
+// `keeps`: line → the id it must still carry. Every batch applies, the fold is what
+// the client believes, the live doc carries the ids the server holds, and a reload
+// shows every typed character.
+async function door(name, blocks, act, { keeps = {}, typed, removes = true }) {
+  await scene(name, async () => {
+    let server = clone(blocks);
+    const batches = [];
+    const refusals = [];
+    const canvas = await mount(blocks, (el, { ops, seq }) => {
+      batches.push(clone(ops));
+      try {
+        server = fold(server, ops);
+      } catch (error) {
+        refusals.push(error.message);
+        el.acknowledgeOps(seq, false);
+        return;
+      }
+      el.acknowledgeOps(seq, true);
+      el.applyServerBlocks(clone(server), { mode: "own" });
+    });
+    try {
+      const editor = canvas._editor;
+      await act(editor, canvas);
+      await saved(canvas);
+      assert.deepEqual(refusals, [], "the server takes every batch");
+      for (const [line, id] of Object.entries(keeps)) assert.equal(idOf(server, line), id, `"${line}" keeps ${id}`);
+      const text = words(server);
+      for (const t of typed) assert.ok(text.includes(t), `"${t}" is saved (have ${JSON.stringify(text)})`);
+      if (!removes) assert.deepEqual(batches.flat().filter((op) => op.op === "remove-block"), [], "no block the author left alone is removed");
+      assert.deepEqual(server, canvas.blocks, "the fold is what the client believes it saved");
+      assert.deepEqual(liveIds(editor).filter((id) => !ids(server).includes(id)), [], "the live doc carries no id the server lacks");
+      assert.deepEqual(repeated(liveIds(editor)), [], "the live doc repeats no id");
+      assert.deepEqual(await reloaded(server), lines(editor), "a reload shows exactly what the author saw");
+      recorded.push({ scene: name.split(":")[0], before: clone(blocks), batches, client_after: clone(canvas.blocks), typed });
+    } finally {
+      canvas.remove();
+    }
+  });
+}
+
+await door("copy-to-top: a nested paragraph copied to the top level above its section, then typed into: the original keeps its id",
+  [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six.")] }],
+  async (editor, canvas) => {
+    place(editor, "Left at six.", "Alpha.", { copy: true });
+    await saved(canvas);
+    caretAfter(editor, "Left at six.");
+    type(editor, " Typed.");
+  },
+  { keeps: { "Left at six.": "p-day", "Alpha.": "p-a" }, typed: ["Left at six. Typed.", "Left at six."] });
+
+await door("copy-in-section: a nested paragraph copied above itself in its section, then typed into: every character saves",
+  [{ id: "s-day", type: "section", title: "Day one", blocks: [p("p-a", "Alpha."), p("p-day", "Left at six.")] }],
+  async (editor, canvas) => {
+    place(editor, "Left at six.", "Alpha.", { copy: true });
+    await saved(canvas);
+    caretAfter(editor, "Left at six.");
+    type(editor, " Typed.");
+  },
+  { keeps: { "Alpha.": "p-a" }, typed: ["Left at six. Typed.", "Left at six."] });
+
+await door("move-to-top: a nested paragraph moved to the top level, then typed into: the typing saves",
+  [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six."), p("p-two", "Fog.")] }],
+  async (editor, canvas) => {
+    place(editor, "Left at six.", "Alpha.", { copy: false });
+    await saved(canvas);
+    caretAfter(editor, "Left at six.");
+    type(editor, " Typed.");
+  },
+  { keeps: { "Fog.": "p-two" }, typed: ["Left at six. Typed."] });
+
+await door("paste-above: pasted copies of a section paragraph above it, then typed into: the original keeps its id",
+  [{ id: "s-day", type: "section", title: "Day one", blocks: [p("p-a", "Alpha."), p("p-day", "Left at six.")] }],
+  async (editor, canvas) => {
+    caretAfter(editor, "Alpha.");
+    paste(editor, COPIES("p-day"), "Copied one.\n\nCopied two.");
+    await saved(canvas);
+    caretAfter(editor, "Copied two.");
+    type(editor, " More.");
+  },
+  { keeps: { "Left at six.": "p-day" }, typed: ["Copied two. More.", "Left at six."] });
+
+await door("paste-into-column: pasted copies of a top-level paragraph in a column: the paragraph is left alone",
+  [{ id: "col1", type: "columns", columns: [[{ type: "paragraph", content: [{ type: "text", value: "Left" }] }], [{ type: "paragraph", content: [{ type: "text", value: "Right" }] }]] }, p("p-x", "Original X.")],
+  async (editor, canvas) => {
+    caretAfter(editor, "Left");
+    paste(editor, COPIES("p-x"), "Copied one.\n\nCopied two.");
+    await saved(canvas);
+    caretAfter(editor, "Original X.");
+    type(editor, " More.");
+  },
+  { keeps: { "Original X. More.": "p-x" }, typed: ["Original X. More."], removes: false });
+
+await door("paste-into-section: pasted copies of a top-level paragraph in a section above it: the paragraph is left alone",
+  [{ id: "s-day", type: "section", title: "Day one", blocks: [p("p-a", "Alpha.")] }, p("p-x", "Original X.")],
+  async (editor, canvas) => {
+    caretAfter(editor, "Alpha.");
+    paste(editor, COPIES("p-x"), "Copied one.\n\nCopied two.");
+    await saved(canvas);
+    caretAfter(editor, "Original X.");
+    type(editor, " More.");
+  },
+  { keeps: { "Original X. More.": "p-x" }, typed: ["Original X. More.", "Copied two."], removes: false });
+
+const doorRecordings = recorded.length;
+await door("legacy-duplicate: a doc that already holds one id twice, typed into elsewhere: nothing is removed",
+  [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-dup", "Inside.")] }, p("p-dup", "Outside.")],
+  async (editor) => {
+    caretAfter(editor, "Alpha.");
+    type(editor, " More.");
+  },
+  { keeps: { "Outside.": "p-dup", "Alpha. More.": "p-a" }, typed: ["Alpha. More.", "Inside.", "Outside."], removes: false });
+// The server refuses a stored doc that repeats an id (task-42d085f7431b8417 criterion 2),
+// so the fixture holds only what it takes today.
+recorded.length = doorRecordings;
 
 function normalised(scenes) {
   const names = new Map();

@@ -4,13 +4,20 @@
 // in headless Chromium with real key events (Playwright's keyboard, the same input
 // pipeline a person's keys take), on the committed bundle and stylesheet the Studio
 // loads. For each container (section, expandable, step, tab): click into the nested
-// paragraph, End, Enter, type, Enter twice, type, then split mid-text and type. The
+// paragraph, End, Enter, type, Enter twice, type, then split mid-text and type. Then
+// two section paragraphs dragged onto a top-level line, with and without the copy
+// key, and typed into. The
 // page's host acknowledges every batch; afterwards every batch is folded through the
 // patch.ex reference fold (smoke/harness.mjs applyOps), and the rig asserts:
 //   - no block id repeats after any batch (patch.ex refuses that: duplicate_id)
 //   - the fold equals what the canvas believes it saved
 //   - a fresh canvas mounted on the folded blocks (the reload) shows exactly the
 //     lines the author saw, every typed character included
+//   - the live doc carries no id the server lacks; a copy-drop's originals keep
+//     their ids, a move-drop's moved paragraphs keep theirs
+// The batches are recorded into api/test/support/fixtures/paper-editor/
+// nested_split_keys.json, which patch_nested_split_test.exs folds through Patch
+// and the canvas batch write (NESTED_SPLIT_WRITE=1 rewrites it).
 //
 //   Run:  node src/__nested_split_keys.mjs        (or: npm run nested-split:keys)
 //   Env:  BP_PLAYWRIGHT_FROM=<package.json that can require("playwright")>
@@ -22,7 +29,7 @@
 // BP_REQUIRE_CHROME=1), per __rig.mjs. Not in `npm test`, like the other rigs.
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -34,6 +41,7 @@ import { applyOps } from "./smoke/harness.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../../../..");
 const ASSETS = join(REPO, "api/priv/static/assets");
+const FIXTURE = join(REPO, "api/test/support/fixtures/paper-editor/nested_split_keys.json");
 
 function playwright() {
   const candidates = [process.env.BP_PLAYWRIGHT_FROM].filter(Boolean);
@@ -149,6 +157,108 @@ async function settle(page) {
   await page.waitForFunction(() => !document.getElementById("canvas").hasPendingChanges());
 }
 
+async function edgeOf(page, text, end) {
+  const box = await page.evaluate(([text, end]) => {
+    const walker = document.createTreeWalker(document.querySelector('[contenteditable="true"]'), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.data.indexOf(text);
+      if (at === -1) continue;
+      const range = document.createRange();
+      const i = end ? at + text.length - 1 : at;
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const r = range.getBoundingClientRect();
+      return { x: end ? r.right - 1 : r.left + 1, y: r.top + r.height / 2 };
+    }
+    return null;
+  }, [text, end]);
+  if (!box) throw new Error(`"${text}" is not on screen`);
+  return box;
+}
+
+// Select from the start of `from` to the end of `to` with the mouse (click, then
+// Shift-click), then drag the selection onto the start of `before`; `copy` holds
+// the copy key (Option on a Mac). Headless Chromium starts no native drag from a
+// text selection, so the drag is the DragEvents a person's drag fires (dragstart
+// in the selection, dragover, drop at the target), dispatched at those points:
+// ProseMirror's own dragstart builds the slice, and its drop handler inserts it.
+async function dragSelection(page, from, to, before, { copy }) {
+  const start = await edgeOf(page, from, false);
+  const end = await edgeOf(page, to, true);
+  await page.mouse.click(start.x, start.y);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(end.x, end.y);
+  await page.keyboard.up("Shift");
+  await page.waitForFunction(() => !document.getElementById("canvas")._editor.state.selection.empty);
+  const grab = { x: start.x + 6, y: start.y };
+  const target = await edgeOf(page, before, false);
+  const started = await page.evaluate(([grab, target, copy]) => {
+    const view = document.getElementById("canvas")._editor.view;
+    const key = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "altKey" : "ctrlKey";
+    const dataTransfer = new DataTransfer();
+    const fire = (type, { x, y }) => document.elementFromPoint(x, y).dispatchEvent(
+      new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer, [key]: copy }));
+    fire("dragstart", grab);
+    const dragging = !!view.dragging;
+    fire("dragover", target);
+    fire("drop", target);
+    return dragging;
+  }, [grab, target, copy]);
+  if (!started) throw new Error("the drag did not start");
+}
+
+function words(blocks, out = []) {
+  for (const block of blocks || []) {
+    if (Array.isArray(block.content)) out.push(block.content.map((n) => n.value || "").join(""));
+    else if (typeof block.text === "string") out.push(block.text);
+    for (const key of ["blocks", "children", "steps", "tabs"]) words(block[key], out);
+  }
+  return out;
+}
+
+// Every batch folds without a refusal or a repeated id, the fold is what the canvas
+// believes it saved, the live doc carries no id the server lacks, every `typed`
+// string is saved, `holds` (container id → its children's [id, text]) holds, and a
+// fresh canvas on the fold shows what the author saw.
+async function landed(page, name, blocks, typed, holds = {}) {
+  const batches = await page.evaluate(() => window.__batches);
+  const client = await page.evaluate(() => document.getElementById("canvas").blocks);
+  const seen = await page.evaluate(() => window.__lines());
+  const live = await page.evaluate(() => {
+    const out = [];
+    document.getElementById("canvas")._editor.state.doc.descendants((node) => { if (!node.isText && node.attrs.bpId != null) out.push(node.attrs.bpId); });
+    return out;
+  });
+  let folded = structuredClone(blocks);
+  for (const ops of batches) {
+    folded = applyOps(folded, ops);
+    const dup = repeated(ids(folded));
+    if (dup.length) throw new Error(`a batch repeats ${dup.join(", ")}: ${JSON.stringify(ops)}`);
+  }
+  if (!isDeepStrictEqual(folded, client)) throw new Error(`the fold ${JSON.stringify(folded)} differs from what the canvas believes it saved ${JSON.stringify(client)}`);
+  const unknown = live.filter((id) => !ids(folded).includes(id));
+  if (unknown.length) throw new Error(`the live doc carries ${unknown.join(", ")}, which the server does not hold`);
+  if (repeated(live).length) throw new Error(`the live doc repeats ${repeated(live).join(", ")}`);
+  for (const [id, children] of Object.entries(holds)) {
+    const have = (folded.find((block) => block.id === id)?.blocks || []).map((child) => [child.id, words([child])[0]]);
+    if (!isDeepStrictEqual(have, children)) throw new Error(`${id} holds ${JSON.stringify(have)}, want ${JSON.stringify(children)}`);
+  }
+  const saved = words(folded);
+  for (const t of typed) {
+    if (!saved.includes(t)) throw new Error(`"${t}" is not saved: ${JSON.stringify(saved)}`);
+  }
+  const reload = await browser.newPage();
+  try {
+    await open(reload, folded);
+    const after = await reload.evaluate(() => window.__lines());
+    if (JSON.stringify(after) !== JSON.stringify(seen)) throw new Error(`the reload shows ${JSON.stringify(after)}, the author saw ${JSON.stringify(seen)}`);
+  } finally {
+    await reload.close();
+  }
+  recorded.push({ scene: name, before: structuredClone(blocks), batches, client_after: client, typed });
+}
+
+const recorded = [];
 const t = tally();
 try {
   for (const [name, blocks] of SCENES) {
@@ -168,33 +278,48 @@ try {
         await page.keyboard.press("Enter");
         await page.keyboard.type("Late");
         await settle(page);
-
-        const batches = await page.evaluate(() => window.__batches);
-        const client = await page.evaluate(() => document.getElementById("canvas").blocks);
-        const seen = await page.evaluate(() => window.__lines());
-        let folded = structuredClone(blocks);
-        for (const ops of batches) {
-          folded = applyOps(folded, ops);
-          const dup = repeated(ids(folded));
-          if (dup.length) throw new Error(`a batch repeats ${dup.join(", ")}: ${JSON.stringify(ops)}`);
-        }
-        if (!isDeepStrictEqual(folded, client)) throw new Error(`the fold ${JSON.stringify(folded)} differs from what the canvas believes it saved ${JSON.stringify(client)}`);
-        for (const typed of ["Left", "Late at six.", "Fog lifted.", "", "Rain."]) {
-          if (!seen.includes(typed)) throw new Error(`"${typed}" is not on screen: ${JSON.stringify(seen)}`);
-        }
-        const reload = await browser.newPage();
-        try {
-          await open(reload, folded);
-          const after = await reload.evaluate(() => window.__lines());
-          if (JSON.stringify(after) !== JSON.stringify(seen)) throw new Error(`the reload shows ${JSON.stringify(after)}, the author saw ${JSON.stringify(seen)}`);
-        } finally {
-          await reload.close();
-        }
+        await landed(page, `keys-${name}`, blocks, ["Left", "Late at six.", "Fog lifted.", "", "Rain."]);
       } finally {
         await page.close();
       }
     });
   }
+
+  const DROP = [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six."), p("p-two", "Fog.")] }];
+  for (const copy of [true, false]) {
+    const name = copy ? "copy-drop" : "move-drop";
+    const why = copy ? "the originals keep their ids" : "the moved paragraphs keep theirs";
+    await t.checkAsync(`${name}: two section paragraphs dragged${copy ? " with the copy key" : ""} onto a top-level line, then typed into: every character folds and reloads, ${why}`, async () => {
+      const page = await browser.newPage();
+      try {
+        await open(page, DROP);
+        await dragSelection(page, "Left at six.", "Fog.", "Alpha.", { copy });
+        await settle(page);
+        await clickAfter(page, "Fog.Alpha.", "Fog.Alpha.".length);
+        await page.keyboard.type(" Typed.");
+        await settle(page);
+        const holds = copy ? [["p-day", "Left at six."], ["p-two", "Fog."]] : [["p-day", "Left at six."], ["p-two", "Fog.Alpha. Typed."]];
+        await landed(page, `keys-${name}`, DROP, ["Fog.Alpha. Typed."].concat(copy ? ["Left at six.", "Fog."] : []), { "s-day": holds });
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  // The recording, for patch_nested_split_test.exs to fold through Patch and the
+  // canvas batch write. NESTED_SPLIT_WRITE=1 rewrites it; otherwise every scene's
+  // after-state must match it, minted ids aside (batch boundaries follow timing).
+  await t.checkAsync("the recording matches api/test/support/fixtures/paper-editor/nested_split_keys.json", async () => {
+    const names = new Map();
+    const scenes = JSON.parse(JSON.stringify(recorded).replace(/c-[0-9a-z]+-[0-9a-f]{8}/g, (id) => {
+      if (!names.has(id)) names.set(id, `c-keys-${names.size + 1}`);
+      return names.get(id);
+    }));
+    const fixture = { recorded_by: "api/assets/paper-editor/src/__nested_split_keys.mjs", scenes };
+    if (process.env.NESTED_SPLIT_WRITE === "1") writeFileSync(FIXTURE, JSON.stringify(fixture, null, 2) + "\n");
+    const shape = (f) => JSON.stringify(f.scenes.map(({ scene, before, client_after, typed }) => ({ scene, before, client_after, typed }))).replace(/c-keys-\d+/g, "c-keys");
+    if (shape(JSON.parse(readFileSync(FIXTURE, "utf8"))) !== shape(fixture)) throw new Error("the recording's after-states differ from the fixture (NESTED_SPLIT_WRITE=1 rewrites it)");
+  });
 } finally {
   await browser.close();
   server.close();
