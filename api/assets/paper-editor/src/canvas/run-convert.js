@@ -1529,7 +1529,7 @@ function walkBlockIds(blocks, sink) {
 // Every block id → the ids of the blocks holding it (null: the top level), over
 // walkBlockIds' scope. A set, because a legacy doc can hold one id in two places.
 export function blockParents(blocks, parent = null, out = new Map()) {
-  for (const block of blocks || []) {
+  for (const block of blocks) {
     if (!block) continue;
     if (block.id != null) out.set(block.id, (out.get(block.id) || new Set()).add(parent));
     for (const key of ["blocks", "children", "steps", "tabs"]) {

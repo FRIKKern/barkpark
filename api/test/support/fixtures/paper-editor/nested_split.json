@@ -1912,6 +1912,144 @@
       ]
     },
     {
+      "scene": "copy-across-sections",
+      "before": [
+        {
+          "id": "s-one",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s-two",
+          "type": "section",
+          "title": "Day two",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-one",
+            "block": {
+              "id": "s-one",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "c-split-23",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left at six."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-a",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Alpha."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "c-split-23",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "s-one",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "c-split-23",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six. Typed."
+                }
+              ]
+            },
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s-two",
+          "type": "section",
+          "title": "Day two",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left at six."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Left at six. Typed.",
+        "Left at six."
+      ]
+    },
+    {
       "scene": "move-to-top",
       "before": [
         {
@@ -1958,7 +2096,7 @@
             "op": "insert-after",
             "afterId": "p-a",
             "block": {
-              "id": "c-split-23",
+              "id": "c-split-24",
               "type": "paragraph",
               "content": [
                 {
@@ -1970,7 +2108,7 @@
           },
           {
             "op": "move-block",
-            "id": "c-split-23",
+            "id": "c-split-24",
             "after": null
           },
           {
@@ -1998,7 +2136,7 @@
         [
           {
             "op": "patch-block",
-            "id": "c-split-23",
+            "id": "c-split-24",
             "patch": {
               "content": [
                 {
@@ -2012,7 +2150,7 @@
       ],
       "client_after": [
         {
-          "id": "c-split-23",
+          "id": "c-split-24",
           "type": "paragraph",
           "content": [
             {
@@ -2105,7 +2243,7 @@
                   ]
                 },
                 {
-                  "id": "c-split-24",
+                  "id": "c-split-25",
                   "type": "paragraph",
                   "content": [
                     {
@@ -2131,7 +2269,7 @@
         [
           {
             "op": "patch-block",
-            "id": "c-split-24",
+            "id": "c-split-25",
             "patch": {
               "content": [
                 {
@@ -2160,7 +2298,7 @@
               ]
             },
             {
-              "id": "c-split-24",
+              "id": "c-split-25",
               "type": "paragraph",
               "content": [
                 {
@@ -2391,7 +2529,7 @@
                   ]
                 },
                 {
-                  "id": "c-split-25",
+                  "id": "c-split-26",
                   "type": "paragraph",
                   "content": [
                     {
@@ -2436,7 +2574,7 @@
               ]
             },
             {
-              "id": "c-split-25",
+              "id": "c-split-26",
               "type": "paragraph",
               "content": [
                 {

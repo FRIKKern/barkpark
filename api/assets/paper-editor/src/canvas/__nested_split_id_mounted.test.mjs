@@ -401,6 +401,16 @@ await door("copy-in-section: a nested paragraph copied above itself in its secti
   },
   { keeps: { "Alpha.": "p-a" }, typed: ["Left at six. Typed.", "Left at six."] });
 
+await door("copy-across-sections: a paragraph copied into an earlier section, then typed into: the original keeps its id",
+  [{ id: "s-one", type: "section", title: "Day one", blocks: [p("p-a", "Alpha.")] }, { id: "s-two", type: "section", title: "Day two", blocks: [p("p-day", "Left at six.")] }],
+  async (editor, canvas) => {
+    place(editor, "Left at six.", "Alpha.", { copy: true });
+    await saved(canvas);
+    caretAfter(editor, "Left at six.");
+    type(editor, " Typed.");
+  },
+  { keeps: { "Left at six.": "p-day", "Alpha.": "p-a" }, typed: ["Left at six. Typed.", "Left at six."] });
+
 await door("move-to-top: a nested paragraph moved to the top level, then typed into: the typing saves",
   [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six."), p("p-two", "Fog.")] }],
   async (editor, canvas) => {

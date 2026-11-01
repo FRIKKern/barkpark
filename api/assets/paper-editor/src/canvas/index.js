@@ -582,10 +582,10 @@ function freshenRepeatedIds(doc, prevBlocks) {
   const was = prevBlocks ? blockParents(prevBlocks) : new Map();
   const copies = new Map();
   const walk = (nodes, parent) => {
-    for (const node of nodes || []) {
+    for (const node of nodes) {
       const id = node.attrs && node.attrs.bpId;
       if (id != null) copies.set(id, [...(copies.get(id) || []), { node, parent }]);
-      if (holdsNodeIds(node)) walk(node.content, id ?? node);
+      if (holdsNodeIds(node)) walk(node.content, id);
     }
   };
   walk(doc.content, null);
