@@ -276,7 +276,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-1-dfbdb783",
+              "id": "c-1-335298b2",
               "type": "heading",
               "text": "Camp at dusk",
               "level": 2
@@ -319,7 +319,7 @@
           ]
         },
         {
-          "id": "c-1-dfbdb783",
+          "id": "c-1-335298b2",
           "type": "heading",
           "text": "Camp at dusk",
           "level": 2
@@ -401,7 +401,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-2-1ac4b788",
+              "id": "c-2-49d2513c",
               "type": "list",
               "ordered": false,
               "items": [
@@ -429,7 +429,7 @@
         [
           {
             "op": "patch-block",
-            "id": "c-2-1ac4b788",
+            "id": "c-2-49d2513c",
             "patch": {
               "ordered": true,
               "items": [
@@ -472,7 +472,7 @@
           ]
         },
         {
-          "id": "c-2-1ac4b788",
+          "id": "c-2-49d2513c",
           "type": "list",
           "ordered": true,
           "items": [
@@ -774,7 +774,7 @@
           {
             "op": "append-block",
             "block": {
-              "id": "c-3-815414b4",
+              "id": "c-3-5b150cef",
               "type": "paragraph",
               "content": [
                 {
@@ -788,7 +788,7 @@
       ],
       "client_after": [
         {
-          "id": "c-3-815414b4",
+          "id": "c-3-5b150cef",
           "type": "paragraph",
           "content": [
             {
@@ -850,7 +850,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-4-e9446eeb",
+              "id": "c-4-95639bb9",
               "type": "divider"
             }
           },
@@ -858,27 +858,27 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-5-abf320e3",
+              "id": "c-5-aac88a44",
               "type": "paragraph",
               "content": []
             }
           },
           {
             "op": "move-block",
-            "id": "c-4-e9446eeb",
+            "id": "c-4-95639bb9",
             "after": "p-ridge"
           }
         ],
         [
           {
             "op": "remove-block",
-            "id": "c-5-abf320e3"
+            "id": "c-5-aac88a44"
           },
           {
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-6-dd47e418",
+              "id": "c-6-66f257e3",
               "type": "code",
               "value": ""
             }
@@ -887,7 +887,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "c-7-be4be620",
+              "id": "c-7-a78d22aa",
               "type": "paragraph",
               "content": [
                 {
@@ -899,13 +899,13 @@
           },
           {
             "op": "move-block",
-            "id": "c-4-e9446eeb",
+            "id": "c-4-95639bb9",
             "after": "p-ridge"
           },
           {
             "op": "move-block",
-            "id": "c-6-dd47e418",
-            "after": "c-4-e9446eeb"
+            "id": "c-6-66f257e3",
+            "after": "c-4-95639bb9"
           }
         ]
       ],
@@ -921,16 +921,16 @@
           ]
         },
         {
-          "id": "c-4-e9446eeb",
+          "id": "c-4-95639bb9",
           "type": "divider"
         },
         {
-          "id": "c-6-dd47e418",
+          "id": "c-6-66f257e3",
           "type": "code",
           "value": ""
         },
         {
-          "id": "c-7-be4be620",
+          "id": "c-7-a78d22aa",
           "type": "paragraph",
           "content": [
             {
@@ -1558,7 +1558,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "m-1-1a2a1760",
+              "id": "m-1-0094ab89",
               "type": "heading",
               "text": "Gear",
               "level": 2
@@ -1568,7 +1568,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "m-2-3e0d63ab",
+              "id": "m-2-bc06b83e",
               "type": "list",
               "ordered": false,
               "items": [
@@ -1591,7 +1591,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "m-3-9f51de17",
+              "id": "m-3-382fd954",
               "type": "blockquote",
               "content": [
                 {
@@ -1605,7 +1605,7 @@
             "op": "insert-after",
             "afterId": "p-ridge",
             "block": {
-              "id": "m-4-9e445baa",
+              "id": "m-4-72d306f5",
               "type": "code",
               "value": "ls gear/",
               "lang": "sh"
@@ -1613,23 +1613,23 @@
           },
           {
             "op": "move-block",
-            "id": "m-1-1a2a1760",
+            "id": "m-1-0094ab89",
             "after": "p-return"
           },
           {
             "op": "move-block",
-            "id": "m-2-3e0d63ab",
-            "after": "m-1-1a2a1760"
+            "id": "m-2-bc06b83e",
+            "after": "m-1-0094ab89"
           },
           {
             "op": "move-block",
-            "id": "m-3-9f51de17",
-            "after": "m-2-3e0d63ab"
+            "id": "m-3-382fd954",
+            "after": "m-2-bc06b83e"
           },
           {
             "op": "move-block",
-            "id": "m-4-9e445baa",
-            "after": "m-3-9f51de17"
+            "id": "m-4-72d306f5",
+            "after": "m-3-382fd954"
           }
         ]
       ],
@@ -1675,13 +1675,13 @@
           ]
         },
         {
-          "id": "m-1-1a2a1760",
+          "id": "m-1-0094ab89",
           "type": "heading",
           "text": "Gear",
           "level": 2
         },
         {
-          "id": "m-2-3e0d63ab",
+          "id": "m-2-bc06b83e",
           "type": "list",
           "ordered": false,
           "items": [
@@ -1700,7 +1700,7 @@
           ]
         },
         {
-          "id": "m-3-9f51de17",
+          "id": "m-3-382fd954",
           "type": "blockquote",
           "content": [
             {
@@ -1710,7 +1710,7 @@
           ]
         },
         {
-          "id": "m-4-9e445baa",
+          "id": "m-4-72d306f5",
           "type": "code",
           "value": "ls gear/",
           "lang": "sh"
@@ -1776,6 +1776,62 @@
               ]
             }
           }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog. Rain."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog. Rain."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
         ]
       ],
       "client_after": [
@@ -1786,6 +1842,252 @@
             {
               "type": "text",
               "value": "Field notes from the ridge. Fog."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "type-then-unmount",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-return",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Back by noon. Wet rock."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. Fog."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon. Wet rock."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "empty-picker-enter",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-8-51da5534",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "next"
+                }
+              ]
+            }
+          },
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. [[zzqx"
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. [[zzqx"
+            }
+          ]
+        },
+        {
+          "id": "c-8-51da5534",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "next"
             }
           ]
         },
@@ -1863,6 +2165,32 @@
             ]
           }
         ]
+      ],
+      "client_after": [
+        {
+          "id": "c-trail",
+          "type": "card",
+          "tone": "info",
+          "slots": {
+            "title": [
+              {
+                "type": "heading",
+                "text": "Trail"
+              }
+            ],
+            "body": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Six hours return. Bring a map."
+                  }
+                ]
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -1872,35 +2200,6 @@
         {
           "id": "t-gear",
           "type": "table",
-          "shape": {
-            "v": 1,
-            "head": {
-              "state": "row",
-              "row": {
-                "kind": "array",
-                "cells": [
-                  "inline-array",
-                  "inline-array"
-                ]
-              }
-            },
-            "rows": [
-              {
-                "kind": "array",
-                "cells": [
-                  "inline-array",
-                  "inline-array"
-                ]
-              },
-              {
-                "kind": "array",
-                "cells": [
-                  "inline-array",
-                  "inline-array"
-                ]
-              }
-            ]
-          },
           "head": [
             [
               {
@@ -1996,12 +2295,8 @@
             ]
           }
         ]
-      ]
-    },
-    {
-      "scene": "table-structure",
-      "element": "bp-paper-editor[data-editor-mode=table]",
-      "before": [
+      ],
+      "client_after": [
         {
           "id": "t-gear",
           "type": "table",
@@ -2034,6 +2329,60 @@
               }
             ]
           },
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "350 g"
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "table-structure",
+      "element": "bp-paper-editor[data-editor-mode=table]",
+      "before": [
+        {
+          "id": "t-gear",
+          "type": "table",
           "head": [
             [
               {
@@ -2117,6 +2466,96 @@
             "action": "add-row"
           }
         ]
+      ],
+      "client_after": [
+        {
+          "id": "t-gear",
+          "type": "table",
+          "shape": {
+            "v": 1,
+            "head": {
+              "state": "row",
+              "row": {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            },
+            "rows": [
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              },
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              },
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            ]
+          },
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "400 g"
+                }
+              ]
+            ],
+            [
+              [],
+              []
+            ]
+          ]
+        }
       ]
     },
     {

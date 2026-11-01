@@ -54,6 +54,8 @@ const { CONTRACT_VERSION } = await load("src/contract.js");
 await load("src/canvas/index.js");
 await load("src/index.js");
 const { moveTopLevel, deleteTopLevel } = await load("src/canvas/block-handle.js");
+const { cardBodyContentMatches, tableProjectionMatchesCells, tableProjectionMatchesAction } =
+  await load("src/convert.js");
 const { TextSelection } = await import("@tiptap/pm/state");
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
@@ -118,11 +120,19 @@ async function canvasScene(name, blocks, play) {
   await tick(350);
   const editor = canvas._editor;
   const flush = async () => { canvas.flushPendingChanges(); await tick(350); };
-  await play({ canvas, editor, flush });
-  await flush();
-  const after = clone(canvas.blocks);
-  canvas.remove();
-  return { scene: name, element: "bp-paper-canvas", before: clone(blocks), batches, client_after: after };
+  let unmounted = null;
+  const unmount = () => {
+    canvas.flushPendingChanges();
+    unmounted = clone(canvas.blocks);
+    canvas.remove();
+  };
+  await play({ canvas, editor, flush, unmount });
+  if (!unmounted) {
+    await flush();
+    unmount();
+  }
+  await tick(350);
+  return { scene: name, element: "bp-paper-canvas", before: clone(blocks), batches, client_after: unmounted };
 }
 
 async function editorScene(name, mode, block, play) {
@@ -135,7 +145,34 @@ async function editorScene(name, mode, block, play) {
   await tick(50);
   await play({ el, editor: el._editor, flush: async () => { el.flushPendingChanges(); await tick(50); } });
   el.remove();
-  return { scene: name, element: `bp-paper-editor[data-editor-mode=${mode}]`, before: [clone(block)], batches };
+  const after = batches.flat().reduce(believed, clone(block));
+  const { shape, ...stored } = clone(block);
+  return { scene: name, element: `bp-paper-editor[data-editor-mode=${mode}]`, before: [stored], batches, client_after: [after] };
+}
+
+// The host hands the editor a table as its projection (stored block + shape) and
+// stores it without the shape. The block the editor takes as its own save's echo
+// is built here, then checked with the tree's own echo test, so a wrong guess
+// stops the recording.
+function believed(block, op) {
+  const next = clone(block);
+  if (op.op === "patch-card-body") {
+    next.slots.body = [{ type: "paragraph", content: op.content }];
+    if (!cardBodyContentMatches(op.content, next)) throw new Error("card body echo not accepted");
+  } else if (op.op === "patch-table-cells") {
+    for (const { area, row, column, content } of op.cells) {
+      (area === "head" ? next.head : next.rows[row])[column] = content;
+    }
+    if (!tableProjectionMatchesCells(next, op.cells)) throw new Error("cells echo not accepted");
+  } else if (op.op === "patch-table-structure" && op.action === "add-row") {
+    const width = next.rows[0].length;
+    next.rows.push(Array(width).fill([]));
+    next.shape.rows.push({ kind: "array", cells: Array(width).fill("inline-array") });
+    if (!tableProjectionMatchesAction(block, next, op.action)) throw new Error("add-row echo not accepted");
+  } else {
+    throw new Error(`no echo for ${op.op}`);
+  }
+  return next;
 }
 
 const ridge = [
@@ -258,14 +295,36 @@ const scenes = [
     paste(editor, "## Gear\n\n- rope\n- stove\n\n> Pack light.\n\n```sh\nls gear/\n```");
     await tick(30);
   }),
-  () => canvasScene("undo-redo", ridge, async ({ canvas, editor }) => {
+  () => canvasScene("undo-redo", ridge, async ({ canvas, editor, flush }) => {
     caret(editor, endOf(editor, 0));
     type(editor, " Fog.");
-    await tick(600);
+    await flush();
+    await tick(300);
     type(editor, " Rain.");
+    await flush();
     canvas.undo();
+    await flush();
     canvas.redo();
+    await flush();
     canvas.undo();
+  }),
+  () => canvasScene("type-then-unmount", ridge, async ({ editor, flush, unmount }) => {
+    caret(editor, endOf(editor, 0));
+    type(editor, " Fog.");
+    await flush();
+    const walker = document.createTreeWalker(editor.view.dom, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (!node.data.includes("Back by noon.")) node = walker.nextNode();
+    node.data += " Wet rock.";
+    unmount();
+  }),
+  () => canvasScene("empty-picker-enter", ridge, async ({ editor }) => {
+    caret(editor, endOf(editor, 0));
+    type(editor, " [[zzqx");
+    await tick(30);
+    key(editor, { key: "Enter" });
+    await tick(30);
+    type(editor, "next");
   }),
   () => editorScene("card-body", "card-body", {
     id: "c-trail",
