@@ -8,21 +8,22 @@
 //
 //   git archive <commit> api/assets/paper-editor/src | tar -x -C /tmp/tree
 //   ln -s "$PWD/node_modules" /tmp/tree/api/assets/paper-editor/node_modules
-//   node scripts/record-replay.mjs /tmp/tree/api/assets/paper-editor <commit> > replay.json
+//   node scripts/record-replay.mjs /tmp/tree/api/assets/paper-editor $(git rev-parse --short=10 <commit>) > replay.json
 //
 // The edits go through the doors a person uses: typed characters through
 // handleTextInput, keydown events, paste events, the toolbar commands and the
 // block menu's move and delete.
 import { JSDOM } from "jsdom";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [treeArg, commit] = process.argv.slice(2);
-if (process.argv.length !== 4) {
-  console.error("usage: node scripts/record-replay.mjs <paper-editor tree> <commit>");
+const tree = resolve(treeArg ?? "");
+if (process.argv.length !== 4 || !/^[0-9a-f]{10}$/.test(commit) || !existsSync(resolve(tree, "src/contract.js"))) {
+  console.error("usage: node scripts/record-replay.mjs <paper-editor tree> <commit: 10 hex>");
   process.exit(2);
 }
-const tree = resolve(treeArg);
 const load = (rel) => import(pathToFileURL(resolve(tree, rel)).href);
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
