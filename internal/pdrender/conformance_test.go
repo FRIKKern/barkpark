@@ -209,6 +209,12 @@ func TestConformanceDriftRedsAStaleStampARowAndARenderer(t *testing.T) {
 	if d := conformanceDrift(report, flipped); !strings.HasPrefix(d[0], "row t drifted") {
 		t.Errorf("a drifted row is not named: %v", d)
 	}
+	extra := report
+	extra.Rows = append([]conformanceRow{}, report.Rows...)
+	extra.Rows = append(extra.Rows, conformanceRow{Type: "u", Status: "pass"})
+	if d := conformanceDrift(extra, report); !reflect.DeepEqual(d, []string{"committed 2 rows, pack has 1"}) {
+		t.Errorf("a committed report with an extra row: %v", d)
+	}
 }
 
 func TestConformanceVerdictCapsTheDiffAtTwelveLines(t *testing.T) {

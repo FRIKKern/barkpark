@@ -44,6 +44,10 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
              )
 
     assert drift =~ "row #{first.type} drifted"
+    assert ["reference: " <> _] = Conformance.settle(%{report | reference: false}, false, false)
+
+    assert ["committed 80 rows, pack has 79"] =
+             Conformance.settle(%{report | rows: rest}, false, false)
   end
 
   test "a reader that renders the unknown-type probe refuses to run" do
