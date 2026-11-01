@@ -92,6 +92,7 @@ on:
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/priv/portable_doc/**"
       - "api/test/support/fixtures/code-block-lang-parity.json"
       # internal/pdrender/code_block_emphasis_parity_test.go reads this fixture
       # (pe-bl-code-emphasis — one fixture, three engines); an edit must

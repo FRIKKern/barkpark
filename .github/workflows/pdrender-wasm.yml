@@ -33,6 +33,7 @@ on:
       # and not in this filter is the defect, every time.
       - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/priv/portable_doc/**"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
@@ -60,6 +61,7 @@ on:
       # and not in this filter is the defect, every time.
       - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/priv/portable_doc/**"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
@@ -102,3 +104,6 @@ jobs:
 
       - name: node smoke (render sample doc through the built blob)
         run: node cmd/pdrender-wasm/smoke.mjs
+
+      - name: PortableDoc conformance (wasm blob vs the golden pack)
+        run: node cmd/pdrender-wasm/conformance.mjs

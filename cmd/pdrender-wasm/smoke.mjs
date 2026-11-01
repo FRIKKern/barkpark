@@ -14,19 +14,9 @@
 // committed loader fails here.
 
 import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
-import vm from "node:vm";
+import { join } from "node:path";
+import { loadRenderTUI, repoRoot } from "./load.mjs";
 
-const require = createRequire(import.meta.url);
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
-
-const wasmGzPath = join(repoRoot, "api/priv/static/assets/bp-pdrender.wasm.gz");
-const loaderPath = join(repoRoot, "api/priv/static/assets/bp-wasm-exec.js");
 const samplePath = join(repoRoot, "internal/pdrender/testdata/sample.json");
 
 function fail(msg) {
@@ -34,50 +24,7 @@ function fail(msg) {
   process.exit(1);
 }
 
-// 1. Evaluate the committed Go loader (bp-wasm-exec.js) to get `globalThis.Go`.
-//    It targets a browser/Node global object; run it in a context that provides
-//    the globals it reaches for, then instantiate the wasm exactly like the Go
-//    toolchain's own runner does.
-const loaderSrc = readFileSync(loaderPath, "utf8");
-const sandbox = {
-  globalThis: null,
-  require,
-  process,
-  Buffer,
-  TextEncoder,
-  TextDecoder,
-  crypto: globalThis.crypto,
-  performance: globalThis.performance,
-  console,
-  WebAssembly,
-  setTimeout,
-  clearTimeout,
-  setInterval,
-  clearInterval,
-};
-sandbox.globalThis = sandbox;
-vm.createContext(sandbox);
-vm.runInContext(loaderSrc, sandbox, { filename: "bp-wasm-exec.js" });
-
-if (typeof sandbox.Go !== "function") fail("bp-wasm-exec.js did not define Go");
-
-// 2. Gunzip + instantiate.
-const wasmBytes = gunzipSync(readFileSync(wasmGzPath));
-const go = new sandbox.Go();
-const { instance } = await WebAssembly.instantiate(wasmBytes, go.importObject);
-// go.run resolves when main() returns; our main blocks on select{} after setting
-// the export, so we do NOT await it — fire it and poll for the export.
-go.run(instance);
-
-let render = null;
-for (let i = 0; i < 200; i++) {
-  if (typeof sandbox.bpRenderTUI === "function") {
-    render = sandbox.bpRenderTUI;
-    break;
-  }
-  await new Promise((r) => setTimeout(r, 10));
-}
-if (!render) fail("wasm did not export bpRenderTUI");
+const render = await loadRenderTUI().catch((e) => fail(e.message));
 
 // 3. Render the sample doc and assert on the output.
 const blocksJSON = readFileSync(samplePath, "utf8");
