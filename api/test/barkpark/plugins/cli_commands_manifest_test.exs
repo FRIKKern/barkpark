@@ -28,6 +28,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
                      "/v1/plugins/bulldocs/intents/:id/processed",
+                     "/v1/plugins/bulldocs/render",
                      # Task 6 (session-handoff): the `session` verb group's routes —
                      # four on the bulldocs ingest surface (tasks 3-4), plus
                      # `session.link-task`'s route on the Tasks plugin's own mount
@@ -97,7 +98,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares six paper verbs, all ingest-tier, all grounded in a real route" do
+    test "declares seven paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -107,12 +108,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "bulldocs.propose" in ids
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
+      assert "bulldocs.render" in ids
 
-      # The six `bulldocs.*` paper verbs all sit behind the ingest highway
+      # The seven `bulldocs.*` paper verbs all sit behind the ingest highway
       # bucket (the `session.*` group added in task 6 is NOT all-ingest —
       # see the dedicated describe block below).
       paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
-      assert length(paper_cmds) == 6
+      assert length(paper_cmds) == 7
       assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented

@@ -112,9 +112,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.MixedWriteGuard
+  alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
-  alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.{ErrorResponse, StudioLocale}
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   #
@@ -182,6 +183,44 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         json(conn, %{valid: violations == [], violations: violations})
     end
+  end
+
+  @doc """
+  `POST /v1/plugins/bulldocs/render` — the reader's HTML for the doc in the
+  body, nothing stored. Body: `{"blocks": [ … ]}`, reply `{"html": "…"}`.
+
+  The doc is validated first (`Barkpark.PortableDoc.Validate`, depth cap
+  `Validate.max_depth/0`): a broken doc is a 422 `validation_failed` carrying
+  every violation, never HTML. A valid doc renders block by block through
+  `Render.render_block/2` with the opts `/papers/:slug` uses, joined as
+  `Render.render_blocks/2` joins them. A block the renderer cannot draw is a
+  422 naming its path (`unrenderable`), not a 500.
+  """
+  def render_doc(conn, params) do
+    with :ok <- Validate.validate(Map.take(params, ["blocks"])),
+         {:ok, html} <- render_html(params["blocks"]) do
+      json(conn, %{html: html})
+    else
+      {:error, violations} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+          code: "validation_failed",
+          message: "the doc is not one the reader can render — fix each violation",
+          violations: violations
+        })
+    end
+  end
+
+  defp render_html(blocks) do
+    opts = StudioLocale.pd_opts(%{style: :article})
+    {:ok, blocks |> Enum.with_index() |> Enum.map_join("", &render_block(&1, opts))}
+  catch
+    {:unrenderable, index} -> {:error, [%{code: :unrenderable, path: "/blocks/#{index}"}]}
+  end
+
+  defp render_block({block, index}, opts) do
+    Render.render_block(block, opts)
+  rescue
+    _ -> throw({:unrenderable, index})
   end
 
   # The wall gates as ONE violation list — `AuthoringWall.validate_all/4` over a

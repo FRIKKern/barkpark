@@ -4,8 +4,8 @@ defmodule Barkpark.PortableDoc.Validate do
   JSON-pointer paths and order as `@portable-doc/validate`
   (FRIKKern/portable-doc `packages/validate/index.js`, codes in its `CODES.md`).
 
-  **Report-only.** Nothing calls it on a write yet; turning it on is a later
-  decision.
+  **Never on a write yet.** `POST /v1/plugins/bulldocs/render` calls it before
+  it renders, and stores nothing; turning it on for a write is a later decision.
 
   The checks come from `priv/portable_doc/spec/blocks.schema.json`, the schema
   the JS validator reads, compiled once at build time by

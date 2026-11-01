@@ -1120,6 +1120,10 @@ defmodule PDS.Census do
     # read back because nothing is stored. Exactly the class prose's case.
     {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
      :validate, :status_only_receipt},
+    # The render route (R4.4a) is the same class: a POST that stores nothing and
+    # answers {html} or a 422 violation list, so there is no row to read back.
+    {:post, "/v1/plugins/bulldocs/render", "BarkparkWeb.BulldocsIngestController",
+     :render_doc, :status_only_receipt},
     # THE ONE ROW ROUTED-DISPOSITION-UNSHADOWED FOUND ON MERGED MAIN, AND ITS DELETION.
     # `{:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
     # :sync, :status_only_receipt}` stood here, and its own comment said the receipts "live

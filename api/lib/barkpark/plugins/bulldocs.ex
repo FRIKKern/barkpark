@@ -304,6 +304,11 @@ defmodule Barkpark.Plugins.Bulldocs do
       # unambiguous either way — "validate" is a fixed segment, not a slug arg.
       {:post, "/bulldocs/papers/validate", BarkparkWeb.BulldocsIngestController, :validate,
        auth: :ingest},
+      # The reader's HTML for a doc in the body, nothing stored (R4.4a, the
+      # `@portable-doc/mcp` render tool). Validates first; same ingest door as
+      # the validate dry-run above.
+      {:post, "/bulldocs/render", BarkparkWeb.BulldocsIngestController, :render_doc,
+       auth: :ingest},
       # Working-copy push (BPML masterplan W3): edited BPML + baseRev in,
       # server-derived op batch under if_rev, canonical BPML back.
       {:post, "/bulldocs/papers/:slug/sync", BarkparkWeb.BulldocsIngestController, :sync,
@@ -365,7 +370,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   `/v1/plugins/bulldocs/…` prefix). Every ingest route maps to `auth_tier: "ingest"`,
   the route's highway bucket.
 
-  Six paper verbs over six routes:
+  Seven paper verbs over seven routes:
 
     * `create` — `POST /v1/plugins/bulldocs/papers/:slug/create`; native
       blocks only, refusing an occupied published slug or draft twin.
@@ -384,6 +389,11 @@ defmodule Barkpark.Plugins.Bulldocs do
       oldest first). READ-shaped over the ingest pipeline.
     * `intent-processed` — `POST /v1/plugins/bulldocs/intents/:id/processed`
       (mark one intent drained). WRITES.
+    * `render` — `POST /v1/plugins/bulldocs/render` (R4.4a): a `{blocks:[…]}`
+      body validated, then rendered to the reader's HTML. Stores nothing; a
+      broken doc is a 422 with every violation. Declared `writes: true` all the
+      same: the manifest's rule (PDS-D302) is that every non-GET command says it
+      writes, so an MCP client asks before calling it.
 
   No `get`/`ls` paper verb is declared: the paper reader at `/papers/:slug` is a
   LiveView (`:public_root`), not a JSON API route, so there is no honest flat
@@ -581,6 +591,31 @@ defmodule Barkpark.Plugins.Bulldocs do
         paginated: false,
         dry_run: false,
         default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "bulldocs.render",
+        noun: "bulldocs",
+        verb: "render",
+        summary:
+          "Render portable-doc blocks to the paper reader's HTML; nothing is stored. " <>
+            "The doc is validated first: a broken doc is refused 422 validation_failed " <>
+            "with every violation (code + JSON-pointer path), never HTML.",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/render"},
+        auth_tier: "ingest",
+        args: [],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Doc payload {\"blocks\":[…]} from a file or - for stdin."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
         scoped_prefix: nil
       },
       %{
