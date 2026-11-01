@@ -104,6 +104,17 @@ defmodule Barkpark.PortableDoc.ValidateTest do
     end
   end
 
+  test "negative numbers pass where the schema sets no minimum (JS)" do
+    doc = %{
+      "blocks" => [
+        %{"type" => "list", "start" => -3, "items" => []},
+        %{"type" => "card", "span" => -1}
+      ]
+    }
+
+    assert Validate.validate(doc) == :ok
+  end
+
   test "every type the schema names passes as a bare block" do
     types = read(Barkpark.PortableDoc.Spec.path())["properties"]["type"]["enum"]
     assert length(types) >= 80
@@ -219,6 +230,17 @@ defmodule Barkpark.PortableDoc.ValidateTest do
       assert pairs(Validate.validate(%{"blocks" => [paragraph("x"), card.(5)]})) == [
                {"wrong_field_type", "/blocks/1/slots/media/0/src"},
                {"duplicate_block_id", "/blocks/1/slots/media/0/id"}
+             ]
+    end
+
+    test "a non-string id is wrong_field_type and never a duplicate (JS)" do
+      doc = %{
+        "blocks" => [%{"type" => "paragraph", "id" => 5}, %{"type" => "paragraph", "id" => 5}]
+      }
+
+      assert pairs(Validate.validate(doc)) == [
+               {"wrong_field_type", "/blocks/0/id"},
+               {"wrong_field_type", "/blocks/1/id"}
              ]
     end
 
@@ -510,6 +532,48 @@ defmodule Barkpark.PortableDoc.ValidateTest do
       for {block, expected} <- cases do
         got = %{"blocks" => [block]} |> Validate.validate(schema) |> pairs()
         assert {block, Enum.map(got, fn {c, p} -> "#{c} #{p}" end)} == {block, expected}
+      end
+    end
+
+    test "each keyword arm gives the JS answer on a custom schema (JS)" do
+      cases = [
+        {~s({"properties":{"n":{"type":"integer","enum":[1]}}}), [%{"n" => "x"}],
+         ["wrong_field_type /blocks/0/n"]},
+        {~s({"properties":{"n":{"maximum":6}}}), [%{"n" => "x"}], []},
+        {~s({"properties":{"n":{"items":{"type":"string"}}}}), [%{"n" => %{"0" => 5}}], []},
+        {~s({"properties":{"n":{"if":{"properties":{"id":{}}},"then":{},"not":{"items":{"$ref":"#"}}}}}),
+         [%{"n" => [%{"id" => "a"}]}, %{"id" => "a"}], ["value_not_allowed /blocks/0/n"]},
+        {~s({"properties":{"n":{"if":{"items":{"$ref":"#"}},"then":{}}}}),
+         [%{"n" => [%{"id" => "a"}]}, %{"id" => "a"}], []},
+        {~s({"properties":{"n":{"$ref":"#/definitions/a"}},"definitions":{"a":{"$ref":"#/definitions/b"},"b":{"$ref":"#/definitions/c"},"c":{"type":"string"}}}),
+         [%{"n" => 1}], ["wrong_field_type /blocks/0/n"]},
+        {~s({"properties":{"n":{"const":null}}}), [%{"n" => 1}, %{"n" => nil}],
+         ["value_not_allowed /blocks/0/n"]},
+        {~s({"properties":{"n":{"const":1,"required":["r"],"properties":{"p":{"type":"string"}},"allOf":[{"required":["y"]},{"required":["z"]}],"if":{},"then":{"required":["t"]},"anyOf":[{"required":["a"]}],"not":{}}}}),
+         [%{"n" => %{"p" => 1}}],
+         [
+           "value_not_allowed /blocks/0/n",
+           "missing_required_field /blocks/0/n/r",
+           "wrong_field_type /blocks/0/n/p",
+           "missing_required_field /blocks/0/n/y",
+           "missing_required_field /blocks/0/n/z",
+           "missing_required_field /blocks/0/n/t",
+           "missing_required_field /blocks/0/n/a",
+           "value_not_allowed /blocks/0/n"
+         ]},
+        {~s({"properties":{"n":{"const":1,"items":{"type":"string"},"allOf":[{"const":2}]}}}),
+         [%{"n" => [1]}],
+         [
+           "value_not_allowed /blocks/0/n",
+           "wrong_field_type /blocks/0/n/0",
+           "value_not_allowed /blocks/0/n"
+         ]}
+      ]
+
+      for {json, blocks, expected} <- cases do
+        schema = Schema.compile(Jason.decode!(json, objects: :ordered_objects))
+        got = %{"blocks" => blocks} |> Validate.validate(schema) |> pairs()
+        assert {json, Enum.map(got, fn {c, p} -> "#{c} #{p}" end)} == {json, expected}
       end
     end
 
