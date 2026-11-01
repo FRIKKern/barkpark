@@ -7,8 +7,8 @@ below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
 `BpPaperEditor.CONTRACT_VERSION === "1.21.0"` (also exported as `CONTRACT_VERSION`).
-Build identity, the Surface index of every name below, and the reach-ins hosts
-still make are at the end.
+Build identity, the Surface index of every name below, a dated census of what each
+host uses, and the reach-ins hosts still make are at the end.
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
@@ -735,6 +735,23 @@ goes unnoticed until the next census.
 | global | window | `BarkparkPaperMermaid`, `BP_PAPER_EDITOR_NO_INJECT` |
 | class | canvas | `bp-canvas-mount-failed`, `bp-comment-range`, `bp-comment-range--active`, `bp-remote-caret`, `bp-remote-caret__label`, `bp-remote-selection` |
 | host class | canvas | `bp-paper-edit-field`, `bp-paper-editor` |
+
+## Host census (2026-10-31)
+
+What each host used on its main branch that day (barkpark `3885f4d7`, barkdown
+`91fbcd64`, barkever `6ae43f5`, barkpark-studio `98c387db`), found by grepping each
+app for the editor's members, attributes, events, classes, tokens and globals. No
+test reads the hosts; each app's own check is later work. Reach-ins are in the next
+section.
+
+| Host | Members and statics | Attributes | Events | Other |
+|---|---|---|---|---|
+| Studio (`bp-paper-editor-hooks.js`, `paper_editor.ex`, `field_inputs.ex`, `root.html.heex`) | canvas: `blocks`, `acknowledgedSaves`, `mediaUploader`, `wikilinkSource`, `tagSource`, `acknowledgeOps`, `identifyOpsRequest`, `discardInflightOps(seq, {reason})`, `resolveConflictWithServerBlocks`, `hasPendingChanges`, `rebaseSafe`, `localEditsRebaseSafe`, `captureResumeFocus`, `restoreResumeFocus`, `applyServerBlocks`, `focusBlock`, `setRemoteSelections`, `recoverySnapshot`, `flushPendingChanges`; editor: `block`, `flushPendingChanges`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `applyTableProjection`, `trackTableMutation`, `tableMutationResult`, `waitForTableSettlement`, `wikilinkSource`, `tagSource` | canvas: `data-dataset`, `data-token`, `data-scope-prefix`, `data-picker-browse`, `data-media-strings`, `data-reference-strings`, `data-locked-tail`, `data-constraints`, `data-vocabulary`; ancestors: `data-server-insert`, `data-strings`, `data-paper-container-kind`, `data-paper-doc-key`, `data-expected-fields`, `data-paper-masters`, `data-field-name`, `data-theme`, `data-bp-theme`; editor: `data-block`, `data-editor-mode` | listens: `bp-op`, `bp-local-change`, `bp-noop`, `bp-canvas-ops`, `bp-slash-insert`, `bp-save-master`, `bp-master-insert`, `bp-server-insert`, `bp-canvas-selection`, `bp-canvas-open-link`, `bp-ready`, `bp-error`; dispatches `bp-fleet-paint` | `.bp-paper-editor`, `.bp-paper-edit-field`; `BP_PAPER_EDITOR_NO_INJECT`, `BarkparkPaperMermaid`; upstream tokens |
+| Reader edit mode (`bulldocs.html.heex`, `bulldocs_live.ex`) | as Studio (same hooks) | as Studio, plus `data-paper-palette` on `<main>` | as Studio | its own `BarkparkPaperMermaid`; `--tok-reading-font`, `--dur-1` |
+| web/ | editor: `block` | editor: `editable="false"`; `data-theme`, `data-bp-theme` | — | the self-inject path; `--dur-1`, `--font-mono` |
+| Barkdown | canvas: `blocks`, `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `discardInflightOps`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `hasPendingChanges`, `flushPendingChanges`, `recoverySnapshot`, `findSet`, `findNext`, `findPrev`, `findState`, `findClear`, `replaceCurrent`, `replaceAll`, `wikilinkSource`, `tagSource`, `linkPreviewSource`, `mediaUploader` | `editable`; `data-theme` on the canvas | `bp-canvas-ops`, `bp-canvas-open-link` | `BP_PAPER_EDITOR_NO_INJECT`; 23 upstream `--tok-*` |
+| Barkever | canvas: `blocks`, `acknowledgedSaves`, `flushKeepsSource`, `wikilinkSource`, `linkPreviewSource`, `wikilinkResolve`, `refreshWikilinks`, `identifyOpsRequest`, `acknowledgeOps`, `applyServerBlocks`, `flushPendingChanges`; static `CONTRACT_VERSION` | `editable`, `mention-trigger`, `data-vocabulary`; ancestors `data-strings`, `data-theme`; reads `data-wikilink`, `docid`, `target`, `data-missing`, `data-bp-id` | `bp-canvas-ops`, `bp-canvas-open-link`, `bp-canvas-wikilink-click` | `BP_PAPER_EDITOR_NO_INJECT`; about 41 theme tokens, `--tok-reading-font` |
+| barkpark-studio | canvas: the sync set, `can`, `run`, `state`, `undo`, `redo`, find and replace, `setRemoteSelections`, `setCommentRanges`, `commentRanges`, `commentsInSelection`, `selectBlock`, `focusFirstBodyBlock`, `editBlockObject`, `mediaPicker`, `mediaUploader`, `linkPreviewSource`, `wikilinkSource`, `recoverySnapshot`, `resendPendingOps`, `applyServerBlocksIfIdle`, `discardInflightOps(seq, {reason})`; static `CONTRACT_VERSION` | `block-cards`, `format-bubble`, `data-field-caps`, `data-vocabulary`, `editable`; ancestors `data-strings`, `data-paper-masters`, `data-theme`; reads `data-bp-id`, `data-comment-id` | about 13, among them `bp-canvas-history`, `bp-canvas-link-request`, `bp-canvas-comment-click`, `bp-selection-change`, `bp-canvas-node-failed`, `bp-ready` and the master events; dispatches `bp-fleet-paint` | `.bp-paper-editor`; `--tok-reading-font` |
 
 ## Known reach-ins, to remove in R2.3
 
