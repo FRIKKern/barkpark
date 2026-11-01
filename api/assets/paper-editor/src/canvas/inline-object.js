@@ -500,7 +500,7 @@ export class HostObjectDialog {
 // Open the dialog for the atom at `pos`. Save rewrites its stored node in one
 // transaction (one undo step); the caret returns to the atom either way.
 export function editInlineObjectAt(host, editor, pos, error) {
-  const vocab = host.inlineObjectVocabulary();
+  const vocab = host._inlineObjectVocabulary();
   const node = editor.state.doc.nodeAt(pos);
   if (!node || node.type.name !== ATOM) return false;
   const stored = node.attrs.node || {};
@@ -508,7 +508,7 @@ export function editInlineObjectAt(host, editor, pos, error) {
   if (!kind) return false;
   const dom = editor.view.nodeDOM(pos);
   const rect = dom && typeof dom.getBoundingClientRect === "function" ? dom.getBoundingClientRect() : null;
-  const dialog = host.inlineObjectDialog();
+  const dialog = host._inlineObjectDialog();
   dialog.open({
     kind,
     stored,
@@ -518,7 +518,7 @@ export function editInlineObjectAt(host, editor, pos, error) {
     onSave: (values) => {
       const at = findAtom(editor.state.doc, pos, stored);
       if (at == null) return;
-      host.noteInlineObjectSave(values);
+      host._noteInlineObjectSave(values);
       editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...node.attrs, node: values }));
     },
     onClose: () => {
@@ -542,7 +542,7 @@ function findAtom(doc, pos, stored, typeName = ATOM, attr = "node") {
 // True when `node` is a declared object block with fields to edit (its Edit).
 export function canEditObjectBlock(host, node) {
   if (!node || node.type.name !== BLOCK) return false;
-  const kind = objectBlockFor(host.inlineObjectVocabulary(), node.attrs.bpType);
+  const kind = objectBlockFor(host._inlineObjectVocabulary(), node.attrs.bpType);
   return !!(kind && editableKind(kind).fields.length);
 }
 
@@ -551,12 +551,12 @@ export function canEditObjectBlock(host, node) {
 export function editObjectBlockAt(host, editor, pos, error) {
   const node = editor.state.doc.nodeAt(pos);
   if (!node || node.type.name !== BLOCK) return false;
-  const kind = objectBlockFor(host.inlineObjectVocabulary(), node.attrs.bpType);
+  const kind = objectBlockFor(host._inlineObjectVocabulary(), node.attrs.bpType);
   if (!kind || !editableKind(kind).fields.length) return false;
   const stored = node.attrs.bpBlock || { type: node.attrs.bpType };
   const dom = editor.view.nodeDOM(pos);
   const rect = dom && typeof dom.getBoundingClientRect === "function" ? dom.getBoundingClientRect() : null;
-  host.inlineObjectDialog().open({
+  host._inlineObjectDialog().open({
     kind,
     stored,
     anchorRect: rect,
@@ -565,7 +565,7 @@ export function editObjectBlockAt(host, editor, pos, error) {
       const at = findAtom(editor.state.doc, pos, stored, BLOCK, "bpBlock");
       if (at == null) return;
       const live = editor.state.doc.nodeAt(at);
-      host.noteInlineObjectSave(values);
+      host._noteInlineObjectSave(values);
       editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...live.attrs, bpBlock: values }));
     },
     onClose: () => {
@@ -581,17 +581,17 @@ export function editObjectBlockAt(host, editor, pos, error) {
 // empty value and Save calls `insert(values)`. False when the kind has no fields
 // to ask for (the caller inserts it at once, as before).
 export function openObjectBlockInsert(host, editor, name, insert) {
-  const kind = objectBlockFor(host.inlineObjectVocabulary(), name);
+  const kind = objectBlockFor(host._inlineObjectVocabulary(), name);
   if (!kind || !editableKind(kind).fields.length) return false;
   // The caret the pick was made at: focus moving through the dialog must not
   // move where the block lands.
   const at = editor.state.selection.from;
-  host.inlineObjectDialog().open({
+  host._inlineObjectDialog().open({
     kind,
     stored: { type: name },
     anchorRect: safeCoords(editor.view, at),
     onSave: (values) => {
-      host.noteInlineObjectSave(values);
+      host._noteInlineObjectSave(values);
       const doc = editor.state.doc;
       editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(doc.resolve(Math.min(at, doc.content.size)))));
       insert(values);
@@ -605,7 +605,7 @@ export function openObjectBlockInsert(host, editor, name, insert) {
 // at the caret (replacing `replaceRange` first, e.g. the slash "/query" text) and
 // leaves the caret after it. Cancel inserts nothing.
 export function insertInlineObject(host, editor, name, { replaceRange } = {}) {
-  const kind = inlineObjectFor(host.inlineObjectVocabulary(), name);
+  const kind = inlineObjectFor(host._inlineObjectVocabulary(), name);
   const nodeType = editor.state.schema.nodes[ATOM];
   if (!kind || !nodeType) return false;
   if (replaceRange && replaceRange.to > replaceRange.from) {
@@ -613,13 +613,13 @@ export function insertInlineObject(host, editor, name, { replaceRange } = {}) {
   }
   const at = editor.state.selection.from;
   const caret = typeof editor.view.coordsAtPos === "function" ? safeCoords(editor.view, at) : null;
-  host.inlineObjectDialog().open({
+  host._inlineObjectDialog().open({
     kind,
     stored: { type: name },
     anchorRect: caret,
     inline: true,
     onSave: (values) => {
-      host.noteInlineObjectSave(values);
+      host._noteInlineObjectSave(values);
       const pos = Math.min(at, editor.state.doc.content.size);
       const tr = editor.state.tr.insert(pos, nodeType.create({ node: values }));
       tr.setSelection(TextSelection.create(tr.doc, pos + 1));
@@ -689,7 +689,7 @@ export class InlineObjectBar {
     if (!atom || !this._host._editable || dialogOpen || !(view.hasFocus() || inBar)) return this.hide();
     if (!this._el) this._build();
     const stored = sel.node.attrs.node || {};
-    const kind = inlineObjectFor(this._host.inlineObjectVocabulary(), stored.type);
+    const kind = inlineObjectFor(this._host._inlineObjectVocabulary(), stored.type);
     this._pos = sel.from;
     this._parts.title.textContent = kind ? kind.title : stored.type || t("Inline");
     this._parts.edit.style.display = kind && editableKind(kind).fields.length ? "" : "none";
@@ -780,8 +780,8 @@ function safeCoords(view, pos) {
 }
 
 // The canvas extension: accessible names on atoms, Enter / double-click to edit.
-// `host` is the canvas element: inlineObjectVocabulary(), inlineObjectDialog(),
-// noteInlineObjectSave(values).
+// `host` is the canvas element: _inlineObjectVocabulary(), _inlineObjectDialog(),
+// _noteInlineObjectSave(values).
 export function inlineObjects(host) {
   let bar = null;
   return Extension.create({
@@ -808,7 +808,7 @@ export function inlineObjects(host) {
           key: decorationsKey,
           props: {
             decorations(state) {
-              const vocab = host.inlineObjectVocabulary();
+              const vocab = host._inlineObjectVocabulary();
               const decos = atomsIn(state.doc).map(({ node, pos }) => {
                 const stored = node.attrs.node || {};
                 const editable = !!inlineObjectFor(vocab, stored.type);

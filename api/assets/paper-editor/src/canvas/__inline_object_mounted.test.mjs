@@ -141,7 +141,7 @@ try {
   await check("only the declared kind is offered for insertion", () => {
     const rows = slashItemsForVocabulary([], parseVocabulary(JSON.stringify(VOCAB))).filter((r) => r.inline);
     assert.deepEqual(rows.map((r) => [r.inline, r.label, r.group]), [["chip", "Status chip", "Inline"]]);
-    const vocab = canvas.inlineObjectVocabulary();
+    const vocab = canvas._inlineObjectVocabulary();
     const palette = buildCommandRegistry(editor, { inlineObjects: vocab.inlineObjects, onInlineInsert() {} });
     assert.deepEqual(palette.filter((c) => c.group === "Inline").map((c) => c.id), ["inline-chip"]);
   });

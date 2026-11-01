@@ -3,8 +3,10 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.20.0) is the normative spec
-// for both elements; these types follow src/index.js and src/canvas/index.js.
+// attributes, events, globals, public classes and theme tokens. EMBED-CONTRACT.md
+// (v1.21.0) is the normative spec for both elements; these types follow
+// src/index.js and src/canvas/index.js. src/__contract_truth.test.mjs fails when
+// this file, EMBED-CONTRACT.md's surface index and the element classes disagree.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
 export interface PortableDocBlock {
@@ -29,6 +31,36 @@ export type CanvasOp =
   | { op: "remove-block"; id: string }
   | { op: "move-block"; id: string; after: string | null };
 
+/** A table structure change (`patch-table-structure`); row and column indexes start at 0. */
+export type TableStructureAction =
+  | "add-row"
+  | "add-column"
+  | "add-header"
+  | "remove-header"
+  | `${"remove" | "up" | "down"}-row:${number}`
+  | `${"remove" | "left" | "right"}-column:${number}`;
+
+/** The intent op of `data-editor-mode="card-body"`: the card body paragraph's inline content. */
+export interface PatchCardBodyOp {
+  op: "patch-card-body";
+  id: string;
+  content: unknown[];
+}
+/** The intent op of `data-editor-mode="table"` for typed cells. */
+export interface PatchTableCellsOp {
+  op: "patch-table-cells";
+  id: string;
+  shape: unknown;
+  cells: Array<{ area: "head" | "body"; row: number; column: number; content: unknown[] }>;
+}
+/** The intent op of `data-editor-mode="table"` for a row, column or header change. */
+export interface PatchTableStructureOp {
+  op: "patch-table-structure";
+  id: string;
+  shape: unknown;
+  action: TableStructureAction;
+}
+
 // ── <bp-paper-editor> events (EMBED-CONTRACT.md "Outbound") ────────────────
 
 export interface BpReadyDetail {
@@ -36,7 +68,7 @@ export interface BpReadyDetail {
   blockType: string;
   contractVersion: string;
 }
-export type BpOpDetail = PatchBlockOp;
+export type BpOpDetail = PatchBlockOp | PatchCardBodyOp | PatchTableCellsOp | PatchTableStructureOp;
 export interface BpSlashInsertDetail {
   type: string;
   afterId: string;
@@ -47,7 +79,14 @@ export interface BpSlashInsertDetail {
 }
 export interface BpErrorDetail {
   error: string;
+  /** The bad `data-block` text. */
   raw?: string;
+  /** Card-body and table modes: why the editor stopped taking edits; the draft stays. */
+  code?: "card_body_source_unsupported" | "table_source_unsupported" | "table_draft_incompatible";
+}
+/** Card-body and table modes: a host listener may set `token`; `bp-noop` hands it back when the edit settles to nothing. */
+export interface BpLocalChangeDetail {
+  token: unknown;
 }
 
 export interface BpPaperEditorEventMap extends HTMLElementEventMap {
@@ -55,11 +94,43 @@ export interface BpPaperEditorEventMap extends HTMLElementEventMap {
   "bp-op": CustomEvent<BpOpDetail>;
   "bp-slash-insert": CustomEvent<BpSlashInsertDetail>;
   "bp-error": CustomEvent<BpErrorDetail>;
+  "bp-local-change": CustomEvent<BpLocalChangeDetail>;
+  /** Card-body and table modes: the edit settled to no op; `token` is what the host set on `bp-local-change`. */
+  "bp-noop": CustomEvent<{ token: unknown }>;
+}
+
+/** The attributes `<bp-paper-editor>` reads. */
+export interface BpPaperEditorAttributes {
+  /** A JSON string of the block. */
+  "data-block"?: string;
+  /** Only `"false"` mounts read-only. Observed. */
+  editable?: string;
+  /** Read at connect. Absent: `"block"`, one paragraph, heading or list sending `patch-block`. */
+  "data-editor-mode"?: "block" | "card-body" | "table";
 }
 
 /** One PortableDoc block per element. Inbound: the `data-block` attribute or the `block` property. */
 export interface BpPaperEditorElement extends HTMLElement {
+  /** In table mode, the table projection the server sends. */
   block: PortableDocBlock;
+  /** The `[[` menu, as on the canvas. */
+  wikilinkSource: ((query: string) => MaybePromise<WikilinkSuggestion[]>) | null | undefined;
+  /** The `#` menu, as on the canvas. */
+  tagSource: ((query: string) => MaybePromise<string[]>) | null | undefined;
+  /** Send the debounced op now; true when it sent one. */
+  flushPendingChanges(): boolean;
+  /** A debounced op, or a table structure change that has not settled. */
+  hasPendingChanges(): boolean;
+  /** The user's "use latest": drop the debounce and any draft, take `block`. False in table mode for another id. */
+  resolveConflictWithServerBlock(block: PortableDocBlock): boolean;
+  /** Table mode: the server's table projection, with the request it answers. */
+  applyTableProjection(value: PortableDocBlock, metadata?: { requestId?: string | null; rev?: unknown }): boolean;
+  /** Table mode: bind the host's request id to the structure op in flight. */
+  trackTableMutation(op: PatchTableStructureOp, requestId: string): boolean;
+  /** Table mode: the save result of that request. */
+  tableMutationResult(op: PatchTableStructureOp, saved: boolean, result: { request_id?: string | null }): boolean;
+  /** Table mode: settles true when a structure change lands, false when it is dropped; null when none is pending. */
+  waitForTableSettlement(): Promise<boolean> | null;
   addEventListener<K extends keyof BpPaperEditorEventMap>(
     type: K,
     listener: (this: BpPaperEditorElement, ev: BpPaperEditorEventMap[K]) => unknown,
@@ -79,6 +150,24 @@ export interface BpPaperEditorElement extends HTMLElement {
 export interface BpCanvasReadyDetail {
   blockCount: number;
 }
+/** The statics both element classes carry: `customElements.get("bp-paper-canvas").EDITOR_VERSION`. */
+export interface BpPaperBuildInfo {
+  /** This contract's version, as EMBED-CONTRACT.md's title. */
+  readonly CONTRACT_VERSION: string;
+  /** Since 1.21.0: the npm package version (package.json `version`, today "1.0.0"); not bumped per contract release. */
+  readonly EDITOR_VERSION: string;
+  /** Since 1.21.0: 12 hex of the sha-256 over esbuild's version and the bundle's input files; null unbuilt. Build options are not hashed: `build` and `build:dev` give the same sha. */
+  readonly BUILD_SHA: string | null;
+}
+export interface BpPaperEditorConstructor extends BpPaperBuildInfo {
+  new (): BpPaperEditorElement;
+  readonly prototype: BpPaperEditorElement;
+}
+export interface BpPaperCanvasConstructor extends BpPaperBuildInfo {
+  new (): BpPaperCanvasElement;
+  readonly prototype: BpPaperCanvasElement;
+}
+
 export interface BpCanvasOpsDetail {
   ops: CanvasOp[];
   /** Present when the host set `acknowledgedSaves = true`. Pass it back to acknowledgeOps. */
@@ -162,6 +251,210 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-canvas-wikilink-click": CustomEvent<BpCanvasWikilinkClickDetail>;
   /** 1.15.0, with liveRemote: a server block the canvas did not apply over unsaved typing. Once per block and version. */
   "bp-canvas-remote-held": CustomEvent<BpCanvasRemoteHeldDetail>;
+}
+
+/** Events a host or a host-supplied piece dispatches into the canvas. */
+export interface BpPaperInboundEventMap {
+  /** On a paint hole (`[data-bp-fleet-id] [data-bp-fleet-body]`), cancelable. A node that paints itself cancels it; otherwise the host sets the hole's HTML. */
+  "bp-fleet-paint": CustomEvent<{ html: string; sourceBlock?: PortableDocBlock }>;
+  /** From a host picker element (`bp-media-picker`, `bp-reference-picker`), bubbling: its new value. */
+  "bp-change": CustomEvent<{ value: unknown }>;
+}
+
+/** The attributes `<bp-paper-canvas>` reads on itself. */
+export interface BpPaperCanvasAttributes {
+  /** Only `"false"` mounts read-only. Observed. */
+  editable?: string;
+  /** `"off"` hides the format bubble. Observed. */
+  "format-bubble"?: "off";
+  /** Present: images and declared object blocks are cards. */
+  "block-cards"?: "";
+  /** `"off"`: only `[[` opens the document menu. */
+  "mention-trigger"?: "off";
+  /** The type's Expectation, `{fieldName: max | null}`, as JSON. */
+  "data-field-caps"?: string;
+  /** A field's block declaration (`blocks`) as JSON: edits outside it are refused. */
+  "data-vocabulary"?: string;
+  /** A paper's constraint declarations as JSON: removes and moves that break them are refused. */
+  "data-constraints"?: string;
+  /** `"true"`: the block after this run is locked, so the run cannot grow at its end. */
+  "data-locked-tail"?: "true";
+  /** Picker scope: the dataset the pickers search. */
+  "data-dataset"?: string;
+  /** Picker scope: the token the media picker uploads with. */
+  "data-token"?: string;
+  /** Picker scope: the API path prefix the pickers fetch under. */
+  "data-scope-prefix"?: string;
+  /** `"false"`: pickers keep the current value and offer no browser. */
+  "data-picker-browse"?: "false" | "true";
+  /** The media picker's `data-strings`. */
+  "data-media-strings"?: string;
+  /** The reference picker's `data-strings`. */
+  "data-reference-strings"?: string;
+}
+
+/** Attributes the canvas reads on an ancestor (or, for the carriers, anywhere in its root). */
+export interface BpPaperAncestorAttributes {
+  /** JSON map from the canvas's English words to the host's. */
+  "data-strings"?: string;
+  /** Present: terminal, stage, image and equation picks emit `bp-server-insert`. */
+  "data-server-insert"?: "";
+  /** `"document"` or `"figure"`: the container the run sits in. */
+  "data-paper-container-kind"?: string;
+  /** On a `.bp-paper-editor` root: the document key resume focus checks. */
+  "data-paper-doc-key"?: string;
+  /** A carrier element: the paper's masters, `[{ id, title, tier, block_type }]`, as JSON. */
+  "data-paper-masters"?: string;
+  /** A carrier element: the expected fields, `[{ name, type?, label?, max? }]`, as JSON. */
+  "data-expected-fields"?: string;
+  /** On the element or an ancestor (`<html>` in most hosts): the stylesheet's dark or light theme. */
+  "data-theme"?: "dark" | "light";
+  /** On an ancestor: the accent family the stylesheet paints with. */
+  "data-bp-theme"?: "iris" | "fjord" | "evergreen" | "ember" | "charple";
+  /** On an ancestor: `"legacy"` keeps the reader's legacy palette, so embeds get no `.bp-paper-surface` island. */
+  "data-paper-palette"?: "article" | "legacy";
+  /** On a `.bp-paper-edit-field`: its field name; the slash menu counts the field blocks on screen by it. */
+  "data-field-name"?: string;
+}
+
+/** Attributes the canvas writes for a host to read or select. */
+export interface BpPaperDomAttributes {
+  /** On each top-level block's DOM: its id. */
+  "data-bp-id": string;
+  /** On a locked block's DOM: its template role (`title`, …). */
+  "data-bp-role": string;
+  /** On a document link's span. */
+  "data-wikilink": "";
+  /** On a document link's span: its stored words. */
+  target: string;
+  /** On a document link's span: its document id. */
+  docid: string;
+  /** On a document link's span: its alias. */
+  alias: string;
+  /** On a document link's span: its target is gone (1.17.0). */
+  "data-missing": "";
+  /** On the canvas while `mediaPicker` is set. */
+  "data-media-picker": "";
+  /** On the canvas after `bp-canvas-mount-failed`. */
+  "data-mount-failed": "true";
+  /** On a comment range's span. */
+  "data-comment-id": string;
+  /** On a paint hole's node: the block id. */
+  "data-bp-fleet-id": string;
+  /** The paint hole itself. */
+  "data-bp-fleet-body": "";
+}
+
+/** Classes the contract names. Every other class inside the elements is internal. */
+export type BpPaperPublicClass =
+  | "bp-remote-caret"
+  | "bp-remote-caret__label"
+  | "bp-remote-selection"
+  | "bp-comment-range"
+  | "bp-comment-range--active"
+  | "bp-canvas-mount-failed";
+
+/** Host classes the canvas reads: a `.bp-paper-editor` root (resume focus, masters, `data-paper-doc-key`) and `.bp-paper-edit-field` (with `data-field-name`). */
+export type BpPaperHostClass = "bp-paper-editor" | "bp-paper-edit-field";
+
+/** CSS custom properties a host sets to theme the editor's stylesheet. */
+export type BpPaperThemeToken =
+  | "--paper-accent"
+  | "--paper-accent-soft"
+  | "--paper-bg"
+  | "--paper-bg-deep"
+  | "--paper-chrome-bg"
+  | "--paper-chrome-border"
+  | "--paper-danger"
+  | "--paper-edit-hover"
+  | "--paper-font-mono"
+  | "--paper-font-sans"
+  | "--paper-font-serif"
+  | "--paper-font-ui"
+  | "--paper-ink"
+  | "--paper-ink-faint"
+  | "--paper-ink-faint-line"
+  | "--paper-ink-soft"
+  | "--paper-reading-accent"
+  | "--paper-rule"
+  | "--paper-rule-soft"
+  | "--paper-picker-accent"
+  | "--paper-picker-accent-soft"
+  | "--paper-picker-bg"
+  | "--paper-picker-chrome-bg"
+  | "--paper-picker-chrome-border"
+  | "--paper-picker-ink"
+  | "--paper-picker-ink-faint"
+  | "--paper-picker-ink-soft"
+  | "--paper-picker-rule"
+  | "--paper-picker-rule-soft"
+  | "--paper-picker-shadow"
+  | "--bp-air-callout"
+  | "--bp-air-code"
+  | "--bp-air-table"
+  | "--bp-body-lh"
+  | "--bp-body-size"
+  | "--bp-body-tracking"
+  | "--bp-code-pad"
+  | "--bp-code-radius"
+  | "--bp-code-size"
+  | "--bp-codeblock-lh"
+  | "--bp-codeblock-margin"
+  | "--bp-codeblock-pad"
+  | "--bp-codeblock-radius"
+  | "--bp-codeblock-size"
+  | "--bp-cols"
+  | "--bp-evidence-band"
+  | "--bp-evidence-band-max"
+  | "--bp-evidence-fill"
+  | "--bp-evidence-gutter"
+  | "--bp-evidence-pull"
+  | "--bp-evidence-width"
+  | "--bp-h1-size"
+  | "--bp-h2-lh"
+  | "--bp-h2-size"
+  | "--bp-h2-tracking"
+  | "--bp-h2-weight"
+  | "--bp-h3-lh"
+  | "--bp-h3-size"
+  | "--bp-heading-weight"
+  | "--bp-img-radius"
+  | "--bp-li-gap"
+  | "--bp-list-indent"
+  | "--bp-para-margin-top"
+  | "--bp-pre-radius"
+  | "--bp-remote-color"
+  | "--bp-rule-hairline"
+  | "--bp-section-beat"
+  | "--bp-section-gap"
+  | "--bp-section-rule"
+  | "--bp-shadow-hsl"
+  | "--bp-table-centre"
+  | "--bp-tone-danger-bg"
+  | "--bp-tone-danger-fg"
+  | "--bp-tone-info-bg"
+  | "--bp-tone-info-fg"
+  | "--bp-tone-neutral-bg"
+  | "--bp-tone-neutral-fg"
+  | "--bp-tone-success-bg"
+  | "--bp-tone-success-fg"
+  | "--bp-tone-warning-bg"
+  | "--bp-tone-warning-fg";
+
+/** A picker element the host defines; the canvas creates it for `field-image`, `field-reference`, card media and embeds. */
+export interface BpHostPickerElement extends HTMLElement {
+  /** The picked value; the canvas sets it and reads it back. */
+  value: string;
+  /** `bp-media-picker`: open the asset browser; false when none is wired. */
+  openBrowser?(): boolean;
+  /** `bp-media-picker`: open the file dialog. */
+  openFileDialog?(): void;
+}
+
+/** The Mermaid runtime the host supplies as `window.BarkparkPaperMermaid`. */
+export interface BarkparkPaperMermaidRuntime {
+  /** Render the diagrams inside `this.el`. */
+  runMermaid(this: { el: Element }): void;
 }
 
 /** A mark a toolbar toggles (portable-doc names). */
@@ -268,6 +561,7 @@ export type RecoverySnapshot =
 
 /** A whole paper in one ProseMirror document. `editable="false"` mounts read-only. */
 export interface BpPaperCanvasElement extends HTMLElement {
+  /** Set: seed the run. Read: the saved baseline (the run last seeded, acknowledged or applied), not the live document; `recoverySnapshot()` reads that. */
   blocks: PortableDocBlock[];
   /** true: one batch in flight at a time, each `bp-canvas-ops` carries `seq`, and the host must acknowledge it. */
   acknowledgedSaves: boolean;
@@ -303,7 +597,16 @@ export interface BpPaperCanvasElement extends HTMLElement {
     | undefined;
 
   acknowledgeOps(seq: number, saved: boolean): boolean;
-  discardInflightOps(seq: number): boolean;
+  /** `refusal.reason` reopens the field dialog of the inline object that batch saved, with the reason on its field. */
+  discardInflightOps(seq: number, refusal?: { reason?: string } | null): boolean;
+  /** Whether the in-flight batch `seq` can be resent unchanged on the newer `serverBlocks`. */
+  rebaseSafe(seq: number, serverBlocks: PortableDocBlock[]): boolean;
+  /** Whether everything this canvas holds (in flight and unsent) can ride on the newer `serverBlocks`. */
+  localEditsRebaseSafe(serverBlocks: PortableDocBlock[]): boolean;
+  /** Before the page goes inert or moves: remember that the author was typing here. True when armed. */
+  captureResumeFocus(): boolean;
+  /** After: put the caret back if nothing else took focus meanwhile. True when restored. */
+  restoreResumeFocus(): boolean;
   resendPendingOps(): boolean;
   identifyOpsRequest(seq: number, requestId: string, previousRequestId?: string | null): boolean;
   flushPendingChanges(): boolean;
@@ -372,7 +675,9 @@ declare global {
     "bp-paper-canvas": BpPaperCanvasElement;
   }
   interface Window {
-    /** Set to true before the first element mounts to stop the bundle appending <link href="/assets/bp-paper-editor.css">. */
+    /** Set to true before the first element mounts to stop the bundle appending <link id="bp-paper-editor-styles" href="/assets/bp-paper-editor.css">. */
     BP_PAPER_EDITOR_NO_INJECT?: boolean;
+    /** Host-supplied: the diagram node calls its runMermaid to render a preview. */
+    BarkparkPaperMermaid?: BarkparkPaperMermaidRuntime;
   }
 }

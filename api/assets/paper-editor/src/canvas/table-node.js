@@ -371,7 +371,7 @@ function moveCell(editor, dir) {
     const contextualHost = editor.options.element?.closest?.(
       'bp-paper-editor[data-editor-mode="table"]',
     );
-    if (contextualHost) return contextualHost.requestTableStructure?.("add-row") === true;
+    if (contextualHost) return contextualHost._requestTableStructure?.("add-row") === true;
     return editor
       .chain()
       .focus()
@@ -630,7 +630,7 @@ export const BpTable = Node.create({
         b.addEventListener("mousedown", (e) => e.preventDefault());
         b.addEventListener("click", (e) => {
           e.preventDefault();
-          if (contextualHost) contextualHost.requestTableStructure?.(name);
+          if (contextualHost) contextualHost._requestTableStructure?.(name);
           else runTransform(name);
         });
         return b;

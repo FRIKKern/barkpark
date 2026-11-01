@@ -399,10 +399,10 @@ try {
   );
   editCell(live.editor, "body", 0, 0, "Ada Lovelace");
   assert.equal(live.editor.hasPendingChanges(), true);
-  assert.equal(live.editor.requestTableStructure("add-row"), true);
+  assert.equal(live.editor._requestTableStructure("add-row"), true);
   assert.equal(live.ops.length, 1, "cell save is emitted before a structural action");
   assert.equal(live.ops[0].op, "patch-table-cells");
-  assert.equal(live.editor.requestTableStructure("add-column"), false,
+  assert.equal(live.editor._requestTableStructure("add-column"), false,
     "one positional intent remains immutable while waiting for authority");
 
   const cellAck = clone(projection);
@@ -450,13 +450,13 @@ try {
     "a receipt without its exact resulting projection stays locked");
   live.editor.applyTableProjection(structureAck, { requestId: "structure-1" });
   assert.equal(live.editor._editor.isEditable, true);
-  assert.equal(live.editor.requestTableStructure("remove-row:01"), false);
-  assert.equal(live.editor.requestTableStructure("up-row:0"), false);
-  assert.equal(live.editor.requestTableStructure("down-row:2"), false);
-  assert.equal(live.editor.requestTableStructure("remove-column:9"), false);
-  assert.equal(live.editor.requestTableStructure("add-header"), false,
+  assert.equal(live.editor._requestTableStructure("remove-row:01"), false);
+  assert.equal(live.editor._requestTableStructure("up-row:0"), false);
+  assert.equal(live.editor._requestTableStructure("down-row:2"), false);
+  assert.equal(live.editor._requestTableStructure("remove-column:9"), false);
+  assert.equal(live.editor._requestTableStructure("add-header"), false,
     "header presence fences contradictory actions");
-  assert.equal(live.editor.requestTableStructure("remove-header"), true);
+  assert.equal(live.editor._requestTableStructure("remove-header"), true);
   assert.equal(live.ops.at(-1).action, "remove-header");
   live.editor.remove();
 
@@ -760,7 +760,7 @@ try {
     "repeated same-debounce revert cycles settle independently");
 
   editCell(hookedEditor, "body", 0, 0, "Cell before structure");
-  assert.equal(hookedEditor.requestTableStructure("add-row"), true);
+  assert.equal(hookedEditor._requestTableStructure("add-row"), true);
   assert.equal(replies.length, 1);
   let drainSettled = false;
   let drainPromise = null;

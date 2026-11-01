@@ -174,7 +174,7 @@ const DOCUMENT_ICON = '<svg class="bp-canvas-object-doc" width="25" height="25" 
 
 function paintChip(dom, chip, bpType, block, el) {
   const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
-  const vocab = host && typeof host.inlineObjectVocabulary === "function" ? host.inlineObjectVocabulary() : null;
+  const vocab = host && typeof host._inlineObjectVocabulary === "function" ? host._inlineObjectVocabulary() : null;
   const kind = objectBlockFor(vocab, bpType);
   const row = !!(kind && Array.isArray(kind.fields) && kind.fields.length);
   dom.classList.toggle("bp-canvas-object-row", row);

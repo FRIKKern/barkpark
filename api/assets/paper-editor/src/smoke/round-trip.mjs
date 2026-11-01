@@ -17,7 +17,8 @@ import {
 } from "../convert.js";
 import { runToTiptap, runToOps, docToBlocks } from "../canvas/run-convert.js";
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
-import { CONTRACT_VERSION } from "../contract.js";
+import { BUILD_SHA, CONTRACT_VERSION, EDITOR_VERSION } from "../contract.js";
+import { readFileSync } from "node:fs";
 
 // 1) paragraph with bold + italic + inline code round-trips.
 check("paragraph round-trip (text + bold + em + code)", () => {
@@ -529,12 +530,15 @@ check("editor mark schemas match convert.js attrs", () => {
   ]);
 });
 
-// 16) the embed contract exposes a stable CONTRACT_VERSION from a DOM-free
-//     module (so this guard runs in pure Node, never importing index.js).
-check("contract exposes CONTRACT_VERSION", () => {
-  assert.equal(typeof CONTRACT_VERSION, "string");
-  assert.ok(CONTRACT_VERSION.length > 0, "non-empty");
-  assert.equal(CONTRACT_VERSION, "1.20.0");
+// 16) the embed contract exposes its build identity from a DOM-free module (so
+//     this guard runs in pure Node, never importing index.js): the versions are
+//     package.json's, and BUILD_SHA is null until esbuild defines it.
+check("contract exposes CONTRACT_VERSION, EDITOR_VERSION and BUILD_SHA", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  assert.match(CONTRACT_VERSION, /^\d+\.\d+\.\d+$/);
+  assert.equal(CONTRACT_VERSION, pkg.barkpark.contractVersion);
+  assert.equal(EDITOR_VERSION, pkg.version);
+  assert.equal(BUILD_SHA, null);
 });
 
 // 17) blockToTiptap is editability-independent — the read-mode `editable`
