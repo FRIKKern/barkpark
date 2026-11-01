@@ -48,6 +48,7 @@ on:
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
+      - "api/priv/portable_doc/goldens/ops/**"
       - "api/lib/barkpark/portable_doc/render/walk.ex"
       - "api/lib/barkpark_web/components/studio_components/nav.ex"
       - "api/lib/barkpark_web/components/studio_components/panes.ex"
@@ -75,6 +76,7 @@ on:
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
+      - "api/priv/portable_doc/goldens/ops/**"
       - "api/lib/barkpark/portable_doc/render/walk.ex"
       - "api/lib/barkpark_web/components/studio_components/nav.ex"
       - "api/lib/barkpark_web/components/studio_components/panes.ex"
