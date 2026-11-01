@@ -2244,6 +2244,158 @@
           ]
         }
       ]
+    },
+    {
+      "scene": "nested-enter",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "level": 2,
+          "text": "Trip"
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left the car park at six."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Fog by eight."
+                    }
+                  ]
+                },
+                {
+                  "id": "co-ice",
+                  "type": "callout",
+                  "tone": "warning",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Ice on the north face."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "text": "Trip",
+          "level": 2
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six."
+                }
+              ]
+            },
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Fog by eight."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ]
     }
   ]
 }

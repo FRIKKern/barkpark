@@ -71,39 +71,59 @@ defmodule Barkpark.PortableDoc.OldClientReplayTest do
         assert Enum.all?(recording["scenes"], &(is_binary(&1["scene"]) and &1["batches"] != []))
       end
 
-      for scene <- recording["scenes"] do
+      for scene <- recording["scenes"], scene["scene"] != "nested-enter" do
         @scene scene
 
         test "#{scene["scene"]}: every batch applies through Patch" do
-          blocks =
-            Enum.reduce(Enum.concat(@scene["batches"]), @scene["before"], fn op, blocks ->
-              assert {:ok, lowered} = BlockOps.lower_editor_op(blocks, op)
-              assert {:ok, next} = Patch.apply_patch(blocks, lowered)
-              next
-            end)
-
+          assert {:ok, blocks} = through_patch(@scene)
           assert_landed(@scene, blocks)
         end
 
         test "#{scene["scene"]}: every batch applies through the canvas batch write" do
-          slug = "replay-#{System.unique_integer([:positive])}"
-
-          {:ok, _} =
-            Content.upsert_paper(
-              Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: @scene["before"]})
-            )
-
-          for batch <- @scene["batches"] do
-            rev = get_in(Content.get_paper(slug).content, ["rev"])
-
-            assert {:ok, _receipt} =
-                     Content.apply_paper_block_ops(slug, batch, "production", if_rev: rev)
-          end
-
-          assert_landed(@scene, Content.paper_blocks(slug))
+          assert {:ok, blocks} = through_batch_write(@scene)
+          assert_landed(@scene, blocks)
         end
       end
+
+      @scene Enum.find(recording["scenes"], &(&1["scene"] == "nested-enter"))
+
+      test "nested-enter: Patch refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
+        assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_patch(@scene)
+      end
+
+      test "nested-enter: the canvas batch write refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
+        assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_batch_write(@scene)
+      end
     end
+  end
+
+  defp through_patch(%{"before" => before, "batches" => batches}) do
+    batches
+    |> Enum.concat()
+    |> Enum.reduce_while({:ok, before}, fn op, {:ok, blocks} ->
+      with {:ok, lowered} <- BlockOps.lower_editor_op(blocks, op),
+           {:ok, next} <- Patch.apply_patch(blocks, lowered) do
+        {:cont, {:ok, next}}
+      else
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp through_batch_write(%{"before" => before, "batches" => batches}) do
+    slug = "replay-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: before}))
+
+    Enum.reduce_while(batches, {:ok, nil}, fn batch, _ ->
+      rev = get_in(Content.get_paper(slug).content, ["rev"])
+
+      case Content.apply_paper_block_ops(slug, batch, "production", if_rev: rev) do
+        {:ok, _receipt} -> {:cont, {:ok, Content.paper_blocks(slug)}}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp assert_landed(%{"client_after" => expected}, blocks), do: assert(blocks == expected)

@@ -154,6 +154,20 @@ const gearTable = {
   rows: [[[text("Tent")], [text("2 kg")]], [[text("Stove")], [text("400 g")]]],
 };
 
+const trip = [
+  { id: "h-trip", type: "heading", level: 2, text: "Trip" },
+  {
+    id: "s-day",
+    type: "section",
+    title: "Day one",
+    blocks: [
+      para("p-day", "Left the car park at six."),
+      { id: "co-ice", type: "callout", tone: "warning", content: [text("Ice on the north face.")] },
+    ],
+  },
+  para("p-after", "Home by dark."),
+];
+
 const scenes = [
   () => canvasScene("type-and-mark", ridge, async ({ canvas, editor, flush }) => {
     caret(editor, endOf(editor, 0));
@@ -276,19 +290,7 @@ const scenes = [
     el.requestTableStructure("add-row");
     await tick(50);
   }),
-  () => canvasScene("nested-edits", [
-    { id: "h-trip", type: "heading", level: 2, text: "Trip" },
-    {
-      id: "s-day",
-      type: "section",
-      title: "Day one",
-      blocks: [
-        para("p-day", "Left the car park at six."),
-        { id: "co-ice", type: "callout", tone: "warning", content: [text("Ice on the north face.")] },
-      ],
-    },
-    para("p-after", "Home by dark."),
-  ], async ({ editor, flush }) => {
+  () => canvasScene("nested-edits", trip, async ({ editor, flush }) => {
     const day = find(editor, "at six");
     caret(editor, day.to);
     type(editor, " in fog");
@@ -296,6 +298,11 @@ const scenes = [
     const ice = find(editor, "north face");
     caret(editor, ice.to);
     type(editor, " and the ridge");
+  }),
+  () => canvasScene("nested-enter", trip, async ({ editor }) => {
+    caret(editor, find(editor, "six.").to);
+    key(editor, { key: "Enter" });
+    type(editor, "Fog by eight.");
   }),
 ];
 
