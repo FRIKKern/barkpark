@@ -7,7 +7,7 @@
 export const CONTRACT_VERSION = "1.21.0";
 // EDITOR_VERSION is package.json's version. BUILD_SHA is the first 12 hex of the
 // sha-256 over esbuild's version and every input file of the bundle
-// (scripts/build-bundle.mjs defines __BP_BUILD_SHA__); unbuilt, as in plain Node, it is null.
+// (scripts/build-sha.mjs; build-bundle.mjs defines __BP_BUILD_SHA__); unbuilt, as in plain Node, it is null.
 export const EDITOR_VERSION = "1.0.0";
 export const BUILD_SHA = typeof __BP_BUILD_SHA__ === "string" ? __BP_BUILD_SHA__ : null;
 export const DEBOUNCE_MS = 300;

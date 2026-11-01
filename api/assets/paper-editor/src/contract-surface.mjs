@@ -5,7 +5,7 @@
 
 const body = (src, open) => {
   const start = src.indexOf(open);
-  if (start < 0) throw new Error(`index.d.ts has no ${open}`);
+  if (start === -1) throw new Error(`index.d.ts has no ${open}`);
   let depth = 0;
   for (let i = src.indexOf("{", start); i < src.length; i++) {
     if (src[i] === "{") depth++;
@@ -55,7 +55,7 @@ export function declaredInTypes(dts) {
   add("global", "window", names(body(body(dts, "declare global "), "interface Window "), /^\s+([A-Za-z_$][\w$]*)\??\s*:/));
   const union = (name) => {
     const at = dts.indexOf(`export type ${name} =`);
-    if (at < 0) throw new Error(`index.d.ts has no ${name}`);
+    if (at === -1) throw new Error(`index.d.ts has no ${name}`);
     return [...dts.slice(at, dts.indexOf(";", at)).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   };
   add("class", "canvas", union("BpPaperPublicClass"));
@@ -69,7 +69,7 @@ export function declaredInContract(md) {
   const section = index.slice(0, index.indexOf("\n## ", 4) > 0 ? index.indexOf("\n## ", 4) : undefined);
   for (const row of section.split("\n")) {
     const cells = row.split("|").map((c) => c.trim());
-    if (cells.length < 5 || !cells[3].includes("`")) continue;
+    if (cells.length < 5) continue;
     for (const m of cells[3].matchAll(/`([^`]+)`/g)) keys.add(`${cells[1]}|${cells[2]}|${m[1]}`);
   }
   for (const m of md.matchAll(/`(--(?:paper|bp)-[a-z0-9-]+)`/g)) keys.add(`token|css|${m[1]}`);
