@@ -634,7 +634,7 @@
     },
     {
       "name": "prosemirror-view",
-      "version": "1.42.6",
+      "version": "1.42.9",
       "license": "MIT",
       "repository": "git+https://code.haverbeke.berlin/prosemirror/prosemirror-view.git",
       "bundledInto": [
