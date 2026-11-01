@@ -25,15 +25,17 @@ defmodule BarkparkWeb.PaperCanvasTKeysTest do
 
   @pinned_patterns %{
     {"slash-menu.js:332", "^.+\\ \\(linked\\)$"} =>
-      "a master's title (user data) + \" (linked)\"",
+      "a master's title (user data) + \" (linked)\", English untranslated: task-0e2edc6dc4f3089f",
     {"slash-menu.js:332", "^linked\\ master.+$"} =>
-      "\"linked master\" + a master's tier (user data)",
-    {"slash-menu.js:332", "^master.+$"} => "\"master\" + a master's tier (user data)",
+      "\"linked master\" + a master's tier (user data), English untranslated: task-0e2edc6dc4f3089f",
+    {"slash-menu.js:332", "^master.+$"} =>
+      "\"master\" + a master's tier (user data), English untranslated: task-0e2edc6dc4f3089f",
     {"slash-menu.js:495", "^.+\\ \\(linked\\)$"} =>
-      "a master's title (user data) + \" (linked)\"",
+      "a master's title (user data) + \" (linked)\", English untranslated: task-0e2edc6dc4f3089f",
     {"slash-menu.js:500", "^linked\\ master.+$"} =>
-      "\"linked master\" + a master's tier (user data)",
-    {"slash-menu.js:500", "^master.+$"} => "\"master\" + a master's tier (user data)"
+      "\"linked master\" + a master's tier (user data), English untranslated: task-0e2edc6dc4f3089f",
+    {"slash-menu.js:500", "^master.+$"} =>
+      "\"master\" + a master's tier (user data), English untranslated: task-0e2edc6dc4f3089f"
   }
 
   setup_all do
