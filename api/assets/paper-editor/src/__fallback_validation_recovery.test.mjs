@@ -1223,6 +1223,10 @@ for (const family of ["section", "column"]) {
         ];
       }
       const mountedBody = env.window.document.getElementById(scenario.expectedId);
+      childEditors.querySelector("bp-paper-editor, bp-paper-canvas").focusSelection = () => {
+        mountedBody.focus();
+        return true;
+      };
       assert.ok(
         mountedBody,
         "the acknowledged child body is mounted before the save receipt settles",
@@ -1310,6 +1314,10 @@ for (const scenario of [
     ? '<bp-paper-canvas><div id="terminal-child-body" contenteditable="true" tabindex="0"></div></bp-paper-canvas>'
     : '<div id="paper-ed-child:new"><bp-paper-editor><div id="terminal-child-body" contenteditable="true" tabindex="0"></div></bp-paper-editor></div>';
   if (scenario.canvas) children.querySelector("bp-paper-canvas").blocks = [{ id: "child:new" }];
+  children.querySelector("bp-paper-editor, bp-paper-canvas").focusSelection = () => {
+    env.window.document.getElementById("terminal-child-body").focus();
+    return true;
+  };
   env.settle({
     saved: scenario.saved !== false,
     request_id: env.calls[0].payload.request_id,

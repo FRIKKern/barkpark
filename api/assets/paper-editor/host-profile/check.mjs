@@ -14,19 +14,23 @@
 //     of their own, such as history.state or a link's target) has no reason, is
 //     not a contract name, is also listed under "uses", or no source uses it;
 //   - "fleet" disagrees with whether the host dispatches bp-fleet-paint;
-//   - "minContract" is above the build's contract.
+//   - "minContract" is above the build's contract;
+//   - the profile lacks host, root, minContract, fleet, sources or uses, or names a
+//     source that does not exist.
 // A member is matched as `.name` in scripts, HTML and HEEx, so a member of the same
 // name on another object counts as a use unless "notEditor" names it, and then a
 // real use of that name passes unseen. Comments are skipped in every source but
 // Elixir; only the first use of each name is reported.
 // No dependencies: hosts copy this file and surface.json, pinned by surface.build.
 //
-// Run: node check.mjs <host-profile.json> [surface.json]
+// Run: node check.mjs <host-profile.json> [surface.json]   (exit 1 on a failure,
+// 2 without a profile or when a file cannot be read as JSON)
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const REQUIRED = ["host", "root", "minContract", "fleet", "sources", "uses"];
 const MEMBER_SCANNED = /\.(?:[cm]?js|jsx|tsx?|html|heex)$/;
 const SCANNED = /\.(?:[cm]?js|jsx|tsx?|css|html|heex|ex)$/;
 const EDITOR_CLASS = /^(?:bp-|ProseMirror|prosemirror-|tiptap|hljs)/;
@@ -61,7 +65,7 @@ const attribute = (name) => new RegExp([
   ...(name.startsWith("data-") ? [`\\.dataset\\.${camel(name)}(?![\\w$])`] : []),
 ].join("|"));
 
-const files = (root, sources) => sources.flatMap((source) => {
+const files = (root, sources) => sources.filter((source) => existsSync(path.join(root, source))).flatMap((source) => {
   const walk = (p) => statSync(p).isDirectory() ? readdirSync(p).sort().flatMap((n) => walk(path.join(p, n))) : SCANNED.test(p) ? [p] : [];
   return walk(path.join(root, source));
 });
@@ -77,8 +81,11 @@ const firstUse = (texts, pattern, scriptsOnly) => {
 
 const entries = (groups) => Object.entries(groups).flatMap(([element, kinds]) => Object.entries(kinds).flatMap(([kind, names]) => names.map((name) => ({ element, kind, name }))));
 
-export function check(profile, surface, root) {
-  const errors = [];
+export function check(profile, surface, profileDir) {
+  const missing = REQUIRED.filter((key) => profile[key] === undefined);
+  if (missing.length) return missing.map((key) => `profile has no ${key}`);
+  const root = path.resolve(profileDir, profile.root);
+  const errors = profile.sources.filter((source) => !existsSync(path.join(root, source))).map((source) => `no such source: ${source}`);
   const texts = files(root, profile.sources).map((file) => {
     const raw = readFileSync(file, "utf8");
     const text = file.endsWith(".ex") ? raw : stripComments(raw);
@@ -149,8 +156,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("usage: node check.mjs <host-profile.json> [surface.json]");
     process.exit(2);
   }
-  const profile = JSON.parse(readFileSync(profilePath, "utf8"));
-  const errors = check(profile, JSON.parse(readFileSync(surfacePath, "utf8")), path.resolve(path.dirname(profilePath), profile.root));
+  const read = (file) => {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch (error) {
+      console.error(`cannot read ${file}: ${error.message}`);
+      process.exit(2);
+    }
+  };
+  const profile = read(profilePath);
+  const errors = check(profile, read(surfacePath), path.dirname(profilePath));
   for (const e of errors) console.log(`FAIL  ${profile.host}: ${e}`);
   if (errors.length) process.exit(1);
   console.log(`PASS  ${profile.host}: every editor name its sources use is in its profile`);

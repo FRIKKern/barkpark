@@ -709,12 +709,14 @@ host-profile/check.mjs      node check.mjs <profile.json> [surface.json]; no dep
 host-profile/<host>.json    one per host: Barkpark's studio, reader and web live here, each app keeps its own
 ```
 
-A profile lists the files a host embeds the editor from (`sources`), the contract
+A profile names its host (`host`) and lists the files it embeds the editor from
+(`sources`, relative to `root`, which is relative to the profile's folder), the contract
 names they use (`uses`, keyed like the Surface index), contract names they use for
 something of their own (`notEditor`, such as `history.state`), the internal names
 they still touch, each with a reason (`internals`), whether the host paints fleet
 blocks (`fleet`) and the lowest contract it needs (`minContract`). `check.mjs` fails
-on an undeclared use, an undeclared reach-in, or a listed name no source uses. An
+on an undeclared use, an undeclared reach-in, a listed name no source uses, or a
+missing key or source. An
 app copies `check.mjs` and `surface.json` from one Barkpark commit (`surface.json`'s
 `build` names the bundle) and runs the check in its own test. The checker moves
 home with the editor at R5.
