@@ -1599,7 +1599,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          :ok <- preflight_table_editor_ops(blocks, ops),
-         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         blocks = project_batch_ids(blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          no_op? =
            ops == [] or
@@ -2191,12 +2191,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
 
+  defp project_batch_ids(blocks, nil), do: blocks
+  defp project_batch_ids(blocks, _if_rev), do: ensure_block_ids(blocks)
+
   defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
     # every op of the atomic fold, so a batch op that breaks a cardinality /
     # relative-order rule halts the fold exactly like a locked-block op (the
     # paper stays UNCHANGED). Same declaration set as the single-op path.
-    Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
+    Enum.reduce_while(ops, {:ok, blocks, [], []}, fn op, {:ok, acc, ids, applied} ->
       # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
       # once after it. Two defects share this one root — the batch used to read
       # its receipt one step BEFORE the id existed, and to thread a still-id-less
@@ -2224,7 +2227,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # `ensure_block_ids` at the caller is then a no-op that stays as the
       # belt-and-braces chokepoint.
       with {:ok, applied_op} <- lower_editor_block_op(acc, op),
-           {:ok, patched} <- Patch.apply_patch(acc, applied_op, constraints: constraints),
+           {:ok, patched} <-
+             Patch.apply_patch(acc, applied_op,
+               constraints: constraints,
+               duplicates: {:batch, blocks}
+             ),
            next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(applied_op, next) do
         new_ids =
@@ -2233,11 +2240,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
             id -> if id in ids, do: ids, else: ids ++ [id]
           end
 
-        {:cont, {:ok, next, new_ids}}
+        {:cont, {:ok, next, new_ids, [applied_op | applied]}}
       else
         {:error, _reason} = err -> {:halt, err}
       end
     end)
+    |> case do
+      {:ok, folded, ids, applied} ->
+        with :ok <- Patch.refuse_new_duplicates(blocks, folded, Enum.reverse(applied)) do
+          {:ok, folded, ids}
+        end
+
+      {:error, _reason} = err ->
+        err
+    end
   end
 
   # The CURRENT streaming rev (no bump) — used by the empty-batch no-op receipt.
@@ -2869,7 +2885,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp fold_document_ops(blocks, ops) do
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, results} ->
       with {:ok, applied_op} <- lower_editor_block_op(acc, op),
-           {:ok, patched} <- Patch.apply_patch(acc, applied_op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op, duplicates: {:batch, blocks}),
            next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(applied_op, next) do
         result = %{
@@ -2879,14 +2895,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
           position: affected.position
         }
 
-        {:cont, {:ok, next, [result | results]}}
+        {:cont, {:ok, next, [{result, applied_op} | results]}}
       else
         {:error, _reason} = err -> {:halt, err}
       end
     end)
     |> case do
-      {:ok, folded, results} -> {:ok, folded, Enum.reverse(results)}
-      {:error, _reason} = err -> err
+      {:ok, folded, results} ->
+        {results, applied} = results |> Enum.reverse() |> Enum.unzip()
+
+        with :ok <- Patch.refuse_new_duplicates(blocks, folded, applied) do
+          {:ok, folded, results}
+        end
+
+      {:error, _reason} = err ->
+        err
     end
   end
 
