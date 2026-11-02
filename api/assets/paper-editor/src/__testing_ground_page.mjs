@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import { exitRig, skip, tally } from "./__rig.mjs";
 import { drills } from "./testing-ground/drills/index.mjs";
 import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
-import { lightsOf, play } from "./testing-ground/play.mjs";
-import { start } from "./testing-ground/server.mjs";
+import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
+import { makeBuild, pickBuild } from "./testing-ground/builds.mjs";
+import { mainBuild, start } from "./testing-ground/server.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const ONLY = process.env.TG_ONLY;
@@ -231,6 +232,70 @@ await scene("every test doc opens: 7 drills and 80 block samples, none with a du
   const windows = await page.evaluate(() => { window.testingGround.openDoc("drill:D06"); return [...document.querySelectorAll(".tg-edit bp-paper-canvas")].map((c) => c.liveRemote); });
   assert.deepEqual(windows, [true, true], "D06 opens two windows on one host, each taking the other's saves live");
 });
+
+async function split(builds, query, fn) {
+  const pair = await start({ builds });
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await page.goto(`${pair.url}${query}`);
+    await page.waitForFunction(() => [...document.querySelectorAll(".tg-frame")].every((f) => f.contentWindow.testingGround?.state.canvases[0]?._editor));
+    const frames = page.frames().filter((frame) => frame.url().includes("/b/"));
+    await fn(page, frames);
+    assert.deepEqual(errors, [], "page errors");
+  } finally {
+    await page.close();
+    await pair.close();
+  }
+}
+const saved = (frame) => frame.evaluate(async () => { await window.testingGround.settle(); return window.testingGround.state.host.saved.map((b) => (b.content || []).map((c) => c.value).join("")); });
+const keyOf = (frame) => frame.evaluate(() => window.testingGround.state.key);
+
+await t.checkAsync("split screen: two builds side by side, each named with its sha; the left window's keys, doc and reload go into the right", () =>
+  split([{ ...mainBuild(), label: "left build" }, { ...mainBuild(), label: "right build" }], "?doc=drill:D01", async (page, [left, right]) => {
+    assert.deepEqual(await page.$$eval(".tg-split-label", (ls) => ls.map((l) => l.textContent.replace(/[0-9a-f]{10}/, "<sha>"))), ["Left: left build at <sha>", "Right: right build at <sha>"]);
+    assert.deepEqual([await left.textContent(".tg-stamp"), await right.textContent(".tg-stamp")].map((s) => s.replace(/[0-9a-f]{10}$/, "<sha>")), ["left build at <sha>", "right build at <sha>"]);
+    await left.click("text=Beta");
+    await caretRead(left);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Fog");
+    await page.keyboard.press("Backspace");
+    assert.deepEqual(await saved(right), await saved(left), "both builds hold the same doc");
+    assert.deepEqual((await saved(left)).slice(-1), ["Fo"]);
+    await right.click("text=Alpha");
+    await caretRead(right);
+    await page.keyboard.type("Z");
+    assert.equal((await saved(left)).includes("Alpha"), true, "keys typed on the right stay on the right");
+    await left.evaluate(() => window.testingGround.openDoc("drill:D02"));
+    await right.waitForFunction(() => window.testingGround.state.key === "drill:D02");
+    await left.evaluate(() => window.testingGround.reload());
+    await right.waitForFunction(() => window.testingGround.state.reload !== null);
+    assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload");
+  }));
+
+if (process.env.TG_TRY) {
+  const pick = pickBuild(process.env.TG_TRY, { repo: REPO });
+  const built = makeBuild(pick, { repo: REPO });
+  await t.checkAsync(`D01 split: main lights hidden blocks red, ${pick.label} keeps every light green`, () =>
+    split([mainBuild(), built], "?doc=drill:D01", async (page, [left, right]) => {
+      await left.getByRole("button", { name: "Edit empty paragraph" }).click();
+      await caretRead(left);
+      for (let i = 0; i < 6; i++) await page.keyboard.press("Enter");
+      await page.keyboard.type("x");
+      await page.keyboard.press("Backspace");
+      await left.evaluate(() => window.testingGround.reload());
+      await right.waitForFunction(() => window.testingGround.state.reload !== null);
+      assert.deepEqual(red(await lightsOf(left)), ["hidden-blocks"]);
+      assert.deepEqual(red(await lightsOf(right)), []);
+      if (process.env.TG_SHOTS) {
+        for (const frame of [left, right]) await frame.evaluate(() => window.testingGround.setDrawer(true));
+        await page.screenshot({ path: join(process.env.TG_SHOTS, `split-D01-main-vs-${process.env.TG_TRY}.png`) });
+      }
+    }));
+  built.remove();
+}
 
 if (process.env.TG_BARKPARK) {
   const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
