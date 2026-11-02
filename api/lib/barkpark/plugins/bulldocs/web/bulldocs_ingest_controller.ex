@@ -1403,6 +1403,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
+        Warnings.reset()
 
         case Content.apply_document_block_op(
                slug,
@@ -1420,17 +1421,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
            }} ->
             conn
             |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: slug,
-              op: op_kind,
-              block_id: block_id,
-              position: position,
-              # F5: name the row that was ACTUALLY written (the draft twin) and
-              # say plainly that it is not yet the row a reader sees.
-              written_doc_id: written_doc_id,
-              note: "ops write the draft twin; publish to make visible"
-            })
+            |> json(
+              with_warnings(%{
+                ok: true,
+                slug: slug,
+                op: op_kind,
+                block_id: block_id,
+                position: position,
+                # F5: name the row that was ACTUALLY written (the draft twin) and
+                # say plainly that it is not yet the row a reader sees.
+                written_doc_id: written_doc_id,
+                note: "ops write the draft twin; publish to make visible"
+              })
+            )
 
           {:error, :not_found} ->
             conn

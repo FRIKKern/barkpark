@@ -701,7 +701,8 @@ const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-p
 
 ## Surface index
 
-Every name a host may use, by kind. CSS tokens are in Styling.
+Every name a host may use, by kind, and the names a host supplies for the canvas to
+use (`picker`, `mermaid`: Host-supplied pieces). CSS tokens are in Styling.
 `src/__contract_truth.test.mjs` fails when:
 
 - this table and `index.d.ts` disagree, either way (tokens: every backticked
@@ -710,22 +711,49 @@ Every name a host may use, by kind. CSS tokens are in Styling.
   created or a connected (mounted) element (no leading `_`) that is not declared,
   or lacks a declared member;
 - a declared event is never dispatched (inbound: never listened for), a declared
-  DOM attribute is never written, or a declared attribute, class, token or global
-  never appears in the source with comments stripped, matched on name boundaries;
-- the source dispatches an event, listens for a `bp-*` event by a literal name, or
-  reads a `data-*` attribute or `bp-*` class off an ancestor or the document
-  (`closest(…)`, `document.querySelector(…)`, a CSS selector that starts with an
-  attribute), that is neither declared nor on the test's short list of
-  editor-internal names and the reach-ins below;
+  DOM attribute is never written, a declared attribute, class, token or global
+  never appears in the source with comments stripped, matched on name boundaries,
+  or a name the host supplies is never used;
+- the source dispatches an event, listens by a literal name for an event that is
+  not a DOM event, or reads a `data-*` attribute or `bp-*` class off an ancestor or
+  the document (`closest(…)`, `document.querySelector(…)`, a CSS selector that
+  starts with an attribute), that is neither declared nor on the test's short list
+  of editor-internal names nor a reach-in listed by kind (Known reach-ins);
+- the source reads an attribute off its own element, a parent or the document
+  root (`getAttribute`, `hasAttribute`, `getAttributeNode`, `getAttributeNS`,
+  `hasAttributeNS`, `attributes[…]`, `dataset.x`, `dataset["x"]`, `"x" in
+  dataset`, a destructured `dataset`, `matches`, `closest`; receivers `this`,
+  `parentElement`, `parentNode`, `offsetParent`, `getRootNode()`, and
+  `.documentElement`, `.body`, `.getElementById(…)`, `.querySelector(…)`,
+  `.querySelectorAll(…)` on `document` or `ownerDocument`; `?.` counts as `.`
+  anywhere in the chain, and a chain wrapped over lines is joined), or a
+  stylesheet selector names one (anywhere in it, also inside `@supports
+  selector(…)` and `@scope (…)`), that is not declared, written by the build or
+  the reader, a global HTML attribute, editor-internal or a reach-in;
 - an upstream token in Styling is no longer read by the stylesheet.
 
-It does not read the hosts: a host that starts using a new member or an internal
-goes unnoticed until the next census.
+What the scan does not see, so a review has to: a stored reference or an alias of
+`this` (`const host = this.parentElement; host.getAttribute(…)`), a computed
+attribute or event name (`getAttribute(name)`, `` addEventListener(`${x}`) ``,
+`this[prop]`), a loop over `attributes`, `getAttributeNames()` or the dataset's
+keys (`Object.keys(this.dataset)`), an `on*` handler property, and a public
+property first set after mount. It does not read the hosts; a host checks
+its own sources against `host-profile/surface.json`, whose groups are `declared`
+and `host` (index.d.ts), `reachIns` (the table below), `reader` (PortableDoc's page
+vocabulary: the classes and `data-*` the reader writes, which a host may style)
+and `internal` (the rest of what the build writes; members only those of the two
+element classes).
 
 | Kind | On | Names |
 |---|---|---|
 | static | both | `BUILD_SHA`, `CONTRACT_VERSION`, `EDITOR_VERSION` |
 | member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
+| tag | canvas | `bp-paper-canvas` |
+| tag | editor | `bp-paper-editor` |
+| tag | picker | `bp-media-picker`, `bp-reference-picker` |
+| member | picker | `openBrowser`, `openFileDialog`, `value` |
+| attribute | picker | `chrome`, `data-strings`, `data-token`, `dataset`, `ref-type`, `scope-prefix`, `value` |
+| member | mermaid | `runMermaid` |
 | member | editor | `applyTableProjection`, `block`, `flushPendingChanges`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `tableMutationResult`, `tagSource`, `trackTableMutation`, `waitForTableSettlement`, `wikilinkSource` |
 | attribute | canvas | `block-cards`, `data-constraints`, `data-dataset`, `data-field-caps`, `data-locked-tail`, `data-media-strings`, `data-picker-browse`, `data-reference-strings`, `data-scope-prefix`, `data-token`, `data-vocabulary`, `editable`, `format-bubble`, `mention-trigger` |
 | attribute | editor | `data-block`, `data-editor-mode`, `editable` |
@@ -780,7 +808,20 @@ The other way round, the editor's stylesheet styles host DOM it does not own:
 | Reach-in | Host | Where |
 |---|---|---|
 | `[data-block-id]`: dark-mode overrides for server-painted blocks | Studio, the reader | `src/styles.css` |
-| `[data-bp-paper-conflict]`: the conflict banner | Studio (`bp-paper-editor-hooks.js`) | `src/styles.css` |
+| `[data-bp-paper-conflict]`: the conflict banner, and its `[data-conflict-detail]` and `[data-conflict-message]` | Studio (`bp-paper-editor-hooks.js`) | `src/styles.css` |
+
+The same reach-ins by kind, for `host-profile/surface.json` (`reachIns`) and the
+truth test. Private members and internal classes from the rows above are read off
+the build into surface.json's `internal`; this table holds the names the build does
+not show as its own:
+
+| Kind | Names |
+|---|---|
+| member | `domObserver`, `pmViewDesc` (ProseMirror's view internals) |
+| expando | `editor` (TipTap's editor, set on the contenteditable) |
+| attribute | `data-block-id`, `data-bp-paper-conflict`, `data-conflict-detail`, `data-conflict-message` |
+| class | `bp-mp-browse`, `bp-mp-empty`, `bp-ref-search-input` (the pickers' own DOM, Host-supplied pieces) |
+| event | `bp-flush-node` |
 
 ## Invariants
 

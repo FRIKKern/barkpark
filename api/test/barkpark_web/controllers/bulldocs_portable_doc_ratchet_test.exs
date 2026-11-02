@@ -423,21 +423,4 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
                Warnings.drain()
     end
   end
-
-  describe "not a paper" do
-    test "a session upsert is not checked yet, even refusing" do
-      refusing!()
-      s = slug("ratchet-session")
-
-      conn =
-        post_json("/v1/plugins/bulldocs/sessions", %{
-          "slug" => s,
-          "title" => s,
-          "blocks" => [bad_heading("h")]
-        })
-
-      body = json_response(conn, 200)
-      assert portable_doc_warning(body) == nil
-    end
-  end
 end

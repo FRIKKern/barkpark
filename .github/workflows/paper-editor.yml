@@ -49,7 +49,7 @@ on:
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
       - "api/priv/portable_doc/goldens/ops/**"
-      - "api/lib/barkpark/portable_doc/render/walk.ex"
+      - "api/lib/barkpark/portable_doc/render/**"
       - "api/lib/barkpark_web/components/studio_components/nav.ex"
       - "api/lib/barkpark_web/components/studio_components/panes.ex"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
@@ -78,7 +78,7 @@ on:
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
       - "api/priv/portable_doc/goldens/ops/**"
-      - "api/lib/barkpark/portable_doc/render/walk.ex"
+      - "api/lib/barkpark/portable_doc/render/**"
       - "api/lib/barkpark_web/components/studio_components/nav.ex"
       - "api/lib/barkpark_web/components/studio_components/panes.ex"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
