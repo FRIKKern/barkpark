@@ -1,0 +1,2904 @@
+{
+  "contract": "1.19.0",
+  "commit": "648bfeeb44",
+  "recorded_by": "api/assets/paper-editor/scripts/record-replay.mjs",
+  "scenes": [
+    {
+      "scene": "type-and-mark",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Wind from the west."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the "
+                },
+                {
+                  "type": "strong",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "ridge"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "value": ". Wind from the west."
+                }
+              ]
+            }
+          },
+          {
+            "op": "patch-block",
+            "id": "p-camp",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "We made camp below the "
+                },
+                {
+                  "type": "link",
+                  "href": "https://example.com/saddle",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "saddle"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "value": "."
+                }
+              ]
+            }
+          },
+          {
+            "op": "patch-block",
+            "id": "p-water",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Water at the "
+                },
+                {
+                  "type": "em",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "second"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "value": " stream."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the "
+            },
+            {
+              "type": "strong",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "ridge"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "value": ". Wind from the west."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the "
+            },
+            {
+              "type": "link",
+              "href": "https://example.com/saddle",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "saddle"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the "
+            },
+            {
+              "type": "em",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "second"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "value": " stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "split-and-heading",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-1-9ca6129a",
+              "type": "heading",
+              "text": "Camp at dusk",
+              "level": 2
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "p-camp",
+            "after": "p-ridge"
+          }
+        ],
+        [
+          {
+            "op": "replace-block",
+            "id": "p-ridge",
+            "block": {
+              "text": "Field notes from the ridge.",
+              "level": 3,
+              "id": "p-ridge",
+              "type": "heading"
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "heading",
+          "text": "Field notes from the ridge.",
+          "level": 3
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "c-1-9ca6129a",
+          "type": "heading",
+          "text": "Camp at dusk",
+          "level": 2
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "lists",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "remove-block",
+            "id": "p-water"
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-2-09927b49",
+              "type": "list",
+              "ordered": false,
+              "items": [
+                [
+                  {
+                    "type": "text",
+                    "value": "Water at the second stream."
+                  }
+                ],
+                [
+                  {
+                    "type": "text",
+                    "value": "Filter the third"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "p-camp",
+            "after": "p-ridge"
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "c-2-09927b49",
+            "patch": {
+              "ordered": true,
+              "items": [
+                [
+                  {
+                    "type": "text",
+                    "value": "Water at the second stream."
+                  }
+                ],
+                [
+                  {
+                    "type": "text",
+                    "value": "Filter the third"
+                  }
+                ]
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "c-2-09927b49",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "Water at the second stream."
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Filter the third"
+              }
+            ]
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "move-and-remove",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "move-block",
+            "id": "p-ridge",
+            "after": "p-water"
+          }
+        ],
+        [
+          {
+            "op": "remove-block",
+            "id": "p-water"
+          }
+        ],
+        [
+          {
+            "op": "move-block",
+            "id": "p-return",
+            "after": null
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "turn-into-quote",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "p-return",
+            "block": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Back by noon."
+                }
+              ],
+              "id": "p-return",
+              "type": "blockquote"
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "blockquote",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "select-all-retype",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "remove-block",
+            "id": "p-ridge"
+          },
+          {
+            "op": "remove-block",
+            "id": "p-camp"
+          },
+          {
+            "op": "remove-block",
+            "id": "p-water"
+          },
+          {
+            "op": "remove-block",
+            "id": "p-return"
+          },
+          {
+            "op": "append-block",
+            "block": {
+              "id": "c-3-61bab56b",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "A fresh start."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "c-3-61bab56b",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "A fresh start."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "insert-blocks",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-4-fcb03fa1",
+              "type": "divider"
+            }
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-5-c7e7fab2",
+              "type": "paragraph",
+              "content": []
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "c-4-fcb03fa1",
+            "after": "p-ridge"
+          }
+        ],
+        [
+          {
+            "op": "remove-block",
+            "id": "c-5-c7e7fab2"
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-6-328e270e",
+              "type": "code",
+              "value": ""
+            }
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-7-825a6a9a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "tar -czf notes.tgz notes/"
+                }
+              ]
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "c-4-fcb03fa1",
+            "after": "p-ridge"
+          },
+          {
+            "op": "move-block",
+            "id": "c-6-328e270e",
+            "after": "c-4-fcb03fa1"
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "c-4-fcb03fa1",
+          "type": "divider"
+        },
+        {
+          "id": "c-6-328e270e",
+          "type": "code",
+          "value": ""
+        },
+        {
+          "id": "c-7-825a6a9a",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "tar -czf notes.tgz notes/"
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "wikilink-menu-pick",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Plan",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "Plan"
+                    }
+                  ],
+                  "docId": "n-plan"
+                },
+                {
+                  "type": "text",
+                  "value": "  and "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Packing list",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "Packing list"
+                    }
+                  ],
+                  "docId": "n-pack"
+                },
+                {
+                  "type": "text",
+                  "value": " "
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. "
+            },
+            {
+              "type": "wikilink",
+              "target": "Plan",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Plan"
+                }
+              ],
+              "docId": "n-plan"
+            },
+            {
+              "type": "text",
+              "value": "  and "
+            },
+            {
+              "type": "wikilink",
+              "target": "Packing list",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Packing list"
+                }
+              ],
+              "docId": "n-pack"
+            },
+            {
+              "type": "text",
+              "value": " "
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "wikilink-typed",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-camp",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "We made camp below the saddle. See "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Plan",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "Plan"
+                    }
+                  ],
+                  "docId": "n-plan"
+                },
+                {
+                  "type": "text",
+                  "value": "."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle. See "
+            },
+            {
+              "type": "wikilink",
+              "target": "Plan",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Plan"
+                }
+              ],
+              "docId": "n-plan"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "wikilink-pasted",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-water",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Water at the second stream. Check "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Packing list",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "Packing list"
+                    }
+                  ],
+                  "docId": "n-pack"
+                },
+                {
+                  "type": "text",
+                  "value": " and [[Nobody]]."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream. Check "
+            },
+            {
+              "type": "wikilink",
+              "target": "Packing list",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Packing list"
+                }
+              ],
+              "docId": "n-pack"
+            },
+            {
+              "type": "text",
+              "value": " and [[Nobody]]."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "wikilink-alias",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-return",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Back by noon. Read "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Plan",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "the plan"
+                    }
+                  ],
+                  "alias": "the plan",
+                  "docId": "n-plan"
+                },
+                {
+                  "type": "text",
+                  "value": ". Also "
+                },
+                {
+                  "type": "wikilink",
+                  "target": "Packing list",
+                  "children": [
+                    {
+                      "type": "text",
+                      "value": "our list"
+                    }
+                  ],
+                  "alias": "our list",
+                  "docId": "n-pack"
+                },
+                {
+                  "type": "text",
+                  "value": "."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon. Read "
+            },
+            {
+              "type": "wikilink",
+              "target": "Plan",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "the plan"
+                }
+              ],
+              "alias": "the plan",
+              "docId": "n-plan"
+            },
+            {
+              "type": "text",
+              "value": ". Also "
+            },
+            {
+              "type": "wikilink",
+              "target": "Packing list",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "our list"
+                }
+              ],
+              "alias": "our list",
+              "docId": "n-pack"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "markdown-paste",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "m-1-5380f5a8",
+              "type": "heading",
+              "text": "Gear",
+              "level": 2
+            }
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "m-2-6eb1298b",
+              "type": "list",
+              "ordered": false,
+              "items": [
+                [
+                  {
+                    "type": "text",
+                    "value": "rope"
+                  }
+                ],
+                [
+                  {
+                    "type": "text",
+                    "value": "stove"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "m-3-0fe9def2",
+              "type": "blockquote",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Pack light."
+                }
+              ]
+            }
+          },
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "m-4-b2481cc9",
+              "type": "code",
+              "value": "ls gear/",
+              "lang": "sh"
+            }
+          },
+          {
+            "op": "move-block",
+            "id": "m-1-5380f5a8",
+            "after": "p-return"
+          },
+          {
+            "op": "move-block",
+            "id": "m-2-6eb1298b",
+            "after": "m-1-5380f5a8"
+          },
+          {
+            "op": "move-block",
+            "id": "m-3-0fe9def2",
+            "after": "m-2-6eb1298b"
+          },
+          {
+            "op": "move-block",
+            "id": "m-4-b2481cc9",
+            "after": "m-3-0fe9def2"
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        },
+        {
+          "id": "m-1-5380f5a8",
+          "type": "heading",
+          "text": "Gear",
+          "level": 2
+        },
+        {
+          "id": "m-2-6eb1298b",
+          "type": "list",
+          "ordered": false,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "rope"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "stove"
+              }
+            ]
+          ]
+        },
+        {
+          "id": "m-3-0fe9def2",
+          "type": "blockquote",
+          "content": [
+            {
+              "type": "text",
+              "value": "Pack light."
+            }
+          ]
+        },
+        {
+          "id": "m-4-b2481cc9",
+          "type": "code",
+          "value": "ls gear/",
+          "lang": "sh"
+        }
+      ]
+    },
+    {
+      "scene": "undo-redo",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog. Rain."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog. Rain."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. Fog."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "type-then-unmount",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. Fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "p-return",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Back by noon. Wet rock."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. Fog."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon. Wet rock."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "empty-picker-enter",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge."
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "insert-after",
+            "afterId": "p-ridge",
+            "block": {
+              "id": "c-8-277f1164",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "next"
+                }
+              ]
+            }
+          },
+          {
+            "op": "patch-block",
+            "id": "p-ridge",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Field notes from the ridge. [[zzqx"
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "p-ridge",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Field notes from the ridge. [[zzqx"
+            }
+          ]
+        },
+        {
+          "id": "c-8-277f1164",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "next"
+            }
+          ]
+        },
+        {
+          "id": "p-camp",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "We made camp below the saddle."
+            }
+          ]
+        },
+        {
+          "id": "p-water",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Water at the second stream."
+            }
+          ]
+        },
+        {
+          "id": "p-return",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Back by noon."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "card-body",
+      "element": "bp-paper-editor[data-editor-mode=card-body]",
+      "before": [
+        {
+          "id": "c-trail",
+          "type": "card",
+          "tone": "info",
+          "slots": {
+            "title": [
+              {
+                "type": "heading",
+                "text": "Trail"
+              }
+            ],
+            "body": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Six hours return."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-card-body",
+            "id": "c-trail",
+            "content": [
+              {
+                "type": "text",
+                "value": "Six hours return. Bring a map."
+              }
+            ]
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "c-trail",
+          "type": "card",
+          "tone": "info",
+          "slots": {
+            "title": [
+              {
+                "type": "heading",
+                "text": "Trail"
+              }
+            ],
+            "body": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Six hours return. Bring a map."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scene": "table-cells",
+      "element": "bp-paper-editor[data-editor-mode=table]",
+      "before": [
+        {
+          "id": "t-gear",
+          "type": "table",
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "400 g"
+                }
+              ]
+            ]
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-table-cells",
+            "id": "t-gear",
+            "shape": {
+              "v": 1,
+              "head": {
+                "state": "row",
+                "row": {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                }
+              },
+              "rows": [
+                {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                },
+                {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                }
+              ]
+            },
+            "cells": [
+              {
+                "area": "body",
+                "row": 1,
+                "column": 1,
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "350 g"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "t-gear",
+          "type": "table",
+          "shape": {
+            "v": 1,
+            "head": {
+              "state": "row",
+              "row": {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            },
+            "rows": [
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              },
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            ]
+          },
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "350 g"
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "table-structure",
+      "element": "bp-paper-editor[data-editor-mode=table]",
+      "before": [
+        {
+          "id": "t-gear",
+          "type": "table",
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "400 g"
+                }
+              ]
+            ]
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-table-structure",
+            "id": "t-gear",
+            "shape": {
+              "v": 1,
+              "head": {
+                "state": "row",
+                "row": {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                }
+              },
+              "rows": [
+                {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                },
+                {
+                  "kind": "array",
+                  "cells": [
+                    "inline-array",
+                    "inline-array"
+                  ]
+                }
+              ]
+            },
+            "action": "add-row"
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "t-gear",
+          "type": "table",
+          "shape": {
+            "v": 1,
+            "head": {
+              "state": "row",
+              "row": {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            },
+            "rows": [
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              },
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              },
+              {
+                "kind": "array",
+                "cells": [
+                  "inline-array",
+                  "inline-array"
+                ]
+              }
+            ]
+          },
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Item"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Weight"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Tent"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "2 kg"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "Stove"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "400 g"
+                }
+              ]
+            ],
+            [
+              [],
+              []
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "nested-edits",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "level": 2,
+          "text": "Trip"
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "patch-block",
+            "id": "p-day",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six in fog."
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "op": "patch-block",
+            "id": "co-ice",
+            "patch": {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face and the ridge."
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "text": "Trip",
+          "level": 2
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six in fog."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face and the ridge."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scene": "nested-enter",
+      "element": "bp-paper-canvas",
+      "before": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "level": 2,
+          "text": "Trip"
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left the car park at six."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Fog by eight."
+                    }
+                  ]
+                },
+                {
+                  "id": "co-ice",
+                  "type": "callout",
+                  "tone": "warning",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Ice on the north face."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "h-trip",
+          "type": "heading",
+          "text": "Trip",
+          "level": 2
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left the car park at six."
+                }
+              ]
+            },
+            {
+              "id": "p-day",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Fog by eight."
+                }
+              ]
+            },
+            {
+              "id": "co-ice",
+              "type": "callout",
+              "tone": "warning",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Ice on the north face."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-after",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Home by dark."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

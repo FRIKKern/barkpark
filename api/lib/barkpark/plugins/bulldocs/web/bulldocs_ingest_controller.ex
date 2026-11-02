@@ -112,9 +112,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.MixedWriteGuard
+  alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
-  alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.{ErrorResponse, StudioLocale}
+
+  require Logger
+
+  @max_render_html_bytes 16 * 1024 * 1024
+  @renderer_errors [ArgumentError, BadMapError, Protocol.UndefinedError]
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   #
@@ -182,6 +188,77 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         json(conn, %{valid: violations == [], violations: violations})
     end
+  end
+
+  @doc """
+  `POST /v1/plugins/bulldocs/render` — the reader's HTML for the doc in the
+  body, nothing stored. Body: `{"blocks": [ … ]}`, reply `{"html": "…"}`.
+
+  The doc is validated first (`Barkpark.PortableDoc.Validate`, depth cap
+  `Validate.max_depth/0`): a broken doc is a 422 `validation_failed` carrying
+  every violation, never HTML. A valid doc renders block by block through
+  `Render.render_block/2` with the opts `/papers/:slug` uses, joined as
+  `Render.render_blocks/2` joins them. A block the renderer cannot draw (a
+  data-shape error such as `BadMapError`) is a 422 naming its path
+  (`unrenderable`), logged with the block type and path; any other exception
+  is a real bug and stays a 500. HTML past `max_render_html_bytes/0` is a 413
+  `render_too_large`, and rendering stops at the block that crosses it. The
+  body cap is `BarkparkWeb.Endpoint.render_body_length/0`.
+  """
+  def render_doc(conn, params) do
+    with :ok <- Validate.validate(Map.take(params, ["blocks"])),
+         {:ok, html} <- render_html(params["blocks"]) do
+      json(conn, %{html: html})
+    else
+      :too_large ->
+        ErrorResponse.emit_custom(
+          conn,
+          413,
+          "render_too_large",
+          "the rendered HTML would pass #{@max_render_html_bytes} bytes",
+          %{limit_bytes: @max_render_html_bytes},
+          "Render the doc in parts: send fewer or smaller blocks per call."
+        )
+
+      {:error, violations} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+          code: "validation_failed",
+          message: "the doc is not one the reader can render — fix each violation",
+          violations: violations
+        })
+    end
+  end
+
+  @doc "The most HTML `POST /v1/plugins/bulldocs/render` answers, in bytes."
+  def max_render_html_bytes, do: @max_render_html_bytes
+
+  defp render_html(blocks) do
+    opts = StudioLocale.pd_opts(%{style: :article})
+
+    blocks
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, [], 0}, fn {block, index}, {:ok, parts, size} ->
+      case render_block(block, index, opts) do
+        {:ok, html} when size + byte_size(html) > @max_render_html_bytes -> {:halt, :too_large}
+        {:ok, html} -> {:cont, {:ok, [parts | html], size + byte_size(html)}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, parts, _size} -> {:ok, IO.iodata_to_binary(parts)}
+      refused -> refused
+    end
+  end
+
+  defp render_block(block, index, opts) do
+    {:ok, Render.render_block(block, opts)}
+  rescue
+    e in @renderer_errors ->
+      Logger.warning(
+        "bulldocs render: /blocks/#{index} (#{block["type"]}) raised #{inspect(e.__struct__)}"
+      )
+
+      {:error, [%{code: :unrenderable, path: "/blocks/#{index}"}]}
   end
 
   # The wall gates as ONE violation list — `AuthoringWall.validate_all/4` over a

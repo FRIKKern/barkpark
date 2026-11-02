@@ -238,6 +238,15 @@ defmodule BarkparkWeb.Endpoint do
   @ticket_attachment_body_length 11 * 1024 * 1024
   @ticket_body_length 1_000_000
 
+  # The render dry-run (R4.4a) stores nothing, so DocumentSize never refuses
+  # its body; validate and render each cost about 1 s per MB and the HTML can
+  # be 35x the doc. 2 MiB keeps one call near 10 s and 200 MB of memory.
+  # Pinned by `test/barkpark_web/controllers/bulldocs_render_test.exs`.
+  @render_body_length 2 * 1024 * 1024
+
+  @doc "The body cap of `POST /v1/plugins/bulldocs/render`, in bytes."
+  def render_body_length, do: @render_body_length
+
   defp body_length(%Plug.Conn{
          path_info: ["v1", "plugins", "forms", "w", _, "p", _, "d", _, "sites", _, "submissions"]
        }),
@@ -247,6 +256,9 @@ defmodule BarkparkWeb.Endpoint do
     do: @ticket_attachment_body_length
 
   defp body_length(%Plug.Conn{path_info: ["v1", "tickets" | _]}), do: @ticket_body_length
+
+  defp body_length(%Plug.Conn{path_info: ["v1", "plugins", "bulldocs", "render"]}),
+    do: @render_body_length
 
   # The document data routes (owner ruling #39). One document is capped by
   # `Barkpark.Content.DocumentSize` in the changeset; the body cap stops the

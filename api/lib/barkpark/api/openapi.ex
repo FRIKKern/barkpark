@@ -381,6 +381,20 @@ defmodule Barkpark.Api.OpenApi do
     |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
   end
 
+  defp responses_for(%{"id" => "bulldocs.render"} = cmd, _template) do
+    %{
+      "200" =>
+        Map.put(success_response(cmd), "description", "The reader's HTML; nothing stored."),
+      "400" => err_resp("The body is not JSON (malformed)."),
+      "413" =>
+        err_resp(
+          "payload_too_large: the body is over 2 MiB. render_too_large: the HTML would pass 16 MiB."
+        )
+    }
+    |> maybe_ref(true, ["401", "403", "422"])
+    |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
+  end
+
   defp responses_for(%{"id" => "dataset.delete"} = cmd, template) do
     cmd
     |> default_responses(template)
@@ -440,6 +454,12 @@ defmodule Barkpark.Api.OpenApi do
   # field the manifest never declared. Keyed by command id; add a row when a
   # verb answers a receipt shape, never widen the default.
   @receipt_schemas %{
+    "bulldocs.render" => %{
+      "type" => "object",
+      "required" => ["html"],
+      "properties" => %{"html" => %{"type" => "string"}},
+      "additionalProperties" => false
+    },
     "bulldocs.create" => %{
       "type" => "object",
       "required" => ["ok", "slug", "rev", "title", "liveview_path", "scoped_liveview_path"],
