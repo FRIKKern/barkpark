@@ -2,6 +2,7 @@ defmodule BarkparkWeb.PaperTocDepthFormTest do
   use BarkparkWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
   alias Barkpark.{Auth, Content}
+  alias Barkpark.PortableDoc.Validate
 
   setup %{conn: conn} do
     {:ok, _} =
@@ -39,6 +40,7 @@ defmodule BarkparkWeb.PaperTocDepthFormTest do
     for depth <- [6, 1] do
       assert %{saved: true} = submit(view, %{"depth" => Integer.to_string(depth)})
       assert stored_toc(slug)["depth"] == depth
+      assert :ok = Validate.validate(stored_blocks(slug))
     end
   end
 
@@ -111,10 +113,9 @@ defmodule BarkparkWeb.PaperTocDepthFormTest do
     slug
   end
 
-  defp stored_toc(slug) do
-    Content.get_paper(slug, "production").content["blocks"]
-    |> Enum.find(&(&1["id"] == "toc"))
-  end
+  defp stored_blocks(slug), do: Content.get_paper(slug, "production").content["blocks"]
+
+  defp stored_toc(slug), do: Enum.find(stored_blocks(slug), &(&1["id"] == "toc"))
 
   defp mount(conn, slug) do
     {:ok, view, _} = live(conn, scoped_studio("/d/production/studio/paper/#{slug}"))
