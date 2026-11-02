@@ -77,6 +77,23 @@ defmodule Barkpark.PortableDoc.Validate do
 
   def validate(_doc, _schema), do: {:error, [%{code: :not_a_doc, path: ""}]}
 
+  @doc """
+  The errors and block ids (`{id, path}`) of the one top-level block at
+  `/blocks/<index>`, in walk order, without `duplicate_block_id`: the one rule
+  that spans blocks (`duplicate_errors/1`). `validate/2` on a doc is every
+  block's errors in order, then `duplicate_errors/1` of every block's ids.
+  """
+  @spec check_top_block(term(), non_neg_integer(), Schema.t()) ::
+          {[error()], [{String.t(), String.t()}]}
+  def check_top_block(block, index, schema \\ @schema) do
+    {errors, ids} = check(block, schema.root, pointer("/blocks", index), 0, schema, {[], []})
+    {Enum.reverse(errors), Enum.reverse(ids)}
+  end
+
+  @doc "A `duplicate_block_id` error at every later `{id, path}` of an id seen before."
+  @spec duplicate_errors([{String.t(), String.t()}]) :: [error()]
+  def duplicate_errors(ids), do: duplicates(ids)
+
   defp walk(blocks, base, schema) do
     {errors, ids} =
       blocks

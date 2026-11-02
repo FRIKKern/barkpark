@@ -173,7 +173,7 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
 
       assert message ==
                "this write adds 1 PortableDoc error(s): value_not_allowed at /blocks/1/level" <>
-                 " (1 already in the paper stay as they are)"
+                 " (it keeps 1 old error(s) where it wrote)"
     end
 
     test "refusing: the halt names the added errors and counts the existing ones" do
@@ -182,7 +182,7 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
 
       assert {:error, {:halted, message}} = NewErrors.check([], [bad_heading("h")])
       assert message =~ "adds 1 PortableDoc error(s): value_not_allowed at /blocks/0/level"
-      assert message =~ "(0 already in the paper"
+      assert message =~ "(it keeps 0 old error(s)"
       assert Warnings.drain() == []
     end
 

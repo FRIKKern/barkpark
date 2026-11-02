@@ -16,16 +16,23 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   counted, not just matched, so a third block with a duplicated id, or a
   second broken item in one list, is one more error.
 
-  `check/2` is what the write paths call. Report-only until the
+  Ingest, proposals and the validate dry run call `check/2` (whole doc). Ops
+  and op batches call `check_touched/2`, which validates only the top-level
+  blocks the write changed, added or dropped (`split_touched/2`): an unchanged
+  block has the same errors on both sides. Both are report-only until the
   `:portable_doc_refuse_new_errors` config flag is on (`refuse?/0`):
 
     * off (the default): the write goes ahead; the added errors are logged and
       queued as a `portable_doc_invalid` warning (`Barkpark.Content.Warnings`)
-      carrying `violations` (added) and `existing` (already there), which an
-      ingest, op or proposal reply carries out;
+      carrying `violations` (added) and `existing` (the old errors where it
+      wrote), which an ingest, op or proposal reply carries out;
     * on: `{:error, {:halted, message}}`, the shape every paper ratchet uses, so
       each caller already renders it. The message names each added error and
-      how many were already there.
+      counts the old ones where it wrote.
+
+  Known limits of naming a place by id: renaming a broken block's id makes
+  its error read as added, and so does re-ingesting id-less blocks with one
+  inserted above a broken one (ingest mints positional ids).
 
   Paths read as in `POST /v1/plugins/bulldocs/render`: `/blocks/2/level`. A
   block list that is not a list (an HTML-only paper write) is never checked.
@@ -52,8 +59,142 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
     end
   end
 
-  defp sort(found, stored, written) do
-    known = stored |> errors() |> counts(stored)
+  @doc """
+  `split/2` for an op or a batch, which only changes some top-level blocks: a
+  written block equal to the stored block with its id has the same errors on
+  both sides, so only the other blocks are validated (the written ones that
+  changed or are new, their stored versions, and stored blocks the write
+  dropped). `duplicate_block_id` is the one rule that spans blocks: for each id
+  the touched blocks now carry more often, the untouched blocks are searched
+  for it too. An id-less top-level block always counts as touched. Falls back
+  to `split/2` when top-level ids repeat on either side.
+  """
+  @spec split_touched(term(), term()) :: {[Validate.error()], [Validate.error()]}
+  def split_touched(stored, written) when is_list(stored) and is_list(written) do
+    with {:ok, stored_at, stored_idless} <- by_id(stored),
+         {:ok, written_at, _written_idless} <- by_id(written) do
+      written_touched =
+        written
+        |> Enum.with_index()
+        |> Enum.reject(fn {block, _index} -> match?({^block, _}, stored_at[block["id"]]) end)
+
+      stored_touched =
+        stored_at
+        |> Enum.filter(fn {id, {_block, _index}} ->
+          not Map.has_key?(written_at, id) or
+            Enum.any?(written_touched, fn {block, _index} -> block["id"] == id end)
+        end)
+        |> Enum.map(fn {_id, at} -> at end)
+        |> Enum.concat(stored_idless)
+        |> Enum.sort_by(fn {_block, index} -> index end)
+
+      split_blocks(written_touched, stored_touched, stored, written)
+    else
+      _ -> split(stored, written)
+    end
+  end
+
+  def split_touched(stored, written), do: split(stored, written)
+
+  defp split_blocks(written_touched, stored_touched, stored, written) do
+    written_reports = reports(written_touched)
+    stored_reports = reports(stored_touched)
+    found = Enum.flat_map(written_reports, fn {_index, errors, _ids} -> errors end)
+    grown = grown_ids(written_reports, stored_reports)
+
+    if found == [] and grown == [] do
+      {[], []}
+    else
+      known = stored_reports |> Enum.flat_map(fn {_index, errors, _ids} -> errors end)
+      {added, existing} = match(found, counts(known, stored), written)
+      {dup_added, dup_existing} = duplicates(grown, written_reports, stored_reports, written)
+      {added ++ dup_added, existing ++ dup_existing}
+    end
+  end
+
+  defp reports(at) do
+    Enum.map(at, fn {block, index} ->
+      {errors, ids} = Validate.check_top_block(block, index)
+      {index, errors, ids}
+    end)
+  end
+
+  defp grown_ids(written_reports, stored_reports) do
+    stored = id_counts(stored_reports)
+
+    written_reports
+    |> id_counts()
+    |> Enum.filter(fn {id, n} -> n > Map.get(stored, id, 0) end)
+    |> Enum.map(fn {id, _n} -> id end)
+  end
+
+  defp id_counts(reports),
+    do:
+      reports
+      |> Enum.flat_map(fn {_index, _errors, ids} -> ids end)
+      |> Enum.frequencies_by(&elem(&1, 0))
+
+  defp duplicates([], _written_reports, _stored_reports, _written), do: {[], []}
+
+  defp duplicates(grown, written_reports, stored_reports, written) do
+    touched = MapSet.new(written_reports, fn {index, _errors, _ids} -> index end)
+
+    untouched =
+      written
+      |> Enum.with_index()
+      |> Enum.reject(fn {block, index} -> index in touched or not carries_id?(block, grown) end)
+      |> reports()
+
+    in_doc_order =
+      (written_reports ++ untouched)
+      |> Enum.sort_by(fn {index, _errors, _ids} -> index end)
+      |> Enum.flat_map(fn {_index, _errors, ids} -> ids end)
+
+    stored_counts = id_counts(stored_reports ++ untouched)
+
+    grown
+    |> Enum.map(fn id ->
+      later = in_doc_order |> Enum.filter(&(elem(&1, 0) == id)) |> Enum.drop(1)
+      old = max(Map.get(stored_counts, id, 0) - 1, 0)
+      errors = Enum.map(later, fn {_id, path} -> %{code: :duplicate_block_id, path: path} end)
+      Enum.split(errors, old) |> then(fn {existing, added} -> {added, existing} end)
+    end)
+    |> Enum.reduce({[], []}, fn {added, existing}, {all_added, all_existing} ->
+      {all_added ++ added, all_existing ++ existing}
+    end)
+  end
+
+  defp carries_id?(%{"id" => id} = map, ids) do
+    id in ids or Enum.any?(map, fn {_key, value} -> carries_id?(value, ids) end)
+  end
+
+  defp carries_id?(map, ids) when is_map(map),
+    do: Enum.any?(map, fn {_key, value} -> carries_id?(value, ids) end)
+
+  defp carries_id?(list, ids) when is_list(list), do: Enum.any?(list, &carries_id?(&1, ids))
+  defp carries_id?(_value, _ids), do: false
+
+  defp by_id(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, %{}, []}, fn {block, index}, {:ok, at, idless} ->
+      case block do
+        %{"id" => id} when is_binary(id) and id != "" and is_map_key(at, id) ->
+          {:halt, :repeated}
+
+        %{"id" => id} when is_binary(id) and id != "" ->
+          {:cont, {:ok, Map.put(at, id, {block, index}), idless}}
+
+        _ ->
+          {:cont, {:ok, at, idless ++ [{block, index}]}}
+      end
+    end)
+  end
+
+  defp sort(found, stored, written),
+    do: match(found, stored |> errors() |> counts(stored), written)
+
+  defp match(found, known, written) do
     root = root(written)
 
     {added, existing, _known} =
@@ -71,12 +212,14 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
 
   @doc "`:ok`, or the refusal when `refuse?/0` is on and `written` adds errors; reports them otherwise."
   @spec check(term(), term()) :: :ok | {:error, {:halted, String.t()}}
-  def check(stored, written) do
-    case split(stored, written) do
-      {[], _existing} -> :ok
-      {added, existing} -> refuse_or_report(added, existing, refuse?())
-    end
-  end
+  def check(stored, written), do: verdict(split(stored, written))
+
+  @doc "`check/2` through `split_touched/2`, for ops and batches."
+  @spec check_touched(term(), term()) :: :ok | {:error, {:halted, String.t()}}
+  def check_touched(stored, written), do: verdict(split_touched(stored, written))
+
+  defp verdict({[], _existing}), do: :ok
+  defp verdict({added, existing}), do: refuse_or_report(added, existing, refuse?())
 
   @doc "The refusal and warning text for `added` errors, with `existing` counted."
   @spec message([Validate.error()], [Validate.error()]) :: String.t()
@@ -85,7 +228,7 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
     more = if length(added) > @named, do: " and #{length(added) - @named} more", else: ""
 
     "this write adds #{length(added)} PortableDoc error(s): #{named}#{more}" <>
-      " (#{length(existing)} already in the paper stay as they are)"
+      " (it keeps #{length(existing)} old error(s) where it wrote)"
   end
 
   defp refuse_or_report(added, existing, true), do: {:error, {:halted, message(added, existing)}}

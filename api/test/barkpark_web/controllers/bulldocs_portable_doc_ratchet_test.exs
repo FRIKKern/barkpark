@@ -19,6 +19,7 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
 
   alias Barkpark.Auth
   alias Barkpark.Content
+  alias Barkpark.Content.Warnings
   alias Barkpark.LabelFixtures
 
   @token "barkpark-test-ingest-token"
@@ -250,11 +251,20 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
       assert %{"ok" => true} = json_response(op(s, patch), 200)
     end
 
-    test "still refuses an error the write adds, and counts the old one", %{slug: s} do
+    test "still refuses an error the write adds; an op or batch counts only the old errors in what it touched",
+         %{slug: s} do
       refusing!()
       conn = op(s, append(bad_heading("new")))
       assert_refused(conn, "/blocks/2/level")
-      assert json_response(conn, 409) |> inspect() =~ "1 already in the paper"
+      assert json_response(conn, 409) |> inspect() =~ "it keeps 0 old error(s)"
+
+      conn = batch(s, [append(bad_heading("new"))])
+      assert_refused(conn, "/blocks/2/level")
+      assert json_response(conn, 409) |> inspect() =~ "it keeps 0 old error(s)"
+
+      conn = ingest(s, [para("a"), bad_heading("old"), bad_heading("new")])
+      assert_refused(conn, "/blocks/2/level")
+      assert json_response(conn, 409) |> inspect() =~ "it keeps 1 old error(s)"
     end
   end
 
@@ -383,6 +393,34 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
 
       assert %{"violations" => [%{"path" => "/blocks/1/level"}], "existing" => []} =
                portable_doc_warning(json_response(conn, 200))
+    end
+  end
+
+  describe "a rev-less op that loses its race" do
+    test "reports the warning once, from the retry" do
+      s = seed!(slug("ratchet-race"), [para("a")])
+      parent = self()
+      ref = make_ref()
+
+      racer = fn ->
+        unless Process.get(ref) do
+          Process.put(ref, true)
+          send(parent, :racer_ran)
+          {:ok, _} = Content.apply_paper_block_op(s, append(para("b")), @dataset)
+        end
+      end
+
+      Warnings.reset()
+
+      assert {:ok, _} =
+               Content.apply_paper_block_op(s, append(bad_heading("h")), @dataset,
+                 before_fenced_write: racer
+               )
+
+      assert_received :racer_ran
+
+      assert [%{code: "portable_doc_invalid", violations: [%{path: "/blocks/2/level"}]}] =
+               Warnings.drain()
     end
   end
 
