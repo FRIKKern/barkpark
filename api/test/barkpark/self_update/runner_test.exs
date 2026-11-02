@@ -464,6 +464,45 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       assert starts(count_file) == 2
     end
 
+    # The stuck line used to say "the box keeps serving its old build" in every
+    # case. On a slot box the restart can already have put the new build live,
+    # so the line now names the commit this server runs and compares it with
+    # the run's start commit and deploy-rebuild's target sha.
+    for {label, serving, expected} <- [
+          {"the new build", "201598b", "This server runs commit 201598b, the new build."},
+          {"the old build", "aaaaaaa",
+           "This server runs commit aaaaaaa, the old build the run started from."}
+        ] do
+      test "a stuck run says the box serves #{label} when that is what it runs",
+           %{dir: dir, status_file: status_file} do
+        count_file = Path.join(dir, "starts")
+
+        put_cfg(
+          enabled: true,
+          max_resumes: 1,
+          serving_commit: unquote(serving),
+          command: {"bash", ["-c", build_script(status_file, count_file)]}
+        )
+
+        assert Runner.trigger() == {:ok, :started}
+        await_log_line("Compiling 1095 files")
+        service_restart()
+
+        await_starts(count_file, 2)
+        await_log_line("Compiling 1095 files")
+        service_restart()
+
+        status = await_done()
+        assert status.exit_code == -4
+        stuck = Enum.find(status.log, &(&1 =~ "deploy stuck"))
+        assert stuck =~ unquote(expected)
+        refute stuck =~ "keeps serving its old build"
+
+        manifest = dir |> Path.join("run.manifest.json") |> File.read!() |> Jason.decode!()
+        assert manifest["from_commit"] == unquote(serving)
+      end
+    end
+
     test "with resuming off, an interrupted build is build_interrupted and stays stopped",
          %{dir: dir, status_file: status_file} do
       count_file = Path.join(dir, "starts")
@@ -636,6 +675,36 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       Enum.any?(status.log, &String.contains?(&1, fragment)) -> status
       attempts > 0 -> Process.sleep(50) && await_log_line(fragment, attempts - 1)
       true -> flunk("log never showed #{inspect(fragment)}: #{inspect(status)}")
+    end
+  end
+
+  describe "serving_sentence/3" do
+    test "names the new build when the serving commit is the deploy target" do
+      assert Runner.serving_sentence("201598b", "aaaaaaa", "201598b14ffff") ==
+               "This server runs commit 201598b, the new build."
+    end
+
+    test "names the old build when the serving commit is the start commit" do
+      assert Runner.serving_sentence("aaaaaaa", "aaaaaaa", "201598b14") ==
+               "This server runs commit aaaaaaa, the old build the run started from."
+    end
+
+    test "says unknown when the serving commit matches neither" do
+      assert Runner.serving_sentence("ccccccc", "aaaaaaa", "201598b14") ==
+               "This server runs commit ccccccc; the run started from aaaaaaa and was " <>
+                 "deploying 201598b14. Whether that is the old or the new build is unknown."
+    end
+
+    test "says unknown when the start and target commits are missing" do
+      assert Runner.serving_sentence("ccccccc", nil, nil) ==
+               "This server runs commit ccccccc. Whether that is the old or the new build is unknown."
+    end
+
+    test "says unknown when the serving commit is not known" do
+      for serving <- [nil, "", "unknown"] do
+        assert Runner.serving_sentence(serving, "aaaaaaa", "201598b14") ==
+                 "Which build the box serves now is unknown."
+      end
     end
   end
 end
