@@ -73,6 +73,9 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.equal(await page.isVisible(".tg-steps"), false, "a block sample has no checklist");
   assert.equal(await page.evaluate(() => window.testingGround.state.canvases[0].liveRemote), false, "one window keeps the canvas's own echo rules");
   assert.deepEqual(await page.$$eval(".tg-light", (ls) => ls.map((l) => l.className)), ["tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--wait"]);
+  const first = await page.$(".tg-light");
+  await page.evaluate(() => { window.testingGround.paintLights(); window.testingGround.paintLights(); });
+  assert.equal(await first.evaluate((li) => li.isConnected), true, "unchanged lights are not repainted, so their words stay selectable");
 });
 
 await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (page) => {
@@ -189,6 +192,17 @@ await scene("fleet blocks are painted from the pack's fragments", "?doc=sample:h
   const [painted, fragment] = await page.evaluate(async () => [document.querySelector("[data-bp-fleet-body]").innerHTML, (await (await fetch("/pack/fragments.json")).json()).heatmap]);
   assert.equal(painted, fragment);
 });
+
+await scene("a fleet block the canvas does not paint gets the fragment from the host", "?doc=sample:roadmap", async (page) => {
+  await page.waitForFunction(() => document.querySelector("[data-bp-fleet-body][data-tg-painted]"));
+  const [painted, fragment] = await page.evaluate(async () => [document.querySelector("[data-bp-fleet-body]").innerHTML, (await (await fetch("/pack/fragments.json")).json()).roadmap]);
+  assert.equal(painted, fragment);
+});
+
+await scene("a fleet block the canvas paints itself is left to the canvas", "?doc=sample:roadmap", async (page) => {
+  await page.waitForFunction(() => document.querySelector("[data-bp-fleet-body][data-tg-painted]"));
+  assert.equal(await page.innerHTML("[data-bp-fleet-body]"), "<p>the canvas painted this</p>");
+}, (page) => page.addInitScript(() => document.addEventListener("bp-fleet-paint", (event) => { event.preventDefault(); event.target.innerHTML = "<p>the canvas painted this</p>"; }, true)));
 
 await scene("phone width and dark mode", "?doc=sample:paragraph&phone=1&dark=1", async (page) => {
   assert.equal(await page.evaluate(() => document.querySelector(".tg-stage").getBoundingClientRect().width), 390);

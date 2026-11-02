@@ -119,9 +119,7 @@ function applyOps(prevBlocks, ops) {
 }
 
 function idsAtAnyDepth(value, out = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) idsAtAnyDepth(item, out);
-  } else if (value && typeof value === "object") {
+  if (value && typeof value === "object") {
     if (typeof value.id === "string") out.push(value.id);
     for (const [key, child] of Object.entries(value)) if (key !== "id") idsAtAnyDepth(child, out);
   }

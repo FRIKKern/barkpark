@@ -113,7 +113,6 @@ function changed() {
 
 function paintLights() {
   const [canvas] = state.canvases;
-  if (!canvas?._editor) return;
   const list = lights({
     visibility: visibility(canvas),
     believed: canvas.blocks,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { get as rawGet } from "node:http";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,10 @@ import { start } from "./server.mjs";
 
 const SERVER = fileURLToPath(new URL("./server.mjs", import.meta.url));
 const standIn = async () => "export const render = () => 'stand-in';";
+
+function getAsIs(url, path) {
+  return new Promise((resolve, reject) => rawGet(url, { path: `/${path}` }, (res) => { res.resume(); resolve(res.statusCode); }).on("error", reject));
+}
 
 async function get(url, init) {
   const res = await fetch(url, init);
@@ -30,7 +35,7 @@ try {
   assert.equal((await get(`${plain.url}reader-standin.js`)).body, "export const render = () => 'stand-in';");
   const outside = ["package", "json"].join(".");
   for (const path of [`src/../${outside}`, `src/testing-ground/../../${outside}`, `src/%2e%2e/${outside}`, "src/no-such.mjs", "src/testing-ground", "nope"])
-    assert.equal((await get(`${plain.url}${path}`)).status, 404, `${path} is not served`);
+    assert.equal(await getAsIs(plain.url, path), 404, `${path} is not served`);
   assert.equal((await get(plain.url, { method: "POST" })).status, 404, "only GET reads files");
   assert.equal((await get(`${plain.url}fold`, { method: "POST", body: "{}" })).status, 404, "no fold switch, no /fold");
 } finally {
@@ -56,8 +61,13 @@ try {
   await switched.close();
 }
 
+const bin = mkdtempSync(join(tmpdir(), "tg-open-"));
+writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$1" >> "${join(bin, "opened")}"\n`);
+chmodSync(join(bin, "open"), 0o755);
+process.on("exit", () => rmSync(bin, { recursive: true, force: true }));
+
 function cli(args, env = {}) {
-  const child = spawn(process.execPath, [SERVER, ...args], { env: { ...process.env, BARKPARK_TG_TOKEN: "", ...env } });
+  const child = spawn(process.execPath, [SERVER, ...args], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BARKPARK_TG_TOKEN: "", ...env } });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
@@ -112,21 +122,14 @@ try {
   local.stop();
 }
 
-const bin = mkdtempSync(join(tmpdir(), "tg-open-"));
+const opens = cli(["--port=0"]);
 try {
-  writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$1" > "${join(bin, "opened")}"\n`);
-  chmodSync(join(bin, "open"), 0o755);
-  const opens = cli(["--port=0"], { PATH: `${bin}:${process.env.PATH}` });
-  try {
-    const url = (await opens.printed(/main: (\S+)/)).match(/main: (\S+)/)[1];
-    const until = Date.now() + 10000;
-    while (!existsSync(join(bin, "opened")) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
-    assert.equal(readFileSync(join(bin, "opened"), "utf8").trim(), url, "npm run try opens the page");
-  } finally {
-    opens.stop();
-  }
+  const url = (await opens.printed(/main: (\S+)/)).match(/main: (\S+)/)[1];
+  const until = Date.now() + 10000;
+  while (!existsSync(join(bin, "opened")) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(readFileSync(join(bin, "opened"), "utf8").trim(), url, "npm run try opens the page, and every --no-open run before it opened nothing");
 } finally {
-  rmSync(bin, { recursive: true, force: true });
+  opens.stop();
 }
 
 console.log("PASS  testing-ground server: routes, the fold switch, the stand-in fallback and every CLI flag");
