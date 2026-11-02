@@ -15,6 +15,9 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
+  alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.LabelFixtures
 
@@ -228,6 +231,40 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
       conn = op(s, append(bad_heading("new")))
       assert_refused(conn, "/blocks/2/level")
       assert json_response(conn, 409) |> inspect() =~ "1 already in the paper"
+    end
+  end
+
+  describe "a dry run whose write scope is refused" do
+    test "is compared with no paper, never the Default workspace's" do
+      ws_a = create_workspace!()
+      create_project!(ws_a, "default")
+      ws_b = create_workspace!()
+      create_project!(ws_b, "default")
+      raw = "ratchet-scope-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(
+          raw,
+          "ratchet-a",
+          @dataset,
+          ["read", "write", "admin"],
+          ws_a.id
+        )
+
+      s = seed!(slug("ratchet-scope"), [para("a"), bad_heading("old")])
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-barkpark-workspace", ws_b.slug)
+        |> post(
+          "#{@papers}/validate",
+          LabelFixtures.paper_attrs(%{"slug" => s, "blocks" => [para("a"), bad_heading("old")]})
+        )
+
+      assert %{"violations" => [%{"path" => "/blocks/1/level"}], "existing" => []} =
+               portable_doc_warning(json_response(conn, 200))
     end
   end
 

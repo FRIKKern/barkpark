@@ -101,6 +101,10 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
     test "nothing stored: every error is added" do
       assert {[_], []} = NewErrors.split([], [bad_heading("h")])
     end
+
+    test "a stored block list that is not a list counts as nothing stored" do
+      assert {[_], []} = NewErrors.split(%{"html" => "<p>x</p>"}, [bad_heading("h")])
+    end
   end
 
   describe "check/2" do

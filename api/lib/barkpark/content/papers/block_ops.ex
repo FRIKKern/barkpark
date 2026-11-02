@@ -3673,8 +3673,6 @@ defmodule Barkpark.Content.Papers.BlockOps do
       "the renderer ignores. Move the prose into the block's content field."
   end
 
-  # The stored blocks of the existing paper row (the prev side of the upsert
-  # ratchet), or [] for a brand-new paper / an HTML-only row.
   # PortableDoc RATCHET (R4.5) on the upsert door: papers only. Sessions and
   # other block docs are not checked yet.
   defp check_new_portable_doc_errors(@paper_type, stored, written),
@@ -3694,6 +3692,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       |> get_existing_blocks_doc_for_write(slug, dataset, scope_attrs)
       |> existing_paper_blocks()
 
+  # The stored blocks of the existing paper row (the prev side of the upsert
+  # ratchet), or [] for a brand-new paper / an HTML-only row.
   defp existing_paper_blocks(nil), do: []
 
   defp existing_paper_blocks(%Document{} = existing),

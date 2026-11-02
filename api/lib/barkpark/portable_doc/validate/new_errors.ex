@@ -3,9 +3,10 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   The PortableDoc check on a paper write (R4.5): only the errors a write ADDS
   count, so a paper that is already broken never blocks a save.
 
-  `split/2` validates the stored blocks and the blocks about to be stored with
-  `Barkpark.PortableDoc.Validate` and keeps, as added, every error the stored
-  blocks did not already have. Two errors are the same when they have the same
+  `split/2` validates the blocks about to be stored with
+  `Barkpark.PortableDoc.Validate`; only when they have errors does it validate
+  the stored blocks too, and it keeps, as added, every error the stored blocks
+  did not already have. Two errors are the same when they have the same
   code at the same place, and a place is named from the nearest block with an
   `id` on its path: `{code, id, rest of the path}`. So inserting a block above
   a broken one moves the broken one's index without making its error new. A
@@ -42,13 +43,19 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   @doc "`{added, existing}`: the errors of `written` the `stored` blocks did not have, and the ones it did."
   @spec split(term(), term()) :: {[Validate.error()], [Validate.error()]}
   def split(stored, written) do
-    known = stored |> errors() |> Enum.frequencies_by(&key(&1, stored))
+    case errors(written) do
+      [] -> {[], []}
+      found -> sort(found, stored, written)
+    end
+  end
+
+  defp sort(found, stored, written) do
+    known = stored |> errors() |> counts(stored)
+    root = root(written)
 
     {added, existing, _known} =
-      written
-      |> errors()
-      |> Enum.reduce({[], [], known}, fn error, {added, existing, known} ->
-        key = key(error, written)
+      Enum.reduce(found, {[], [], known}, fn error, {added, existing, known} ->
+        key = key(error, root)
 
         case Map.get(known, key, 0) do
           0 -> {[error | added], existing, known}
@@ -96,11 +103,20 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
 
   defp errors(_blocks), do: []
 
-  defp key(%{code: code, path: path}, blocks) do
+  defp counts([], _blocks), do: %{}
+
+  defp counts(errors, blocks) do
+    root = root(blocks)
+    Enum.frequencies_by(errors, &key(&1, root))
+  end
+
+  defp root(blocks), do: %{"blocks" => List.to_tuple(blocks)}
+
+  defp key(%{code: code, path: path}, root) do
     {id, rest} =
       path
       |> segments()
-      |> Enum.reduce({%{"blocks" => blocks}, nil, []}, fn segment, {value, id, rest} ->
+      |> Enum.reduce({root, nil, []}, fn segment, {value, id, rest} ->
         {id, rest} = anchor(value, id, rest)
         {child(value, segment), id, [segment | rest]}
       end)
@@ -111,6 +127,8 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
 
   defp anchor(%{"id" => id}, _id, _rest) when is_binary(id) and id != "", do: {id, []}
   defp anchor(_value, id, rest), do: {id, rest}
+
+  defp child(blocks, segment) when is_tuple(blocks), do: elem(blocks, String.to_integer(segment))
 
   defp child(list, segment) when is_list(list) do
     case Integer.parse(segment) do

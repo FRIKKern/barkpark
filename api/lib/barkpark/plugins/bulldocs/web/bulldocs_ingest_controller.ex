@@ -779,16 +779,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # tenant rule, `BlockOps.stored_paper_blocks/3`; none stored: every error). While the
   # ratchet is report-only they ride `warnings` with the entry the write queues,
   # and `valid` is unchanged; once it refuses they are violations, so the dry
-  # run and the write agree.
+  # run and the write agree. A scope the write would refuse reads no paper: an
+  # empty scope means the seeded Default, whose errors are another tenant's.
   defp with_portable_doc_check(conn, params, violations, slug, blocks) do
-    scope_attrs =
-      case resolve_write_scope(conn, params) do
-        {:ok, {ws_id, project_id}} -> %{"workspace_id" => ws_id, "project_id" => project_id}
-        _ -> %{}
-      end
-
     dataset = blank_to_nil(params["dataset"]) || Content.paper_default_dataset()
-    stored = BlockOps.stored_paper_blocks(slug, dataset, scope_attrs)
+
+    stored =
+      case resolve_write_scope(conn, params) do
+        {:ok, {ws_id, project_id}} ->
+          BlockOps.stored_paper_blocks(slug, dataset, %{
+            "workspace_id" => ws_id,
+            "project_id" => project_id
+          })
+
+        {:error, _refused} ->
+          []
+      end
 
     written =
       if is_list(blocks),
