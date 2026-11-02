@@ -1,8 +1,8 @@
 // Mounted: focusSelection() (1.22.0) moves focus into the editing surface and
 // keeps the selection where it was, on <bp-paper-canvas> and <bp-paper-editor>.
 // Hosts used to focus [contenteditable] or .ProseMirror inside the element for
-// this (Studio, Barkdown, Barkever, barkpark-studio); an unmounted element answers
-// false.
+// this (Studio, Barkdown, Barkever, barkpark-studio); an unmounted or read-only element
+// answers false.
 
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -58,7 +58,25 @@ assert.equal(editor.focusSelection(), true, "the editor reports focus");
 assert.ok(editor.contains(document.activeElement), "focus is inside the editor");
 assert.equal(editor._editor.state.selection.from, 5, "the editor keeps its selection");
 
+const reader = document.createElement("bp-paper-canvas");
+reader.setAttribute("editable", "false");
+reader.blocks = [{ id: "r-1", type: "paragraph", content: text("Read only.") }];
+document.body.appendChild(reader);
+await settle();
+away.focus();
+assert.equal(reader.focusSelection(), false, "a read-only canvas cannot take focus and says so");
+assert.equal(document.activeElement, away, "focus stays where it was");
+
+const readOnlyEditor = document.createElement("bp-paper-editor");
+readOnlyEditor.setAttribute("editable", "false");
+readOnlyEditor.setAttribute("data-block", JSON.stringify({ id: "r-2", type: "paragraph", content: text("Read only.") }));
+document.body.appendChild(readOnlyEditor);
+await settle();
+away.focus();
+assert.equal(readOnlyEditor.focusSelection(), false, "a read-only editor cannot take focus and says so");
+assert.equal(document.activeElement, away, "focus stays where it was");
+
 canvas.remove();
 assert.equal(canvas.focusSelection(), false, "a removed canvas answers false");
 
-console.log("focusSelection: both elements focus their surface and keep the selection; unmounted answers false");
+console.log("focusSelection: both elements focus their surface and keep the selection; unmounted or read-only answers false");

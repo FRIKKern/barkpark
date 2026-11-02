@@ -60,7 +60,7 @@ export async function surface() {
 
   const js = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
   const css = readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8");
-  const reader = readdirSync(readerDir).filter((n) => n.endsWith(".ex")).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
+  const reader = readdirSync(readerDir).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
   const readerClasses = new Set([...reader.matchAll(/class=\\?"([^"\\]*)/g)].flatMap((m) => words(m[1])));
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true, url: "http://localhost/" });
   dom.window.BP_PAPER_EDITOR_NO_INJECT = true;

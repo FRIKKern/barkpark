@@ -408,11 +408,12 @@
           const directEditor = directWrapper && contextualEditor?.contains(directWrapper)
             ? directWrapper.querySelector("bp-paper-editor")
             : null;
-          const canvas = directEditor ? null : contextualEditor && [...contextualEditor.querySelectorAll(
+          if (directEditor?.focusSelection?.() === true) return;
+          const canvas = contextualEditor && [...contextualEditor.querySelectorAll(
             "bp-paper-canvas",
           )].find((editor) => Array.isArray(editor.blocks) &&
             editor.blocks.some((block) => block?.id === targetId));
-          if ((directEditor || canvas)?.focusSelection() !== true) add?.focus();
+          if (canvas?.focusSelection?.() !== true) add?.focus();
           return;
         }
         (rowControl || add)?.focus();
