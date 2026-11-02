@@ -29,7 +29,7 @@ const repro = {
     { t: 19, kind: "reload" },
   ],
   batches: [{ seq: 1, ops: [{ op: "insert-after", afterId: "p-e", block: { id: "c-1", type: "paragraph" } }], answer: { ok: true } }],
-  red: [{ key: "hidden-blocks", words: "Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown)." }],
+  red: [{ key: "hidden-blocks", name: "Hidden blocks", words: "6 lines are in the doc but hidden on screen (9 blocks, 2 shown)." }],
 };
 
 assert.deepEqual(drillFromRepro(repro), {
@@ -59,7 +59,7 @@ assert.deepEqual(args.slice(6), [
 ]);
 assert.equal(args[4], "--description");
 const description = args[5];
-assert.match(description, /^Six Enters left one line\nand more\n\nBuild: main at 4090b798ab\. Doc: drill:D07\. Fold: Reference fold \(the JS mirror of patch\.ex\)\. desk, light\.\nRed lights:\n- Hidden blocks — red 6 lines/);
+assert.match(description, /^Six Enters left one line\nand more\n\nBuild: main at 4090b798ab\. Doc: drill:D07\. Fold: Reference fold \(the JS mirror of patch\.ex\)\. desk, light\.\nRed lights:\n- Hidden blocks: 6 lines are in the doc but hidden on screen \(9 blocks, 2 shown\)\.\n/);
 assert.match(description, /npm run drill -- --repro=repro\.json --build=<main \| PR number>/);
 assert.deepEqual(JSON.parse(description.match(/```json\n([\s\S]*)\n```$/)[1]), repro, "the whole repro rides along, intact");
 assert.equal(reportArgs({ what: "x".repeat(300), repro })[3].length, "Testing ground: ".length + 100);

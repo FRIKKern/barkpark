@@ -143,7 +143,7 @@ function snapshot() {
     start: docs.get(state.key).blocks,
     events: record.events(),
     batches: host.batches.map(({ seq, ops, answer }) => ({ seq, ops, answer })),
-    red: currentLights().filter((light) => light.ok === false).map(({ key, words }) => ({ key, words })),
+    red: currentLights().filter((light) => light.ok === false).map(({ key, name, words }) => ({ key, name, words })),
   };
 }
 

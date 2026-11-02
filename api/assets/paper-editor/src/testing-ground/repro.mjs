@@ -40,7 +40,7 @@ export function drillFromRepro(repro) {
 export function reportArgs({ what, repro }) {
   const said = what.trim();
   if (!said) throw new Error("Say what went wrong first.");
-  const red = repro.red.map((light) => `- ${light.words}`).join("\n") || "- No light was red.";
+  const red = repro.red.map((light) => `- ${light.name}: ${light.words}`).join("\n") || "- No light was red.";
   const description = [
     said,
     "",

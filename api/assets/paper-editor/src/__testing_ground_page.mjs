@@ -310,7 +310,7 @@ await scene("Report a bug shows exactly what bp gets, files it, and its repro re
   const args = reportArgs({ what: "Six Enters left one line", repro });
   assert.equal(await page.textContent(".tg-report-preview"), ["bp", ...args].join("\n"), "the preview is every argument bp will get");
   assert.deepEqual(repro.events.map((e) => e.key || e.text || `${e.kind}${e.id ? ` ${e.id} ${e.offset}` : ""}`), ["caret p-e 0", "Enter", "Enter", "Enter", "Enter", "Enter", "Enter", "x", "Backspace", "reload"]);
-  assert.deepEqual(repro.red.map((light) => light.key), ["hidden-blocks"]);
+  assert.deepEqual(repro.red, [{ key: "hidden-blocks", name: "Hidden blocks", words: "6 lines are in the doc but hidden on screen (9 blocks, 2 shown)." }]);
   assert.deepEqual([repro.build.label, repro.doc, repro.width, repro.theme], ["main", "drill:D01", "desk", "light"]);
   await page.fill(".tg-report-what", "Six Enters left one line!");
   assert.equal(await page.isDisabled(".tg-report-file"), true, "an edit after the preview needs a new preview");
