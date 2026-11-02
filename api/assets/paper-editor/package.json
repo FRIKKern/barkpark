@@ -54,6 +54,7 @@
     "index.d.ts",
     "contract.d.ts",
     "EMBED-CONTRACT.md",
+    "host-profile/surface.json",
     "THIRD-PARTY-NOTICES.txt",
     "third-party-notices.json",
     "LICENSE"
@@ -62,7 +63,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node scripts/build-bundle.mjs && esbuild src/styles.css --bundle --outfile=../../priv/static/assets/bp-paper-editor.css --minify && esbuild src/reader-code.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-code.js --minify && esbuild ../paper-surface/paper-surface.css --bundle --outfile=../../priv/static/assets/bp-paper-surface.css --minify",
+    "build": "node scripts/build-bundle.mjs && esbuild src/styles.css --bundle --outfile=../../priv/static/assets/bp-paper-editor.css --minify && esbuild src/reader-code.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-code.js --minify && esbuild ../paper-surface/paper-surface.css --bundle --outfile=../../priv/static/assets/bp-paper-surface.css --minify && node scripts/surface.mjs",
     "build:dev": "node scripts/build-bundle.mjs --dev && esbuild src/styles.css --bundle --outfile=../../priv/static/assets/bp-paper-editor.css --sourcemap && esbuild src/reader-code.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-code.js --sourcemap && esbuild ../paper-surface/paper-surface.css --bundle --outfile=../../priv/static/assets/bp-paper-surface.css --sourcemap",
     "build:web": "npm run build && cp ../../priv/static/assets/bp-paper-editor.bundle.js ../../../web/public/bp-paper-editor.bundle.js && mkdir -p ../../../web/public/assets && cp ../../priv/static/assets/bp-paper-editor.css ../../../web/public/assets/bp-paper-editor.css",
     "test:reader-canvas-render": "MIX_ENV=test node src/__reader_canvas_render.mjs",

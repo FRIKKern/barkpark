@@ -441,6 +441,22 @@ export type BpPaperThemeToken =
   | "--bp-tone-warning-bg"
   | "--bp-tone-warning-fg";
 
+/** The picker elements the host defines: media for `field-image` and card media, reference for `field-reference` and embeds. */
+export type BpHostPickerTag = "bp-media-picker" | "bp-reference-picker";
+
+/** The attributes the canvas sets on a picker it creates. */
+export interface BpHostPickerAttributes {
+  value?: string;
+  dataset?: string;
+  "scope-prefix"?: string;
+  "data-token"?: string;
+  "data-strings"?: string;
+  /** `bp-media-picker` only: `"ghost"` inside a card. */
+  chrome?: "ghost";
+  /** `bp-reference-picker` only. */
+  "ref-type"?: string;
+}
+
 /** A picker element the host defines; the canvas creates it for `field-image`, `field-reference`, card media and embeds. */
 export interface BpHostPickerElement extends HTMLElement {
   /** The picked value; the canvas sets it and reads it back. */

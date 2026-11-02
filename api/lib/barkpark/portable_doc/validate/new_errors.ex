@@ -16,10 +16,13 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   counted, not just matched, so a third block with a duplicated id, or a
   second broken item in one list, is one more error.
 
-  Ingest, proposals and the validate dry run call `check/2` (whole doc). Ops
-  and op batches call `check_touched/2`, which validates only the top-level
-  blocks the write changed, added or dropped (`split_touched/2`): an unchanged
-  block has the same errors on both sides. Both are report-only until the
+  Paper and session ingest, proposals, a paper written through the Writer
+  (`/v1/data/mutate`, the Bulldocs `:before_save` hook) and the validate dry
+  run call `check/2` (whole doc). Paper ops and op batches, document and
+  session ops (`/v1/data/doc/:dataset/:type/:doc_id/ops`) and block-editor
+  field ops call `check_touched/2`, which validates only the top-level blocks
+  the write changed, added or dropped (`split_touched/2`): an unchanged block
+  has the same errors on both sides. Both are report-only until the
   `:portable_doc_refuse_new_errors` config flag is on (`refuse?/0`):
 
     * off (the default): the write goes ahead; the added errors are logged and
