@@ -96,6 +96,8 @@ config :barkpark_cloud,
 # do. nil is the SAFE reading here: the module treats an unconfigured client as
 # unmeasured, never as distance 0.
 config :barkpark_cloud, BarkparkCloud.GitHub.CommitDistance, http_client: nil
+# The release watch never reaches api.github.com from a test; tests inject a fun.
+config :barkpark_cloud, BarkparkCloud.GitHub.LatestRelease, http_client: nil
 
 # hetzner-proxy: swap the server-side Hetzner API fan-out for the in-process
 # per-path fake (same seam shape as notifications/studio-link above).

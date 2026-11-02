@@ -27,6 +27,10 @@ defmodule Barkpark.SelfUpdate.Checker do
 
   @default_initial_delay_ms 10_000
   @default_check_interval_ms 3_600_000
+  # A refresh asked for within this long of the last started check is
+  # ignored, so repeated refresh requests cannot spend the box's anonymous
+  # 60 requests/hour GitHub budget.
+  @default_refresh_floor_ms 60_000
 
   # The most SEQUENTIAL client HTTP calls run_check/0 can make on any single
   # path — the fork-mode :behind path, which fires all four in order:
@@ -60,18 +64,12 @@ defmodule Barkpark.SelfUpdate.Checker do
   @impl true
   def init(opts) do
     Process.send_after(self(), :check, delay(opts, :initial_delay_ms, @default_initial_delay_ms))
-    {:ok, %{status: SelfUpdate.base_status(:unknown), opts: opts}}
+    {:ok, %{status: SelfUpdate.base_status(:unknown), opts: opts, last_started: nil}}
   end
 
   @impl true
   def handle_info(:check, state) do
-    # The HTTP check runs in a throwaway task so this GenServer stays
-    # instantly callable — :status backs every admin Studio render, and a
-    # slow/blackholed api.github.com must never queue those calls behind
-    # 10s+ of network. The task posts the result back as {:check_result, _};
-    # if it dies, the result simply never arrives and the next tick retries.
-    parent = self()
-    Task.start(fn -> send(parent, {:check_result, run_check()}) end)
+    state = start_check(state)
 
     Process.send_after(
       self(),
@@ -87,6 +85,31 @@ defmodule Barkpark.SelfUpdate.Checker do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # An out-of-cycle check (`SelfUpdate.refresh/0`). Barkpark Cloud asks for one
+  # when it has seen a release this box does not report yet. The periodic timer
+  # keeps its own cadence; a refresh within the floor of the last started check
+  # is dropped.
+  @impl true
+  def handle_cast(:refresh, state) do
+    floor = delay(state.opts, :refresh_floor_ms, @default_refresh_floor_ms)
+    now = System.monotonic_time(:millisecond)
+
+    if state.last_started && now - state.last_started < floor,
+      do: {:noreply, state},
+      else: {:noreply, start_check(state)}
+  end
+
+  # The HTTP check runs in a throwaway task so this GenServer stays
+  # instantly callable — :status backs every admin Studio render, and a
+  # slow/blackholed api.github.com must never queue those calls behind
+  # 10s+ of network. The task posts the result back as {:check_result, _};
+  # if it dies, the result simply never arrives and the next tick retries.
+  defp start_check(state) do
+    parent = self()
+    Task.start(fn -> send(parent, {:check_result, run_check()}) end)
+    %{state | last_started: System.monotonic_time(:millisecond)}
+  end
 
   @impl true
   def handle_call(:status, _from, state) do

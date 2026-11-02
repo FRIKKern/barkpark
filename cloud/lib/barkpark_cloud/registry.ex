@@ -5822,8 +5822,14 @@ defmodule BarkparkCloud.Registry do
 
   Transport is the same swappable seam `mint_studio_link/1` uses
   (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
+
+  `refresh: true` adds `?refresh=1`, which asks the box to start an upstream
+  check now (`Workers.ReleaseWatchWorker` sends it when GitHub has a release the
+  row does not show). The box answers with its cached verdict at once and the
+  fresh one lands for the next read. A box that predates the parameter ignores
+  it. Everything else about the read is the same.
   """
-  @spec refresh_update_status(Barkpark.t()) ::
+  @spec refresh_update_status(Barkpark.t(), keyword()) ::
           {:ok, Barkpark.t()}
           | {:error,
              :not_live
@@ -5835,7 +5841,11 @@ defmodule BarkparkCloud.Registry do
              | :unreachable
              | :bad_shape
              | :instance_error}
-  def refresh_update_status(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+  def refresh_update_status(bp, opts \\ [])
+
+  def refresh_update_status(%Barkpark{url: url} = bp, opts) when is_binary(url) and url != "" do
+    query = if Keyword.get(opts, :refresh, false), do: "?refresh=1", else: ""
+
     case reveal_admin_token(bp) do
       {:ok, nil} ->
         persist_update_unknown(bp, :no_admin_token)
@@ -5846,7 +5856,7 @@ defmodule BarkparkCloud.Registry do
       {:ok, admin_token} ->
         request = %{
           method: :get,
-          url: String.trim_trailing(url, "/") <> "/v1/admin/self-update",
+          url: String.trim_trailing(url, "/") <> "/v1/admin/self-update" <> query,
           headers: instance_headers(admin_token),
           body: ""
         }
@@ -5887,7 +5897,7 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  def refresh_update_status(%Barkpark{} = bp), do: persist_update_unknown(bp, :not_live)
+  def refresh_update_status(%Barkpark{} = bp, _opts), do: persist_update_unknown(bp, :not_live)
 
   # THE ARMING PROBE, read off the SIBLING of `"check"` (#12995). `apply_enabled`
   # reports the box's `Runner.enabled?/0` — the running BEAM's boot-frozen value,

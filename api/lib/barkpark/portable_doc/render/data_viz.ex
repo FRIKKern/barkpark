@@ -142,6 +142,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # image to assistive tech (`role="img"` + "2 of 10" in the render's
   # language); the dots themselves are hidden.
   @max_dots 50
+  @min_magnitude 1.0e-100
+  @max_magnitude 1.0e100
 
   @doc false
   def dots(block) do
@@ -489,9 +491,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       end
 
     body =
-      grid
-      |> Enum.with_index()
-      |> Enum.map_join("", fn {row, i} ->
+      heat_rows(grid, fn row, i, left ->
         label =
           if row_labels == [] do
             ""
@@ -499,14 +499,20 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
           end
 
-        cells =
-          Enum.map_join(0..(cols - 1), "", fn j ->
-            v = Enum.at(row, j) || 0.0
-            i_norm = clamp(v / max_val, 0.0, 1.0)
-            ~s|<i class="bp-heat__c" style="--i:#{fmt3(i_norm)}" title="#{fmt(v)}"></i>|
-          end)
+        {cells, left} =
+          heat_cells(
+            row,
+            cols,
+            left,
+            fn v ->
+              v = v || 0.0
+              i_norm = clamp(v / max_val, 0.0, 1.0)
+              ~s|<i class="bp-heat__c" style="--i:#{fmt3(i_norm)}" title="#{fmt(v)}"></i>|
+            end,
+            &heat_gap/1
+          )
 
-        label <> cells
+        {label <> cells, left}
       end)
 
     track = if row_labels == [], do: "", else: "auto "
@@ -549,8 +555,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     body =
       grid
-      |> Enum.with_index()
-      |> Enum.map_join("", fn {row, i} ->
+      |> Enum.zip_with(bins, &Enum.zip/2)
+      |> heat_rows(fn row, i, left ->
         label =
           if row_labels == [] do
             ""
@@ -558,18 +564,21 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
           end
 
-        bin_row = Enum.at(bins, i)
+        # Ragged rows: a missing week reads as a zero cell (bin -1), so the
+        # calendar keeps its shape — the web read of heatmap.go's gap rule.
+        {cells, left} =
+          heat_cells(
+            row,
+            weeks,
+            left,
+            fn cell ->
+              {v, bin} = cell || {0.0, -1}
+              ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
+            end,
+            &heat_gap/1
+          )
 
-        cells =
-          Enum.map_join(0..(weeks - 1), "", fn w ->
-            # Ragged rows: a missing week reads as a zero cell (bin -1), so the
-            # calendar keeps its shape — the web read of heatmap.go's gap rule.
-            v = Enum.at(row, w) || 0.0
-            bin = Enum.at(bin_row, w) || -1
-            ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
-          end)
-
-        label <> cells
+        {label <> cells, left}
       end)
 
     track = if row_labels == [], do: "", else: "auto "
@@ -596,10 +605,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     # Row / column sums for the marginals; ragged rows contribute 0 (gap rule).
     row_sums = Enum.map(grid, &Enum.sum/1)
 
-    col_sums =
-      Enum.map(0..(cols - 1), fn j ->
-        grid |> Enum.map(&(Enum.at(&1, j) || 0.0)) |> Enum.sum()
-      end)
+    col_sums = Enum.reduce(grid, List.duplicate(0, cols), &add_col_sums/2)
 
     grand = Enum.sum(row_sums)
 
@@ -626,8 +632,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     body =
       grid
-      |> Enum.with_index()
-      |> Enum.map_join("", fn {row, i} ->
+      |> Enum.zip_with(bins, &Enum.zip/2)
+      |> heat_rows(fn row, i, left ->
         label =
           if gutter do
             ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
@@ -635,23 +641,26 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             ""
           end
 
-        bin_row = Enum.at(bins, i)
-
-        cells =
-          Enum.map_join(0..(cols - 1), "", fn j ->
-            v = Enum.at(row, j) || 0.0
-            bin = Enum.at(bin_row, j) || -1
-            matrix_cell(bin, v, show_vals)
-          end)
+        {cells, left} =
+          heat_cells(
+            row,
+            cols,
+            left,
+            fn cell ->
+              {v, bin} = cell || {0.0, -1}
+              matrix_cell(bin, v, show_vals)
+            end,
+            &heat_gap/1
+          )
 
         row_sum =
           if show_marg do
-            ~s|<span class="bp-heat__sum">#{fmt(Enum.at(row_sums, i))}</span>|
+            ~s|<span class="bp-heat__sum">#{fmt(Enum.sum_by(row, &elem(&1, 0)))}</span>|
           else
             ""
           end
 
-        label <> cells <> row_sum
+        {label <> cells <> row_sum, left}
       end)
 
     foot =
@@ -681,6 +690,31 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   defp matrix_cell(bin, v, false) do
     ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
   end
+
+  defp heat_rows(grid, row_html) do
+    {rows, _left} =
+      grid
+      |> Enum.with_index()
+      |> Enum.map_reduce(Enum.sum_by(grid, &length/1), fn {row, i}, left ->
+        row_html.(row, i, left)
+      end)
+
+    Enum.join(rows)
+  end
+
+  defp heat_cells(values, cols, left, cell, gap) do
+    pad = cols - length(values)
+
+    if pad <= left,
+      do: {Enum.map_join(values ++ List.duplicate(nil, pad), "", cell), left - pad},
+      else: {Enum.map_join(values, "", cell) <> gap.(pad), left}
+  end
+
+  defp heat_gap(pad), do: ~s|<i style="grid-column:span #{pad}"></i>|
+  defp heat_email_gap(pad), do: ~s|<td colspan="#{pad}"></td>|
+
+  defp add_col_sums([], sums), do: sums
+  defp add_col_sums([v | row], [sum | sums]), do: [sum + v | add_col_sums(row, sums)]
 
   defp bin_class(-1), do: "bp-heat__c--z"
   defp bin_class(k) when is_integer(k), do: "bp-heat__c--b#{k |> max(0) |> min(3)}"
@@ -1298,7 +1332,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         true -> {pmin || dmin, pmax || dmax}
       end
 
-    if max_v <= min_v, do: {min_v, min_v + 1.0}, else: {min_v, max_v}
+    if max_v <= min_v, do: {min_v, min_v + max(1.0, abs(min_v) * 1.0e-9)}, else: {min_v, max_v}
   end
 
   defp x_at(i, n) do
@@ -1737,21 +1771,26 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         end
 
       body =
-        grid
-        |> Enum.with_index()
-        |> Enum.map_join("", fn {row, i} ->
+        heat_rows(grid, fn row, i, left ->
           label =
             if row_labels == [],
               do: "",
               else: ~s|<td #{label_td}>#{escape_html(Enum.at(row_labels, i) || "")}</td>|
 
-          "<tr>" <>
-            label <>
-            Enum.map_join(0..(cols - 1), "", fn j ->
-              v = Enum.at(row, j) || 0.0
+          {cells, left} =
+            heat_cells(
+              row,
+              cols,
+              left,
+              fn v ->
+                v = v || 0.0
 
-              ~s|<td style="width:22px;height:18px;border-radius:3px;background:#{mix_hex(clamp(v / max_val, 0.0, 1.0), sk)}" title="#{fmt(v)}"></td>|
-            end) <> "</tr>"
+                ~s|<td style="width:22px;height:18px;border-radius:3px;background:#{mix_hex(clamp(v / max_val, 0.0, 1.0), sk)}" title="#{fmt(v)}"></td>|
+              end,
+              &heat_email_gap/1
+            )
+
+          {"<tr>" <> label <> cells <> "</tr>", left}
         end)
 
       ~s|<div style="display:inline-block;background:#{sk.paper};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
@@ -2035,7 +2074,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   # One varint chunk: 5-bit groups, char − 63, bit 0x20 continues; the sign
   # rides the low bit (zig-zag).
-  defp decode_chunk(<<c, rest::binary>>, shift, acc) when c >= 63 and c <= 126 do
+  defp decode_chunk(<<c, rest::binary>>, shift, acc) when c >= 63 and c <= 126 and shift <= 30 do
     acc = acc ||| (c - 63 &&& 0x1F) <<< shift
 
     if (c - 63 &&& 0x20) != 0 do
@@ -2063,12 +2102,14 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   defp display_string(n) when is_float(n), do: fmt(n)
   defp display_string(_), do: ""
 
-  defp numeric(v) when is_integer(v), do: v * 1.0
-  defp numeric(v) when is_float(v), do: v
+  defp numeric(v) when is_number(v) and v == 0, do: 0.0
+
+  defp numeric(v) when is_number(v) and abs(v) >= @min_magnitude and abs(v) <= @max_magnitude,
+    do: v * 1.0
 
   defp numeric(v) when is_binary(v) do
     case Float.parse(String.trim(v)) do
-      {f, ""} -> f
+      {f, ""} -> numeric(f)
       _ -> nil
     end
   end

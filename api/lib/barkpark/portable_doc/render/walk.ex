@@ -1351,8 +1351,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     # Merged cells (Barkdown plan #24): a covered position renders nothing, the origin carries the
     # span attributes. `spans` is already validated and in-grid (compose.ex table_put_spans/4).
-    spans = Map.get(n, "spans", []) |> List.wrap()
-    covered = table_covered(spans)
+    {origins, covered} = table_span_lookup(n)
 
     tbody =
       body
@@ -1364,7 +1363,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           |> Enum.reject(fn {_cell, index} -> MapSet.member?(covered, {r, index}) end)
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            attrs = table_span_attrs(spans, r, index) <> table_align_attr(aligns, :rows, r, index)
+            attrs = span_attr(origins, r, index) <> table_align_attr(aligns, :rows, r, index)
 
             # The header column (plan #26): the first body cell is a row header.
             if head_col? and index == 0 do
@@ -1466,35 +1465,14 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp table_align_attr(_aligns, _area, _r, _c), do: ""
 
-  # The body positions a span covers without being its origin.
-  defp table_covered(spans) do
-    Enum.reduce(spans, MapSet.new(), fn s, acc ->
-      r0 = Map.get(s, "row", 0)
-      c0 = Map.get(s, "col", 0)
-
-      for r <- r0..(r0 + Map.get(s, "rowspan", 1) - 1),
-          c <- c0..(c0 + Map.get(s, "colspan", 1) - 1),
-          {r, c} != {r0, c0},
-          reduce: acc do
-        set -> MapSet.put(set, {r, c})
-      end
+  defp table_span_lookup(n) do
+    n
+    |> Map.get("spans", [])
+    |> Enum.flat_map(fn
+      %{"row" => r0, "col" => c0, "rowspan" => rs, "colspan" => cs} -> [{r0, c0, rs, cs}]
+      _span -> []
     end)
-  end
-
-  # ` colspan="2" rowspan="3"` on the origin (each only when above 1); integers only, so nothing
-  # here can carry author text.
-  defp table_span_attrs(spans, r, c) do
-    case Enum.find(spans, fn s -> Map.get(s, "row") == r and Map.get(s, "col") == c end) do
-      nil ->
-        ""
-
-      s ->
-        cs = Map.get(s, "colspan", 1)
-        rs = Map.get(s, "rowspan", 1)
-
-        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
-          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
-    end
+    |> cover_spans(row_lengths(n), &Map.put_new/3)
   end
 
   defp table_col_class(cols, index, base) do
@@ -1556,7 +1534,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               # derived default-align CLASS rides in the SAME class attr as the
               # chrome class (one attribute; explicit `al` still suppresses it).
               w_style = col_width_style(col_widths, c)
-              span = sheet_span_attr(anchors, r, c)
+              span = span_attr(anchors, r, c)
               extra = sheet_cell_style(styles, r, c)
               err = sheet_err_style(cell)
 
@@ -1621,7 +1599,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               []
             else
               w_style = col_width_style(col_widths, c)
-              span = sheet_span_attr(anchors, r, c)
+              span = span_attr(anchors, r, c)
               al = sheet_default_align_attr(styles, r, c, cell)
               extra = sheet_cell_style(styles, r, c)
               err = sheet_err_style(cell)
@@ -1692,22 +1670,56 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     n
     |> Map.get("merges")
     |> List.wrap()
-    |> Enum.reduce({%{}, MapSet.new()}, fn
-      [r, c, rs, cs], {anchors, covered}
+    |> Enum.flat_map(fn
+      [r, c, rs, cs]
       when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
              r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap ->
-        covered =
-          for(rr <- r..(r + rs - 1), cc <- c..(c + cs - 1), {rr, cc} != {r, c}, do: {rr, cc})
-          |> Enum.into(covered)
+        [{r, c, rs, cs}]
 
-        {Map.put(anchors, {r, c}, {rs, cs}), covered}
-
-      _other, acc ->
-        acc
+      _other ->
+        []
     end)
+    |> cover_spans(row_lengths(n), &Map.put/3)
   end
 
-  defp sheet_span_attr(anchors, r, c) do
+  defp cover_spans(spans, lens, put) do
+    {origins, covered, _left} =
+      Enum.reduce_while(spans, {%{}, MapSet.new(), cell_count(lens)}, fn
+        {r0, c0, rs, cs}, {origins, covered, left} = acc ->
+          if r0 < tuple_size(lens) and c0 < elem(lens, r0) do
+            cost = span_cost(lens, r0, c0, rs, cs)
+
+            if cost <= left do
+              [_origin | rest] = stored_cells(lens, r0, c0, rs, cs)
+              {:cont, {put.(origins, {r0, c0}, {rs, cs}), Enum.into(rest, covered), left - cost}}
+            else
+              {:halt, acc}
+            end
+          else
+            {:cont, acc}
+          end
+      end)
+
+    {origins, covered}
+  end
+
+  defp row_lengths(n), do: n |> Map.get("rows", []) |> Enum.map(&length/1) |> List.to_tuple()
+
+  defp cell_count(lens), do: lens |> Tuple.to_list() |> Enum.sum()
+
+  defp span_cost(lens, r0, c0, rs, cs) do
+    rows = r0..(min(r0 + rs, tuple_size(lens)) - 1)//1
+    cells = Enum.sum_by(rows, &max(min(c0 + cs, elem(lens, &1)) - c0, 0))
+    max(cells, Range.size(rows))
+  end
+
+  defp stored_cells(lens, r0, c0, rs, cs) do
+    for r <- r0..(min(r0 + rs, tuple_size(lens)) - 1)//1,
+        c <- c0..(min(c0 + cs, elem(lens, r)) - 1)//1,
+        do: {r, c}
+  end
+
+  defp span_attr(anchors, r, c) do
     case Map.fetch(anchors, {r, c}) do
       {:ok, {rs, cs}} ->
         if(cs > 1, do: ~s( colspan="#{cs}"), else: "") <>

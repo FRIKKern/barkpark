@@ -14881,6 +14881,35 @@ test("#14886: the fleet LIST stays silent on every state but a failure — the s
   }
 });
 
+test("task-0fc277c5d1bcbabc: a single-unit box reads as one unit, not an idle pair", () => {
+  const idle = [
+    { unit: "barkpark-slot@blue.service", active_state: "inactive", sub_state: "dead", main_pid: 0, state_since: "n/a" },
+    { unit: "barkpark-slot@green.service", active_state: "inactive", sub_state: "dead", main_pid: 0, state_since: "n/a" },
+  ];
+  const single = { pressure: { slot_units: idle, beam_pid: "2937529", beam_slot: null } };
+  const m = hooks.slotUnitsModel(single);
+  assert.equal(m.state, "single");
+  assert.equal(hooks.slotUnitsText(m), "serving through one unit; the BEAM (pid 2937529) runs outside the blue/green pair");
+  assert.equal(hooks.fleetSlotUnitsText(single), "", "a single-unit box adds no fleet-list segment");
+
+  // No BEAM reading, a BEAM attributed to a slot, or a pid that is a slot
+  // unit's own main pid: still an idle pair.
+  for (const p of [
+    { slot_units: idle },
+    { slot_units: idle, beam_pid: "4185178", beam_slot: "green" },
+    { slot_units: idle, beam_pid: "0" },
+    { slot_units: [idle[0], { unit: "barkpark-slot@green.service", active_state: "activating", sub_state: "start", main_pid: 77 }], beam_pid: "77" },
+  ]) {
+    const im = hooks.slotUnitsModel({ pressure: p });
+    assert.equal(im.state, "idle");
+    assert.equal(hooks.slotUnitsText(im), "no blue/green slot is active");
+  }
+
+  // A failed slot is never hidden by single-unit evidence.
+  const failed = { pressure: { slot_units: [{ unit: "barkpark-slot@blue.service", active_state: "failed", sub_state: "failed", main_pid: 0 }, idle[1]], beam_pid: "2937529" } };
+  assert.equal(hooks.slotUnitsModel(failed).state, "failed");
+});
+
 test("#14886: the slot_units fold is TOTAL — garbage never fabricates an intact pair", () => {
   for (const bad of [null, undefined, 0, "x", [], { pressure: "nope" }, { pressure: { slot_units: "nope" } }]) {
     const m = hooks.slotUnitsModel(bad);
