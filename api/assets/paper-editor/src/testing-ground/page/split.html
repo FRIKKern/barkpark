@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor testing ground</title>
+  <link rel="stylesheet" href="/src/testing-ground/page/style.css">
+  <script type="module" src="/src/testing-ground/page/split.mjs"></script>
+</head>
+<body class="tg-split">
+  <header class="tg-split-head">
+    <strong class="tg-split-label"></strong>
+    <strong class="tg-split-label"></strong>
+    <p class="tg-split-note">Type in the left window. Enter, Backspace, Delete, Tab, shortcuts, typing and paste go into the right window too, at the same block. Arrow keys and clicks move only the left caret; the right one jumps to the same block at your next key. Test docs only.</p>
+  </header>
+  <div class="tg-split-frames">
+    <iframe class="tg-frame"></iframe>
+    <iframe class="tg-frame"></iframe>
+  </div>
+</body>
+</html>

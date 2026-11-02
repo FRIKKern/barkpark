@@ -41,6 +41,13 @@ function type(view, chars) {
   }
 }
 
+function deleteChar(view, key) {
+  const { empty, $from, from } = view.state.selection;
+  if (!empty) return;
+  if (key === "Backspace" && $from.parentOffset > 0) view.dispatch(view.state.tr.delete(from - 1, from));
+  if (key === "Delete" && $from.parentOffset < $from.parent.content.size) view.dispatch(view.state.tr.delete(from, from + 1));
+}
+
 function paste(view, data) {
   const event = new view.dom.ownerDocument.defaultView.Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { getData: (kind) => data[kind] } });
@@ -58,7 +65,9 @@ export function mirror(root, source, target) {
     follow(from, to);
     const { key, code, shiftKey, altKey, metaKey, ctrlKey } = event;
     const { dom } = to._editor.view;
-    dom.dispatchEvent(new dom.ownerDocument.defaultView.KeyboardEvent("keydown", { key, code, shiftKey, altKey, metaKey, ctrlKey, bubbles: true, cancelable: true }));
+    const sent = new dom.ownerDocument.defaultView.KeyboardEvent("keydown", { key, code, shiftKey, altKey, metaKey, ctrlKey, bubbles: true, cancelable: true });
+    dom.dispatchEvent(sent);
+    if (!sent.defaultPrevented) deleteChar(to._editor.view, key);
   });
   on("beforeinput", (event, from, to) => {
     if (event.inputType !== "insertText") return;

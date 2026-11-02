@@ -5,6 +5,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { barkparkFold } from "./barkpark-fold.mjs";
+import { makeBuild, pickBuild } from "./builds.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(SRC, "../../../..");
@@ -52,7 +53,7 @@ export function packSamples() {
 }
 
 export function mainBuild() {
-  return { label: "main", sha: git(REPO, "log", "-1", "--format=%h", "--", "api/priv/static/assets/bp-paper-editor.bundle.js"), dir: MAIN_ASSETS };
+  return { label: "main", sha: git(REPO, "log", "-1", "--format=%H", "--", "api/priv/static/assets/bp-paper-editor.bundle.js").slice(0, 10), dir: MAIN_ASSETS };
 }
 
 function inside(root, rel) {
@@ -80,29 +81,36 @@ async function standInModule(make) {
   }
 }
 
-export async function start({ build: picked = mainBuild(), port = 0, fold = null, standIn = readerStandIn } = {}) {
+export async function start({ builds = [mainBuild()], port = 0, fold = null, standIn = readerStandIn } = {}) {
   const reader = await standInModule(standIn);
+  const page = (name) => () => readFileSync(join(SRC, "testing-ground/page", name));
   const files = {
-    "/index.html": () => readFileSync(join(SRC, "testing-ground/page/index.html")),
-    "/build.json": () => JSON.stringify({ label: picked.label, sha: picked.sha, fold: fold?.name }),
+    "/index.html": page("index.html"),
     "/pack/samples.json": () => JSON.stringify(packSamples()),
     "/pack/fragments.json": () => readFileSync(join(PACK, "fragments.json")),
     "/pack/paper-surface.css": () => readFileSync(join(PACK, "css/paper-surface.css")),
     "/pack/code-tokens.css": () => readFileSync(join(PACK, "css/code-tokens.css")),
     "/reader-standin.js": () => reader,
   };
-  for (const name of BUNDLE_FILES) files[`/build/${name}`] = () => readFileSync(join(picked.dir, name));
+  if (builds.length > 1) files["/split.html"] = page("split.html");
+  const perBuild = (build) => ({
+    "/build.json": () => JSON.stringify({ label: build.label, sha: build.sha, fold: fold?.name }),
+    ...Object.fromEntries(BUNDLE_FILES.map((name) => [`/build/${name}`, () => readFileSync(join(build.dir, name))])),
+  });
 
   const server = createServer((req, res) => {
     const asked = decodeURIComponent(req.url.split("?")[0]);
-    const path = asked === "/" ? "/index.html" : asked;
+    const [, index, rest] = asked.match(/^\/b\/(\d+)(\/.*)$/) || [null, "0", asked];
+    const build = builds[Number(index)];
+    const split = rest === asked && builds.length > 1;
+    const path = rest === "/" ? (split ? "/split.html" : "/index.html") : rest;
     if (fold && req.method === "POST" && path === "/fold") {
       res.setHeader("content-type", TYPES[".json"]);
       return foldThrough(fold, req, res);
     }
-    const route = files[path];
+    const route = build && { ...files, ...perBuild(build) }[path];
     const file = path.startsWith("/src/") && inside(SRC, path.slice(5));
-    if (req.method !== "GET" || (!route && !file)) {
+    if (req.method !== "GET" || !build || (!route && !file)) {
       res.statusCode = 404;
       return res.end("not found");
     }
@@ -115,18 +123,25 @@ export async function start({ build: picked = mainBuild(), port = 0, fold = null
 }
 
 function usage(why) {
-  console.error(`npm run try: ${why}\nusage: npm run try [main] [-- --port=<n>] [--no-open] [--barkpark=<http://localhost:port>]  (--barkpark needs BARKPARK_TG_TOKEN)`);
+  console.error(`npm run try: ${why}\nusage: npm run try [main | <PR number> | <contract like 1.19>] [<second build>] [-- --port=<n>] [--no-open] [--barkpark=<http://localhost:port>]\n  one build that is not main opens beside main; two open side by side; --barkpark needs BARKPARK_TG_TOKEN`);
   process.exit(2);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(130));
   const args = process.argv.slice(2);
   const known = /^--(port=\d+|no-open|barkpark=.+)$/;
-  const [which = "main", ...extra] = args.filter((a) => !a.startsWith("--"));
+  const names = args.filter((a) => !a.startsWith("--"));
   const bad = args.find((a) => a.startsWith("--") && !known.test(a));
   if (bad) usage(`unknown or malformed flag ${bad}`);
-  if (extra.length) usage(`one build at a time, got ${[which, ...extra].join(" ")}`);
-  if (which !== "main") usage(`only main for now; PR heads and contract trees come next, got ${which}`);
+  if (names.length > 2) usage(`two builds at most, got ${names.join(" ")}`);
+  const asked = names.length === 1 && names[0] !== "main" ? ["main", ...names] : names.length ? names : ["main"];
+  let picks;
+  try {
+    picks = asked.map((name) => (name === "main" ? null : pickBuild(name, { repo: REPO })));
+  } catch (error) {
+    usage(error.message);
+  }
   const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
   const token = process.env.BARKPARK_TG_TOKEN;
   if (flag("barkpark") && !token) usage("--barkpark needs BARKPARK_TG_TOKEN, a write token for that local Barkpark");
@@ -136,8 +151,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } catch (error) {
     usage(error.message);
   }
+  let builds;
+  try {
+    builds = picks.map((pick) => {
+      if (!pick) return mainBuild();
+      console.log(`building ${pick.label} at ${pick.sha.slice(0, 10)}`);
+      return makeBuild(pick, { repo: REPO });
+    });
+  } catch (error) {
+    console.error(`npm run try: ${error.message}`);
+    process.exit(1);
+  }
   const port = flag("port");
-  const { url } = await start({ port: port === undefined ? 4417 : Number(port), fold });
-  console.log(`testing ground on main: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
+  const { url } = await start({ builds, port: port === undefined ? 4417 : Number(port), fold });
+  console.log(`testing ground on ${builds.map((b) => `${b.label} at ${b.sha}`).join(" beside ")}: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
   if (!args.includes("--no-open")) spawn("open", [url], { stdio: "ignore", detached: true }).unref();
 }

@@ -56,7 +56,15 @@ const caretAt = (canvas, id, offset) => {
   canvas._editor.state.doc.forEach((node, start) => { if (pos === undefined && node.attrs.bpId === id) pos = start + offset; });
   canvas._editor.commands.setTextSelection(pos);
 };
-const key = (key, init = {}) => left._editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+function key(key, init = {}) {
+  const view = left._editor.view;
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
+  view.dom.dispatchEvent(event);
+  const { empty, $from, from } = view.state.selection;
+  if (event.defaultPrevented || !empty) return;
+  if (key === "Backspace" && $from.parentOffset > 0) view.dispatch(view.state.tr.delete(from - 1, from));
+  if (key === "Delete" && $from.parentOffset < $from.parent.content.size) view.dispatch(view.state.tr.delete(from, from + 1));
+}
 function typeLeft(chars) {
   const view = left._editor.view;
   left._editor.view.dom.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: chars, bubbles: true, cancelable: true }));
@@ -81,6 +89,7 @@ typeLeft("Fog");
 same("typed text follows into the new line, whose id differs on each side");
 key("Backspace");
 same("Backspace");
+assert.ok(lines(left).includes("paragraph:/Fo"), "a Backspace no handler takes deletes a letter, as the browser does");
 caretAt(left, "p-e", 1);
 typeLeft("mid");
 same("a caret moved by clicking or a button follows by block id");
@@ -106,6 +115,11 @@ same("a range follows too, and shortcuts go across");
 assert.ok(lines(left).some((line) => line.includes("bold/")), "the shortcut made bold text");
 key("Delete");
 same("Delete");
+caretAt(left, "p-z", 1);
+key("Delete");
+same("Delete at a caret takes the next letter");
+assert.ok(lines(left).includes("paragraph:/ed"), "the letter went");
+typeLeft("Z");
 caretAt(right, "p-a", 1);
 caretAt(left, "p-z", 4);
 pasteLeft({ "text/plain": "One\n\nTwo" });
@@ -148,7 +162,7 @@ left._editor.commands.setNodeSelection(divider);
 key("Backspace");
 same("a selected block between blocks is deleted on both sides");
 assert.ok(!lines(left).includes("divider:"), "the divider went");
-assert.deepEqual(sent, ["Enter", "Backspace", "Meta-b", "Ctrl-b", "Delete", "Enter", "Backspace"], "only editing keys and shortcuts go across as keys");
+assert.deepEqual(sent, ["Enter", "Backspace", "Meta-b", "Ctrl-b", "Delete", "Delete", "Enter", "Backspace"], "only editing keys and shortcuts go across as keys");
 const before = lines(left);
 caretAt(right, "p-z", 1);
 right._editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));

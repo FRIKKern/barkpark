@@ -42,6 +42,31 @@ try {
   await plain.close();
 }
 
+const MAIN_ASSETS = join(fileURLToPath(new URL("../../../../priv/static/assets", import.meta.url)));
+const one = await start({ standIn, builds: [{ label: "main", sha: "aaaaaaaaaa", dir: MAIN_ASSETS }] });
+try {
+  assert.match((await get(one.url)).body, /<title>Editor testing ground<\/title>[\s\S]*class="tg-stamp"/, "one build: / is the editor, with its stamp");
+  assert.match((await get(`${one.url}b/0/`)).body, /class="tg-edit"/);
+  for (const path of ["split.html", "b/1/", "b/1/build.json", "b/0", "b/x/"]) assert.equal((await get(`${one.url}${path}`)).status, 404, `${path} with one build`);
+} finally {
+  await one.close();
+}
+
+const two = await start({ standIn, builds: [{ label: "main", sha: "aaaaaaaaaa", dir: MAIN_ASSETS }, { label: "PR #7", sha: "bbbbbbbbbb", dir: MAIN_ASSETS }] });
+try {
+  const shell = await get(two.url);
+  assert.match(shell.body, /class="tg-split"[\s\S]*<iframe class="tg-frame"><\/iframe>\s*<iframe class="tg-frame"><\/iframe>/, "two builds: / is the split screen");
+  assert.equal((await get(`${two.url}?doc=drill:D01`)).body, shell.body, "the query rides along to the frames");
+  assert.deepEqual(JSON.parse((await get(`${two.url}b/1/build.json`)).body), { label: "PR #7", sha: "bbbbbbbbbb" });
+  assert.deepEqual(JSON.parse((await get(`${two.url}b/0/build.json`)).body), { label: "main", sha: "aaaaaaaaaa" });
+  assert.match((await get(`${two.url}b/1/`)).body, /class="tg-edit"/, "each frame is the editor page");
+  assert.equal((await get(`${two.url}b/1/build/bp-paper-editor.css`)).type, "text/css");
+  assert.equal((await get(`${two.url}b/1/src/testing-ground/page/mirror.mjs`)).type, "text/javascript");
+  assert.equal((await get(`${two.url}b/2/`)).status, 404);
+} finally {
+  await two.close();
+}
+
 const broken = await start({ standIn: async () => { throw new Error("no react here\nmore"); } });
 try {
   assert.equal((await get(`${broken.url}reader-standin.js`)).body, 'export const render = () => { throw new Error("The stand-in reader did not build: no react here"); };');
@@ -84,9 +109,10 @@ function cli(args, env = {}) {
 }
 
 for (const [args, why, env] of [
-  [["25044"], /only main for now; PR heads and contract trees come next, got 25044/],
-  [["main", "1.19"], /one build at a time, got main 1.19/],
-  [["x--y", "--no-open"], /only main for now; PR heads and contract trees come next, got x--y/],
+  [["main", "1.19", "25044"], /two builds at most, got main 1\.19 25044/],
+  [["1.99"], /no recorded tree for contract 1\.99; recorded: 1\.14, /],
+  [["main", "0"], /a build is main, a PR number or a contract like 1\.19, got 0/],
+  [["x--y", "--no-open"], /a build is main, a PR number or a contract like 1\.19, got x--y/],
   [["--port"], /unknown or malformed flag --port$/m],
   [["--port=abc"], /unknown or malformed flag --port=abc/],
   [["--open"], /unknown or malformed flag --open/],
@@ -97,34 +123,34 @@ for (const [args, why, env] of [
   const { code, out } = await cli(args, env).exited;
   assert.equal(code, 2, `${args.join(" ")} is a usage error`);
   assert.match(out, why);
-  assert.match(out, /usage: npm run try \[main\]/);
+  assert.match(out, /usage: npm run try \[main \| <PR number> \| <contract like 1\.19>\] \[<second build>\]/);
 }
 
 const quiet = cli(["main", "--no-open", "--port=0"]);
 try {
   const line = await quiet.printed(/\n/);
-  assert.match(line, /^testing ground on main: http:\/\/127\.0\.0\.1:\d+\/\n$/, "no fold switch named");
+  assert.match(line, /^testing ground on main at [0-9a-f]{10}: http:\/\/127\.0\.0\.1:\d+\/\n$/, "no fold switch named");
 } finally {
   quiet.stop();
 }
 
 const fixed = cli(["--no-open"]);
 try {
-  assert.match(await fixed.printed(/4417/), /testing ground on main: http:\/\/127\.0\.0\.1:4417\/|EADDRINUSE.*4417/, "npm run try listens on 4417 unless told otherwise");
+  assert.match(await fixed.printed(/4417/), /testing ground on main at [0-9a-f]{10}: http:\/\/127\.0\.0\.1:4417\/|EADDRINUSE.*4417/, "npm run try listens on 4417 unless told otherwise");
 } finally {
   fixed.stop();
 }
 
 const local = cli(["--barkpark=http://127.0.0.1:4999", "--no-open", "--port=0"], { BARKPARK_TG_TOKEN: "t" });
 try {
-  assert.match(await local.printed(/fold:/), /testing ground on main: http:\/\/127\.0\.0\.1:\d+\/ · fold: Local Barkpark at http:\/\/127\.0\.0\.1:4999/);
+  assert.match(await local.printed(/fold:/), /testing ground on main at [0-9a-f]{10}: http:\/\/127\.0\.0\.1:\d+\/ · fold: Local Barkpark at http:\/\/127\.0\.0\.1:4999/);
 } finally {
   local.stop();
 }
 
 const opens = cli(["--port=0"]);
 try {
-  const url = (await opens.printed(/main: (\S+)/)).match(/main: (\S+)/)[1];
+  const url = (await opens.printed(/[0-9a-f]{10}: (\S+)/)).match(/[0-9a-f]{10}: (\S+)/)[1];
   const until = Date.now() + 10000;
   while (!existsSync(join(bin, "opened")) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
   assert.equal(readFileSync(join(bin, "opened"), "utf8").trim(), url, "npm run try opens the page, and every --no-open run before it opened nothing");
