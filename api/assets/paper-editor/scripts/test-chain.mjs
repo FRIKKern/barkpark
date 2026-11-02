@@ -44,7 +44,7 @@ if (realpathSync(process.argv[1]) === SELF) {
     const { status, signal } = spawnSync(process.execPath, [file], { cwd: PKG, stdio: "inherit" });
     if (status !== 0) {
       console.error(`npm test: ${file} ${signal ? `was killed by ${signal}` : `exited ${status}`}`);
-      process.exit(status || 1);
+      process.exit(signal ? 1 : status);
     }
   }
   console.log(`npm test: ${files.length} files passed`);
