@@ -141,6 +141,7 @@ await check("each reader finds every form on a fixture", async () => {
   ].join("\n");
   assert.deepEqual(readerClasses(ex).sort(), ["bp-card", "bp-r1", "bp-r3", "bp-toc", "bp-toc--sticky", "plain-r2"]);
   assert.deepEqual(readerAttributes(ex).sort(), ["data-r1", "data-r2"]);
+  assert.deepEqual(readerClasses(`~s(<p class="plain">)`), ["plain"]);
 
   assert.deepEqual(sourceMembers(`this._set = 1; this._called(); other._not;`), ["_set", "_called"]);
   assert.equal(elementClassBody("class Helper { m() { this._a = 1; } }\nclass El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}\nfunction after() { this._c = 1; }\n"), "class El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}");
