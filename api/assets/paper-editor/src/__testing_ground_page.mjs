@@ -78,17 +78,23 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.equal(await first.evaluate((li) => li.isConnected), true, "unchanged lights are not repainted, so their words stay selectable");
 });
 
-await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (page) => {
+await scene("D01 on this build keeps every line on screen", "?doc=drill:D01", async (page) => {
   await play(page, drill("D01"));
-  const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["hidden-blocks"]);
-  assert.match(lights["hidden-blocks"].words, /6 lines are in the doc but hidden on screen \(9 blocks, 2 shown\)/);
-  assert.equal(await page.isVisible(".tg-tab-dot"), true, "the closed drawer's tab shows a red dot");
-  assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 6 lines/);
-  assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
+  assert.deepEqual(red(await lightsOf(page)), []);
+  assert.equal(await page.isVisible(".tg-tab-dot"), false);
   await page.click(".tg-tab");
   assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), drill("D01").steps.map((s) => s.say));
   assert.equal(await page.isVisible(".tg-tally"), false);
+});
+
+await scene("lines hidden on screen light hidden blocks red, with a red dot on the closed tab", "?doc=drill:D01", async (page) => {
+  await page.addStyleTag({ content: ".ProseMirror > :nth-child(n+2) { display: none !important; }" });
+  await play(page, { steps: [{ click: { text: "Alpha", at: "end" } }, { type: "y" }] });
+  const lights = await lightsOf(page);
+  assert.deepEqual(red(lights), ["hidden-blocks"]);
+  assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 1 line is in the doc but hidden on screen \(3 blocks, 1 shown\)/);
+  assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
+  assert.equal(await page.isVisible(".tg-tab-dot"), true);
 });
 
 await scene("a hand-only step says so, and a missing word stops the player", "?doc=drill:D03", async (page) => {
@@ -142,19 +148,28 @@ await scene("under the hood: batches with the server's answer, the diff and the 
   assert.match(await page.textContent(".tg-json"), /"value": "Home by dark\.!"/);
   await play(page, drill("D02"));
   const batches = await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent));
-  assert.match(batches.join("\n"), /#\d+ replace-block s-day → refused: replace-block: duplicate id p-day/);
+  assert.match(batches.join("\n"), /#\d+ replace-block s-day → saved/);
+  await page.evaluate(() => { window.testingGround.state.host.fold = { name: "refuses every batch", apply: async () => { throw new Error("patch-block: refused by the test"); } }; });
+  await play(page, { steps: [{ click: { text: "Home by dark.!", at: "end" } }, { type: "?" }] });
+  assert.match((await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent))).join("\n"), /#\d+ patch-block p-after → refused: patch-block: refused by the test/);
   await play(page, { steps: [{ click: { text: "Trip", at: "end" } }, { key: "Enter" }, { type: "z" }] });
   assert.match((await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent))).join("\n"), /insert-after c-\d/);
 });
 
 
-await scene("D02 on main lights duplicate ids, refused batches and lost keys red", "?doc=drill:D02", async (page) => {
+await scene("D02 on this build: one id per line, every batch saved, no key lost", "?doc=drill:D02", async (page) => {
   await play(page, drill("D02"));
+  assert.deepEqual(red(await lightsOf(page)), []);
+});
+
+await scene("a refusing fold lights refused batches, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
+  await page.evaluate(() => { window.testingGround.state.host.fold = { name: "refuses every batch", apply: async () => { throw new Error("patch-block: refused by the test"); } }; });
+  await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "zz" }] });
   const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
-  assert.match(lights["duplicate-ids"].words, /Used twice: p-day/);
-  assert.match(lights["refused-batches"].words, /replace-block: duplicate id p-day/);
-  assert.match(lights["lost-keys"].words, /13 characters you typed did not come back after the reload: "Fog by eight\."/);
+  assert.deepEqual(red(lights), ["refused-batches"]);
+  assert.match(lights["refused-batches"].words, /patch-block: refused by the test/);
+  await play(page, { steps: [{ reload: true }] });
+  assert.match((await lightsOf(page))["lost-keys"].words, /2 characters you typed did not come back after the reload: "zz"/);
 });
 
 await scene("a fold that drops ops lights fold drift, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
