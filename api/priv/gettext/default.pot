@@ -13101,3 +13101,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This item cannot be inserted here."
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:521
+#, elixir-autogen, elixir-format
+msgid "E = mc^2"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:580
+#, elixir-autogen, elixir-format
+msgid ""
+"Introduction | intro\n"
+"  Background"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:661
+#, elixir-autogen, elixir-format
+msgid "path/to/file"
+msgstr ""
