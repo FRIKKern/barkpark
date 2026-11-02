@@ -1,0 +1,90 @@
+{
+  "host": "Barkpark reader (bulldocs)",
+  "root": "../../../..",
+  "minContract": "1.21.0",
+  "fleet": false,
+  "sources": [
+    "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+    "api/lib/barkpark_web/live/bulldocs_live.ex",
+    "api/lib/barkpark_web/live/bulldocs_live/"
+  ],
+  "uses": {
+    "canvas": {
+      "DOM attribute": [
+        "target"
+      ],
+      "ancestor attribute": [
+        "data-bp-theme",
+        "data-paper-palette",
+        "data-theme"
+      ]
+    },
+    "window": {
+      "global": [
+        "BP_PAPER_EDITOR_NO_INJECT",
+        "BarkparkPaperMermaid"
+      ]
+    },
+    "css": {
+      "token": [
+        "--bp-body-lh",
+        "--bp-cols",
+        "--bp-evidence-band",
+        "--bp-evidence-band-max",
+        "--bp-evidence-fill",
+        "--bp-evidence-gutter",
+        "--bp-evidence-pull",
+        "--bp-evidence-width",
+        "--bp-section-gap",
+        "--bp-section-rule",
+        "--bp-tone-danger-bg",
+        "--bp-tone-danger-fg",
+        "--bp-tone-info-bg",
+        "--bp-tone-info-fg",
+        "--bp-tone-neutral-bg",
+        "--bp-tone-neutral-fg",
+        "--bp-tone-success-bg",
+        "--bp-tone-success-fg",
+        "--bp-tone-warning-bg",
+        "--bp-tone-warning-fg",
+        "--paper-accent",
+        "--paper-accent-soft",
+        "--paper-bg",
+        "--paper-bg-deep",
+        "--paper-chrome-bg",
+        "--paper-chrome-border",
+        "--paper-ink",
+        "--paper-ink-faint",
+        "--paper-ink-faint-line",
+        "--paper-ink-soft",
+        "--paper-reading-accent",
+        "--paper-rule"
+      ]
+    }
+  },
+  "notEditor": [
+    {
+      "names": [
+        "blocks",
+        "run"
+      ],
+      "why": "the page's own source.blocks (the /source fetch) and the Go wasm runtime's go.run, not the canvas's"
+    }
+  ],
+  "internals": [
+    {
+      "names": [
+        "bp-paper-surface",
+        "bp-table__td"
+      ],
+      "why": "the page's own stylesheet scopes the reading font and a wide table's first column with the classes the canvas paints too"
+    },
+    {
+      "names": [
+        "bp-tabs__tab",
+        "bp-tabs__tab--active"
+      ],
+      "why": "the page's tab script switches tabs on the reader's markup by the class names the canvas's tabs node uses too"
+    }
+  ]
+}

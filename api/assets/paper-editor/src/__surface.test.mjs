@@ -1,7 +1,7 @@
 // __surface.test.mjs — host-profile/surface.json is what the committed build gives.
 //
 // scripts/surface.mjs reads the declared surface out of index.d.ts and the internal
-// one out of the committed bundle and dist stylesheets. This fails when the
+// one out of the committed bundle and the editor's stylesheet. This fails when the
 // committed file differs from a fresh read (run npm run build), when its versions
 // are not this package's, or when a reader finds nothing it is known to find.
 //
@@ -52,6 +52,11 @@ check("each internal reader finds a name only it can find", () => {
   assert.deepEqual(lacks(classes, ["hljs-keyword", "ProseMirror-widget", "tiptap", "bp-slash-foot-sep", "bp-paper-format__btn--bold"]), [], "classes: stylesheet, classList, className, class=, BEM string");
   assert.deepEqual(lacks(attributes, ["data-pm-slice", "data-checked", "data-field"]), [], "attributes: setAttribute, key, attr=");
   assert.deepEqual(lacks(events, ["bp-flush-node", "bp-canvas-image-pick"]), [], "events");
+});
+
+check("a class the reader writes, or only bp-paper-surface.css styles, is not internal", () => {
+  assert.equal(fresh.internal.classes.includes("bp-card"), false, "bp-card: the reader writes it, the bundle paints it");
+  assert.equal(fresh.internal.classes.includes("bp-chat-plan"), false, "bp-chat-plan: only bp-paper-surface.css styles it");
 });
 
 check("no name is both declared and internal", () => {

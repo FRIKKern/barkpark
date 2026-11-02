@@ -1,0 +1,48 @@
+{
+  "host": "Barkpark web/",
+  "root": "../../../..",
+  "minContract": "1.0.0",
+  "fleet": false,
+  "sources": [
+    "web/components/",
+    "web/app/"
+  ],
+  "uses": {
+    "canvas": {
+      "ancestor attribute": [
+        "data-bp-theme",
+        "data-theme"
+      ]
+    },
+    "editor": {
+      "attribute": [
+        "editable"
+      ],
+      "member": [
+        "block"
+      ]
+    }
+  },
+  "notEditor": [
+    {
+      "names": [
+        "blocks"
+      ],
+      "why": "post bodies' own .blocks arrays, not a canvas"
+    },
+    {
+      "names": [
+        "target"
+      ],
+      "why": "links' own target=\"_blank\""
+    }
+  ],
+  "internals": [
+    {
+      "names": [
+        "bp-paper-surface"
+      ],
+      "why": "document-detail renders body_html into the same .bp-paper-surface column the reader uses"
+    }
+  ]
+}

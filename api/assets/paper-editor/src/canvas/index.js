@@ -5206,6 +5206,15 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // 1.22.0: focus the editing surface where its selection already is, so a host
+  // no longer focuses [contenteditable] or .ProseMirror inside the element.
+  focusSelection() {
+    const view = this._editor?.view;
+    if (!view || view.isDestroyed) return false;
+    view.focus();
+    return view.hasFocus();
+  }
+
   // Public seam for a neighbouring run: focus this run's first body block.
   focusFirstBodyBlock() {
     return this._focusBodyFrom(0);

@@ -2,13 +2,17 @@
 // it keeps to itself. "declared" is index.d.ts (which __contract_truth.test.mjs holds
 // equal to EMBED-CONTRACT.md's Surface index). "internal" is read off the build a
 // host actually loads: the bundle's private members (on the prototype and on a
-// mounted element), the classes in the dist stylesheets and in the bundle's class strings, the data-* attributes the
-// bundle writes and the events it dispatches, each minus what is declared. A host profile (R2.3) is checked against this file, so a
-// host can tell a contract name from an internal one from a name of its own.
+// mounted element), the classes in bp-paper-editor.css and in the bundle's class
+// strings, the data-* attributes the bundle writes and the events it dispatches,
+// each minus what is declared. A class the reader writes too (class="..." in
+// lib/barkpark/portable_doc/render) is PortableDoc's page vocabulary, not the
+// editor's own, and is left out, as is bp-paper-surface.css, the reader's sheet.
+// A host profile (R2.3) is checked against this file, so a host can tell a
+// contract name from an internal one from a name of its own.
 //
 // Run: node scripts/surface.mjs   (npm run build runs it; src/__surface.test.mjs
 // fails when the committed file is stale)
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
@@ -16,6 +20,7 @@ import { declaredInTypes } from "../src/contract-surface.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const assets = path.join(root, "../../priv/static/assets");
+const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
 export const surfacePath = path.join(root, "host-profile/surface.json");
 
 const sorted = (list) => [...new Set(list)].sort();
@@ -54,7 +59,9 @@ export async function surface() {
   const undeclared = (list) => sorted(list).filter((n) => !names.has(n));
 
   const js = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
-  const css = ["bp-paper-editor.css", "bp-paper-surface.css"].map((f) => readFileSync(path.join(assets, f), "utf8")).join("\n");
+  const css = readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8");
+  const reader = readdirSync(readerDir).filter((n) => n.endsWith(".ex")).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
+  const readerClasses = new Set([...reader.matchAll(/class=\\?"([^"\\]*)/g)].flatMap((m) => words(m[1])));
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true, url: "http://localhost/" });
   dom.window.BP_PAPER_EDITOR_NO_INJECT = true;
   dom.window.eval(js);
@@ -76,7 +83,7 @@ export async function surface() {
     declared: grouped(declared),
     internal: {
       members: { canvas: await privateMembers("bp-paper-canvas"), editor: await privateMembers("bp-paper-editor") },
-      classes: undeclared([...stylesheetClasses(css), ...bundleClasses(js)]),
+      classes: undeclared([...stylesheetClasses(css), ...bundleClasses(js)]).filter((n) => !readerClasses.has(n)),
       attributes: undeclared(bundleAttributes(js)),
       events: undeclared(bundleEvents(js)),
     },
