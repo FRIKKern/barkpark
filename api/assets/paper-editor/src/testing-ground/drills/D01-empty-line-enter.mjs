@@ -11,5 +11,4 @@ export default {
     { say: "Press Backspace", key: "Backspace" },
     { say: "Press Reload", reload: true },
   ],
-  green: ["hidden-blocks", "lost-keys"],
 };

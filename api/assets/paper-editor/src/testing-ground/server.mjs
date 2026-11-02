@@ -94,9 +94,19 @@ export async function start({ build: picked = mainBuild(), port = 0, fold = null
   for (const name of BUNDLE_FILES) files[`/build/${name}`] = () => readFileSync(join(picked.dir, name));
 
   const server = createServer((req, res) => {
-    const asked = decodeURIComponent(req.url.split("?")[0]);
+    let asked;
+    try {
+      asked = decodeURIComponent(req.url.split("?")[0]);
+    } catch {
+      res.statusCode = 400;
+      return res.end("malformed url");
+    }
     const path = asked === "/" ? "/index.html" : asked;
     if (fold && req.method === "POST" && path === "/fold") {
+      if (req.headers["content-type"] !== TYPES[".json"]) {
+        res.statusCode = 415;
+        return res.end("the fold takes application/json only");
+      }
       res.setHeader("content-type", TYPES[".json"]);
       return foldThrough(fold, req, res);
     }
@@ -125,6 +135,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [which = "main", ...extra] = args.filter((a) => !a.startsWith("--"));
   const bad = args.find((a) => a.startsWith("--") && !known.test(a));
   if (bad) usage(`unknown or malformed flag ${bad}`);
+  const twice = args.find((a, i) => a.startsWith("--") && args.findIndex((b) => b.split("=")[0] === a.split("=")[0]) !== i);
+  if (twice) usage(`${twice.split("=")[0]} given twice`);
   if (extra.length) usage(`one build at a time, got ${[which, ...extra].join(" ")}`);
   if (which !== "main") usage(`only main for now; PR heads and contract trees come next, got ${which}`);
   const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -137,6 +149,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     usage(error.message);
   }
   const port = flag("port");
+  if (Number(port) > 65535) usage(`--port=${port} is not a port`);
   const { url } = await start({ port: port === undefined ? 4417 : Number(port), fold });
   console.log(`testing ground on main: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
   if (!args.includes("--no-open")) spawn("open", [url], { stdio: "ignore", detached: true }).unref();

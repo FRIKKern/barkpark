@@ -2,6 +2,7 @@ export function createFakeHost({ fold, blocks, onChange }) {
   const canvases = new Set();
   const pending = new Set();
   let requests = 0;
+  let folding = Promise.resolve();
   const host = {
     fold,
     saved: structuredClone(blocks),
@@ -28,11 +29,16 @@ export function createFakeHost({ fold, blocks, onChange }) {
     },
   };
 
-  async function answer(canvas, { ops, seq }) {
+  function answer(canvas, { ops, seq }) {
     const requestId = `tg-${++requests}`;
     const batch = { seq, ops: structuredClone(ops), at: Date.now() };
     host.batches.push(batch);
     canvas.identifyOpsRequest(seq, requestId);
+    folding = folding.then(() => foldBatch(canvas, batch, { ops, seq, requestId }));
+    return folding;
+  }
+
+  async function foldBatch(canvas, batch, { ops, seq, requestId }) {
     try {
       host.saved = structuredClone(await host.fold.apply(structuredClone(host.saved), ops));
       batch.answer = { ok: true };

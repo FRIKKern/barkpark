@@ -10,5 +10,4 @@ export default {
     { say: "At the same time, in the bottom editor, type at the end of \"Window B edits here.\"", hands: true },
     { say: "Press Reload", reload: true },
   ],
-  green: ["lost-keys", "fold-drift"],
 };

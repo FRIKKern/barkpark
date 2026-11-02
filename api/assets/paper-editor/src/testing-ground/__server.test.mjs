@@ -38,6 +38,8 @@ try {
     assert.equal(await getAsIs(plain.url, path), 404, `${path} is not served`);
   assert.equal((await get(plain.url, { method: "POST" })).status, 404, "only GET reads files");
   assert.equal((await get(`${plain.url}fold`, { method: "POST", body: "{}" })).status, 404, "no fold switch, no /fold");
+  assert.equal(await getAsIs(plain.url, "%E0%A4%A"), 400, "a malformed url is answered");
+  assert.equal((await get(plain.url)).status, 200, "and the server keeps serving");
 } finally {
   await plain.close();
 }
@@ -53,9 +55,11 @@ const fold = { name: "stub fold", apply: async (blocks, ops) => { if (ops[0].op 
 const switched = await start({ standIn, fold });
 try {
   assert.equal(JSON.parse((await get(`${switched.url}build.json`)).body).fold, "stub fold");
-  const ok = await get(`${switched.url}fold`, { method: "POST", body: JSON.stringify({ blocks: [{ id: "a" }], ops: [{ op: "append-block", block: { id: "b" } }] }) });
+  const json = { "content-type": "application/json" };
+  assert.equal((await get(`${switched.url}fold`, { method: "POST", body: "{}" })).status, 415, "a page on another origin cannot post a plain form to the fold");
+  const ok = await get(`${switched.url}fold`, { method: "POST", headers: json, body: JSON.stringify({ blocks: [{ id: "a" }], ops: [{ op: "append-block", block: { id: "b" } }] }) });
   assert.deepEqual([ok.status, ok.type, JSON.parse(ok.body)], [200, "application/json", { blocks: [{ id: "a" }, { id: "b" }] }]);
-  const no = await get(`${switched.url}fold`, { method: "POST", body: JSON.stringify({ blocks: [], ops: [{ op: "bad" }] }) });
+  const no = await get(`${switched.url}fold`, { method: "POST", headers: json, body: JSON.stringify({ blocks: [], ops: [{ op: "bad" }] }) });
   assert.deepEqual([no.status, JSON.parse(no.body)], [422, { error: "refused: bad" }]);
 } finally {
   await switched.close();
@@ -65,9 +69,13 @@ const bin = mkdtempSync(join(tmpdir(), "tg-open-"));
 writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$1" >> "${join(bin, "opened")}"\n`);
 chmodSync(join(bin, "open"), 0o755);
 process.on("exit", () => rmSync(bin, { recursive: true, force: true }));
+const children = new Set();
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => { for (const child of children) child.kill(); process.exit(130); });
 
 function cli(args, env = {}) {
   const child = spawn(process.execPath, [SERVER, ...args], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BARKPARK_TG_TOKEN: "", ...env } });
+  children.add(child);
+  child.on("exit", () => children.delete(child));
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
@@ -89,6 +97,9 @@ for (const [args, why, env] of [
   [["x--y", "--no-open"], /only main for now; PR heads and contract trees come next, got x--y/],
   [["--port"], /unknown or malformed flag --port$/m],
   [["--port=abc"], /unknown or malformed flag --port=abc/],
+  [["--port=99999"], /--port=99999 is not a port/],
+  [["--port=4611", "--port=4612"], /--port given twice/],
+  [["--no-open", "--no-open"], /--no-open given twice/],
   [["--open"], /unknown or malformed flag --open/],
   [["--barkpark="], /unknown or malformed flag --barkpark=/],
   [["--barkpark=http://127.0.0.1:4817"], /--barkpark needs BARKPARK_TG_TOKEN/],
@@ -115,7 +126,7 @@ try {
   fixed.stop();
 }
 
-const local = cli(["--barkpark=http://127.0.0.1:4999", "--no-open", "--port=0"], { BARKPARK_TG_TOKEN: "t" });
+const local = cli(["--barkpark=http://127.0.0.1:4999/--port=1", "--no-open", "--port=0"], { BARKPARK_TG_TOKEN: "t" });
 try {
   assert.match(await local.printed(/fold:/), /testing ground on main: http:\/\/127\.0\.0\.1:\d+\/ · fold: Local Barkpark at http:\/\/127\.0\.0\.1:4999/);
 } finally {

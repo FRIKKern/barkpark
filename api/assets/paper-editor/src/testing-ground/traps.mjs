@@ -1,4 +1,4 @@
-export function idsAtAnyDepth(value, out = []) {
+function idsAtAnyDepth(value, out = []) {
   if (value && typeof value === "object") {
     if (typeof value.id === "string") out.push(value.id);
     for (const [key, child] of Object.entries(value)) if (key !== "id") idsAtAnyDepth(child, out);

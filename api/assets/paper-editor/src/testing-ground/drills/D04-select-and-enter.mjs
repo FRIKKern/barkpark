@@ -6,5 +6,4 @@ export default {
     { say: "Double-click the word \"stove\"", dblclick: { word: "stove" } },
     { say: "Press Enter", key: "Enter" },
   ],
-  green: ["hidden-blocks"],
 };

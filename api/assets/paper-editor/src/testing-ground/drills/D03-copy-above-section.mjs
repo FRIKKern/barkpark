@@ -8,5 +8,4 @@ export default {
     { say: "Hold Option and drag \"Left the car park at six.\" by its handle above \"Day one\"", hands: true },
     { say: "Type in the copy", hands: true },
   ],
-  green: ["duplicate-ids", "refused-batches"],
 };
