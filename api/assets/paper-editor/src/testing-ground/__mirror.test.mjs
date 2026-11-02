@@ -19,12 +19,14 @@ window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right
 
 const thrown = [];
 window.addEventListener("error", (event) => thrown.push(event.error));
+const warned = [];
+console.warn = (...args) => warned.push(args.join(" "));
 await import("../canvas/index.js");
 const { mirror } = await import("./page/mirror.mjs");
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 const para = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "text", value }] : [] });
-const doc = [para("p-a", "Alpha"), para("p-e", ""), para("p-b", "Beta")];
+const doc = [para("p-a", "Alpha"), para("p-e", ""), para("p-b", "Beta"), { id: "d-1", type: "divider" }, para("p-z", "Zed")];
 
 async function mount() {
   const canvas = document.createElement("bp-paper-canvas");
@@ -37,6 +39,8 @@ async function mount() {
 const left = await mount();
 const right = await mount();
 mirror(left, right);
+const sent = [];
+right._editor.view.dom.addEventListener("keydown", (event) => sent.push(`${event.metaKey ? "Meta-" : ""}${event.ctrlKey ? "Ctrl-" : ""}${event.key}`));
 
 const lines = (canvas) => {
   const out = [];
@@ -72,7 +76,7 @@ caretAt(left, "p-a", 6);
 caretAt(right, "p-b", 1);
 key("Enter");
 same("Enter goes in where the left caret is, not where the right one was");
-assert.deepEqual(lines(left), ["paragraph:/Alpha", "paragraph:", "paragraph:", "paragraph:/Beta"]);
+assert.deepEqual(lines(left).slice(0, 4), ["paragraph:/Alpha", "paragraph:", "paragraph:", "paragraph:/Beta"]);
 typeLeft("Fog");
 same("typed text follows into the new line, whose id differs on each side");
 key("Backspace");
@@ -100,9 +104,23 @@ same("a range follows too, and shortcuts go across");
 assert.ok(lines(left).some((line) => line.includes("bold/")), "the shortcut made bold text");
 key("Delete");
 same("Delete");
+caretAt(right, "p-a", 1);
+caretAt(left, "p-z", 4);
 pasteLeft({ "text/plain": "One\n\nTwo" });
 same("paste goes across with its clipboard");
 assert.ok(lines(left).some((line) => line.includes("Two")), "the paste landed");
+key("Enter");
+typeLeft("## Head");
+same("typing that a text rule turns into a heading");
+assert.ok(lines(left).includes("heading:/Head"), "the rule ran");
+let divider;
+left._editor.state.doc.forEach((node, at) => { if (node.attrs.bpId === "d-1") divider = at; });
+left._editor.commands.setNodeSelection(divider);
+key("Backspace");
+same("a selected block between blocks is deleted on both sides");
+assert.ok(!lines(left).includes("divider:"), "the divider went");
+assert.deepEqual(sent, ["Enter", "Backspace", "Meta-b", "Ctrl-b", "Delete", "Enter", "Backspace"], "only editing keys and shortcuts go across as keys");
 assert.deepEqual(thrown, [], "nothing threw");
+assert.deepEqual(warned, [], "no warnings, so a selected block is mirrored as a selected block");
 
 console.log("PASS  testing-ground mirror: Enter, Backspace, Delete, shortcuts, typing and paste from the left window go into the right one at the same block");
