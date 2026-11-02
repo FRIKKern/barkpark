@@ -29,7 +29,13 @@ export function chain(pkg = PKG) {
 }
 
 if (realpathSync(process.argv[1]) === SELF) {
-  if (process.argv.includes("--list")) {
+  const args = process.argv.slice(2);
+  const list = args.length === 1 && args[0] === "--list";
+  if (args.length > 0 && !list) {
+    console.error(`npm test: unknown arguments ${JSON.stringify(args)}; usage: node scripts/test-chain.mjs [--list]`);
+    process.exit(2);
+  }
+  if (list) {
     console.log(chain().join("\n"));
     process.exit(0);
   }

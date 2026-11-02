@@ -110,6 +110,17 @@ scene("--list prints the chain and runs nothing", () => {
   });
 });
 
+for (const args of [["--list=1"], ["--lst"], ["--list", "--list"], ["src/__a.test.mjs"], [""], ["--list", ""]]) {
+  scene(`arguments ${JSON.stringify(args)}: usage error, exit 2, nothing runs`, () => {
+    inPackage({}, ({ root, pkg, ran }) => {
+      const r = spawnSync(process.execPath, [join(pkg, "scripts/test-chain.mjs"), ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /usage: node scripts\/test-chain\.mjs \[--list\]/);
+      assert.deepEqual(ran(), []);
+    });
+  });
+}
+
 const TEST = { test: "node scripts/test-chain.mjs" };
 for (const [what, scripts, gone, says] of [
   ["a clean package", TEST, null, null],
