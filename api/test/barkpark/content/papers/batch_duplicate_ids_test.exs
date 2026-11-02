@@ -7,6 +7,8 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
   alias Barkpark.Content
 
   @dataset "production"
+  @lv "lv:canvas"
+  @other "lv:other"
 
   defp paragraph(id, text),
     do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
@@ -27,6 +29,8 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
 
   defp write(slug, ops, opts \\ []),
     do: Content.apply_paper_block_ops(slug, ops, @dataset, [if_rev: rev(slug)] ++ opts)
+
+  defp canvas(slug, ops, writer \\ @lv), do: write(slug, ops, remint_writer: writer)
 
   defp write_at(slug, ops, rev),
     do: Content.apply_paper_block_ops(slug, ops, @dataset, if_rev: rev)
@@ -137,7 +141,7 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
     end
   end
 
-  test "an old client's nested Enter saves; the second copy gets a fresh id the echo carries" do
+  test "a nested Enter from a client without a canvas session saves with a fresh id and leaves no ledger" do
     slug =
       seed!([
         section("s-day", [paragraph("p-day", "Left the car park at six.")]),
@@ -162,6 +166,8 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
              ]),
              paragraph("p-after", "Home.")
            ]
+
+    refute Map.has_key?(Content.get_paper(slug).content, "id_remints")
   end
 
   test "inside a canvas run, the fresh id avoids ids outside the run" do
@@ -197,7 +203,7 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
       ])
 
     {:ok, _} =
-      write(slug, [
+      canvas(slug, [
         replace(
           "s-day",
           section("s-day", [
@@ -209,12 +215,13 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
 
     assert %{"p-day" => %{"fresh" => ["s-day-1"]}} = Content.get_paper(slug).content["id_remints"]
 
-    assert {:ok, %{block_ids: ["s-day-1"]}} = write(slug, [type("p-day", "Fog by eight. Clear.")])
+    assert {:ok, %{block_ids: ["s-day-1"]}} =
+             canvas(slug, [type("p-day", "Fog by eight. Clear.")])
 
     assert {:ok, %{block_ids: ["p-day"]}} =
-             write(slug, [type("p-day", "Left the car park at six sharp.")])
+             canvas(slug, [type("p-day", "Left the car park at six sharp.")])
 
-    assert {:ok, _} = write(slug, [type("s-day-1", "Fog by eight. Clear!")])
+    assert {:ok, _} = canvas(slug, [type("s-day-1", "Fog by eight. Clear!")])
     refute Map.has_key?(Content.get_paper(slug).content, "id_remints")
 
     assert Content.paper_blocks(slug) == [
@@ -354,7 +361,7 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
       slug: slug
     } do
       assert {:ok, %{block_ids: ["s-1-0"]}} =
-               write(slug, [
+               canvas(slug, [
                  %{
                    "op" => "patch-block",
                    "id" => "p-dup",
@@ -382,7 +389,7 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
       log =
         capture_log(fn ->
           assert {:ok, _} =
-                   write(slug, [
+                   canvas(slug, [
                      %{
                        "op" => "patch-block",
                        "id" => "p-dup",
@@ -405,7 +412,7 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
     test "a remove on the repeated id removes neither copy", %{slug: slug} do
       log =
         capture_log(fn ->
-          assert {:ok, _} = write(slug, [%{"op" => "remove-block", "id" => "p-dup"}])
+          assert {:ok, _} = canvas(slug, [%{"op" => "remove-block", "id" => "p-dup"}])
         end)
 
       assert log =~ ~s(remove-block on repeated id "p-dup")
@@ -427,5 +434,214 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
 
       assert ids(Content.paper_blocks(slug)) == ["p-dup", "s-1", "p-dup", "p-a", "p-b"]
     end
+  end
+
+  describe "an old editor after its nested Enter" do
+    setup do
+      %{
+        slug:
+          seed!([
+            section("s-day", [paragraph("p-day", "Left the car park at six.")]),
+            paragraph("p-after", "Home.")
+          ])
+      }
+    end
+
+    defp enter(slug, first, second) do
+      {:ok, _} =
+        canvas(slug, [
+          replace(
+            "s-day",
+            section("s-day", [paragraph("p-day", first), paragraph("p-day", second)])
+          )
+        ])
+    end
+
+    defp day_blocks(slug), do: slug |> Content.paper_blocks() |> hd() |> Map.fetch!("blocks")
+
+    test "another window typing in the fresh line: the old editor's next patch overwrites no line",
+         %{slug: slug} do
+      enter(slug, "Left the car park at six.", "Fog by eight.")
+      assert {:ok, _} = canvas(slug, [type("s-day-1", "Fog by eight. Window B.")], @other)
+
+      capture_log(fn ->
+        assert {:ok, %{block_ids: ["p-day-1"]}} =
+                 canvas(slug, [type("p-day", "Fog by eight. Clear.")])
+      end)
+
+      assert {:ok, %{block_ids: ["p-day-1"]}} =
+               canvas(slug, [type("p-day", "Fog by eight. Clear. More.")])
+
+      assert day_blocks(slug) == [
+               paragraph("p-day", "Left the car park at six."),
+               paragraph("s-day-1", "Fog by eight. Window B."),
+               paragraph("p-day-1", "Fog by eight. Clear. More.")
+             ]
+    end
+
+    test "Enter at the end of a line, then typing in the first line over several batches",
+         %{slug: slug} do
+      enter(slug, "Left the car park at six.", "")
+
+      for suffix <- [" A", " Ab", " Abc", " Abcd"] do
+        assert {:ok, %{block_ids: ["p-day"]}} =
+                 canvas(slug, [type("p-day", "Left the car park at six." <> suffix)])
+      end
+
+      assert day_blocks(slug) == [
+               paragraph("p-day", "Left the car park at six. Abcd"),
+               paragraph("s-day-1", "")
+             ]
+    end
+
+    test "Enter at the start of a line: typing on the moved text goes to it", %{slug: slug} do
+      enter(slug, "", "Left the car park at six.")
+
+      for suffix <- [" A", " Ab"] do
+        assert {:ok, %{block_ids: ["s-day-1"]}} =
+                 canvas(slug, [type("p-day", "Left the car park at six." <> suffix)])
+      end
+
+      assert day_blocks(slug) == [
+               paragraph("p-day", ""),
+               paragraph("s-day-1", "Left the car park at six. Ab")
+             ]
+    end
+
+    test "a client without a canvas session writes as it always did", %{slug: slug} do
+      enter(slug, "Left the car park at six.", "Fog by eight.")
+
+      assert {:ok, %{block_ids: ["p-day"], op_count: 1}} =
+               write(slug, [type("p-day", "We left at dawn.")])
+
+      assert {:ok, %{op_count: 1}} = write(slug, [%{"op" => "remove-block", "id" => "p-day"}])
+      assert day_blocks(slug) == [paragraph("s-day-1", "Fog by eight.")]
+    end
+
+    test "a skipped remove is not counted as applied", %{slug: slug} do
+      enter(slug, "Left the car park at six.", "Fog by eight.")
+
+      capture_log(fn ->
+        assert {:ok, %{op_count: 1, block_ids: ["p-after"]}} =
+                 canvas(slug, [
+                   %{"op" => "remove-block", "id" => "p-day"},
+                   type("p-after", "Home!")
+                 ])
+      end)
+
+      assert ids(Content.paper_blocks(slug)) == ["s-day", "p-day", "s-day-1", "p-after"]
+    end
+
+    test "another window deletes the kept line: the old editor's typing goes to the line left",
+         %{slug: slug} do
+      enter(slug, "Left the car park at six.", "Fog by eight.")
+
+      assert {:ok, _} =
+               canvas(
+                 slug,
+                 [replace("s-day", section("s-day", [paragraph("s-day-1", "Fog by eight.")]))],
+                 @other
+               )
+
+      assert {:ok, %{block_ids: ["s-day-1"]}} =
+               canvas(slug, [type("p-day", "Fog by eight. More.")])
+
+      assert day_blocks(slug) == [paragraph("s-day-1", "Fog by eight. More.")]
+    end
+
+    test "each routed write restarts the 24 hours", %{slug: slug} do
+      enter(slug, "Left the car park at six.", "Fog by eight.")
+      doc = Content.get_paper(slug)
+      old = System.os_time(:second) - 86_000
+      aged = put_in(doc.content, ["id_remints", "p-day", "at"], old)
+
+      Barkpark.Repo.update_all(
+        from(d in Barkpark.Content.Document, where: d.id == ^doc.id),
+        set: [content: aged]
+      )
+
+      assert {:ok, _} = canvas(slug, [type("p-day", "Fog by eight. Clear.")])
+      assert Content.get_paper(slug).content["id_remints"]["p-day"]["at"] > old
+    end
+
+    test "ops in one batch are judged against the blocks the batch has written so far", %{
+      slug: slug
+    } do
+      enter(slug, "Left.", "Fog.")
+
+      assert {:ok, _} = canvas(slug, [type("p-day", "Left. Rain."), type("p-day", "Lft. Rain.")])
+      assert day_blocks(slug) == [paragraph("p-day", "Lft. Rain."), paragraph("s-day-1", "Fog.")]
+    end
+  end
+
+  describe "an old editor's Enter inside a container row" do
+    for {kind, field, row} <- [
+          {"steps", "steps", %{"id" => "r-1", "title" => "One"}},
+          {"tabs", "tabs", %{"id" => "r-1", "label" => "One"}}
+        ] do
+      @kind kind
+      @field field
+      @row row
+
+      test "#{kind}: the patch carrying the repeat saves, resent it keeps the same ids, and typing finds its line" do
+        holder = fn children ->
+          %{
+            "id" => "box",
+            "type" => @kind,
+            @field => [Map.put(@row, "blocks", children)]
+          }
+        end
+
+        slug =
+          seed!([holder.([paragraph("p-s", "Pack the tent.")]), paragraph("p-after", "Home.")])
+
+        split = %{
+          "op" => "patch-block",
+          "id" => "box",
+          "patch" => %{
+            @field => [
+              Map.put(@row, "blocks", [
+                paragraph("p-s", "Pack the tent."),
+                paragraph("p-s", "Boots.")
+              ])
+            ]
+          }
+        }
+
+        stored =
+          holder.([paragraph("p-s", "Pack the tent."), paragraph("r-1-1", "Boots.")])
+
+        assert {:ok, _} = canvas(slug, [split])
+        assert hd(Content.paper_blocks(slug)) == stored
+        assert {:ok, _} = canvas(slug, [split])
+        assert hd(Content.paper_blocks(slug)) == stored
+
+        assert {:ok, %{block_ids: ["r-1-1"]}} = canvas(slug, [type("p-s", "Boots. Laces.")])
+
+        assert hd(Content.paper_blocks(slug)) ==
+                 holder.([
+                   paragraph("p-s", "Pack the tent."),
+                   paragraph("r-1-1", "Boots. Laces.")
+                 ])
+      end
+    end
+  end
+
+  test "a heal routes every canvas editor; a client without one patches the first copy as before" do
+    slug =
+      seed!([
+        paragraph("p-dup", "Top copy."),
+        section("s-1", [paragraph("p-dup", "Nested copy.")])
+      ])
+
+    assert {:ok, %{block_ids: ["s-1-0"]}} =
+             canvas(slug, [type("p-dup", "Nested copy. More.")], @other)
+
+    assert {:ok, %{block_ids: ["p-dup"]}} = write(slug, [type("p-dup", "Nested copy. Again.")])
+
+    assert Content.paper_blocks(slug) == [
+             paragraph("p-dup", "Nested copy. Again."),
+             section("s-1", [paragraph("s-1-0", "Nested copy. More.")])
+           ]
   end
 end

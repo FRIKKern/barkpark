@@ -8,14 +8,24 @@ defmodule Barkpark.Content.Papers.RevisionFencedDuplicateIdentityTest do
   @dataset "production"
   @duplicate "duplicate-form"
 
-  test "revision-fenced single and form writes reject globally ambiguous ids" do
-    for kind <- [:single, :form] do
+  test "revision-fenced single, batch, and form writes reject globally ambiguous ids" do
+    for kind <- [:single, :batch, :form] do
       {slug, rev, before} = seed_duplicate_paper!(kind)
 
       result =
         case kind do
           :single ->
             Content.apply_paper_block_op(slug, patch(@duplicate, "Wrong target"), @dataset,
+              if_rev: rev
+            )
+
+          :batch ->
+            Content.apply_paper_block_ops_once(
+              slug,
+              [patch(@duplicate, "Wrong target")],
+              @dataset,
+              Ecto.UUID.generate(),
+              "user:duplicate-batch",
               if_rev: rev
             )
 
@@ -37,8 +47,8 @@ defmodule Barkpark.Content.Papers.RevisionFencedDuplicateIdentityTest do
     end
   end
 
-  test "a revision-fenced batch heals the ambiguous id and overwrites neither copy" do
-    {slug, rev, _before} = seed_duplicate_paper!(:batch)
+  test "a canvas batch heals the ambiguous id and overwrites neither copy" do
+    {slug, rev, _before} = seed_duplicate_paper!(:canvas)
 
     log =
       capture_log(fn ->
@@ -48,8 +58,9 @@ defmodule Barkpark.Content.Papers.RevisionFencedDuplicateIdentityTest do
                    [patch(@duplicate, "Wrong target")],
                    @dataset,
                    Ecto.UUID.generate(),
-                   "user:duplicate-batch",
-                   if_rev: rev
+                   "user:duplicate-canvas",
+                   if_rev: rev,
+                   remint_writer: "lv:canvas"
                  )
       end)
 

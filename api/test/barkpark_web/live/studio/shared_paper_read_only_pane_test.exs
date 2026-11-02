@@ -23,7 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.PaperReadOnlyPaneTest do
 
   defp socket(assigns) do
     base = %{__changed__: %{}, flash: %{}, dataset: "production"}
-    %Phoenix.LiveView.Socket{assigns: Map.merge(base, assigns)}
+    %Phoenix.LiveView.Socket{id: "phx-pane", assigns: Map.merge(base, assigns)}
   end
 
   defp session_socket do

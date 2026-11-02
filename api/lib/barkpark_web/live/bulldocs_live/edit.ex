@@ -352,7 +352,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         |> Content.apply_paper_block_ops(
           ops,
           socket.assigns[:dataset],
-          write_opts(socket)
+          write_opts(socket) ++ [remint_writer: "lv:" <> socket.id]
         )
         |> handle_result(socket)
     end
@@ -398,7 +398,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
         opts =
           write_opts(socket) ++
-            [if_rev: if_rev, contextual_history: true] ++
+            [if_rev: if_rev, contextual_history: true, remint_writer: "lv:" <> socket.id] ++
             if(context, do: [canvas_run_context: context], else: [])
 
         # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —

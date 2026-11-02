@@ -8,20 +8,28 @@ defmodule Barkpark.Content.Papers.RemintLedger do
   id twice, and a fenced batch heals a duplicate already stored. Either way the
   first copy keeps the id and the others get fresh ids. While that editor
   stays focused it never applies the echo, so its next `patch-block <id>` may
-  mean any copy. The ledger names the copies,
-  `%{repeated_id => %{"fresh" => [fresh_id], "at" => unix_s}}`, stored in the
-  Paper's content under `"id_remints"`.
+  mean any copy. The ledger names the copies and the editor that made them,
+  `%{repeated_id => %{"fresh" => [fresh_id], "at" => unix_s, "writer" => w}}`,
+  stored in the Paper's content under `"id_remints"`. `w` is the canvas
+  session (`"lv:" <> socket.id`) that sent the repeat, or nil for a heal.
 
-  A patch or replace on a ledgered id goes to the one copy it clearly
-  continues: the text of the fields the op writes is that copy's text of the
-  same fields with one run inserted or removed, and no other copy's is. When
-  that names no copy, or more than one, nothing is overwritten: the op's
-  content lands as a new block after the closest copy and joins the ledger,
-  and a remove is skipped. An op that writes no field goes to the kept id. An
-  entry drops once an op names one of its fresh ids (that editor has the new
-  ids), once fewer than two of its copies remain, or 24 hours after it was
-  last written: a client may resend a batch under its idempotency key for 24
-  hours (`Barkpark.Idempotency`), and a resent batch still carries the old id.
+  Only canvas ops are routed: those of the writer that sent the repeat, or of
+  any canvas writer for a heal. A writer-less client (bp push, the HTTP batch,
+  masters) and every other session write as they always did.
+
+  A routed patch or replace goes to the copy it clearly continues: the text of
+  the fields the op writes is that copy's text of the same fields with one run
+  inserted or removed. Among several such copies the one sharing the most text
+  wins; copies that read the same tie to the first. Otherwise nothing is
+  overwritten: the op's content lands as a new block after the closest copy
+  and joins the ledger, and a remove is skipped. An op that writes no field
+  goes to the first copy left.
+
+  An entry drops once its writer names one of its fresh ids (that editor has
+  the new ids), once none of its copies remain, or 24 hours after it was last
+  written or routed: a client may resend a batch under its idempotency key for
+  24 hours (`Barkpark.Idempotency`), and a resent batch still carries the old
+  id.
   """
 
   require Logger
@@ -39,11 +47,12 @@ defmodule Barkpark.Content.Papers.RemintLedger do
   def load(content, now) do
     case content && Map.get(content, @key) do
       %{} = ledger ->
-        for {id, %{"fresh" => [_ | _] = fresh, "at" => at} = entry} <- ledger,
-            is_binary(id) and is_integer(at) and now - at < @ttl_seconds and
-              Enum.all?(fresh, &is_binary/1),
+        for {id, %{"fresh" => fresh, "at" => at} = entry} <- ledger,
+            is_binary(id) and is_list(fresh) and Enum.all?(fresh, &is_binary/1) and
+              is_integer(at) and now - at < @ttl_seconds and
+              (is_binary(entry["writer"]) or is_nil(entry["writer"])),
             into: %{},
-            do: {id, entry}
+            do: {id, Map.take(entry, ["fresh", "at", "writer"])}
 
       _ ->
         %{}
@@ -54,25 +63,27 @@ defmodule Barkpark.Content.Papers.RemintLedger do
   def put(content, ledger) when ledger == %{}, do: Map.delete(content, @key)
   def put(content, ledger), do: Map.put(content, @key, ledger)
 
-  @spec record(t(), [{String.t(), String.t()}], integer()) :: t()
-  def record(ledger, pairs, now) do
+  @spec record(t(), [{String.t(), String.t()}], integer(), String.t() | nil) :: t()
+  def record(ledger, pairs, now, writer) do
     Enum.reduce(pairs, ledger, fn {id, fresh}, acc ->
-      Map.update(acc, id, %{"fresh" => [fresh], "at" => now}, fn entry ->
-        %{"fresh" => Enum.uniq(entry["fresh"] ++ [fresh]), "at" => now}
+      Map.update(acc, id, %{"fresh" => [fresh], "at" => now, "writer" => writer}, fn entry ->
+        %{entry | "fresh" => Enum.uniq(entry["fresh"] ++ [fresh]), "at" => now}
       end)
     end)
   end
 
-  @spec forget_named(t(), map()) :: t()
-  def forget_named(ledger, op) when is_map(op) do
+  @spec forget_named(t(), map(), String.t() | nil) :: t()
+  def forget_named(ledger, op, writer) when is_map(op) and is_binary(writer) do
     named = op |> Map.take(["id", "afterId", "after"]) |> Map.values()
 
     ledger
-    |> Enum.reject(fn {_id, entry} -> Enum.any?(entry["fresh"], &(&1 in named)) end)
+    |> Enum.reject(fn {_id, entry} ->
+      entry["writer"] == writer and Enum.any?(entry["fresh"], &(&1 in named))
+    end)
     |> Map.new()
   end
 
-  def forget_named(ledger, _op), do: ledger
+  def forget_named(ledger, _op, _writer), do: ledger
 
   @spec settle(t(), list()) :: t()
   def settle(ledger, blocks) do
@@ -80,27 +91,28 @@ defmodule Barkpark.Content.Papers.RemintLedger do
 
     for {id, entry} <- ledger,
         fresh = Enum.filter(entry["fresh"], &MapSet.member?(present, &1)),
-        fresh != [] and (MapSet.member?(present, id) or length(fresh) > 1),
+        MapSet.member?(present, id) or fresh != [],
         into: %{},
         do: {id, %{entry | "fresh" => fresh}}
   end
 
   @doc """
-  Route one op against the ledger. Returns `{op, ledger}`, or `{nil, ledger}`
-  for a remove that must not run.
+  Route one op against the ledger for the editor `writer` that sent it.
+  Returns `{op, ledger}`, or `{nil, ledger}` for a remove that must not run.
   """
-  @spec route(t(), list(), map(), integer()) :: {map() | nil, t()}
-  def route(ledger, blocks, %{"op" => kind, "id" => id} = op, now)
-      when kind in ["patch-block", "replace-block", "remove-block"] and
+  @spec route(t(), list(), map(), integer(), String.t() | nil) :: {map() | nil, t()}
+  def route(ledger, blocks, %{"op" => kind, "id" => id} = op, now, writer)
+      when kind in ["patch-block", "replace-block", "remove-block"] and is_binary(writer) and
              is_map_key(ledger, id) do
-    case Enum.flat_map([id | ledger[id]["fresh"]], &find(blocks, &1)) do
-      [_only] -> {op, ledger}
-      [] -> {op, ledger}
-      copies -> route_among(ledger, blocks, op, copies, now)
-    end
+    entry = ledger[id]
+    copies = Enum.flat_map([id | entry["fresh"]], &find(blocks, &1))
+
+    if copies != [] and entry["writer"] in [writer, nil],
+      do: route_among(Map.put(ledger, id, %{entry | "at" => now}), blocks, op, copies, now),
+      else: {op, ledger}
   end
 
-  def route(ledger, _blocks, op, _now), do: {op, ledger}
+  def route(ledger, _blocks, op, _now, _writer), do: {op, ledger}
 
   defp route_among(ledger, _blocks, %{"op" => "remove-block", "id" => id}, _copies, _now) do
     doubt(id, "remove-block")
@@ -110,16 +122,16 @@ defmodule Barkpark.Content.Papers.RemintLedger do
   defp route_among(ledger, blocks, %{"op" => kind, "id" => id} = op, copies, now) do
     case written_keys(op) do
       [] ->
-        {op, ledger}
+        {%{op | "id" => hd(copies)["id"]}, ledger}
 
       keys ->
         text = fields_text(payload(op), keys)
 
-        case Enum.filter(copies, &continues?(fields_text(&1, keys), text)) do
-          [copy] ->
+        case continued(copies, keys, text) do
+          {:ok, copy} ->
             {%{op | "id" => copy["id"]}, ledger}
 
-          _doubt ->
+          :doubt ->
             doubt(id, kind)
             closest = Enum.max_by(copies, &shared(fields_text(&1, keys), text))
             fresh = BlockIds.fresh_id(blocks, id)
@@ -128,8 +140,26 @@ defmodule Barkpark.Content.Papers.RemintLedger do
                "op" => "insert-after",
                "afterId" => closest["id"],
                "block" => doubt_block(op, closest, fresh)
-             }, record(ledger, [{id, fresh}], now)}
+             }, record(ledger, [{id, fresh}], now, ledger[id]["writer"])}
         end
+    end
+  end
+
+  defp continued(copies, keys, text) do
+    scored =
+      for copy <- copies,
+          stored = fields_text(copy, keys),
+          continues?(stored, text),
+          do: {copy, stored, shared(stored, text)}
+
+    best = scored |> Enum.map(&elem(&1, 2)) |> Enum.max(fn -> nil end)
+    tops = Enum.filter(scored, &(elem(&1, 2) == best))
+
+    cond do
+      tops == [] -> :doubt
+      match?([_], tops) -> {:ok, tops |> hd() |> elem(0)}
+      tops |> Enum.uniq_by(&elem(&1, 1)) |> length() == 1 -> {:ok, tops |> hd() |> elem(0)}
+      true -> :doubt
     end
   end
 

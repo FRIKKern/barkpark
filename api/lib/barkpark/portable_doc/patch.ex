@@ -168,13 +168,16 @@ defmodule Barkpark.PortableDoc.Patch do
   def apply_patch_reminting(blocks, op, opts) when is_list(blocks) do
     reserve = fn ->
       MapSet.new(authored_ids(blocks) ++ authored_ids(Keyword.get(opts, :document_blocks, [])))
+      |> MapSet.difference(MapSet.new(rewritten_ids(blocks, op)))
     end
 
     {incoming_op, incoming} = remint_incoming(op, reserve)
 
     with {:ok, new_blocks} <- apply_to_blocks(blocks, incoming_op),
+         {new_blocks, patched} =
+           remint_patched(blocks, new_blocks, op, reserve, Keyword.get(opts, :duplicates)),
          {:ok, new_blocks} <- validate_result(blocks, new_blocks, op, opts) do
-      {:ok, new_blocks, incoming}
+      {:ok, new_blocks, incoming ++ patched}
     end
   end
 
@@ -582,6 +585,28 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp remint_incoming(op, _reserve), do: {op, []}
+
+  defp remint_patched(blocks, new_blocks, %{"op" => "patch-block", "id" => id}, reserve, :batch) do
+    before = block_at(blocks, id)
+
+    transform_with_flag(new_blocks, id, fn target ->
+      if new_duplicate([before], [target]) do
+        BlockIds.remint_repeated_ids([target], reserve.())
+      else
+        {[target], []}
+      end
+    end)
+  end
+
+  defp remint_patched(_blocks, new_blocks, _op, _reserve, _duplicates), do: {new_blocks, []}
+
+  defp rewritten_ids(blocks, %{"op" => kind, "id" => id})
+       when kind in ["replace-block", "patch-block"],
+       do: blocks |> block_at(id) |> authored_block_ids()
+
+  defp rewritten_ids(_blocks, _op), do: []
+
+  defp block_at(blocks, id), do: blocks |> transform_with_flag(id, &{[&1], &1}) |> elem(1)
 
   defp authored_ids(blocks) when is_list(blocks),
     do: Enum.flat_map(blocks, &authored_block_ids/1)
