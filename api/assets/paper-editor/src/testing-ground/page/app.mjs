@@ -78,7 +78,7 @@ function paintTally() {
   const rule = docs.get(state.key).drill?.tally;
   ui.tally.hidden = !rule;
   ui.tally.textContent = tallyWords(state.tally);
-  ui.tally.classList.toggle("tg-tally--red", state.tally.hits < state.tally.tries);
+  ui.tally.classList.toggle("tg-tally--red", state.tally.hits > 0 || state.tally.stayed > 0);
 }
 
 function openDoc(key) {
