@@ -216,11 +216,22 @@ function words(blocks, out = []) {
   return out;
 }
 
+function idText(blocks, id) {
+  for (const block of blocks || []) {
+    if (block.id === id) return words([block])[0];
+    for (const key of ["blocks", "children", "steps", "tabs"]) {
+      const found = idText(block[key], id);
+      if (found != null) return found;
+    }
+  }
+  return null;
+}
+
 // Every batch folds without a refusal or a repeated id, the fold is what the canvas
 // believes it saved, the live doc carries no id the server lacks, every `typed`
-// string is saved, `holds` (container id → its children's [id, text]) holds, and a
-// fresh canvas on the fold shows what the author saw.
-async function landed(page, name, blocks, typed, holds = {}) {
+// string is saved, `holds` (container id → its children's [id, text]) and `owns`
+// (id → its text) hold, and a fresh canvas on the fold shows what the author saw.
+async function landed(page, name, blocks, typed, holds = {}, owns = {}) {
   const batches = await page.evaluate(() => window.__batches);
   const client = await page.evaluate(() => document.getElementById("canvas").blocks);
   const seen = await page.evaluate(() => window.__lines());
@@ -242,6 +253,10 @@ async function landed(page, name, blocks, typed, holds = {}) {
   for (const [id, children] of Object.entries(holds)) {
     const have = (folded.find((block) => block.id === id)?.blocks || []).map((child) => [child.id, words([child])[0]]);
     if (!isDeepStrictEqual(have, children)) throw new Error(`${id} holds ${JSON.stringify(have)}, want ${JSON.stringify(children)}`);
+  }
+  for (const [id, text] of Object.entries(owns)) {
+    const have = idText(folded, id);
+    if (have !== text) throw new Error(`${id} reads ${JSON.stringify(have)}, want ${JSON.stringify(text)}`);
   }
   const saved = words(folded);
   for (const t of typed) {
@@ -288,7 +303,7 @@ try {
   const DROP = [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six."), p("p-two", "Fog.")] }];
   for (const copy of [true, false]) {
     const name = copy ? "copy-drop" : "move-drop";
-    const why = copy ? "the originals keep their ids" : "the moved paragraphs keep theirs";
+    const why = copy ? "the originals keep their ids" : "the moved paragraphs keep theirs, and a paste right after carrying p-two gets fresh ids";
     await t.checkAsync(`${name}: two section paragraphs dragged${copy ? " with the copy key" : ""} onto a top-level line, then typed into: every character folds and reloads, ${why}`, async () => {
       const page = await browser.newPage();
       try {
@@ -298,8 +313,20 @@ try {
         await clickAfter(page, "Fog.Alpha.", "Fog.Alpha.".length);
         await page.keyboard.type(" Typed.");
         await settle(page);
-        const holds = copy ? [["p-day", "Left at six."], ["p-two", "Fog."]] : [["p-day", "Left at six."], ["p-two", "Fog.Alpha. Typed."]];
-        await landed(page, `keys-${name}`, DROP, ["Fog.Alpha. Typed."].concat(copy ? ["Left at six.", "Fog."] : []), { "s-day": holds });
+        if (copy) {
+          await landed(page, `keys-${name}`, DROP, ["Fog.Alpha. Typed.", "Left at six.", "Fog."], { "s-day": [["p-day", "Left at six."], ["p-two", "Fog."]] });
+        } else {
+          await clickAfter(page, "Left at six.", "Left at six.".length);
+          await page.evaluate(() => {
+            const clipboardData = new DataTransfer();
+            const copy = (text) => `<p data-bp-id="p-two" data-bp-type="paragraph">${text}</p>`;
+            clipboardData.setData("text/html", copy("Copied one.") + copy("Copied two."));
+            clipboardData.setData("text/plain", "Copied one.\n\nCopied two.");
+            document.querySelector('[contenteditable="true"]').dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+          });
+          await settle(page);
+          await landed(page, `keys-${name}`, DROP, ["Fog.Alpha. Typed.", "Copied two."], {}, { "p-day": "Left at six.Copied one.", "p-two": "Fog.Alpha. Typed." });
+        }
       } finally {
         await page.close();
       }

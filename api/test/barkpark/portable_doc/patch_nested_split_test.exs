@@ -30,7 +30,7 @@ defmodule Barkpark.PortableDoc.PatchNestedSplitTest do
 
   test "the recording covers every container a paragraph can be split in, and every copy and move door" do
     assert Enum.map(@scenes, & &1["scene"]) ==
-             ~w(section expandable steps tabs section-heading copy-to-top copy-in-section copy-across-sections move-to-top paste-above paste-into-column paste-into-section) ++
+             ~w(section expandable steps tabs section-heading copy-to-top copy-in-section copy-across-sections move-to-top paste-above paste-into-column paste-into-section copy-into-column copy-into-earlier-row snapshot-before-emit) ++
                ~w(keys-section keys-expandable keys-steps keys-tabs keys-copy-drop keys-move-drop)
   end
 

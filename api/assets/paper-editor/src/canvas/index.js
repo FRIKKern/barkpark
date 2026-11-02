@@ -579,7 +579,7 @@ function figurePastePlan(slice) {
 // doc has to carry the id the server got. Only ids the projection keeps count: a
 // column's children and a list's paragraphs carry none (holdsNodeIds).
 function freshenRepeatedIds(doc, prevBlocks) {
-  const was = prevBlocks ? blockParents(prevBlocks) : new Map();
+  const was = blockParents(prevBlocks);
   const copies = new Map();
   const walk = (nodes, parent) => {
     for (const node of nodes) {
@@ -621,7 +621,7 @@ function freshenRepeatedIds(doc, prevBlocks) {
 // a freshly-typed/split block runToOps must mint an id for. We only ever strip
 // the phantom nested ones. This keeps S0's runToOps used verbatim, with a doc
 // shaped exactly the way it was tested against.
-function normalizeCanvasDoc(doc, prevBlocks = null) {
+function normalizeCanvasDoc(doc, prevBlocks) {
   freshenRepeatedIds(doc, prevBlocks);
 
   const stripNested = (node) => {
@@ -2214,7 +2214,7 @@ class BpPaperCanvas extends HTMLElement {
       }
       return {
         mode: "rich",
-        blocks: deepCloneBlocks(docToBlocks(normalizeCanvasDoc(rawEditorDocument))),
+        blocks: deepCloneBlocks(docToBlocks(this._normalizedDoc(rawEditorDocument))),
       };
     } catch (_error) {
       return {
@@ -2298,6 +2298,12 @@ class BpPaperCanvas extends HTMLElement {
   //
   // `_blocks` advances when the bridge acknowledges the one in-flight batch, so
   // the next dispatch is incremental even if its server echo arrives later.
+  // The live doc as the emit diffs it: a repeated id stays with the copy the
+  // baseline knew (freshenRepeatedIds), so every reader agrees with the next batch.
+  _normalizedDoc(doc) {
+    return normalizeCanvasDoc(doc, this._debounceBaselineBlocks || this._blocks);
+  }
+
   _emitOps() {
     if (!this._editor) return false;
     // Never the half-composed run (see _scheduleEmit): mid-composition the doc holds the IME's
@@ -2310,7 +2316,7 @@ class BpPaperCanvas extends HTMLElement {
       if (!source) { this._armComposeEndEmit(); return false; }
     }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
-    const nextDoc = normalizeCanvasDoc(source ? source.toJSON() : this._editor.getJSON(), diffBaseline);
+    const nextDoc = this._normalizedDoc(source ? source.toJSON() : this._editor.getJSON());
     // The fast path (task-fb938eb8be3bce48): a top-level node that is the SAME
     // ProseMirror node object it was at the last acknowledged emit is unchanged
     // since then, and when the baseline is exactly that emit's after-state its
@@ -2528,7 +2534,7 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     const draftBase = inflight ? inflight.afterBlocks : (this._debounceBaselineBlocks || this._blocks);
-    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON(), draftBase), { preserveNewIds: true }) || [];
     if (!draft.length) return true;
     // Behind an in-flight batch the run's shape was already checked above; the
     // draft only must not touch what the other writer changed.
@@ -4493,7 +4499,7 @@ class BpPaperCanvas extends HTMLElement {
     // on an edited exit, a setContent built from C would DELETE those edits. So the
     // baseline + textarea MUST come from L0. We deep-clone L0 so a later parse +
     // realign never mutates it.
-    const liveDoc = normalizeCanvasDoc(this._editor.getJSON());
+    const liveDoc = this._normalizedDoc(this._editor.getJSON());
     const L0 = docToBlocks(liveDoc);
     this._sourceBaselineBlocks = deepCloneBlocks(L0);
     this._sourceCommitBlocks = this._sourceBaselineBlocks;
@@ -4641,7 +4647,7 @@ class BpPaperCanvas extends HTMLElement {
   // end went. So a caret stays a caret, follows the block it is in, and the next key
   // never overwrites text the writer did not select.
   _syncSourceText() {
-    const blocks = deepCloneBlocks(docToBlocks(normalizeCanvasDoc(this._editor.getJSON())));
+    const blocks = deepCloneBlocks(docToBlocks(this._normalizedDoc(this._editor.getJSON())));
     const ta = this._sourceEl;
     const old = ta.value;
     const { text: md, map } = mergeSourceText(old, this._sourceCommitBlocks, blocks);
@@ -4831,7 +4837,7 @@ class BpPaperCanvas extends HTMLElement {
     // own-echo verdict + the id-writebacks. normalizeCanvasDoc first so we compare
     // against the same shape the emit path diffs (phantom nested attrs / split
     // dedup), exactly as runToOps was tested against.
-    const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
+    const liveContent = this._normalizedDoc(this._editor.getJSON()).content || [];
     const { ownEcho, idWrites } = this._re(next, liveContent);
 
     // A genuinely external echo cannot safely replace local content while one
@@ -5292,7 +5298,7 @@ class BpPaperCanvas extends HTMLElement {
     const base = this._debounceBaselineBlocks || this._blocks;
     const remoteIds = remote.map((block) => block && block.id);
     if (remoteIds.some((id) => id == null) || new Set(remoteIds).size !== remoteIds.length) return null;
-    const live = normalizeCanvasDoc(editor.getJSON()).content || [];
+    const live = normalizeCanvasDoc(editor.getJSON(), base).content || [];
     const baseNodes = this._rt(base).content || [];
     const remoteNodes = this._rt(remote).content || [];
     if (live.length !== state.doc.childCount || baseNodes.length !== base.length ||

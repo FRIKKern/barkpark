@@ -54,6 +54,7 @@ await import("./index.js");
 const { applyOps } = await import("../smoke/harness.mjs");
 const { TextSelection } = await import("@tiptap/pm/state");
 const { Fragment, Slice } = await import("@tiptap/pm/model");
+const { holdsNodeIds } = await import("./run-convert.js");
 
 const FIXTURE = new URL("../../../../test/support/fixtures/paper-editor/nested_split.json", import.meta.url);
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,7 +97,13 @@ function lines(editor) {
 }
 function liveIds(editor) {
   const out = [];
-  editor.state.doc.descendants((node) => { if (!node.isText && node.attrs.bpId != null) out.push(node.attrs.bpId); });
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (node.attrs?.bpId != null) out.push(node.attrs.bpId);
+      if (holdsNodeIds(node)) walk(node.content);
+    }
+  };
+  walk(editor.getJSON().content);
   return out;
 }
 function caretAfter(editor, text) {
@@ -344,7 +351,7 @@ await scene("section: pasted paragraphs that carry an id already in the doc get 
 // `keeps`: line → the id it must still carry. Every batch applies, the fold is what
 // the client believes, the live doc carries the ids the server holds, and a reload
 // shows every typed character.
-async function door(name, blocks, act, { keeps = {}, typed, removes = true }) {
+async function door(name, blocks, act, { keeps = {}, typed, removes = true, sends, check }) {
   await scene(name, async () => {
     let server = clone(blocks);
     const batches = [];
@@ -370,6 +377,8 @@ async function door(name, blocks, act, { keeps = {}, typed, removes = true }) {
       const text = words(server);
       for (const t of typed) assert.ok(text.includes(t), `"${t}" is saved (have ${JSON.stringify(text)})`);
       if (!removes) assert.deepEqual(batches.flat().filter((op) => op.op === "remove-block"), [], "no block the author left alone is removed");
+      if (sends) assert.deepEqual([...new Set(batches.flat().map((op) => `${op.op} ${op.id}`))], sends, "the batches touch only what changed");
+      if (check) check(server, editor);
       assert.deepEqual(server, canvas.blocks, "the fold is what the client believes it saved");
       assert.deepEqual(liveIds(editor).filter((id) => !ids(server).includes(id)), [], "the live doc carries no id the server lacks");
       assert.deepEqual(repeated(liveIds(editor)), [], "the live doc repeats no id");
@@ -419,7 +428,11 @@ await door("move-to-top: a nested paragraph moved to the top level, then typed i
     caretAfter(editor, "Left at six.");
     type(editor, " Typed.");
   },
-  { keeps: { "Fog.": "p-two" }, typed: ["Left at six. Typed."] });
+  {
+    keeps: { "Fog.": "p-two" },
+    typed: ["Left at six. Typed."],
+    check: (server) => assert.notEqual(server[0].id, "p-day", "a block moved across depths is a new top-level block with a fresh id"),
+  });
 
 await door("paste-above: pasted copies of a section paragraph above it, then typed into: the original keeps its id",
   [{ id: "s-day", type: "section", title: "Day one", blocks: [p("p-a", "Alpha."), p("p-day", "Left at six.")] }],
@@ -453,6 +466,42 @@ await door("paste-into-section: pasted copies of a top-level paragraph in a sect
     type(editor, " More.");
   },
   { keeps: { "Original X. More.": "p-x" }, typed: ["Original X. More.", "Copied two."], removes: false });
+
+await door("copy-into-column: a top-level paragraph copied into a column above it, its ids kept by the slice: only the columns change",
+  [{ id: "col1", type: "columns", columns: [[{ type: "paragraph", content: [{ type: "text", value: "Left" }] }], [{ type: "paragraph", content: [{ type: "text", value: "Right" }] }]] }, p("p-x", "Original X.")],
+  async (editor) => place(editor, "Original X.", "Left", { copy: true }),
+  {
+    keeps: { "Original X.": "p-x" },
+    typed: ["Original X."],
+    removes: false,
+    sends: ["patch-block col1"],
+  });
+
+await door("copy-into-earlier-row: a step's paragraph copied into the step above it, its ids kept by the slice: the original keeps its id",
+  [{ id: "st-walk", type: "steps", steps: [
+    { id: "r-one", title: "First", blocks: [p("p-a", "Alpha.")] },
+    { id: "r-two", title: "Second", blocks: [p("p-two", "Fog.")] },
+  ] }],
+  async (editor) => place(editor, "Fog.", "Alpha.", { copy: true }),
+  {
+    keeps: { "Alpha.": "p-a" },
+    typed: ["Fog.", "Alpha."],
+    check: (server) => assert.equal(server[0].steps[1].blocks[0].id, "p-two", "the second step's paragraph keeps p-two"),
+  });
+
+await door("snapshot-before-emit: a recovery snapshot taken between a copy and its batch names the same ids the batch saves",
+  [p("p-a", "Alpha."), { id: "s-day", type: "section", title: "Day one", blocks: [p("p-day", "Left at six.")] }],
+  async (editor, canvas) => {
+    place(editor, "Left at six.", "Alpha.", { copy: true });
+    const snapshot = canvas.recoverySnapshot().blocks;
+    assert.equal(snapshot[2].blocks[0].id, "p-day", "the snapshot leaves p-day with the original");
+    assert.notEqual(snapshot[0].id, "p-day", "and not with the copy");
+  },
+  {
+    keeps: { "Alpha.": "p-a" },
+    typed: ["Left at six.", "Alpha."],
+    check: (server) => assert.equal(server[2].blocks[0].id, "p-day", "the batch saves p-day with the original too"),
+  });
 
 const doorRecordings = recorded.length;
 await door("legacy-duplicate: a doc that already holds one id twice, typed into elsewhere: nothing is removed",

@@ -1482,6 +1482,49 @@
               ]
             }
           }
+        ],
+        [
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-day",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Left at six.Copied one."
+                    }
+                  ]
+                },
+                {
+                  "id": "c-keys-22",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Copied two."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-two",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Fog.Alpha. Typed."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
         ]
       ],
       "client_after": [
@@ -1496,7 +1539,17 @@
               "content": [
                 {
                   "type": "text",
-                  "value": "Left at six."
+                  "value": "Left at six.Copied one."
+                }
+              ]
+            },
+            {
+              "id": "c-keys-22",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Copied two."
                 }
               ]
             },
@@ -1526,7 +1579,8 @@
         }
       ],
       "typed": [
-        "Fog.Alpha. Typed."
+        "Fog.Alpha. Typed.",
+        "Copied two."
       ]
     }
   ]
