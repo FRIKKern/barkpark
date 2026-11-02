@@ -7,7 +7,7 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
   contract; an old editor's split repeats an id and is refused; the tree's
   split never repeats one.
   """
-  use Barkpark.DataCase, async: true
+  use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.BlockOps

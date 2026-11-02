@@ -1,5 +1,7 @@
 defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
-  use Barkpark.DataCase, async: true
+  use Barkpark.DataCase, async: false
+
+  import Ecto.Query
 
   alias Barkpark.Content
 
@@ -328,5 +330,25 @@ defmodule Barkpark.Content.Papers.BatchDuplicateIdsTest do
                  }
                ])
     end
+  end
+
+  test "a fenced batch names a stored block that has no id by the id the reader shows" do
+    slug = seed!([section("s-1", [paragraph("p-a", "Alpha.")]), paragraph("p-dup", "Top.")])
+    doc = Content.get_paper(slug)
+
+    stored =
+      put_in(doc.content, ["blocks"], [
+        section("s-1", [Map.delete(paragraph("p-a", "Alpha."), "id")]),
+        paragraph("p-dup", "Top."),
+        paragraph("p-dup", "Again.")
+      ])
+
+    Barkpark.Repo.update_all(
+      from(d in Barkpark.Content.Document, where: d.id == ^doc.id),
+      set: [content: stored]
+    )
+
+    assert {:ok, _} = write(slug, [type("s-1-0", "Alpha!")])
+    assert hd(Content.paper_blocks(slug)) == section("s-1", [paragraph("s-1-0", "Alpha!")])
   end
 end
