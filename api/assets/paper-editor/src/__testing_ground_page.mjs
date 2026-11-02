@@ -24,7 +24,7 @@ const scratch = mkdtempSync(join(tmpdir(), "tg-rig-"));
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 const filed = join(scratch, "argv.json");
 const fakeBp = join(scratch, "bp");
-writeFileSync(fakeBp, `#!${process.execPath}\nrequire("fs").writeFileSync(${JSON.stringify(filed)}, JSON.stringify(process.argv.slice(2)));\nconsole.log(JSON.stringify({ id: "task-rig" }));\n`);
+writeFileSync(fakeBp, `#!${process.execPath}\nconst argv = process.argv.slice(2);\nif (argv[3].includes("please fail")) { console.error("bp: refused"); process.exit(1); }\nrequire("fs").writeFileSync(${JSON.stringify(filed)}, JSON.stringify(argv));\nconsole.log(JSON.stringify({ id: "task-rig" }));\n`);
 chmodSync(fakeBp, 0o755);
 const server = await start({ bp: fakeBp });
 const t = tally();
@@ -89,6 +89,9 @@ await scene("a hand-only step says so, and a missing word stops the player", "?d
   await page.click(".tg-tab");
   assert.match(await page.textContent(".tg-steps li"), /\(by hand\)$/);
   await assert.rejects(play(page, { steps: [{ click: { text: "No such words", at: "end" } }] }), /"No such words" is not on screen/);
+  await assert.rejects(play(page, { steps: [{ caret: { id: "p-nowhere", offset: 0 } }] }), /no block p-nowhere in the doc/);
+  await play(page, { steps: [{ caret: { id: "p-day", offset: 4 } }, { type: "!" }] });
+  assert.equal(await page.evaluate(() => window.testingGround.state.host.saved.find((b) => b.id === "s-day").blocks[0].content[0].value), "Left! the car park at six.", "a caret step finds a nested block and its offset");
 });
 
 await scene("D04: a double-click and Enter split the line around the word", "?doc=drill:D04", async (page) => {
@@ -291,6 +294,8 @@ async function preview(page) {
 }
 
 await scene("Report a bug shows exactly what bp gets, files it, and its repro replays as a drill that fails on main", "?doc=drill:D01", async (page) => {
+  await play(page, { steps: [{ click: { text: "Beta", at: "end" } }, { key: "ArrowLeft" }] });
+  await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
   await play(page, drill("D01"));
   await page.click(".tg-tab");
   await page.click('[data-section="report"] summary');
@@ -311,10 +316,21 @@ await scene("Report a bug shows exactly what bp gets, files it, and its repro re
   assert.equal(await page.isDisabled(".tg-report-file"), true, "an edit after the preview needs a new preview");
   await page.fill(".tg-report-what", "Six Enters left one line");
   await preview(page);
+  await play(page, { steps: [{ click: { text: "Alpha", at: "end" } }, { key: "ArrowUp" }] });
   await page.click(".tg-report-file");
   await page.waitForFunction(() => document.querySelector(".tg-report-result").textContent);
   assert.equal(await page.textContent(".tg-report-result"), "Filed task-rig. An agent replays it with npm run drill -- --repro.");
-  assert.deepEqual(JSON.parse(readFileSync(filed, "utf8")), args, "bp got exactly what the preview showed");
+  assert.deepEqual(JSON.parse(readFileSync(filed, "utf8")), args, "bp got exactly what the preview showed, not keys pressed after it");
+  await page.fill(".tg-report-what", "please fail");
+  await preview(page);
+  await page.click(".tg-report-file");
+  await page.waitForFunction(() => document.querySelector(".tg-report-result").textContent);
+  assert.equal(await page.textContent(".tg-report-result"), "Not filed: bp failed: bp: refused");
+  await page.check(".tg-phone");
+  await page.check(".tg-dark");
+  await page.evaluate(() => window.testingGround.openDoc("sample:paragraph"));
+  const fresh = await page.evaluate(() => window.testingGround.snapshot());
+  assert.deepEqual([fresh.width, fresh.theme, fresh.events, fresh.red], ["phone", "dark", [], []], "a new doc starts a new recording; a light with no verdict yet is not red");
   const file = join(scratch, "repro.json");
   writeFileSync(file, JSON.stringify(repro));
   const { code, lines } = await runDrill(`--repro=${file}`);
@@ -329,6 +345,8 @@ if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
     "PASS  D04 Select and Enter on main at <sha>: hidden-blocks green",
     'HANDS D06 Two windows on main at <sha>: needs hands at "In the top editor, type at the end of "Window A types here.""',
   ]]);
+  const hands = await runDrill("D06");
+  assert.deepEqual([hands.code, hands.lines.at(-1)], [1, "FAIL  nothing ran: every drill asked for needs hands"], "a run where nothing played is not a pass");
 });
 
 if (process.env.TG_TRY) {

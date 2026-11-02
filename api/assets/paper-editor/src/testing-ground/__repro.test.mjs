@@ -9,7 +9,7 @@ const repro = {
   v: 1,
   build: { label: "main", sha: "4090b798ab" },
   fold: "Reference fold (the JS mirror of patch.ex)",
-  doc: "drill:D01",
+  doc: "drill:D07",
   width: "desk",
   theme: "light",
   start: [{ id: "p-a", type: "paragraph", content: [] }],
@@ -24,7 +24,7 @@ const repro = {
     { t: 14, kind: "key", key: "Meta+b" },
     { t: 15, kind: "key", key: "Backspace" },
     { t: 16, kind: "paste", html: "", text: "One\n<Two>" },
-    { t: 17, kind: "paste", html: "<p>Three</p>", text: "Three" },
+    { t: 17, kind: "paste", html: "<p><b>Three</b></p>", text: "Three" },
     { t: 18, kind: "reload" },
     { t: 19, kind: "reload" },
   ],
@@ -35,7 +35,7 @@ const repro = {
 assert.deepEqual(drillFromRepro(repro), {
   id: "R",
   title: "Repro from main at 4090b798ab",
-  open: "drill:D01",
+  open: "drill:D07",
   green: ["hidden-blocks"],
   steps: [
     { say: "Put the caret in p-e after 0 characters", caret: { id: "p-e", offset: 0 } },
@@ -44,7 +44,7 @@ assert.deepEqual(drillFromRepro(repro), {
     { say: "Press Meta+b", key: "Meta+b" },
     { say: "Press Backspace", key: "Backspace" },
     { say: "Paste the recorded clipboard", paste: { html: "<p>One</p><p>&lt;Two&gt;</p>" } },
-    { say: "Paste the recorded clipboard", paste: { html: "<p>Three</p>" } },
+    { say: "Paste the recorded clipboard", paste: { html: "<p><b>Three</b></p>" } },
     { say: "Press Reload", reload: true },
     { say: "Press Reload", reload: true },
   ],
@@ -59,7 +59,7 @@ assert.deepEqual(args.slice(6), [
 ]);
 assert.equal(args[4], "--description");
 const description = args[5];
-assert.match(description, /^Six Enters left one line\nand more\n\nBuild: main at 4090b798ab\. Doc: drill:D01\. Fold: Reference fold \(the JS mirror of patch\.ex\)\. desk, light\.\nRed lights:\n- Hidden blocks — red 6 lines/);
+assert.match(description, /^Six Enters left one line\nand more\n\nBuild: main at 4090b798ab\. Doc: drill:D07\. Fold: Reference fold \(the JS mirror of patch\.ex\)\. desk, light\.\nRed lights:\n- Hidden blocks — red 6 lines/);
 assert.match(description, /npm run drill -- --repro=repro\.json --build=<main \| PR number>/);
 assert.deepEqual(JSON.parse(description.match(/```json\n([\s\S]*)\n```$/)[1]), repro, "the whole repro rides along, intact");
 assert.equal(reportArgs({ what: "x".repeat(300), repro })[3].length, "Testing ground: ".length + 100);
@@ -68,12 +68,15 @@ for (const what of ["", "  \n "]) assert.throws(() => reportArgs({ what, repro }
 
 const root = window.document.createElement("div");
 const canvas = window.document.createElement("div");
+const other = window.document.createElement("div");
 const outside = window.document.createElement("div");
-root.append(canvas, outside);
+root.append(canvas, other, outside);
 window.document.body.append(root);
-canvas._editor = { state: { selection: { $from: { parent: { attrs: { bpId: "p-b" } }, parentOffset: 3 } } } };
+const at = (id, offset) => ({ state: { selection: { $from: { parent: { attrs: { bpId: id } }, parentOffset: offset } } } });
+canvas._editor = at("p-b", 3);
+other._editor = at("p-c", 1);
 let clock = 1000;
-const rec = recorder(root, () => [canvas], () => clock);
+const rec = recorder(root, () => [canvas, other], () => clock);
 const fire = (target, event) => target.dispatchEvent(event);
 const key = (init) => fire(canvas, new window.KeyboardEvent("keydown", { bubbles: true, ...init }));
 key({ key: "Shift", shiftKey: true });
@@ -82,7 +85,10 @@ key({ key: "Enter" });
 key({ key: "ArrowDown", shiftKey: true });
 key({ key: "B", shiftKey: true });
 key({ key: "b", metaKey: true });
-key({ key: "z", ctrlKey: true, altKey: true });
+key({ key: "B", metaKey: true, shiftKey: true });
+key({ key: "z", ctrlKey: true });
+key({ key: "y", altKey: true });
+key({ key: "q", ctrlKey: true, altKey: true });
 fire(canvas, new window.InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: "hi" }));
 fire(canvas, new window.InputEvent("beforeinput", { bubbles: true, inputType: "deleteContentBackward" }));
 const paste = new window.Event("paste", { bubbles: true });
@@ -97,14 +103,25 @@ assert.deepEqual(rec.events(), [
   { t: 0, kind: "key", key: "Enter" },
   { t: 0, kind: "key", key: "Shift+ArrowDown" },
   { t: 0, kind: "key", key: "Meta+b" },
-  { t: 0, kind: "key", key: "Control+Alt+z" },
+  { t: 0, kind: "key", key: "Meta+B" },
+  { t: 0, kind: "key", key: "Control+z" },
+  { t: 0, kind: "key", key: "Alt+y" },
+  { t: 0, kind: "key", key: "Control+Alt+q" },
   { t: 0, kind: "type", text: "hi" },
   { t: 0, kind: "paste", html: "<p>P</p>", text: "P" },
   { t: 250, kind: "caret", id: "p-b", offset: 4 },
   { t: 250, kind: "reload" },
 ], "editing keys, typed text, paste, reloads, and where a click left the caret, read just before the next act; letters come as text, a bare modifier is nothing, a click outside the editor keeps the last click");
 key({ key: "Enter" });
-assert.deepEqual(rec.events().slice(-1), [{ t: 250, kind: "key", key: "Enter" }], "one click is one caret step");
+assert.deepEqual(rec.events().slice(-3), [{ t: 250, kind: "caret", id: "p-b", offset: 4 }, { t: 250, kind: "reload" }, { t: 250, kind: "key", key: "Enter" }], "one click is one caret step");
+fire(canvas, new window.Event("pointerup", { bubbles: true }));
+fire(other, new window.Event("pointerup", { bubbles: true }));
+key({ key: "Enter" });
+assert.deepEqual(rec.events().slice(-2), [{ t: 250, kind: "caret", id: "p-c", offset: 1 }, { t: 250, kind: "key", key: "Enter" }], "the last click wins");
+rec.clear();
+fire(outside, new window.Event("pointerup", { bubbles: true }));
+key({ key: "Enter" });
+assert.deepEqual(rec.events(), [{ t: 0, kind: "key", key: "Enter" }], "a click outside every editor is no caret");
 fire(canvas, new window.Event("pointerup", { bubbles: true }));
 rec.clear();
 key({ key: "Enter" });

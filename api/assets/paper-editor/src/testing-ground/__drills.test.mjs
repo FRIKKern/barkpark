@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { drills } from "./drills/index.mjs";
+import { chromium } from "./chromium.mjs";
 import { doors } from "./play.mjs";
 import { lights } from "./traps.mjs";
 import { needsHands, verdict } from "./verdict.mjs";
@@ -42,6 +43,8 @@ const DRILL = fileURLToPath(new URL("./drill.mjs", import.meta.url));
 for (const [args, why] of [
   [[], /name a drill, or all/],
   [["D99"], /no drill D99/],
+  [["x--y"], /no drill x--y/],
+  [["--repro=/no/--build=1.99"], /--repro=\/no\/--build=1\.99 is not a repro: ENOENT/],
   [["D01", "--fast"], /unknown or malformed flag --fast/],
   [["D01", "--build="], /unknown or malformed flag --build=/],
   [["D01", "--build=1.99"], /no recorded tree for contract 1\.99/],
@@ -58,5 +61,8 @@ for (const [args, why] of [
   assert.match(run.stderr, why);
   assert.match(run.stderr, /usage: npm run drill <drill id …> \| all \[-- --build=<main \| PR number \| contract like 1\.19>\]\n       npm run drill -- --repro=<repro\.json> \[--build=…\]\n  drills: D01, D02, D03, D04, D05, D06, D07/);
 }
+
+process.env.BP_PLAYWRIGHT_FROM = "/no/such/package.json";
+await assert.rejects(chromium(), /^Error: playwright not found from \/no\/such\/package\.json \(set BP_PLAYWRIGHT_FROM\)$/, "BP_PLAYWRIGHT_FROM picks where playwright comes from");
 
 console.log("PASS  testing-ground drills: one file is a checklist and a script, and the runner's verdict reads its lights");
