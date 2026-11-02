@@ -110,7 +110,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   defp compose_inline(_node, _inside_link, depth) when depth >= @max_inline_depth,
     do: Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
 
-  defp compose_inline(%{"type" => "text"} = n, inside_link, _depth) do
+  defp compose_inline(%{"type" => "text"} = n, inside_link, depth) do
     # Coerce a non-string `value` — a raw API/SDK/CLI mutate can persist a number
     # (or, worse, a map/list) where a text leaf's string was expected. Binaries
     # pass through, numbers stringify, anything else (map/list/bool/nil) → "" so
@@ -134,10 +134,20 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       end
 
     case Map.get(n, "marks") do
-      nil -> value
-      [] -> value
-      marks when is_list(marks) -> apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
-      _ -> value
+      nil ->
+        value
+
+      [] ->
+        value
+
+      marks when is_list(marks) and depth + length(marks) >= @max_inline_depth ->
+        Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+
+      marks when is_list(marks) ->
+        apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
+
+      _ ->
+        value
     end
   end
 

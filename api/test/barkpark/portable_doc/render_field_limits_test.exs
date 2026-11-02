@@ -17,7 +17,7 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
     for name <-
           ["toc", "sheet", "table", "heatmap", "route", "record table", "nested columns"] ++
             ["nested section", "big number", "nested strong", "many merges", "many spans"] ++
-            ["flat line", "flat line high"],
+            ["many marks", "flat line", "flat line high"],
         style <- [:article, :email] do
       @name name
       @style style
@@ -416,6 +416,23 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
         assert inline.(max) =~ "Nested too deep to show"
         refute inline.(max) =~ "leaf"
       end
+    end
+
+    test "a text's marks count toward the same depth" do
+      marked = fn depth, marks ->
+        text = %{"type" => "text", "value" => "leaf", "marks" => List.duplicate("strong", marks)}
+
+        node =
+          Enum.reduce(List.duplicate("em", depth), text, &%{"type" => &1, "children" => [&2]})
+
+        article(%{"type" => "paragraph", "content" => [node]})
+      end
+
+      max = Validate.max_depth()
+      assert marked.(0, max - 1) =~ "leaf"
+      assert marked.(0, max) =~ "Nested too deep to show"
+      assert marked.(10, max - 11) =~ "leaf"
+      assert marked.(10, max - 10) =~ "Nested too deep to show"
     end
 
     test "a chain of bare lists counts toward the same depth" do

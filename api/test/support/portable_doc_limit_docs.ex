@@ -85,6 +85,13 @@ defmodule Barkpark.PortableDoc.LimitDocs do
          "spans" =>
            List.duplicate(%{"row" => 0, "col" => 0, "rowspan" => 100, "colspan" => 100}, 20_000)
        }},
+      {"many marks",
+       %{
+         "type" => "paragraph",
+         "content" => [
+           %{"type" => "text", "value" => "x", "marks" => List.duplicate("strong", 40_000)}
+         ]
+       }},
       {"flat line", flat_line(1.0e16)},
       {"flat line high", flat_line(1.0e100)}
     ]
