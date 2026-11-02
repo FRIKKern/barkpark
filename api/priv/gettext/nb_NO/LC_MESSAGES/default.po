@@ -13104,3 +13104,22 @@ msgstr "Dette elementet kan ikke åpnes i et skjema."
 #, elixir-autogen, elixir-format
 msgid "This item cannot be inserted here."
 msgstr "Dette elementet kan ikke settes inn her."
+
+#: lib/barkpark_web/studio_locale.ex:521
+#, elixir-autogen, elixir-format
+msgid "E = mc^2"
+msgstr "E = mc^2"
+
+#: lib/barkpark_web/studio_locale.ex:580
+#, elixir-autogen, elixir-format
+msgid ""
+"Introduction | intro\n"
+"  Background"
+msgstr ""
+"Innledning | innledning\n"
+"  Bakgrunn"
+
+#: lib/barkpark_web/studio_locale.ex:661
+#, elixir-autogen, elixir-format
+msgid "path/to/file"
+msgstr "sti/til/fil"
