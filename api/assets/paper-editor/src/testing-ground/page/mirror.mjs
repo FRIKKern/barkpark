@@ -1,16 +1,26 @@
 const KEYS = new Set(["Enter", "Backspace", "Delete", "Tab"]);
 
+function block(doc, index) {
+  const { bpId } = doc.child(index).attrs;
+  let nth = 0;
+  for (let i = 0; i < index; i++) if (doc.child(i).attrs.bpId === bpId) nth++;
+  return { id: bpId, nth };
+}
+
 function spot(view, pos) {
-  const $pos = view.state.doc.resolve(pos);
-  if ($pos.depth) return { id: $pos.node(1).attrs.bpId, offset: pos - $pos.before(1) };
-  const { nodeAfter, nodeBefore } = $pos;
-  return nodeAfter ? { id: nodeAfter.attrs.bpId, offset: 0 } : { id: nodeBefore.attrs.bpId, offset: nodeBefore.nodeSize };
+  const { doc } = view.state;
+  const $pos = doc.resolve(pos);
+  if ($pos.depth) return { ...block(doc, $pos.index(0)), offset: pos - $pos.before(1) };
+  return $pos.nodeAfter ? { ...block(doc, $pos.index(0)), edge: "before" } : { ...block(doc, $pos.index(0) - 1), edge: "after" };
 }
 
 function place(view, where) {
   let pos = null;
+  let nth = 0;
   view.state.doc.forEach((node, start) => {
-    if (node.attrs.bpId === where.id) pos = Math.min(start + where.offset, start + node.nodeSize);
+    if (node.attrs.bpId !== where.id || nth++ !== where.nth) return;
+    if (where.edge) pos = where.edge === "before" ? start : start + node.nodeSize;
+    else pos = Math.min(start + where.offset, start + node.nodeSize - 1);
   });
   return pos;
 }
@@ -33,7 +43,7 @@ function type(view, chars) {
 
 function paste(view, data) {
   const event = new view.dom.ownerDocument.defaultView.Event("paste", { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "clipboardData", { value: { types: Object.keys(data), getData: (kind) => data[kind], files: [] } });
+  Object.defineProperty(event, "clipboardData", { value: { getData: (kind) => data[kind] } });
   view.dom.dispatchEvent(event);
 }
 
