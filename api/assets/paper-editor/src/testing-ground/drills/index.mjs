@@ -4,5 +4,6 @@ import D03 from "./D03-copy-above-section.mjs";
 import D04 from "./D04-select-and-enter.mjs";
 import D05 from "./D05-paste-blank-lines.mjs";
 import D06 from "./D06-two-windows.mjs";
+import D07 from "./D07-arrow-down-skips.mjs";
 
-export const drills = [D01, D02, D03, D04, D05, D06];
+export const drills = [D01, D02, D03, D04, D05, D06, D07];

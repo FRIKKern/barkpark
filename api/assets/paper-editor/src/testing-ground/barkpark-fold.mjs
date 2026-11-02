@@ -12,9 +12,9 @@ export function barkparkFold(origin, token) {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: body && JSON.stringify(body),
     });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error?.code ? `${json.error.code}: ${json.error.message}` : `HTTP ${res.status} from ${path}`);
-    return json;
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Barkpark answered ${res.status} to ${method} ${path}: ${text.slice(0, 300)}`);
+    return JSON.parse(text);
   };
   return {
     name: `Local Barkpark at ${base.origin}`,

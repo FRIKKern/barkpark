@@ -5,6 +5,7 @@ import { lights } from "../traps.mjs";
 import { paintHood } from "./hood.mjs";
 import { lines, settle, visibility } from "./measure.mjs";
 import { paintReader } from "./reader.mjs";
+import { tallyWords, watchTally } from "./tally.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 const json = (url) => fetch(url).then((r) => r.json());
@@ -17,7 +18,7 @@ const docs = new Map([
 ]);
 
 const params = new URLSearchParams(location.search);
-const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, shown: "" };
+const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, shown: "", tally: { tries: 0, hits: 0 } };
 
 const ui = {
   edit: $(".tg-edit"),
@@ -28,6 +29,7 @@ const ui = {
   lights: $(".tg-lights"),
   doc: $(".tg-doc"),
   steps: $(".tg-steps"),
+  tally: $(".tg-tally"),
   reader: $(".tg-reader"),
   phone: $(".tg-phone"),
   dark: $(".tg-dark"),
@@ -46,7 +48,6 @@ function paintFleet(root) {
     hole.setAttribute("data-tg-painted", "");
     const type = hole.closest("[data-bp-type]")?.getAttribute("data-bp-type");
     const html = fragments[type];
-    if (html == null) continue;
     if (hole.dispatchEvent(new CustomEvent("bp-fleet-paint", { detail: { html }, cancelable: true }))) hole.innerHTML = html;
   }
 }
@@ -72,18 +73,25 @@ function mountCanvases() {
   }));
 }
 
+function paintTally() {
+  const rule = docs.get(state.key).drill?.tally;
+  ui.tally.hidden = !rule;
+  ui.tally.textContent = tallyWords(state.tally);
+  ui.tally.classList.toggle("tg-tally--red", state.tally.hits < state.tally.tries);
+}
+
 function openDoc(key) {
+  if (key !== state.key) state.tally = { tries: 0, hits: 0 };
   state.key = key;
   state.reload = null;
   const doc = docs.get(key);
   state.host = createFakeHost({ fold: build.fold ? serverFold(build.fold) : referenceFold, blocks: doc.blocks, onChange: changed });
   mountCanvases();
   ui.steps.hidden = !doc.drill;
-  ui.steps.replaceChildren(...(doc.drill?.steps || []).map((step) => {
-    const li = document.createElement("li");
-    li.textContent = step.hands ? `${step.say} (by hand)` : step.say;
-    return li;
-  }));
+  const says = doc.drill ? doc.drill.steps.map((step) => (step.hands ? `${step.say} (by hand)` : step.say)) : [];
+  if (doc.drill?.repeat) says.push(`Pick ${doc.drill.id} again and repeat, ${doc.drill.repeat} tries in all`);
+  ui.steps.replaceChildren(...says.map((say) => Object.assign(document.createElement("li"), { textContent: say })));
+  paintTally();
   remember();
   changed();
 }
@@ -112,7 +120,7 @@ function paintLights() {
     saved: state.host.saved,
     batches: state.host.batches,
     refusals: state.host.refusals,
-    settled: state.host.inflight === 0,
+    settled: !state.host.busy,
     reload: state.reload,
   });
   const shown = JSON.stringify(list);
@@ -152,6 +160,7 @@ $(".tg-close").addEventListener("click", () => setDrawer(false));
 $(".tg-reload").addEventListener("click", reload);
 ui.hood.addEventListener("toggle", changed);
 
+new MutationObserver(() => paintFleet(ui.edit)).observe(ui.edit, { childList: true, subtree: true });
 openDoc(state.key);
 
 const views = {
@@ -165,7 +174,10 @@ for (const [name, apply] of Object.entries(views)) {
   ui[name].addEventListener("change", () => { apply(ui[name].checked); remember(); });
 }
 
-new MutationObserver(() => paintFleet(ui.edit)).observe(ui.edit, { childList: true, subtree: true });
+watchTally(ui.edit, () => {
+  const rule = docs.get(state.key).drill?.tally;
+  return rule && { rule, canvas: state.canvases[0], tally: state.tally, counted: paintTally };
+});
 $(".tg-build").textContent = `Editor build: ${build.label} at ${build.sha}`;
 setInterval(paintLights, 200);
 window.testingGround = { state, reload, openDoc, setDrawer, paintLights, settle: () => settle(state.canvases[0], state.host) };

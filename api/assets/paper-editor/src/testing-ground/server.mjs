@@ -57,14 +57,13 @@ export function mainBuild() {
 
 function inside(root, rel) {
   const path = normalize(join(root, rel));
-  return path.startsWith(root + sep) && existsSync(path) ? path : null;
+  return path.startsWith(root + sep) && extname(path) in TYPES && existsSync(path) ? path : null;
 }
 
 async function foldThrough(fold, req, res) {
   let body = "";
   for await (const chunk of req) body += chunk;
   const { blocks, ops } = JSON.parse(body);
-  res.setHeader("content-type", "application/json");
   try {
     res.end(JSON.stringify({ blocks: await fold.apply(blocks, ops) }));
   } catch (error) {
@@ -73,34 +72,41 @@ async function foldThrough(fold, req, res) {
   }
 }
 
-export async function start({ build: picked = mainBuild(), port = 0, fold = null } = {}) {
-  let standIn;
+async function standInModule(make) {
   try {
-    standIn = await readerStandIn();
+    return await make();
   } catch (error) {
-    standIn = `export const render = () => { throw new Error(${JSON.stringify(`stand-in reader did not build: ${error.message.split("\n")[0]}`)}); };`;
+    return `export const render = () => { throw new Error(${JSON.stringify(`The stand-in reader did not build: ${error.message.split("\n")[0]}`)}); };`;
   }
-  const routes = {
-    "/": () => readFileSync(join(SRC, "testing-ground/page/index.html")),
-    "/build.json": () => JSON.stringify({ label: picked.label, sha: picked.sha, fold: fold?.name || null }),
+}
+
+export async function start({ build: picked = mainBuild(), port = 0, fold = null, standIn = readerStandIn } = {}) {
+  const reader = await standInModule(standIn);
+  const files = {
+    "/index.html": () => readFileSync(join(SRC, "testing-ground/page/index.html")),
+    "/build.json": () => JSON.stringify({ label: picked.label, sha: picked.sha, fold: fold?.name }),
     "/pack/samples.json": () => JSON.stringify(packSamples()),
     "/pack/fragments.json": () => readFileSync(join(PACK, "fragments.json")),
     "/pack/paper-surface.css": () => readFileSync(join(PACK, "css/paper-surface.css")),
     "/pack/code-tokens.css": () => readFileSync(join(PACK, "css/code-tokens.css")),
-    "/reader-standin.js": () => standIn,
+    "/reader-standin.js": () => reader,
   };
-  for (const name of BUNDLE_FILES) routes[`/build/${name}`] = () => readFileSync(join(picked.dir, name));
+  for (const name of BUNDLE_FILES) files[`/build/${name}`] = () => readFileSync(join(picked.dir, name));
 
   const server = createServer((req, res) => {
-    const path = decodeURIComponent(req.url.split("?")[0]);
-    if (fold && req.method === "POST" && path === "/fold") return foldThrough(fold, req, res);
-    const route = routes[path];
-    const file = !route && path.startsWith("/src/") ? inside(SRC, path.slice(5)) : null;
+    const asked = decodeURIComponent(req.url.split("?")[0]);
+    const path = asked === "/" ? "/index.html" : asked;
+    if (fold && req.method === "POST" && path === "/fold") {
+      res.setHeader("content-type", TYPES[".json"]);
+      return foldThrough(fold, req, res);
+    }
+    const route = files[path];
+    const file = path.startsWith("/src/") && inside(SRC, path.slice(5));
     if (req.method !== "GET" || (!route && !file)) {
       res.statusCode = 404;
       return res.end("not found");
     }
-    res.setHeader("content-type", TYPES[extname(path)] || (path === "/" ? "text/html" : "application/octet-stream"));
+    res.setHeader("content-type", TYPES[extname(path)]);
     res.setHeader("cache-control", "no-store");
     res.end(route ? route() : readFileSync(file));
   });
@@ -108,16 +114,30 @@ export async function start({ build: picked = mainBuild(), port = 0, fold = null
   return { url: `http://127.0.0.1:${server.address().port}/`, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
+function usage(why) {
+  console.error(`npm run try: ${why}\nusage: npm run try [main] [-- --port=<n>] [--no-open] [--barkpark=<http://localhost:port>]  (--barkpark needs BARKPARK_TG_TOKEN)`);
+  process.exit(2);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  const which = args.find((a) => !a.startsWith("--")) || "main";
-  if (which !== "main") {
-    console.error(`npm run try ${which}: only main for now; PR heads and contract trees come next.`);
-    process.exit(2);
-  }
+  const known = /^--(port=\d+|no-open|barkpark=.+)$/;
+  const [which = "main", ...extra] = args.filter((a) => !a.startsWith("--"));
+  const bad = args.find((a) => a.startsWith("--") && !known.test(a));
+  if (bad) usage(`unknown or malformed flag ${bad}`);
+  if (extra.length) usage(`one build at a time, got ${[which, ...extra].join(" ")}`);
+  if (which !== "main") usage(`only main for now; PR heads and contract trees come next, got ${which}`);
   const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const fold = flag("barkpark") ? barkparkFold(flag("barkpark"), process.env.BARKPARK_TG_TOKEN || "barkpark-dev-token") : null;
-  const { url } = await start({ port: Number(flag("port") || 4417), fold });
+  const token = process.env.BARKPARK_TG_TOKEN;
+  if (flag("barkpark") && !token) usage("--barkpark needs BARKPARK_TG_TOKEN, a write token for that local Barkpark");
+  let fold;
+  try {
+    fold = flag("barkpark") && barkparkFold(flag("barkpark"), token);
+  } catch (error) {
+    usage(error.message);
+  }
+  const port = flag("port");
+  const { url } = await start({ port: port === undefined ? 4417 : Number(port), fold });
   console.log(`testing ground on main: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
-  if (!args.includes("--no-open")) spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+  if (!args.includes("--no-open")) spawn("open", [url], { stdio: "ignore", detached: true }).unref();
 }

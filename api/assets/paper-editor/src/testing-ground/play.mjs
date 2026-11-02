@@ -60,16 +60,27 @@ const doors = {
   },
 };
 
-export const playable = (drill) => drill.steps.every((step) => !step.hands);
-
-export async function play(page, drill) {
-  for (const step of drill.steps) {
+async function once(page, steps) {
+  for (const step of steps) {
     const door = Object.keys(doors).find((name) => name in step);
     await doors[door](page, step[door], step);
   }
   await page.evaluate(() => window.testingGround.settle());
 }
 
+export async function play(page, drill) {
+  if (!drill.repeat) return once(page, drill.steps);
+  for (let run = 0; run < drill.repeat; run++) {
+    await page.evaluate((key) => window.testingGround.openDoc(key), `drill:${drill.id}`);
+    await page.waitForFunction(() => window.testingGround.state.canvases[0]._editor);
+    await once(page, drill.steps);
+    await page.waitForFunction((run) => window.testingGround.state.tally.tries > run, run);
+  }
+}
+
 export async function lightsOf(page) {
-  return page.evaluate(() => window.testingGround.paintLights() || Object.fromEntries([...document.querySelectorAll(".tg-light")].map((li) => [li.dataset.trap, { ok: li.dataset.ok, words: li.textContent }])));
+  return page.evaluate(() => {
+    window.testingGround.paintLights();
+    return Object.fromEntries([...document.querySelectorAll(".tg-light")].map((li) => [li.dataset.trap, { ok: li.dataset.ok, words: li.textContent }]));
+  });
 }

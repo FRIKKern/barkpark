@@ -128,16 +128,11 @@ function idsAtAnyDepth(value, out = []) {
   return out;
 }
 
-function counts(blocks) {
-  const out = new Map();
-  for (const id of idsAtAnyDepth(blocks)) out.set(id, (out.get(id) || 0) + 1);
-  return out;
-}
-
 function duplicateGrowth(before, after) {
-  const was = counts(before);
-  for (const [id, n] of counts(after)) if (n > 1 && n > (was.get(id) || 0)) return id;
-  return null;
+  const was = idsAtAnyDepth(before);
+  const now = idsAtAnyDepth(after);
+  const count = (ids, id) => ids.filter((x) => x === id).length;
+  return now.find((id) => count(now, id) > 1 && count(now, id) > count(was, id));
 }
 
 export { applyOps, idsAtAnyDepth };

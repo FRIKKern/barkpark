@@ -98,6 +98,8 @@ body {
 .tg-words { color: var(--tg-soft); }
 
 .tg-reload { font: inherit; padding: 6px 12px; cursor: pointer; }
+.tg-tally { margin: 10px 0 0; font-weight: 600; color: var(--tg-green); }
+.tg-tally--red { color: var(--tg-red); }
 .tg-steps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 6px; }
 .tg-batches { padding-left: 20px; margin: 0; display: grid; gap: 4px; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: 12px; word-break: break-all; }
 .tg-diff, .tg-json { margin: 0; max-height: 280px; overflow: auto; padding: 8px; background: var(--tg-bg); border: 1px solid var(--tg-rule); font-size: 12px; }

@@ -59,7 +59,7 @@ export function lostKeys(before, after) {
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export function sentDuplicates(batches) {
-  return batches.flatMap(({ ops }) => ops.flatMap((op) => duplicateIds([op.block, op.patch].filter(Boolean))));
+  return batches.flatMap(({ ops }) => ops.flatMap((op) => duplicateIds([op.block, op.patch])));
 }
 
 export function lights({ visibility, believed, saved, batches, refusals, settled, reload }) {

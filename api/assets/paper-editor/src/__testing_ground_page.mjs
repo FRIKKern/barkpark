@@ -35,18 +35,19 @@ try {
 const server = await start();
 const t = tally();
 
-async function open(query = "") {
+async function open(query = "", prepare = async () => {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.errors = [];
   page.on("pageerror", (error) => page.errors.push(error.message));
+  await prepare(page);
   await page.goto(`${server.url}${query}`);
   await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
   return page;
 }
 
-async function scene(name, query, fn) {
+async function scene(name, query, fn, prepare) {
   if (ONLY && !name.includes(ONLY)) return;
-  const page = await open(query);
+  const page = await open(query, prepare);
   try {
     await t.checkAsync(name, async () => {
       await fn(page);
@@ -69,6 +70,9 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.deepEqual(await page.$$eval("#tg-drawer summary", (s) => s.map((x) => x.textContent)), ["Live checks", "Preview and test docs", "Versions", "Under the hood"]);
   assert.match(await page.textContent(".tg-build"), /^Editor build: main at [0-9a-f]{7,}$/);
   assert.deepEqual(red(await lightsOf(page)), []);
+  assert.equal(await page.isVisible(".tg-steps"), false, "a block sample has no checklist");
+  assert.equal(await page.evaluate(() => window.testingGround.state.canvases[0].liveRemote), false, "one window keeps the canvas's own echo rules");
+  assert.deepEqual(await page.$$eval(".tg-light", (ls) => ls.map((l) => l.className)), ["tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--wait"]);
 });
 
 await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (page) => {
@@ -77,7 +81,63 @@ await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (pag
   assert.deepEqual(red(lights), ["hidden-blocks"]);
   assert.match(lights["hidden-blocks"].words, /6 lines are in the doc but hidden on screen \(9 blocks, 2 shown\)/);
   assert.equal(await page.isVisible(".tg-tab-dot"), true, "the closed drawer's tab shows a red dot");
+  assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 6 lines/);
+  assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
+  await page.click(".tg-tab");
+  assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), drill("D01").steps.map((s) => s.say));
+  assert.equal(await page.isVisible(".tg-tally"), false);
 });
+
+await scene("a hand-only step says so, and a missing word stops the player", "?doc=drill:D03", async (page) => {
+  await page.click(".tg-tab");
+  assert.match(await page.textContent(".tg-steps li"), /\(by hand\)$/);
+  await assert.rejects(play(page, { steps: [{ click: { text: "No such words", at: "end" } }] }), /"No such words" is not on screen/);
+});
+
+await scene("D04: a double-click and Enter split the line around the word", "?doc=drill:D04", async (page) => {
+  await play(page, drill("D04"));
+  assert.deepEqual(red(await lightsOf(page)), []);
+  assert.deepEqual(await page.evaluate(() => window.testingGround.state.host.saved.map((b) => b.content.map((n) => n.value).join(""))), ["Pack the ", " and the tent."]);
+});
+
+await scene("a click at the start of a line puts the caret before its first letter", "?doc=drill:D01", async (page) => {
+  await play(page, { steps: [{ click: { text: "Beta", at: "start" } }, { type: "x" }, { click: { text: "Alpha", at: "end" } }, { type: "y" }] });
+  assert.deepEqual(await page.evaluate(() => window.testingGround.state.host.saved.map((b) => b.content.map((n) => n.value).join(""))), ["Alphay", "", "xBeta"]);
+});
+
+await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=drill:D07", async (page) => {
+  await play(page, drill("D07"));
+  await page.click(".tg-tab");
+  const words = await page.textContent(".tg-tally");
+  assert.match(words, /^↓ skipped the empty line in [0-8] of 8 tries\.$/);
+  const { tries, hits } = await page.evaluate(() => window.testingGround.state.tally);
+  assert.equal(tries, 8);
+  assert.equal(await page.getAttribute(".tg-tally", "class"), hits < tries ? "tg-tally tg-tally--red" : "tg-tally");
+  console.log(`      D07 on this build: ${words}`);
+  await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
+  assert.equal(await page.isVisible(".tg-tally"), false);
+  await page.evaluate(() => window.testingGround.openDoc("drill:D07"));
+  assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 0 tries.", "another doc starts the count over");
+  assert.match(await page.textContent(".tg-steps"), /Pick D07 again and repeat, 8 tries in all/);
+});
+
+await scene("under the hood: batches with the server's answer, the diff and the saved doc", "?doc=drill:D02", async (page) => {
+  await page.click(".tg-tab");
+  await page.click('[data-section="hood"] summary');
+  await page.waitForFunction(() => document.querySelector(".tg-diff").textContent === "nothing yet");
+  assert.equal(await page.textContent(".tg-fold"), "Fold: Reference fold (the JS mirror of patch.ex)");
+  await play(page, { steps: [{ click: { text: "Home by dark.", at: "end" } }, { type: "!" }] });
+  await page.waitForFunction(() => document.querySelector(".tg-batches li"));
+  assert.deepEqual(await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent)), ["#1 patch-block p-after → saved"]);
+  assert.equal(await page.textContent(".tg-diff"), "~ p-after (paragraph)");
+  assert.match(await page.textContent(".tg-json"), /"value": "Home by dark\.!"/);
+  await play(page, drill("D02"));
+  const batches = await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent));
+  assert.match(batches.join("\n"), /#\d+ replace-block s-day → refused: replace-block: duplicate id p-day/);
+  await play(page, { steps: [{ click: { text: "Trip", at: "end" } }, { key: "Enter" }, { type: "z" }] });
+  assert.match((await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent))).join("\n"), /insert-after c-\d/);
+});
+
 
 await scene("D02 on main lights duplicate ids, refused batches and lost keys red", "?doc=drill:D02", async (page) => {
   await play(page, drill("D02"));
@@ -102,7 +162,8 @@ await scene("typing and a reload on a sound build keep every light green", "?doc
   await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "ok " }, { key: "Enter" }, { type: "next" }, { reload: true }] });
   const lights = await lightsOf(page);
   assert.deepEqual(Object.values(lights).map((l) => l.ok), ["true", "true", "true", "true", "true"]);
-  assert.match(await page.evaluate(() => JSON.stringify(window.testingGround.state.host.saved)), /ok .*next/);
+  const words = await page.evaluate(() => window.testingGround.state.host.saved.map((b) => b.content.map((n) => n.value || n.children?.[0]?.value).join("")));
+  assert.deepEqual(words, ["A body paragraph with bold emphasis inside it, ok ", "nexta marked link and a link node."]);
 });
 
 await scene("the reader shows the golden HTML, then the labeled stand-in after an edit", "?doc=sample:callout&reader=1", async (page) => {
@@ -112,6 +173,21 @@ await scene("the reader shows the golden HTML, then the labeled stand-in after a
   await page.waitForFunction(() => document.querySelector(".tg-read-label").textContent.startsWith("Stand-in"));
   assert.match(await page.textContent(".tg-read-label"), /^Stand-in: the @barkpark\/react render of this doc, not the golden reader\./);
   assert.match(await page.textContent(".tg-read-body"), /callout body\. Edited/);
+  await page.click(".tg-tab");
+  await page.uncheck(".tg-reader");
+  await play(page, { steps: [{ click: { text: "Edited", at: "end" } }, { type: "Z" }] });
+  assert.doesNotMatch(await page.textContent(".tg-read-body"), /EditedZ/, "a hidden reader is not repainted");
+});
+
+await scene("a stand-in that throws shows its error in the reader", "?doc=drill:D01&reader=1", async (page) => {
+  assert.match(await page.textContent(".tg-read-label"), /^Stand-in:/, "a drill has no golden");
+  await page.waitForFunction(() => document.querySelector(".tg-read-body").textContent === "stand-in broke");
+}, (page) => page.route("**/reader-standin.js", (route) => route.fulfill({ contentType: "text/javascript", body: "export const render = () => { throw new Error('stand-in broke'); };" })));
+
+await scene("fleet blocks are painted from the pack's fragments", "?doc=sample:heatmap", async (page) => {
+  await page.waitForFunction(() => document.querySelector("[data-bp-fleet-body][data-tg-painted]"));
+  const [painted, fragment] = await page.evaluate(async () => [document.querySelector("[data-bp-fleet-body]").innerHTML, (await (await fetch("/pack/fragments.json")).json()).heatmap]);
+  assert.equal(painted, fragment);
 });
 
 await scene("phone width and dark mode", "?doc=sample:paragraph&phone=1&dark=1", async (page) => {
@@ -125,10 +201,10 @@ await scene("phone width and dark mode", "?doc=sample:paragraph&phone=1&dark=1",
   assert.doesNotMatch(page.url(), /dark=1/);
 });
 
-await scene("every test doc opens: 6 drills and 80 block samples, none with a duplicate id", "", async (page) => {
+await scene("every test doc opens: 7 drills and 80 block samples, none with a duplicate id", "", async (page) => {
   await page.click(".tg-tab");
   const keys = await page.$$eval(".tg-doc option", (options) => options.map((o) => o.value));
-  assert.equal(keys.filter((k) => k.startsWith("drill:")).length, 6);
+  assert.equal(keys.filter((k) => k.startsWith("drill:")).length, 7);
   assert.equal(keys.filter((k) => k.startsWith("sample:")).length, 80);
   const bad = [];
   for (const key of keys) {
@@ -138,12 +214,12 @@ await scene("every test doc opens: 6 drills and 80 block samples, none with a du
     if (lights["duplicate-ids"].ok !== "true" || lights["refused-batches"].ok !== "true") bad.push(key);
   }
   assert.deepEqual(bad, []);
-  const windows = await page.evaluate(() => { window.testingGround.openDoc("drill:D06"); return document.querySelectorAll(".tg-edit bp-paper-canvas").length; });
-  assert.equal(windows, 2, "D06 opens two windows on one host");
+  const windows = await page.evaluate(() => { window.testingGround.openDoc("drill:D06"); return [...document.querySelectorAll(".tg-edit bp-paper-canvas")].map((c) => c.liveRemote); });
+  assert.deepEqual(windows, [true, true], "D06 opens two windows on one host, each taking the other's saves live");
 });
 
 if (process.env.TG_BARKPARK) {
-  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN || "barkpark-dev-token") });
+  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
   const page = await browser.newPage();
   await t.checkAsync("D02 through a local Barkpark: patch.ex itself refuses the batch", async () => {
     await page.goto(`${local.url}?doc=drill:D02`);
@@ -151,7 +227,7 @@ if (process.env.TG_BARKPARK) {
     await play(page, drill("D02"));
     const lights = await lightsOf(page);
     assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
-    assert.match(lights["refused-batches"].words, /invalid_op/);
+    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*invalid_op/);
   });
   await page.close();
   await local.close();

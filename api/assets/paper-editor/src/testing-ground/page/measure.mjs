@@ -1,6 +1,5 @@
 export function visibility(canvas) {
-  const view = canvas._editor?.view;
-  if (!view) return [];
+  const { view } = canvas._editor;
   const out = [];
   view.state.doc.forEach((node, pos) => {
     const el = view.nodeDOM(pos);
@@ -15,8 +14,7 @@ export function lines(canvas) {
   return out;
 }
 
-export async function settle(canvas, host, timeout = 3000) {
+export async function settle(canvas, host) {
   canvas.flushPendingChanges();
-  const until = Date.now() + timeout;
-  while ((host.inflight > 0 || canvas.hasPendingChanges()) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+  await host.idle();
 }

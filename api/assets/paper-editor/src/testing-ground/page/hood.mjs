@@ -17,7 +17,7 @@ export function paintHood(el, { host, start }) {
   el.batches.replaceChildren(...host.batches.slice(-20).map(({ seq, ops, answer }) => {
     const li = document.createElement("li");
     const verdict = !answer ? "waiting" : answer.ok ? "saved" : `refused: ${answer.error}`;
-    li.textContent = `#${seq} ${ops.map((op) => `${op.op} ${op.id || op.afterId || op.block?.id || ""}`.trim()).join(", ")} → ${verdict}`;
+    li.textContent = `#${seq} ${ops.map((op) => `${op.op} ${"id" in op ? op.id : op.block.id}`).join(", ")} → ${verdict}`;
     return li;
   }));
   el.diff.textContent = blockDiff(start, host.saved).join("\n") || "nothing yet";
