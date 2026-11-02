@@ -36,6 +36,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     Labels,
     Mutations,
     Sheets,
+    Warnings,
     Writer
   }
 
@@ -49,6 +50,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
+  alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
@@ -431,6 +433,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- validate_render_shapes_for_type(type, blocks),
          :ok <- maybe_reject_hollow_result(type, blocks),
          :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
+         :ok <- check_new_portable_doc_errors(type, existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
            encrypt_blocks_for_type(
              type,
@@ -1041,11 +1044,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks =
-           patched
-           |> ensure_block_ids()
-           |> normalize_render_shapes()
-           |> hydrate_changed_sheet_blocks(blocks, doc, dataset, slug),
+         normalized = patched |> ensure_block_ids() |> normalize_render_shapes(),
+         # PortableDoc RATCHET (R4.5): the op may not ADD a validation error;
+         # report-only until :portable_doc_refuse_new_errors is on (NewErrors).
+         # Only the blocks the op touched are validated, and before sheet
+         # hydration, as the batch path checks.
+         :ok <- NewErrors.check_touched(blocks, normalized),
+         new_blocks = hydrate_changed_sheet_blocks(normalized, blocks, doc, dataset, slug),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -1685,6 +1690,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
          normalized = folded |> ensure_block_ids() |> normalize_render_shapes(),
+         # Same PortableDoc RATCHET as the single-op path, on the batch RESULT.
+         :ok <- NewErrors.check_touched(blocks, normalized),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
@@ -2456,10 +2463,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp retry_revless(attempt, opts, 1), do: attempt.(Keyword.delete(opts, @revless_cas))
 
+  # A lost race replays the attempt: its queued advisories (the PortableDoc
+  # ratchet's report-only warning) go back to the snapshot so they are not
+  # reported twice, nor from the losing base.
   defp retry_revless(attempt, opts, left) do
+    queued = Warnings.snapshot()
+
     case attempt.(opts) do
-      {:error, :revless_conflict} -> retry_revless(attempt, opts, left - 1)
-      other -> other
+      {:error, :revless_conflict} ->
+        Warnings.restore(queued)
+        retry_revless(attempt, opts, left - 1)
+
+      other ->
+        other
     end
   end
 
@@ -3688,6 +3704,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
     "This #{type} block would render empty — its text is authored under a key " <>
       "the renderer ignores. Move the prose into the block's content field."
   end
+
+  # PortableDoc RATCHET (R4.5) on the upsert door: papers only. Sessions and
+  # other block docs are not checked yet.
+  defp check_new_portable_doc_errors(@paper_type, stored, written),
+    do: NewErrors.check(stored, written)
+
+  defp check_new_portable_doc_errors(_type, _stored, _written), do: :ok
+
+  @doc """
+  The blocks of the paper an ingest at `slug` would replace, found by the
+  write's own tenant rule (`scope_attrs` carries `"workspace_id"` and
+  `"project_id"` as ingest stamps them); `[]` when there is none. The validate
+  dry run reads it so its PortableDoc ratchet (R4.5) agrees with the write.
+  """
+  def stored_paper_blocks(slug, dataset, scope_attrs) when is_binary(slug),
+    do:
+      @paper_type
+      |> get_existing_blocks_doc_for_write(slug, dataset, scope_attrs)
+      |> existing_paper_blocks()
 
   # The stored blocks of the existing paper row (the prev side of the upsert
   # ratchet), or [] for a brand-new paper / an HTML-only row.

@@ -112,7 +112,12 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                              # SUCCESS (SchemaController, task-415c5c02fad8a3c7:
                              # a key Barkpark never reads), never an error
                              # envelope
-                             "schema_unknown_key"
+                             "schema_unknown_key",
+                             # a `warnings[].code` on the Bulldocs dry run's 200
+                             # SUCCESS (BulldocsIngestController, report-only
+                             # PortableDoc ratchet, task-181daed9e4e0c4be), never
+                             # an error envelope
+                             "portable_doc_invalid"
                            ])
 
   defp emitted_codes do
