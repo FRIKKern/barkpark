@@ -45,7 +45,7 @@ const surface = {
   declared: {
     canvas: {
       member: ["blocks", "focusSelection", "state"],
-      attribute: ["block-cards", "editable"],
+      attribute: ["block-cards", "editable", "x-data-mode"],
       "ancestor attribute": ["data-theme"],
       "DOM attribute": ["data-bp-id", "target"],
       event: ["bp-canvas-ops"],
@@ -110,10 +110,16 @@ test("undeclared contract names fail with the name and file:line, one per kind",
   fails(run({ "page.css": `.x { color: var(--paper-ink); }` }), "undeclared css token --paper-ink at page.css:1");
 });
 
-test("look-alikes are not uses: a comparison, an assignment, the tag name, a comment", () => {
+test("look-alikes are not uses: a comparison, an assignment, the tag name, a comment (in a file whose name holds .ex too), a dataset key of a non-data attribute", () => {
   assert.deepEqual(run(line(`if (options.target == null) { const target = 1; }`)), []);
   assert.deepEqual(run({ "page.heex": `<bp-paper-editor></bp-paper-editor>` }), []);
   assert.deepEqual(run(line(`// canvas.state() and canvas._editor\n/* canvas._mount() */`)), []);
+  assert.deepEqual(run({ "widget.exports.js": `// canvas.state()` }), []);
+  assert.deepEqual(run(line(`el.dataset.xDataMode;`)), []);
+});
+
+test("the first use reported is the first file by name, whatever order the folder lists", () => {
+  fails(run({ "z.js": `canvas.state();`, "b.js": `canvas.state();` }), "undeclared canvas member state at b.js:1");
 });
 
 test("a */* inside a line comment does not hide the code after it", () => {
@@ -149,6 +155,7 @@ test("a host's own names are not reach-ins: a private member it defines, an unpr
 
 test("internals lets a listed reach-in through, and fails when it lies or has no reason", () => {
   const files = line(`canvas._editor.commands;`);
+  assert.deepEqual(run({}, { internals: undefined }), []);
   assert.deepEqual(run(files, { internals: [{ names: ["_editor"], why: "title row" }] }), []);
   fails(run(files, { internals: [{ names: ["_editor"] }] }), "internals entry without a why: _editor");
   fails(run({}, { internals: [{ names: ["_editor"], why: "gone" }] }), "internals lists _editor but no source touches it");
@@ -160,9 +167,10 @@ test("uses fails on a name the contract lacks or no source uses", () => {
   fails(run({}, { uses: { canvas: { ...baseProfile.uses.canvas, attribute: ["editable"] } } }), "listed but no source uses it: canvas attribute editable");
 });
 
-test("notEditor silences a contract name used for something else, and fails when it lies or has no reason", () => {
+test("notEditor silences a contract name used for something else (an attribute in CSS too), and fails when it lies or has no reason", () => {
   const files = line(`const s = history.state;`);
   assert.deepEqual(run(files, { notEditor: [{ names: ["state"], why: "history.state" }] }), []);
+  assert.deepEqual(run({ "page.css": `a[target] { color: red; }` }, { notEditor: [{ names: ["target"], why: "link targets" }] }), []);
   fails(run(files, { notEditor: [{ names: ["state"] }] }), "notEditor entry without a why: state");
   fails(run({}, { notEditor: [{ names: ["state"], why: "?" }] }), "notEditor lists state but no source uses it");
   fails(run(files, { notEditor: [{ names: ["status"], why: "?" }] }), "notEditor lists status, which is not a contract name");

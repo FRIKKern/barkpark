@@ -446,7 +446,7 @@ class BpPaperEditor extends HTMLElement {
   // no longer focuses [contenteditable] inside the element.
   focusSelection() {
     const view = this._editor?.view;
-    if (!view || view.isDestroyed) return false;
+    if (!view) return false;
     view.focus();
     return view.hasFocus();
   }
