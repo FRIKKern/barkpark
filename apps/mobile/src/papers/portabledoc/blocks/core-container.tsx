@@ -151,11 +151,14 @@ function tocItems(raw: unknown): TocItem[] {
   return out
 }
 
+function tocDepth(depth: unknown): number {
+  return typeof depth === 'number' && Number.isInteger(depth) && depth > 0 ? Math.min(depth, 6) : 2
+}
+
 const toc: Render = (b, ctx, key) => {
   const items = tocItems(b.items)
   if (items.length === 0) return null
-  const depthRaw = num(b.depth)
-  const depth = depthRaw !== undefined ? depthRaw : 2
+  const depth = tocDepth(b.depth)
   const numbered = b.numbered === true
   const minLevel = Math.min(...items.map((i) => i.level))
   const counters = new Array(depth + 1).fill(0) as number[]

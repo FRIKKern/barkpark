@@ -23,6 +23,41 @@ export function loadPack(dir = PACK) {
   return { stamp: packStamp(dir), cases };
 }
 
+export function loadLimits(dir = PACK) {
+  const limitsDir = join(dir, "limits");
+  const edges = readdirSync(limitsDir)
+    .filter((f) => f.endsWith(".golden.json"))
+    .sort()
+    .map((f) => JSON.parse(readFileSync(join(limitsDir, f), "utf8")));
+  const { docs } = JSON.parse(readFileSync(join(dir, "limit-docs.json"), "utf8"));
+  return { edges, docs: docs.map(({ name, doc }) => ({ name, doc: expandLimitDoc(doc) })) };
+}
+
+const entriesMap = (v, f) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, f(x)]));
+
+const fill = (v, inner) =>
+  v === "$hole" ? inner : Array.isArray(v) ? v.map((x) => fill(x, inner)) : v && typeof v === "object" ? entriesMap(v, (x) => fill(x, inner)) : v;
+
+export function expandLimitDoc(v) {
+  if (Array.isArray(v)) return v.map(expandLimitDoc);
+  if (!v || typeof v !== "object") return v;
+  if ("$repeat" in v) {
+    const x = expandLimitDoc(v.of);
+    return Array.from({ length: v.$repeat }, () => x);
+  }
+  if ("$text" in v) return v.$text.repeat(v.times);
+  if ("$concat" in v) {
+    const parts = v.$concat.map(expandLimitDoc);
+    return typeof parts[0] === "string" ? parts.join("") : parts.flat(1);
+  }
+  if ("$nest" in v) {
+    let node = expandLimitDoc(v.leaf);
+    for (let i = 0; i < v.$nest; i++) node = fill(v.wrap, node);
+    return node;
+  }
+  return entriesMap(v, expandLimitDoc);
+}
+
 export function packStamp(dir = PACK) {
   return createHash("sha256").update(readFileSync(join(dir, "stamp.json"))).digest("hex");
 }

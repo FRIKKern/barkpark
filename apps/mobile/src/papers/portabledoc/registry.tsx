@@ -28,7 +28,8 @@ import { sheetRenderers } from './blocks/sheet'
 import { tableRenderers } from './blocks/table'
 import { taskboardRenderers } from './blocks/taskboard'
 import { CHAT_RENDERERS } from './chat'
-import { isMap, str, type Block } from './model'
+import { chromeWord } from './chrome'
+import { capDepth, isMap, str, type Block } from './model'
 import { isDegradeCard, type BlockCtx, type Render } from './register'
 
 /* ── unknown-block degrade — honest, labeled, logged ONCE per type ──────────── */
@@ -131,6 +132,12 @@ export const DEGRADE_ONLY: ReadonlySet<string> = new Set(
  * degrade to the labeled fallback — never a throw, never a silent hole
  * (registry.ts renderBlock twin). */
 export function renderBlockNative(block: unknown, ctx: BlockCtx, key: number): ReactNode {
+  if (ctx.depthChecked) return renderChecked(block, ctx, key)
+  const capped = capDepth(block, chromeWord(ctx.locale, 'Nested too deep to show'))
+  return renderChecked(capped, { ...ctx, depthChecked: true }, key)
+}
+
+function renderChecked(block: unknown, ctx: BlockCtx, key: number): ReactNode {
   if (!isMap(block)) return unknownBlock('invalid block', ctx, key)
   const type = str(block.type)
   const render = BLOCK_RENDERERS[type]

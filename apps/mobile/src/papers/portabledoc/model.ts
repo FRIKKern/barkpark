@@ -128,3 +128,38 @@ export function markAttr(m: unknown, key: string): string {
   const v = (attrs && attrs[key]) ?? m[key]
   return typeof v === 'string' ? v : ''
 }
+
+export const MAX_DEPTH = 100
+
+const LIST_TYPES = ['list', 'ordered-list', 'numbered_list', 'bulletList', 'bullet_list', 'bulleted-list', 'bulleted_list']
+
+const BLOCK_SLOTS = new Map<string, string[][]>([
+  ['section', [['blocks', '*']]],
+  ['columns', [['columns', '*', '*']]],
+  ['terminal', [['blocks', '*'], ['children', '*']]],
+  ['expandable', [['blocks', '*'], ['children', '*']]],
+  ['tabs', [['tabs', '*', 'blocks', '*']]],
+  ['steps', [['steps', '*', 'blocks', '*'], ['steps', '*', 'children', '*']]],
+  ['figure', [['child']]],
+  ['card', [['slots', 'action', '*'], ['slots', 'body', '*'], ['slots', 'media', '*'], ['slots', 'title', '*']]],
+  ['callout', [['slots', 'body', '*']]],
+  ['note', [['slots', 'body', '*'], ['slots', 'label', '*'], ['slots', 'lead', '*']]],
+  ['stage', [['slots', 'detail', '*'], ['slots', 'kind', '*'], ['slots', 'title', '*']]],
+  ...LIST_TYPES.map((type): [string, string[][]] => [type, [['items', '*', 'children', '*']]]),
+])
+
+export function capDepth(block: unknown, notice: string, depth = 0): unknown {
+  if (!isMap(block)) return block
+  if (depth >= MAX_DEPTH) return { type: 'paragraph', text: notice }
+  return (BLOCK_SLOTS.get(str(block.type)) ?? []).reduce<unknown>(
+    (capped, path) => updatePath(capped, path, (child) => capDepth(child, notice, depth + 1)),
+    block,
+  )
+}
+
+function updatePath(value: unknown, path: string[], fun: (v: unknown) => unknown): unknown {
+  const [head, ...rest] = path
+  if (head === undefined) return fun(value)
+  if (head === '*') return Array.isArray(value) ? value.map((v) => updatePath(v, rest, fun)) : value
+  return isMap(value) && head in value ? { ...value, [head]: updatePath(value[head], rest, fun) } : value
+}

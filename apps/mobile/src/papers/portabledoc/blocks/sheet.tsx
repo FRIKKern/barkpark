@@ -207,7 +207,7 @@ function bodyCell(
  * one are DIFFERENT facts, so they say different things: react renders an
  * invisible empty <table> for both, which is the one thing a reader cannot
  * act on. */
-function sheetState(label: string, ctx: BlockCtx, key: number): ReactNode {
+export function sheetState(label: string, ctx: BlockCtx, key: number): ReactNode {
   return (
     <Text
       key={key}

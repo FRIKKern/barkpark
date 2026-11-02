@@ -38,6 +38,15 @@ export const PACK: string
 export const MISSING: unique symbol
 export const UNCHECKED: unique symbol
 export function loadPack(dir?: string): { stamp: string; cases: GoldenCase[] }
+export interface LimitEdge {
+  name: string
+  input: Record<string, unknown>
+  expectedHtml: string
+  shape: unknown[]
+}
+
+export function loadLimits(dir?: string): { edges: LimitEdge[]; docs: { name: string; doc: Record<string, unknown> }[] }
+export function expandLimitDoc(doc: unknown): unknown
 export function packStamp(dir?: string): string
 export function shapeOf(nodes: ArrayLike<unknown>): ShapeNode[]
 export function diffShapes(actual: ShapeNode[], golden: ShapeNode[]): string[]

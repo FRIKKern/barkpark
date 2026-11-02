@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -35,10 +36,10 @@ func (barChartRenderer) Render(b Block, ctx RenderCtx) []string {
 		label string
 		value float64
 	}, 0, len(bars))
-	max := attrFloat(b.Attrs, "max")
+	max := attrNumeric(b.Attrs, "max")
 	inferMax := max <= 0
 	for _, bar := range bars {
-		v := attrFloat(bar, "value")
+		v := attrNumeric(bar, "value")
 		if inferMax && v > max {
 			max = v
 		}
@@ -115,8 +116,8 @@ func (barChartRenderer) Render(b Block, ctx RenderCtx) []string {
 // formatBarValue prints a bar's value without a trailing ".0" for whole
 // numbers (mirrors toStr's float64 tolerance for JSON-decoded numbers).
 func formatBarValue(v float64) string {
-	if v == float64(int64(v)) {
-		return strconv.FormatInt(int64(v), 10)
+	if v == math.Trunc(v) {
+		return strconv.FormatFloat(v, 'f', 0, 64)
 	}
 	return strconv.FormatFloat(v, 'g', -1, 64)
 }

@@ -21,8 +21,14 @@
 // it ships from BOTH the client entry (`index.ts`) and the RSC-safe entry
 // (`server.ts`) and drops into a Server Component untouched (charter D2/D3).
 
-import { type Block, type InlineObjectRenderer, withInlineObjects } from './inline'
+import {
+  type Block,
+  type InlineObjectRenderer,
+  withInlineObjects,
+  withTooDeepNotice,
+} from './inline'
 import { renderBlocks } from './blocks/registry'
+import { capDepth } from './blocks/depth'
 import { type ChromeStrings, type RenderCtx, makeCtx } from './blocks/chrome'
 
 export type { Block, Inline, InlineObjectRenderer } from './inline'
@@ -77,7 +83,9 @@ export function renderPortableDocument(
 ): string {
   const ctx = makeCtx(options.strings)
   ctx.blocks = options.blocks
+  const notice = ctx.t('Nested too deep to show')
+  const blocks = Array.isArray(value) ? value.map((b) => capDepth(b, notice)) : []
   return withInlineObjects(options.inlineObjects, () =>
-    renderBlocks(Array.isArray(value) ? value : [], ctx),
+    withTooDeepNotice(notice, () => renderBlocks(blocks, ctx)),
   )
 }

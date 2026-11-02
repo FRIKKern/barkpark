@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
       css/code-tokens.css              the served code-token rules
       ops/<verb>.json                  before + op + after for each of the 9 edit verbs
       nested-list-carriers.json        the nested-list carrier fixture, verbatim
+      limit-docs.json, limits/         the shared render limits (GenPdParity.Limits)
       canvas-forbidden-classes.json    reader literals the canvas JS must never write
       i18n/paper-canvas.<locale>.json  StudioLocale.component_strings(:paper_canvas)
 
@@ -33,6 +34,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   alias BarkparkWeb.StudioLocale
   alias Mix.Tasks.Barkpark.PortableDoc.GenGoldenEmail
   alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity
+  alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Limits
 
   @api Path.expand("../../..", __DIR__)
   @dir Path.join(@api, "priv/portable_doc/goldens")
@@ -42,8 +44,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   @inputs Enum.sort([
             "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
             "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+            "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.limits.ex",
             "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.pack.ex",
-            "test/support/fixtures/nested-list-carriers.json"
+            "test/support/fixtures/nested-list-carriers.json",
+            "test/support/fixtures/portable-doc-limits.json"
           ])
 
   @themes ~w(light dark)
@@ -146,12 +150,16 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
         Enum.map(op_cases(), fn {verb, before, op} ->
           {"ops/#{verb}.json", json(op_fixture(before, op))}
         end),
+        Enum.map(Limits.goldens(), fn {path, golden} ->
+          {path, Jason.encode!(ordered(golden)) <> "\n"}
+        end),
         [
           {"fragments.json", json(fragments())},
           {"email.html", GenGoldenEmail.render()},
           {"css/paper-surface.css", served_css("paper-surface.css")},
           {"css/code-tokens.css", served_css("code-tokens.css")},
           {"nested-list-carriers.json", File.read!(@carriers)},
+          {"limit-docs.json", File.read!(Limits.fixture())},
           {"canvas-forbidden-classes.json", json(canvas_forbidden())}
         ]
       ])

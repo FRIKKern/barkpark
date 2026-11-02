@@ -308,8 +308,7 @@ const toc: Emit = (b) => {
   const items = tocItems(b.items)
   if (items.length === 0) return ''
 
-  const depthNum = num(b.depth)
-  const depth = depthNum != null && depthNum > 0 ? depthNum : 2
+  const depth = Number.isInteger(b.depth) && (b.depth as number) > 0 ? Math.min(b.depth as number, 6) : 2
   const numbered = b.numbered === true
   const minLevel = Math.min(...items.map((i) => i.level))
   const counters = new Array(depth + 1).fill(0)

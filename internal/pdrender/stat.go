@@ -158,7 +158,7 @@ func parseSpark(m map[string]any) []float64 {
 	}
 	out := make([]float64, 0, len(raw))
 	for _, el := range raw {
-		if f, ok := toFloat(el); ok {
+		if f, ok := numeric(el); ok {
 			out = append(out, f)
 		}
 	}
@@ -242,10 +242,10 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 
 	// Mode branch: `max` present and positive → bullet-bar; else big-number.
 	if _, hasMax := m["max"]; hasMax {
-		maxVal := attrFloat(m, "max")
+		maxVal := attrNumeric(m, "max")
 		if maxVal > 0 {
 			proportion := 0.0
-			if v, ok := toFloat(m["value"]); ok {
+			if v, ok := numeric(m["value"]); ok {
 				proportion = v / maxVal
 			}
 			// Reserve room for the trailing value label (plus dim denom/unit, if

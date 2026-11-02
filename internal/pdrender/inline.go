@@ -21,7 +21,7 @@ import (
 func (ir InlineRenderer) Inline(nodes []any, ctx RenderCtx) string {
 	var b strings.Builder
 	for _, n := range unwrapBlockWrappers(nodes) {
-		b.WriteString(ir.node(n, ctx, false))
+		b.WriteString(ir.node(n, ctx, false, 0))
 	}
 	return b.String()
 }
@@ -93,7 +93,10 @@ func blockWrapperContent(n any) []any {
 // node renders a single inline node. insideLink tracks whether we are already
 // within a link so a nested link can flatten (the model keeps links
 // non-recursive).
-func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
+func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool, depth int) string {
+	if depth >= maxNestDepth {
+		return nestedTooDeep
+	}
 	switch v := n.(type) {
 	case string:
 		// Bare string → a text node with no marks.
@@ -112,18 +115,18 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 		// The TUI has no wrapper element, so the children render in place.
 		var b strings.Builder
 		for _, child := range v {
-			b.WriteString(ir.node(child, ctx, insideLink))
+			b.WriteString(ir.node(child, ctx, insideLink, depth+1))
 		}
 		return b.String()
 	case map[string]any:
-		return ir.typed(v, ctx, insideLink)
+		return ir.typed(v, ctx, insideLink, depth)
 	default:
 		return ""
 	}
 }
 
 // typed dispatches a map-shaped inline node by its "type" discriminator.
-func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool) string {
+func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool, depth int) string {
 	switch attrStr(n, "type") {
 	case "text":
 		marks := attrSlice(n, "marks")
@@ -139,22 +142,25 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		if len(marks) == 0 {
 			return value
 		}
+		if depth+len(marks) >= maxNestDepth {
+			return nestedTooDeep
+		}
 		return ir.applyMarks(value, marks, ctx, insideLink)
 
 	case "strong":
-		inner := ir.children(n, ctx, insideLink)
+		inner := ir.children(n, ctx, insideLink, depth+1)
 		return ir.theme.markStyle("bold").Render(inner)
 
 	case "em":
-		inner := ir.children(n, ctx, insideLink)
+		inner := ir.children(n, ctx, insideLink, depth+1)
 		return ir.theme.markStyle("italic").Render(inner)
 
 	case "underline":
-		inner := ir.children(n, ctx, insideLink)
+		inner := ir.children(n, ctx, insideLink, depth+1)
 		return ir.theme.markStyle("underline").Render(inner)
 
 	case "strikethrough", "strike", "s":
-		inner := ir.children(n, ctx, insideLink)
+		inner := ir.children(n, ctx, insideLink, depth+1)
 		return ir.theme.markStyle("strikethrough").Render(inner)
 
 	case "code":
@@ -166,7 +172,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 
 	case "link":
 		// Children are rendered with insideLink=true so a nested link flattens.
-		inner := ir.children(n, ctx, true)
+		inner := ir.children(n, ctx, true, depth+1)
 		if insideLink {
 			// Nested link → plain (already-styled) text, no new link chrome.
 			return inner
@@ -181,7 +187,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		if ctx.TaskResolver != nil {
 			if id := wikilinkResolveID(n); id != "" {
 				if chip := ctx.TaskResolver(id); chip != nil {
-					return ir.renderTaskChip(chip, n, ctx, insideLink)
+					return ir.renderTaskChip(chip, n, ctx, insideLink, depth)
 				}
 			}
 		}
@@ -189,7 +195,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		// style, with the ordered fallback alias → children → target (wire §4
 		// amended — a chip-shaped node ships alias + children:[], which
 		// previously rendered as an empty string).
-		return ir.theme.Link.Render(ir.wikilinkLabel(n, ctx, insideLink))
+		return ir.theme.Link.Render(ir.wikilinkLabel(n, ctx, insideLink, depth))
 
 	case "blockref":
 		// Leaf — the "^anchor" pointer token, dimmed.
@@ -216,7 +222,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		// show its text, else its type name. Twins: inline.ex PdInlineObject and
 		// inline.tsx's default branch.
 		if _, ok := n["children"]; ok {
-			return ir.children(n, ctx, insideLink)
+			return ir.children(n, ctx, insideLink, depth+1)
 		}
 		// A block-shaped node ("content" key) is not an inline object.
 		if _, block := n["content"]; block {
@@ -248,10 +254,10 @@ func inlineObjectText(n map[string]any) string {
 }
 
 // children renders an inline node's "children" array in order.
-func (ir InlineRenderer) children(n map[string]any, ctx RenderCtx, insideLink bool) string {
+func (ir InlineRenderer) children(n map[string]any, ctx RenderCtx, insideLink bool, depth int) string {
 	var b strings.Builder
 	for _, c := range attrSlice(n, "children") {
-		b.WriteString(ir.node(c, ctx, insideLink))
+		b.WriteString(ir.node(c, ctx, insideLink, depth))
 	}
 	return b.String()
 }
@@ -295,11 +301,11 @@ func wikilinkResolveID(n map[string]any) string {
 // children → target (wire §4 amended). Alias/target are resolver-adjacent
 // strings and pass through sanitizeText; children render through the normal
 // node path (text leaves sanitize themselves).
-func (ir InlineRenderer) wikilinkLabel(n map[string]any, ctx RenderCtx, insideLink bool) string {
+func (ir InlineRenderer) wikilinkLabel(n map[string]any, ctx RenderCtx, insideLink bool, depth int) string {
 	if alias := sanitizeText(strings.TrimSpace(attrStr(n, "alias"))); alias != "" {
 		return alias
 	}
-	if inner := ir.children(n, ctx, insideLink); inner != "" {
+	if inner := ir.children(n, ctx, insideLink, depth+1); inner != "" {
 		return inner
 	}
 	return sanitizeText(strings.TrimSpace(attrStr(n, "target")))
@@ -312,7 +318,7 @@ func (ir InlineRenderer) wikilinkLabel(n map[string]any, ctx RenderCtx, insideLi
 // omits the m/n segment (never "0/0"). ALL resolver-returned strings pass
 // through sanitizeText. Never raises, never blanks — an empty title falls back
 // to the alias/children/target label.
-func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx RenderCtx, insideLink bool) string {
+func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx RenderCtx, insideLink bool, depth int) string {
 	status := sanitizeText(strings.TrimSpace(chip.Status))
 
 	segs := make([]string, 0, 3)
@@ -330,7 +336,7 @@ func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx Re
 
 	title := sanitizeText(strings.TrimSpace(chip.Title))
 	if title == "" {
-		title = ir.wikilinkLabel(n, ctx, insideLink)
+		title = ir.wikilinkLabel(n, ctx, insideLink, depth)
 	}
 
 	chipText := "[" + strings.Join(segs, " · ") + "]"

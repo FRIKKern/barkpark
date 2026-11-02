@@ -32,6 +32,7 @@ export interface BlockCtx extends InlineCtx {
   /** The workspace's language (BCP-47, e.g. 'nb-NO'): the renderer's own words
    * follow it through `chromeWord` (./chrome). Absent means English. */
   locale?: string
+  depthChecked?: boolean
 }
 
 /** One block renderer. Exported so the chat.tsx sibling types its own six

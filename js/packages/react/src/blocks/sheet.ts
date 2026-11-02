@@ -11,6 +11,7 @@
 
 import { type Block, escapeHtml, safeUrl, isMap } from '../inline'
 import type { RenderCtx } from './chrome'
+import { coverSpans, spanAttr, type Span } from './spans'
 
 type Emit = (block: Block, ctx: RenderCtx) => string
 
@@ -76,46 +77,19 @@ function colWidthStyle(colWidths: unknown, idx: number): string {
   return typeof w === 'number' && Number.isInteger(w) && w > 0 ? `width:${w}px;` : ''
 }
 
-interface MergeLookup {
-  anchors: Map<string, [number, number]>
-  covered: Set<string>
-}
-
-function mergeLookup(merges: unknown): MergeLookup {
-  const anchors = new Map<string, [number, number]>()
-  const covered = new Set<string>()
-  if (!Array.isArray(merges)) return { anchors, covered }
-  for (const m of merges) {
-    if (!Array.isArray(m) || m.length !== 4) continue
-    const [r, c, rs, cs] = m
-    if (
-      Number.isInteger(r) &&
-      Number.isInteger(c) &&
-      Number.isInteger(rs) &&
-      Number.isInteger(cs) &&
-      r >= 0 &&
-      c >= 0 &&
-      rs >= 1 &&
-      cs >= 1 &&
-      rs * cs <= MERGE_AREA_CAP
-    ) {
-      for (let rr = r; rr < r + rs; rr++) {
-        for (let cc = c; cc < c + cs; cc++) {
-          if (rr === r && cc === c) continue
-          covered.add(`${rr},${cc}`)
-        }
-      }
-      anchors.set(`${r},${c}`, [rs, cs])
-    }
-  }
-  return { anchors, covered }
-}
-
-function spanAttr(anchors: Map<string, [number, number]>, r: number, c: number): string {
-  const hit = anchors.get(`${r},${c}`)
-  if (!hit) return ''
-  const [rs, cs] = hit
-  return (cs > 1 ? ` colspan="${cs}"` : '') + (rs > 1 ? ` rowspan="${rs}"` : '')
+function sheetMerges(merges: unknown): Span[] {
+  if (!Array.isArray(merges)) return []
+  return merges.filter(
+    (m): m is Span =>
+      Array.isArray(m) &&
+      m.length === 4 &&
+      m.every(Number.isInteger) &&
+      m[0] >= 0 &&
+      m[1] >= 0 &&
+      m[2] >= 1 &&
+      m[3] >= 1 &&
+      m[2] * m[3] <= MERGE_AREA_CAP,
+  )
 }
 
 function cellStyleFragment(styles: unknown, r: number, c: number): string {
@@ -168,7 +142,11 @@ const sheet: Emit = (b, ctx) => {
     : []
   const colWidths = snap.col_widths
   const styles = snap.styles
-  const { anchors, covered } = mergeLookup(snap.merges)
+  const { anchors, covered } = coverSpans(
+    sheetMerges(snap.merges),
+    body.map((row) => row.length),
+    false,
+  )
 
   const thead =
     head.length === 0

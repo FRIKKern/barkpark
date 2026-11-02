@@ -71,16 +71,16 @@ func loadGoldenPack(dir string) (string, []goldenCase, error) {
 	return hex.EncodeToString(sum[:]), cases, nil
 }
 
+type shapeNode struct {
+	Text     *string     `json:"text"`
+	Children []shapeNode `json:"children"`
+}
+
 func goldenWords(shape []json.RawMessage) []string {
 	var leaves []string
-	var walk func([]json.RawMessage)
-	walk = func(nodes []json.RawMessage) {
-		for _, raw := range nodes {
-			var n struct {
-				Text     *string           `json:"text"`
-				Children []json.RawMessage `json:"children"`
-			}
-			_ = json.Unmarshal(raw, &n)
+	var walk func([]shapeNode)
+	walk = func(nodes []shapeNode) {
+		for _, n := range nodes {
 			if n.Text != nil {
 				leaves = append(leaves, *n.Text)
 			} else {
@@ -88,7 +88,11 @@ func goldenWords(shape []json.RawMessage) []string {
 			}
 		}
 	}
-	walk(shape)
+	for _, raw := range shape {
+		var n shapeNode
+		_ = json.Unmarshal(raw, &n)
+		walk([]shapeNode{n})
+	}
 	return conformanceWords(strings.Join(leaves, " "))
 }
 

@@ -194,7 +194,7 @@ func parseChartPoints(v any) []float64 {
 	}
 	out := make([]float64, 0, len(raw))
 	for _, el := range raw {
-		if f, ok := toFloat(el); ok {
+		if f, ok := numeric(el); ok {
 			out = append(out, f)
 		}
 	}
@@ -258,7 +258,7 @@ func applyAxes(m map[string]any, series []chartSeries, dataMin, dataMax float64)
 	if min >= max {
 		min, max = dataMin, dataMax
 		if min >= max {
-			max = min + 1
+			max = min + math.Max(1, math.Abs(min)*1e-9)
 		}
 	}
 	return min, max
@@ -271,10 +271,10 @@ func chartAxesPins(m map[string]any) (min float64, hasMin bool, max float64, has
 	if !ok {
 		return 0, false, 0, false
 	}
-	if v, ok := toFloat(axes["min"]); ok {
+	if v, ok := numeric(axes["min"]); ok {
 		min, hasMin = v, true
 	}
-	if v, ok := toFloat(axes["max"]); ok {
+	if v, ok := numeric(axes["max"]); ok {
 		max, hasMax = v, true
 	}
 	return

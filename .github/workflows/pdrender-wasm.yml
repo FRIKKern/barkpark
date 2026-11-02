@@ -107,3 +107,6 @@ jobs:
 
       - name: PortableDoc conformance (wasm blob vs the golden pack)
         run: node cmd/pdrender-wasm/conformance.mjs
+
+      - name: PortableDoc render limits (wasm blob vs the limit pack)
+        run: node cmd/pdrender-wasm/limits.mjs

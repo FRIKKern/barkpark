@@ -20,7 +20,7 @@ func (er expandableRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	w := clampWidth(ctx.Width)
 	bold := ctx.Theme.Body.Bold(true)
-	const indent = "  "
+	indent := nestIndent(w)
 	childCtx := ctx.Deeper().WithWidth(clampWidth(w - len(indent)))
 
 	var out []string

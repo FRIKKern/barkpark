@@ -509,7 +509,8 @@ function isBlockWrapper(n: unknown): n is Record<string, unknown> {
 }
 
 /** Render one inline node to an HTML string. */
-export function renderInline(node: Inline): string {
+export function renderInline(node: Inline, depth = 0, insideLink = false): string {
+  if (depth >= MAX_DEPTH) return escapeHtml(tooDeepNotice)
   if (typeof node === 'string') return escapeHtml(node)
   if (typeof node === 'number') return escapeHtml(String(node))
   // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
@@ -518,7 +519,7 @@ export function renderInline(node: Inline): string {
   // is_list(l)` wraps the composed children in a PdText, which walk.ex `text/3`
   // emits as a bare `<span>`; js returned '' and the text VANISHED. 59 live
   // paragraphs + 18 list blocks carry the shape.
-  if (Array.isArray(node)) return `<span>${renderInlines(node)}</span>`
+  if (Array.isArray(node)) return `<span>${renderInlines(node, depth + 1)}</span>`
   if (!isMap(node)) return ''
 
   switch (str(node.type)) {
@@ -528,22 +529,23 @@ export function renderInline(node: Inline): string {
       // spellings as content, so the renderers must agree or such a paper reads
       // as structure with zero prose. Twins: inline.ex compose_inline,
       // pdrender inline.go attrStrFirst(n, "value", "text").
-      const value = escapeHtml(textLeafValue(node))
       const marks = asList(node.marks)
+      if (depth + marks.length >= MAX_DEPTH) return escapeHtml(tooDeepNotice)
+      const value = escapeHtml(textLeafValue(node))
       return marks.length ? applyMarks(value, marks) : value
     }
     case 'strong':
     case 'bold':
-      return `<span style="font-weight:bold">${renderInlineChildren(node.children)}</span>`
+      return `<span style="font-weight:bold">${renderInlineChildren(node.children, depth + 1, insideLink)}</span>`
     case 'em':
     case 'italic':
-      return `<span style="font-style:italic">${renderInlineChildren(node.children)}</span>`
+      return `<span style="font-style:italic">${renderInlineChildren(node.children, depth + 1, insideLink)}</span>`
     case 'underline':
-      return `<span style="text-decoration:underline">${renderInlineChildren(node.children)}</span>`
+      return `<span style="text-decoration:underline">${renderInlineChildren(node.children, depth + 1, insideLink)}</span>`
     case 'strike':
     case 's':
     case 'strikethrough':
-      return `<span style="text-decoration:line-through">${renderInlineChildren(node.children)}</span>`
+      return `<span style="text-decoration:line-through">${renderInlineChildren(node.children, depth + 1, insideLink)}</span>`
     case 'code':
       // Swept sibling of the block-level content[] defect, at inline level: an
       // inline code node authored with `children` inline nodes (rather than a
@@ -553,11 +555,13 @@ export function renderInline(node: Inline): string {
       // `<code>` body stays escaped plain text exactly as the `value` path.
       return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
-      return `<a href="${safeUrl(str(node.href))}">${renderInlineChildren(node.children)}</a>`
+      return insideLink
+        ? `<span>${renderInlineChildren(node.children, depth + 1, true)}</span>`
+        : `<a href="${safeUrl(str(node.href))}">${renderInlineChildren(node.children, depth + 1, true)}</a>`
     case 'wikilink': {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
-      const kids = renderInlineChildren(node.children)
+      const kids = renderInlineChildren(node.children, depth + 1, insideLink)
       const label =
         alias !== '' ? escapeHtml(alias) : kids !== '' ? kids : escapeHtml(str(node.target))
       return `<span data-wikilink="${target}" class="bp-wikilink bp-wikilink--unresolved">${label}</span>`
@@ -585,7 +589,7 @@ export function renderInline(node: Inline): string {
       // inline.ex PdInlineObject + walk.ex inline_object/2.
       const kids = asList(node.children)
       // A block-shaped node (`content` key) is not an inline object.
-      if (kids.length || 'content' in node) return renderInlineChildren(kids)
+      if (kids.length || 'content' in node) return renderInlineChildren(kids, depth + 1, insideLink)
       const type = str(node.type)
       const own = inlineObjectRenderers?.[type]
       if (own) {
@@ -612,6 +616,20 @@ export type InlineObjectRenderer = (node: Record<string, unknown>) => string
 // withInlineObjects). Module state is safe here: a render never yields.
 let inlineObjectRenderers: Record<string, InlineObjectRenderer> | undefined
 
+export const MAX_DEPTH = 100
+
+let tooDeepNotice = 'Nested too deep to show'
+
+export function withTooDeepNotice<T>(notice: string, fn: () => T): T {
+  const prev = tooDeepNotice
+  tooDeepNotice = notice
+  try {
+    return fn()
+  } finally {
+    tooDeepNotice = prev
+  }
+}
+
 /** Run `fn` with `renderers` registered for inline objects, then restore. */
 export function withInlineObjects<T>(
   renderers: Record<string, InlineObjectRenderer> | undefined,
@@ -630,12 +648,12 @@ export function withInlineObjects<T>(
  * HTML string. This is the twin of `compose_inline_children/1` and
  * `InlineRenderer.Inline`, and the ONE place the block-wrapper unwrap above
  * applies. */
-export function renderInlines(nodes: unknown): string {
+export function renderInlines(nodes: unknown, depth = 0): string {
   if (typeof nodes === 'string') return escapeHtml(nodes)
   if (typeof nodes === 'number') return escapeHtml(String(nodes))
   if (!Array.isArray(nodes)) return ''
   return unwrapBlockWrappers(nodes)
-    .map((n) => renderInline(n as Inline))
+    .map((n) => renderInline(n as Inline, depth))
     .join('')
 }
 
@@ -644,11 +662,11 @@ export function renderInlines(nodes: unknown): string {
  * wrapper — the Elixir twin maps `compose_inline/2` over those children rather
  * than routing them back through `compose_inline_children/1`, and this leg is
  * bounded exactly as that one. */
-function renderInlineChildren(nodes: unknown): string {
+function renderInlineChildren(nodes: unknown, depth: number, insideLink: boolean): string {
   if (typeof nodes === 'string') return escapeHtml(nodes)
   if (typeof nodes === 'number') return escapeHtml(String(nodes))
   if (!Array.isArray(nodes)) return ''
-  return nodes.map((n) => renderInline(n as Inline)).join('')
+  return nodes.map((n) => renderInline(n as Inline, depth, insideLink)).join('')
 }
 
 /** Render a TABLE cell's inline content the way `walk.ex` does — one PdText per
@@ -664,8 +682,10 @@ export function renderCell(cell: unknown): string {
       if (typeof n === 'number') return `<span>${escapeHtml(String(n))}</span>`
       if (!isMap(n)) return ''
       if (str(n.type) === 'text') {
+        const marks = asList(n.marks)
+        if (marks.length >= MAX_DEPTH) return `<span>${escapeHtml(tooDeepNotice)}</span>`
         const value = escapeHtml(textLeafValue(n))
-        const inner = asList(n.marks).length ? applyMarks(value, asList(n.marks)) : value
+        const inner = marks.length ? applyMarks(value, marks) : value
         // A mark that produced a wrapper element (bold/italic/code/link/…) is the
         // PdText span itself; only genuinely-bare text needs the base `<span>`.
         return inner.startsWith('<') ? inner : `<span>${inner}</span>`

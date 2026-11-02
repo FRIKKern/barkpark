@@ -20,7 +20,7 @@ func (sr stepsRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	w := clampWidth(ctx.Width)
-	const indent = "  "
+	indent := nestIndent(w)
 	childCtx := ctx.Deeper().WithWidth(clampWidth(w - len(indent)))
 	bold := ctx.Theme.Body.Bold(true)
 

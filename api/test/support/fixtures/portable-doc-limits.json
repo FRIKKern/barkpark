@@ -1,0 +1,1589 @@
+{
+  "_comment": "PortableDoc render limits. `docs`: worst-case docs every reader renders under its time bound. `edges`: small docs at and past each limit; gen_pd_parity renders each into goldens/limits/. Macros: {\"$repeat\": n, \"of\": x} is a list of n copies; {\"$text\": s, \"times\": n} is s repeated; {\"$concat\": [...]} joins lists or strings; {\"$nest\": n, \"wrap\": w, \"leaf\": x} puts x in w's \"$hole\" n times.",
+  "docs": [
+    {
+      "name": "toc",
+      "doc": {
+        "type": "toc",
+        "depth": 10000000,
+        "numbered": true,
+        "items": [
+          {
+            "text": "h1",
+            "level": 1,
+            "anchor": "a1"
+          },
+          {
+            "text": "h2",
+            "level": 2,
+            "anchor": "a2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "sheet",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b"
+            ]
+          ],
+          "merges": {
+            "$repeat": 400,
+            "of": [
+              0,
+              0,
+              100,
+              100
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "table",
+      "doc": {
+        "type": "table",
+        "rows": {
+          "$concat": [
+            [
+              {
+                "$repeat": 1000,
+                "of": []
+              }
+            ],
+            {
+              "$repeat": 999,
+              "of": [
+                []
+              ]
+            }
+          ]
+        },
+        "spans": {
+          "$repeat": 5,
+          "of": {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1000,
+            "colspan": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "heatmap",
+      "doc": {
+        "type": "heatmap",
+        "cells": {
+          "$concat": [
+            [
+              {
+                "$repeat": 2000,
+                "of": 1
+              }
+            ],
+            {
+              "$repeat": 1999,
+              "of": [
+                1
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "route",
+      "doc": {
+        "type": "route",
+        "polyline": {
+          "$concat": [
+            {
+              "$text": "~",
+              "times": 60000
+            },
+            "???"
+          ]
+        }
+      }
+    },
+    {
+      "name": "record table",
+      "doc": {
+        "type": "table",
+        "columns": {
+          "$repeat": 1000,
+          "of": {
+            "key": "k"
+          }
+        },
+        "rows": {
+          "$repeat": 1000,
+          "of": {}
+        }
+      }
+    },
+    {
+      "name": "tool diff",
+      "doc": {
+        "type": "chat-tool-diff",
+        "input": {
+          "file_path": "f",
+          "old_string": {
+            "$text": "a\n",
+            "times": 2000
+          },
+          "new_string": {
+            "$text": "b\n",
+            "times": 2000
+          }
+        }
+      }
+    },
+    {
+      "name": "multi edit",
+      "doc": {
+        "type": "chat-tool-diff",
+        "input": {
+          "file_path": "f",
+          "edits": {
+            "$repeat": 5,
+            "of": {
+              "old_string": {
+                "$text": "a\n",
+                "times": 2000
+              },
+              "new_string": {
+                "$text": "b\n",
+                "times": 2000
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "nested columns",
+      "doc": {
+        "$nest": 4000,
+        "wrap": {
+          "type": "columns",
+          "columns": [
+            [
+              "$hole"
+            ]
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "nested section",
+      "doc": {
+        "$nest": 4000,
+        "wrap": {
+          "type": "section",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "big number",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "nested strong",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 20000,
+            "wrap": {
+              "type": "strong",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "many merges",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": {
+            "$repeat": 50,
+            "of": {
+              "$repeat": 50,
+              "of": "a"
+            }
+          },
+          "merges": {
+            "$repeat": 20000,
+            "of": [
+              0,
+              0,
+              50,
+              50
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "many spans",
+      "doc": {
+        "type": "table",
+        "rows": {
+          "$repeat": 50,
+          "of": {
+            "$repeat": 50,
+            "of": []
+          }
+        },
+        "spans": {
+          "$repeat": 20000,
+          "of": {
+            "row": 0,
+            "col": 0,
+            "rowspan": 50,
+            "colspan": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "many marks",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "x",
+            "marks": {
+              "$repeat": 40000,
+              "of": "strong"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat line",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1e+16,
+              1e+16
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat line high",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1e+100,
+              1e+100
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "name": "record table past the cap",
+      "doc": {
+        "type": "table",
+        "columns": {
+          "$repeat": 101,
+          "of": {
+            "key": "k"
+          }
+        },
+        "rows": {
+          "$repeat": 100,
+          "of": {
+            "k": "r"
+          }
+        }
+      }
+    },
+    {
+      "name": "toc past six levels",
+      "doc": {
+        "type": "toc",
+        "depth": 10000000,
+        "numbered": true,
+        "items": [
+          {
+            "text": "h1",
+            "level": 1,
+            "anchor": "a1"
+          },
+          {
+            "text": "h2",
+            "level": 2,
+            "anchor": "a2"
+          },
+          {
+            "text": "h3",
+            "level": 3,
+            "anchor": "a3"
+          },
+          {
+            "text": "h4",
+            "level": 4,
+            "anchor": "a4"
+          },
+          {
+            "text": "h5",
+            "level": 5,
+            "anchor": "a5"
+          },
+          {
+            "text": "h6",
+            "level": 6,
+            "anchor": "a6"
+          },
+          {
+            "text": "h7",
+            "level": 7,
+            "anchor": "a7"
+          },
+          {
+            "text": "h8",
+            "level": 8,
+            "anchor": "a8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "heatmap padding within the stored cells",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            1,
+            2,
+            3,
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "name": "heatmap padding past the stored cells",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "name": "heatmap calendar padding past the stored cells",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ],
+        "mode": "calendar"
+      }
+    },
+    {
+      "name": "heatmap matrix padding past the stored cells",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ],
+        "values": true
+      }
+    },
+    {
+      "name": "heatmap number past what a float holds",
+      "doc": {
+        "type": "heatmap",
+        "cells": [
+          [
+            10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "chart number past the range",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1,
+              1e+101,
+              3,
+              -1e+101,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "bar chart number past the range",
+      "doc": {
+        "type": "bar-chart",
+        "bars": [
+          {
+            "label": "a",
+            "value": 1e+101
+          },
+          {
+            "label": "b",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart number below the range",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1,
+              1e-101,
+              3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "bar chart value with many digits",
+      "doc": {
+        "type": "bar-chart",
+        "values": true,
+        "bars": [
+          {
+            "label": "a",
+            "value": 1e+22
+          },
+          {
+            "label": "b",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat line at a large value",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1e+16,
+              1e+16
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat line at the largest value",
+      "doc": {
+        "type": "chart",
+        "series": [
+          {
+            "label": "s",
+            "points": [
+              1e+100,
+              1e+100
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route value of seven groups",
+      "doc": {
+        "type": "route",
+        "polyline": "_p~iF~ps|U_ulLnnqC~~~~~~??"
+      }
+    },
+    {
+      "name": "route value past seven groups",
+      "doc": {
+        "type": "route",
+        "polyline": "_p~iF~ps|U_ulLnnqC~~~~~~~??"
+      }
+    },
+    {
+      "name": "sheet merges on a ragged sheet",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b",
+              "c",
+              "d"
+            ],
+            [
+              "e"
+            ],
+            [
+              "f"
+            ],
+            [
+              "g"
+            ]
+          ],
+          "merges": [
+            [
+              0,
+              0,
+              4,
+              2
+            ],
+            [
+              0,
+              2,
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "sheet merge past the cells left",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b"
+            ],
+            [
+              "c",
+              "d"
+            ]
+          ],
+          "merges": [
+            [
+              0,
+              0,
+              2,
+              2
+            ],
+            [
+              0,
+              0,
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "sheet merge with no stored origin",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b"
+            ],
+            [
+              "c"
+            ],
+            [
+              "d",
+              "e"
+            ],
+            [
+              "f",
+              "g"
+            ]
+          ],
+          "merges": [
+            [
+              1,
+              1,
+              3,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "sheet merge down empty rows",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b"
+            ],
+            [],
+            [],
+            []
+          ],
+          "merges": [
+            [
+              0,
+              0,
+              4,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "sheet merges sharing an origin",
+      "doc": {
+        "type": "sheet",
+        "snapshot": {
+          "rows": [
+            [
+              "a",
+              "b",
+              "c",
+              "d"
+            ],
+            [
+              "e",
+              "f",
+              "g",
+              "h"
+            ]
+          ],
+          "merges": [
+            [
+              0,
+              0,
+              1,
+              2
+            ],
+            [
+              0,
+              0,
+              1,
+              3
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "table span on a ragged table",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "c"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "d"
+              }
+            ]
+          ]
+        ],
+        "spans": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 2,
+            "colspan": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "table spans past the first misfit",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "c"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "d"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "e"
+              }
+            ]
+          ]
+        ],
+        "spans": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 3
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 3
+          },
+          {
+            "row": 0,
+            "col": 3,
+            "rowspan": 1,
+            "colspan": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "table span with no stored origin",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "c"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "d"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "e"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "f"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "g"
+              }
+            ]
+          ]
+        ],
+        "spans": [
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 3,
+            "colspan": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "table cell marks one level above the depth limit",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "leaf",
+                "marks": {
+                  "$repeat": 99,
+                  "of": "strong"
+                }
+              }
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table cell marks at the depth limit",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "leaf",
+                "marks": {
+                  "$repeat": 100,
+                  "of": "strong"
+                }
+              }
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table span down empty rows",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          ],
+          [],
+          [],
+          []
+        ],
+        "spans": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 4,
+            "colspan": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "table spans sharing an origin",
+      "doc": {
+        "type": "table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "c"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "d"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "e"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "f"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "g"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "h"
+              }
+            ]
+          ]
+        ],
+        "spans": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 2
+          },
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "section one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "section",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "section at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "section",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "columns one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "columns",
+          "columns": [
+            [
+              "$hole"
+            ]
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "columns at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "columns",
+          "columns": [
+            [
+              "$hole"
+            ]
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "terminal one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "terminal",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "terminal at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "terminal",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "tabs one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "tabs",
+          "tabs": [
+            {
+              "label": "t",
+              "blocks": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "tabs at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "tabs",
+          "tabs": [
+            {
+              "label": "t",
+              "blocks": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "figure one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "figure",
+          "child": "$hole"
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "figure at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "figure",
+          "child": "$hole"
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "card one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "card",
+          "slots": {
+            "body": [
+              "$hole"
+            ]
+          }
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "card at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "card",
+          "slots": {
+            "body": [
+              "$hole"
+            ]
+          }
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "expandable one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "expandable",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "expandable at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "expandable",
+          "blocks": [
+            "$hole"
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "steps one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "steps",
+          "steps": [
+            {
+              "title": "s",
+              "blocks": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "steps at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "steps",
+          "steps": [
+            {
+              "title": "s",
+              "blocks": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "paragraph",
+          "text": "leaf"
+        }
+      }
+    },
+    {
+      "name": "list one level above the depth limit",
+      "doc": {
+        "$nest": 99,
+        "wrap": {
+          "type": "list",
+          "items": [
+            {
+              "children": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "list",
+          "items": [
+            "leaf"
+          ]
+        }
+      }
+    },
+    {
+      "name": "list at the depth limit",
+      "doc": {
+        "$nest": 100,
+        "wrap": {
+          "type": "list",
+          "items": [
+            {
+              "children": [
+                "$hole"
+              ]
+            }
+          ]
+        },
+        "leaf": {
+          "type": "list",
+          "items": [
+            "leaf"
+          ]
+        }
+      }
+    },
+    {
+      "name": "strong one level above the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 99,
+            "wrap": {
+              "type": "strong",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "strong at the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 100,
+            "wrap": {
+              "type": "strong",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "em one level above the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 99,
+            "wrap": {
+              "type": "em",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "em at the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 100,
+            "wrap": {
+              "type": "em",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "link one level above the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 99,
+            "wrap": {
+              "type": "link",
+              "href": "https://example.com",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "link at the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 100,
+            "wrap": {
+              "type": "link",
+              "href": "https://example.com",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "marks one level above the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "leaf",
+            "marks": {
+              "$repeat": 99,
+              "of": "strong"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "marks at the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "leaf",
+            "marks": {
+              "$repeat": 100,
+              "of": "strong"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bare lists at the depth limit",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 100,
+            "wrap": [
+              "$hole"
+            ],
+            "leaf": "leaf"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -85,7 +85,7 @@ func TestRemovingTheUnwrapBlanksTheWrapperCases(t *testing.T) {
 		}
 		var b []byte
 		for _, n := range c.Nodes { // the pre-fix walk: no unwrap
-			b = append(b, ir.node(n, RenderCtx{}, false)...)
+			b = append(b, ir.node(n, RenderCtx{}, false, 0)...)
 		}
 		if ansi.Strip(string(b)) != c.Text {
 			blanked++

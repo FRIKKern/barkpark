@@ -20,8 +20,9 @@
 // reads that file rather than re-typing it.
 
 import type { RenderCtx } from './chrome'
-import { type Block, asList, isMap, renderCell } from '../inline'
+import { type Block, asList, escapeHtml, isMap, renderCell } from '../inline'
 import { sparkSvg } from './dataviz'
+import { coverSpans, spanAttr, type Span } from './spans'
 
 type Emit = (block: Block, ctx: RenderCtx) => string
 
@@ -30,7 +31,38 @@ const COL_MOD: Record<string, string> = { num: '--num', delta: '--num', spark: '
 // [down, flat, up], indexed by Math.sign(n) + 1.
 const DELTA_GLYPHS = ['\u25bc', '-', '\u25b2']
 
-const table: Emit = (b) => {
+const TABLE_CELL_CAP = 10_000
+
+function recordKeyCount(columns: unknown[]): number {
+  if (!columns.length || !columns.every(isMap)) return 0
+  const maps = columns as Array<Record<string, unknown>>
+  if (maps.every((column) => typeof column.text === 'string')) return 0
+  return maps.every((column) => typeof column.key === 'string' && column.key !== '') ? maps.length : 0
+}
+
+function spanInt(v: unknown, min: number): number | null {
+  const n = typeof v === 'string' && /^[+-]?\d+$/.test(v) ? Number(v) : v
+  return Number.isInteger(n) && (n as number) >= min ? (n as number) : null
+}
+
+function tableSpans(spans: unknown, nRows: number, nCols: number): Span[] {
+  if (!Array.isArray(spans)) return []
+  return spans.filter(isMap).flatMap((s): Span[] => {
+    const r = spanInt(s.row, 0)
+    const c = spanInt(s.col, 0)
+    const cs = spanInt(s.colspan, 1) ?? 1
+    const rs = spanInt(s.rowspan, 1) ?? 1
+    if (r === null || c === null || r >= nRows || c >= nCols || (cs <= 1 && rs <= 1)) return []
+    const clipped: Span = [r, c, Math.min(rs, nRows - r), Math.min(cs, nCols - c)]
+    return clipped[2] > 1 || clipped[3] > 1 ? [clipped] : []
+  })
+}
+
+const rowCount = (rows: unknown) => (Array.isArray(rows) ? rows.length : rows == null ? 0 : 1)
+
+const table: Emit = (b, ctx) => {
+  if (rowCount(b.rows) * recordKeyCount(asList(b.columns)) > TABLE_CELL_CAP)
+    return `<span>${escapeHtml(ctx.t('Table too large to show'))}</span>`
   const types = asList(b.cols).map((c) => (isMap(c) ? String(c.type ?? '') : ''))
   const cls = (base: string, i: number) => {
     const m = COL_MOD[types[i] ?? '']
@@ -69,15 +101,22 @@ const table: Emit = (b) => {
           )
           .join('')}</tr></thead>`
 
-  const tbody = body
-    .map((row) => {
-      const cells = rowCells(row)
-        .map(
-          (cell, i) =>
-            `<td class="${cls('bp-table__td', i)}">${typedCell(cell, types[i] ?? '')}</td>`,
+  const rows = body.map(rowCells)
+  const { anchors, covered } = coverSpans(
+    tableSpans(b.spans, rows.length, rows[0]?.length ?? 0),
+    rows.map((row) => row.length),
+    true,
+  )
+  const tbody = rows
+    .map((cells, r) => {
+      const tds = cells
+        .map((cell, i) =>
+          covered.has(`${r},${i}`)
+            ? ''
+            : `<td class="${cls('bp-table__td', i)}"${spanAttr(anchors, r, i)}>${typedCell(cell, types[i] ?? '')}</td>`,
         )
         .join('')
-      return `<tr>${cells}</tr>`
+      return `<tr>${tds}</tr>`
     })
     .join('')
 

@@ -191,7 +191,7 @@ func (terminalRenderer) terminalChildren(b Block) []Block {
 	if raw == nil {
 		return nil
 	}
-	return decodeAnyBlocks(raw, 0)
+	return decodeAnyBlocks(raw)
 }
 
 // attrTruthy mirrors the reader's `live in [true, "true", "live"]` truthiness:

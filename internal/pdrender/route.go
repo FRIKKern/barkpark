@@ -110,6 +110,8 @@ func (routeRenderer) Render(b Block, ctx RenderCtx) []string {
 	return out
 }
 
+const polylineMaxShift = 30
+
 // decodePolyline is the Google encoded-polyline decoder (ASCII 63–126,
 // 5-decimal fixed point, zig-zag deltas) — the Go twin of
 // DataViz.decode_polyline/1, with the same contract: a malformed tail drops at
@@ -123,7 +125,7 @@ func decodePolyline(s string) [][2]float64 {
 		shift, acc := 0, 0
 		for i < len(s) {
 			c := int(s[i])
-			if c < 63 || c > 126 {
+			if c < 63 || c > 126 || shift > polylineMaxShift {
 				return 0, false
 			}
 			i++
