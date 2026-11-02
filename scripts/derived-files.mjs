@@ -15,6 +15,33 @@ const RENDER = [
   "api/lib/barkpark/portable_doc/render/**",
   "api/lib/barkpark/portable_doc/slots.ex",
 ];
+// What a rendered block reads outside render/: the HTML-producing goldens move
+// with these too.
+const RENDERED = [
+  ...RENDER,
+  "api/lib/barkpark/portable_doc/{constraints,master_ref,task_resolver,text_diff,tiers,validate}.ex",
+  "api/lib/barkpark/chat/tool_rows.ex",
+  "api/lib/barkpark/plugins/sheets.ex",
+  "api/lib/barkpark/plugins/sheets/**",
+];
+// The golden pack's pages wrap the blocks in the Bulldocs reader layout, one
+// page per locale Tenancy knows.
+const READER_PAGE = [
+  "api/lib/barkpark_web/layouts.ex",
+  "api/lib/barkpark_web/layouts/bulldocs*.heex",
+  "api/lib/barkpark_web/components/share_meta.ex",
+  "api/lib/barkpark/tenancy.ex",
+];
+// The Studio paper editor the flag-off snapshot slices, and what it renders.
+const PAPER_EDITOR_VIEW = [
+  "api/lib/barkpark_web/live/studio/**",
+  "api/lib/barkpark_web/components/field_inputs.ex",
+  "api/lib/barkpark_web/components/studio_components/**",
+  "api/lib/barkpark_web/studio/save_status.ex",
+  "api/lib/barkpark_web/paper_canvas_lease.ex",
+  "api/lib/barkpark/portable_doc/{projection,table_editing}.ex",
+  "api/lib/barkpark/content/papers/template.ex",
+];
 const GETTEXT = ["api/priv/gettext/**/*.po", "api/lib/barkpark_web/studio_locale.ex"];
 const SNAPSHOT = "test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs:182";
 const PACK_GATES = [
@@ -84,7 +111,7 @@ export const STEPS = [
   {
     name: "email-golden",
     inputs: [
-      ...RENDER,
+      ...RENDERED,
       "api/test/support/portable_doc_parity_fixture.ex",
       "api/lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     ],
@@ -109,8 +136,9 @@ export const STEPS = [
     name: "chat-goldens",
     inputs: [
       "api/lib/barkpark/portable_doc/render/components.ex",
+      "api/lib/barkpark/chat/tool_rows.ex",
+      "api/lib/barkpark/portable_doc/text_diff.ex",
       "api/lib/barkpark/portable_doc/from_markdown.ex",
-      "api/lib/barkpark/portable_doc/from_markdown/**",
       "api/lib/barkpark/studio_chat/**",
       "api/lib/mix/tasks/barkpark.chat.gen_golden_*.ex",
     ],
@@ -124,13 +152,13 @@ export const STEPS = [
   {
     name: "golden-pack",
     inputs: [
-      ...RENDER,
+      ...RENDERED,
+      ...READER_PAGE,
       ...GETTEXT,
       "api/assets/paper-surface/**",
       "api/lib/barkpark/plugins/bulldocs/**",
       "api/lib/barkpark/content/papers/block_ops.ex",
       "api/lib/barkpark/portable_doc/patch.ex",
-      "api/lib/barkpark/portable_doc/patch/**",
       "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity*.ex",
       "api/lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
       "api/test/support/fixtures/nested-list-carriers.json",
@@ -143,7 +171,7 @@ export const STEPS = [
     ],
   },
   conformance("elixir", {
-    inputs: [...RENDER, "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex"],
+    inputs: [...RENDERED, "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex"],
     check: `${MIX} barkpark.portable_doc.conformance`,
     write: `cd api && CONFORMANCE_WRITE=1 MIX_ENV=test mix barkpark.portable_doc.conformance`,
     gate: "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex",
@@ -198,7 +226,7 @@ export const STEPS = [
   },
   {
     name: "studio-snapshot",
-    inputs: [...GETTEXT, ...RENDER, "api/lib/barkpark_web/live/studio/**"],
+    inputs: [...GETTEXT, ...RENDERED, ...PAPER_EDITOR_VIEW],
     after: ["design-emit"],
     check: `${MIX} test ${SNAPSHOT}`,
     write: `cd api && rm -f test/barkpark_web/live/studio/snapshots/paper_editor_flag_off.html && (MIX_ENV=test mix test ${SNAPSHOT} >/dev/null 2>&1; true) && MIX_ENV=test mix test ${SNAPSHOT}`,
@@ -206,7 +234,7 @@ export const STEPS = [
   },
   {
     name: "reader-style-goldens",
-    inputs: [...RENDER, ...GETTEXT, "api/lib/barkpark/plugins/bulldocs/**"],
+    inputs: [...RENDERED, ...GETTEXT, "api/lib/barkpark/plugins/bulldocs/**"],
     after: ["design-emit"],
     check: `${MIX} test test/barkpark_web/live/bulldocs_reader_style_default_test.exs`,
     write: `cd api && REGEN_READER_STYLE_GOLDENS=1 MIX_ENV=test mix test test/barkpark_web/live/bulldocs_reader_style_default_test.exs`,
@@ -224,6 +252,7 @@ export const STEPS = [
 
 export function globToRegExp(glob) {
   let re = "";
+  let inBraces = false;
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === "*" && glob[i + 1] === "*") {
@@ -231,7 +260,10 @@ export function globToRegExp(glob) {
       re += slash ? "(?:.*/)?" : ".*";
       i += slash ? 2 : 1;
     } else if (c === "*") re += "[^/]*";
-    else re += c.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    else if (c === "{") (inBraces = true), (re += "(?:");
+    else if (c === "}") (inBraces = false), (re += ")");
+    else if (c === "," && inBraces) re += "|";
+    else re += c.replace(/[.+?^$()|[\]\\]/g, "\\$&");
   }
   return new RegExp(`^${re}$`);
 }

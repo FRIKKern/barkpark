@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -60,7 +61,37 @@ test("a design token edit reaches everything built from the tokens", () => {
 });
 
 test("a change outside every input reaches nothing", () => {
-  assert.deepEqual(names(["README.md", "api/lib/barkpark/tenancy.ex"]), []);
+  assert.deepEqual(names(["README.md", "api/lib/barkpark/accounts.ex"]), []);
+});
+
+test("globs: {a,b} picks one of the names", () => {
+  const re = globToRegExp("api/lib/x/{one,two}.ex");
+  assert.ok(re.test("api/lib/x/one.ex") && re.test("api/lib/x/two.ex"));
+  assert.ok(!re.test("api/lib/x/three.ex") && !re.test("api/lib/x/{one,two}.ex"));
+});
+
+test("a Bulldocs layout edit reaches the pack's pages and all six reports, not the editor", () => {
+  for (const path of ["api/lib/barkpark_web/layouts/bulldocs.html.heex", "api/lib/barkpark_web/layouts.ex", "api/lib/barkpark_web/components/share_meta.ex", "api/lib/barkpark/tenancy.ex"]) {
+    const hit = names([path]);
+    for (const n of ["golden-pack", ...CONFORMANCE]) assert.ok(hit.includes(n), `${path}: ${n}`);
+    assert.ok(!hit.includes("paper-editor") && !hit.includes("studio-snapshot"), path);
+  }
+});
+
+test("a module a rendered block reads outside render/ reaches every HTML golden", () => {
+  for (const path of ["api/lib/barkpark/portable_doc/text_diff.ex", "api/lib/barkpark/chat/tool_rows.ex", "api/lib/barkpark/plugins/sheets/core.ex"]) {
+    const hit = names([path]);
+    for (const n of ["golden-pack", "email-golden", "conformance-elixir", "studio-snapshot", "reader-style-goldens"]) assert.ok(hit.includes(n), `${path}: ${n}`);
+  }
+});
+
+test("a Studio component the editor renders reaches the snapshot only", () => {
+  assert.deepEqual(names(["api/lib/barkpark_web/components/field_inputs.ex"]), ["studio-snapshot"]);
+});
+
+test("every input glob matches a file in the tree", () => {
+  const files = execSync("git ls-files", { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 }).split("\n");
+  for (const s of STEPS) for (const g of s.inputs) assert.ok(files.some((f) => globToRegExp(g).test(f)), `${s.name}: ${g}`);
 });
 
 test("every step comes after the steps it waits for", () => {
