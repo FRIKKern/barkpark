@@ -11,7 +11,7 @@ const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8"
 const noGit = () => assert.fail("this build needs no git");
 const leftovers = () => readdirSync(tmpdir()).filter((name) => name.startsWith("tg-build-")).length;
 const before = leftovers();
-for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(130));
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit({ SIGINT: 130, SIGTERM: 143 }[signal]));
 
 assert.deepEqual(pickBuild("1.19", { repo: REPO, git: noGit }), { label: "contract 1.19", sha: "648bfeeb44" }, "a contract is the tree R2.2 recorded it from");
 assert.throws(() => pickBuild("1.99", { repo: REPO, git: noGit }), /^Error: no recorded tree for contract 1\.99; recorded: 1\.14, 1\.15, 1\.16, 1\.17, 1\.18, 1\.19$/);
@@ -71,7 +71,7 @@ try {
 assert.equal(leftovers(), before, "a failed build leaves no tree behind");
 
 const holder = `const { makeBuild } = await import(${JSON.stringify(new URL("./builds.mjs", import.meta.url).href)});
-for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(130));
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit({ SIGINT: 130, SIGTERM: 143 }[signal]));
 makeBuild({ label: "HEAD", sha: ${JSON.stringify(head)} }, { repo: ${JSON.stringify(REPO)} });
 console.log("built");
 setInterval(() => {}, 1000);`;

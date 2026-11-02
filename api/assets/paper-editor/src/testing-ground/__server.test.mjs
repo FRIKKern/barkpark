@@ -98,7 +98,7 @@ writeFileSync(join(bin, "npm"), "#!/bin/sh\necho \"fake npm: no build\"\nexit 1\
 chmodSync(join(bin, "npm"), 0o755);
 process.on("exit", () => rmSync(bin, { recursive: true, force: true }));
 const children = new Set();
-for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => { for (const child of children) child.kill(); process.exit(130); });
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => { for (const child of children) child.kill(); process.exit({ SIGINT: 130, SIGTERM: 143 }[signal]); });
 
 function cli(args, env = {}) {
   const child = spawn(process.execPath, [SERVER, ...args], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BARKPARK_TG_TOKEN: "", ...env } });
@@ -152,6 +152,7 @@ try {
 } finally {
   quiet.stop();
 }
+assert.equal((await quiet.exited).code, 143, "npm run try exits 128 + 15 on SIGTERM");
 
 const fixed = cli(["--no-open"]);
 try {

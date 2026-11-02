@@ -163,6 +163,20 @@ await raced.idle();
 assert.deepEqual(JSON.stringify(raced.saved).match(/Home by nine\.|Fog\./g), ["Fog.", "Home by nine."], "two windows with a batch in flight at once both keep their edit: folds run one after another");
 assert.deepEqual(raced.refusals, []);
 
+const surfaced = [];
+process.on("unhandledRejection", (error) => surfaced.push(error.message));
+let calls = 0;
+const touchy = createFakeHost({ fold: lagging, blocks: trip, onChange: () => { if (++calls === 1) throw new Error("onChange broke"); } });
+const lone = stubCanvas();
+touchy.attach(lone);
+send(lone, edit, 1);
+send(lone, [{ op: "patch-block", id: "p-day", patch: { content: [{ type: "text", value: "Fog." }] } }], 2);
+await touchy.idle().catch(() => {});
+await new Promise((r) => setTimeout(r, 20));
+assert.deepEqual(JSON.stringify(touchy.saved).match(/Home by nine\.|Fog\./g), ["Fog.", "Home by nine."], "a throwing onChange does not stall the batches after it");
+assert.equal(touchy.busy, false);
+assert.deepEqual(surfaced, ["onChange broke"], "and its error still surfaces");
+
 assert.deepEqual(blockDiff(trip, [trip[0], { ...trip[2], content: [] }, { id: "p-new", type: "paragraph" }]), ["~ p-after (paragraph)", "+ p-new (paragraph)", "- s-day (section)"]);
 assert.deepEqual(blockDiff(trip, structuredClone(trip)), []);
 assert.equal(tallyWords({ tries: 8, hits: 5 }), "↓ skipped the empty line in 3 of 8 tries.");
