@@ -94,6 +94,7 @@ import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
 import { exactClipboardSerializer, exactSliceFromClipboard, sliceWithFreshIds } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
+import { CaretBeforeKeys } from "./caret-before-keys.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
 // no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
@@ -1174,6 +1175,9 @@ class BpPaperCanvas extends HTMLElement {
         // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
         // replace wholesale. See ./resting-selection.js.
         RestingSelection,
+        // A key acts on the caret a click just put down, not the one before it. See
+        // ./caret-before-keys.js.
+        CaretBeforeKeys,
         // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
         // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
