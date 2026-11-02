@@ -773,8 +773,9 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # distrust-vacuous-green: the mounted-shape assertions only protect parity if
   # they actually RUN in CI. The paper-editor `npm test` chain (elixir.yml's asset
   # job / the paper-editor mirror job) runs the mjs suite; pin that
-  # __section_parity.test.mjs EXISTS and is APPENDED to that chain, so it cannot be
-  # written yet silently unhooked.
+  # __section_parity.test.mjs EXISTS and that npm test runs it: the runner
+  # (scripts/test-chain.mjs) runs every src/**/__*.test.mjs, so it cannot be written
+  # yet silently unhooked.
   test "§6b __section_parity.test.mjs exists and is wired into the paper-editor npm test chain" do
     base = "../../../../assets/paper-editor" |> Path.expand(__DIR__)
     test_path = Path.join(base, "src/__section_parity.test.mjs")
@@ -792,8 +793,13 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
     package_json = Path.join(base, "package.json") |> File.read!()
 
-    assert String.contains?(package_json, "__section_parity.test.mjs"),
-           "__section_parity.test.mjs is not in package.json's test chain — the real gate never runs in CI"
+    assert String.contains?(package_json, ~s("test": "node scripts/test-chain.mjs")),
+           "npm test no longer runs scripts/test-chain.mjs, which runs every src/**/__*.test.mjs — the real gate never runs in CI"
+
+    runner = Path.join(base, "scripts/test-chain.mjs") |> File.read!()
+
+    assert String.contains?(runner, ~S"/(^|\/)__[^/]*\.test\.mjs$/"),
+           "scripts/test-chain.mjs no longer runs every src/**/__*.test.mjs — __section_parity.test.mjs may be unhooked"
   end
 
   # ── §7 STAGE-WIDGET exemption (DESIGN 1 — the editable pipeline-node twin) ────
