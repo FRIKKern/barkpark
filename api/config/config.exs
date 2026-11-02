@@ -418,6 +418,10 @@ config :barkpark, Oban,
        # Window: `:paper_access_log_ttl_days` below. Core (not a plugin), so it
        # lives in this static crontab and rides the `default` queue.
        {"15 4 * * *", Barkpark.Content.Workers.PaperAccessSweeper},
+       # task-29663e18251a8b4c — deletes CANCELLED scheduled publishes older than
+       # `:scheduled_publish_cancelled_ttl_days` (below); never a pending, paused or
+       # finished one. A no-op tick while that is nil (the default).
+       {"20 4 * * *", Barkpark.Content.Workers.ScheduledPublishSweeper},
        # Owner ruling #33 — redacts copies of DELETED content older than the
        # window in mutation_events.document / webhook_deliveries.payload_snapshot.
        # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
@@ -558,6 +562,12 @@ config :barkpark, :task_lease_ttl_seconds, 2700
 # the job args rather than overriding this. Runtime override:
 # BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS (see runtime.exs).
 config :barkpark, :paper_access_log_ttl_days, 90
+
+# task-29663e18251a8b4c — days a cancelled scheduled publish is kept before the
+# daily ScheduledPublishSweeper deletes it. nil (the default) = never purge: how
+# long Archived keeps history is the owner's call, so turning it on is explicit.
+# Only `cancelled` rows are ever deleted.
+config :barkpark, :scheduled_publish_cancelled_ttl_days, nil
 
 # Owner ruling #33 (2026-10-03) — retention for copies of DELETED content in
 # `mutation_events.document` and media `webhook_deliveries.payload_snapshot`:
