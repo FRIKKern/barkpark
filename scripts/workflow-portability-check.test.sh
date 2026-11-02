@@ -15,12 +15,12 @@
 # input is not yet an instrument.
 #
 # The cases that matter most:
-#   case 2   the syntax mutant a `node --check` clause reports GREEN
+#   case 2   the syntax mutant `node --check` cannot tell from a clean engine
 #   case 6   a reference that EXISTS on this disk but is untracked — the
 #            working-tree oracle's false pass, and the whole reason clause G is
 #            the deliberate inverse of cloud-path-escape-check.sh's D31 rule
 #   case 7   an empty corpus is RED, not "all 0 engines pass"
-#   case 12  node --check's vacuity, re-derived from scratch rather than quoted
+#   case 12  node --check's blindness, re-derived from scratch rather than quoted
 #   case 18  a runner with no node REDS instead of skipping
 
 set -euo pipefail
@@ -116,19 +116,27 @@ else
 fi
 echo
 
-# ── case 2: a syntax error AFTER meta — the mutant node --check calls green ─
-echo "case 2 [P]: a syntax error after meta is RED (node --check reports it green)"
+# ── case 2: a syntax error AFTER meta, the mutant node --check cannot see ──
+echo "case 2 [P]: a syntax error after meta is RED (node --check cannot tell it from a clean engine)"
 root="$(newrepo)"
 write_engine "$root/.claude/workflows/fixture.workflow.js"
 printf 'const broken = ;\n' >>"$root/.claude/workflows/fixture.workflow.js"
 run_on "$root"
 if [ "$rc" -eq 1 ]; then ok "exit 1 on a file that does not compile"; else no "expected 1, got $rc: $out"; fi
 if has "$out" "workflow-portability-check\[P\]"; then ok "names clause P"; else no "clause P not named: $out"; fi
-# The same bytes, through the clause this one replaces:
-if node --check "$root/.claude/workflows/fixture.workflow.js" >/dev/null 2>&1; then
-  ok "and \`node --check\` calls those same bytes GREEN — which is why clause P is an async-body compile"
+# The same bytes, through the clause this one replaces. `node --check` must give
+# the clean engine and the mutant the SAME answer, or it could replace clause P.
+# Node before 24.21.0 calls both green.  Node 24.21.0 and later parse the file
+# as a module, so they call both red with "Illegal return statement".  Either
+# way `node --check` cannot tell them apart.  If a node ever does, this reds.
+clean="$TMPROOT/case2-clean.workflow.js"
+write_engine "$clean"
+if node --check "$clean" >/dev/null 2>&1; then rc_clean=0; else rc_clean=1; fi
+if node --check "$root/.claude/workflows/fixture.workflow.js" >/dev/null 2>&1; then rc_mut=0; else rc_mut=1; fi
+if [ "$rc_clean" -eq "$rc_mut" ]; then
+  ok "and \`node --check\` gives the clean engine and those same bytes one answer (rc $rc_mut on $(node --version)), which is why clause P is an async-body compile"
 else
-  no "node --check REJECTED the mutant: the header's vacuity rationale needs re-deriving on this node"
+  no "node --check told the clean engine (rc $rc_clean) from the mutant (rc $rc_mut) on $(node --version): the header's clause-P rationale needs re-deriving on this node"
 fi
 echo
 
@@ -273,21 +281,33 @@ if [ "$rc" -eq 1 ]; then ok "exit 1"; else no "expected 1, got $rc: $out"; fi
 if has "$out" "over the harness cap of 524288"; then ok "names the cap"; else no "no [S] message: $out"; fi
 echo
 
-# ── case 12: node --check's vacuity, RE-DERIVED (never quoted) ─────────────
-# If a future node ever fixes this, THIS case fails and the header's rationale
-# gets re-derived — rather than the comment quietly becoming a lie.
-echo "case 12 [P rationale]: \`node --check\` is vacuous on any export-bearing file"
+# ── case 12: node --check's blindness, RE-DERIVED (never quoted) ───────────
+# If a future node ever tells the engine dialect from a broken file, THIS case
+# fails and the header's rationale gets re-derived, rather than the comment
+# quietly becoming a lie.  The probe pair is a VALID engine-dialect file (export,
+# top-level await, top-level return) and the same file with a syntax error.
+# Node before 24.21.0 calls both green.  Node 24.21.0 and later call both red.
+echo "case 12 [P rationale]: \`node --check\` cannot tell a valid engine-dialect file from a broken one"
 probe="$TMPROOT/probe"
 mkdir -p "$probe"
 printf 'const broken = ;\n' >"$probe/plain.js"
-printf 'export const x = 1;\nconst broken = ;\n' >"$probe/exported.js"
+printf 'export const x = 1;\nawait Promise.resolve(x);\nreturn x;\n' >"$probe/dialect.js"
+printf 'export const x = 1;\nawait Promise.resolve(x);\nconst broken = ;\nreturn x;\n' >"$probe/exported.js"
 if node --check "$probe/plain.js" >/dev/null 2>&1; then rc_plain=0; else rc_plain=1; fi
+if node --check "$probe/dialect.js" >/dev/null 2>&1; then rc_dialect=0; else rc_dialect=1; fi
 if node --check "$probe/exported.js" >/dev/null 2>&1; then rc_export=0; else rc_export=1; fi
 if [ "$rc_plain" -eq 1 ]; then ok "node --check REJECTS the plain CJS syntax error"; else no "node --check accepted a real syntax error"; fi
-if [ "$rc_export" -eq 0 ]; then
-  ok "node --check ACCEPTS the identical error once an \`export\` precedes it — vacuous, exactly as the header states"
+if [ "$rc_dialect" -eq "$rc_export" ]; then
+  ok "node --check gives the valid dialect file and the broken one the same answer (rc $rc_export on $(node --version)), exactly as the header states"
 else
-  no "node --check now rejects the export-bearing mutant: re-derive the header's clause-P rationale"
+  no "node --check told the valid dialect file (rc $rc_dialect) from the broken one (rc $rc_export) on $(node --version): re-derive the header's clause-P rationale"
+fi
+# The async-body mirror accepts the valid dialect file, so its red below is a
+# verdict on the syntax error and not on the dialect:
+if node -e 'const fs=require("fs");new (Object.getPrototypeOf(async function(){}).constructor)(fs.readFileSync(process.argv[1],"utf8").replace(/^export\s+/m,""))' "$probe/dialect.js" >/dev/null 2>&1; then
+  ok "the async-body mirror accepts the valid dialect file"
+else
+  no "the async-body mirror REJECTED the valid dialect file: clause P would red every engine"
 fi
 # And the mirror this script actually uses tells the two apart:
 if node -e 'const fs=require("fs");new (Object.getPrototypeOf(async function(){}).constructor)(fs.readFileSync(process.argv[1],"utf8").replace(/^export\s+/m,""))' "$probe/exported.js" >/dev/null 2>&1; then

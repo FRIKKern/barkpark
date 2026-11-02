@@ -34,7 +34,15 @@
 #     # -> 0   VACUOUS: the same syntax error, reported green
 #
 # A chartered `node --check` clause could therefore never fail on any engine —
-# a check that cannot lose. `--input-type=module --check` is no escape either:
+# a check that cannot lose.
+#
+# Node 24.21.0 changed this, measured 2026-11-02 on node:24.20.0 and
+# node:24.21.0.  From 24.21.0 `node --check` parses an export-bearing file as a
+# module, so both lines above return 1.  It also returns 1 on every clean engine,
+# with "SyntaxError: Illegal return statement", because the engines use
+# top-level `return`.  On that node a `node --check` clause could never PASS.
+# Node 22 and node 24 before 24.21.0 still behave as shown above.  On every
+# node, `node --check` gives a clean engine and a broken one the same answer. `--input-type=module --check` is no escape either:
 # the engines use top-level `return`, and node's module check rejects it
 # ("SyntaxError: Illegal return statement") on all four, so that direction reds
 # on every file forever.
@@ -47,7 +55,7 @@
 # function body — a function body permits both top-level `return` and `await`.
 # The compiled function is NEVER invoked; this is a syntax check, not a run.
 # scripts/workflow-portability-check.test.sh case 2 mutates a real engine to
-# prove this clause can fail, and case 12 re-derives the `node --check` vacuity
+# prove this clause can fail, and case 12 re-derives the `node --check` blindness
 # above from scratch so nobody has to take this comment on faith.
 #
 # ────────────────────────────────────────────────────────────────────────────
