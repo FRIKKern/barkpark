@@ -218,7 +218,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
         {:error, reason} ->
           Media.clear_deferred_media_effects()
-          {:error, reason}
+          {:error, rolled_back(reason, System.monotonic_time(:millisecond) - started)}
       end
     rescue
       e in [DBConnection.ConnectionError, Postgrex.Error] ->
@@ -240,7 +240,18 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
   defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
   defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
-  defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
+  defp failure(_e, ms), do: spent(ms)
+
+  # A nested write that lost the transaction after its last query raises
+  # nothing: DBConnection answers `{:error, :rollback}`, bare or wrapped by the
+  # media delete. The transaction is gone either way, so it is the same
+  # rolled-back failure a raised one is.
+  defp rolled_back(reason, ms) when reason in [:rollback, {:asset_doc_delete_failed, :rollback}],
+    do: {:delete_failed, spent(ms)}
+
+  defp rolled_back(reason, _ms), do: reason
+
+  defp spent(ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)

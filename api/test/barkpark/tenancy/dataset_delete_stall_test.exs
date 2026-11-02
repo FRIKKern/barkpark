@@ -9,12 +9,14 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
   """
   use ExUnit.Case, async: false
 
+  import Barkpark.TenancyFixtures
   import Ecto.Query
   import Phoenix.ConnTest
   import Plug.Conn, only: [put_req_header: 3, get_resp_header: 2]
 
   alias Barkpark.{Audit, Auth, Content, Repo, Tenancy}
   alias Barkpark.Content.Document
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Dataset
   alias Barkpark.Tenancy.DatasetDelete.Runs
@@ -287,6 +289,99 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
 
     :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
     assert %Dataset{} = Tenancy.get_dataset(project, "doomed")
+  end
+
+  # An unregistered module: the media delete's after-callbacks run nothing, so
+  # its asset-doc lookup is the last query before its commit.
+  defmodule NoPluginHooks do
+    @moduledoc false
+    def lifecycle_hooks, do: %{}
+  end
+
+  # A nested write loses the transaction after its last query and before its
+  # commit: DBConnection's own `conclude` then answers `{:error, :rollback}`
+  # with nothing raised. On CI the budget timer lands there by chance; this
+  # puts it there on purpose, once, after the queries in `steps` ran in order.
+  defp after_queries(steps, fun) do
+    seen = :atomics.new(1, [])
+    id = "dsstall-after-queries-#{System.unique_integer([:positive])}"
+    handler = fn _, _, meta, _ -> step(meta, steps, seen, fun) end
+    :telemetry.attach(id, [:barkpark, :repo, :query], handler, nil)
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  defp step(%{source: source, query: query}, steps, seen, fun) do
+    i = :atomics.get(seen, 1)
+
+    with {^source, verb} <- Enum.at(steps, i),
+         true <- String.starts_with?(query, verb),
+         :ok <- :atomics.compare_exchange(seen, 1, i, i + 1),
+         true <- i + 1 == length(steps),
+         do: fun.()
+  end
+
+  defp step(_meta, _steps, _seen, _fun), do: :ok
+
+  defp after_first_document_delete(fun), do: after_queries([{"documents", "DELETE"}], fun)
+
+  defp lose_the_transaction,
+    do: {:error, :nested} = Repo.transaction(fn -> Repo.rollback(:nested) end)
+
+  test "a document write that loses the transaction before its commit answers :database and leaves the dataset whole",
+       %{project: project, opts: opts} do
+    seed("doomed", 3, opts)
+    after_first_document_delete(&lose_the_transaction/0)
+
+    assert {:error, {:delete_failed, :database}} =
+             Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+
+    assert %Dataset{} = dataset = Tenancy.get_dataset(project, "doomed")
+    assert documents(dataset) == 3
+  end
+
+  test "a budget that runs out between a document's last query and its commit answers :timeout",
+       %{project: project, opts: opts} do
+    seed("doomed", 3, opts)
+    Application.put_env(:barkpark, :dataset_delete_timeout_ms, 300)
+    after_first_document_delete(fn -> Process.sleep(600) end)
+
+    assert {:error, {:delete_failed, :timeout}} =
+             Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+
+    :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
+    assert %Dataset{} = dataset = Tenancy.get_dataset(project, "doomed")
+    assert documents(dataset) == 3
+  end
+
+  test "a media write that loses the transaction before its commit answers :database and leaves the dataset whole",
+       %{ws: ws, project: project, opts: opts} = ctx do
+    seed("doomed", 3, opts)
+    {:ok, file} = create_media_file_in!(ws, project, %{}, "doomed")
+    Barkpark.PluginEnv.with_plugins([NoPluginHooks], ctx)
+    after_queries([{"media_files", "DELETE"}, {"documents", "SELECT"}], &lose_the_transaction/0)
+
+    assert {:error, {:delete_failed, :database}} =
+             Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+
+    assert %Dataset{} = dataset = Tenancy.get_dataset(project, "doomed")
+    assert documents(dataset) == 3
+    assert Repo.get(MediaFile, file.id)
+  end
+
+  test "DELETE answers the rolled-back 503 when a write loses the transaction, never a 500",
+       %{ws: ws, project: project, opts: opts} do
+    seed("doomed", 3, opts)
+    raw = owner_token!(ws)
+    after_first_document_delete(&lose_the_transaction/0)
+
+    assert %{
+             "error" => %{
+               "code" => "storage_unavailable",
+               "details" => %{"reason" => "dataset_delete_database"}
+             }
+           } = json_response(http_delete(raw, ws, project, "doomed"), 503)
+
+    assert documents(Tenancy.get_dataset(project, "doomed")) == 3
   end
 
   test "a delete over its time budget rolls back whole and answers a typed error",
