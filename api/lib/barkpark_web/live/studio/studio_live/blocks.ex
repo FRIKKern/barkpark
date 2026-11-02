@@ -809,7 +809,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "toc"} = block, params) do
     with :ok <- validate_collection_count(block, params, "items", "toc"),
-         :ok <- validate_positive_integer_form_field(block, params, "depth", "depth"),
+         :ok <- validate_toc_depth(block, params),
          :ok <- validate_boolean_form_fields(params, ~w(numbered sticky)),
          :ok <- validate_collection_text_fields(params, "toc", ~w(text anchor), "items"),
          :ok <- validate_toc_item_levels(block, params) do
@@ -3527,12 +3527,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  defp validate_positive_integer_form_field(block, params, field, error_field) do
-    if not Map.has_key?(params, field) or form_wire_value(Map.get(block, field)) == params[field] or
-         valid_submitted_number?(params[field], true) do
+  # The PortableDoc schema caps toc depth at 6 (headings go 1 to 6). An
+  # unchanged stored depth passes, so a legacy toc above 6 stays editable.
+  defp validate_toc_depth(block, params) do
+    if not Map.has_key?(params, "depth") or
+         form_wire_value(Map.get(block, "depth")) == params["depth"] or
+         toc_depth?(params["depth"]) do
       :ok
     else
-      {:error, {:invalid_number, error_field}}
+      {:error, {:invalid_number, "depth"}}
+    end
+  end
+
+  defp toc_depth?(value) do
+    case parse_submitted_number(value) do
+      {:ok, depth} when is_integer(depth) and depth in 1..6 -> true
+      _ -> false
     end
   end
 

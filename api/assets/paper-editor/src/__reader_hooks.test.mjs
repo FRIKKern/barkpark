@@ -539,6 +539,42 @@ settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
 legacyTocForm.remove();
 
+// TOC depth stops at 6, the schema maximum; item levels are not capped, and an
+// unchanged legacy depth above 6 still passes.
+const depthTocForm = window.document.createElement('form');
+depthTocForm.className = 'bp-paper-edit-form';
+depthTocForm.setAttribute('phx-change', 'paper-block-autosave');
+depthTocForm.setAttribute('phx-debounce', '0');
+depthTocForm.setAttribute('data-test-id', 'paper-toc-editor');
+depthTocForm.innerHTML = '<input name="block_id" value="depth-toc"><input name="depth" value="9"><input name="toc-0-level" value="2">';
+window.document.querySelector('main').append(depthTocForm);
+const tocDepth = depthTocForm.querySelector('[name="depth"]');
+calls.length = 0;
+depthTocForm.querySelector('[name="toc-0-level"]').value = '7';
+depthTocForm.querySelector('[name="toc-0-level"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave'], 'an unchanged legacy depth of 9 and a level of 7 pass');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+for (const value of ['7', '60']) {
+  calls.length = 0;
+  tocDepth.value = value;
+  tocDepth.dispatchEvent(new window.Event('input', {bubbles:true}));
+  await tick();
+  assert.deepEqual(calls, [], `a TOC depth of ${value} is blocked before autosave`);
+  assert.match(tocDepth.validationMessage, /whole number from 1 to 6/);
+}
+calls.length = 0;
+tocDepth.value = '6';
+tocDepth.dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.equal(tocDepth.validationMessage, '');
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+assert.equal(replies[0].payload.depth, '6');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+depthTocForm.remove();
+
 // Typing during a form save must create a later snapshot, not disappear when
 // the earlier acknowledgement arrives or when View is clicked immediately.
 calls.length = 0;

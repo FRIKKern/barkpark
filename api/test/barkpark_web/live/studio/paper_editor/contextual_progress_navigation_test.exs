@@ -231,8 +231,15 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualProgressNavigationTest do
       assert {:error, {:malformed_collection, "items"}} = Blocks.validate_block_patch(toc, params)
     end
 
-    assert {:error, {:invalid_number, "depth"}} =
-             Blocks.validate_block_patch(toc, %{"depth" => "0"})
+    for depth <- ["0", "7", "6.5"] do
+      assert {:error, {:invalid_number, "depth"}} =
+               Blocks.validate_block_patch(toc, %{"depth" => depth})
+    end
+
+    assert {:ok, %{"depth" => 6}} = Blocks.validate_block_patch(toc, %{"depth" => "6"})
+
+    assert {:ok, %{}} =
+             Blocks.validate_block_patch(Map.put(toc, "depth", 9), %{"depth" => "9"})
 
     assert {:error, {:invalid_number, "items"}} =
              Blocks.validate_block_patch(toc, %{
