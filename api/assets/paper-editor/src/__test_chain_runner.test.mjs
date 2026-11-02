@@ -1,0 +1,113 @@
+// __test_chain_runner.test.mjs — what scripts/test-chain.mjs does with its chain: it
+// runs every file, in chain order, and stops at the first that fails, with that file's
+// exit code and its name. The census pins chain(); this pins the loop around it.
+//
+// Each scene copies the runner into a fresh package under the temp folder whose path has
+// a space, a % and a non-ASCII letter, with logging stub tests at every depth, and runs it
+// from another folder (the runner must set the cwd itself). src/Upper sorts before
+// src/__a but is listed after it, so the order is the runner's sort, not the folder's. The temp folder is removed
+// after every scene, red or green.
+// Run: node src/__test_chain_runner.test.mjs   (or: npm test)
+
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { FIRST } from "../scripts/test-chain.mjs";
+
+const RUNNER = fileURLToPath(new URL("../scripts/test-chain.mjs", import.meta.url));
+const REST = ["src/Upper/__k.test.mjs", "src/__a.test.mjs", "src/__m.test.mjs", "src/canvas/__b.test.mjs", "src/canvas/__z.test.mjs", "src/deep/x/__q.test.mjs"];
+const ORDER = [...FIRST, ...REST];
+
+let failures = 0;
+function scene(name, fn) {
+  try {
+    fn();
+    console.log(`PASS  ${name}`);
+  } catch (e) {
+    failures += 1;
+    console.log(`FAIL  ${name}\n      ${e.message.split("\n").slice(0, 6).join(" | ")}`);
+  }
+}
+
+function inPackage(plant, play) {
+  const root = mkdtempSync(join(tmpdir(), "bp test chain %ø-"));
+  try {
+    const pkg = join(root, "pkg");
+    const log = join(root, "ran.log");
+    mkdirSync(join(pkg, "scripts"), { recursive: true });
+    writeFileSync(join(pkg, "scripts/test-chain.mjs"), readFileSync(RUNNER));
+    for (const file of [...ORDER, "src/__helper.mjs", "src/canvas/notes.test.mjs"]) {
+      mkdirSync(join(pkg, dirname(file)), { recursive: true });
+      writeFileSync(join(pkg, file), `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(log)}, ${JSON.stringify(`${file}\n`)});\n${plant[file] ?? ""}\n`);
+    }
+    return play({ root, pkg, ran: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const run = (script, cwd) => spawnSync(process.execPath, [script], { cwd, encoding: "utf8" });
+
+scene("all pass: every test file runs once, FIRST then the rest by path, from the package root; exit 0 and a count", () => {
+  inPackage({ "src/canvas/__b.test.mjs": `if (!process.cwd().endsWith("pkg")) process.exit(7);` }, ({ root, pkg, ran }) => {
+    const r = run(join(pkg, "scripts/test-chain.mjs"), root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(ran(), ORDER, "ran exactly the chain, in order (no helper, no file not named __*.test.mjs)");
+    assert.equal(r.stdout.trim().split("\n").at(-1), `npm test: ${ORDER.length} files passed`);
+  });
+});
+
+for (const [file, plant, code, what] of [
+  ["src/__path_filter.test.mjs", "process.exit(3)", 3, "exits 3"],
+  ["src/__m.test.mjs", "process.exit(4)", 4, "exits 4"],
+  ["src/canvas/__b.test.mjs", "throw new Error('boom')", 1, "throws"],
+  ["src/deep/x/__q.test.mjs", "process.exit(5)", 5, "exits 5"],
+]) {
+  scene(`a test that ${what} (${file}) stops the chain there, with its code and its name`, () => {
+    inPackage({ [file]: plant }, ({ root, pkg, ran }) => {
+      const r = run(join(pkg, "scripts/test-chain.mjs"), root);
+      assert.equal(r.status, code);
+      assert.deepEqual(ran(), ORDER.slice(0, ORDER.indexOf(file) + 1), "nothing after it ran");
+      assert.equal(r.stderr.trim().split("\n").at(-1), `npm test: ${file} exited ${code}`);
+    });
+  });
+}
+
+for (const signal of ["SIGKILL", "SIGTERM"]) {
+  scene(`a test killed by ${signal} fails the chain, exit 1`, () => {
+    inPackage({ "src/canvas/__b.test.mjs": `process.kill(process.pid, "${signal}")` }, ({ root, pkg, ran }) => {
+      const r = run(join(pkg, "scripts/test-chain.mjs"), root);
+      assert.equal(r.status, 1);
+      assert.deepEqual(ran(), ORDER.slice(0, ORDER.indexOf("src/canvas/__b.test.mjs") + 1));
+      assert.equal(r.stderr.trim().split("\n").at(-1), `npm test: src/canvas/__b.test.mjs was killed by ${signal}`);
+    });
+  });
+}
+
+scene("run through an absolute symlink to the runner: the whole chain still runs", () => {
+  inPackage({}, ({ root, pkg, ran }) => {
+    const link = join(root, "link to runner.mjs");
+    symlinkSync(join(pkg, "scripts/test-chain.mjs"), link);
+    const r = run(link, root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(ran(), ORDER);
+  });
+});
+
+scene("--list prints the chain and runs nothing", () => {
+  inPackage({}, ({ root, pkg, ran }) => {
+    const r = run(join(pkg, "scripts/test-chain.mjs"), root);
+    assert.equal(r.status, 0);
+    const listed = spawnSync(process.execPath, [join(pkg, "scripts/test-chain.mjs"), "--list"], { cwd: root, encoding: "utf8" });
+    assert.equal(listed.status, 0);
+    assert.deepEqual(listed.stdout.trim().split("\n"), ORDER);
+    assert.deepEqual(ran(), ORDER, "only the first run ran anything");
+  });
+});
+
+if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
+console.log("\ntest-chain runner: all checks passed");
+process.exit(0);
