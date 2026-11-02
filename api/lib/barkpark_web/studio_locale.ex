@@ -313,6 +313,7 @@ defmodule BarkparkWeb.StudioLocale do
       "Enter a number." => gettext("Enter a number."),
       "Enter a positive whole number." => gettext("Enter a positive whole number."),
       "Enter a whole number." => gettext("Enter a whole number."),
+      "Enter a whole number from 1 to 6." => gettext("Enter a whole number from 1 to 6."),
       "Keep mine" => gettext("Keep mine"),
       "master" => gettext("master"),
       "Maximum must be at least the minimum." => gettext("Maximum must be at least the minimum."),
