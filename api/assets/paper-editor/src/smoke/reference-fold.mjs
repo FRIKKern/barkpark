@@ -20,7 +20,7 @@
 //                   RECURSES into section children
 //   replace-block → replace the block by id wholesale; RECURSES into section children
 //                   (the container coarse path — the whole rebuilt subtree)
-function applyOps(prevBlocks, ops, { batch = false } = {}) {
+function applyOps(prevBlocks, ops) {
   let blocks = (prevBlocks || []).map((b) => ({ ...b }));
   const idAt = (id) => blocks.findIndex((b) => b && b.id === id);
   const idExists = (list, id) =>
@@ -55,14 +55,14 @@ function applyOps(prevBlocks, ops, { batch = false } = {}) {
   for (const op of ops) {
     switch (op.op) {
       case "append-block": {
-        if (!batch && op.block && op.block.id != null && idExists(blocks, op.block.id)) {
+        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`append-block: duplicate id ${op.block.id}`);
         }
         blocks = [...blocks, { ...op.block }];
         break;
       }
       case "insert-after": {
-        if (!batch && op.block && op.block.id != null && idExists(blocks, op.block.id)) {
+        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`insert-after: duplicate id ${op.block.id}`);
         }
         const next = transformAtId(blocks, op.afterId, (target) => [target, { ...op.block }]);

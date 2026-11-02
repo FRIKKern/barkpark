@@ -36,7 +36,7 @@ export const referenceFold = {
     for (const op of ops) {
       const repeat = named(op).find((id) => repeated(counts, id));
       if (repeat) throw new Error(`${op.op}: duplicate id ${repeat}`);
-      now = applyOps(now, [op], { batch: true });
+      now = applyOps(now, [op]);
       const next = tally(now);
       for (const [id, n] of next) if (n > (counts.get(id) ?? 0)) adder.set(id, op.op);
       counts = next;
