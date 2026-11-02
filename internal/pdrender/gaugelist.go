@@ -188,9 +188,9 @@ func shareGauges(m map[string]any) []gaugeRow {
 	}
 	sum := 0.0
 	for _, it := range items {
-		sum += attrFloat(it, "value")
+		sum += attrNumeric(it, "value")
 	}
-	denom := attrFloat(m, "max")
+	denom := attrNumeric(m, "max")
 	if denom <= 0 {
 		denom = sum
 	}
@@ -200,7 +200,7 @@ func shareGauges(m map[string]any) []gaugeRow {
 
 	gs := make([]gaugeRow, 0, len(items))
 	for _, it := range items {
-		prop := attrFloat(it, "value") / denom
+		prop := attrNumeric(it, "value") / denom
 		if prop < 0 {
 			prop = 0
 		}

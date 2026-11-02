@@ -40,8 +40,8 @@ func (criteriaProgressRenderer) Render(b Block, ctx RenderCtx) []string {
 	for _, r := range rows {
 		resolved = append(resolved, row{
 			label: sanitizeText(strings.TrimSpace(attrStr(r, "label"))),
-			met:   attrFloat(r, "met"),
-			total: attrFloat(r, "total"),
+			met:   attrNumeric(r, "met"),
+			total: attrNumeric(r, "total"),
 		})
 	}
 

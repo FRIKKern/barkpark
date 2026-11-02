@@ -84,7 +84,7 @@ func (heatmapRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	// Normalisation ceiling: explicit `max` when positive, else the data max;
 	// guard all-zero/empty so intensity = value/maxVal never divides by zero.
-	maxVal := attrFloat(b.Attrs, "max")
+	maxVal := attrNumeric(b.Attrs, "max")
 	if maxVal <= 0 {
 		maxVal = heatDataMax(grid)
 	}
@@ -463,15 +463,19 @@ func heatRenderCalendar(grid [][]float64, attrs map[string]any, ctx RenderCtx) [
 		out = append(out, firstLine(wrapLines(ctx.Theme.Dim.Render(strings.TrimRight(string(buf), " ")), clampWidth(ctx.Width))))
 	}
 
-	// One line per day-row: gutter day letter + a 2-col cell per surviving week.
-	for i := range grid {
+	padded := heatPaddedRows(grid, weeks)
+	for i, row := range grid {
 		var sb strings.Builder
 		label := ""
 		if i < len(rowLabels) {
 			label = rowLabels[i]
 		}
 		sb.WriteString(ctx.Theme.Dim.Render(padOrTruncate(label, heatCalGutter)))
-		for w := start; w < weeks; w++ {
+		end := len(row)
+		if padded[i] {
+			end = weeks
+		}
+		for w := start; w < end; w++ {
 			bin := -1
 			if w < len(bins[i]) {
 				bin = bins[i][w]
@@ -518,12 +522,10 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	colSum := make([]float64, nCols)
 	grand := 0.0
 	for i, row := range grid {
-		for j := 0; j < nCols; j++ {
-			if j < len(row) {
-				rowSum[i] += row[j]
-				colSum[j] += row[j]
-				grand += row[j]
-			}
+		for j, v := range row {
+			rowSum[i] += v
+			colSum[j] += v
+			grand += v
 		}
 	}
 
@@ -563,6 +565,14 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	// Per-column width: enough for the compact header (label or numbered index)
 	// and for the widest value in the column (incl. its Σ sum) when values are
 	// shown; else 1 for a pure shade cell.
+	valW := make([]int, nCols)
+	if showVals {
+		for _, row := range grid {
+			for j, v := range row {
+				valW[j] = max(valW[j], len(heatNum(v)))
+			}
+		}
+	}
 	colW := make([]int, nCols)
 	for j := 0; j < nCols; j++ {
 		w := 1
@@ -580,12 +590,8 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 			}
 		}
 		if showVals {
-			for i := range grid {
-				if j < len(grid[i]) {
-					if n := len(heatNum(grid[i][j])); n > w {
-						w = n
-					}
-				}
+			if n := valW[j]; n > w {
+				w = n
 			}
 			if showMarg {
 				if n := len(heatNum(colSum[j])); n > w {
@@ -623,9 +629,10 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	if showMarg {
 		matrixW += 2 + margW
 	}
+	padded := heatPaddedRows(grid, nCols)
 	if matrixW > clampWidth(ctx.Width) {
 		return heatMatrixLedger(
-			grid, rowLabels, colLabels, rowSum, colSum, grand, showVals, showMarg, ctx,
+			grid, padded, rowLabels, colLabels, rowSum, colSum, grand, showVals, showMarg, ctx,
 		)
 	}
 
@@ -675,7 +682,11 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	// uninterrupted before its values.
 	for i, row := range grid {
 		var data strings.Builder
-		for j := 0; j < nCols; j++ {
+		end := len(row)
+		if padded[i] {
+			end = nCols
+		}
+		for j := 0; j < end; j++ {
 			if j > 0 {
 				data.WriteString(" ")
 			}
@@ -739,6 +750,7 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 // its header mapping.
 func heatMatrixLedger(
 	grid [][]float64,
+	padded []bool,
 	rowLabels, colLabels []string,
 	rowSum, colSum []float64,
 	grand float64,
@@ -772,8 +784,12 @@ func heatMatrixLedger(
 			w,
 		)...)
 
-		values := make([]string, 0, len(colSum)+1)
-		for j := 0; j < len(colSum); j++ {
+		end := len(row)
+		if padded[i] {
+			end = len(colSum)
+		}
+		values := make([]string, 0, end+1)
+		for j := 0; j < end; j++ {
 			value := 0.0
 			bin := -1
 			if j < len(row) {
@@ -815,6 +831,21 @@ func heatMatrixLedger(
 	return out
 }
 
+func heatPaddedRows(grid [][]float64, cols int) []bool {
+	left := 0
+	for _, row := range grid {
+		left += len(row)
+	}
+	padded := make([]bool, len(grid))
+	for i, row := range grid {
+		if pad := cols - len(row); len(row) > 0 && pad <= left {
+			padded[i] = true
+			left -= pad
+		}
+	}
+	return padded
+}
+
 // heatMatrixCell renders one matrix cell: the exact right-aligned value (bin colour
 // as reinforcement) when values are shown, else a quantile dual-encode shade cell.
 func heatMatrixCell(bin int, v float64, w int, showVals bool, ctx RenderCtx) string {
@@ -850,7 +881,7 @@ func heatSumField(v float64, w int, showVals bool) string {
 // trimmed 1-dp decimal — so the aligned digit columns stay narrow.
 func heatNum(v float64) string {
 	if v == math.Trunc(v) {
-		return strconv.FormatInt(int64(v), 10)
+		return strconv.FormatFloat(v, 'f', 0, 64)
 	}
 	return strconv.FormatFloat(v, 'f', 1, 64)
 }
@@ -906,7 +937,7 @@ func parseHeatCells(m map[string]any) (grid [][]float64, ok bool) {
 		}
 		row := make([]float64, len(cells))
 		for j, c := range cells {
-			if f, okf := toFloat(c); okf {
+			if f, okf := numeric(c); okf {
 				row[j] = f
 			}
 			total++

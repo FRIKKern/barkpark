@@ -258,15 +258,30 @@ const fieldNumber: Render = (b, ctx, key) => (
 
 /** composite_scalar/1: a sub-value as one display string (maps in key order). */
 function fieldScalar(v: unknown, ctx: BlockCtx): string {
+  let text = "";
+  const work: ([true, string] | [false, unknown])[] = [[false, v]];
+  while (work.length) {
+    const [literal, x] = work.pop()!;
+    if (literal) text += x;
+    else if (Array.isArray(x))
+      for (let i = x.length - 1; i >= 0; i--) {
+        work.push([false, x[i]]);
+        if (i > 0) work.push([true, ", "]);
+      }
+    else if (isMap(x)) {
+      const keys = Object.keys(x).sort();
+      for (let i = keys.length - 1; i >= 0; i--) {
+        work.push([false, x[keys[i]!]], [true, `${keys[i]}: `]);
+        if (i > 0) work.push([true, ", "]);
+      }
+    } else text += leafScalar(x, ctx);
+  }
+  return text;
+}
+
+function leafScalar(v: unknown, ctx: BlockCtx): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return chromeWord(ctx.locale, v ? "Yes" : "No");
-  if (Array.isArray(v)) return v.map((x) => fieldScalar(x, ctx)).join(", ");
-  if (isMap(v)) {
-    return Object.keys(v)
-      .sort()
-      .map((k) => `${k}: ${fieldScalar(v[k], ctx)}`)
-      .join(", ");
-  }
   return typeof v === "number" ? String(v) : str(v);
 }
 

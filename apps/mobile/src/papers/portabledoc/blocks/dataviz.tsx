@@ -40,7 +40,7 @@ import { ScrollView, Text, View } from 'react-native'
 import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
 import { chromeWord } from '../chrome'
-import { asList, isMap, num, str } from '../model'
+import { asList, isMap, str } from '../model'
 import { MONO, bodyText, type BlockCtx, type Render } from '../register'
 
 /* ── coercion (the dataviz.ts twins) ───────────────────────────────────────── */
@@ -49,18 +49,20 @@ import { MONO, bodyText, type BlockCtx, type Render } from '../register'
 // and a −3 is a datum; dropping them would silently reshape the plot. This is
 // data_viz.ex/dataviz.ts `numeric/1` verbatim, strict regex included.
 function numeric(v: unknown): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
-  if (typeof v === 'string') {
-    const t = v.trim()
-    if (t === '') return null
-    const f = Number(t)
-    return Number.isFinite(f) && /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? f : null
-  }
-  return null
+  const f = typeof v === 'number' ? v : typeof v === 'string' ? parsedNumber(v.trim()) : null
+  return f !== null && (f === 0 || (Math.abs(f) >= 1e-100 && Math.abs(f) <= 1e100)) ? f : null
+}
+
+function parsedNumber(t: string): number | null {
+  return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : null
+}
+
+function wholeString(v: number): string {
+  return Math.abs(v) >= 1e21 ? BigInt(v).toString() : String(v)
 }
 
 function fmt(v: number): string {
-  if (Number.isInteger(v)) return String(v)
+  if (Number.isInteger(v)) return wholeString(v)
   const r = Math.round(v * 10) / 10
   return Number.isInteger(r) ? String(r) : r.toFixed(1)
 }
@@ -89,7 +91,8 @@ function clamp(v: number, lo: number, hi: number): number {
 function tickCompact(v: number): string {
   if (Math.abs(v) < 10000) return fmt(v)
   const [div, suffix] = Math.abs(v) >= 1e9 ? [1e9, 'B'] : Math.abs(v) >= 1e6 ? [1e6, 'M'] : [1e3, 'k']
-  return (v / (div as number)).toFixed(1).replace(/\.0$/, '') + String(suffix)
+  const q = v / (div as number)
+  return (Math.abs(q) >= 1e21 ? wholeString(q) : q.toFixed(1).replace(/\.0$/, '')) + String(suffix)
 }
 
 type Pct = `${number}%`
@@ -413,11 +416,8 @@ function statCard(item: Record<string, unknown>, ctx: BlockCtx, key: number): Re
   //     `"1.24M"` as 1.24 and painted 62% of a max of 2 where react paints 0%.
   //     `numeric` is this file's strict twin of react's own parse: a string
   //     that is not wholly a number is NOT a quantity.
-  //
-  // `num()` itself is UNCHANGED and stays the reader for `max` (and for cell
-  // spans elsewhere): its above-zero law is right there — a max of zero has no
-  // bar to denominate — and rewriting it would move those callers too.
-  const max = num(item.max)
+  const maxNum = numeric(item.max)
+  const max = maxNum !== null && maxNum > 0 ? maxNum : undefined
   const fill = max === undefined ? undefined : clamp((numeric(value) ?? 0) / max, 0, 1)
   return (
     <View
@@ -697,6 +697,20 @@ function normGrid(b: Record<string, unknown>): number[][] {
     .filter((row) => row.length > 0)
 }
 
+export function heatWidths(grid: number[][], cols: number): number[] {
+  let left = grid.reduce((n, row) => n + row.length, 0)
+  return grid.map((row) => {
+    const pad = cols - row.length
+    if (pad > left) return row.length
+    left -= pad
+    return cols
+  })
+}
+
+function heatGap(pad: number, cell: number, gap: number): ReactNode {
+  return pad > 0 ? <View key="gap" style={{ width: pad * (cell + gap) - gap }} /> : null
+}
+
 /** data_viz.ex quantile_bins: non-zero values only, q25/q50/q75, and −1 for
  * "no activity" (the calendar's gap cell). */
 export function quantileBins(grid: number[][]): number[][] {
@@ -854,6 +868,7 @@ function heatGrid(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx, k
   const rowLabels = stringList(b.rowLabels)
   const colLabels = stringList(b.colLabels)
   const cols = Math.max(...grid.map((r) => r.length), 0)
+  const widths = heatWidths(grid, cols)
   const row = { flexDirection: 'row', alignItems: 'center', gap: GRID_GAP } as const
   return card(
     ctx,
@@ -869,7 +884,7 @@ function heatGrid(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx, k
         {grid.map((cells, i) => (
           <View key={i} style={row}>
             {rowLabels.length > 0 && rowLabel(rowLabels[i] ?? '', ctx)}
-            {Array.from({ length: cols }, (_, j) =>
+            {Array.from({ length: widths[i]! }, (_, j) =>
               heatCell(
                 j,
                 GRID_CELL,
@@ -878,6 +893,7 @@ function heatGrid(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx, k
                 null,
               ),
             )}
+            {heatGap(cols - widths[i]!, GRID_CELL, GRID_GAP)}
           </View>
         ))}
       </View>
@@ -905,6 +921,7 @@ function heatCalendar(grid: number[][], b: Record<string, unknown>, ctx: BlockCt
   const rowLabels = stringList(b.rowLabels)
   const colLabels = stringList(b.colLabels)
   const weeks = Math.max(...grid.map((r) => r.length), 0)
+  const widths = heatWidths(grid, weeks)
   const row = { flexDirection: 'row', alignItems: 'center', gap: CAL_GAP } as const
   return card(
     ctx,
@@ -921,10 +938,11 @@ function heatCalendar(grid: number[][], b: Record<string, unknown>, ctx: BlockCt
           {grid.map((_, i) => (
             <View key={i} style={row}>
               {rowLabels.length > 0 && rowLabel(rowLabels[i] ?? '', ctx)}
-              {Array.from({ length: weeks }, (_, w) => {
+              {Array.from({ length: widths[i]! }, (_, w) => {
                 const bin = bins[i]?.[w] ?? -1
                 return heatCell(w, CAL_CELL, binColor(bin, ctx.theme), ctx, { bin })
               })}
+              {heatGap(weeks - widths[i]!, CAL_CELL, CAL_GAP)}
             </View>
           ))}
         </View>
@@ -944,7 +962,9 @@ function heatMatrix(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx,
   const colLabels = stringList(b.colLabels)
   const cols = Math.max(...grid.map((r) => r.length), 0)
   const rowSums = grid.map((row) => row.reduce((a, v) => a + v, 0))
-  const colSums = Array.from({ length: cols }, (_, j) => grid.reduce((a, row) => a + (row[j] ?? 0), 0))
+  const colSums = new Array<number>(cols).fill(0)
+  grid.forEach((row) => row.forEach((v, j) => (colSums[j] = (colSums[j] ?? 0) + v)))
+  const widths = heatWidths(grid, cols)
   const grand = rowSums.reduce((a, v) => a + v, 0)
   const gutter = rowLabels.length > 0 || showMarg
   const cellW = showVals ? VALUE_CELL_W : GRID_CELL
@@ -982,7 +1002,7 @@ function heatMatrix(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx,
           {grid.map((cells, i) => (
             <View key={i} style={row}>
               {gutter && rowLabel(rowLabels[i] ?? '', ctx)}
-              {Array.from({ length: cols }, (_, j) => {
+              {Array.from({ length: widths[i]! }, (_, j) => {
                 const bin = bins[i]?.[j] ?? -1
                 return heatCell(
                   j,
@@ -993,6 +1013,7 @@ function heatMatrix(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx,
                   showVals ? fmt(cells[j] ?? 0) : undefined,
                 )
               })}
+              {heatGap(cols - widths[i]!, cellW, GRID_GAP)}
               {showMarg && sumText(rowSums[i] ?? 0, cols)}
             </View>
           ))}
@@ -1034,7 +1055,7 @@ interface Series {
 }
 
 /** dataviz.ts `span`: axes.min/max PIN the span; a reversed pair (min ≥ max) is
- * discarded for the data range; a flat series opens to [min, min+1]. */
+ * discarded for the data range; a flat series opens by max(1, |min| × 1e-9). */
 export function chartSpan(series: Series[], axes: Record<string, unknown>): [number, number] {
   const data = series.flatMap((s) => s.points)
   const dmin = Math.min(...data)
@@ -1050,7 +1071,7 @@ export function chartSpan(series: Series[], axes: Record<string, unknown>): [num
     minV = pmin ?? dmin
     maxV = pmax ?? dmax
   }
-  return maxV <= minV ? [minV, minV + 1] : [minV, maxV]
+  return maxV <= minV ? [minV, minV + Math.max(1, Math.abs(minV) * 1e-9)] : [minV, maxV]
 }
 
 /** D56's recorded substitute for the web's accent/info/warning/danger map: NO
@@ -1424,9 +1445,10 @@ export function decodeRoutePolyline(s: string): Array<[number, number]> {
       const c = s.charCodeAt(i)
       if (c < 63 || c > 126) return null
       i++
-      acc |= ((c - 63) & 0x1f) << shift
-      if (((c - 63) & 0x20) === 0) return (acc & 1) !== 0 ? -((acc >> 1) + 1) : acc >> 1
+      acc += ((c - 63) & 0x1f) * 2 ** shift
+      if (((c - 63) & 0x20) === 0) return acc % 2 !== 0 ? -(Math.floor(acc / 2) + 1) : acc / 2
       shift += 5
+      if (shift > 30) return null
     }
     return null
   }

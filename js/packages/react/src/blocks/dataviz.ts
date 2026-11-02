@@ -20,13 +20,15 @@ function get(m: unknown, k: string): unknown {
 function asArr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : []
 }
+const drawable = (v: number) => v === 0 || (Math.abs(v) >= 1e-100 && Math.abs(v) <= 1e100)
+
 function numeric(v: unknown): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'number') return drawable(v) ? v : null
   if (typeof v === 'string') {
     const t = v.trim()
     if (t === '') return null
     const f = Number(t)
-    return Number.isFinite(f) && /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? f : null
+    return drawable(f) && /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? f : null
   }
   return null
 }
@@ -47,17 +49,17 @@ function stringList(v: unknown): string[] {
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi)
 }
+const wholeDigits = (v: number) => (Math.abs(v) < 1e21 ? String(v) : BigInt(v).toString())
+
 function fmt(v: number): string {
-  if (Number.isInteger(v)) return String(v)
-  const r = Math.round(v * 10) / 10
-  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+  return Number.isInteger(v) ? wholeDigits(v) : v.toFixed(1)
 }
 function fmt3(v: number): string {
   return v.toFixed(3)
 }
 function tick(v: number): string {
   const r = Math.round(v * 10) / 10
-  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+  return Number.isInteger(r) ? wholeDigits(r) : r.toFixed(1)
 }
 function tickCompact(v: number): string {
   if (Math.abs(v) < 10000) return tick(v)
@@ -70,7 +72,11 @@ function tickCompact(v: number): string {
     div = 1e6
     suffix = 'M'
   }
-  return (v / div).toFixed(1).replace(/\.0$/, '') + suffix
+  const scaled = v / div
+  return (
+    (Math.abs(scaled) < 1e21 ? scaled.toFixed(1) : `${BigInt(scaled)}.0`).replace(/\.0$/, '') +
+    suffix
+  )
 }
 
 function empty(kind: string, ctx: RenderCtx): string {
@@ -397,6 +403,18 @@ function normGrid(block: unknown): number[][] {
     .filter((row) => row.length > 0)
 }
 
+function heatWidths(grid: number[][], cols: number): Array<[number, number]> {
+  let left = grid.reduce((n, row) => n + row.length, 0)
+  return grid.map((row) => {
+    const pad = cols - row.length
+    if (pad > left) return [row.length, pad]
+    left -= pad
+    return [cols, 0]
+  })
+}
+
+const heatGap = (pad: number) => (pad > 0 ? `<i style="grid-column:span ${pad}"></i>` : '')
+
 function heatGridHtml(grid: number[][], block: unknown, ctx: RenderCtx): string {
   const maxNum = numeric(get(block, 'max'))
   // Mirror data_viz.ex heat_grid_html/2: with no explicit `max`, the divisor is
@@ -418,19 +436,21 @@ function heatGridHtml(grid: number[][], block: unknown, ctx: RenderCtx): string 
     head = corner + cells
   }
 
+  const widths = heatWidths(grid, cols)
   let body = ''
   grid.forEach((row, i) => {
     const label =
       rowLabels.length === 0
         ? ''
         : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
+    const [width, gap] = widths[i]!
     let cells = ''
-    for (let j = 0; j < cols; j++) {
+    for (let j = 0; j < width; j++) {
       const v = row[j] ?? 0.0
       const iNorm = clamp(v / maxVal, 0.0, 1.0)
       cells += `<i class="bp-heat__c" style="--i:${fmt3(iNorm)}" title="${fmt(v)}"></i>`
     }
-    body += label + cells
+    body += label + cells + heatGap(gap)
   })
 
   const track = rowLabels.length === 0 ? '' : 'auto '
@@ -456,6 +476,7 @@ function heatCalendarHtml(grid: number[][], block: unknown, ctx: RenderCtx): str
     head = corner + cells
   }
 
+  const widths = heatWidths(grid, weeks)
   let body = ''
   grid.forEach((row, i) => {
     const label =
@@ -463,13 +484,14 @@ function heatCalendarHtml(grid: number[][], block: unknown, ctx: RenderCtx): str
         ? ''
         : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
     const binRow = bins[i] ?? []
+    const [width, gap] = widths[i]!
     let cells = ''
-    for (let w = 0; w < weeks; w++) {
+    for (let w = 0; w < width; w++) {
       const v = row[w] ?? 0.0
       const bin = binRow[w] ?? -1
       cells += `<i class="bp-heat__c ${binClass(bin)}" title="${fmt(v)}"></i>`
     }
-    body += label + cells
+    body += label + cells + heatGap(gap)
   })
 
   const track = rowLabels.length === 0 ? '' : 'auto '
@@ -490,8 +512,8 @@ function heatMatrixExtrasHtml(grid: number[][], block: unknown, ctx: RenderCtx):
   const colLabels = stringList(get(block, 'colLabels'))
   const cols = Math.max(...grid.map((r) => r.length), 0)
   const rowSums = grid.map((row) => row.reduce((a, b) => a + b, 0))
-  const colSums: number[] = []
-  for (let j = 0; j < cols; j++) colSums.push(grid.reduce((a, row) => a + (row[j] ?? 0.0), 0))
+  const colSums: number[] = new Array(cols).fill(0)
+  for (const row of grid) row.forEach((v, j) => (colSums[j] = colSums[j]! + v))
   const grand = rowSums.reduce((a, b) => a + b, 0)
   const gutter = rowLabels.length !== 0 || showMarg
 
@@ -505,16 +527,19 @@ function heatMatrixExtrasHtml(grid: number[][], block: unknown, ctx: RenderCtx):
     head = corner + labels + sumHead
   }
 
+  const widths = heatWidths(grid, cols)
   let body = ''
   grid.forEach((row, i) => {
     const label = gutter ? `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>` : ''
     const binRow = bins[i] ?? []
+    const [width, gap] = widths[i]!
     let cells = ''
-    for (let j = 0; j < cols; j++) {
+    for (let j = 0; j < width; j++) {
       const v = row[j] ?? 0.0
       const bin = binRow[j] ?? -1
       cells += matrixCell(bin, v, showVals)
     }
+    cells += heatGap(gap)
     const rowSum = showMarg ? `<span class="bp-heat__sum">${fmt(rowSums[i]!)}</span>` : ''
     body += label + cells + rowSum
   })
@@ -581,7 +606,7 @@ function span(series: Series[], axes: Record<string, unknown>): [number, number]
     minV = pmin ?? dmin
     maxV = pmax ?? dmax
   }
-  return maxV <= minV ? [minV, minV + 1.0] : [minV, maxV]
+  return maxV <= minV ? [minV, minV + Math.max(1.0, Math.abs(minV) * 1e-9)] : [minV, maxV]
 }
 
 function gridSvg(minV: number, maxV: number): string {
@@ -905,9 +930,11 @@ export function decodePolyline(s: string): Array<[number, number]> {
       const c = s.charCodeAt(i)
       if (c < 63 || c > 126) return null
       i++
-      acc |= ((c - 63) & 0x1f) << shift
-      if (((c - 63) & 0x20) === 0) return (acc & 1) !== 0 ? -((acc >> 1) + 1) : acc >> 1
+      acc += ((c - 63) & 0x1f) * 2 ** shift
+      if (((c - 63) & 0x20) === 0)
+        return acc % 2 === 1 ? -(Math.floor(acc / 2) + 1) : Math.floor(acc / 2)
       shift += 5
+      if (shift > 30) return null
     }
     return null
   }

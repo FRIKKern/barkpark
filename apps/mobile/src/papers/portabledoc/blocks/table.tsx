@@ -7,11 +7,26 @@
 import { ScrollView, Text, View } from 'react-native'
 
 import { scale } from '../../../ui/typography'
+import { chromeWord } from '../chrome'
 import { renderInlineNodes } from '../inlines'
 import { asList, isMap } from '../model'
 import type { Render } from '../register'
+import { sheetState } from './sheet'
+
+const TABLE_CELL_CAP = 10000
+
+function recordCells(b: Record<string, unknown>): number {
+  const columns = asList(b.columns)
+  const record =
+    columns.length > 0 &&
+    columns.every(isMap) &&
+    !columns.every((column) => typeof column.text === 'string') &&
+    columns.every((column) => typeof column.key === 'string' && column.key !== '')
+  return record ? asList(b.rows).length * columns.length : 0
+}
 
 const table: Render = (b, ctx, key) => {
+  if (recordCells(b) > TABLE_CELL_CAP) return sheetState(chromeWord(ctx.locale, 'Table too large to show'), ctx, key)
   let head = asList(b.head ?? b.header)
   let rows = asList(b.rows)
   const columns = asList(b.columns)
@@ -73,7 +88,7 @@ function rowCells(row: unknown): unknown[] {
 
 function asInlineCell(cell: unknown): unknown[] {
   if (isMap(cell) && typeof cell.text === 'string') return [cell.text]
-  const content = isMap(cell) && Array.isArray(cell.content) ? cell.content : [cell]
+  const content = Array.isArray(cell) ? cell : isMap(cell) && Array.isArray(cell.content) ? cell.content : [cell]
   return content.flatMap((node) =>
     isMap(node) && Array.isArray(node.content) ? node.content : [node],
   )

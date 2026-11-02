@@ -18,8 +18,10 @@ defmodule Barkpark.PortableDoc.GoldenPackTest do
 
   @inputs ~w(lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex
              lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex
+             lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.limits.ex
              lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.pack.ex
-             test/support/fixtures/nested-list-carriers.json)
+             test/support/fixtures/nested-list-carriers.json
+             test/support/fixtures/portable-doc-limits.json)
 
   # The pack syncs to a public repo: no owner names, no internal hosts.
   @private ~r/jarl|pelle|frikk|guerrilla|barkpark-cp|157\.180\.|178\.105\.|89\.167\./i

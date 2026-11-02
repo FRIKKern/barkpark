@@ -21,7 +21,8 @@ import { Linking, Text, type StyleProp, type TextStyle } from 'react-native'
 
 import type { Theme } from '../../ui/theme'
 import { scale } from '../../ui/typography'
-import { asList, isMap, markAttr, markName, openableUrl, str, type Inline } from './model'
+import { chromeWord } from './chrome'
+import { MAX_DEPTH, asList, isMap, markAttr, markName, openableUrl, str, type Inline } from './model'
 
 /** Which typographic voice the same tree speaks in. `paper` is the reader's
  * serif document register; `chat` is the transcript's sans register (charter
@@ -34,6 +35,7 @@ export interface InlineCtx {
   theme: Theme
   /** Defaults to 'paper'. */
   register?: BlockRegister
+  locale?: string
 }
 
 const MONO_FONT = 'monospace' // Android; the reader is Android-first (bpspike)
@@ -159,13 +161,24 @@ function applyMarks(key: number, leaf: ReactNode, marks: unknown[], ctx: InlineC
  * twin (inline.tsx:389). Used by the `code` leaf, whose children fold to text
  * rather than to nested markup. */
 function inlineText(nodes: unknown): string {
-  if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
-  if (!Array.isArray(nodes)) return ''
-  return nodes.map((n) => (isMap(n) ? str(n.value) || inlineText(n.children) : inlineText(n))).join('')
+  let text = ''
+  const stack: [unknown, boolean][] = [[nodes, false]]
+  while (stack.length) {
+    const [n, inList] = stack.pop()!
+    if (typeof n === 'string' || typeof n === 'number') text += String(n)
+    else if (Array.isArray(n)) for (let i = n.length - 1; i >= 0; i--) stack.push([n[i], true])
+    else if (inList && isMap(n)) {
+      const leaf = str(n.value)
+      if (leaf) text += leaf
+      else stack.push([n.children, false])
+    }
+  }
+  return text
 }
 
 /** Render one inline node. Mirrors inline.tsx renderInline's dispatch. */
-export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): ReactNode {
+export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number, depth = 0): ReactNode {
+  if (depth >= MAX_DEPTH) return chromeWord(ctx.locale, 'Nested too deep to show')
   if (typeof node === 'string') return node
   if (typeof node === 'number') return String(node)
   // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
@@ -175,7 +188,7 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
   // null and the text VANISHED. Recurse into the array inside a keyed <Text>,
   // the RN equivalent of the reference's bare wrapper span.
   if (Array.isArray(node)) {
-    return <Text key={key}>{renderInlineNodes(node, ctx)}</Text>
+    return <Text key={key}>{renderInlineNodes(node, ctx, depth + 1)}</Text>
   }
   if (!isMap(node)) return null
 
@@ -184,26 +197,27 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
     case 'text': {
       const value = str(node.value)
       const marks = asList(node.marks)
+      if (depth + marks.length >= MAX_DEPTH) return chromeWord(ctx.locale, 'Nested too deep to show')
       return marks.length ? applyMarks(key, value, marks, ctx) : value
     }
     case 'strong':
     case 'bold':
       return (
         <Text key={key} style={{ fontWeight: 'bold' }}>
-          {renderInlineNodes(node.children, ctx)}
+          {renderInlineNodes(node.children, ctx, depth + 1)}
         </Text>
       )
     case 'em':
     case 'italic':
       return (
         <Text key={key} style={{ fontStyle: 'italic' }}>
-          {renderInlineNodes(node.children, ctx)}
+          {renderInlineNodes(node.children, ctx, depth + 1)}
         </Text>
       )
     case 'underline':
       return (
         <Text key={key} style={{ textDecorationLine: 'underline' }}>
-          {renderInlineNodes(node.children, ctx)}
+          {renderInlineNodes(node.children, ctx, depth + 1)}
         </Text>
       )
     case 'strike':
@@ -211,7 +225,7 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
     case 'strikethrough':
       return (
         <Text key={key} style={{ textDecorationLine: 'line-through' }}>
-          {renderInlineNodes(node.children, ctx)}
+          {renderInlineNodes(node.children, ctx, depth + 1)}
         </Text>
       )
     case 'code':
@@ -225,14 +239,14 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
         </Text>
       )
     case 'link':
-      return linkText(key, str(node.href), renderInlineNodes(node.children, ctx), theme)
+      return linkText(key, str(node.href), renderInlineNodes(node.children, ctx, depth + 1), theme)
     case 'wikilink': {
       // Unresolved on mobile (no resolver): render the alias/children/target
       // label, dashed-underlined like the web's bp-wikilink--unresolved.
       const alias = str(node.alias)
       const kids = asList(node.children)
       const label: ReactNode =
-        alias !== '' ? alias : kids.length ? renderInlineNodes(kids, ctx) : str(node.target)
+        alias !== '' ? alias : kids.length ? renderInlineNodes(kids, ctx, depth + 1) : str(node.target)
       return (
         <Text key={key} style={{ color: theme.accent, textDecorationLine: 'underline' }}>
           {label}
@@ -259,16 +273,16 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
     default: {
       // Unknown inline → degrade to its children when present, else nothing.
       const kids = asList(node.children)
-      return kids.length ? renderInlineNodes(kids, ctx) : null
+      return kids.length ? renderInlineNodes(kids, ctx, depth + 1) : null
     }
   }
 }
 
 /** Render an inline-node array (or scalar) to ReactNodes — the renderInlines
  * twin. Callers place the result inside a styled <Text> block. */
-export function renderInlineNodes(nodes: unknown, ctx: InlineCtx): ReactNode {
+export function renderInlineNodes(nodes: unknown, ctx: InlineCtx, depth = 0): ReactNode {
   if (typeof nodes === 'string') return nodes
   if (typeof nodes === 'number') return String(nodes)
   if (!Array.isArray(nodes)) return null
-  return nodes.map((n, i) => renderInlineNode(n as Inline, ctx, i))
+  return nodes.map((n, i) => renderInlineNode(n as Inline, ctx, i, depth))
 }

@@ -144,6 +144,15 @@ type RenderCtx struct {
 // WithWidth returns a copy of the ctx with a new target width.
 func (c RenderCtx) WithWidth(w int) RenderCtx { c.Width = w; return c }
 
+const nestFloor = 10
+
+func nestIndent(w int) string {
+	if w-2 < nestFloor {
+		return ""
+	}
+	return "  "
+}
+
 // Deeper returns a copy of the ctx one nesting level deeper.
 func (c RenderCtx) Deeper() RenderCtx { c.Depth++; return c }
 

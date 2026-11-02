@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row: `dots: {on, of}` → role=img dot row + chrome label): 26346 B -> 26529 B (+183) after trimming (one shared dot template; string coercion kept for Elixir/Go parity, costs 22 B); limit raised by the irremovable +183, 31 B headroom",
+  "name": "PortableDoc client — 2026-11-02 (#25101, task-9226090856ff8b2b, client readers answer the server renderer's limits: the depth cap and its notice, table span support, the record-table cap, plus the chart/heatmap number range and whole-number digits): 26401 B -> 27644 B (+1243); limit raised to the measured size plus about 0.2 kB, 206 B headroom",
   "path": "dist/index.mjs",
-  "limit": "26.56 KB",
+  "limit": "27.85 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the server entry): 25364 B -> 25520 B (+156) after trimming; limit raised by the irremovable +156, 10 B headroom",
+  "name": "RSC server — 2026-11-02 (#25101, task-9226090856ff8b2b, client readers answer the server renderer's limits: the depth cap and its notice, table span support, the record-table cap, plus the chart/heatmap number range and whole-number digits): 25403 B -> 26650 B (+1247); limit raised to the measured size plus about 0.2 kB, 200 B headroom",
   "path": "dist/server.mjs",
-  "limit": "25.53 KB",
+  "limit": "26.85 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the PortableDoc subpath): 22370 B -> 22539 B (+169) after trimming; limit raised by the irremovable +169, 41 B headroom",
+  "name": "PortableDoc subpath — 2026-11-02 (#25101, task-9226090856ff8b2b, client readers answer the server renderer's limits: the depth cap and its notice, table span support, the record-table cap, plus the chart/heatmap number range and whole-number digits): 22437 B -> 23732 B (+1295); limit raised to the measured size plus about 0.2 kB, 198 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "22.58 KB",
+  "limit": "23.93 KB",
   "gzip": true
  },
  {

@@ -302,9 +302,9 @@ func cardSlots(m map[string]any) map[string]any {
 func slotBlocks(raw any) []Block {
 	switch v := raw.(type) {
 	case []any:
-		return decodeAnyBlocks(v, 0)
+		return decodeAnyBlocks(v)
 	case map[string]any:
-		return []Block{blockFromMap(v, 0)}
+		return []Block{blockFromMap(v)}
 	default:
 		return nil
 	}

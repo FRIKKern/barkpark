@@ -25,15 +25,7 @@ func TestDecodeSkipsNonObjectBlocks(t *testing.T) {
 	}
 }
 
-// TestDecodeCapsNestingDepth asserts the depth cap: a pathologically-nested
-// document (thousands deep here, but arbitrary from the API) decodes without the
-// process fatally overflowing its goroutine stack, and the resulting tree is
-// truncated at maxBlockDepth rather than descending forever. (Depth is kept just
-// under encoding/json's own ~10k nesting limit so json.Unmarshal itself does not
-// reject the input before our recursion is exercised.)
-func TestDecodeCapsNestingDepth(t *testing.T) {
-	// Build a figure nested `depth` levels deep, each carrying the next under
-	// "child": figure{child: figure{child: … paragraph}}.
+func TestDecodeCapsFigureNestingAtTheDepthLimit(t *testing.T) {
 	const depth = 4000
 	var sb strings.Builder
 	for i := 0; i < depth; i++ {
@@ -43,33 +35,21 @@ func TestDecodeCapsNestingDepth(t *testing.T) {
 	for i := 0; i < depth; i++ {
 		sb.WriteString(`}`)
 	}
-	raw := []byte(fmt.Sprintf(`{"blocks":[%s]}`, sb.String()))
-
-	blocks, err := Decode(raw)
-	if err != nil {
-		t.Fatalf("Decode: unexpected error: %v", err)
+	blocks, err := Decode([]byte(fmt.Sprintf(`{"blocks":[%s]}`, sb.String())))
+	if err != nil || len(blocks) != 1 {
+		t.Fatalf("Decode: %d blocks, %v", len(blocks), err)
 	}
-	if len(blocks) != 1 {
-		t.Fatalf("Decode: got %d top-level blocks, want 1", len(blocks))
-	}
-
-	// Walk the Child chain. It must stop (Child == nil) at or before the cap,
-	// never continuing all the way down the 10k-deep source.
-	levels := 1
-	for b := &blocks[0]; b.Child != nil; b = b.Child {
+	b := &blocks[0]
+	levels := 0
+	for ; b.Child != nil; b = b.Child {
 		levels++
-		if levels > maxBlockDepth+1 {
-			t.Fatalf("Decode: child chain reached %d levels, not truncated at maxBlockDepth=%d", levels, maxBlockDepth)
-		}
 	}
-	if levels <= maxBlockDepth {
-		t.Fatalf("Decode: child chain only %d levels, expected truncation right at the cap (maxBlockDepth=%d)", levels, maxBlockDepth)
+	if levels != maxNestDepth || b.Type != "paragraph" || attrStr(b.Attrs, "text") != nestedTooDeep {
+		t.Fatalf("figure chain: %d levels to a %q %v, want %d to the notice", levels, b.Type, b.Attrs, maxNestDepth)
 	}
 }
 
-// TestDecodeCapsSectionNestingDepth is the section/"blocks" analogue: a deeply
-// nested section chain must likewise truncate at the cap without crashing.
-func TestDecodeCapsSectionNestingDepth(t *testing.T) {
+func TestDecodeCapsSectionNestingAtTheDepthLimit(t *testing.T) {
 	const depth = 4000
 	var sb strings.Builder
 	for i := 0; i < depth; i++ {
@@ -79,24 +59,16 @@ func TestDecodeCapsSectionNestingDepth(t *testing.T) {
 	for i := 0; i < depth; i++ {
 		sb.WriteString(`]}`)
 	}
-	raw := []byte(fmt.Sprintf(`{"blocks":[%s]}`, sb.String()))
-
-	blocks, err := Decode(raw)
-	if err != nil {
-		t.Fatalf("Decode: unexpected error: %v", err)
+	blocks, err := Decode([]byte(fmt.Sprintf(`{"blocks":[%s]}`, sb.String())))
+	if err != nil || len(blocks) != 1 {
+		t.Fatalf("Decode: %d blocks, %v", len(blocks), err)
 	}
-	if len(blocks) != 1 {
-		t.Fatalf("Decode: got %d top-level blocks, want 1", len(blocks))
-	}
-
-	levels := 1
-	for b := &blocks[0]; len(b.Children) > 0; b = &b.Children[0] {
+	b := &blocks[0]
+	levels := 0
+	for ; len(b.Children) > 0; b = &b.Children[0] {
 		levels++
-		if levels > maxBlockDepth+1 {
-			t.Fatalf("Decode: section chain reached %d levels, not truncated at maxBlockDepth=%d", levels, maxBlockDepth)
-		}
 	}
-	if levels <= maxBlockDepth {
-		t.Fatalf("Decode: section chain only %d levels, expected truncation right at the cap (maxBlockDepth=%d)", levels, maxBlockDepth)
+	if levels != maxNestDepth || attrStr(b.Attrs, "text") != nestedTooDeep {
+		t.Fatalf("section chain: %d levels to %v, want %d to the notice", levels, b.Attrs, maxNestDepth)
 	}
 }

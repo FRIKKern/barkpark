@@ -1484,15 +1484,33 @@ func toFloat(v any) (float64, bool) {
 	case int64:
 		return float64(x), true
 	case string:
-		if f, err := strconv.ParseFloat(strings.TrimSpace(x), 64); err == nil {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(x), 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
 			return f, true
 		}
 	case fmt.Stringer:
-		if f, err := strconv.ParseFloat(x.String(), 64); err == nil {
+		if f, err := strconv.ParseFloat(x.String(), 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
 			return f, true
 		}
 	}
 	return 0, false
+}
+
+const (
+	minMagnitude = 1e-100
+	maxMagnitude = 1e100
+)
+
+func numeric(v any) (float64, bool) {
+	f, ok := toFloat(v)
+	if !ok || (f != 0 && (math.Abs(f) < minMagnitude || math.Abs(f) > maxMagnitude)) {
+		return 0, false
+	}
+	return f, true
+}
+
+func attrNumeric(m map[string]any, key string) float64 {
+	f, _ := numeric(m[key])
+	return f
 }
 
 // attrFloat reads a numeric-ish field as float64 (missing/uncoercible → 0).

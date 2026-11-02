@@ -64,12 +64,20 @@ func hasColName(names []string, name string) bool {
 	return false
 }
 
+const (
+	tableCellCap  = 10000
+	tableTooLarge = "Table too large to show"
+)
+
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	head := attrSlice(b.Attrs, "head")
 	rows := attrSlice(b.Attrs, "rows")
 	columnHead, columnKeys := tableColumns(attrSlice(b.Attrs, "columns"))
+	if len(rows)*len(columnKeys) > tableCellCap {
+		return []string{ctx.Theme.Body.Render(tableTooLarge)}
+	}
 	if len(head) == 0 && len(columnHead) > 0 {
 		head = columnHead
 		if len(columnKeys) > 0 {
@@ -101,28 +109,26 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(ctx.Theme.Rule)
 
-	// Header band: uppercase + muted, only when `head` is non-empty (opt-in).
-	hasHead := len(head) > 0
-	if hasHead {
-		cells := make([]string, 0, len(head))
-		for _, c := range head {
-			// A head cell is a single cell-string (or inline run); render it,
-			// strip styling, uppercase it for the muted band look.
-			txt := ansi.Strip(tr.cellString(c, ctx))
-			cells = append(cells, strings.ToUpper(txt))
-		}
-		t.Headers(cells...)
+	headCells := make([]string, 0, len(head))
+	for _, c := range head {
+		headCells = append(headCells, strings.ToUpper(ansi.Strip(tr.cellString(c, ctx))))
 	}
-
-	addedRows := 0
+	var bodyRows [][]string
 	for _, r := range rows {
-		cells := tr.rowCells(r, colTypes, ctx)
-		if len(cells) == 0 {
-			continue // skip empty rows — ltable panics on zero-column rows
+		if cells := tr.rowCells(r, colTypes, ctx); len(cells) > 0 {
+			bodyRows = append(bodyRows, cells)
 		}
-		t.Row(cells...)
-		addedRows++
 	}
+	keep := tableColumnsDrawn(headCells, bodyRows, ctx.Width)
+
+	hasHead := len(headCells) > 0
+	if hasHead {
+		t.Headers(headCells[:min(len(headCells), keep)]...)
+	}
+	for _, cells := range bodyRows {
+		t.Row(cells[:min(len(cells), keep)]...)
+	}
+	addedRows := len(bodyRows)
 
 	// Guard: no columns at all (no head and no non-empty rows) → empty output.
 	// lipgloss/table's auto-sizer indexes colWidths[0] on a zero-column table
@@ -155,6 +161,17 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	})
 
 	return strings.Split(t.Render(), "\n")
+}
+
+func tableColumnsDrawn(head []string, rows [][]string, width int) int {
+	cols := len(head)
+	for _, r := range rows {
+		cols = max(cols, len(r))
+	}
+	if len(rows)*cols <= tableCellCap {
+		return cols
+	}
+	return max(1, min(cols, clampWidth(width)/3, tableCellCap/len(rows)))
 }
 
 // rowCells renders a row (an array of cells) to a []string of styled cells,

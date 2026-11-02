@@ -45,15 +45,14 @@ func tocItems(raw any) []tocItem {
 	return out
 }
 
+const tocMaxDepth = 6
+
 func (tocRenderer) Render(b Block, ctx RenderCtx) []string {
 	items := tocItems(b.Attrs["items"])
 	if len(items) == 0 {
 		return nil
 	}
-	depth := attrInt(b.Attrs, "depth", 2)
-	if depth < 1 {
-		depth = 1
-	}
+	depth := tocDepth(attrInt(b.Attrs, "depth", 2))
 	numbered := attrBool(b.Attrs, "numbered")
 
 	minLevel := items[0].level
@@ -89,4 +88,11 @@ func (tocRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, truncateANSI(line, w))
 	}
 	return out
+}
+
+func tocDepth(depth int) int {
+	if depth < 1 {
+		return 2
+	}
+	return min(depth, tocMaxDepth)
 }
