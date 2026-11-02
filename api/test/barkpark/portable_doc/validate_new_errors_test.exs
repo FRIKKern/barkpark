@@ -72,6 +72,18 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
       assert {[%{path: "/blocks/1/level"}], []} = NewErrors.split([idless], [para("a"), idless])
     end
 
+    test "the broken block itself is the place when it has an id" do
+      pt = %{"id" => "pt", "_type" => "block", "children" => []}
+
+      assert {[], [%{code: :portable_text_block, path: "/blocks/1"}]} =
+               NewErrors.split([pt], [para("z"), pt])
+    end
+
+    test "a blank id is no place" do
+      blank = %{"id" => "", "type" => "heading", "level" => 9, "text" => "x"}
+      assert {[%{path: "/blocks/1/level"}], []} = NewErrors.split([blank], [para("z"), blank])
+    end
+
     test "errors are counted: a third block on a duplicated id is one more" do
       assert {[%{code: :duplicate_block_id}], [%{code: :duplicate_block_id}]} =
                NewErrors.split([para("d"), para("d")], [para("d"), para("d"), para("d")])

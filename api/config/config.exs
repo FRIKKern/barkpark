@@ -104,6 +104,12 @@ config :barkpark, :idempotency, ttl_seconds: 86_400
 # passthrough. Runtime enables it from BARKPARK_WRITE_ADMISSION_* (runtime.exs).
 config :barkpark, :write_admission, enabled: false
 
+# PortableDoc ratchet on paper writes (R4.5, Barkpark.PortableDoc.Validate.NewErrors):
+# false = report-only (log + a `portable_doc_invalid` reply warning); true = a write
+# that ADDS a validation error is refused with the paper-ratchet halt. Flip a week
+# after the report-only merge (follow-up task under task-a97e5076cc498dc1).
+config :barkpark, :portable_doc_refuse_new_errors, false
+
 # Per-kind DEFAULT expiry (days) for NEWLY minted api tokens that request none
 # (task-a0f8cfd7f4800236; `Barkpark.Auth.TokenExpiry`). SHIPS nil = no default:
 # every mint behaves exactly as before until the owner sets a value (owner item

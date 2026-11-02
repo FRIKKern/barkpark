@@ -124,9 +124,5 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
 
   defp segments(""), do: []
 
-  defp segments("/" <> path),
-    do:
-      path
-      |> String.split("/")
-      |> Enum.map(&(&1 |> String.replace("~1", "/") |> String.replace("~0", "~")))
+  defp segments("/" <> path), do: String.split(path, "/")
 end

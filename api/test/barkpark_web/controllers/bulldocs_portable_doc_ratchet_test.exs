@@ -214,6 +214,15 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
       assert stored(s) == ["z", "a", "old"]
     end
 
+    test "the dry run normalizes as ingest does: an id-less broken block keeps its minted place" do
+      idless = %{"type" => "heading", "level" => 9, "text" => "Id-less"}
+      s = seed!(slug("ratchet-idless"), [para("a"), idless])
+      refusing!()
+
+      body = json_response(dry_run(s, [para("a"), idless]), 200)
+      refute Enum.any?(body["violations"], &String.starts_with?(&1["code"], "portable_doc"))
+    end
+
     test "still refuses an error the write adds, and counts the old one", %{slug: s} do
       refusing!()
       conn = op(s, append(bad_heading("new")))
