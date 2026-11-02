@@ -512,6 +512,15 @@ if [ "$selftest" -eq 1 ]; then
   #                          builtin `printf | grep -q`   external `cat | grep -q`
   #   macOS 15 / bash 3.2                        141                          141
   #   ubuntu-latest / bash 5 + GNU coreutils       1                            1
+  #   ubuntu-26.04 / bash 5.3 + uutils cat 0.10    1                            0
+  #
+  # MEASURED 2026-11-02 in ubuntu:26.04 with SIGPIPE ignored, as Actions runs it.
+  # Ubuntu 26.04 ships cat from uutils coreutils.  uutils cat treats EPIPE as
+  # success and exits 0, so `cat | grep -q` is safe on that box.  It still fails
+  # on macOS and on GNU coreutils, where these scripts also run, so the scanner
+  # keeps reporting the shape.  On a uutils box (0a) runs the same pipeline with
+  # GNU cat, which 26.04 installs as `gnucat`.  GNU sed there returns 4 and gnucat
+  # returns 1, so the external-producer defect is still live.
   #
   # On GNU the producer reports the write error and exits 1 instead of dying on
   # the signal; on BSD it dies and pipefail propagates 128+13.  DIFFERENT NUMBER,
@@ -543,10 +552,23 @@ if [ "$selftest" -eq 1 ]; then
     set -o pipefail
     cat "$std/long.txt" | grep -q '^hit$'
   ) 2>/dev/null || rcext=$?
+  catv="$(cat --version 2>/dev/null)" || catv=""
+  catv="${catv%%$'\n'*}"
   if [ "$rcext" -ne 0 ]; then
     sok "(0a) non-vacuity: an EXTERNAL producer (cat) into grep -q comes back FAILED too (rc $rcext on this box)"
+  elif [[ "$catv" == *uutils* ]] && command -v gnucat >/dev/null 2>&1; then
+    rcgnu=0
+    (
+      set -o pipefail
+      gnucat "$std/long.txt" | grep -q '^hit$'
+    ) 2>/dev/null || rcgnu=$?
+    if [ "$rcgnu" -ne 0 ]; then
+      sok "(0a) non-vacuity: GNU cat (gnucat) into grep -q comes back FAILED (rc $rcgnu). This box's cat is '$catv', which exits 0 on a closed pipe"
+    else
+      sno "(0a) cat is '$catv' and returned 0, and gnucat | grep -q returned 0 too. The external-producer form does not reproduce here"
+    fi
   else
-    sno "(0a) cat | grep -q returned 0 — the external-producer form does not reproduce here"
+    sno "(0a) cat | grep -q returned 0 (cat is '${catv:-unknown}'). The external-producer form does not reproduce here"
   fi
   rcfix=0
   (
