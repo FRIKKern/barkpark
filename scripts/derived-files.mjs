@@ -3,10 +3,11 @@
 // rebuilt. `scripts/regen.mjs` runs the rebuilds in order; `scripts/reach.mjs`
 // maps a diff onto the steps and gates it reaches. task-e04a2c419fdd3621.
 //
-// A step's `write` is the generator that already exists for it, run from the
-// repo root. When it has a `check`, regen runs the check first and writes only
-// when the check fails or a step it waits for was rewritten, so a rerun on a
-// fresh tree writes nothing (a conformance report's `ran_at_sha` stays put).
+// STEPS is written in dependency order: a step comes after every step in its
+// `after`. A step's `write` is the generator that already exists for it, run
+// from the repo root. When it has a `check`, regen runs the check first and
+// writes only when the check fails or a step it waits for was rewritten, so a
+// rerun on a fresh tree writes nothing (a report's `ran_at_sha` stays put).
 
 const MIX = "cd api && MIX_ENV=test mix";
 const RENDER = [
@@ -249,16 +250,7 @@ export function step(name) {
 
 export function ordered(steps = STEPS) {
   const want = new Set(steps.map((s) => s.name));
-  const out = [];
-  const seen = new Set();
-  const visit = (s) => {
-    if (seen.has(s.name)) return;
-    seen.add(s.name);
-    s.after.forEach((d) => visit(step(d)));
-    if (want.has(s.name)) out.push(s);
-  };
-  STEPS.forEach(visit);
-  return out;
+  return STEPS.filter((s) => want.has(s.name));
 }
 
 export function reached(paths) {

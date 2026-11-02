@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { STEPS, globToRegExp, ordered, reached } from "./derived-files.mjs";
+import { STEPS, globToRegExp, ordered, reached, step } from "./derived-files.mjs";
 import { commandsFor, isTest } from "./reach.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,9 +64,9 @@ test("a change outside every input reaches nothing", () => {
 });
 
 test("every step comes after the steps it waits for", () => {
-  const order = ordered().map((s) => s.name);
-  assert.equal(order.length, STEPS.length);
-  for (const s of STEPS) for (const d of s.after) assert.ok(order.indexOf(d) < order.indexOf(s.name), `${d} before ${s.name}`);
+  const order = STEPS.map((s) => s.name);
+  for (const s of STEPS) for (const d of s.after) assert.ok(order.indexOf(d) >= 0 && order.indexOf(d) < order.indexOf(s.name), `${d} before ${s.name}`);
+  assert.deepEqual(ordered([step("conformance-react"), step("golden-pack")]).map((s) => s.name), ["golden-pack", "conformance-react"]);
 });
 
 test("every gate file and every mix task a step names exists", () => {
