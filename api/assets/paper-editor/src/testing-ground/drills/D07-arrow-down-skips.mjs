@@ -10,5 +10,4 @@ export default {
   ],
   repeat: 8,
   tally: { from: "p-a", to: "p-e" },
-  green: [],
 };

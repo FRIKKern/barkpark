@@ -99,12 +99,22 @@ export async function start({ builds = [mainBuild()], port = 0, fold = null, sta
   });
 
   const server = createServer((req, res) => {
-    const asked = decodeURIComponent(req.url.split("?")[0]);
+    let asked;
+    try {
+      asked = decodeURIComponent(req.url.split("?")[0]);
+    } catch {
+      res.statusCode = 400;
+      return res.end("malformed url");
+    }
     const [, index, rest] = asked.match(/^\/b\/(\d+)(\/.*)$/) || [null, "0", asked];
     const build = builds[Number(index)];
     const split = rest === asked && builds.length > 1;
     const path = rest === "/" ? (split ? "/split.html" : "/index.html") : rest;
     if (fold && req.method === "POST" && path === "/fold") {
+      if (req.headers["content-type"] !== TYPES[".json"]) {
+        res.statusCode = 415;
+        return res.end("the fold takes application/json only");
+      }
       res.setHeader("content-type", TYPES[".json"]);
       return foldThrough(fold, req, res);
     }
@@ -134,6 +144,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const names = args.filter((a) => !a.startsWith("--"));
   const bad = args.find((a) => a.startsWith("--") && !known.test(a));
   if (bad) usage(`unknown or malformed flag ${bad}`);
+  const twice = args.find((a, i) => a.startsWith("--") && args.findIndex((b) => b.split("=")[0] === a.split("=")[0]) !== i);
+  if (twice) usage(`${twice.split("=")[0]} given twice`);
   if (names.length > 2) usage(`two builds at most, got ${names.join(" ")}`);
   let picks;
   try {
@@ -150,6 +162,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } catch (error) {
     usage(error.message);
   }
+  const port = flag("port");
+  if (Number(port) > 65535) usage(`--port=${port} is not a port`);
   let builds;
   try {
     builds = picks.map((pick) => {
@@ -161,7 +175,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`npm run try: ${error.message}`);
     process.exit(1);
   }
-  const port = flag("port");
   const { url } = await start({ builds, port: port === undefined ? 4417 : Number(port), fold });
   console.log(`testing ground on ${builds.map((b) => `${b.label} at ${b.sha}`).join(" beside ")}: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
   if (!args.includes("--no-open")) spawn("open", [url], { stdio: "ignore", detached: true }).unref();

@@ -113,9 +113,9 @@ await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=
   await play(page, drill("D07"));
   await page.click(".tg-tab");
   const words = await page.textContent(".tg-tally");
-  assert.match(words, /^↓ skipped the empty line in [0-8] of 8 tries\.$/);
-  const { tries, hits } = await page.evaluate(() => window.testingGround.state.tally);
-  assert.equal(tries, 8);
+  assert.match(words, /^↓ skipped the empty line in [0-8] of [0-8] tries\.( The caret stayed put [1-8] times?\.)?$/);
+  const { tries, hits, stayed } = await page.evaluate(() => window.testingGround.state.tally);
+  assert.equal(tries + stayed, 8);
   assert.equal(await page.getAttribute(".tg-tally", "class"), hits < tries ? "tg-tally tg-tally--red" : "tg-tally");
   console.log(`      D07 on this build: ${words}`);
   await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
@@ -206,6 +206,7 @@ await scene("a fleet block the canvas paints itself is left to the canvas", "?do
 }, (page) => page.addInitScript(() => document.addEventListener("bp-fleet-paint", (event) => { event.preventDefault(); event.target.innerHTML = "<p>the canvas painted this</p>"; }, true)));
 
 await scene("phone width and dark mode", "?doc=sample:paragraph&phone=1&dark=1", async (page) => {
+  assert.match(page.url(), /phone=1&dark=1$/, "the views asked for in the url stay in it after the page loads");
   assert.equal(await page.evaluate(() => document.querySelector(".tg-stage").getBoundingClientRect().width), 390);
   assert.equal(await page.getAttribute("html", "data-theme"), "dark");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(14, 22, 20)");

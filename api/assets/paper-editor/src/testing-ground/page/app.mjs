@@ -18,7 +18,7 @@ const docs = new Map([
 ]);
 
 const params = new URLSearchParams(location.search);
-const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, shown: "", tally: { tries: 0, hits: 0 } };
+const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, shown: "", tally: { tries: 0, hits: 0, stayed: 0 } };
 
 const ui = {
   edit: $(".tg-edit"),
@@ -82,7 +82,7 @@ function paintTally() {
 }
 
 function openDoc(key) {
-  if (key !== state.key) state.tally = { tries: 0, hits: 0 };
+  if (key !== state.key) state.tally = { tries: 0, hits: 0, stayed: 0 };
   state.key = key;
   state.reload = null;
   const doc = docs.get(key);
@@ -102,7 +102,6 @@ async function reload() {
   await settle(canvas, state.host);
   const before = lines(canvas);
   mountCanvases(true);
-  await new Promise((r) => setTimeout(r, 50));
   state.reload = { before, after: lines(state.canvases[0]) };
 }
 
@@ -160,16 +159,15 @@ $(".tg-close").addEventListener("click", () => setDrawer(false));
 $(".tg-reload").addEventListener("click", reload);
 ui.hood.addEventListener("toggle", changed);
 
-new MutationObserver(() => paintFleet(ui.edit)).observe(ui.edit, { childList: true, subtree: true });
-openDoc(state.key);
-
 const views = {
   reader: (on) => { ui.read.hidden = !on; document.body.classList.toggle("tg-with-reader", on); changed(); },
   phone: (on) => document.body.classList.toggle("tg-phone", on),
   dark: (on) => { document.documentElement.dataset.theme = on ? "dark" : "light"; },
 };
+for (const name of Object.keys(views)) ui[name].checked = params.get(name) === "1";
+new MutationObserver(() => paintFleet(ui.edit)).observe(ui.edit, { childList: true, subtree: true });
+openDoc(state.key);
 for (const [name, apply] of Object.entries(views)) {
-  ui[name].checked = params.get(name) === "1";
   apply(ui[name].checked);
   ui[name].addEventListener("change", () => { apply(ui[name].checked); remember(); });
 }

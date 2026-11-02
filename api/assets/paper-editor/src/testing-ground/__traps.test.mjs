@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { trip } from "./drills/trip.mjs";
 import { barkparkFold } from "./barkpark-fold.mjs";
 import { createFakeHost } from "./fake-host.mjs";
-import { referenceFold } from "./fold.mjs";
+import { authoredIds, referenceFold } from "./fold.mjs";
 import { blockDiff } from "./page/hood.mjs";
 import { tallyWords } from "./page/tally.mjs";
 import { canonical, duplicateIds, foldDrift, hiddenBlocks, lights, lostKeys, sentDuplicates } from "./traps.mjs";
@@ -44,6 +44,26 @@ await assert.rejects(fold(trip, [{ op: "insert-after", afterId: "p-after", block
   /insert-after: duplicate id p-twin/, "a new id that arrives twice in one op is refused too");
 await assert.rejects(fold(legacy, [{ op: "insert-after", afterId: "p-new", block: { id: "p-day", type: "paragraph", content: [] } }]), /duplicate id p-day/);
 assert.deepEqual(await fold(trip, [{ op: "patch-block", id: "p-day", patch: { content: [] } }, { op: "remove-block", id: "p-after" }]).then((b) => b.map((x) => x.id)), trip.map((x) => x.id).filter((id) => id !== "p-after"), "every op of a batch folds, in order");
+
+const leaf = (id) => ({ id, type: "paragraph", content: [] });
+assert.deepEqual(authoredIds([
+  { id: "s", type: "section", blocks: [leaf("s1")] },
+  { id: "e", type: "expandable", children: [leaf("e1")], blocks: [leaf("e2")] },
+  { id: "t", type: "terminal", children: [leaf("t1")], blocks: [leaf("t2")] },
+  { id: "c", type: "columns", columns: [[leaf("c1")], "opaque", [leaf("c2")]] },
+  { id: "f", type: "figure", child: { id: "f1", type: "image", child: { id: "f2" } } },
+  { id: "st", type: "steps", steps: [{ id: "r1", children: [leaf("r1a")], blocks: [leaf("r1b")] }, "opaque"] },
+  { id: "tb", type: "tabs", tabs: [{ id: "tab1", blocks: [leaf("tab1a")], children: [leaf("skipped")] }] },
+  { id: "fn", type: "footnote", notes: [{ id: "fn1" }] },
+  { id: "q", type: "form", questions: [{ id: "q1" }] },
+  { id: "x", type: "section", blocks: "opaque" },
+  { id: "", type: "paragraph" },
+  { id: 7, type: "paragraph" },
+  "opaque",
+]), ["s", "s1", "e", "e1", "e2", "t", "t1", "t2", "c", "c1", "c2", "f", "f1", "st", "r1", "r1a", "r1b", "tb", "tab1", "tab1a", "fn", "q", "x"], "the ratchet counts the ids patch.ex counts, and only those");
+assert.deepEqual(authoredIds([{ id: "o", type: "constructor" }]), ["o"]);
+const footnote = (id) => ({ id, type: "footnote", notes: [{ id: "fn1", text: "The board updates live." }] });
+assert.deepEqual((await fold([footnote("f-1")], [{ op: "insert-after", afterId: "f-1", block: footnote("f-2") }])).map((b) => b.id), ["f-1", "f-2"], "a copied footnote keeps its note id, as patch.ex allows");
 
 const refused = lights({ ...calm, refusals: ["replace-block: duplicate id p-day"] });
 assert.equal(light(refused, "refused-batches").ok, false);
@@ -131,9 +151,23 @@ await settled();
 assert.equal(idle, true);
 assert.equal(slow.busy, false);
 
+const lagging = { name: "lagging", apply: async (blocks, ops) => { await new Promise((r) => setTimeout(r, 5)); return referenceFold.apply(blocks, ops); } };
+const raced = createFakeHost({ fold: lagging, blocks: trip, onChange: () => {} });
+const [first, second] = [stubCanvas(), stubCanvas()];
+raced.attach(first);
+raced.attach(second);
+send(first, edit, 1);
+send(second, [{ op: "patch-block", id: "p-day", patch: { content: [{ type: "text", value: "Fog." }] } }], 1);
+assert.deepEqual([first, second].map((c) => c.calls.map(([name]) => name)), [["identifyOpsRequest"], ["identifyOpsRequest"]], "each batch is named the moment it arrives");
+await raced.idle();
+assert.deepEqual(JSON.stringify(raced.saved).match(/Home by nine\.|Fog\./g), ["Fog.", "Home by nine."], "two windows with a batch in flight at once both keep their edit: folds run one after another");
+assert.deepEqual(raced.refusals, []);
+
 assert.deepEqual(blockDiff(trip, [trip[0], { ...trip[2], content: [] }, { id: "p-new", type: "paragraph" }]), ["~ p-after (paragraph)", "+ p-new (paragraph)", "- s-day (section)"]);
 assert.deepEqual(blockDiff(trip, structuredClone(trip)), []);
 assert.equal(tallyWords({ tries: 8, hits: 5 }), "↓ skipped the empty line in 3 of 8 tries.");
 assert.equal(tallyWords({ tries: 1, hits: 1 }), "↓ skipped the empty line in 0 of 1 try.");
+assert.equal(tallyWords({ tries: 6, hits: 6, stayed: 2 }), "↓ skipped the empty line in 0 of 6 tries. The caret stayed put 2 times.");
+assert.equal(tallyWords({ tries: 7, hits: 7, stayed: 1 }), "↓ skipped the empty line in 0 of 7 tries. The caret stayed put 1 time.");
 
 console.log("PASS  testing-ground traps: each light goes red on the bug it names");

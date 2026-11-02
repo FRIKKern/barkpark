@@ -10,5 +10,4 @@ export default {
     { say: "Type \"Fog by eight.\"", type: "Fog by eight." },
     { say: "Press Reload", reload: true },
   ],
-  green: ["duplicate-ids", "refused-batches", "lost-keys"],
 };
