@@ -1,37 +1,21 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { exitRig, skip, tally } from "./__rig.mjs";
 import { drills } from "./testing-ground/drills/index.mjs";
 import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
+import { chromium } from "./testing-ground/chromium.mjs";
 import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
 import { makeBuild, pickBuild } from "./testing-ground/builds.mjs";
-import { mainBuild, start } from "./testing-ground/server.mjs";
+import { mainBuild, REPO, start } from "./testing-ground/server.mjs";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const ONLY = process.env.TG_ONLY;
 
-function playwright() {
-  const candidates = [process.env.BP_PLAYWRIGHT_FROM].filter(Boolean);
-  try {
-    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: REPO, encoding: "utf8" }).trim();
-    candidates.push(join(dirname(common), "js", "package.json"));
-  } catch {}
-  for (const from of candidates) {
-    try { return createRequire(from)("playwright"); } catch {}
-  }
-  return null;
-}
-
-const pw = playwright();
-if (!pw) process.exit(skip("__testing_ground_page.mjs — playwright not found (set BP_PLAYWRIGHT_FROM)."));
 let browser;
 try {
-  browser = await pw.chromium.launch();
+  browser = await chromium();
 } catch (error) {
-  process.exit(skip(`__testing_ground_page.mjs — no Chromium for playwright: ${error.message.split("\n")[0]}`));
+  process.exit(skip(`__testing_ground_page.mjs — ${error.message.split("\n")[0]}`));
 }
 const server = await start();
 const t = tally();
@@ -88,7 +72,7 @@ await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (pag
   assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 6 lines/);
   assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
   await page.click(".tg-tab");
-  assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), drill("D01").steps.map((s) => s.say));
+  assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), [...drill("D01").steps.map((s) => s.say), "Check that Hidden blocks and Lost keys stay green"]);
   assert.equal(await page.isVisible(".tg-tally"), false);
 });
 
@@ -123,6 +107,7 @@ await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=
   await page.evaluate(() => window.testingGround.openDoc("drill:D07"));
   assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 0 tries.", "another doc starts the count over");
   assert.match(await page.textContent(".tg-steps"), /Pick D07 again and repeat, 8 tries in all/);
+  assert.doesNotMatch(await page.textContent(".tg-steps"), /Check that/, "a drill with no lights to keep green says none");
 });
 
 await scene("under the hood: batches with the server's answer, the diff and the saved doc", "?doc=drill:D02", async (page) => {
@@ -275,6 +260,23 @@ await t.checkAsync("split screen: two builds side by side, each named with its s
     await right.waitForFunction(() => window.testingGround.state.key === "drill:D02");
     assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload, and the keys after a reload go across once");
   }));
+
+const runner = "npm run drill plays drills as tests: D01 fails on main with its red light, D04 passes, D06 needs hands";
+if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
+  const run = spawn(process.execPath, [new URL("./testing-ground/drill.mjs", import.meta.url).pathname, "D01", "D04", "D06"]);
+  let out = "";
+  run.stdout.on("data", (d) => (out += d));
+  run.stderr.on("data", (d) => (out += d));
+  const deadline = setTimeout(() => run.kill(), 120000);
+  const code = await new Promise((resolve) => run.on("exit", resolve));
+  clearTimeout(deadline);
+  assert.equal(code, 1, out);
+  assert.deepEqual(out.replace(/[0-9a-f]{10}/g, "<sha>").trim().split("\n"), [
+    "FAIL  D01 Empty-line Enter on main at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown).",
+    "PASS  D04 Select and Enter on main at <sha>: hidden-blocks green",
+    'HANDS D06 Two windows on main at <sha>: needs hands at "In the top editor, type at the end of "Window A types here.""',
+  ]);
+});
 
 if (process.env.TG_TRY) {
   const pick = pickBuild(process.env.TG_TRY, { repo: REPO });

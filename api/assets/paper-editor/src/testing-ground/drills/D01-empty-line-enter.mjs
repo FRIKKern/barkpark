@@ -3,6 +3,7 @@ const p = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "te
 export default {
   id: "D01",
   title: "Empty-line Enter",
+  green: ["hidden-blocks", "lost-keys"],
   doc: [p("p-a", "Alpha"), p("p-e", ""), p("p-b", "Beta")],
   steps: [
     { say: "Click the + in the margin under \"Alpha\" to open the empty line", button: "Edit empty paragraph" },

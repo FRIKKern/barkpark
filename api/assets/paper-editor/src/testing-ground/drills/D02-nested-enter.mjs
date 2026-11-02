@@ -3,6 +3,7 @@ import { trip } from "./trip.mjs";
 export default {
   id: "D02",
   title: "Nested Enter",
+  green: ["duplicate-ids", "refused-batches", "lost-keys"],
   doc: trip,
   steps: [
     { say: "Click at the end of \"Left the car park at six.\"", click: { text: "Left the car park at six.", at: "end" } },

@@ -90,6 +90,7 @@ function openDoc(key) {
   mountCanvases();
   ui.steps.hidden = !doc.drill;
   const says = doc.drill ? doc.drill.steps.map((step) => (step.hands ? `${step.say} (by hand)` : step.say)) : [];
+  if (doc.drill?.green.length) says.push(`Check that ${new Intl.ListFormat("en").format(doc.drill.green.map((key) => `${key[0].toUpperCase()}${key.slice(1).replace("-", " ")}`))} stay green`);
   if (doc.drill?.repeat) says.push(`Pick ${doc.drill.id} again and repeat, ${doc.drill.repeat} tries in all`);
   ui.steps.replaceChildren(...says.map((say) => Object.assign(document.createElement("li"), { textContent: say })));
   paintTally();

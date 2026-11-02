@@ -25,7 +25,7 @@ export async function caretRead(page) {
   });
 }
 
-const doors = {
+export const doors = {
   async click(page, { text, at }) {
     const { x, y } = await boxOf(page, text, at);
     await page.mouse.click(x, y);

@@ -3,6 +3,7 @@ const p = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "te
 export default {
   id: "D07",
   title: "ArrowDown into a hidden empty line",
+  green: [],
   doc: [p("p-a", "Alpha"), p("p-e", ""), p("p-b", "Beta")],
   steps: [
     { say: "Click at the end of \"Alpha\"", click: { text: "Alpha", at: "end" } },

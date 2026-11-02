@@ -3,6 +3,7 @@ const p = (id, value) => ({ id, type: "paragraph", content: [{ type: "text", val
 export default {
   id: "D06",
   title: "Two windows",
+  green: ["lost-keys", "fold-drift"],
   windows: 2,
   doc: [p("p-a", "Window A types here."), p("p-b", "Window B edits here.")],
   steps: [

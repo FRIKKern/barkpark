@@ -8,7 +8,7 @@ import { barkparkFold } from "./barkpark-fold.mjs";
 import { besideMain, makeBuild, pickBuild } from "./builds.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = join(SRC, "../../../..");
+export const REPO = join(SRC, "../../../..");
 const PACK = join(REPO, "api/priv/portable_doc/goldens");
 const MAIN_ASSETS = join(REPO, "api/priv/static/assets");
 const BUNDLE_FILES = ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"];
@@ -16,7 +16,7 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/ja
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-function primaryJs() {
+export function primaryJs() {
   return join(dirname(git(REPO, "rev-parse", "--path-format=absolute", "--git-common-dir")), "js");
 }
 
