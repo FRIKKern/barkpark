@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "./regen.mjs";
-import { report } from "./reach.mjs";
+import { commandsFor, report } from "./reach.mjs";
 
 function fixture(t, steps) {
   const dir = mkdtempSync(join(tmpdir(), "regen-test-"));
@@ -85,4 +85,23 @@ test("reach quotes a valid metacharacter branch in its runnable output", (t) => 
   const result = f.run("reach", "evil;printf_PWN");
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes("node scripts/regen.mjs --base 'evil;printf_PWN'"));
+});
+
+
+test("reach quotes changed test paths and Go package directories", () => {
+  assert.deepEqual(commandsFor([
+    "api/test/a space_test.exs",
+    "internal/a;echo_PWN/a_test.go",
+    "apps/mobile/__tests__/a space.test.tsx",
+    "js/packages/react/tests/a;echo_PWN.test.tsx",
+    "api/assets/paper-editor/src/a space.test.mjs",
+    "scripts/a'quote;echo_PWN.test.mjs",
+  ]), [
+    "cd api && mix test 'test/a space_test.exs'",
+    "go test './internal/a;echo_PWN' -count=1",
+    "cd apps/mobile && pnpm exec jest '__tests__/a space.test.tsx'",
+    "cd js && pnpm --filter @barkpark/react exec vitest run 'tests/a;echo_PWN.test.tsx'",
+    "cd api/assets/paper-editor && node 'src/a space.test.mjs'",
+    "node 'scripts/a'\\''quote;echo_PWN.test.mjs'",
+  ]);
 });

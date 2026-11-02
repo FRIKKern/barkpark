@@ -46,20 +46,20 @@ export function commandsFor(paths) {
   const out = [];
   const mix = (app) => {
     const files = paths.filter((p) => p.startsWith(`${app}/test/`) && p.endsWith(".exs"));
-    if (files.length) out.push(`cd ${app} && mix test ${files.map((p) => relative(app, p)).join(" ")}`);
+    if (files.length) out.push(`cd ${app} && mix test ${files.map((p) => shellArg(relative(app, p))).join(" ")}`);
   };
   mix("api");
   mix("cloud");
   for (const p of paths) {
     if (p.includes(".yml: ")) out.push(p);
     else if (p.endsWith(".exs")) continue;
-    else if (p.endsWith(".go")) out.push(`go test ./${dirname(p)} -count=1`);
-    else if (p.startsWith("apps/mobile/")) out.push(`cd apps/mobile && pnpm exec jest ${relative("apps/mobile", p)}`);
+    else if (p.endsWith(".go")) out.push(`go test ${shellArg(`./${dirname(p)}`)} -count=1`);
+    else if (p.startsWith("apps/mobile/")) out.push(`cd apps/mobile && pnpm exec jest ${shellArg(relative("apps/mobile", p))}`);
     else if (p.startsWith("js/") && /\.test\.tsx?$/.test(p)) {
       const pkg = packageOf(p);
-      out.push(`cd js && pnpm --filter ${pkg.name} exec vitest run ${relative(pkg.dir, p)}`);
-    } else if (p.startsWith("api/assets/paper-editor/")) out.push(`cd api/assets/paper-editor && node ${relative("api/assets/paper-editor", p)}`);
-    else if (p.endsWith(".mjs") || p.endsWith(".js")) out.push(`node ${p}`);
+      out.push(`cd js && pnpm --filter ${shellArg(pkg.name)} exec vitest run ${shellArg(relative(pkg.dir, p))}`);
+    } else if (p.startsWith("api/assets/paper-editor/")) out.push(`cd api/assets/paper-editor && node ${shellArg(relative("api/assets/paper-editor", p))}`);
+    else if (p.endsWith(".mjs") || p.endsWith(".js")) out.push(`node ${shellArg(p)}`);
   }
   return out;
 }
