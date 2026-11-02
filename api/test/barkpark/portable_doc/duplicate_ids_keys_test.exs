@@ -1,14 +1,13 @@
 defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
   @moduledoc """
   task-c91fbd0c5c7bb4a6 and task-42d085f7431b8417 criterion 2: what each editor
-  contract sent for a real drop between sections and a real Enter inside one,
-  recorded in headless Chromium by
-  `api/assets/paper-editor/src/__duplicate_ids_keys.mjs`, with the host
-  answering each batch with the echo the batch write stores.
+  contract sent for a real drop between sections and a real Enter inside a
+  section, step or tab, recorded in headless Chromium by
+  `api/assets/paper-editor/src/__duplicate_ids_keys.mjs`. A drop saves on every
+  contract; an old editor's split repeats an id and is refused; the tree's
+  split never repeats one.
   """
-  use Barkpark.DataCase, async: false
-
-  import ExUnit.CaptureLog
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.BlockOps
@@ -18,70 +17,56 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
   @external_resource @fixture
   @scenes @fixture |> File.read!() |> Jason.decode!() |> Map.fetch!("scenes")
 
-  test "every contract from 1.14 and the open canvas fix is recorded, both echo orders for each Enter" do
-    keys = Enum.map(@scenes, &{&1["contract"], &1["scene"], &1["order"]})
+  test "every contract from 1.14 and the tree is recorded for every scene" do
+    keys = Enum.map(@scenes, &{&1["contract"], &1["scene"]})
 
-    for contract <- ~w(1.14 1.15 1.16 1.17 1.18 1.19 1.20 1.21 tree pr-25040),
-        scene <-
-          ~w(nested-enter-keep-typing nested-enter-back-up nested-enter-retype-line nested-enter-pause-type-above nested-enter-line-start steps-enter tabs-enter),
-        order <- ~w(reply-first echo-first) do
-      assert {contract, scene, order} in keys
+    for contract <- ~w(1.14 1.15 1.16 1.17 1.18 1.19 1.20 1.21 tree),
+        scene <- ~w(move-up move-down nested-enter-keep-typing steps-enter tabs-enter) do
+      assert {contract, scene} in keys
     end
-
-    assert {"1.14", "move-up", "reply-first"} in keys
-    assert {"pr-25040", "move-down", "reply-first"} in keys
   end
 
   for scene <- @scenes do
     @scene scene
-    @name "#{scene["contract"]} #{scene["scene"]} #{scene["order"]}"
+    @name "#{scene["contract"]} #{scene["scene"]}"
 
-    test "#{@name}: every batch saves through the batch write and a reload shows every typed line" do
-      %{"before" => before, "batches" => batches, "echoes" => echoes, "seen" => seen} = @scene
-      slug = "keys-#{System.unique_integer([:positive])}"
+    if scene["contract"] != "tree" and scene["scene"] not in ["move-up", "move-down"] do
+      test "#{@name}: the old editor's split repeats an id, so its batch is refused and writes nothing" do
+        %{"before" => before, "batches" => [batch | _]} = @scene
+        slug = seed!(before)
+        content = Content.get_paper(slug).content
 
-      {:ok, _} =
-        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: before}))
+        assert {:error, {:duplicate_id, _id, _kind}} =
+                 Content.apply_paper_block_ops(slug, batch, "production", if_rev: content["rev"])
 
-      doubt? =
-        @scene["scene"] == "nested-enter-retype-line" and
-          @scene["contract"] not in ["tree", "pr-25040"]
-
-      for {batch, echo} <- Enum.zip(batches, echoes) do
-        rev = get_in(Content.get_paper(slug).content, ["rev"])
-
-        log =
-          capture_log(fn ->
-            assert {:ok, _receipt} =
-                     Content.apply_paper_block_ops(slug, batch, "production",
-                       if_rev: rev,
-                       remint_writer: "lv:keys"
-                     )
-          end)
-
-        refute log =~ "Mist."
-        unless doubt?, do: assert(Content.paper_blocks(slug) == echo)
+        assert Content.get_paper(slug).content == content
       end
+    else
+      test "#{@name}: every batch saves through the batch write and a reload shows every typed line" do
+        %{"before" => before, "batches" => batches, "echoes" => echoes, "seen" => seen} = @scene
+        slug = seed!(before)
 
-      stored = Content.paper_blocks(slug)
-      assert ids(stored) == Enum.uniq(ids(stored))
-      assert Enum.all?(@scene["typed"], &(&1 in lines(stored)))
+        for {batch, echo} <- Enum.zip(batches, echoes) do
+          rev = get_in(Content.get_paper(slug).content, ["rev"])
 
-      if doubt? do
-        assert lines(stored) == List.insert_at(seen, 1, "Fog by eight.")
-      else
+          assert {:ok, _receipt} =
+                   Content.apply_paper_block_ops(slug, batch, "production", if_rev: rev)
+
+          assert Content.paper_blocks(slug) == echo
+        end
+
+        stored = Content.paper_blocks(slug)
+        assert ids(stored) == Enum.uniq(ids(stored))
         assert lines(stored) == seen
       end
-    end
 
-    if scene["scene"] in ["move-up", "move-down"] or scene["contract"] == "pr-25040" do
       test "#{@name}: every batch folds through Patch to the echo" do
         Enum.zip(@scene["batches"], @scene["echoes"])
         |> Enum.reduce(@scene["before"], fn {batch, echo}, blocks ->
           lowered =
             Enum.map_reduce(batch, blocks, fn op, acc ->
               {:ok, op} = BlockOps.lower_editor_op(acc, op)
-              {:ok, next} = Patch.apply_patch(acc, op, duplicates: :batch)
+              {:ok, next} = Patch.apply_patch(acc, op, duplicates: {:batch, blocks})
               {op, next}
             end)
             |> elem(0)
@@ -92,6 +77,15 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
         end)
       end
     end
+  end
+
+  defp seed!(blocks) do
+    slug = "keys-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+    slug
   end
 
   defp ids(blocks) do

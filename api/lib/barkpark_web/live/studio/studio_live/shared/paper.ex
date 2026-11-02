@@ -460,7 +460,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         opts =
           BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
-            [if_rev: if_rev, remint_writer: "lv:" <> socket.id] ++
+            [if_rev: if_rev] ++
             if(context, do: [canvas_run_context: context], else: []) ++
             if(is_binary(request_id), do: [contextual_history: true], else: [])
 

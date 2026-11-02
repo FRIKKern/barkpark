@@ -47,18 +47,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.ChangeEvents
   alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.Content.Papers.RemintLedger
-
-  alias Barkpark.PortableDoc.{
-    BlockIds,
-    FieldVocabulary,
-    HtmlSanitizer,
-    Patch,
-    Projection,
-    Render,
-    Slots
-  }
-
+  alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
   alias Barkpark.Repo.IdempotencyStore
 
@@ -1610,17 +1599,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          :ok <- preflight_table_editor_ops(blocks, ops),
-         {:ok, blocks, healed} <- heal_revision_fenced_ids(blocks, if_rev),
-         :ok <- refuse_healed_names(healed, ops, Keyword.get(opts, :remint_writer)),
-         now = System.os_time(:second),
-         ledger = doc.content |> RemintLedger.load(now) |> RemintLedger.record(healed, now, nil),
-         {:ok, folded, {block_ids, ledger, applied_count}} <-
-           fold_paper_ops_in_context(blocks, ops, ledger, now, opts),
-         block_ids = Enum.uniq(Enum.map(healed, &elem(&1, 1)) ++ block_ids),
-         doc = %{
-           doc
-           | content: RemintLedger.put(doc.content || %{}, RemintLedger.settle(ledger, folded))
-         },
+         blocks = project_batch_ids(blocks, if_rev),
+         {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          no_op? =
            ops == [] or
              (folded == blocks and
@@ -1638,7 +1618,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
            ) do
       receipt = %{
         slug: slug,
-        op_count: if(no_op?, do: 0, else: applied_count),
+        op_count: if(no_op?, do: 0, else: length(ops)),
         rev: rev,
         block_ids: if(no_op?, do: [], else: block_ids)
       }
@@ -2179,36 +2159,26 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # collecting the affected block id per op against the post-op state. Halts on
   # the first failure (returning that op's tagged error) so a partial batch is
   # never persisted. Affected ids are de-duped while preserving first-seen order.
-  defp fold_paper_ops_in_context(blocks, ops, ledger, now, opts) do
-    writer = Keyword.get(opts, :remint_writer)
-
+  defp fold_paper_ops_in_context(blocks, ops, opts) do
     case Keyword.get(opts, :canvas_run_context) do
       nil ->
-        fold_paper_ops(
-          blocks,
-          ops,
-          paper_fold(ledger, now, writer, [], Papers.Template.paper_declarations())
-        )
+        fold_paper_ops(blocks, ops)
 
       %{container_kind: "document"} = context ->
         # The segment owns local ordering, but locks and declarations belong to
         # the whole Paper. Check the spliced result before any write can occur.
-        with {:ok, folded, folded_ids} <-
-               CanvasRunContext.map_run(
-                 blocks,
-                 context,
-                 &fold_paper_ops(&1, ops, paper_fold(ledger, now, writer, blocks))
-               ),
+        with {:ok, folded, ids} <-
+               CanvasRunContext.map_run(blocks, context, &fold_paper_ops(&1, ops, [])),
              {:ok, folded} <-
                Patch.validate_result(blocks, folded, %{"op" => "canvas-run"},
                  constraints: Papers.Template.paper_declarations()
                ) do
-          {:ok, folded, folded_ids}
+          {:ok, folded, ids}
         end
 
       context ->
         CanvasRunContext.map_run(blocks, context, fn run_blocks ->
-          fold_paper_ops(run_blocks, ops, paper_fold(ledger, now, writer, blocks))
+          fold_paper_ops(run_blocks, ops, [])
         end)
     end
   end
@@ -2221,140 +2191,70 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
 
-  defp heal_revision_fenced_ids(blocks, if_rev) do
-    case project_revision_fenced_ids(blocks, if_rev) do
-      {:ok, projected} ->
-        {:ok, projected, []}
+  defp project_batch_ids(blocks, nil), do: blocks
+  defp project_batch_ids(blocks, _if_rev), do: ensure_block_ids(blocks)
 
-      {:error, {:duplicate_id, _id}} ->
-        heal_repeated_ids(blocks)
-    end
-  end
-
-  defp refuse_healed_names(_healed, _ops, writer) when is_binary(writer), do: :ok
-
-  defp refuse_healed_names(healed, ops, nil) do
-    repeated = Enum.map(healed, &elem(&1, 0))
-
-    named =
-      for op <- ops,
-          is_map(op),
-          id <- op |> Map.take(["id", "afterId", "after"]) |> Map.values(),
-          id in repeated,
-          do: id
-
-    case named do
-      [] -> :ok
-      [id | _] -> {:error, {:duplicate_id, id}}
-    end
-  end
-
-  defp heal_repeated_ids(blocks) do
-    {healed, pairs} = BlockIds.remint_repeated_ids(blocks, MapSet.new())
-
-    with {:ok, projected} <- project_block_ids_safely(healed) do
-      {:ok, projected, pairs}
-    end
-  end
-
-  defp fold_paper_ops(blocks, ops, fold) do
+  defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
     # every op of the atomic fold, so a batch op that breaks a cardinality /
     # relative-order rule halts the fold exactly like a locked-block op (the
     # paper stays UNCHANGED). Same declaration set as the single-op path.
-    Enum.reduce_while(ops, {:ok, blocks, [], [], fold.ledger}, fn op,
-                                                                  {:ok, acc, ids, applied, ledger} ->
-      case fold_paper_op(acc, op, ledger, fold) do
-        {:ok, next, applied_op, affected_id, ledger} ->
-          new_ids =
-            case affected_id do
-              nil -> ids
-              id -> if id in ids, do: ids, else: ids ++ [id]
-            end
+    Enum.reduce_while(ops, {:ok, blocks, [], []}, fn op, {:ok, acc, ids, applied} ->
+      # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
+      # once after it. Two defects share this one root — the batch used to read
+      # its receipt one step BEFORE the id existed, and to thread a still-id-less
+      # block into the next op:
+      #
+      #   1. RECEIPT. `locate_paper_affected` reads the id out of the post-op
+      #      list. Minting after the fold meant an id-less append/insert-after
+      #      located a `nil` block_id, the `nil -> ids` clause below dropped it,
+      #      and the batch answered `{"ok":true,…,"block_ids":[]}` about a block
+      #      it HAD minted and persisted — `ok: true` withholding the only
+      #      addressable identifier it created. The single-op path (:582) always
+      #      minted before locate and reported it correctly; the two shapes of
+      #      one route disagreed.
+      #   2. COLLISION. `Patch`'s duplicate guard is `id_exists?(blocks, block_id
+      #      (block))`, and `block_id/1` is a bare `Map.get` — so an id-less
+      #      block asks "does any block have id nil?". With minting deferred, the
+      #      FIRST id-less append left a nil-id block in the accumulator and the
+      #      SECOND one collided with it: 422 `duplicate_id` on a batch with no
+      #      duplicates. Minting per op leaves no nil-id block in `acc`, so the
+      #      real duplicate check (a literal id already present) still fires and
+      #      the phantom one cannot.
+      #
+      # Additive + idempotent, exactly as at the other chokepoints: a batch of
+      # id-bearing ops is byte-identical through it, and the post-fold
+      # `ensure_block_ids` at the caller is then a no-op that stays as the
+      # belt-and-braces chokepoint.
+      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
+           {:ok, patched} <-
+             Patch.apply_patch(acc, applied_op,
+               constraints: constraints,
+               duplicates: {:batch, blocks}
+             ),
+           next = ensure_block_ids(patched),
+           {:ok, affected} <- locate_paper_affected(applied_op, next) do
+        new_ids =
+          case affected.block_id do
+            nil -> ids
+            id -> if id in ids, do: ids, else: ids ++ [id]
+          end
 
-          {:cont, {:ok, next, new_ids, [applied_op | applied], ledger}}
-
-        {:skipped, ledger} ->
-          {:cont, {:ok, acc, ids, applied, ledger}}
-
-        {:error, _reason} = err ->
-          {:halt, err}
+        {:cont, {:ok, next, new_ids, [applied_op | applied]}}
+      else
+        {:error, _reason} = err -> {:halt, err}
       end
     end)
     |> case do
-      {:ok, folded, ids, applied, ledger} ->
+      {:ok, folded, ids, applied} ->
         with :ok <- Patch.refuse_new_duplicates(blocks, folded, Enum.reverse(applied)) do
-          {:ok, folded, {ids, ledger, length(applied)}}
+          {:ok, folded, ids}
         end
 
       {:error, _reason} = err ->
         err
     end
   end
-
-  defp fold_paper_op(acc, op, ledger, fold) do
-    # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
-    # once after it. Two defects share this one root — the batch used to read
-    # its receipt one step BEFORE the id existed, and to thread a still-id-less
-    # block into the next op:
-    #
-    #   1. RECEIPT. `locate_paper_affected` reads the id out of the post-op
-    #      list. Minting after the fold meant an id-less append/insert-after
-    #      located a `nil` block_id, the `nil -> ids` clause below dropped it,
-    #      and the batch answered `{"ok":true,…,"block_ids":[]}` about a block
-    #      it HAD minted and persisted — `ok: true` withholding the only
-    #      addressable identifier it created. The single-op path (:582) always
-    #      minted before locate and reported it correctly; the two shapes of
-    #      one route disagreed.
-    #   2. COLLISION. `Patch`'s duplicate guard is `id_exists?(blocks, block_id
-    #      (block))`, and `block_id/1` is a bare `Map.get` — so an id-less
-    #      block asks "does any block have id nil?". With minting deferred, the
-    #      FIRST id-less append left a nil-id block in the accumulator and the
-    #      SECOND one collided with it: 422 `duplicate_id` on a batch with no
-    #      duplicates. Minting per op leaves no nil-id block in `acc`, so the
-    #      real duplicate check (a literal id already present) still fires and
-    #      the phantom one cannot.
-    #
-    # Additive + idempotent, exactly as at the other chokepoints: a batch of
-    # id-bearing ops is byte-identical through it, and the post-fold
-    # `ensure_block_ids` at the caller is then a no-op that stays as the
-    # belt-and-braces chokepoint.
-    with {:ok, lowered} <- lower_editor_block_op(acc, op) do
-      ledger = RemintLedger.forget_named(ledger, lowered, fold.writer)
-
-      case RemintLedger.route(ledger, acc, lowered, fold.now, fold.writer) do
-        {nil, ledger} -> {:skipped, ledger}
-        {applied_op, ledger} -> apply_paper_op(acc, applied_op, ledger, fold)
-      end
-    end
-  end
-
-  defp apply_paper_op(acc, applied_op, ledger, fold) do
-    with {:ok, patched, reminted} <-
-           Patch.apply_patch_reminting(acc, applied_op,
-             constraints: fold.constraints,
-             duplicates: :batch,
-             document_blocks: fold.document_blocks
-           ),
-         next = ensure_block_ids(patched),
-         {:ok, affected} <- locate_paper_affected(applied_op, next) do
-      {:ok, next, applied_op, affected.block_id, record_remints(ledger, reminted, fold)}
-    end
-  end
-
-  defp record_remints(ledger, _reminted, %{writer: nil}), do: ledger
-
-  defp record_remints(ledger, reminted, fold),
-    do: RemintLedger.record(ledger, reminted, fold.now, fold.writer)
-
-  defp paper_fold(ledger, now, writer, document_blocks, constraints \\ []),
-    do: %{
-      ledger: ledger,
-      now: now,
-      writer: writer,
-      document_blocks: document_blocks,
-      constraints: constraints
-    }
 
   # The CURRENT streaming rev (no bump) — used by the empty-batch no-op receipt.
   defp paper_current_rev(%Document{content: content}) when is_map(content) do
@@ -2985,29 +2885,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp fold_document_ops(blocks, ops) do
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, results} ->
       with {:ok, applied_op} <- lower_editor_block_op(acc, op),
-           {:ok, patched} <- Patch.apply_patch(acc, applied_op, duplicates: :batch),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op, duplicates: {:batch, blocks}),
            next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(applied_op, next) do
         result = %{
           block: affected.block,
           block_id: affected.block_id,
           op_kind: Map.get(op, "op"),
-          position: affected.position,
-          applied_op: applied_op
+          position: affected.position
         }
 
-        {:cont, {:ok, next, [result | results]}}
+        {:cont, {:ok, next, [{result, applied_op} | results]}}
       else
         {:error, _reason} = err -> {:halt, err}
       end
     end)
     |> case do
       {:ok, folded, results} ->
-        results = Enum.reverse(results)
+        {results, applied} = results |> Enum.reverse() |> Enum.unzip()
 
-        with :ok <-
-               Patch.refuse_new_duplicates(blocks, folded, Enum.map(results, & &1.applied_op)) do
-          {:ok, folded, Enum.map(results, &Map.delete(&1, :applied_op))}
+        with :ok <- Patch.refuse_new_duplicates(blocks, folded, applied) do
+          {:ok, folded, results}
         end
 
       {:error, _reason} = err ->

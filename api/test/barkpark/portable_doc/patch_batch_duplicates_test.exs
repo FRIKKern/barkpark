@@ -141,8 +141,60 @@ defmodule Barkpark.PortableDoc.PatchBatchDuplicatesTest do
     end
   end
 
-  describe "a repeat inside one incoming block is re-minted" do
-    test "old-client nested Enter: the first copy keeps the id, the second gets a fresh one" do
+  describe "only a repeat the batch adds is refused" do
+    test "a legacy pair that grows to three is refused" do
+      blocks = [paragraph("p-d", "Top."), section("s-1", [paragraph("p-d", "Nested.")])]
+
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" => section("s-1", [paragraph("p-d", "Nested."), paragraph("p-d", "Third.")])
+        }
+      ]
+
+      assert {:error, {:duplicate_id, "p-d", "replace-block"}} = Patch.apply_patches(blocks, ops)
+    end
+
+    test "one id moved and another copied in the same batch: the copy is refused" do
+      blocks = two_sections() ++ [section("s-3", [paragraph("p-c", "Gamma.")])]
+
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" => section("s-1", [paragraph("p-x", "Original X."), paragraph("p-a", "Alpha.")])
+        },
+        %{
+          "op" => "replace-block",
+          "id" => "s-2",
+          "block" => section("s-2", [paragraph("p-b", "Beta.")])
+        },
+        %{
+          "op" => "replace-block",
+          "id" => "s-3",
+          "block" => section("s-3", [paragraph("p-c", "Gamma."), paragraph("p-x", "Copy.")])
+        }
+      ]
+
+      assert {:error, {:duplicate_id, "p-x", "replace-block"}} = Patch.apply_patches(blocks, ops)
+    end
+
+    test "a legacy pair that shrinks does not pay for another id that doubles" do
+      blocks = [
+        paragraph("p-d", "Top."),
+        section("s-1", [paragraph("p-d", "Nested."), paragraph("p-x", "X.")])
+      ]
+
+      ops = [
+        %{"op" => "remove-block", "id" => "p-d"},
+        %{"op" => "append-block", "block" => paragraph("p-x", "Copy.")}
+      ]
+
+      assert {:error, {:duplicate_id, "p-x", "append-block"}} = Patch.apply_patches(blocks, ops)
+    end
+
+    test "an old editor's nested Enter repeats the id inside one block, so it is refused" do
       blocks = [section("s-day", [paragraph("p-day", "Left the car park at six.")])]
 
       op = %{
@@ -155,73 +207,91 @@ defmodule Barkpark.PortableDoc.PatchBatchDuplicatesTest do
           ])
       }
 
-      expected = [
-        section("s-day", [
-          paragraph("p-day", "Left the car park at six."),
-          paragraph("s-day-1", "Fog by eight.")
-        ])
+      assert {:error, {:duplicate_id, "p-day", "replace-block"}} = Patch.apply_patch(blocks, op)
+
+      assert {:error, {:duplicate_id, "p-day", "replace-block"}} =
+               Patch.apply_patches(blocks, [op])
+    end
+
+    test "a leftover copy and a later bad op answer the later op's error" do
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" => section("s-1", [paragraph("p-x", "Copy."), paragraph("p-a", "Alpha.")])
+        },
+        %{"op" => "patch-block", "id" => "p-missing", "patch" => %{"text" => "z"}}
       ]
 
-      assert {:ok, expected} == Patch.apply_patch(blocks, op)
-      assert {:ok, expected} == Patch.apply_patches(blocks, [op])
+      assert {:error, {:block_not_found, "p-missing", "patch-block"}} =
+               Patch.apply_patches(two_sections(), ops)
+    end
+  end
+
+  describe "an op that names an id the batch has made repeated is refused" do
+    defp down do
+      [
+        section("s-1", [paragraph("p-a", "Alpha."), paragraph("p-x", "Original X.")]),
+        section("s-2", [paragraph("p-b", "Beta.")])
+      ]
     end
 
-    test "the fresh id never takes an id the document already holds" do
-      blocks = [paragraph("s-day-1", "Taken."), section("s-day", [paragraph("p-day", "A.")])]
+    test "a move down with an edit of the moved paragraph between its two replaces" do
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-2",
+          "block" => section("s-2", [paragraph("p-b", "Beta."), paragraph("p-x", "Original X.")])
+        },
+        %{"op" => "patch-block", "id" => "p-x", "patch" => %{"text" => "Original X. Edited."}},
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" => section("s-1", [paragraph("p-a", "Alpha.")])
+        }
+      ]
 
-      op = %{
-        "op" => "replace-block",
-        "id" => "s-day",
-        "block" => section("s-day", [paragraph("p-day", "A."), paragraph("p-day", "B.")])
-      }
-
-      assert {:ok,
-              [
-                paragraph("s-day-1", "Taken."),
-                section("s-day", [paragraph("p-day", "A."), paragraph("s-day-1-1", "B.")])
-              ]} == Patch.apply_patch(blocks, op)
+      assert {:error, {:duplicate_id, "p-x", "patch-block"}} = Patch.apply_patches(down(), ops)
     end
 
-    test "an insert carrying a repeat inside itself is re-minted, top level and nested" do
-      block =
-        section("s-new", [
-          paragraph("p-n", "One."),
-          paragraph("p-n", "Two."),
-          paragraph("p-n", "Three.")
-        ])
+    test "a move up, then a remove of the old copy by id" do
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" =>
+            section("s-1", [
+              paragraph("p-x", "Original X. Moved and edited."),
+              paragraph("p-a", "Alpha.")
+            ])
+        },
+        %{"op" => "remove-block", "id" => "p-x"}
+      ]
 
-      assert {:ok, [_, %{"id" => "s-new", "blocks" => children}]} =
-               Patch.apply_patch([paragraph("p-a", "A.")], %{
-                 "op" => "append-block",
-                 "block" => block
-               })
-
-      assert Enum.map(children, & &1["id"]) == ["p-n", "s-new-1", "s-new-2"]
+      assert {:error, {:duplicate_id, "p-x", "remove-block"}} =
+               Patch.apply_patches(two_sections(), ops)
     end
 
-    test "a repeat of an id held elsewhere is not re-minted: that is a real duplicate" do
-      op = %{
-        "op" => "replace-block",
-        "id" => "s-1",
-        "block" => section("s-1", [paragraph("p-a", "Alpha."), paragraph("p-b", "Stolen.")])
-      }
+    test "an insert after an id the batch has made repeated" do
+      ops = [
+        %{
+          "op" => "replace-block",
+          "id" => "s-1",
+          "block" => section("s-1", [paragraph("p-x", "Original X."), paragraph("p-a", "Alpha.")])
+        },
+        %{"op" => "insert-after", "afterId" => "p-x", "block" => paragraph("p-n", "New.")}
+      ]
 
-      assert {:error, {:duplicate_id, "p-b", "replace-block"}} =
-               Patch.apply_patch(two_sections(), op)
+      assert {:error, {:duplicate_id, "p-x", "insert-after"}} =
+               Patch.apply_patches(two_sections(), ops)
     end
 
-    test "a copy in a hidden alias is not walked, so the repeat is refused" do
-      blocks = [paragraph("p-a", "A.")]
+    test "an op on a legacy duplicate the batch did not add keeps the first match" do
+      blocks = [paragraph("dup", "Top."), section("s-1", [paragraph("dup", "Nested.")])]
+      ops = [%{"op" => "patch-block", "id" => "dup", "patch" => %{"text" => "Top!"}}]
 
-      block = %{
-        "id" => "exp",
-        "type" => "expandable",
-        "children" => [paragraph("p-h", "Visible.")],
-        "blocks" => [paragraph("p-h", "Hidden.")]
-      }
-
-      assert {:error, {:duplicate_id, "p-h", "append-block"}} =
-               Patch.apply_patch(blocks, %{"op" => "append-block", "block" => block})
+      assert {:ok, [paragraph("dup", "Top!"), section("s-1", [paragraph("dup", "Nested.")])]} ==
+               Patch.apply_patches(blocks, ops)
     end
   end
 end

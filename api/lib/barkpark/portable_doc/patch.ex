@@ -100,7 +100,6 @@ defmodule Barkpark.PortableDoc.Patch do
   byte-identical to the pre-vocabulary behavior (D3 additive).
   """
 
-  alias Barkpark.PortableDoc.BlockIds
   alias Barkpark.PortableDoc.Constraints
   alias Barkpark.PortableDoc.FieldNumber
 
@@ -153,38 +152,17 @@ defmodule Barkpark.PortableDoc.Patch do
     # Locks are checked FIRST so a displaced locked block keeps its
     # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
     # never mask one.
-    with {:ok, new_blocks, _reminted} <- apply_patch_reminting(blocks, op, opts) do
-      {:ok, new_blocks}
-    end
-  end
-
-  @doc """
-  `apply_patch/3` on a block list that also returns every id it re-minted, as
-  `{repeated_id, fresh_id}` pairs: a block id repeated inside the op's one
-  incoming block keeps its first copy, and each later copy gets a fresh id.
-  """
-  @spec apply_patch_reminting(blocks(), op(), keyword()) ::
-          {:ok, blocks(), [{String.t(), String.t()}]} | error()
-  def apply_patch_reminting(blocks, op, opts) when is_list(blocks) do
-    reserve = fn ->
-      MapSet.new(authored_ids(blocks) ++ authored_ids(Keyword.get(opts, :document_blocks, [])))
-      |> MapSet.difference(MapSet.new(rewritten_ids(blocks, op)))
-    end
-
-    {incoming_op, incoming} = remint_incoming(op, reserve)
-
-    with {:ok, new_blocks} <- apply_to_blocks(blocks, incoming_op),
-         {new_blocks, patched} =
-           remint_patched(blocks, new_blocks, op, reserve, Keyword.get(opts, :duplicates)),
-         {:ok, new_blocks} <- validate_result(blocks, new_blocks, op, opts) do
-      {:ok, new_blocks, incoming ++ patched}
+    with :ok <- check_named_repeat(blocks, op, Keyword.get(opts, :duplicates)),
+         {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
+      validate_result(blocks, new_blocks, op, opts)
     end
   end
 
   @doc false
   def validate_result(blocks, new_blocks, op, opts) do
     with {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
-         {:ok, new_blocks} <- check_op_duplicates(blocks, new_blocks, op, opts) do
+         {:ok, new_blocks} <-
+           check_op_duplicates(blocks, new_blocks, op, Keyword.get(opts, :duplicates)) do
       check_constraints(blocks, new_blocks, op, opts)
     end
   end
@@ -214,7 +192,8 @@ defmodule Barkpark.PortableDoc.Patch do
   def apply_patches(doc_or_blocks, ops), do: apply_patches(doc_or_blocks, ops, [])
 
   def apply_patches(doc_or_blocks, ops, opts) when is_list(ops) do
-    batch_opts = Keyword.put(opts, :duplicates, :batch)
+    start = blocks_of(doc_or_blocks)
+    batch_opts = Keyword.put(opts, :duplicates, {:batch, start})
 
     with {:ok, result} <-
            Enum.reduce_while(ops, {:ok, doc_or_blocks}, fn op, {:ok, acc} ->
@@ -223,17 +202,17 @@ defmodule Barkpark.PortableDoc.Patch do
                {:error, _} = err -> {:halt, err}
              end
            end),
-         :ok <- refuse_new_duplicates(blocks_of(doc_or_blocks), blocks_of(result), ops) do
+         :ok <- refuse_new_duplicates(start, blocks_of(result), ops) do
       {:ok, result}
     end
   end
 
   @doc """
   The end-of-batch duplicate judgment behind `apply_patches/3`, for a fold that
-  applies each op with `duplicates: :batch`. An id may sit twice while the
-  batch runs (a move lands in its new section before it leaves the old one);
-  only an id the whole batch leaves repeated, more often than before it, is
-  refused, naming the last op that added a copy.
+  applies each op with `duplicates: {:batch, start_blocks}`. An id may sit twice
+  while the batch runs (a move lands in its new section before it leaves the
+  old one); only an id the whole batch leaves repeated, more often than before
+  it, is refused, naming the last op that added a copy.
   """
   @spec refuse_new_duplicates(blocks(), blocks(), [op()]) ::
           :ok | {:error, {:duplicate_id, String.t(), String.t()}}
@@ -245,19 +224,19 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp new_duplicate(before_blocks, after_blocks) do
-    before_counts = before_blocks |> authored_ids() |> Enum.frequencies()
+    before_counts = id_counts(before_blocks)
     after_ids = authored_ids(after_blocks)
     after_counts = Enum.frequencies(after_ids)
-
-    Enum.find(after_ids, fn id ->
-      after_counts[id] > 1 and after_counts[id] > Map.get(before_counts, id, 0)
-    end)
+    Enum.find(after_ids, &added_repeat?(after_counts, before_counts, &1))
   end
+
+  defp added_repeat?(counts, before_counts, id),
+    do: Map.get(counts, id, 0) > 1 and counts[id] > Map.get(before_counts, id, 0)
 
   defp op_adding_copy(blocks, ops, id) do
     {_blocks, kind} =
       Enum.reduce_while(ops, {blocks, op_kind(List.last(ops))}, fn op, {acc, kind} ->
-        case apply_patch(acc, op, duplicates: :batch) do
+        case apply_patch(acc, op, duplicates: {:batch, blocks}) do
           {:ok, next} ->
             if id_count(next, id) > id_count(acc, id),
               do: {:cont, {next, op_kind(op)}},
@@ -270,6 +249,8 @@ defmodule Barkpark.PortableDoc.Patch do
 
     kind
   end
+
+  defp id_counts(blocks), do: blocks |> authored_ids() |> Enum.frequencies()
 
   defp id_count(blocks, id), do: Enum.count(authored_ids(blocks), &(&1 == id))
 
@@ -569,44 +550,26 @@ defmodule Barkpark.PortableDoc.Patch do
   defp check_duplicate_ratchet(_before_blocks, after_blocks, _op),
     do: {:ok, after_blocks}
 
-  defp check_op_duplicates(before_blocks, after_blocks, op, opts) do
-    if Keyword.get(opts, :duplicates) == :batch,
-      do: {:ok, after_blocks},
-      else: check_duplicate_ratchet(before_blocks, after_blocks, op)
-  end
+  defp check_op_duplicates(_before_blocks, after_blocks, _op, {:batch, _start}),
+    do: {:ok, after_blocks}
 
-  defp remint_incoming(%{"block" => block} = op, reserve) when is_map(block) do
-    if new_duplicate([], [block]) do
-      {[reminted], pairs} = BlockIds.remint_repeated_ids([block], reserve.())
-      {Map.put(op, "block", reminted), pairs}
-    else
-      {op, []}
+  defp check_op_duplicates(before_blocks, after_blocks, op, _duplicates),
+    do: check_duplicate_ratchet(before_blocks, after_blocks, op)
+
+  defp check_named_repeat(blocks, op, {:batch, start}) when is_map(op) do
+    counts = id_counts(blocks)
+    start_counts = id_counts(start)
+
+    case op
+         |> Map.take(["id", "afterId", "after"])
+         |> Map.values()
+         |> Enum.find(&added_repeat?(counts, start_counts, &1)) do
+      nil -> :ok
+      id -> {:error, {:duplicate_id, id, op_kind(op)}}
     end
   end
 
-  defp remint_incoming(op, _reserve), do: {op, []}
-
-  defp remint_patched(blocks, new_blocks, %{"op" => "patch-block", "id" => id}, reserve, :batch) do
-    before = block_at(blocks, id)
-
-    transform_with_flag(new_blocks, id, fn target ->
-      if new_duplicate([before], [target]) do
-        BlockIds.remint_repeated_ids([target], reserve.())
-      else
-        {[target], []}
-      end
-    end)
-  end
-
-  defp remint_patched(_blocks, new_blocks, _op, _reserve, _duplicates), do: {new_blocks, []}
-
-  defp rewritten_ids(blocks, %{"op" => kind, "id" => id})
-       when kind in ["replace-block", "patch-block"],
-       do: blocks |> block_at(id) |> authored_block_ids()
-
-  defp rewritten_ids(_blocks, _op), do: []
-
-  defp block_at(blocks, id), do: blocks |> transform_with_flag(id, &{[&1], &1}) |> elem(1)
+  defp check_named_repeat(_blocks, _op, _duplicates), do: :ok
 
   defp authored_ids(blocks) when is_list(blocks),
     do: Enum.flat_map(blocks, &authored_block_ids/1)
