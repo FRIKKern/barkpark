@@ -76,7 +76,7 @@ DEFERRED to wave 2: **t11** mainline gap-audit (audit is honest only AFTER wave 
 
 ### Wave-1 mechanics (all builders)
 - The paper-editor bundle is COMMITTED (`api/priv/static/assets/bp-paper-editor.bundle.js` + web mirror). NEVER hand-merge it: on rebase/conflict, take source, re-run `npm run build` (+ `build:web` if the mirror changed), then `scripts/paper-editor-mirror-check.sh`.
-- JS slices extend the `npm test` script in `api/assets/paper-editor/package.json` with their new `__*.test.mjs`.
+- JS slices add their new `src/**/__*.test.mjs` file; `npm test` (`scripts/test-chain.mjs`) finds it, so package.json is not edited.
 - DB-backed LiveView tests (paper_canvas_test.exs etc.) run locally where Postgres is up; CI's full suite (7119/0 baseline) is authoritative at PR time. Targeted `CC=clang mix test <file>` is the per-slice gate.
 - Visual verify against a REAL local server per memory `local-portable-testing`; `scripts/status-manifest-check.sh` untouched-green.
 

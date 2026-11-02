@@ -7,7 +7,8 @@
 // the reads instead of trusting a list:
 //   1. entry points: every `node <file>`, `npm test` and `npm run <script>` in
 //      the workflow, expanded through package.json (pre/post hooks, nested
-//      `npm run`, `esbuild <entry>`);
+//      `npm run`, `esbuild <entry>`), and through scripts/test-chain.mjs, which
+//      runs every file its chain() lists;
 //   2. from each reachable file, every path it names that exists: "./x" and
 //      "../x" literals, bare repo paths ("api/x"), `${ROOT}/x` templates,
 //      ROOT + "/x" concats, join/resolve(ROOT, "a", "b/c", …), and CSS url(x).
@@ -23,6 +24,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chain } from "../scripts/test-chain.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const PKG = resolve(dirname(SELF), "..");
@@ -103,7 +105,7 @@ const literalValue = (arg) => {
   return m ? m[2] : null;
 };
 
-export function scanner({ repo, pkg, notRead = new Map(), self = null }) {
+export function scanner({ repo, pkg, notRead = new Map(), self = null, runs = new Map() }) {
   const inside = (p) => p === pkg || p.startsWith(pkg + sep);
   const inRepo = (p) => p.startsWith(repo + sep);
   const ancestorOfPkg = (p) => pkg.startsWith(p + sep);
@@ -166,7 +168,10 @@ export function scanner({ repo, pkg, notRead = new Map(), self = null }) {
       }
     };
     const commands = (text) => {
-      for (const m of text.matchAll(/\bnode\s+([^\s&|;"'>]+\.(?:mjs|cjs|js))/g)) queue.push(resolve(pkg, m[1]));
+      for (const m of text.matchAll(/\bnode\s+([^\s&|;"'>]+\.(?:mjs|cjs|js))/g)) {
+        const file = resolve(pkg, m[1]);
+        queue.push(file, ...(runs.get(file) || []));
+      }
       for (const m of text.matchAll(/\besbuild\s+([^\s&|;"'>-][^\s&|;"'>]*)/g)) queue.push(resolve(pkg, m[1]));
       for (const m of text.matchAll(/\bnpm\s+run\s+([\w:-]+)/g)) expand(m[1]);
       for (const m of text.matchAll(/["']npm["'],\s*\[\s*["']run["'],\s*["']([\w:-]+)["']/g)) expand(m[1]);
@@ -212,7 +217,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const arms = filterArms(yml);
   assert.deepEqual(Object.keys(arms).sort(), ["pull_request", "push"], "the workflow has a push and a pull_request path filter");
 
-  const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF }).reads(yml, scripts);
+  const runs = new Map([[join(PKG, "scripts/test-chain.mjs"), chain(PKG).map((file) => join(PKG, file))]]);
+  const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF, runs }).reads(yml, scripts);
   assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
   assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
 
