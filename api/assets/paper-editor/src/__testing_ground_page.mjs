@@ -319,17 +319,28 @@ if (process.env.TG_TRY) {
 }
 
 if (process.env.TG_BARKPARK) {
-  const fold = barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN);
-  await t.checkAsync("a batch patch.ex refuses comes back with Barkpark's own answer", () =>
-    assert.rejects(fold.apply([{ id: "p-a", type: "paragraph", content: [] }], [{ op: "patch-block", id: "p-missing", patch: { content: [] } }]), /^Error: Barkpark answered 4\d\d to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*p-missing/));
-  const local = await start({ fold });
+  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
   const page = await browser.newPage();
-  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
+  const openLocal = async () => {
     await page.goto(`${local.url}?doc=drill:D02`);
     await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
+  };
+  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
+    await openLocal();
     await play(page, drill("D02"));
+    assert.deepEqual(red(await lightsOf(page)), []);
+  });
+  await t.checkAsync("a batch that adds a second p-after comes back refused with Barkpark's own answer", async () => {
+    await openLocal();
+    await page.evaluate(() => {
+      const { host } = window.testingGround.state;
+      const real = host.fold;
+      host.fold = { name: real.name, apply: (blocks, ops) => real.apply(blocks, [...ops, { op: "insert-after", afterId: "p-after", block: { id: "p-after", type: "paragraph", content: [] } }]) };
+    });
+    await play(page, { steps: [{ click: { text: "Home by dark.", at: "end" } }, { type: "!" }] });
     const lights = await lightsOf(page);
-    assert.deepEqual(red(lights), []);
+    assert.deepEqual(red(lights), ["refused-batches"]);
+    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*"code":"invalid_op"/);
   });
   await page.close();
   await local.close();
