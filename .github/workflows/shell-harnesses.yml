@@ -738,6 +738,13 @@ on:
       - "scripts/usage-envelope-diff.test.mjs"
       - "scripts/fixtures/usage-envelope-diff/*.json"
       - "cloud/lib/barkpark_cloud/usage.ex"
+      # DERIVED FILES MAP (task-e04a2c419fdd3621). `tooling-harnesses` runs the
+      # regen/reach map's suite; the suite also reads the gate files it names.
+      - "scripts/derived-files.mjs"
+      - "scripts/derived-files.test.mjs"
+      - "scripts/regen.mjs"
+      - "scripts/regen.test.mjs"
+      - "scripts/reach.mjs"
       # CP-OPS ARMS (task-2ea65cb8f1c71a2a). `tooling-harnesses` runs
       # scripts/cp-ops.test.sh: cp-ops.yml's choice list vs the script's arms,
       # and every arm's ssh argv vs the golden. cp-ops.yml is workflow_dispatch
@@ -1461,6 +1468,13 @@ on:
       - "scripts/usage-envelope-diff.test.mjs"
       - "scripts/fixtures/usage-envelope-diff/*.json"
       - "cloud/lib/barkpark_cloud/usage.ex"
+      # DERIVED FILES MAP (task-e04a2c419fdd3621). `tooling-harnesses` runs the
+      # regen/reach map's suite; the suite also reads the gate files it names.
+      - "scripts/derived-files.mjs"
+      - "scripts/derived-files.test.mjs"
+      - "scripts/regen.mjs"
+      - "scripts/regen.test.mjs"
+      - "scripts/reach.mjs"
       # CP-OPS ARMS (task-2ea65cb8f1c71a2a). `tooling-harnesses` runs
       # scripts/cp-ops.test.sh: cp-ops.yml's choice list vs the script's arms,
       # and every arm's ssh argv vs the golden. cp-ops.yml is workflow_dispatch

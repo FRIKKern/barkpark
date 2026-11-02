@@ -188,6 +188,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # its controls belong in this baseline, without enabling the canvas.
       assert rendered =~ ~s(aria-label="Content change history")
 
+      if System.get_env("GOLDEN_REGEN") == "1" do
+        File.mkdir_p!(Path.dirname(@snapshot_path))
+        File.write!(@snapshot_path, rendered)
+      end
+
       if File.exists?(@snapshot_path) do
         # The snapshot is a text file; its final newline is not part of the DOM.
         baseline = @snapshot_path |> File.read!() |> String.trim_trailing("\n")

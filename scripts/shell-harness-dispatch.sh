@@ -344,6 +344,11 @@ tooling-harnesses scripts/usage-envelope-diff.mjs
 tooling-harnesses scripts/usage-envelope-diff.test.mjs
 tooling-harnesses scripts/fixtures/usage-envelope-diff/*.json
 tooling-harnesses cloud/lib/barkpark_cloud/usage.ex
+tooling-harnesses scripts/derived-files.mjs
+tooling-harnesses scripts/derived-files.test.mjs
+tooling-harnesses scripts/regen.mjs
+tooling-harnesses scripts/regen.test.mjs
+tooling-harnesses scripts/reach.mjs
 tooling-harnesses scripts/cp-ops.sh
 tooling-harnesses scripts/cp-ops.test.sh
 tooling-harnesses scripts/fixtures/cp-ops/golden.txt
