@@ -381,3 +381,126 @@ func TestTheRealSlotPairStillMatchesThePrefix(t *testing.T) {
 		t.Errorf("a unit carrying the prefix was filed as a SITE unit: %q", d)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// task-0fc277c5d1bcbabc: single-unit boxes.
+//
+// Measured 2026-11-02 on gyl, dnd, dooodo, jarl, regnskap and remote-studio.
+// Each serves through one barkpark.service. Both slot units read
+// inactive/dead with state_since "n/a", health reads up, and the agent reports
+// beam_pid with no beam_slot. The detail line called every one of them a
+// systemd/gate disagreement.
+// ---------------------------------------------------------------------------
+
+func idleSlotPair() []cloudclient.SlotUnit {
+	return []cloudclient.SlotUnit{
+		slotUnit("barkpark-slot@blue.service", "inactive", "dead", "success", 0, 0, "n/a"),
+		slotUnit("barkpark-slot@green.service", "inactive", "dead", "success", 0, 0, "n/a"),
+	}
+}
+
+func withBeam(b cloudclient.Barkpark, pid, slot string) cloudclient.Barkpark {
+	if pid != "" {
+		b.Pressure.BeamPID = strPtr(pid)
+	}
+	if slot != "" {
+		b.Pressure.BeamSlot = strPtr(slot)
+	}
+	return b
+}
+
+func TestSingleUnitBoxWithIdleSlotsIsNotADisagreement(t *testing.T) {
+	b := withBeam(slotBox(idleSlotPair()...), "2937529", "")
+	if got := slotUnitMarker(b); got != "" {
+		t.Fatalf("marker = %q, want empty for a box whose BEAM runs outside the pair", got)
+	}
+	st := attentionStatus(b)
+	if st != "ok" || attentionBucket(st) != "healthy" {
+		t.Fatalf("status/bucket = %q/%q, want ok/healthy", st, attentionBucket(st))
+	}
+	if d := attentionDetail(b, st); strings.Contains(d, "disagree") || strings.Contains(d, "no blue/green slot") {
+		t.Errorf("detail %q still flags a single-unit box", d)
+	}
+}
+
+func TestSlotBoxWithNoServingSlotAndHealthUpIsStillADisagreement(t *testing.T) {
+	cases := map[string]cloudclient.Barkpark{
+		"no BEAM reading at all":                 slotBox(idleSlotPair()...),
+		"BEAM attributed to a slot":              withBeam(slotBox(idleSlotPair()...), "4185178", "green"),
+		"BEAM pid is a slot unit's main pid":     withBeam(slotBox(slotUnit("barkpark-slot@blue.service", "inactive", "dead", "success", 0, 0, ""), slotUnit("barkpark-slot@green.service", "activating", "start", "success", 4185178, 0, "")), "4185178", ""),
+		"BEAM pid empty or zero is not evidence": withBeam(slotBox(idleSlotPair()...), "0", ""),
+	}
+	for name, b := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := slotUnitMarker(b)
+			if !strings.Contains(d, "no blue/green slot is active") || !strings.Contains(d, "health says up") {
+				t.Errorf("marker = %q, want the disagreement named", d)
+			}
+		})
+	}
+}
+
+func TestSingleUnitEvidenceDoesNotHideAFailedSlot(t *testing.T) {
+	units := idleSlotPair()
+	units[0] = slotUnit("barkpark-slot@blue.service", "failed", "failed", "signal", 0, 9, "")
+	b := withBeam(slotBox(units...), "2937529", "")
+	d := slotUnitMarker(b)
+	if !strings.Contains(d, "NO slot is serving") || !strings.Contains(d, "blue slot FAILED") ||
+		!strings.Contains(d, "health says up") {
+		t.Errorf("marker = %q, a failed slot must still be named", d)
+	}
+}
+
+func TestServingSlotWhileHealthSaysDownIsADisagreement(t *testing.T) {
+	serving := []cloudclient.SlotUnit{
+		slotUnit("barkpark-slot@blue.service", "inactive", "dead", "success", 0, 0, ""),
+		slotUnit("barkpark-slot@green.service", "active", "running", "success", 2988434, 0,
+			"Mon 2026-11-02 11:46:52 UTC"),
+	}
+	down := slotBox(serving...)
+	down.HealthStatus = "down"
+	st := attentionStatus(down)
+	if st != "degraded" || attentionBucket(st) != "attention" {
+		t.Fatalf("status/bucket = %q/%q, want degraded/attention", st, attentionBucket(st))
+	}
+	d := attentionDetail(down, st)
+	if !strings.Contains(d, "serving on green") || !strings.Contains(d, "health says down — systemd and the gate disagree") {
+		t.Errorf("detail %q must name both readings", d)
+	}
+
+	// Health up, or not yet read, is no disagreement.
+	for _, h := range []string{"up", "unknown"} {
+		b := slotBox(serving...)
+		b.HealthStatus = h
+		if got := slotUnitMarker(b); got != "" {
+			t.Errorf("health %q: marker = %q, want empty", h, got)
+		}
+	}
+
+	// A failed half beside the serving one keeps its clause and gains the
+	// reverse disagreement.
+	f := slotBox(blueFailedGreenServing()...)
+	f.HealthStatus = "down"
+	if d := slotUnitMarker(f); !strings.Contains(d, "blue slot FAILED") || !strings.Contains(d, "health says down") {
+		t.Errorf("marker = %q, want the failure and the disagreement", d)
+	}
+}
+
+// The fleet as measured on 2026-11-02: four boxes on their latest release
+// tag and behind main by commits. The slot marker never decided their bucket.
+// The behind rung does, and this pins that the fix leaves the rung alone.
+func TestSingleUnitBoxBehindMainStaysBehind(t *testing.T) {
+	b := withBeam(slotBox(idleSlotPair()...), "2937529", "")
+	b.CommitAncestry = "behind"
+	n := 29
+	b.CommitDistance = &n
+	b.UpdateState = "current"
+	st := attentionStatus(b)
+	if st != "behind" || attentionBucket(st) != "attention" {
+		t.Fatalf("status/bucket = %q/%q, want behind/attention", st, attentionBucket(st))
+	}
+	d := attentionDetail(b, st)
+	if !strings.Contains(d, "29 commits behind main") || strings.Contains(d, "disagree") {
+		t.Errorf("detail = %q", d)
+	}
+}
