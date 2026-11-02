@@ -257,13 +257,26 @@ await scene("every test doc opens: 7 drills and 80 block samples, none with a du
 if (process.env.TG_BARKPARK) {
   const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
   const page = await browser.newPage();
-  await t.checkAsync("D02 through a local Barkpark: patch.ex itself refuses the batch", async () => {
+  const openLocal = async () => {
     await page.goto(`${local.url}?doc=drill:D02`);
     await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
+  };
+  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
+    await openLocal();
     await play(page, drill("D02"));
+    assert.deepEqual(red(await lightsOf(page)), []);
+  });
+  await t.checkAsync("a batch that adds a second p-after comes back refused with Barkpark's own answer", async () => {
+    await openLocal();
+    await page.evaluate(() => {
+      const { host } = window.testingGround.state;
+      const real = host.fold;
+      host.fold = { name: real.name, apply: (blocks, ops) => real.apply(blocks, [...ops, { op: "insert-after", afterId: "p-after", block: { id: "p-after", type: "paragraph", content: [] } }]) };
+    });
+    await play(page, { steps: [{ click: { text: "Home by dark.", at: "end" } }, { type: "!" }] });
     const lights = await lightsOf(page);
-    assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
-    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*invalid_op/);
+    assert.deepEqual(red(lights), ["refused-batches"]);
+    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*"code":"invalid_op"/);
   });
   await page.close();
   await local.close();
