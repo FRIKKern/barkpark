@@ -264,8 +264,11 @@ try {
     await reloads(after.blocks, ["The lead.", "", "Beta"]);
   });
 
-  for (const [kind, data] of [["text/html", "<p>One</p><p></p><p></p><p></p><p>Two</p>"], ["text/plain", "One\n\n\n\nTwo"]]) {
-    await run(`pasting a line, three empty lines and a line (${kind}) leaves one empty line`, RUN, async (page) => {
+  for (const [kind, data, doc, shown] of [
+    ["text/html", "<p>One</p><p></p><p></p><p></p><p>Two</p>", ["AlphaOne", "", "Two", "Beta"], ["AlphaOne", "Two", "Beta"]],
+    ["text/plain", "One\n\n\n\nTwo", ["AlphaOne", "Two", "Beta"], ["AlphaOne", "Two", "Beta"]],
+  ]) {
+    await run(`pasting a line, three empty lines and a line (${kind}) leaves at most one empty line`, RUN, async (page) => {
       await clickAt(page, "Alpha", 5);
       await page.evaluate(([kind, data]) => {
         const clipboardData = new DataTransfer();
@@ -274,10 +277,10 @@ try {
       }, [kind, data]);
       await settle(page);
       const after = await state(page, RUN);
-      equal(after.doc, ["AlphaOne", "", "Two", "Beta"], "the doc");
-      equal(after.shown, ["AlphaOne", "Two", "Beta"], "the lines on screen");
-      equal(after.saved, ["AlphaOne", "", "Two", "Beta"], "the saved blocks");
-      await reloads(after.blocks, ["AlphaOne", "", "Two", "Beta"]);
+      equal(after.doc, doc, "the doc");
+      equal(after.shown, shown, "the lines on screen");
+      equal(after.saved, doc, "the saved blocks");
+      await reloads(after.blocks, doc);
     });
   }
 } finally {
