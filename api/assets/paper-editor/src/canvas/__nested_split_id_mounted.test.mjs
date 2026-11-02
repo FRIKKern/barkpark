@@ -477,6 +477,18 @@ await door("copy-into-column: a top-level paragraph copied into a column above i
     sends: ["patch-block col1"],
   });
 
+await door("move-and-column-copy: one transaction moves p-x into a section and puts an id-keeping copy in a column above: the moved block keeps p-x",
+  [{ id: "col1", type: "columns", columns: [[{ type: "paragraph", content: [{ type: "text", value: "Left" }] }], [{ type: "paragraph", content: [{ type: "text", value: "Right" }] }]] }, { id: "s-day", type: "section", title: "Day one", blocks: [p("p-a", "Alpha.")] }, p("p-x", "Original X.")],
+  async (editor) => {
+    const { node, pos } = textblockAt(editor.state.doc, "Original X.");
+    let tr = editor.state.tr.delete(pos, pos + node.nodeSize);
+    tr = tr.replaceRange(textblockAt(tr.doc, "Alpha.").pos, textblockAt(tr.doc, "Alpha.").pos, new Slice(Fragment.from(node), 0, 0));
+    const copy = node.type.create(node.attrs, editor.state.schema.text("Copy."));
+    tr = tr.replaceRange(textblockAt(tr.doc, "Left").pos, textblockAt(tr.doc, "Left").pos, new Slice(Fragment.from(copy), 0, 0));
+    editor.view.dispatch(tr);
+  },
+  { keeps: { "Original X.": "p-x", "Alpha.": "p-a" }, typed: ["Original X.", "Alpha."] });
+
 await door("copy-into-earlier-row: a step's paragraph copied into the step above it, its ids kept by the slice: the original keeps its id",
   [{ id: "st-walk", type: "steps", steps: [
     { id: "r-one", title: "First", blocks: [p("p-a", "Alpha.")] },

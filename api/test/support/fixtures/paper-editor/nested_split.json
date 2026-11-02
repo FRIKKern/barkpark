@@ -2740,6 +2740,214 @@
       ]
     },
     {
+      "scene": "move-and-column-copy",
+      "before": [
+        {
+          "id": "col1",
+          "type": "columns",
+          "columns": [
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Left"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Right"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-x",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Original X."
+            }
+          ]
+        }
+      ],
+      "batches": [
+        [
+          {
+            "op": "remove-block",
+            "id": "p-x"
+          },
+          {
+            "op": "patch-block",
+            "id": "col1",
+            "patch": {
+              "columns": [
+                [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "Copy."
+                      }
+                    ]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "Left"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "value": "Right"
+                      }
+                    ]
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "op": "replace-block",
+            "id": "s-day",
+            "block": {
+              "id": "s-day",
+              "type": "section",
+              "title": "Day one",
+              "blocks": [
+                {
+                  "id": "p-x",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Original X."
+                    }
+                  ]
+                },
+                {
+                  "id": "p-a",
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "value": "Alpha."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "client_after": [
+        {
+          "id": "col1",
+          "type": "columns",
+          "columns": [
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Copy."
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Left"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Right"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "s-day",
+          "type": "section",
+          "title": "Day one",
+          "blocks": [
+            {
+              "id": "p-x",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Original X."
+                }
+              ]
+            },
+            {
+              "id": "p-a",
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Alpha."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "typed": [
+        "Original X.",
+        "Alpha."
+      ]
+    },
+    {
       "scene": "copy-into-earlier-row",
       "before": [
         {
