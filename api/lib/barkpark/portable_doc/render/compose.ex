@@ -849,100 +849,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # above for the implicit header). Non-`:article` styles never see the spec:
   # the email emitters are byte-locked and a classed inline SVG paints as a
   # black blob in a stylesheet-less mail client.
+  @table_cell_cap 10_000
+
   def compose_block(%{"type" => "table"} = b, style) do
-    col_types = table_col_types(b, style)
-
-    compose_cell = fn cell ->
-      cell
-      |> table_cell_content()
-      |> compose_inline_children()
-      |> Enum.map(&to_pd_node_from_inline_child/1)
-    end
-
-    compose_typed_cell = fn cell, index ->
-      case Enum.at(col_types, index) do
-        "delta" -> table_delta_cell(cell, compose_cell)
-        "spark" -> table_spark_cell(cell, compose_cell)
-        _ -> compose_cell.(cell)
-      end
-    end
-
-    # Head cells stay on the legacy body in EVERY column type (mirrors the Go
-    # renderer, which types only body cells); the head only inherits alignment.
-    compose_head_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
-
-    compose_row = fn row ->
-      row
-      |> table_row_cells()
-      |> Enum.with_index()
-      |> Enum.map(fn {cell, index} -> compose_typed_cell.(cell, index) end)
-    end
-
-    {column_head, record_keys} = table_column_head(b)
-    raw_rows = Map.get(b, "rows", []) |> List.wrap()
-
-    declared_head =
-      case Map.get(b, "head") do
-        nil -> Map.get(b, "header")
-        [] -> Map.get(b, "header")
-        head -> head
-      end
-
-    {declared_head, raw_rows} =
-      case {declared_head, raw_rows} do
-        {true, [first | rest]} -> {table_row_cells(first), rest}
-        pair -> pair
-      end
-
-    {legacy_head, body_rows} =
-      case raw_rows do
-        [%{"header" => true} = row | rest] ->
-          {table_row_cells(row), rest}
-
-        [%{"cells" => cells} = row | rest] when is_list(cells) ->
-          if cells != [] and Enum.all?(cells, &(is_map(&1) and Map.get(&1, "header") == true)) do
-            {table_row_cells(row), rest}
-          else
-            {nil, raw_rows}
-          end
-
-        rows ->
-          {nil, rows}
-      end
-
-    body_rows =
-      if record_keys == [] do
-        body_rows
-      else
-        Enum.map(body_rows, fn row -> Enum.map(record_keys, &Map.get(row, &1, "")) end)
-      end
-
-    rows =
-      body_rows
-      |> Enum.map(compose_row)
-
-    pd =
-      %{"kind" => "PdTable", "rows" => rows}
-      |> table_put_col_types(col_types)
-      |> table_put_spans(
-        Map.get(b, "spans"),
-        length(rows),
-        rows |> List.first() |> List.wrap() |> length()
-      )
-      |> table_put_widths(Map.get(b, "cols"))
-      |> table_put_head_col(Map.get(b, "headCol"))
-      |> table_put_aligns(declared_head || legacy_head || column_head, body_rows)
-
-    head =
-      if is_list(declared_head) and declared_head != [],
-        do: declared_head,
-        else: legacy_head || column_head
-
-    case head do
-      nil -> pd
-      [] -> pd
-      head_row -> Map.put(pd, "head", compose_head_row.(head_row))
-    end
+    if record_cells(b) > @table_cell_cap,
+      do: %{"kind" => "PdText", "children" => [Chrome.t("Table too large to show")]},
+      else: compose_table(b, style)
   end
 
   # ── field-* LEAF blocks (P2.1) ─────────────────────────────────────────────
@@ -2010,6 +1922,102 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     unknown_block_node("invalid block")
   end
 
+  defp compose_table(b, style) do
+    col_types = table_col_types(b, style)
+
+    compose_cell = fn cell ->
+      cell
+      |> table_cell_content()
+      |> compose_inline_children()
+      |> Enum.map(&to_pd_node_from_inline_child/1)
+    end
+
+    compose_typed_cell = fn cell, index ->
+      case Enum.at(col_types, index) do
+        "delta" -> table_delta_cell(cell, compose_cell)
+        "spark" -> table_spark_cell(cell, compose_cell)
+        _ -> compose_cell.(cell)
+      end
+    end
+
+    # Head cells stay on the legacy body in EVERY column type (mirrors the Go
+    # renderer, which types only body cells); the head only inherits alignment.
+    compose_head_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+
+    compose_row = fn row ->
+      row
+      |> table_row_cells()
+      |> Enum.with_index()
+      |> Enum.map(fn {cell, index} -> compose_typed_cell.(cell, index) end)
+    end
+
+    {column_head, record_keys} = table_column_head(b)
+    raw_rows = Map.get(b, "rows", []) |> List.wrap()
+
+    declared_head =
+      case Map.get(b, "head") do
+        nil -> Map.get(b, "header")
+        [] -> Map.get(b, "header")
+        head -> head
+      end
+
+    {declared_head, raw_rows} =
+      case {declared_head, raw_rows} do
+        {true, [first | rest]} -> {table_row_cells(first), rest}
+        pair -> pair
+      end
+
+    {legacy_head, body_rows} =
+      case raw_rows do
+        [%{"header" => true} = row | rest] ->
+          {table_row_cells(row), rest}
+
+        [%{"cells" => cells} = row | rest] when is_list(cells) ->
+          if cells != [] and Enum.all?(cells, &(is_map(&1) and Map.get(&1, "header") == true)) do
+            {table_row_cells(row), rest}
+          else
+            {nil, raw_rows}
+          end
+
+        rows ->
+          {nil, rows}
+      end
+
+    body_rows =
+      if record_keys == [] do
+        body_rows
+      else
+        Enum.map(body_rows, fn row -> Enum.map(record_keys, &Map.get(row, &1, "")) end)
+      end
+
+    rows =
+      body_rows
+      |> Enum.map(compose_row)
+
+    pd =
+      %{"kind" => "PdTable", "rows" => rows}
+      |> table_put_col_types(col_types)
+      |> table_put_spans(
+        Map.get(b, "spans"),
+        length(rows),
+        rows |> List.first() |> List.wrap() |> length()
+      )
+      |> table_put_widths(Map.get(b, "cols"))
+      |> table_put_head_col(Map.get(b, "headCol"))
+      |> table_put_aligns(declared_head || legacy_head || column_head, body_rows)
+
+    head =
+      if is_list(declared_head) and declared_head != [],
+        do: declared_head,
+        else: legacy_head || column_head
+
+    case head do
+      nil -> pd
+      [] -> pd
+      head_row -> Map.put(pd, "head", compose_head_row.(head_row))
+    end
+  end
+
   # A `_raw` degrade node the walker passes through verbatim (walk.ex `_raw`
   # clause). `label` is already escaped/literal at every call site.
   defp unknown_block_node(label) do
@@ -2411,7 +2419,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp toc_level(_), do: 1
 
-  defp toc_depth(depth) when is_integer(depth) and depth > 0, do: depth
+  defp toc_depth(depth) when is_integer(depth) and depth > 0, do: min(depth, 6)
   defp toc_depth(_), do: 2
 
   defp toc_list_wrapper(false, _style),
@@ -2656,6 +2664,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
   defp table_row_cells(row), do: List.wrap(row)
+
+  defp record_cells(b) do
+    {_head, keys} = table_column_head(b)
+    b |> Map.get("rows", []) |> List.wrap() |> length() |> Kernel.*(length(keys))
+  end
 
   defp table_cell_content(%{"content" => content}) when is_list(content) do
     Enum.flat_map(content, fn
