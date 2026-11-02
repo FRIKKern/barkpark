@@ -92,6 +92,8 @@ await check("each reader finds every form on a fixture", async () => {
   ].join("\n");
   assert.deepEqual(classWords(js).sort(), ["ProseMirror-thing", "bp-after-division", "bp-after-paren", "bp-block", "bp-block--mod", "bp-block__head", "bp-block__second", "bp-escaped", "bp-in-template", "bp-inner", "bp-outer", "bp-plain", "bp-single", "bp-template-escaped", "bp-ternary", "bp-toggled", "hljs-scope", "tiptap"]);
   assert.throws(() => lex("x = `${a"), /lexer ended inside 1 template expression/);
+  assert.deepEqual(lex(`const r = /[/a/']/; x = 'bp-y'`).strings, ["bp-y"]);
+  assert.deepEqual(lex(`x = "bp-open`).strings, ["bp-open"]);
   assert.deepEqual(reachInsInContract("## Known reach-ins\n| Kind | Names |\n|---|---|\n| member | `a` |\n| Who | `b` |\n| event | `c` | x |\n## Next\n| event | `d` |\n"), new Set(["member|a"]));
   assert.deepEqual(notClasses(`customElements.define("bp-tag",X);document.createElement("bp-made");document.getElementById("bp-id1");n.id="bp-id2";`).sort(), ["bp-id1", "bp-id2", "bp-made", "bp-tag"]);
   assert.deepEqual(bundleEvents(`new CustomEvent("bp-a");new Event('bp-b');`), ["bp-a", "bp-b"]);
@@ -127,7 +129,7 @@ await check("each reader finds every form on a fixture", async () => {
   };
   assert.deepEqual(schemaAttributes(schema).sort(), ["data-box", "data-child-of-bare", "data-docid", "data-from-dom-wrapper", "data-from-node", "data-nested", "href"]);
 
-  const ex = `~s(<div class="bp-r1 bp-r2" data-r1="x">) <> ~s(<span class=\\"bp-r3\\">) %{"data-r2" => 1}`;
+  const ex = `~s(<div class=" bp-r1  bp-r2" data-r1="x">) <> ~s(<span class=\\"bp-r3\\">) %{"data-r2" => 1}`;
   assert.deepEqual(readerClasses(ex).sort(), ["bp-r1", "bp-r2", "bp-r3"]);
   assert.deepEqual(readerAttributes(ex).sort(), ["data-r1", "data-r2"]);
 
