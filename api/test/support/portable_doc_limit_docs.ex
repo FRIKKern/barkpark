@@ -64,9 +64,40 @@ defmodule Barkpark.PortableDoc.LimitDocs do
        }},
       {"nested columns", nest(&%{"type" => "columns", "columns" => [[&1]]})},
       {"nested section", nest(&%{"type" => "section", "blocks" => [&1]})},
-      {"big number", %{"type" => "heatmap", "cells" => [[Integer.pow(10, 400), 1]]}}
+      {"big number", %{"type" => "heatmap", "cells" => [[Integer.pow(10, 400), 1]]}},
+      {"nested strong",
+       %{
+         "type" => "paragraph",
+         "content" => [nest_inline("strong", 20_000)]
+       }},
+      {"many merges",
+       %{
+         "type" => "sheet",
+         "snapshot" => %{
+           "rows" => List.duplicate(List.duplicate("a", 100), 100),
+           "merges" => List.duplicate([0, 0, 100, 100], 20_000)
+         }
+       }},
+      {"many spans",
+       %{
+         "type" => "table",
+         "rows" => List.duplicate(List.duplicate([], 100), 100),
+         "spans" =>
+           List.duplicate(%{"row" => 0, "col" => 0, "rowspan" => 100, "colspan" => 100}, 20_000)
+       }},
+      {"flat line", flat_line(1.0e16)},
+      {"flat line high", flat_line(1.0e100)}
     ]
   end
+
+  defp flat_line(value),
+    do: %{"type" => "chart", "series" => [%{"label" => "s", "points" => [value, value]}]}
+
+  def nest_inline(type, depth),
+    do:
+      Enum.reduce(1..depth, %{"type" => "text", "value" => "leaf"}, fn _, node ->
+        %{"type" => type, "children" => [node]}
+      end)
 
   def nest(wrap, depth \\ 4000),
     do: Enum.reduce(1..depth, %{"type" => "paragraph", "text" => "leaf"}, fn _, b -> wrap.(b) end)

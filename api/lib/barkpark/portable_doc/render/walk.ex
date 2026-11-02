@@ -1466,28 +1466,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp table_align_attr(_aligns, _area, _r, _c), do: ""
 
   defp table_span_lookup(n) do
-    lens = row_lengths(n)
-
-    {origins, covered, _left} =
-      n
-      |> Map.get("spans", [])
-      |> Enum.reduce({%{}, MapSet.new(), cell_count(lens)}, fn
-        %{"row" => r0, "col" => c0, "rowspan" => rs, "colspan" => cs},
-        {origins, covered, left} = acc ->
-          case stored_cells(lens, r0, c0, rs, cs) do
-            [{^r0, ^c0} | rest] = cells when length(cells) <= left ->
-              {Map.put_new(origins, {r0, c0}, {rs, cs}), Enum.into(rest, covered),
-               left - length(cells)}
-
-            _ ->
-              acc
-          end
-
-        _span, acc ->
-          acc
-      end)
-
-    {origins, covered}
+    n
+    |> Map.get("spans", [])
+    |> Enum.flat_map(fn
+      %{"row" => r0, "col" => c0, "rowspan" => rs, "colspan" => cs} -> [{r0, c0, rs, cs}]
+      _span -> []
+    end)
+    |> cover_spans(row_lengths(n), &Map.put_new/3)
   end
 
   defp table_col_class(cols, index, base) do
@@ -1682,34 +1667,51 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # no <td>). Malformed entries are ignored; with overlapping ranges the
   # first listed wins (a covered anchor is simply skipped at emission time).
   defp sheet_merge_lookup(n) do
-    lens = row_lengths(n)
+    n
+    |> Map.get("merges")
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      [r, c, rs, cs]
+      when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
+             r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap ->
+        [{r, c, rs, cs}]
 
-    {anchors, covered, _left} =
-      n
-      |> Map.get("merges")
-      |> List.wrap()
-      |> Enum.reduce({%{}, MapSet.new(), cell_count(lens)}, fn
-        [r, c, rs, cs], {anchors, covered, left} = acc
-        when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
-               r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap ->
-          case stored_cells(lens, r, c, rs, cs) do
-            [{^r, ^c} | rest] = cells when length(cells) <= left ->
-              {Map.put(anchors, {r, c}, {rs, cs}), Enum.into(rest, covered), left - length(cells)}
+      _other ->
+        []
+    end)
+    |> cover_spans(row_lengths(n), &Map.put/3)
+  end
 
-            _ ->
-              acc
+  defp cover_spans(spans, lens, put) do
+    {origins, covered, _left} =
+      Enum.reduce_while(spans, {%{}, MapSet.new(), cell_count(lens)}, fn
+        {r0, c0, rs, cs}, {origins, covered, left} = acc ->
+          if r0 < tuple_size(lens) and c0 < elem(lens, r0) do
+            cost = span_cost(lens, r0, c0, rs, cs)
+
+            if cost <= left do
+              [_origin | rest] = stored_cells(lens, r0, c0, rs, cs)
+              {:cont, {put.(origins, {r0, c0}, {rs, cs}), Enum.into(rest, covered), left - cost}}
+            else
+              {:halt, acc}
+            end
+          else
+            {:cont, acc}
           end
-
-        _other, acc ->
-          acc
       end)
 
-    {anchors, covered}
+    {origins, covered}
   end
 
   defp row_lengths(n), do: n |> Map.get("rows", []) |> Enum.map(&length/1) |> List.to_tuple()
 
   defp cell_count(lens), do: lens |> Tuple.to_list() |> Enum.sum()
+
+  defp span_cost(lens, r0, c0, rs, cs) do
+    rows = r0..(min(r0 + rs, tuple_size(lens)) - 1)//1
+    cells = Enum.sum_by(rows, &max(min(c0 + cs, elem(lens, &1)) - c0, 0))
+    max(cells, Range.size(rows))
+  end
 
   defp stored_cells(lens, r0, c0, rs, cs) do
     for r <- r0..(min(r0 + rs, tuple_size(lens)) - 1)//1,

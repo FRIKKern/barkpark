@@ -852,7 +852,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   @table_cell_cap 10_000
 
   def compose_block(%{"type" => "table"} = b, style) do
-    if table_cells(b) > @table_cell_cap,
+    if record_cells(b) > @table_cell_cap,
       do: %{"kind" => "PdText", "children" => [Chrome.t("Table too large to show")]},
       else: compose_table(b, style)
   end
@@ -2665,13 +2665,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
   defp table_row_cells(row), do: List.wrap(row)
 
-  defp table_cells(b) do
-    rows = b |> Map.get("rows", []) |> List.wrap()
-
-    case table_column_head(b) do
-      {_head, []} -> Enum.sum_by(rows, &length(table_row_cells(&1)))
-      {_head, keys} -> length(rows) * length(keys)
-    end
+  defp record_cells(b) do
+    {_head, keys} = table_column_head(b)
+    b |> Map.get("rows", []) |> List.wrap() |> length() |> Kernel.*(length(keys))
   end
 
   defp table_cell_content(%{"content" => content}) when is_list(content) do

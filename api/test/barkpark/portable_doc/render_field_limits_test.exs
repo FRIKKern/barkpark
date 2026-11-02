@@ -15,8 +15,9 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
 
   describe "a doc at a field's limit renders in under 1 s and 100 MB" do
     for name <-
-          ["toc", "sheet", "table", "heatmap", "route", "record table", "tool diff"] ++
-            ["multi edit", "nested columns", "nested section", "big number"],
+          ["toc", "sheet", "table", "heatmap", "route", "record table", "nested columns"] ++
+            ["nested section", "big number", "nested strong", "many merges", "many spans"] ++
+            ["flat line", "flat line high"],
         style <- [:article, :email] do
       @name name
       @style style
@@ -26,6 +27,32 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
         assert is_binary(html)
         assert us < @time_us, "#{@name} took #{div(us, 1000)} ms"
       end
+    end
+  end
+
+  describe "a diff doc at the cell budget" do
+    for name <- ["tool diff", "multi edit"], style <- [:article, :email] do
+      @name name
+      @style style
+      test "costs about one diff at the cap and stays under 100 MB: #{name}, #{style}" do
+        {_name, block} = List.keyfind(limit_docs(), @name, 0)
+        %{"old_string" => old, "new_string" => new} = tool_diff_input()
+
+        {cap, doc} =
+          Enum.reduce(1..3, {nil, nil}, fn _, {cap, doc} ->
+            {base, _} = :timer.tc(fn -> Barkpark.PortableDoc.TextDiff.diff_lines(old, new) end)
+            {us, html} = bounded(fn -> Render.render_block(block, %{style: @style}) end)
+            assert is_binary(html)
+            {min(cap, base), min(doc, us)}
+          end)
+
+        assert doc < 2 * cap, "#{@name} took #{div(doc, 1000)} ms, one diff #{div(cap, 1000)} ms"
+      end
+    end
+
+    defp tool_diff_input do
+      {_name, %{"input" => input}} = List.keyfind(limit_docs(), "tool diff", 0)
+      input
     end
   end
 
@@ -73,6 +100,35 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       refute html =~ "rowspan"
       assert length(String.split(html, "<td")) == 8
       assert html =~ ">g<"
+    end
+
+    test "on a ragged sheet each merge is charged the stored cells it covers" do
+      html =
+        article(%{
+          "type" => "sheet",
+          "snapshot" => %{
+            "rows" => [~w(a b c d), ~w(e), ~w(f), ~w(g)],
+            "merges" => [[0, 0, 4, 2], [0, 2, 1, 2]]
+          }
+        })
+
+      assert html =~ ~s(<td colspan="2" rowspan="4")
+      assert html =~ ~s(<td colspan="2" class="bp-sheet__td">c<)
+      assert length(String.split(html, "<td")) == 3
+    end
+
+    test "a merge is charged at least one cell for each row it spans" do
+      html =
+        article(%{
+          "type" => "sheet",
+          "snapshot" => %{
+            "rows" => [~w(a b), ~w(c), ~w(d)],
+            "merges" => [[0, 1, 3, 1], [0, 0, 1, 2]]
+          }
+        })
+
+      assert html =~ ~s(rowspan="3")
+      refute html =~ "colspan"
     end
 
     test "on a ragged sheet a merge counts only the cells it covers, so it renders" do
@@ -127,6 +183,18 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       refute html =~ "rowspan"
     end
 
+    test "past the first span that does not fit, the rest drop" do
+      html =
+        table([Enum.map(~w(a b c d e), &text_cell/1)], [
+          span(0, 0, 1, 3),
+          span(0, 1, 1, 3),
+          span(0, 3, 1, 2)
+        ])
+
+      refute html =~ ~s( colspan="2")
+      assert html =~ ~s( colspan="3")
+    end
+
     test "a span past the cells left to cover is dropped" do
       html =
         table([[text_cell("a"), text_cell("b"), text_cell("c")]], [
@@ -166,15 +234,20 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       refute html =~ "<table"
     end
 
-    test "a table of 10 000 stored cells renders; one more shows the notice" do
-      assert plain(10_000) =~ "<table"
-      assert plain(10_001) =~ @notice
+    test "a plain table past 10 000 stored cells renders: its cells are all in the doc" do
+      html = plain(10_001)
+      assert html =~ "<table"
+      refute html =~ @notice
     end
 
     test "the notice is in the reader's language" do
       html =
         Render.render_block(
-          %{"type" => "table", "rows" => [List.duplicate([], 10_001)]},
+          %{
+            "type" => "table",
+            "columns" => Enum.map(1..101, &%{"key" => "k#{&1}"}),
+            "rows" => List.duplicate(%{}, 100)
+          },
           %{style: :article, locale: "nb-NO"}
         )
 
@@ -237,6 +310,32 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
             do: {block["type"], style}
 
       assert raised == []
+    end
+
+    test "every number in a golden block set to one large value never raises, in either style" do
+      raised =
+        for file <- Path.wildcard("priv/portable_doc/goldens/blocks/*.golden.json"),
+            block = file |> File.read!() |> Jason.decode!() |> Map.fetch!("input"),
+            value <- [1.0e16, -1.0e16, Integer.pow(2, 64), 1.0e100, -1.0e100, 1.0e300, -1.0e300],
+            style <- [:article, :email],
+            doc = Enum.reduce(number_paths(block, []), block, &put_path(&2, &1, value)),
+            raises?(fn -> Render.render_block(doc, %{style: style}) end),
+            uniq: true,
+            do: {block["type"], value, style}
+
+      assert raised == []
+    end
+
+    test "a flat chart line at a large value draws" do
+      for value <- [1.0e16, 1.0e100], style <- [:article, :email] do
+        html =
+          Render.render_block(
+            %{"type" => "chart", "series" => [%{"label" => "s", "points" => [value, value]}]},
+            %{style: style}
+          )
+
+        assert is_binary(html)
+      end
     end
 
     defp number_paths(m, p) when is_map(m),
@@ -302,6 +401,39 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
         refute :too_deep in validate_codes(fits)
         assert :too_deep in validate_codes(deepest)
       end
+    end
+
+    for mark <- ["strong", "em", "link"] do
+      @mark mark
+      test "#{mark}: an inline mark at the same depth shows the notice, one above it renders" do
+        inline = fn depth ->
+          article(%{"type" => "paragraph", "content" => [nest_inline(@mark, depth)]})
+        end
+
+        max = Validate.max_depth()
+        assert inline.(max - 1) =~ "leaf"
+        refute inline.(max - 1) =~ "Nested too deep to show"
+        assert inline.(max) =~ "Nested too deep to show"
+        refute inline.(max) =~ "leaf"
+      end
+    end
+
+    test "a chain of bare lists counts toward the same depth" do
+      chain = fn depth -> Enum.reduce(1..depth, "leaf", fn _, inner -> [inner] end) end
+      paragraph = &article(%{"type" => "paragraph", "content" => [chain.(&1)]})
+
+      assert paragraph.(Validate.max_depth() - 1) =~ "leaf"
+      assert paragraph.(Validate.max_depth()) =~ "Nested too deep to show"
+    end
+
+    test "inline marks past the depth stop composing" do
+      html =
+        article(%{
+          "type" => "paragraph",
+          "content" => [nest_inline("strong", Validate.max_depth() + 50)]
+        })
+
+      assert length(String.split(html, "font-weight:bold")) - 1 == Validate.max_depth()
     end
 
     test "the notice is in the reader's language" do

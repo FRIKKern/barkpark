@@ -1332,7 +1332,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         true -> {pmin || dmin, pmax || dmax}
       end
 
-    if max_v <= min_v, do: {min_v, min_v + 1.0}, else: {min_v, max_v}
+    if max_v <= min_v, do: {min_v, min_v + max(1.0, abs(min_v) * 1.0e-9)}, else: {min_v, max_v}
   end
 
   defp x_at(i, n) do
