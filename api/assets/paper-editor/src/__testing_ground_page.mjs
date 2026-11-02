@@ -121,7 +121,8 @@ await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=
   assert.match(words, /^↓ skipped the empty line in [0-8] of [0-8] tries\.( The caret stayed put [1-8] times?\.)?$/);
   const { tries, hits, stayed } = await page.evaluate(() => window.testingGround.state.tally);
   assert.equal(tries + stayed, 8);
-  assert.equal(await page.getAttribute(".tg-tally", "class"), hits < tries ? "tg-tally tg-tally--red" : "tg-tally");
+  assert.equal(hits, 0, "ArrowDown never lands in a hidden empty line on this build");
+  assert.equal(await page.getAttribute(".tg-tally", "class"), stayed > 0 ? "tg-tally tg-tally--red" : "tg-tally");
   console.log(`      D07 on this build: ${words}`);
   await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
   assert.equal(await page.isVisible(".tg-tally"), false);
@@ -134,7 +135,23 @@ await scene("D07 counts a caret that never leaves the line as stayed put, not as
   await play(page, drill("D07"));
   assert.deepEqual(await page.evaluate(() => window.testingGround.state.tally), { tries: 0, hits: 0, stayed: 8 });
   assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 0 tries. The caret stayed put 8 times.");
+  assert.equal(await page.getAttribute(".tg-tally", "class"), "tg-tally tg-tally--red");
 }, (page) => page.addInitScript(() => document.addEventListener("keydown", (event) => { if (event.key === "ArrowDown") event.preventDefault(); }, true)));
+
+await scene("D07 paints the tally red when the caret lands in the hidden empty line", "?doc=drill:D07", async (page) => {
+  await play(page, drill("D07"));
+  assert.deepEqual(await page.evaluate(() => window.testingGround.state.tally), { tries: 8, hits: 8, stayed: 0 });
+  assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 8 tries.");
+  assert.equal(await page.getAttribute(".tg-tally", "class"), "tg-tally tg-tally--red");
+}, (page) => page.addInitScript(() => document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  setTimeout(() => {
+    const { view } = window.testingGround.state.canvases[0]._editor;
+    const { state } = view;
+    view.dispatch(state.tr.setSelection(state.selection.constructor.create(state.doc, state.doc.child(0).nodeSize + 1)));
+  });
+}, true)));
 
 await scene("under the hood: batches with the server's answer, the diff and the saved doc", "?doc=drill:D02", async (page) => {
   await page.click(".tg-tab");
