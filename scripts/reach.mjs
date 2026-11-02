@@ -64,6 +64,8 @@ export function commandsFor(paths) {
   return out;
 }
 
+const shellArg = (value) => /^[a-zA-Z0-9_./:@-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
+
 export function report(base, paths) {
   const steps = reached(paths);
   const gates = [...new Set(steps.flatMap((s) => s.gates))];
@@ -72,7 +74,7 @@ export function report(base, paths) {
   if (steps.length) {
     out.push("", "derived files (in order):");
     for (const s of steps) out.push(`  ${s.name}  (after: ${s.after.join(", ") || "-"})`);
-    out.push("", "rebuild them:", `  node scripts/regen.mjs --base ${base}`);
+    out.push("", "rebuild them:", `  node scripts/regen.mjs --base ${shellArg(base)}`);
     out.push("", "gates that catch them stale:", ...gates.map((g) => `  ${g}`));
   } else out.push("", "derived files: none reached");
   const run = [...new Set([

@@ -77,3 +77,12 @@ test("reach prints each reached step's complete prerequisite command", () => {
   assert.match(text, /pnpm --filter @barkpark\/core build && pnpm --filter @barkpark\/react exec vitest/);
   assert.match(text, /pnpm --filter @barkpark\/react build && cd apps\/mobile/);
 });
+
+
+test("reach quotes a valid metacharacter branch in its runnable output", (t) => {
+  const f = fixture(t, [{ name: "one", write: "true" }]);
+  f.git("branch", "evil;printf_PWN");
+  const result = f.run("reach", "evil;printf_PWN");
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes("node scripts/regen.mjs --base 'evil;printf_PWN'"));
+});
