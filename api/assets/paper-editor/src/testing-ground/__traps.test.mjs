@@ -51,6 +51,8 @@ assert.deepEqual(await fold(two, [{ op: "patch-block", id: "s-2", patch: { block
 const doubled = { op: "patch-block", id: "s-2", patch: { blocks: [para("p-x", "Moved")] } };
 await assert.rejects(fold(two, [doubled, { op: "replace-block", id: "p-a", block: { id: "p-a", type: "section", blocks: [para("p-x")] } }]), /^Error: replace-block: duplicate id p-x$/, "a repeat the batch leaves is refused, naming the last op that added a copy");
 await assert.rejects(fold(two, [doubled, { op: "remove-block", id: "p-a" }]), /^Error: patch-block: duplicate id p-x$/, "a later op that adds no copy is not the one named");
+await assert.rejects(fold(two, [doubled, { op: "insert-after", afterId: "p-x", block: para("p-new") }]), /^Error: insert-after: duplicate id p-x$/, "an afterId naming a batch-made repeat is refused");
+await assert.rejects(fold(two, [doubled, { op: "move-block", id: "p-a", after: "p-x" }]), /^Error: move-block: duplicate id p-x$/, "an after naming a batch-made repeat is refused");
 await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-x", patch: { content: [] } }]), /^Error: patch-block: duplicate id p-x$/, "an op naming an id the batch made repeated is refused, naming that op");
 await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: patch-block: id not found p-gone$/, "a leftover repeat plus a later bad op answers the later error");
 await assert.rejects(fold(two, [{ op: "append-block", block: para("p-a") }, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: append-block: duplicate id p-a$/, "append-block and insert-after still refuse an id that exists, at that op, inside a batch");
