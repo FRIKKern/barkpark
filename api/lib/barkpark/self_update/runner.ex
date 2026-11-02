@@ -86,6 +86,14 @@ defmodule Barkpark.SelfUpdate.Runner do
   scope, so on a box with systemd a service restart no longer kills the build
   at all: the run is re-attached (its pid is alive) and finishes on its own.
   The resume rule covers what is left: a reboot, or a box without the scope.
+
+  On a blue/green slot box the run is `deploy/instance-deploy.sh`, which retires
+  the slot this process runs in. That script moves itself under
+  `scripts/build-guard.sh` when it starts inside a barkpark unit's cgroup, and
+  writes the same flight record with `engine: "instance-deploy"`. It writes
+  `phase=restart outcome=applied` after the new slot passes its health gate, so
+  the Runner in the new slot reads the finished run as exit 0
+  (task-212dfd3376d57aef).
   """
 
   use GenServer

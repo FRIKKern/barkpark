@@ -2432,6 +2432,69 @@ else
   trap - EXIT
 fi
 
+echo "== Case: a run inside the slot it retires leaves that slot's cgroup, and records its outcome and release tags (task-212dfd3376d57aef) =="
+# On guerrilla on 2026-10-30 the self-update runner in barkpark-slot@blue started
+# this script. The deploy flipped Caddy to a healthy green, and then its own
+# `systemctl disable --now barkpark-slot@blue` killed it. The runner in green
+# found no flight record and resumed the run, the resume died the same way, and
+# the run ended as deploy_stuck. This case has eleven fixed checks and skips none.
+CGDIR="$(mktemp -d)"
+printf '0::/system.slice/system-barkpark\\x2dslot.slice/barkpark-slot@blue.service\n' > "$CGDIR/slot"
+printf '0::/user.slice/user-0.slice/session-7.scope\n' > "$CGDIR/ssh"
+stage_build_guard() { mkdir -p "$APP/scripts" && cp "$HERE/../scripts/build-guard.sh" "$APP/scripts/build-guard.sh"; }
+status_has() { grep -qF "$1" "$APP/.deploy-status.json" 2>/dev/null; }
+
+# Inside a slot cgroup the run re-execs under build-guard. The scope needs a real
+# systemd, so BP_BUILD_GUARD_SCOPE=0 runs only the guard's second stage. This arm
+# proves the re-exec and the pid hand-off.
+setup_case; stage_build_guard
+rc="$(BP_DEPLOY_CGROUP_FILE="$CGDIR/slot" BP_BUILD_GUARD_SCOPE=0 BP_DEPLOY_RECORD_PID=4242 run_deploy 200 guardsha)"
+check "slot cgroup: exit 0" "[ '$rc' = '0' ]"
+check "slot cgroup: the run re-execs under build-guard" \
+  "grep -q 'moving into a build-guard scope' '$TMP/out.log' && grep -q '\[build-guard\]' '$TMP/out.log'"
+check "slot cgroup: the guarded deploy runs to HEALTHY" "grep -q 'HEALTHY — slot green live' '$APP/.bp-build.log'"
+check "slot cgroup: flight record says restart applied for the deployed sha, under the runner's pid" \
+  "status_has '\"engine\":\"instance-deploy\",\"phase\":\"restart\",\"outcome\":\"applied\",\"sha\":\"guardsha\"' && status_has '\"pid\":4242}'"
+rm -rf "$TMP"
+
+# A run from an SSH session, as deploy.yml starts it, runs in place.
+setup_case; stage_build_guard
+rc="$(BP_DEPLOY_CGROUP_FILE="$CGDIR/ssh" run_deploy 200 sshsha)"
+check "ssh session: exit 0 and no build-guard re-exec" \
+  "[ '$rc' = '0' ] && ! grep -q '\[build-guard\]' '$TMP/out.log' && [ ! -e '$APP/.bp-build.log' ]"
+check "ssh session: the flight record is still written, with this run's pid" \
+  "status_has '\"phase\":\"restart\",\"outcome\":\"applied\",\"sha\":\"sshsha\"' && grep -qE '\"pid\":[0-9]+}' '$APP/.deploy-status.json'"
+check "ssh session: release tags are fetched, after the reset to origin/main" \
+  "awk '/reset --hard FETCH_HEAD/ {r=NR} /fetch origin --tags --force/ {t=NR} END {exit !(r && t > r)}' '$GITLOG'"
+rm -rf "$TMP"
+
+# BP_BUILD_GUARD=0 opts out, even inside a slot cgroup.
+setup_case; stage_build_guard
+rc="$(BP_DEPLOY_CGROUP_FILE="$CGDIR/slot" BP_BUILD_GUARD=0 run_deploy 200 optoutsha)"
+check "BP_BUILD_GUARD=0: runs in place inside a slot cgroup" \
+  "[ '$rc' = '0' ] && ! grep -q '\[build-guard\]' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# When the new slot never turns healthy, the record stays at build running. A
+# runner that finds the pid gone then never reads the run as applied.
+setup_case
+rc="$(BP_DEPLOY_CGROUP_FILE="$CGDIR/ssh" run_deploy 503 sicksha)"
+check "unhealthy slot: fails, and the record says build running, never applied" \
+  "[ '$rc' != '0' ] && status_has '\"phase\":\"build\",\"outcome\":\"running\",\"sha\":\"sicksha\"' && ! status_has 'applied'"
+rm -rf "$TMP"
+
+# The read-only preflight runs in place inside a slot cgroup, because the runner
+# reads its stdout synchronously. A rollback records restart applied for its target.
+setup_case; stage_build_guard
+BP_DEPLOY_CGROUP_FILE="$CGDIR/slot" BP_BUILD_GUARD_SCOPE=0 run_preflight livesha >/dev/null
+check "rollback preflight: no build-guard re-exec inside a slot cgroup" "! grep -q '\[build-guard\]' '$TMP/preflight.log'"
+BP_DEPLOY_CGROUP_FILE="$CGDIR/ssh" run_deploy 200 v1sha >/dev/null   # green live, .slots/green.sha=v1sha
+BP_DEPLOY_CGROUP_FILE="$CGDIR/ssh" run_deploy 200 v2sha >/dev/null   # blue live,  .slots/blue.sha=v2sha
+rc="$(BP_DEPLOY_CGROUP_FILE="$CGDIR/ssh" run_rollback 200 v2sha)"
+check "rollback: exit 0 and the record says restart applied for the rolled-back sha" \
+  "[ '$rc' = '0' ] && status_has '\"phase\":\"restart\",\"outcome\":\"applied\",\"sha\":\"v1sha\"'"
+rm -rf "$TMP" "$CGDIR"
+
 echo
 echo "[selftest] $((TESTS - fails))/$TESTS checks passed"
 # --- deploy/README.md count guard (ssw8-selftest-count-guard) ---------------
