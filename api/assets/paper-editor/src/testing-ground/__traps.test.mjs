@@ -54,6 +54,14 @@ await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-x", patch: 
 await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: patch-block: id not found p-gone$/, "a leftover repeat plus a later bad op answers the later error");
 await assert.rejects(fold(two, [{ op: "append-block", block: para("p-a") }, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: append-block: duplicate id p-a$/, "append-block and insert-after still refuse an id that exists, at that op, inside a batch");
 await assert.rejects(fold(two, [{ op: "insert-after", afterId: "s-2", block: para("p-a") }, { op: "remove-block", id: "p-a" }]), /^Error: insert-after: duplicate id p-a$/, "an insert of an id a later op would remove is refused at the insert");
+const vectors = JSON.parse(readFileSync(new URL("./batch-vectors.json", import.meta.url), "utf8"));
+for (const { name, doc, ops, answer } of vectors.cases) {
+  const folded = fold(doc.blocks, ops);
+  if (answer.ok) assert.deepEqual(await folded, answer.value.blocks, `patch.ex at ${vectors.barkpark}: ${name}`);
+  else if (answer.error.code === "duplicate_id") await assert.rejects(folded, new RegExp(`^Error: ${answer.error.op}: duplicate id ${answer.error.target}$`), `patch.ex at ${vectors.barkpark}: ${name}`);
+  else await assert.rejects(folded, new RegExp(`^Error: ${answer.error.op}: .*not found ${answer.error.target}$`), `patch.ex at ${vectors.barkpark}: ${name}`);
+}
+assert.equal(vectors.cases.length, 9);
 const pair = [para("p-d", "First"), para("p-d", "Second")];
 assert.deepEqual(await fold(pair, [{ op: "patch-block", id: "p-d", patch: { content: [] } }]).then((b) => b.map((x) => x.content.length)), [0, 1], "an op on a repeat that was there before the batch takes the first match");
 await assert.rejects(fold(pair, [{ op: "append-block", block: para("p-d") }]), /^Error: append-block: duplicate id p-d$/, "a legacy pair that grows is refused");
