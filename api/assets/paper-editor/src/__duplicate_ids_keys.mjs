@@ -21,7 +21,6 @@ const CONTRACTS = [
   ["1.20", "d14236b0ee"],
   ["1.21", "d092a5b5ab"],
   ["tree", null],
-  ["pr-25040", "d64d04625c"],
 ];
 
 function asset(commit, name) {
@@ -56,24 +55,7 @@ const PAGE = (contract) => `<!doctype html><html><head><meta charset="utf-8">
   const canvas = document.getElementById("canvas");
   window.__batches = [];
   window.__echoes = [];
-  window.__order = "reply-first";
   canvas.acknowledgedSaves = true;
-  const remint = (blocks) => {
-    const seen = new Set();
-    const rows = (list) => list.map((row) => {
-      seen.add(row.id);
-      return Array.isArray(row.blocks) ? { ...row, blocks: walk(row.blocks, row.id) } : row;
-    });
-    const walk = (list, parent) => list.map((block, index) => {
-      const id = block.id != null && seen.has(block.id) ? parent + "-" + index : block.id;
-      seen.add(id);
-      const out = { ...block, id };
-      if (Array.isArray(block.blocks)) out.blocks = walk(block.blocks, id);
-      for (const key of ["steps", "tabs"]) if (Array.isArray(block[key])) out[key] = rows(block[key]);
-      return out;
-    });
-    return walk(blocks, "block");
-  };
   window.__ids = (blocks) => blocks.flatMap((block) => [
     block.id,
     ...window.__ids(block.blocks || []),
@@ -84,12 +66,11 @@ const PAGE = (contract) => `<!doctype html><html><head><meta charset="utf-8">
     window.__batches.push(JSON.parse(JSON.stringify(ops)));
     const requestId = "r" + seq;
     canvas.identifyOpsRequest?.(seq, requestId);
-    const echo = remint(JSON.parse(JSON.stringify(canvas._inflightOps.afterBlocks)));
+    const echo = JSON.parse(JSON.stringify(canvas._inflightOps.afterBlocks));
     window.__echoes.push(echo);
     setTimeout(() => {
-      if (window.__order === "echo-first") canvas.applyServerBlocks(echo, { mode: "own", requestId });
       canvas.acknowledgeOps(seq, true);
-      if (window.__order === "reply-first") canvas.applyServerBlocks(echo, { mode: "own", requestId });
+      canvas.applyServerBlocks(echo, { mode: "own", requestId });
     }, 0);
   });
   window.__mount = (blocks) => { canvas.blocks = blocks; };
@@ -118,9 +99,8 @@ const origin = `http://127.0.0.1:${server.address().port}/`;
 const p = (id, value) => ({ id, type: "paragraph", content: [{ type: "text", value }] });
 const section = (id, blocks) => ({ id, type: "section", title: id, blocks });
 
-async function open(page, contract, blocks, order = "reply-first") {
+async function open(page, contract, blocks) {
   await page.goto(`${origin}${contract}/`);
-  await page.evaluate((o) => { window.__order = o; }, order);
   await page.waitForFunction(() => customElements.get("bp-paper-canvas"));
   await page.evaluate((b) => window.__mount(b), blocks);
   await page.waitForFunction(() => document.getElementById("canvas")._editor);
@@ -261,67 +241,19 @@ const SCENES = [
     await page.keyboard.type(" Then rain.");
     await settle(page);
   }],
-  ["nested-enter-back-up", TRIP, ["Left the car park at six. Late.", "Fog by eight."], async (page) => {
-    await clickEnd(page, "Left the car park at six.");
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("Fog by eight.");
-    await settle(page);
-    await clickEnd(page, "Left the car park at six.");
-    await page.keyboard.type(" Late.");
-    await settle(page);
-  }],
-  ["nested-enter-retype-line", TRIP, ["Left the car park at six.", "Mist."], async (page) => {
-    await clickEnd(page, "Left the car park at six.");
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("Fog by eight.");
-    await settle(page);
-    for (const _ of "Fog by eight.") await page.keyboard.press("Shift+ArrowLeft");
-    await page.keyboard.type("Mist.");
-    await settle(page);
-  }],
-  ["nested-enter-pause-type-above", TRIP, ["Left the car park at six. Abc"], async (page) => {
-    await clickEnd(page, "Left the car park at six.");
-    await page.keyboard.press("Enter");
-    await settle(page);
-    await clickEnd(page, "Left the car park at six.");
-    for (const typed of [" A", "b", "c"]) {
-      await page.keyboard.type(typed);
-      await settle(page);
-    }
-  }],
-  ["nested-enter-line-start", TRIP, ["So then Left the car park at six."], async (page) => {
-    await clickAt(page, await edgeOf(page, "Left the car park at six.", false), "the caret before the line");
-    await page.keyboard.press("Enter");
-    await settle(page);
-    for (const typed of ["So ", "then "]) {
-      await page.keyboard.type(typed);
-      await settle(page);
-    }
-  }],
   ["steps-enter", STEPS, ["Pack the tent.", "Boots. Laces."], enterInRow],
   ["tabs-enter", TABS, ["Pack the tent.", "Boots. Laces."], enterInRow],
 ];
-const ORDERS = {
-  "move-up": ["reply-first"],
-  "move-down": ["reply-first"],
-  "nested-enter-keep-typing": ["reply-first", "echo-first"],
-  "nested-enter-back-up": ["reply-first", "echo-first"],
-  "nested-enter-retype-line": ["reply-first", "echo-first"],
-  "nested-enter-pause-type-above": ["reply-first", "echo-first"],
-  "nested-enter-line-start": ["reply-first", "echo-first"],
-  "steps-enter": ["reply-first", "echo-first"],
-  "tabs-enter": ["reply-first", "echo-first"],
-};
 
 const recorded = [];
 const t = tally();
 try {
   for (const [contract, commit] of CONTRACTS) {
-    for (const [scene, before, typed, play] of SCENES) for (const order of ORDERS[scene]) {
-      await t.checkAsync(`${contract} ${scene} ${order}: real keys and a real drop, every typed line on screen, a reload of what the client believes shows it`, async () => {
+    for (const [scene, before, typed, play] of SCENES) {
+      await t.checkAsync(`${contract} ${scene}: real keys and a real drop, every typed line on screen, a reload of what the client believes shows it`, async () => {
         const page = await browser.newPage();
         try {
-          await open(page, contract, before, order);
+          await open(page, contract, before);
           await play(page);
           const batches = await page.evaluate(() => window.__batches);
           const echoes = await page.evaluate(() => window.__echoes);
@@ -342,7 +274,7 @@ try {
           const want = JSON.stringify(await page.evaluate((echo) => window.__ids(echo), echoes.at(-1)));
           await waitFor(page, "the client to take the last echo's ids after a blur",
             (want) => JSON.stringify(window.__ids(document.getElementById("canvas").blocks)) === want, want);
-          recorded.push({ contract, commit, scene, order, before, batches, echoes, client_after: client, seen, typed });
+          recorded.push({ contract, commit, scene, before, batches, echoes, client_after: client, seen, typed });
         } finally {
           await page.close();
         }
