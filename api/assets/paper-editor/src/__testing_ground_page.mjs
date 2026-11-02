@@ -125,6 +125,12 @@ await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=
   assert.match(await page.textContent(".tg-steps"), /Pick D07 again and repeat, 8 tries in all/);
 });
 
+await scene("D07 counts a caret that never leaves the line as stayed put, not as a skip", "?doc=drill:D07", async (page) => {
+  await play(page, drill("D07"));
+  assert.deepEqual(await page.evaluate(() => window.testingGround.state.tally), { tries: 0, hits: 0, stayed: 8 });
+  assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 0 tries. The caret stayed put 8 times.");
+}, (page) => page.addInitScript(() => document.addEventListener("keydown", (event) => { if (event.key === "ArrowDown") event.preventDefault(); }, true)));
+
 await scene("under the hood: batches with the server's answer, the diff and the saved doc", "?doc=drill:D02", async (page) => {
   await page.click(".tg-tab");
   await page.click('[data-section="hood"] summary');
