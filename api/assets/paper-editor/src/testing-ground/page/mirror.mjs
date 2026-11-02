@@ -47,24 +47,27 @@ function paste(view, data) {
   view.dom.dispatchEvent(event);
 }
 
-export function mirror(from, to) {
-  const dom = from._editor.view.dom;
-  const target = () => to._editor.view;
-  dom.addEventListener("keydown", (event) => {
+export function mirror(root, source, target) {
+  const on = (type, act) => root.addEventListener(type, (event) => {
+    const from = source();
+    if (!from._editor.view.dom.contains(event.target)) return;
+    act(event, from, target());
+  }, true);
+  on("keydown", (event, from, to) => {
     if (!KEYS.has(event.key) && !event.metaKey && !event.ctrlKey) return;
     follow(from, to);
     const { key, code, shiftKey, altKey, metaKey, ctrlKey } = event;
-    const { dom: there } = target();
-    there.dispatchEvent(new there.ownerDocument.defaultView.KeyboardEvent("keydown", { key, code, shiftKey, altKey, metaKey, ctrlKey, bubbles: true, cancelable: true }));
-  }, true);
-  dom.addEventListener("beforeinput", (event) => {
+    const { dom } = to._editor.view;
+    dom.dispatchEvent(new dom.ownerDocument.defaultView.KeyboardEvent("keydown", { key, code, shiftKey, altKey, metaKey, ctrlKey, bubbles: true, cancelable: true }));
+  });
+  on("beforeinput", (event, from, to) => {
     if (event.inputType !== "insertText") return;
     follow(from, to);
-    type(target(), event.data);
-  }, true);
-  dom.addEventListener("paste", (event) => {
+    type(to._editor.view, event.data);
+  });
+  on("paste", (event, from, to) => {
     const data = Object.fromEntries([...event.clipboardData.types].map((kind) => [kind, event.clipboardData.getData(kind)]));
     follow(from, to);
-    paste(target(), data);
-  }, true);
+    paste(to._editor.view, data);
+  });
 }

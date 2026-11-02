@@ -37,8 +37,8 @@ async function mount() {
   return canvas;
 }
 const left = await mount();
-const right = await mount();
-mirror(left, right);
+let right = await mount();
+mirror(document.body, () => left, () => right);
 const sent = [];
 right._editor.view.dom.addEventListener("keydown", (event) => sent.push(`${event.metaKey ? "Meta-" : ""}${event.ctrlKey ? "Ctrl-" : ""}${event.key}`));
 
@@ -149,6 +149,15 @@ key("Backspace");
 same("a selected block between blocks is deleted on both sides");
 assert.ok(!lines(left).includes("divider:"), "the divider went");
 assert.deepEqual(sent, ["Enter", "Backspace", "Meta-b", "Ctrl-b", "Delete", "Enter", "Backspace"], "only editing keys and shortcuts go across as keys");
+const before = lines(left);
+caretAt(right, "p-z", 1);
+right._editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+assert.deepEqual(lines(left), before, "keys typed in the right window stay there");
+right.remove();
+right = await mount();
+caretAt(left, "p-a", 3);
+key("Enter");
+assert.deepEqual(lines(right).slice(0, 2), ["paragraph:/Al", "paragraph:/pha"], "a window remounted after a reload is the one that follows");
 assert.deepEqual(thrown, [], "nothing threw");
 assert.deepEqual(warned, [], "no warnings, so a selected block is mirrored as a selected block");
 
