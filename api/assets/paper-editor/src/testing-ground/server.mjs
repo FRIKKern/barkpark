@@ -167,7 +167,7 @@ function usage(why) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(130));
+  for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit({ SIGINT: 130, SIGTERM: 143 }[signal]));
   const args = process.argv.slice(2);
   const known = /^--(port=\d+|no-open|barkpark=.+)$/;
   const names = args.filter((a) => !a.startsWith("--"));

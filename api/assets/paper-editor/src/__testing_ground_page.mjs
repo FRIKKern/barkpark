@@ -8,7 +8,7 @@ import { drills } from "./testing-ground/drills/index.mjs";
 import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
 import { chromium } from "./testing-ground/chromium.mjs";
 import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
-import { makeBuild, pickBuild } from "./testing-ground/builds.mjs";
+import { besideMain, makeBuild, pickBuild } from "./testing-ground/builds.mjs";
 import { reportArgs } from "./testing-ground/repro.mjs";
 import { mainBuild, REPO, start } from "./testing-ground/server.mjs";
 
@@ -72,17 +72,23 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.equal(await first.evaluate((li) => li.isConnected), true, "unchanged lights are not repainted, so their words stay selectable");
 });
 
-await scene("D01 on main lights hidden blocks red", "?doc=drill:D01", async (page) => {
+await scene("D01 on this build keeps every line on screen", "?doc=drill:D01", async (page) => {
   await play(page, drill("D01"));
-  const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["hidden-blocks"]);
-  assert.match(lights["hidden-blocks"].words, /6 lines are in the doc but hidden on screen \(9 blocks, 2 shown\)/);
-  assert.equal(await page.isVisible(".tg-tab-dot"), true, "the closed drawer's tab shows a red dot");
-  assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 6 lines/);
-  assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
+  assert.deepEqual(red(await lightsOf(page)), []);
+  assert.equal(await page.isVisible(".tg-tab-dot"), false);
   await page.click(".tg-tab");
   assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), [...drill("D01").steps.map((s) => s.say), "Check that Hidden blocks and Lost keys stay green"]);
   assert.equal(await page.isVisible(".tg-tally"), false);
+});
+
+await scene("lines hidden on screen light hidden blocks red, with a red dot on the closed tab", "?doc=drill:D01", async (page) => {
+  await page.addStyleTag({ content: ".ProseMirror > :nth-child(n+2) { display: none !important; }" });
+  await play(page, { steps: [{ click: { text: "Alpha", at: "end" } }, { type: "y" }] });
+  const lights = await lightsOf(page);
+  assert.deepEqual(red(lights), ["hidden-blocks"]);
+  assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 1 line is in the doc but hidden on screen \(3 blocks, 1 shown\)/);
+  assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
+  assert.equal(await page.isVisible(".tg-tab-dot"), true);
 });
 
 await scene("a hand-only step says so, and a missing word stops the player", "?doc=drill:D03", async (page) => {
@@ -141,19 +147,28 @@ await scene("under the hood: batches with the server's answer, the diff and the 
   assert.match(await page.textContent(".tg-json"), /"value": "Home by dark\.!"/);
   await play(page, drill("D02"));
   const batches = await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent));
-  assert.match(batches.join("\n"), /#\d+ replace-block s-day → refused: replace-block: duplicate id p-day/);
+  assert.match(batches.join("\n"), /#\d+ replace-block s-day → saved/);
+  await page.evaluate(() => { window.testingGround.state.host.fold = { name: "refuses every batch", apply: async () => { throw new Error("patch-block: refused by the test"); } }; });
+  await play(page, { steps: [{ click: { text: "Home by dark.!", at: "end" } }, { type: "?" }] });
+  assert.match((await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent))).join("\n"), /#\d+ patch-block p-after → refused: patch-block: refused by the test/);
   await play(page, { steps: [{ click: { text: "Trip", at: "end" } }, { key: "Enter" }, { type: "z" }] });
   assert.match((await page.$$eval(".tg-batches li", (li) => li.map((x) => x.textContent))).join("\n"), /insert-after c-\d/);
 });
 
 
-await scene("D02 on main lights duplicate ids, refused batches and lost keys red", "?doc=drill:D02", async (page) => {
+await scene("D02 on this build: one id per line, every batch saved, no key lost", "?doc=drill:D02", async (page) => {
   await play(page, drill("D02"));
+  assert.deepEqual(red(await lightsOf(page)), []);
+});
+
+await scene("a refusing fold lights refused batches, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
+  await page.evaluate(() => { window.testingGround.state.host.fold = { name: "refuses every batch", apply: async () => { throw new Error("patch-block: refused by the test"); } }; });
+  await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "zz" }] });
   const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
-  assert.match(lights["duplicate-ids"].words, /Used twice: p-day/);
-  assert.match(lights["refused-batches"].words, /replace-block: duplicate id p-day/);
-  assert.match(lights["lost-keys"].words, /13 characters you typed did not come back after the reload: "Fog by eight\."/);
+  assert.deepEqual(red(lights), ["refused-batches"]);
+  assert.match(lights["refused-batches"].words, /patch-block: refused by the test/);
+  await play(page, { steps: [{ reload: true }] });
+  assert.match((await lightsOf(page))["lost-keys"].words, /2 characters you typed did not come back after the reload: "zz"/);
 });
 
 await scene("a fold that drops ops lights fold drift, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
@@ -294,10 +309,12 @@ async function preview(page) {
   await page.waitForSelector(".tg-report-show:not([disabled])");
 }
 
-await scene("Report a bug shows exactly what bp gets, files it, and its repro replays as a drill that fails on main", "?doc=drill:D01", async (page) => {
+await scene("Report a bug shows exactly what bp gets, files it, and its repro replays as a drill that fails on contract 1.19", "?doc=drill:D01", async (page) => {
   await play(page, { steps: [{ click: { text: "Beta", at: "end" } }, { key: "ArrowLeft" }] });
   await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
   await play(page, drill("D01"));
+  await page.addStyleTag({ content: ".ProseMirror > :nth-child(n+2) { display: none !important; }" });
+  await page.evaluate(() => window.testingGround.paintLights());
   await page.click(".tg-tab");
   await page.click('[data-section="report"] summary');
   assert.match(await page.textContent('[data-section="report"] .tg-note'), /^Test docs only\./);
@@ -311,7 +328,7 @@ await scene("Report a bug shows exactly what bp gets, files it, and its repro re
   const args = reportArgs({ what: "Six Enters left one line", repro });
   assert.equal(await page.textContent(".tg-report-preview"), ["bp", ...args].join("\n"), "the preview is every argument bp will get");
   assert.deepEqual(repro.events.map((e) => e.key || e.text || `${e.kind}${e.id ? ` ${e.id} ${e.offset}` : ""}`), ["caret p-e 0", "Enter", "Enter", "Enter", "Enter", "Enter", "Enter", "x", "Backspace", "reload"]);
-  assert.deepEqual(repro.red, [{ key: "hidden-blocks", name: "Hidden blocks", words: "6 lines are in the doc but hidden on screen (9 blocks, 2 shown)." }]);
+  assert.deepEqual(repro.red, [{ key: "hidden-blocks", name: "Hidden blocks", words: "1 line is in the doc but hidden on screen (3 blocks, 1 shown)." }]);
   assert.deepEqual([repro.build.label, repro.doc, repro.width, repro.theme], ["main", "drill:D01", "desk", "light"]);
   await page.fill(".tg-report-what", "Six Enters left one line!");
   assert.equal(await page.isDisabled(".tg-report-file"), true, "an edit after the preview needs a new preview");
@@ -334,15 +351,15 @@ await scene("Report a bug shows exactly what bp gets, files it, and its repro re
   assert.deepEqual([fresh.width, fresh.theme, fresh.events, fresh.red], ["phone", "dark", [], []], "a new doc starts a new recording; a light with no verdict yet is not red");
   const file = join(scratch, "repro.json");
   writeFileSync(file, JSON.stringify(repro));
-  const { code, lines } = await runDrill(`--repro=${file}`);
-  assert.deepEqual([code, lines], [1, ["FAIL  R Repro from main at <sha> on main at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown)."]]);
+  const { code, lines } = await runDrill("--build=1.19", `--repro=${file}`);
+  assert.deepEqual([code, lines], [1, ["building contract 1.19 at <sha>", "FAIL  R Repro from main at <sha> on contract 1.19 at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown)."]]);
 });
 
-const runner = "npm run drill plays drills as tests: D01 fails on main with its red light, D04 passes, D06 needs hands";
+const runner = "npm run drill plays drills as tests: D01 and D04 pass on main, D06 needs hands, and a run where nothing played fails";
 if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
   const { code, lines } = await runDrill("D01", "D04", "D06");
-  assert.deepEqual([code, lines], [1, [
-    "FAIL  D01 Empty-line Enter on main at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown).",
+  assert.deepEqual([code, lines], [0, [
+    "PASS  D01 Empty-line Enter on main at <sha>: hidden-blocks, lost-keys green",
     "PASS  D04 Select and Enter on main at <sha>: hidden-blocks green",
     'HANDS D06 Two windows on main at <sha>: needs hands at "In the top editor, type at the end of "Window A types here.""',
   ]]);
@@ -351,37 +368,38 @@ if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
 });
 
 if (process.env.TG_TRY) {
-  const pick = pickBuild(process.env.TG_TRY, { repo: REPO });
-  const built = makeBuild(pick, { repo: REPO });
-  await t.checkAsync(`D01 split: main lights hidden blocks red, ${pick.label} keeps every light green`, () =>
-    split([mainBuild(), built], "?doc=drill:D01", async (page, [left, right]) => {
-      await left.getByRole("button", { name: "Edit empty paragraph" }).click();
-      await caretRead(left);
+  const [left, right] = besideMain(process.env.TG_TRY.split(" ")).map((name) => (name === "main" ? mainBuild() : makeBuild(pickBuild(name, { repo: REPO }), { repo: REPO })));
+  await t.checkAsync(`D01 split: ${left.label} lights hidden blocks red, ${right.label} keeps every light green`, () =>
+    split([left, right], "?doc=drill:D01", async (page, [leftFrame, rightFrame]) => {
+      await leftFrame.getByRole("button", { name: "Edit empty paragraph" }).click();
+      await caretRead(leftFrame);
       for (let i = 0; i < 6; i++) await page.keyboard.press("Enter");
       await page.keyboard.type("x");
       await page.keyboard.press("Backspace");
-      await left.evaluate(() => window.testingGround.reload());
-      await right.waitForFunction(() => window.testingGround.state.reload !== null);
-      assert.deepEqual(red(await lightsOf(left)), ["hidden-blocks"]);
-      assert.deepEqual(red(await lightsOf(right)), []);
+      await leftFrame.evaluate(() => window.testingGround.reload());
+      await rightFrame.waitForFunction(() => window.testingGround.state.reload !== null);
+      assert.deepEqual(red(await lightsOf(leftFrame)), ["hidden-blocks"]);
+      assert.deepEqual(red(await lightsOf(rightFrame)), []);
       if (process.env.TG_SHOTS) {
-        for (const frame of [left, right]) await frame.evaluate(() => window.testingGround.setDrawer(true));
-        await page.screenshot({ path: join(process.env.TG_SHOTS, `split-D01-main-vs-${process.env.TG_TRY}.png`) });
+        for (const frame of [leftFrame, rightFrame]) await frame.evaluate(() => window.testingGround.setDrawer(true));
+        await page.screenshot({ path: join(process.env.TG_SHOTS, `split-D01-${process.env.TG_TRY.replace(" ", "-vs-")}.png`) });
       }
     }));
-  built.remove();
+  for (const build of [left, right]) build.remove?.();
 }
 
 if (process.env.TG_BARKPARK) {
-  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
+  const fold = barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN);
+  await t.checkAsync("a batch patch.ex refuses comes back with Barkpark's own answer", () =>
+    assert.rejects(fold.apply([{ id: "p-a", type: "paragraph", content: [] }], [{ op: "patch-block", id: "p-missing", patch: { content: [] } }]), /^Error: Barkpark answered 4\d\d to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*p-missing/));
+  const local = await start({ fold });
   const page = await browser.newPage();
-  await t.checkAsync("D02 through a local Barkpark: patch.ex itself refuses the batch", async () => {
+  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
     await page.goto(`${local.url}?doc=drill:D02`);
     await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
     await play(page, drill("D02"));
     const lights = await lightsOf(page);
-    assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
-    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*invalid_op/);
+    assert.deepEqual(red(lights), []);
   });
   await page.close();
   await local.close();
