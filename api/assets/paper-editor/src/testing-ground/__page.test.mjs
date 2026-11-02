@@ -61,6 +61,8 @@ function stubCanvas(at) {
   return canvas;
 }
 const root = el();
+const thrown = [];
+window.addEventListener("error", (event) => thrown.push(event.error));
 const canvas = stubCanvas("p-a");
 const tally = { tries: 0, hits: 0 };
 let counted = 0;
@@ -87,5 +89,6 @@ canvas.at = "p-a";
 press("ArrowDown");
 await wait(150);
 assert.deepEqual([tally, counted], [{ tries: 2, hits: 1 }, 2], "only ArrowDown from the line above counts, and only on a drill with a tally");
+assert.deepEqual(thrown, [], "ArrowDown on a doc with no tally throws nothing");
 
 console.log("PASS  testing-ground page modules: under the hood, the reader's paint order, the ArrowDown tally");

@@ -61,8 +61,9 @@ function cli(args, env = {}) {
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
+  const deadline = setTimeout(() => child.kill(), 20000);
   return {
-    exited: new Promise((resolve) => child.on("exit", (code) => resolve({ code, out }))),
+    exited: new Promise((resolve) => child.on("exit", (code) => { clearTimeout(deadline); resolve({ code, out }); })),
     printed: async (re) => {
       const until = Date.now() + 20000;
       while (!re.test(out) && Date.now() < until && child.exitCode === null) await new Promise((r) => setTimeout(r, 50));
@@ -75,6 +76,7 @@ function cli(args, env = {}) {
 for (const [args, why, env] of [
   [["25044"], /only main for now; PR heads and contract trees come next, got 25044/],
   [["main", "1.19"], /one build at a time, got main 1.19/],
+  [["x--y", "--no-open"], /only main for now; PR heads and contract trees come next, got x--y/],
   [["--port"], /unknown or malformed flag --port$/m],
   [["--port=abc"], /unknown or malformed flag --port=abc/],
   [["--open"], /unknown or malformed flag --open/],

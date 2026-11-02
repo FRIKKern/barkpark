@@ -6,7 +6,6 @@ async function boxOf(page, text, at) {
       if (start === -1) continue;
       const range = document.createRange();
       if (at === "end") range.setStart(node, start + text.length - 1), range.setEnd(node, start + text.length);
-      else if (at === "start") range.setStart(node, start), range.setEnd(node, start + 1);
       else range.setStart(node, start), range.setEnd(node, start + text.length);
       const r = range.getBoundingClientRect();
       const x = at === "end" ? r.right - 1 : at === "start" ? r.left + 1 : r.left + r.width / 2;
