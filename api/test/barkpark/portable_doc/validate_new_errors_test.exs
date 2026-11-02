@@ -99,6 +99,16 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
                ])
     end
 
+    test "the same code on another field of the same block is added" do
+      stored = [%{bad_heading("h") | "level" => true}]
+      written = [%{bad_heading("h") | "level" => 2, "text" => 5}]
+
+      assert {[%{code: :wrong_field_type, path: "/blocks/0/text"}], []} =
+               NewErrors.split(stored, written)
+
+      assert NewErrors.split_touched(stored, written) == NewErrors.split(stored, written)
+    end
+
     test "another code at the same place is added" do
       assert {[%{code: :wrong_field_type, path: "/blocks/0/level"}], []} =
                NewErrors.split([bad_heading("h")], [%{bad_heading("h") | "level" => true}])
