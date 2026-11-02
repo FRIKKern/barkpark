@@ -85,8 +85,8 @@
     "css/paper-surface.css": "c334ebacf2ad57942a26b373b55f1e02bc85f6a0a5661d38508937e458f906c0",
     "email.html": "d1bbb210a0004a821e7351f207c6e93ddf71fc12d72c090de5d8fe2fa8a291d7",
     "fragments.json": "039b56eef3d20802952b44f28e8ab5bcbae63ad383ff1f32096249faf2bee574",
-    "i18n/paper-canvas.en.json": "f1929f379bc6487328558e011bf19e4fa26ab7234733e877d6323e1c7f3fa46a",
-    "i18n/paper-canvas.nb-NO.json": "f11bd5c48daf2acae5beb1125a050553c8e5e4e23b6bb3ef15d8e8a89d90bf03",
+    "i18n/paper-canvas.en.json": "a25909dfb1a868ebe1d28a3f0c921f1acf584fd1c49db693647fecfe19ff06d8",
+    "i18n/paper-canvas.nb-NO.json": "43b53a7a389e24853b0f2e8ae0d3fb84eb29f6ef9ea88e5a5950af60c18efa1a",
     "locales/en.locale-golden.json": "4a027d816d88160437de5be5ae446f64cd923e954e9670f9414032eb23ad2b8f",
     "locales/nb-NO.locale-golden.json": "3078cf2ec9df13e03ecf84c25cb7a45742c029234c31f52e6a8aaca2d05acfc9",
     "nested-list-carriers.json": "3047c92e72d1722cb65cae040672349b86e0cb933279bc120608b4dea65383f3",
@@ -104,7 +104,7 @@
     "pages/light-en.html": "4d95e3fe19ad911792fbc194db29d0134f981beaf09599561d7819a127742b11",
     "pages/light-nb-NO.html": "0562742bbef2f69bb4ac17ab8ca2c8333c477d0147aa8fa8a389017f1e3eefe0"
   },
-  "gettext_sha256": "de63f394abbc7a12808fc6f34d7223d298659068265f5ddfac14b364588cd2cd",
+  "gettext_sha256": "80d57f9dc0e7a803b80b381fd841981bba97b678a45d6c983dc318494cfc6480",
   "inputs": [
     "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",

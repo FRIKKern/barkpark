@@ -4525,6 +4525,87 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/plugins/bulldocs/render": {
+      "post": {
+        "operationId": "bulldocs.render",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "html": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "html"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The reader's HTML; nothing stored."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The body is not JSON (malformed)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "payload_too_large: the body is over 2 MiB. render_too_large: the HTML would pass 16 MiB."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Render portable-doc blocks to the paper reader's HTML; nothing is stored. The doc is validated first: a broken doc is refused 422 validation_failed with every violation (code + JSON-pointer path), never HTML.",
+        "tags": [
+          "bulldocs"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/admin/orgs/{org_slug}/domains/{domain}/verify": {
       "post": {
         "operationId": "org.domain-verify",
