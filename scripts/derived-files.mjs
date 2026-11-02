@@ -200,7 +200,7 @@ export const STEPS = [
     inputs: [...GETTEXT, ...RENDER, "api/lib/barkpark_web/live/studio/**"],
     after: ["design-emit"],
     check: `${MIX} test ${SNAPSHOT}`,
-    write: `cd api && rm -f test/barkpark_web/live/studio/snapshots/paper_editor_flag_off.html && (MIX_ENV=test mix test ${SNAPSHOT} >/dev/null 2>&1; true) && MIX_ENV=test mix test ${SNAPSHOT}`,
+    write: `cd api && GOLDEN_REGEN=1 MIX_ENV=test mix test ${SNAPSHOT}`,
     gates: ["api/test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs"],
   },
   {

@@ -10,37 +10,45 @@
 // --check needs a clean tree: it rebuilds, lists what moved, then puts every
 // moved file back, so the tree ends as it started.
 
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { STEPS, ordered, reached, step } from "./derived-files.mjs";
 import { changedPaths } from "./reach.mjs";
 
-const root = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
-const git = (args) => execSync(`git ${args}`, { cwd: root, encoding: "utf8", maxBuffer: 1 << 30 });
+const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 30, env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" } });
 
 function treeState() {
-  const hash = createHash("sha256").update(git("diff HEAD --binary"));
+  const hash = createHash("sha256").update(git(["diff", "HEAD", "--binary"]));
   for (const f of untracked()) hash.update(f).update(readFileSync(`${root}/${f}`));
   return hash.digest("hex");
 }
 
-const untracked = () => git("ls-files --others --exclude-standard").split("\n").filter(Boolean);
-const moved = () => [...git("diff HEAD --name-only").split("\n").filter(Boolean), ...untracked()];
+const untracked = () => git(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
+const moved = () => [...git(["diff", "HEAD", "--name-only", "-z"]).split("\0").filter(Boolean), ...untracked()];
 
 function sh(cmd) {
   return spawnSync("bash", ["-c", cmd], { cwd: root, stdio: "inherit" }).status === 0;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = { check: false, base: null, only: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--check") opts.check = true;
-    else if (a === "--base") opts.base = argv[++i];
-    else if (a === "--only") opts.only.push(argv[++i]);
+    else if (a === "--base" || a === "--only") {
+      const value = argv[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${a} needs a value`);
+      if (a === "--base") {
+        if (opts.base !== null) throw new Error("--base may only be given once");
+        opts.base = value;
+      } else opts.only.push(value);
+    }
     else throw new Error(`unknown argument ${a}`);
   }
+  if (opts.base !== null && opts.only.length) throw new Error("use either --base or --only");
   return opts;
 }
 
@@ -61,32 +69,46 @@ function run(steps) {
     }
     console.log(`\n== ${s.name}: write\n$ ${s.write}`);
     const before = treeState();
-    if (!sh(s.write)) failed.push(s.name);
+    if (!sh(s.write)) {
+      failed.push(s.name);
+      break;
+    }
     if (treeState() !== before) changed.add(s.name);
   }
   return { changed: [...changed], failed };
 }
 
-const opts = parseArgs(process.argv.slice(2));
-if (opts.check && moved().length) {
-  console.error("regen --check needs a clean tree; commit or stash first:\n" + moved().join("\n"));
-  process.exit(2);
+function restore() {
+  const fresh = new Set(untracked());
+  const tracked = moved().filter((f) => !fresh.has(f));
+  if (tracked.length) git(["restore", "--source=HEAD", "--worktree", "--", ...tracked]);
+  for (const f of fresh) rmSync(`${root}/${f}`, { force: true });
 }
 
-const steps = selected(opts);
-console.log(`regen: ${steps.map((s) => s.name).join(", ") || "nothing reached"}`);
-const { changed, failed } = run(steps);
-const files = moved();
-
-console.log(`\nregen: changed ${changed.join(", ") || "nothing"}${failed.length ? `; FAILED ${failed.join(", ")}` : ""}`);
-if (opts.check) {
-  if (files.length) {
-    console.log(`stale:\n${files.join("\n")}`);
-    const fresh = new Set(untracked());
-    const tracked = files.filter((f) => !fresh.has(f));
-    if (tracked.length) git(`checkout -- ${tracked.map((f) => `'${f}'`).join(" ")}`);
-    fresh.forEach((f) => rmSync(`${root}/${f}`));
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  let opts;
+  let steps;
+  try {
+    opts = parseArgs(process.argv.slice(2));
+    steps = selected(opts);
+    if (opts.check && moved().length) throw new Error("--check needs a clean tree; commit or stash first:\n" + moved().join("\n"));
+  } catch (error) {
+    console.error(`regen: ${error.message}`);
+    process.exit(2);
   }
-  process.exit(files.length || failed.length ? 1 : 0);
+  if (opts.check) {
+    for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+      process.once(signal, () => { restore(); process.exit(code); });
+    }
+  }
+  try {
+    console.log(`regen: ${steps.map((s) => s.name).join(", ") || "nothing reached"}`);
+    const { changed, failed } = run(steps);
+    const files = moved();
+    console.log(`\nregen: changed ${changed.join(", ") || "nothing"}${failed.length ? `; FAILED ${failed.join(", ")}` : ""}`);
+    if (opts.check && files.length) console.log(`stale:\n${files.join("\n")}`);
+    process.exitCode = failed.length || (opts.check && files.length) ? 1 : 0;
+  } finally {
+    if (opts.check) restore();
+  }
 }
-process.exit(failed.length ? 1 : 0);

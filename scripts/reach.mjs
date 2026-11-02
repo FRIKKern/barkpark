@@ -9,23 +9,24 @@
 // The diff is base...HEAD plus anything uncommitted, so it can run before a
 // commit as well as before a push.
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reached } from "./derived-files.mjs";
 
-const root = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
-const lines = (cmd) => execSync(cmd, { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean);
+const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+const paths = (args) => git(args).split("\0").filter(Boolean);
 
 export function changedPaths(base) {
-  return [
-    ...new Set([
-      ...lines(`git diff --name-only ${base}...HEAD`),
-      ...lines("git diff --name-only HEAD"),
-      ...lines("git ls-files --others --exclude-standard"),
-    ]),
-  ].sort();
+  if (!base || base.startsWith("-")) throw new Error("base must name a commit");
+  const sha = git(["rev-parse", "--verify", `${base}^{commit}`]).trim();
+  return [...new Set([
+    ...paths(["diff", "--name-only", "-z", `${sha}...HEAD`]),
+    ...paths(["diff", "--name-only", "-z", "HEAD"]),
+    ...paths(["ls-files", "--others", "--exclude-standard", "-z"]),
+  ])].sort();
 }
 
 export const isTest = (p) =>
@@ -74,12 +75,22 @@ export function report(base, paths) {
     out.push("", "rebuild them:", `  node scripts/regen.mjs --base ${base}`);
     out.push("", "gates that catch them stale:", ...gates.map((g) => `  ${g}`));
   } else out.push("", "derived files: none reached");
-  const run = commandsFor([...new Set([...gates.filter((g) => !g.includes(".yml: ")), ...tests])]);
+  const run = [...new Set([
+    ...steps.flatMap((s) => s.check ? [s.check] : [s.write]),
+    ...commandsFor([...new Set([...gates.filter((g) => !g.includes(".yml: ")), ...tests])]),
+  ])];
   if (run.length) out.push("", "run:", ...run.map((c) => `  ${c}`));
   return out.join("\n");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const base = process.argv[2] || "origin/main";
-  console.log(report(base, changedPaths(base)));
+  try {
+    const args = process.argv.slice(2);
+    if (args.length > 1) throw new Error("usage: node scripts/reach.mjs [base]");
+    const base = args[0] ?? "origin/main";
+    console.log(report(base, changedPaths(base)));
+  } catch (error) {
+    console.error(`reach: ${error.message}`);
+    process.exitCode = 2;
+  }
 }
