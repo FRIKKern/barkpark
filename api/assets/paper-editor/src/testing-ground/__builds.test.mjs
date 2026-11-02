@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeBuild, pickBuild } from "./builds.mjs";
+import { besideMain, makeBuild, pickBuild } from "./builds.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
@@ -15,6 +15,13 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.e
 
 assert.deepEqual(pickBuild("1.19", { repo: REPO, git: noGit }), { label: "contract 1.19", sha: "648bfeeb44" }, "a contract is the tree R2.2 recorded it from");
 assert.throws(() => pickBuild("1.99", { repo: REPO, git: noGit }), /^Error: no recorded tree for contract 1\.99; recorded: 1\.14, 1\.15, 1\.16, 1\.17, 1\.18, 1\.19$/);
+for (const [names, opened] of [
+  [[], ["main"]],
+  [["main"], ["main"]],
+  [["25044"], ["main", "25044"]],
+  [["main", "25044"], ["main", "25044"]],
+  [["1.19", "25044"], ["1.19", "25044"]],
+]) assert.deepEqual(besideMain(names), opened, `npm run try ${names.join(" ")} opens ${opened.join(" beside ")}`);
 for (const bad of ["x", "1.19.0", "0", "-3", "25044a", "", "1.19 "])
   assert.throws(() => pickBuild(bad, { repo: REPO, git: noGit }), /^Error: a build is main, a PR number or a contract like 1\.19, got /, JSON.stringify(bad));
 

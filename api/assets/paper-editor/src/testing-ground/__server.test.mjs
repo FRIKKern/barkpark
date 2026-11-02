@@ -63,6 +63,7 @@ try {
   assert.equal((await get(`${two.url}b/1/build/bp-paper-editor.css`)).type, "text/css");
   assert.equal((await get(`${two.url}b/1/src/testing-ground/page/mirror.mjs`)).type, "text/javascript");
   assert.equal((await get(`${two.url}b/2/`)).status, 404);
+  assert.equal((await get(`${two.url}b/2/src/testing-ground/page/mirror.mjs`)).status, 404, "a frame number past the builds serves nothing");
 } finally {
   await two.close();
 }
@@ -89,6 +90,8 @@ try {
 const bin = mkdtempSync(join(tmpdir(), "tg-open-"));
 writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$1" >> "${join(bin, "opened")}"\n`);
 chmodSync(join(bin, "open"), 0o755);
+writeFileSync(join(bin, "npm"), "#!/bin/sh\necho \"fake npm: no build\"\nexit 1\n");
+chmodSync(join(bin, "npm"), 0o755);
 process.on("exit", () => rmSync(bin, { recursive: true, force: true }));
 
 function cli(args, env = {}) {
@@ -125,6 +128,11 @@ for (const [args, why, env] of [
   assert.match(out, why);
   assert.match(out, /usage: npm run try \[main \| <PR number> \| <contract like 1\.19>\] \[<second build>\]/);
 }
+
+const failed = await cli(["1.19", "--no-open", "--port=0"]).exited;
+assert.equal(failed.code, 1, "a build that fails stops npm run try");
+assert.match(failed.out, /^building contract 1\.19 at 648bfeeb44\n/);
+assert.match(failed.out, /npm run try: (git archive 648bfeeb44|npm run build for contract 1\.19 at 648bfeeb44 failed:\nfake npm: no build)/);
 
 const quiet = cli(["main", "--no-open", "--port=0"]);
 try {

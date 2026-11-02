@@ -249,13 +249,15 @@ async function split(builds, query, fn) {
     await pair.close();
   }
 }
-const saved = (frame) => frame.evaluate(async () => { await window.testingGround.settle(); return window.testingGround.state.host.saved.map((b) => (b.content || []).map((c) => c.value).join("")); });
+const saved = (frame) => frame.evaluate(async () => { await window.testingGround.settle(); return window.testingGround.state.host.saved.map((b) => b.content.map((c) => c.value).join("")); });
 const keyOf = (frame) => frame.evaluate(() => window.testingGround.state.key);
 
 await t.checkAsync("split screen: two builds side by side, each named with its sha; the left window's keys, doc and reload go into the right", () =>
   split([{ ...mainBuild(), label: "left build" }, { ...mainBuild(), label: "right build" }], "?doc=drill:D01", async (page, [left, right]) => {
     assert.deepEqual(await page.$$eval(".tg-split-label", (ls) => ls.map((l) => l.textContent.replace(/[0-9a-f]{10}/, "<sha>"))), ["Left: left build at <sha>", "Right: right build at <sha>"]);
     assert.deepEqual([await left.textContent(".tg-stamp"), await right.textContent(".tg-stamp")].map((s) => s.replace(/[0-9a-f]{10}$/, "<sha>")), ["left build at <sha>", "right build at <sha>"]);
+    await left.evaluate(() => window.testingGround.reload());
+    await right.waitForFunction(() => window.testingGround.state.reload !== null);
     await left.click("text=Beta");
     await caretRead(left);
     await page.keyboard.press("End");
@@ -270,9 +272,7 @@ await t.checkAsync("split screen: two builds side by side, each named with its s
     assert.equal((await saved(left)).includes("Alpha"), true, "keys typed on the right stay on the right");
     await left.evaluate(() => window.testingGround.openDoc("drill:D02"));
     await right.waitForFunction(() => window.testingGround.state.key === "drill:D02");
-    await left.evaluate(() => window.testingGround.reload());
-    await right.waitForFunction(() => window.testingGround.state.reload !== null);
-    assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload");
+    assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload, and the keys after a reload go across once");
   }));
 
 if (process.env.TG_TRY) {

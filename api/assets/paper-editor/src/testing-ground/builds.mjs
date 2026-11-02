@@ -32,6 +32,8 @@ function prHead(git, number) {
   return sha;
 }
 
+export const besideMain = (names) => (names.length === 1 && names[0] !== "main" ? ["main", ...names] : names.length ? names : ["main"]);
+
 export function pickBuild(which, { repo, git = gitIn(repo) }) {
   if (/^[1-9]\d*$/.test(which)) return { label: `PR #${which}`, sha: prHead(git, which) };
   if (/^\d+\.\d+$/.test(which)) return { label: `contract ${which}`, sha: contractCommit(repo, which) };

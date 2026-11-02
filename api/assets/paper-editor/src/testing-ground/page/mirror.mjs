@@ -42,10 +42,9 @@ function type(view, chars) {
 }
 
 function deleteChar(view, key) {
-  const { empty, $from, from } = view.state.selection;
-  if (!empty) return;
-  if (key === "Backspace" && $from.parentOffset > 0) view.dispatch(view.state.tr.delete(from - 1, from));
-  if (key === "Delete" && $from.parentOffset < $from.parent.content.size) view.dispatch(view.state.tr.delete(from, from + 1));
+  const { from } = view.state.selection;
+  if (key === "Backspace") view.dispatch(view.state.tr.delete(from - 1, from));
+  if (key === "Delete") view.dispatch(view.state.tr.delete(from, from + 1));
 }
 
 function paste(view, data) {

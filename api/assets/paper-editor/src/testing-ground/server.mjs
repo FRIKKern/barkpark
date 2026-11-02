@@ -5,7 +5,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { barkparkFold } from "./barkpark-fold.mjs";
-import { makeBuild, pickBuild } from "./builds.mjs";
+import { besideMain, makeBuild, pickBuild } from "./builds.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(SRC, "../../../..");
@@ -135,10 +135,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const bad = args.find((a) => a.startsWith("--") && !known.test(a));
   if (bad) usage(`unknown or malformed flag ${bad}`);
   if (names.length > 2) usage(`two builds at most, got ${names.join(" ")}`);
-  const asked = names.length === 1 && names[0] !== "main" ? ["main", ...names] : names.length ? names : ["main"];
   let picks;
   try {
-    picks = asked.map((name) => (name === "main" ? null : pickBuild(name, { repo: REPO })));
+    picks = besideMain(names).map((name) => (name === "main" ? null : pickBuild(name, { repo: REPO })));
   } catch (error) {
     usage(error.message);
   }
