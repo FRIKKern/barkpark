@@ -66,6 +66,54 @@ defmodule Barkpark.PortableDoc.Validate.NewErrorsTest do
                NewErrors.split([section.(2)], [section.(9)])
     end
 
+    test "an item added above a broken list item leaves its error old; a second broken item adds one" do
+      item = fn text -> %{"content" => [%{"type" => "text", "value" => text}]} end
+      broken = Map.put(item.("b"), "checked", "yes")
+
+      list = fn items ->
+        %{"id" => "l", "type" => "list", "ordered" => false, "items" => items}
+      end
+
+      assert {[], [%{path: "/blocks/0/items/2/checked"}]} =
+               NewErrors.split([list.([item.("a"), broken])], [
+                 list.([item.("new"), item.("a"), broken])
+               ])
+
+      assert {[_], [_]} =
+               NewErrors.split([list.([item.("a"), broken])], [
+                 list.([broken, item.("a"), broken])
+               ])
+    end
+
+    test "text typed before a broken inline node leaves its error old" do
+      para = fn content -> %{"id" => "p", "type" => "paragraph", "content" => content} end
+      untyped = %{"value" => "x"}
+
+      assert {[], [%{code: :missing_required_field, path: "/blocks/0/content/2/type"}]} =
+               NewErrors.split([para.([%{"type" => "text", "value" => "a"}, untyped])], [
+                 para.([
+                   %{"type" => "text", "value" => "new"},
+                   %{"type" => "text", "value" => "a"},
+                   untyped
+                 ])
+               ])
+    end
+
+    test "another code at the same place is added" do
+      assert {[%{code: :wrong_field_type, path: "/blocks/0/level"}], []} =
+               NewErrors.split([bad_heading("h")], [%{bad_heading("h") | "level" => true}])
+    end
+
+    test "a nested block with an id is followed when it moves to another section" do
+      section = fn id, blocks -> %{"id" => id, "type" => "section", "blocks" => blocks} end
+
+      assert {[], [%{path: "/blocks/1/blocks/0/level"}]} =
+               NewErrors.split([section.("s1", [bad_heading("k")]), section.("s2", [])], [
+                 section.("s1", []),
+                 section.("s2", [bad_heading("k")])
+               ])
+    end
+
     test "an id-less broken block keys by its whole path, so moving it adds it" do
       idless = %{"type" => "heading", "level" => 9, "text" => "x"}
       assert {[], [_]} = NewErrors.split([idless], [idless])

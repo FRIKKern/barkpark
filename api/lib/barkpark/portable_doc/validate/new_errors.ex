@@ -9,9 +9,12 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   did not already have. Two errors are the same when they have the same
   code at the same place, and a place is named from the nearest block with an
   `id` on its path: `{code, id, rest of the path}`. So inserting a block above
-  a broken one moves the broken one's index without making its error new. A
-  path with no block id on it keys by the whole path. Errors are counted, not
-  just matched, so a third block with a duplicated id is one more error.
+  a broken one moves the broken one's index without making its error new.
+  Below the id, list indexes key as `*` (list items, table rows and inline
+  nodes carry no id), so adding an item above a broken item leaves its error
+  old. A path with no block id on it keys by the whole path. Errors are
+  counted, not just matched, so a third block with a duplicated id, or a
+  second broken item in one list, is one more error.
 
   `check/2` is what the write paths call. Report-only until the
   `:portable_doc_refuse_new_errors` config flag is on (`refuse?/0`):
@@ -122,7 +125,17 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
       end)
       |> then(fn {value, id, rest} -> anchor(value, id, rest) end)
 
-    {code, id, Enum.reverse(rest)}
+    {code, id, rest |> Enum.reverse() |> below(id)}
+  end
+
+  defp below(rest, nil), do: rest
+  defp below(rest, _id), do: Enum.map(rest, &any_index/1)
+
+  defp any_index(segment) do
+    case Integer.parse(segment) do
+      {_index, ""} -> "*"
+      _ -> segment
+    end
   end
 
   defp anchor(%{"id" => id}, _id, _rest) when is_binary(id) and id != "", do: {id, []}

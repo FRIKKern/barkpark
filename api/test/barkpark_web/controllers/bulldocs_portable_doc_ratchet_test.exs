@@ -46,10 +46,14 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
 
   defp slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
-  defp post_json(path, body) do
-    build_conn()
-    |> put_req_header("authorization", "Bearer " <> @token)
-    |> put_req_header("content-type", "application/json")
+  defp post_json(path, body, headers \\ []) do
+    headers
+    |> Enum.reduce(
+      build_conn()
+      |> put_req_header("authorization", "Bearer " <> @token)
+      |> put_req_header("content-type", "application/json"),
+      fn {k, v}, conn -> put_req_header(conn, k, v) end
+    )
     |> post(path, body)
   end
 
@@ -226,11 +230,125 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
       refute Enum.any?(body["violations"], &String.starts_with?(&1["code"], "portable_doc"))
     end
 
+    test "an item added above a broken list item is not refused (patch-block)" do
+      item = fn text -> %{"content" => [%{"type" => "text", "value" => text}]} end
+      broken = Map.put(item.("b"), "checked", "yes")
+
+      list = fn items ->
+        %{"id" => "l", "type" => "list", "ordered" => false, "items" => items}
+      end
+
+      s = seed!(slug("ratchet-list"), [para("a"), list.([item.("a"), broken])])
+      refusing!()
+
+      patch = %{
+        "op" => "patch-block",
+        "id" => "l",
+        "patch" => %{"items" => [item.("new"), item.("a"), broken]}
+      }
+
+      assert %{"ok" => true} = json_response(op(s, patch), 200)
+    end
+
     test "still refuses an error the write adds, and counts the old one", %{slug: s} do
       refusing!()
       conn = op(s, append(bad_heading("new")))
       assert_refused(conn, "/blocks/2/level")
       assert json_response(conn, 409) |> inspect() =~ "1 already in the paper"
+    end
+  end
+
+  describe "the dry run beside the other gates" do
+    defp untagged(slug, blocks),
+      do: LabelFixtures.paper_attrs(%{"slug" => slug, "blocks" => blocks}) |> Map.delete("tags")
+
+    test "report-only: another gate's violation still makes it invalid" do
+      body =
+        json_response(
+          post_json("#{@papers}/validate", untagged(slug("ratchet-wall"), [bad_heading("h")])),
+          200
+        )
+
+      assert body["valid"] == false
+      assert [_ | _] = body["violations"]
+      assert %{"violations" => [_]} = portable_doc_warning(body)
+    end
+
+    test "refusing: the added error joins the other gates' violations" do
+      refusing!()
+
+      body =
+        json_response(
+          post_json("#{@papers}/validate", untagged(slug("ratchet-wall"), [bad_heading("h")])),
+          200
+        )
+
+      codes = Enum.map(body["violations"], & &1["code"])
+      assert "portable_doc-value_not_allowed" in codes
+      assert Enum.any?(codes, &(not String.starts_with?(&1, "portable_doc")))
+    end
+
+    test "reads the stored paper in the dataset the body names" do
+      s = slug("ratchet-dataset")
+      dataset = "r45-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            "slug" => s,
+            "dataset" => dataset,
+            "blocks" => [para("a"), bad_heading("old")]
+          })
+        )
+
+      body =
+        json_response(
+          post_json(
+            "#{@papers}/validate",
+            LabelFixtures.paper_attrs(%{
+              "slug" => s,
+              "dataset" => dataset,
+              "blocks" => [para("a"), bad_heading("old")]
+            })
+          ),
+          200
+        )
+
+      assert portable_doc_warning(body) == nil
+    end
+
+    test "reads the stored paper in the project the request names, not a sibling project" do
+      ws = create_workspace!()
+      p1 = create_project!(ws, "p1")
+      p2 = create_project!(ws, "p2")
+      s = slug("ratchet-project")
+
+      {:ok, _} =
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            "slug" => s,
+            "dataset" => @dataset,
+            "workspace_id" => ws.id,
+            "project_id" => p1.id,
+            "blocks" => [para("a"), bad_heading("old")]
+          })
+        )
+
+      dry = fn project ->
+        "#{@papers}/validate"
+        |> post_json(
+          LabelFixtures.paper_attrs(%{"slug" => s, "blocks" => [para("a"), bad_heading("old")]}),
+          [
+            {"x-barkpark-workspace", ws.slug},
+            {"x-barkpark-project", project.slug}
+          ]
+        )
+        |> json_response(200)
+        |> portable_doc_warning()
+      end
+
+      assert dry.(p1) == nil
+      assert %{"violations" => [_], "existing" => []} = dry.(p2)
     end
   end
 
@@ -243,7 +361,7 @@ defmodule BarkparkWeb.BulldocsPortableDocRatchetTest do
       raw = "ratchet-scope-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Barkpark.Auth.create_token(
+        Auth.create_token(
           raw,
           "ratchet-a",
           @dataset,
