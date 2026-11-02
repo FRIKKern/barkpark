@@ -6,6 +6,9 @@ import { join } from "node:path";
 const REPLAY = "api/test/fixtures/portable_doc/old_client_replay";
 const TREE = ["api/assets/paper-editor", "api/assets/paper-surface", "api/priv/static/assets"];
 
+const live = new Set();
+process.on("exit", () => { for (const root of live) rmSync(root, { recursive: true, force: true }); });
+
 const gitIn = (repo) => (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 function recordedContracts(repo) {
@@ -37,7 +40,11 @@ export function pickBuild(which, { repo, git = gitIn(repo) }) {
 
 export function makeBuild({ label, sha }, { repo, modules = join(repo, "api/assets/paper-editor/node_modules") }) {
   const root = mkdtempSync(join(tmpdir(), "tg-build-"));
-  const remove = () => rmSync(root, { recursive: true, force: true });
+  live.add(root);
+  const remove = () => {
+    rmSync(root, { recursive: true, force: true });
+    live.delete(root);
+  };
   try {
     const tar = spawnSync("git", ["archive", sha, ...TREE], { cwd: repo, maxBuffer: 1 << 30 });
     if (tar.status !== 0) throw new Error(`git archive ${sha}: ${tar.stderr.toString().trim()}`);
