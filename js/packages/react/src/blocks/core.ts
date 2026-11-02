@@ -24,6 +24,7 @@ import {
   LEGEND_ROLES,
   textLeafValue,
   codeSource,
+  MAX_DEPTH,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
 import { listChildren } from '../list-children'
@@ -511,16 +512,17 @@ const preGateBadge: Emit = (b) => {
 // 3 — `renderBlocks` joins emitted strings, never spacing by raw array index).
 // The Elixir twin is walk.ex `paragraph/3`; legacy cached `<p></p>` HTML is
 // belt-and-braces suppressed by `.bp-paper-surface p:empty` in paper-surface.css.
-function isBlankParagraphRun(nodes: unknown): boolean {
+function isBlankParagraphRun(nodes: unknown, depth = 0): boolean {
   if (typeof nodes === 'string') return nodes.trim() === ''
   if (!Array.isArray(nodes)) return false
-  return nodes.every(isBlankParagraphNode)
+  return nodes.every((n) => isBlankParagraphNode(n, depth))
 }
 
-function isBlankParagraphNode(n: unknown): boolean {
+function isBlankParagraphNode(n: unknown, depth: number): boolean {
+  if (depth >= MAX_DEPTH) return false
   if (typeof n === 'string') return n.trim() === ''
   if (typeof n === 'number') return false // renders its digits
-  if (Array.isArray(n)) return isBlankParagraphRun(n) // shallow-flattened shape
+  if (Array.isArray(n)) return isBlankParagraphRun(n, depth + 1) // shallow-flattened shape
   if (!isMap(n)) return true // null/bool — renderInline emits '' for these
   // Only an UNMARKED whitespace text leaf counts as scaffold; every other node
   // type (and any marked run) is authored content and keeps the paragraph.

@@ -3,7 +3,7 @@ import { act, create, type ReactTestRenderer, type ReactTestRendererJSON } from 
 import { diffWords, goldenWords, loadLimits } from '../../../api/priv/portable_doc/conformance/conformance.mjs'
 import { renderBlockNative } from '../src/papers/portabledoc/blocks'
 import { chartSpan, decodeRoutePolyline, heatWidths } from '../src/papers/portabledoc/blocks/dataviz'
-import { capDepth } from '../src/papers/portabledoc/model'
+import * as model from '../src/papers/portabledoc/model'
 import { light } from '../src/ui/theme'
 
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
@@ -85,6 +85,10 @@ describe('record tables', () => {
     expect(render({ type: 'table', rows })).not.toContain('Table too large to show')
   })
 
+  it('shows the notice one cell past the cap', () => {
+    expect(render(recordTable(10001, 1)).trim()).toBe('Table too large to show')
+  })
+
   it('never caps a table whose columns all carry text', () => {
     const table = recordTable(101, 100)
     const columns = table.columns.map((column) => ({ ...column, text: 'K' }))
@@ -164,14 +168,14 @@ describe('block nesting', () => {
   }
 
   it.each(slots)('%s %j keeps depth 99 and replaces depth 100', (type, path) => {
-    expect(leafAt(capDepth(chain(type, path, 99), NOTICE), path, 99)).toEqual({ type: 'paragraph', text: 'leaf' })
-    expect(leafAt(capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({ type: 'paragraph', text: NOTICE })
+    expect(leafAt(model.capDepth(chain(type, path, 99), NOTICE), path, 99)).toEqual({ type: 'paragraph', text: 'leaf' })
+    expect(leafAt(model.capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({ type: 'paragraph', text: NOTICE })
   })
 
   it('leaves a block outside the slot table alone', () => {
     const deep = chain('section', ['blocks', '*'], 100)
     const odd = { type: 'section', other: [deep] }
-    expect(capDepth(odd, NOTICE)).toEqual(odd)
+    expect(model.capDepth(odd, NOTICE)).toEqual(odd)
   })
 
   it('caps once at the top level and says it in the workspace language', () => {
@@ -277,5 +281,32 @@ describe('route polyline', () => {
 
   it('drops the tail at a value past seven groups', () => {
     expect(decodeRoutePolyline('??' + '~'.repeat(7) + '??')).toEqual([[0, 0]])
+  })
+})
+
+describe('depth cap per document', () => {
+  it('runs once for a nested document, not once per nested block', () => {
+    const spy = jest.spyOn(model, 'capDepth')
+    const doc = Array.from({ length: 50 }).reduce<unknown>(
+      (inner) => ({ type: 'section', blocks: [inner] }),
+      { type: 'paragraph', text: 'leaf' },
+    )
+    expect(render(doc)).toContain('leaf')
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+})
+
+describe('deep values', () => {
+  const deepArrays = (depth: number): unknown => Array.from({ length: depth }).reduce<unknown>((inner) => [inner], 'a')
+
+  it('reads a code chip over deeply nested children as its text', () => {
+    expect(render({ type: 'paragraph', content: [{ type: 'code', children: [deepArrays(20000)] }] })).toContain('a')
+  })
+
+  it('reads a deeply nested list value as its text', () => {
+    const text = render({ type: 'arrayOf', label: 'L', value: [deepArrays(20000), { b: [1, 2], a: true }] })
+    expect(text).toContain('1. a')
+    expect(text).toContain('2. a: Yes, b: 1, 2')
   })
 })

@@ -64,6 +64,7 @@ describe('@barkpark/react render limits at their boundaries', () => {
   it('draws a record table of exactly the cell cap and refuses one cell row past it', () => {
     expect(render(recordTable(100, 100))).not.toContain('Table too large to show')
     expect(render(recordTable(101, 100))).toContain('<span>Table too large to show</span>')
+    expect(render(recordTable(1, 10001))).toContain('<span>Table too large to show</span>')
   })
 
   it('counts a plain table with text columns as no record table', () => {
@@ -196,5 +197,33 @@ describe('@barkpark/react caps every nested block slot', () => {
       )
     expect(render(lists(99))).toContain('leaf')
     expect(render(lists(100))).not.toContain('leaf')
+  })
+})
+
+const deepArrays = (depth: number): unknown =>
+  Array.from({ length: depth }).reduce((inner) => [inner], 'a')
+
+describe('@barkpark/react walks deep inline arrays without running out of stack', () => {
+  it('reads a code chip over deeply nested children as its text', () => {
+    const html = render({
+      type: 'paragraph',
+      content: [{ type: 'code', children: [deepArrays(5000)] }],
+    })
+    expect(html).toContain('>a</code>')
+  })
+
+  it('shows the notice for a paragraph of deeply nested arrays', () => {
+    expect(render({ type: 'paragraph', content: [deepArrays(5000)] })).toContain(
+      'Nested too deep to show',
+    )
+  })
+
+  it('reads a code chip in a table head', () => {
+    const html = render({
+      type: 'table',
+      head: [[{ type: 'code', children: [deepArrays(5000)] }]],
+      rows: [['x']],
+    })
+    expect(html).toContain('>a</code>')
   })
 })

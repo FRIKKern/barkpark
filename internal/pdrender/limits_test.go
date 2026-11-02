@@ -251,6 +251,9 @@ func TestRecordTableShowsTheNoticePastTenThousandCells(t *testing.T) {
 	if text := renderBlockText(t, recordTable(101, 100), 100); strings.TrimSpace(text) != tableTooLarge {
 		t.Errorf("101x100 record table: %.300s", text)
 	}
+	if text := renderBlockText(t, recordTable(10001, 1), 100); strings.TrimSpace(text) != tableTooLarge {
+		t.Errorf("10001x1 record table: %.300s", text)
+	}
 	plain := `{"type":"table","rows":[` + strings.TrimSuffix(strings.Repeat(`["x"],`, 20000), ",") + `]}`
 	if strings.Contains(renderBlockText(t, plain, 100), tableTooLarge) {
 		t.Error("a plain table was capped")
@@ -528,5 +531,26 @@ func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
 	}
 	if got := ansi.Strip(ir.Inline([]any{strong(text(maxNestDepth - 1))}, RenderCtx{})); got != nestedTooDeep {
 		t.Errorf("99 marks under a strong: %q", got)
+	}
+}
+
+func TestNestingKeepsItsIndentAtTwentyColumns(t *testing.T) {
+	raw, err := os.ReadFile("../../api/test/support/fixtures/nested-list-carriers.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := renderLimitText(t, raw, 20)
+	for _, line := range []string{"• Plan", "  1. Build", "     • Verify", "  2. Ship", "  1. Alias child"} {
+		if !strings.Contains(text, line) {
+			t.Errorf("missing %q at 20 columns:\n%s", line, text)
+		}
+	}
+	for _, block := range []string{
+		`{"type":"expandable","summary":"S","blocks":[{"type":"paragraph","text":"inner"}]}`,
+		`{"type":"steps","steps":[{"title":"T","blocks":[{"type":"paragraph","text":"inner"}]}]}`,
+	} {
+		if text := renderBlockText(t, block, 20); !strings.Contains(text, "\n  inner") {
+			t.Errorf("child lost its indent at 20 columns:\n%s", text)
+		}
 	}
 }

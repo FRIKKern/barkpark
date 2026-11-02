@@ -136,7 +136,7 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 				childCtx.Width = bodyWidth
 				childCtx.Depth++
 				hang := strings.Repeat(" ", indent)
-				if bodyWidth < MinWidth {
+				if bodyWidth < nestFloor {
 					childCtx.Width, hang = ctx.Width, ""
 				}
 				for _, line := range lr.Render(Block{Type: kind, Attrs: child}, childCtx) {

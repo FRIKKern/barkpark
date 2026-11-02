@@ -161,9 +161,19 @@ function applyMarks(key: number, leaf: ReactNode, marks: unknown[], ctx: InlineC
  * twin (inline.tsx:389). Used by the `code` leaf, whose children fold to text
  * rather than to nested markup. */
 function inlineText(nodes: unknown): string {
-  if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
-  if (!Array.isArray(nodes)) return ''
-  return nodes.map((n) => (isMap(n) ? str(n.value) || inlineText(n.children) : inlineText(n))).join('')
+  let text = ''
+  const stack: [unknown, boolean][] = [[nodes, false]]
+  while (stack.length) {
+    const [n, inList] = stack.pop()!
+    if (typeof n === 'string' || typeof n === 'number') text += String(n)
+    else if (Array.isArray(n)) for (let i = n.length - 1; i >= 0; i--) stack.push([n[i], true])
+    else if (inList && isMap(n)) {
+      const leaf = str(n.value)
+      if (leaf) text += leaf
+      else stack.push([n.children, false])
+    }
+  }
+  return text
 }
 
 /** Render one inline node. Mirrors inline.tsx renderInline's dispatch. */
