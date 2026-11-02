@@ -6,8 +6,9 @@
 // a canvas that hides them. Enter keeps the caret where a person expects it: on an
 // empty line it does nothing; at the end of a line above an empty one it moves the
 // caret there. Every other door (a split, Enter over a range, a list exit, a paste,
-// Backspace, a move) is collapsed after the person's own edit, which also heals a
-// stored stack the first time someone edits next to it. Remote updates, undo and redo, and IME
+// Backspace, a move) is collapsed after the person's own edit. A stored stack heals
+// on the first edit beside it that adds or removes blocks; typing beside it stays a
+// text patch, so another device's save still rebases. Remote updates, undo and redo, and IME
 // composition are left alone.
 //
 // Mounted: the real <bp-paper-canvas>, real Enter / Shift-Enter / Backspace keydowns,
@@ -124,7 +125,7 @@ async function mount(blocks, { kind, lockedTail, shared } = {}) {
   canvas.addEventListener("bp-canvas-ops", (event) => {
     state.batches++;
     if (state.seen !== store.rev) {
-      state.refused.push({ seq: event.detail.seq, rebaseSafe: canvas.rebaseSafe(event.detail.seq, clone(store.blocks)) });
+      state.refused.push({ seq: event.detail.seq, ops: clone(event.detail.ops), rebaseSafe: canvas.rebaseSafe(event.detail.seq, clone(store.blocks)) });
       return;
     }
     store.blocks = applyOps(store.blocks, event.detail.ops);
@@ -357,7 +358,7 @@ await scene("moving a line out from between empty lines collapses them, keeping 
   agrees(editor, state);
 }));
 
-await scene("a stored stack heals on the first edit next to it, not on load and not on an edit elsewhere; text is never removed", async () => {
+await scene("a stored stack heals on the first edit beside it that adds or removes blocks; loading, typing beside it and edits elsewhere leave it; text is never removed", async () => {
   await within(STACK, {}, async ({ canvas, editor, state }) => {
     assert.deepEqual(top(editor), ["Alpha", "", "", "Beta", "Gamma"], "loading leaves it");
     caretAt(editor, "Gamma", 5);
@@ -366,25 +367,29 @@ await scene("a stored stack heals on the first edit next to it, not on load and 
     assert.deepEqual(texts(state.server), ["Alpha", "", "", "Beta", "Gamma!"], "an edit away from it leaves it");
     const { from } = editor.state.selection;
     assert.equal(editor.state.applyTransaction(editor.state.tr.insertText("?", from)).transactions.length, 1, "and appends no transaction");
-    caretAt(editor, "Beta", 4);
-    type(editor, "!");
+    caretAt(editor, "Beta", 0);
+    type(editor, "Very ");
     await saved(canvas);
-    assert.deepEqual(texts(state.server), ["Alpha", "", "Beta!", "Gamma!"], "an edit beside it heals it");
+    assert.deepEqual(texts(state.server), ["Alpha", "", "", "Very Beta", "Gamma!"], "typing beside it stays a text patch");
+    caretAt(editor, "Very Beta", 4);
+    press(editor, "Enter");
+    await saved(canvas);
+    assert.deepEqual(texts(state.server), ["Alpha", "", "Very", " Beta", "Gamma!"], "a split beside it heals it");
     assert.equal(state.server[1].id, "p-e1", "the first line stays");
     agrees(editor, state);
   });
   await within([p("p-e1", ""), p("p-e2", ""), p("p-a", "Alpha"), p("p-m", "Mid"), p("p-b", "Beta"), p("p-e3", ""), p("p-e4", "")], {}, async ({ canvas, editor, state }) => {
-    caretAt(editor, "Mid", 3);
-    type(editor, "!");
+    caretAt(editor, "Mid", 2);
+    press(editor, "Enter");
     await saved(canvas);
-    assert.deepEqual(texts(state.server), ["", "", "Alpha", "Mid!", "Beta", "", ""], "stacks at the doc's edges stay until an edit beside them");
+    assert.deepEqual(texts(state.server), ["", "", "Alpha", "Mi", "d", "Beta", "", ""], "stacks at the doc's edges stay until an edit beside them");
   });
   await within([p("p-a", "Alpha"), p("p-e1", ""), p("p-e2", ""), p("p-b", "Beta"), p("p-e3", ""), p("p-e4", ""), p("p-c", "Gamma")], {}, async ({ canvas, editor, state }) => {
-    caretAt(editor, "Beta", 4);
-    type(editor, "!");
+    caretAt(editor, "Beta", 2);
+    press(editor, "Enter");
     await saved(canvas);
-    assert.deepEqual(texts(state.server), ["Alpha", "", "Beta!", "", "Gamma"], "one edit between two stacks heals both");
-    assert.deepEqual(state.server.map((block) => block.id), ["p-a", "p-e1", "p-b", "p-e3", "p-c"]);
+    assert.deepEqual(texts(state.server), ["Alpha", "", "Be", "ta", "", "Gamma"], "one split between two stacks heals both");
+    assert.deepEqual(state.server.map((block) => block.id).filter((id) => id.startsWith("p-")), ["p-a", "p-e1", "p-b", "p-e3", "p-c"]);
     agrees(editor, state);
   });
 });
@@ -399,11 +404,11 @@ await scene("a remote update is never collapsed; the next local edit beside it i
   assert.deepEqual(top(editor), ["Alpha", "", "", "Beta"], "the remote stack stays as sent");
   assert.equal(state.batches, 0, "nothing sent");
   editor.view.focus();
-  caretAt(editor, "Alpha", 5);
-  type(editor, "!");
+  caretAt(editor, "Alpha", 2);
+  press(editor, "Enter");
   await saved(canvas);
-  assert.deepEqual(top(editor), ["Alpha!", "", "Beta"]);
-  assert.deepEqual(state.server.map((block) => block.id), ["p-a", "p-r1", "p-b"]);
+  assert.deepEqual(top(editor), ["Al", "pha", "", "Beta"]);
+  assert.deepEqual(state.server.map((block) => block.id).filter((id) => id.startsWith("p-")), ["p-a", "p-r1", "p-b"]);
   agrees(editor, state);
 }));
 
@@ -422,48 +427,50 @@ await scene("undo takes back the edit and its collapse in one step, without a ne
     agrees(editor, state);
   });
   await within(STACK, {}, async ({ canvas, editor, state }) => {
-    caretAt(editor, "Alpha", 5);
-    type(editor, "!");
+    caretAt(editor, "Alpha", 2);
+    press(editor, "Enter");
     await saved(canvas);
-    assert.deepEqual(top(editor), ["Alpha!", "", "Beta", "Gamma"]);
+    assert.deepEqual(top(editor), ["Al", "pha", "", "Beta", "Gamma"]);
     editor.commands.undo();
     await saved(canvas);
     assert.deepEqual(top(editor), ["Alpha", "", "", "Beta", "Gamma"], "undo brings the stored stack back and leaves it");
     editor.commands.redo();
     await saved(canvas);
-    assert.deepEqual(top(editor), ["Alpha!", "", "Beta", "Gamma"], "redo heals it again");
+    assert.deepEqual(top(editor), ["Al", "pha", "", "Beta", "Gamma"], "redo heals it again");
     agrees(editor, state);
   });
 });
 
-await scene("no collapse while an IME composes; the first edit after it collapses", () => within(STACK, {}, async ({ canvas, editor, state }) => {
+await scene("no collapse while an IME composes; the first structural edit after it collapses", () => within(GAP, {}, async ({ canvas, editor, state }) => {
   caretAt(editor, "Alpha", 5);
   editor.view.dom.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true, data: "" }));
   assert.equal(editor.view.composing, true);
-  editor.view.dispatch(editor.state.tr.insertText("x"));
-  assert.deepEqual(top(editor), ["Alphax", "", "", "Beta", "Gamma"], "composing: left alone");
-  editor.view.dom.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "x" }));
-  await tick(50);
+  editor.view.dispatch(editor.state.tr.insert(editor.state.doc.child(0).nodeSize, editor.state.schema.nodes.paragraph.create()));
+  assert.deepEqual(top(editor), ["Alpha", "", "", "Beta"], "composing: left alone");
+  editor.view.dom.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "" }));
+  await tick(600);
   assert.equal(editor.view.composing, false);
-  type(editor, "y");
+  caretAt(editor, "Beta", 2);
+  press(editor, "Enter");
   await saved(canvas);
-  assert.deepEqual(texts(state.server), ["Alphaxy", "", "Beta", "Gamma"]);
+  assert.deepEqual(texts(state.server), ["Alpha", "", "Be", "ta"]);
   agrees(editor, state);
 }));
 
 await scene("a collapse that would move a locked block is dropped and the edit lands; a run that only shrinks above a locked tail collapses", async () => {
-  await within([p("p-a", "Alpha"), p("p-e1", ""), p("p-e2", ""), { ...p("p-l", "Locked"), locked: true }], {}, async ({ canvas, editor, state }) => {
-    caretAt(editor, "Alpha", 5);
-    type(editor, "!");
+  await within([p("p-a", "Alpha"), p("p-e1", ""), p("p-x", "B"), p("p-e2", ""), { ...p("p-l", "Locked"), locked: true }], {}, async ({ canvas, editor, state }) => {
+    caretAt(editor, "B", 1);
+    const { from } = editor.state.selection;
+    editor.view.dispatch(editor.state.tr.delete(from - 1, from));
     await saved(canvas);
-    assert.deepEqual(texts(state.server), ["Alpha!", "", "", "Locked"], "the typing lands, the stack stays");
+    assert.deepEqual(texts(state.server), ["Alpha", "", "", "", "Locked"], "the Backspace lands, the three empty lines stay");
     agrees(editor, state);
   });
-  await within(STACK.slice(0, 3), { lockedTail: true }, async ({ canvas, editor, state }) => {
-    caretAt(editor, "Alpha", 5);
-    type(editor, "!");
+  await within([p("p-a", "Alpha"), p("p-b", "Beta"), p("p-e1", ""), p("p-e2", "")], { lockedTail: true }, async ({ canvas, editor, state }) => {
+    caretAt(editor, "Beta", 0);
+    press(editor, "Backspace");
     await saved(canvas);
-    assert.deepEqual(texts(state.server), ["Alpha!", ""]);
+    assert.deepEqual(texts(state.server), ["AlphaBeta", ""]);
     agrees(editor, state);
   });
 });
@@ -487,6 +494,30 @@ await scene("two writers: A types into an empty line that B's edit beside it col
     assert.equal(b.state.refused[0].rebaseSafe, false, "and cannot be resent on A's version");
     assert.equal(b.canvas.localEditsRebaseSafe(clone(shared.blocks)), false, "so B is shown a conflict");
     assert.deepEqual(texts(shared.blocks), ["Alpha", "hi", "Beta"], "A's text stays");
+  } finally {
+    a.canvas.parentNode.remove();
+    b.canvas.parentNode.remove();
+  }
+});
+
+await scene("two writers typing on either side of a stored stack: neither heals it, so the stale save still rebases and both lines merge", async () => {
+  const blocks = [p("p-a", "Alpha"), p("p-e1", ""), p("p-e2", ""), p("p-b", "Beta")];
+  const shared = { blocks: clone(blocks), rev: 0 };
+  const a = await mount(blocks, { shared });
+  const b = await mount(blocks, { shared });
+  try {
+    a.editor.view.focus();
+    caretAt(a.editor, "Alpha", 5);
+    type(a.editor, "!");
+    await saved(a.canvas);
+    b.editor.view.focus();
+    caretAt(b.editor, "Beta", 0);
+    type(b.editor, "?");
+    await saved(b.canvas);
+    assert.equal(b.state.refused.length, 1, "B's save was refused on the old revision");
+    assert.equal(b.state.refused[0].rebaseSafe, true, "and can be resent on A's version");
+    shared.blocks = applyOps(shared.blocks, b.state.refused[0].ops);
+    assert.deepEqual(texts(shared.blocks), ["Alpha!", "", "", "?Beta"], "both lines merge, the stack untouched");
   } finally {
     a.canvas.parentNode.remove();
     b.canvas.parentNode.remove();

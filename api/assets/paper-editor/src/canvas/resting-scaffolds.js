@@ -33,11 +33,14 @@ function enterBesideEmptyProse(editor) {
 
 // Every other door (a split, Enter over a range, a list exit, a paste, Backspace or
 // a move between empty lines) is collapsed after the fact: when a person's own edit
-// makes empty lines touch (a line in the run is new or moved), or edits next to
-// lines that already do, one line stays: the caret's, else the first. No line with
-// text is removed; a collapse that would remove or move a locked block is dropped
-// by the lock veto, and the edit that caused it still lands. Edits that are not a person's own (a remote or echoed update, an
-// id stamp: addToHistory false), undo and redo, and IME composition are left alone.
+// makes empty lines touch (a line in the run is new or moved), one line stays: the
+// caret's, else the first. A stored run heals only when an edit beside it adds or
+// removes blocks; typing beside it stays a text patch, so another device's save on
+// the same run still rebases (opsRebaseSafe refuses a changed block order). No line
+// with text is removed; a collapse that would remove or move a locked block is
+// dropped by the lock veto, and the edit that caused it still lands. Edits that are
+// not a person's own (a remote or echoed update, an id stamp: addToHistory false),
+// undo and redo, and IME composition are left alone.
 const authored = (tr) => tr.getMeta("addToHistory") !== false && !isHistoryTransaction(tr);
 
 function collapseTouchingEmptyLines(transactions, oldState, newState, composing) {
@@ -46,6 +49,7 @@ function collapseTouchingEmptyLines(transactions, oldState, newState, composing)
   oldState.doc.forEach((node, _pos, index) => before.set(node, index));
   const fresh = (node) => !!node && !before.has(node);
   const { doc, selection } = newState;
+  const reshaped = doc.childCount !== oldState.doc.childCount;
   const caret = selection.$head.index(0);
   const runs = [];
   let run = null;
@@ -56,8 +60,8 @@ function collapseTouchingEmptyLines(transactions, oldState, newState, composing)
   });
   const tr = newState.tr;
   for (const lines of runs.reverse()) {
-    const touched = fresh(doc.maybeChild(lines[0].index - 1)) || fresh(doc.maybeChild(lines.at(-1).index + 1)) ||
-      lines.some((line, i) => i > 0 && before.get(line.node) !== before.get(lines[i - 1].node) + 1);
+    const touched = lines.some((line, i) => i > 0 && before.get(line.node) !== before.get(lines[i - 1].node) + 1) ||
+      (reshaped && (fresh(doc.maybeChild(lines[0].index - 1)) || fresh(doc.maybeChild(lines.at(-1).index + 1))));
     if (!touched) continue;
     const keeper = lines.find((line) => line.index === caret) || lines[0];
     for (const line of lines.reverse()) {
