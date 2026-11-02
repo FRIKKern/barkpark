@@ -35,7 +35,9 @@ test("regen rejects missing, conflicting and repeated option values", () => {
 
 test("regen CLI refuses missing base before any generator runs", (t) => {
   const f = fixture(t, [{ name: "one", write: "touch marker" }]);
-  assert.equal(f.run("regen", "--base").status, 2);
+  const result = f.run("regen", "--base");
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /--base needs a value/);
   assert.ok(!existsSync(join(f.dir, "marker")));
 });
 
@@ -152,4 +154,25 @@ test("reach selects runner paths by full prefix and file suffix", () => {
     "node scripts/apps/mobile/a.test.mjs",
     "node scripts/api/assets/paper-editor/a.test.mjs",
   ]);
+});
+
+
+test("missing option values preserve their intended usage diagnostics", () => {
+  for (const option of ["--base", "--only"]) {
+    assert.throws(() => parseArgs([option]), { message: `${option} needs a value` });
+  }
+});
+
+test("ordinary generation preserves its written outputs", (t) => {
+  const f = fixture(t, [{ name: "one", write: "printf generated > tracked.txt; touch generated.txt" }]);
+  assert.equal(f.run("regen").status, 0);
+  assert.equal(readFileSync(join(f.dir, "tracked.txt"), "utf8"), "generated");
+  assert.ok(existsSync(join(f.dir, "generated.txt")));
+});
+
+test("only selects the named step without running the other writers", (t) => {
+  const f = fixture(t, [{ name: "one", write: "touch one" }, { name: "two", write: "touch two" }]);
+  assert.equal(f.run("regen", "--only", "one").status, 0);
+  assert.ok(existsSync(join(f.dir, "one")));
+  assert.ok(!existsSync(join(f.dir, "two")));
 });
