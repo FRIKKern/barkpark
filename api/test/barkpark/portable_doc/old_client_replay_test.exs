@@ -105,14 +105,26 @@ defmodule Barkpark.PortableDoc.OldClientReplayTest do
 
       @scene Enum.find(recording["scenes"], &(&1["scene"] == "nested-enter"))
 
-      test "nested-enter: Patch refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
-        assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_patch(@scene)
+      test "nested-enter: Patch applies the split section paragraph, its second copy re-minted (task-42d085f7431b8417)" do
+        assert {:ok, blocks} = through_patch(@scene)
+        assert blocks == reminted(@scene["client_after"])
       end
 
-      test "nested-enter: the canvas batch write refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
-        assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_batch_write(@scene)
+      test "nested-enter: the canvas batch write applies the split section paragraph, its second copy re-minted (task-42d085f7431b8417)" do
+        assert {:ok, blocks} = through_batch_write(@scene)
+        assert blocks == reminted(@scene["client_after"])
       end
     end
+  end
+
+  defp reminted(blocks) do
+    Enum.map(blocks, fn
+      %{"id" => "s-day", "blocks" => [first, %{"id" => "p-day"} = second | rest]} = section ->
+        %{section | "blocks" => [first, %{second | "id" => "s-day-1"} | rest]}
+
+      block ->
+        block
+    end)
   end
 
   defp through_patch(%{"before" => before, "batches" => batches}) do

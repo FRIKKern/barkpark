@@ -72,9 +72,33 @@ defmodule Barkpark.PortableDoc.BlockIds do
   """
   @spec ensure_block_ids(list()) :: list()
   def ensure_block_ids(blocks) when is_list(blocks) do
-    {ensured, _taken} = ensure_block_ids(blocks, "block", MapSet.new(authored_tree_ids(blocks)))
+    {ensured, _taken} =
+      ensure_block_ids(blocks, "block", {MapSet.new(authored_tree_ids(blocks)), :keep_all})
+
     ensured
   end
+
+  @doc """
+  `ensure_block_ids/1` that also re-mints a repeated id: in the same walk, the
+  first copy of an id keeps it and every later copy gets a fresh positional id,
+  never one in `reserved` or anywhere in `blocks`. Copies in a hidden alias are
+  not walked, so they keep their id. Returns the blocks and a
+  `{repeated_id, fresh_id}` pair per re-mint, in walk order.
+  """
+  @spec remint_repeated_ids(list(), MapSet.t()) :: {list(), [{String.t(), String.t()}]}
+  def remint_repeated_ids(blocks, reserved) when is_list(blocks) do
+    taken = MapSet.union(reserved, MapSet.new(authored_tree_ids(blocks)))
+
+    {reminted, {_taken, {_seen, pairs}}} =
+      ensure_block_ids(blocks, "block", {taken, {MapSet.new(), []}})
+
+    {reminted, Enum.reverse(pairs)}
+  end
+
+  @doc "A positional id `<prefix>-<n>` that no authored id in `blocks` holds."
+  @spec fresh_id(list(), String.t()) :: String.t()
+  def fresh_id(blocks, prefix) when is_list(blocks) and is_binary(prefix),
+    do: unique_id(prefix, 1, MapSet.new(authored_tree_ids(blocks)))
 
   @doc """
   Project stable ids only when every authored block, steps-row, tabs-row,
@@ -169,15 +193,29 @@ defmodule Barkpark.PortableDoc.BlockIds do
 
   defp ensure_block_id(block, _prefix, _index, taken), do: {block, taken}
 
-  defp ensure_identity(value, prefix, index, taken) do
+  defp ensure_identity(value, prefix, index, {taken, seen}) do
     case Map.get(value, "id") do
+      existing when is_binary(existing) and existing != "" and seen == :keep_all ->
+        {value, {taken, seen}}
+
       existing when is_binary(existing) and existing != "" ->
-        {value, taken}
+        {visited, pairs} = seen
+
+        if MapSet.member?(visited, existing) do
+          {value, {taken, _seen}} = mint_identity(value, prefix, index, {taken, seen})
+          {value, {taken, {visited, [{existing, value["id"]} | pairs]}}}
+        else
+          {value, {taken, {MapSet.put(visited, existing), pairs}}}
+        end
 
       _ ->
-        id = unique_id(prefix, index, taken)
-        {Map.put(value, "id", id), MapSet.put(taken, id)}
+        mint_identity(value, prefix, index, {taken, seen})
     end
+  end
+
+  defp mint_identity(value, prefix, index, {taken, seen}) do
+    id = unique_id(prefix, index, taken)
+    {Map.put(value, "id", id), {MapSet.put(taken, id), seen}}
   end
 
   defp ensure_step_ids(rows, prefix, taken) do
