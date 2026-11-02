@@ -12,6 +12,7 @@ defmodule BarkparkWeb.BulldocsRenderTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.PortableDoc.LimitDocs
   import ExUnit.CaptureLog
 
   alias Barkpark.{Auth, Repo, TenancyFixtures}
@@ -388,6 +389,28 @@ defmodule BarkparkWeb.BulldocsRenderTest do
         assert error(resp)["code"] == "unauthorized"
         assert error(resp)["message"] =~ "token"
         refute Map.has_key?(Jason.decode!(resp.resp_body), "html")
+      end
+    end
+  end
+
+  describe "a doc at a field's limit" do
+    test "is answered in under 1 s and 100 MB of heap: 422 past the schema, else the HTML",
+         %{token: token} do
+      for {name, block} <- limit_docs() do
+        body = Jason.encode!(%{"blocks" => [block]})
+        {us, resp} = bounded(fn -> post_render(body, token) end)
+        assert us < 1_000_000, "#{name} took #{div(us, 1000)} ms"
+
+        if name == "toc" do
+          assert resp.status == 422
+
+          assert error(resp)["violations"] == [
+                   %{"code" => "value_not_allowed", "path" => "/blocks/0/depth"}
+                 ]
+        else
+          assert resp.status == 200, "#{name}: #{String.slice(resp.resp_body, 0, 200)}"
+          assert Jason.decode!(resp.resp_body)["html"] =~ "<"
+        end
       end
     end
   end

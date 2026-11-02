@@ -112,6 +112,6 @@
     "test/support/fixtures/nested-list-carriers.json"
   ],
   "inputs_sha256": "f212ade28935fb893306159ab8169279e8cd65e77846f54373a51275740f6eb6",
-  "render_version": "b3e5fed0783c7124b09ddd0221b895a57e9b6382ab0c0a4b9802d8cc7d8ed05f",
+  "render_version": "772c9d2d1d7d8630ffe8935ddc9e5c0b3c27fe0bdc758ce7fc58479b5d95e5f6",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }
