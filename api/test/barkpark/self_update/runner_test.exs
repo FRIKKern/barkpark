@@ -523,6 +523,47 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       Process.sleep(200)
       assert starts(count_file) == 1
     end
+
+    # task-212dfd3376d57aef. On a slot box the run's own `systemctl disable
+    # --now` retires the slot whose BEAM started it. instance-deploy.sh now
+    # moves into its own scope, so the deploy outlives that BEAM. The runner in
+    # the new slot re-attaches by pid. When the pid exits, it reads
+    # instance-deploy's flight record. A finished deploy must read as exit 0
+    # and must not start again.
+    test "a slot deploy that outlives the retired slot and records restart applied is exit 0, not resumed",
+         %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+      go_file = Path.join(dir, "go")
+
+      script = """
+      echo start >> #{count_file}
+      printf '{"engine":"instance-deploy","phase":"build","outcome":"running","sha":"f8c98d77b","ts":"%s","pid":%d}\\n' \\
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" > #{status_file}
+      echo "[instance-deploy] boot barkpark-slot@green on :4001"
+      while [ ! -e #{go_file} ]; do sleep 0.05; done
+      printf '{"engine":"instance-deploy","phase":"restart","outcome":"applied","sha":"f8c98d77b","ts":"%s","pid":%d}\\n' \\
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" > #{status_file}
+      exit 0
+      """
+
+      put_cfg(enabled: true, max_resumes: 1, command: {"bash", ["-c", script]})
+      assert Runner.trigger() == {:ok, :started}
+      await_log_line("boot barkpark-slot@green")
+
+      # The old slot stops. Its Runner goes and the scoped deploy stays.
+      restart_runner()
+      assert %{state: :running} = Runner.status()
+
+      File.write!(go_file, "")
+      status = await_done()
+      assert status.exit_code == 0
+      assert status.failure == nil
+      assert Enum.any?(status.log, &(&1 =~ "phase=restart outcome=applied sha=f8c98d77b"))
+
+      Process.sleep(300)
+      assert starts(count_file) == 1
+      refute Runner.running?()
+    end
   end
 
   describe "a signal exit after the restart was queued is not a failure" do

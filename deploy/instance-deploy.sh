@@ -58,6 +58,45 @@
 #                         on the BEAM's PATH / 32 no flock(1) / 33 no python3 or
 #                         caddy / 34 under 2G available RAM. See the block above
 #                         MODE= for why each one is load-bearing.
+# ---- LEAVE THE UNIT THIS RUN WILL STOP (task-212dfd3376d57aef) -------------
+# Barkpark.SelfUpdate.Runner lives in the serving BEAM. On a slot box it starts
+# this script inside barkpark-slot@<live>.service's cgroup, through
+# scripts/self-update.sh or directly for --rollback. A deploy ends with
+# `systemctl disable --now barkpark-slot@$OTHER`, and a rollback ends with
+# `systemctl disable --now barkpark-slot@$LIVE`. That is the unit the runner
+# lives in, and systemd stops every process in a unit's cgroup. On guerrilla on
+# 2026-10-30 this killed the self-update 5 seconds after the healthy flip to
+# green, and the log shows "Terminated". The runner in green found no outcome,
+# resumed the run as attempt 2, and that attempt died the same way. The run
+# ended as deploy_stuck with exit -4.
+#
+# So when this script finds itself in a barkpark service cgroup, it re-execs
+# under scripts/build-guard.sh. The guard moves it into its own transient
+# systemd scope, which stopping the slot does not reach. The guard keeps the
+# pid the runner recorded and exports it as BP_DEPLOY_RECORD_PID for the flight
+# record below. Only the scope is wanted here. This script already nices its
+# own compile steps and keeps migrate at normal priority, so the guard's nice
+# level, scheduler limit and memory cap are lifted unless the operator set them.
+# A run from deploy.yml's SSH session sits in a session scope and runs in place.
+# The read-only preflights also run in place, because the runner reads their
+# stdout synchronously. BP_BUILD_GUARD=0 opts out. BP_DEPLOY_CGROUP_FILE is for
+# the hermetic harness.
+case "${1:-}" in
+  --rollback-preflight | --site-deploy-preflight) ;;
+  *)
+    __bp_guard="${BARKPARK_APP_DIR:-/opt/barkpark}/scripts/build-guard.sh"
+    if [ "${BP_BUILD_GUARDED:-0}" != 1 ] && [ "${BP_BUILD_GUARD:-1}" != 0 ] && [ -f "$__bp_guard" ] \
+       && grep -Eq '/barkpark(-slot@[^/]*)?\.service(/|$)' "${BP_DEPLOY_CGROUP_FILE:-/proc/self/cgroup}" 2>/dev/null; then
+      __bp_self_abs="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+      export BP_BUILD_NICE="${BP_BUILD_NICE:-0}"
+      export BP_BUILD_SCHEDULERS="${BP_BUILD_SCHEDULERS:-$(nproc 2>/dev/null || echo 2)}"
+      export BP_BUILD_MEMORY_MAX="${BP_BUILD_MEMORY_MAX:-infinity}"
+      echo "[instance-deploy] running inside a barkpark service cgroup; moving into a build-guard scope so that retiring the unit cannot kill this run"
+      exec bash "$__bp_guard" bash "$__bp_self_abs" "$@"
+    fi
+    unset __bp_guard
+    ;;
+esac
 # ---- PRIVATE COPY: a run must only ever execute ITS OWN bytes --------------
 # The CD workflow scps this script to a SHARED path on the box (/tmp/<name>.sh)
 # and runs `bash /tmp/<name>.sh`. bash reads a script INCREMENTALLY, by byte
@@ -102,6 +141,29 @@ set -uo pipefail
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
 LOCK="${BARKPARK_DEPLOY_LOCK:-/var/lock/barkpark-instance-deploy.lock}"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
+
+# ---- Flight record for the self-update runner (task-212dfd3376d57aef) ------
+# A self-update or rollback outlives the BEAM that started it, because this
+# script retires the slot that runs Barkpark.SelfUpdate.Runner. The runner in
+# the new slot re-attaches to the run by pid. Once the pid is gone, it reads
+# $APP/.deploy-status.json to learn the outcome. scripts/deploy-rebuild.sh
+# writes that record on single-checkout boxes. This script wrote none, so the
+# new slot read a deploy that had flipped healthy as "outcome unknown" and
+# resumed it. The runner maps phase=restart outcome=applied to exit 0. This
+# script writes it once the new slot is live behind Caddy and has passed the
+# public health gate, and before the old slot is retired. A box with no scope
+# still gets the record, even though the retire kills this script there. The
+# pid is the runner's child. Under build-guard.sh that is BP_DEPLOY_RECORD_PID.
+# Otherwise it is this process, because self-update.sh and the private-copy
+# step both exec in place. A failed write never fails the deploy.
+DEPLOY_STATUS_FILE="$APP/.deploy-status.json"
+DEPLOY_RECORD_PID="${BP_DEPLOY_RECORD_PID:-$$}"
+case "$DEPLOY_RECORD_PID" in '' | *[!0-9]*) DEPLOY_RECORD_PID=$$ ;; esac
+write_deploy_status() { # $1 = phase (build|restart), $2 = outcome (running|applied), $3 = sha
+  printf '{"engine":"instance-deploy","phase":"%s","outcome":"%s","sha":"%s","ts":"%s","pid":%d}\n' \
+    "$1" "$2" "${3:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DEPLOY_RECORD_PID" \
+    > "$DEPLOY_STATUS_FILE.tmp" 2>/dev/null && mv -f "$DEPLOY_STATUS_FILE.tmp" "$DEPLOY_STATUS_FILE" 2>/dev/null || true
+}
 
 # ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
 # This script is SHIPPED STANDALONE: .github/workflows/deploy.yml scps it ALONE
@@ -1122,6 +1184,7 @@ if [ "$MODE" != "deploy" ]; then
   # This path has no post-flip gate (the comment above the curl says so) —
   # Caddy already points at $TARGET_PORT, so $FLIP_FROM (the slot rolled
   # away from) is retiring right now.
+  write_deploy_status restart applied "$TARGET_SHA"
   signal_sse_retire "$FLIP_FROM"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
@@ -1179,6 +1242,18 @@ else
     log "WARNING: box HEAD $(git rev-parse --short HEAD) has DIVERGED from origin/main (a commit was made on the box, or main was rewritten) — discarding local divergence and converging to origin/main"
   fi
   git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
+  # Release tags (task-212dfd3376d57aef). `git fetch origin main` names a
+  # refspec with no destination, and git only follows tags for a refspec that
+  # stores a ref. So this fetch never brought a new vA.B.C tag to the box.
+  # Barkpark.BuildInfo compiles its release from `git describe --tags`, so each
+  # build named the newest tag the box already held. On guerrilla on 2026-11-02
+  # deploy.yml put the box on f8c98d77b, which describes as v0.2.33-28. The box
+  # reported running_release 0.2.31, the newest tag its last self-update had
+  # fetched. The fetch below follows scripts/self-update.sh. It is forced,
+  # because release tags are immutable and a stale local copy must not block
+  # it. It is non-fatal, because a missing tag must never block a deploy.
+  GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null fetch origin --tags --force --quiet ||
+    log "WARN: tag fetch failed; continuing, and BuildInfo's release may name an older tag"
 fi
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
@@ -1189,6 +1264,7 @@ if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
   log "HEAD $NEW already deployed healthy — nothing to do"
   exit 0
 fi
+write_deploy_status build running "$NEW"
 
 # ---- The prod-required secret keys (each RAISES at boot) -------------------
 # An ABSENT line is not the only broken state. A line that is PRESENT but empty
@@ -2140,6 +2216,7 @@ fi
 # The health gate just above can still revert the flip (old slot never
 # retired) — only past it is $FLIP_FROM (the slot Caddy flipped AWAY from)
 # actually retiring.
+write_deploy_status restart applied "$NEW"
 signal_sse_retire "$FLIP_FROM"
 
 # ---- Drain, then retire the old slot AND the pre-blue/green legacy unit.
