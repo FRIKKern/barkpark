@@ -35,7 +35,7 @@ function prHead(git, number) {
   return sha;
 }
 
-export const buildEnv = (env) => Object.fromEntries(["PATH", "HOME", "TMPDIR"].filter((name) => name in env).map((name) => [name, env[name]]));
+export const buildEnv = (env) => Object.fromEntries(["PATH", "HOME", "TMPDIR"].map((name) => [name, env[name]]));
 
 export const besideMain = (names) => (names.length === 1 && names[0] !== "main" ? ["main", ...names] : names.length ? names : ["main"]);
 
