@@ -90,6 +90,8 @@ const origin = `http://127.0.0.1:${server.address().port}/`;
 const p = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "text", value }] : [] });
 const RUN = [p("p-a", "Alpha"), p("p-b", "Beta")];
 const GAP = [p("p-a", "Alpha"), p("p-e", ""), p("p-b", "Beta")];
+const BETWEEN = [p("p-a", "Alpha"), p("p-e1", ""), p("p-x", "B"), p("p-e2", ""), p("p-c", "Gamma")];
+const LEAD = [{ id: "i-a", type: "ingress", content: [{ type: "text", value: "The lead." }] }, p("p-b", "Beta")];
 
 async function open(page, blocks) {
   await page.goto(origin);
@@ -98,7 +100,7 @@ async function open(page, blocks) {
   await page.waitForFunction(() => document.getElementById("canvas")._editor);
 }
 
-async function clickAt(page, text, offset) {
+async function pointAt(page, text, offset) {
   const box = await page.evaluate(([text, offset]) => {
     const walker = document.createTreeWalker(document.querySelector('[contenteditable="true"]'), NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -113,12 +115,26 @@ async function clickAt(page, text, offset) {
     return null;
   }, [text, offset]);
   if (!box) throw new Error(`"${text}" is not on screen`);
+  return box;
+}
+
+async function clickAt(page, text, offset) {
+  const box = await pointAt(page, text, offset);
   await page.mouse.click(box.x, box.y);
   await page.waitForFunction(() => {
     const view = document.getElementById("canvas")._editor.view;
     const dom = getSelection();
     return view.state.selection.from === view.posAtDOM(dom.anchorNode, dom.anchorOffset);
   });
+}
+
+async function doubleClick(page, text) {
+  const box = await pointAt(page, text, 1);
+  await page.mouse.dblclick(box.x, box.y);
+  await page.waitForFunction((text) => {
+    const { state } = document.getElementById("canvas")._editor.view;
+    return state.doc.textBetween(state.selection.from, state.selection.to) === text;
+  }, text);
 }
 
 async function settle(page) {
@@ -203,6 +219,67 @@ try {
     equal(after.saved, ["Alpha", "Gamma", "Beta"], "the saved blocks");
     await reloads(after.blocks, ["Alpha", "Gamma", "Beta"]);
   });
+
+  await run("Enter in the middle of a line beside an empty line splits it", GAP, async (page) => {
+    await clickAt(page, "Alpha", 2);
+    await page.keyboard.press("Enter");
+    await settle(page);
+    const after = await state(page, GAP);
+    equal(after.doc, ["Al", "pha", "", "Beta"], "the doc");
+    equal(after.saved, ["Al", "pha", "", "Beta"], "the saved blocks");
+  });
+
+  await run("Enter over a double-clicked word under an empty line leaves one empty line, the caret's", GAP, async (page) => {
+    await doubleClick(page, "Beta");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Delta");
+    await settle(page);
+    const after = await state(page, GAP);
+    equal(after.doc, ["Alpha", "Delta"], "the doc");
+    equal(after.shown, ["Alpha", "Delta"], "the lines on screen");
+    equal(after.saved, ["Alpha", "Delta"], "the saved blocks");
+    await reloads(after.blocks, ["Alpha", "Delta"]);
+  });
+
+  await run("Backspace that empties a line between hidden empty lines keeps one line, the caret's", BETWEEN, async (page) => {
+    await clickAt(page, "B", 1);
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("Beta");
+    await settle(page);
+    const after = await state(page, BETWEEN);
+    equal(after.doc, ["Alpha", "Beta", "Gamma"], "the doc");
+    equal(after.shown, ["Alpha", "Beta", "Gamma"], "the lines on screen");
+    equal(after.saved, ["Alpha", "Beta", "Gamma"], "the saved blocks");
+    equal(after.blocks.map((block) => block.id), ["p-a", "p-x", "p-c"], "the caret's line kept its id");
+    await reloads(after.blocks, ["Alpha", "Beta", "Gamma"]);
+  });
+
+  await run("six Enters at the end of an ingress leave one empty line", LEAD, async (page) => {
+    await clickAt(page, "The lead.", 9);
+    for (let i = 0; i < 6; i++) await page.keyboard.press("Enter");
+    await settle(page);
+    const after = await state(page, LEAD);
+    equal(after.doc, ["The lead.", "", "Beta"], "the doc");
+    equal(after.saved, ["The lead.", "", "Beta"], "the saved blocks");
+    await reloads(after.blocks, ["The lead.", "", "Beta"]);
+  });
+
+  for (const [kind, data] of [["text/html", "<p>One</p><p></p><p></p><p></p><p>Two</p>"], ["text/plain", "One\n\n\n\nTwo"]]) {
+    await run(`pasting a line, three empty lines and a line (${kind}) leaves one empty line`, RUN, async (page) => {
+      await clickAt(page, "Alpha", 5);
+      await page.evaluate(([kind, data]) => {
+        const clipboardData = new DataTransfer();
+        clipboardData.setData(kind, data);
+        document.querySelector('[contenteditable="true"]').dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+      }, [kind, data]);
+      await settle(page);
+      const after = await state(page, RUN);
+      equal(after.doc, ["AlphaOne", "", "Two", "Beta"], "the doc");
+      equal(after.shown, ["AlphaOne", "Two", "Beta"], "the lines on screen");
+      equal(after.saved, ["AlphaOne", "", "Two", "Beta"], "the saved blocks");
+      await reloads(after.blocks, ["AlphaOne", "", "Two", "Beta"]);
+    });
+  }
 } finally {
   await browser.close();
   server.close();
