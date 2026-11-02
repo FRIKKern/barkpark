@@ -198,7 +198,7 @@ try {
   const sectionWrapper = document.createElement("div");
   sectionWrapper.dataset.paperContainerKind = "section";
   const sectionCanvas = document.createElement("bp-paper-canvas");
-  sectionCanvas.blocks = [{ id: "section-child", type: "paragraph", content: [] }];
+  sectionCanvas.blocks = [{ id: "section-child", type: "paragraph", content: [{ type: "text", value: "Left at six." }] }];
   sectionWrapper.appendChild(sectionCanvas);
   document.body.appendChild(sectionWrapper);
   await new Promise((resolve) => setTimeout(resolve, 350));

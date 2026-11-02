@@ -82,6 +82,8 @@ import {
   hasOverlappingOps,
   opsRebaseSafe,
   pendingUploadIndexes,
+  blockParents,
+  holdsNodeIds,
 
   withObjectOverrides,
 } from "./run-convert.js";
@@ -90,7 +92,7 @@ import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
 import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
-import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
+import { exactClipboardSerializer, exactSliceFromClipboard, sliceWithFreshIds } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -365,6 +367,9 @@ import { OpaqueMark } from "../opaque-mark.js";
 // How long a focusBlock(id) for a block that has not arrived yet stays armed.
 const PENDING_FOCUS_MS = 5000;
 
+// The key that makes a drag copy instead of move, as prosemirror-view reads it.
+const DRAG_COPY_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "altKey" : "ctrlKey";
+
 // Left is the model's "no alignment" (convert.js stores only center/right; run-convert
 // treats left and absent as one), so Edit paints it as NO alignment too. Stock TextAlign
 // writes an inline `text-align: left` for its default on every paragraph and heading,
@@ -562,6 +567,39 @@ function figurePastePlan(slice) {
   return { inline: new Slice(Fragment.from(paragraph.content), 0, 0) };
 }
 
+// Which copy of a bpId keeps it (task-42d085f7431b8417). ProseMirror's splitBlock
+// copies the source node's attrs, bpId included, so an Enter leaves two nodes with
+// one id: two top-level blocks, or two children of one section / expandable / step /
+// tab. A drop or paste can put a copy anywhere else. runToOps keys edits by id and
+// patch.ex refuses a batch that repeats one, so every copy but one reads as new
+// (bpId null) and the projection mints it a fresh id, which _stampMaterializedIds
+// writes back. The keeper is the copy still where the id was (`prevBlocks`, the
+// diff's baseline), preferring the top level, else the first. A top-level node whose
+// id was only ever nested reads as new as well: runToOps mints for it, and the live
+// doc has to carry the id the server got. Only ids the projection keeps count: a
+// column's children and a list's paragraphs carry none (holdsNodeIds).
+function freshenRepeatedIds(doc, prevBlocks) {
+  const was = blockParents(prevBlocks);
+  const copies = new Map();
+  const walk = (nodes, parent) => {
+    for (const node of nodes) {
+      const id = node.attrs && node.attrs.bpId;
+      if (id != null) copies.set(id, [...(copies.get(id) || []), { node, parent }]);
+      if (holdsNodeIds(node)) walk(node.content, id);
+    }
+  };
+  walk(doc.content, null);
+  for (const [id, found] of copies) {
+    const parents = was.get(id);
+    const placed = parents && !parents.has(null) ? found.filter((copy) => copy.parent !== null) : found;
+    if (found.length === 1 && placed.length === 1) continue;
+    const stayed = placed.filter((copy) => parents && parents.has(copy.parent));
+    const pool = stayed.length ? stayed : placed;
+    const keeper = pool.find((copy) => copy.parent === null) || pool[0];
+    for (const copy of found) if (copy !== keeper) copy.node.attrs = { ...copy.node.attrs, bpId: null };
+  }
+}
+
 // Strip null-valued bpId/bpType from NON-top-level nodes before the diff.
 //
 // Why this exists: BpAttrs declares bpId/bpType GLOBALLY on the `paragraph`
@@ -583,7 +621,9 @@ function figurePastePlan(slice) {
 // a freshly-typed/split block runToOps must mint an id for. We only ever strip
 // the phantom nested ones. This keeps S0's runToOps used verbatim, with a doc
 // shaped exactly the way it was tested against.
-function normalizeCanvasDoc(doc) {
+function normalizeCanvasDoc(doc, prevBlocks) {
+  freshenRepeatedIds(doc, prevBlocks);
+
   const stripNested = (node) => {
     if (node && node.attrs) {
       // ProseMirror toJSON retains each live attrs object by reference.
@@ -622,28 +662,6 @@ function normalizeCanvasDoc(doc) {
   // themselves (their null bpId is the new-block signal runToOps needs).
   (doc.content || []).forEach((top) => {
     (top.content || []).forEach(stripNested);
-  });
-
-  // ── DEDUP top-level bpIds: an Enter-SPLIT clones the origin block's attrs ──
-  //
-  // ProseMirror's splitBlock (the Enter keymap) copies the source node's attrs
-  // into the new half — INCLUDING bpId. So a split yields TWO top-level nodes
-  // carrying the SAME bpId. runToOps assumes each surviving prev id appears at
-  // most once (it keys edits by id); a duplicate makes it emit a self-move and
-  // conflicting patches for that id. The split block is genuinely NEW, so the
-  // SECOND-and-later occurrence of any bpId must read as new: null its bpId so
-  // runToOps mints a fresh id — exactly S0's "split → insert-after(minted id)"
-  // path. The FIRST occurrence keeps the id (it's the surviving origin block).
-  const seen = new Set();
-  (doc.content || []).forEach((top) => {
-    const id = top.attrs && top.attrs.bpId;
-    if (id == null) return;
-    if (seen.has(id)) {
-      // A clone of an already-seen id — strip its stamp so it diffs as NEW.
-      top.attrs = { ...top.attrs, bpId: null };
-    } else {
-      seen.add(id);
-    }
   });
 
   return doc;
@@ -1384,6 +1402,7 @@ class BpPaperCanvas extends HTMLElement {
         handleDOMEvents: {
           keydown: (view, event) => this._modEnterForHost(view, event) || this._escapeForHost(view, event),
           beforeinput: (_view, event) => this._swallowModEnter(event),
+          drop: (view, event) => this._noteDropMoves(view, event),
         },
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
         // The canvas's own copy carries the exact fragment, so its paste rebuilds
@@ -1400,8 +1419,9 @@ class BpPaperCanvas extends HTMLElement {
           this._pasteImagesLeftOut = count;
           return clean;
         },
-        // A field canvas fits the pasted slice to its vocabulary, node by node.
-        transformPasted: (slice) => this._fitPastedSlice(slice),
+        // A copy of a block this doc holds reads as new (clipboard-slice.js); then
+        // a field canvas fits the pasted slice to its vocabulary, node by node.
+        transformPasted: (slice, view) => this._fitPastedSlice(this._dropMoves ? slice : sliceWithFreshIds(view.state.schema, slice, view.state.doc)),
         // Image files dropped onto the canvas land as image nodes at the drop point
         // and upload through the host's mediaUploader (see _insertImageFiles).
         handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
@@ -2194,7 +2214,7 @@ class BpPaperCanvas extends HTMLElement {
       }
       return {
         mode: "rich",
-        blocks: deepCloneBlocks(docToBlocks(normalizeCanvasDoc(rawEditorDocument))),
+        blocks: deepCloneBlocks(docToBlocks(this._normalizedDoc(rawEditorDocument))),
       };
     } catch (_error) {
       return {
@@ -2278,6 +2298,12 @@ class BpPaperCanvas extends HTMLElement {
   //
   // `_blocks` advances when the bridge acknowledges the one in-flight batch, so
   // the next dispatch is incremental even if its server echo arrives later.
+  // The live doc as the emit diffs it: a repeated id stays with the copy the
+  // baseline knew (freshenRepeatedIds), so every reader agrees with the next batch.
+  _normalizedDoc(doc) {
+    return normalizeCanvasDoc(doc, this._debounceBaselineBlocks || this._blocks);
+  }
+
   _emitOps() {
     if (!this._editor) return false;
     // Never the half-composed run (see _scheduleEmit): mid-composition the doc holds the IME's
@@ -2290,7 +2316,7 @@ class BpPaperCanvas extends HTMLElement {
       if (!source) { this._armComposeEndEmit(); return false; }
     }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
-    const nextDoc = normalizeCanvasDoc(source ? source.toJSON() : this._editor.getJSON());
+    const nextDoc = this._normalizedDoc(source ? source.toJSON() : this._editor.getJSON());
     // The fast path (task-fb938eb8be3bce48): a top-level node that is the SAME
     // ProseMirror node object it was at the last acknowledged emit is unchanged
     // since then, and when the baseline is exactly that emit's after-state its
@@ -2321,8 +2347,8 @@ class BpPaperCanvas extends HTMLElement {
     // document before another edit can diff, otherwise each cumulative diff
     // invents a different id for the same inserted paragraph.
     // An id stamp is a transaction, and one mid-composition can break the IME: wait.
-    if (composing && this._stampMaterializedIds(stableDoc, { dryRun: true })) { this._armComposeEndEmit(); return false; }
-    this._stampMaterializedIds(stableDoc);
+    if (composing && this._stampMaterializedIds(stableDoc, nextDoc, { dryRun: true })) { this._armComposeEndEmit(); return false; }
+    this._stampMaterializedIds(stableDoc, nextDoc);
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
@@ -2508,7 +2534,7 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     const draftBase = inflight ? inflight.afterBlocks : (this._debounceBaselineBlocks || this._blocks);
-    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON(), draftBase), { preserveNewIds: true }) || [];
     if (!draft.length) return true;
     // Behind an in-flight batch the run's shape was already checked above; the
     // draft only must not touch what the other writer changed.
@@ -3348,6 +3374,16 @@ class BpPaperCanvas extends HTMLElement {
   // each block becomes the nearest shape the field admits (paste-vocabulary.js),
   // marks the field lacks are unwrapped, and whatever had nothing to keep (an
   // image) is named in a notice that stays until the person moves on.
+  // Whether this drop moves blocks within this canvas, decided the way
+  // ProseMirror's own drop does (the copy modifier), so a moved block keeps its id
+  // and a copy-drop's copy reads as new. ProseMirror reads the slice right after
+  // this handler, in the same event.
+  _noteDropMoves(view, event) {
+    this._dropMoves = !!view.dragging && !event[DRAG_COPY_KEY];
+    queueMicrotask(() => { this._dropMoves = false; });
+    return false;
+  }
+
   _fitPastedSlice(slice) {
     const imagesLeftOut = this._pasteImagesLeftOut || 0;
     this._pasteImagesLeftOut = 0;
@@ -4463,7 +4499,7 @@ class BpPaperCanvas extends HTMLElement {
     // on an edited exit, a setContent built from C would DELETE those edits. So the
     // baseline + textarea MUST come from L0. We deep-clone L0 so a later parse +
     // realign never mutates it.
-    const liveDoc = normalizeCanvasDoc(this._editor.getJSON());
+    const liveDoc = this._normalizedDoc(this._editor.getJSON());
     const L0 = docToBlocks(liveDoc);
     this._sourceBaselineBlocks = deepCloneBlocks(L0);
     this._sourceCommitBlocks = this._sourceBaselineBlocks;
@@ -4611,7 +4647,7 @@ class BpPaperCanvas extends HTMLElement {
   // end went. So a caret stays a caret, follows the block it is in, and the next key
   // never overwrites text the writer did not select.
   _syncSourceText() {
-    const blocks = deepCloneBlocks(docToBlocks(normalizeCanvasDoc(this._editor.getJSON())));
+    const blocks = deepCloneBlocks(docToBlocks(this._normalizedDoc(this._editor.getJSON())));
     const ta = this._sourceEl;
     const old = ta.value;
     const { text: md, map } = mergeSourceText(old, this._sourceCommitBlocks, blocks);
@@ -4801,7 +4837,7 @@ class BpPaperCanvas extends HTMLElement {
     // own-echo verdict + the id-writebacks. normalizeCanvasDoc first so we compare
     // against the same shape the emit path diffs (phantom nested attrs / split
     // dedup), exactly as runToOps was tested against.
-    const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
+    const liveContent = this._normalizedDoc(this._editor.getJSON()).content || [];
     const { ownEcho, idWrites } = this._re(next, liveContent);
 
     // A genuinely external echo cannot safely replace local content while one
@@ -4892,52 +4928,32 @@ class BpPaperCanvas extends HTMLElement {
   // node, including editable descendants inside section/container nodes. The
   // stable projection has the same preorder shape as the live document; text
   // nodes participate in the walk so positions cannot drift between siblings.
-  _stampMaterializedIds(stableDoc, { dryRun = false } = {}) {
+  _stampMaterializedIds(stableDoc, nextDoc, { dryRun = false } = {}) {
     if (!this._editor || !stableDoc) return false;
-    // Nothing to stamp unless some live node has no id, or repeats a top-level id
-    // (the two cases the walk below acts on). Typing into stamped blocks has
-    // neither, and flattening the whole projection per keystroke was the emit's
-    // largest remaining cost (task-fb938eb8be3bce48).
-    let candidate = false;
-    const seenTop = new Set();
-    const liveDoc = this._editor.state.doc;
-    liveDoc.descendants((node, _pos, parent) => {
-      if (candidate) return false;
-      if (node.isText) return false;
-      const id = node.attrs?.bpId;
-      if (id == null) candidate = true;
-      else if (parent === liveDoc) {
-        if (seenTop.has(id)) candidate = true;
-        seenTop.add(id);
-      }
-      return !candidate;
-    });
-    if (!candidate) return false;
-    const stableNodes = [];
-    const collect = (nodes) => {
+    // A node is stamped when the diff read it as new: no id, or a copy
+    // normalizeCanvasDoc cleared (freshenRepeatedIds). Typing into stamped blocks
+    // has neither, and flattening the whole projection per keystroke was the
+    // emit's largest remaining cost (task-fb938eb8be3bce48).
+    const flatten = (nodes, out = []) => {
       for (const node of nodes || []) {
-        stableNodes.push(node);
-        collect(node.content);
+        out.push(node);
+        flatten(node.content, out);
       }
+      return out;
     };
-    collect(stableDoc.content);
+    const diffed = flatten(nextDoc.content);
+    if (!diffed.some((node) => node.type !== "text" && node.attrs?.bpId == null)) return false;
+    const stableNodes = flatten(stableDoc.content);
 
     const { state, view } = this._editor;
     const tr = state.tr;
     let index = 0;
     let mutated = false;
-    const topIds = new Set();
-    state.doc.descendants((node, pos, parent) => {
+    state.doc.descendants((node, pos) => {
+      const diffedId = diffed[index]?.attrs?.bpId;
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
-      // Enter inherits the original paragraph's attrs. normalizeCanvasDoc
-      // treats only the second top-level occurrence as new; materialize its
-      // projected ID too, otherwise every subsequent save/read mints it again.
-      // Keep the first occurrence and all unrelated/nested identities intact.
-      const id = node.attrs?.bpId;
-      const duplicateTopId = parent === state.doc && id != null && topIds.has(id);
-      if (parent === state.doc && id != null) topIds.add(id);
-      if (!node.isText && (id == null || duplicateTopId) && stableId != null) {
+      if (!node.isText && diffedId == null && stableId != null) {
         const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
         if (node.type.name === "note") {
           // Keep pre-save label/lead AttrSteps mapped to this same note.
@@ -5282,7 +5298,7 @@ class BpPaperCanvas extends HTMLElement {
     const base = this._debounceBaselineBlocks || this._blocks;
     const remoteIds = remote.map((block) => block && block.id);
     if (remoteIds.some((id) => id == null) || new Set(remoteIds).size !== remoteIds.length) return null;
-    const live = normalizeCanvasDoc(editor.getJSON()).content || [];
+    const live = normalizeCanvasDoc(editor.getJSON(), base).content || [];
     const baseNodes = this._rt(base).content || [];
     const remoteNodes = this._rt(remote).content || [];
     if (live.length !== state.doc.childCount || baseNodes.length !== base.length ||
