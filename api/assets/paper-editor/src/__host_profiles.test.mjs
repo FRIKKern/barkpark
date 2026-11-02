@@ -9,7 +9,7 @@
 // Run: node src/__host_profiles.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -35,7 +35,7 @@ for (const file of ["../host-profile/studio.json", "../host-profile/reader.json"
   test(`${path.basename(file)}: that Barkpark host uses only what its profile lists`, () => {
     const profile = JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
     const surface = JSON.parse(readFileSync(path.join(profiles, "surface.json"), "utf8"));
-    assert.deepEqual(check(profile, surface, path.resolve(profiles, profile.root)), []);
+    assert.deepEqual(check(profile, surface, profiles), []);
   });
 }
 
@@ -193,20 +193,21 @@ test("minContract must be major.minor.patch and not above the build's contract",
   fails(run({}, { minContract: "1.22" }), "minContract 1.22 is not major.minor.patch");
 });
 
-test("a profile whose sources hold no scanned file fails", () => {
+test("a profile whose sources hold no scanned file, or name a missing one, fails", () => {
   fails(run({ "app.js": "" , "notes.txt": "canvas.state()" }, { sources: ["notes.txt"] }), "no source files under notes.txt");
+  assert.deepEqual(run({}, { sources: [".", "gone/"] }), ["no such source: gone/"]);
 });
 
-test("the CLI exits 0 on a pass, 1 on a failure, 2 without a profile", () => {
+test("a profile missing a required key fails with each missing key", () => {
+  for (const key of ["host", "root", "minContract", "fleet", "sources", "uses"]) {
+    assert.deepEqual(run({}, { [key]: undefined }), [`profile has no ${key}`]);
+  }
+});
+
+test("the CLI exits 0 on a pass, 1 on a failure, 2 without a profile or with one it cannot read", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "host-profile-cli-"));
-  const exit = (args) => {
-    try {
-      execFileSync(process.execPath, [checker, ...args], { stdio: "pipe" });
-      return 0;
-    } catch (error) {
-      return error.status;
-    }
-  };
+  const cli = (args) => spawnSync(process.execPath, [checker, ...args], { encoding: "utf8" });
+  const exit = (args) => cli(args).status;
   try {
     writeFileSync(path.join(dir, "app.js"), baseFiles["app.js"]);
     writeFileSync(path.join(dir, "surface.json"), JSON.stringify(surface));
@@ -214,7 +215,10 @@ test("the CLI exits 0 on a pass, 1 on a failure, 2 without a profile", () => {
     writeFileSync(path.join(dir, "bad.json"), JSON.stringify({ ...baseProfile, uses: {} }));
     assert.equal(exit([path.join(dir, "ok.json"), path.join(dir, "surface.json")]), 0);
     assert.equal(exit([path.join(dir, "bad.json"), path.join(dir, "surface.json")]), 1);
-    assert.equal(exit([]), 2);
+    assert.deepEqual([exit([]), cli([]).stderr], [2, "usage: node check.mjs <host-profile.json> [surface.json]\n"]);
+    assert.equal(exit([path.join(dir, "missing.json"), path.join(dir, "surface.json")]), 2);
+    writeFileSync(path.join(dir, "broken.json"), "{");
+    assert.equal(exit([path.join(dir, "ok.json"), path.join(dir, "broken.json")]), 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
