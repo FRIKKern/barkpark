@@ -10,14 +10,24 @@
 //     declared DOM attribute is never written, or a declared attribute, class,
 //     token or global never appears in the source, comments stripped, matched on
 //     name boundaries;
-//   - the source dispatches an event, listens for a bp-* event by a literal name,
-//     or reads a data-* attribute or bp-* class off an ancestor or the document
-//     (closest, document.querySelector, a CSS selector that starts with an
-//     attribute), that is neither declared nor listed below as editor-internal or
-//     a reach-in EMBED-CONTRACT.md names;
+//   - the source dispatches an event, listens for a non-DOM event by a literal
+//     name, or reads a data-* attribute or bp-* class off an ancestor or the
+//     document (closest, document.querySelector, a CSS selector that starts with
+//     an attribute), that is neither declared nor listed below as editor-internal
+//     or a reach-in EMBED-CONTRACT.md names;
+//   - the source reads an attribute off its own element (this.getAttribute,
+//     this.hasAttribute, this.dataset) or off a parent (.parentElement or
+//     .parentNode, then getAttribute, hasAttribute, dataset, matches or closest
+//     in the same expression), or a stylesheet selector names an attribute
+//     anywhere in it, that is neither declared, written by the bundle or the
+//     reader (lib/barkpark/portable_doc/render), hidden, editor-internal nor a
+//     reach-in;
 //   - an upstream token in Styling is no longer read by the stylesheet;
 //   - the committed bundle's statics are not this source's versions and BUILD_SHA.
-// It does not read the hosts.
+// It does not read the hosts. It does not follow a stored reference (const host
+// = this.parentElement; host.getAttribute(...)), a computed attribute or event
+// name, or a public property first set after mount (on an edit, a timer, a
+// host call).
 //
 // Run: node src/__contract_truth.test.mjs   (or: npm test)
 
@@ -50,7 +60,9 @@ const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const appears = (name, text = source) => new RegExp(`(?<![\\w-])${escape(name)}(?![\\w-])`).test(text);
 
 const EDITOR_INTERNAL = new Set(["bp-canvas-image-pick", "data-action", "data-bp-opaque", "data-bp-text-boundary", "data-test-id", "data-bp-paste-notice", "bp-canvas-image-chrome"]);
-const REACH_INS = ["bp-flush-node", "data-block-id", "data-bp-paper-conflict"];
+const REACH_INS = ["bp-flush-node", "data-block-id", "data-bp-paper-conflict", "data-conflict-detail", "data-conflict-message"];
+const DOM_EVENTS = new Set(["DOMContentLoaded", "blur", "change", "click", "compositionend", "compositionstart", "contextmenu", "dblclick", "focus", "focusin", "focusout", "input", "keydown", "load", "mousedown", "mouseenter", "mouseleave", "mousemove", "mouseout", "mouseover", "pagehide", "paste", "pointercancel", "pointerdown", "pointermove", "pointerup", "resize", "scroll", "submit", "toggle"]);
+const HTML_ATTRIBUTES = new Set(["hidden"]);
 
 const declaredNames = new Set([...types].map((k) => k.split("|")[2]));
 const names = (kind, element) => [...types].filter((k) => k.startsWith(`${kind}|${element}|`)).map((k) => k.split("|")[2]);
@@ -154,12 +166,12 @@ check("every declared attribute, class and token appears in the source", () => {
 });
 
 const camel = (name) => name.replace(/^data-/, "").replace(/-(\w)/g, (_, c) => c.toUpperCase());
-const written = (name) => new RegExp([
+const written = (name, text = js) => new RegExp([
   `(?:set|toggle)Attribute\\(\\s*["'\`]${escape(name)}["'\`]`,
   `["'\`]${escape(name)}["'\`]\\s*:`,
   `(?<![\\w-])${escape(name)}=["'\`$]`,
   ...(name.startsWith("data-") ? [`\\.dataset\\.${camel(name)}\\s*=(?!=)`, `internalLinkMark\\(\\s*["'\`]${escape(name.slice(5))}["'\`]`] : []),
-].join("|")).test(js) || new RegExp(`(?<![\\w-])${escape(name)}\\s*:\\s*\\{\\s*default`, "i").test(js);
+].join("|")).test(text) || new RegExp(`(?<![\\w-])${escape(name)}\\s*:\\s*\\{\\s*default`, "i").test(text);
 
 check("every declared DOM attribute is written by the source", () => {
   assert.deepEqual(names("DOM attribute", "canvas").filter((n) => !written(n)).sort(), []);
@@ -182,10 +194,10 @@ check("every event the source dispatches is declared, editor-internal or a reach
   assert.deepEqual([...new Set(literal)].filter((e) => !known(e)).sort(), []);
 });
 
-check("every bp-* event the source listens for by a literal name is declared, editor-internal or a reach-in", () => {
-  const heard = new Set([...js.matchAll(/addEventListener\(\s*["'`](bp-[\w-]+)["'`]/g)].map((m) => m[1]));
-  assert.ok(heard.has("bp-fleet-paint"), "found no bp-* listeners");
-  assert.deepEqual([...heard].filter((e) => !known(e)).sort(), []);
+check("every event the source listens for by a literal name is a DOM event, declared, editor-internal or a reach-in", () => {
+  const heard = new Set([...js.matchAll(/addEventListener\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]));
+  assert.ok(heard.has("bp-fleet-paint") && heard.has("keydown"), "found no listeners");
+  assert.deepEqual([...heard].filter((e) => !DOM_EVENTS.has(e) && !known(e)).sort(), []);
 });
 
 check("every attribute and class the source reads off an ancestor or the document is declared, editor-internal or a reach-in", () => {
@@ -195,6 +207,42 @@ check("every attribute and class the source reads off an ancestor or the documen
   const read = new Set([...selectors, ...leading].flatMap((sel) => [...sel.matchAll(/\[(data-[\w-]+)|\.(bp-[\w-]+)/g)].map((m) => m[1] ?? m[2])));
   assert.ok(read.has("data-paper-palette") && read.has("data-theme"), "the selector scan found nothing");
   assert.deepEqual([...read].filter((n) => !known(n)).sort(), []);
+});
+
+const ownOrParentReads = () => {
+  const literal = `\\(\\s*["'\`]([\\w-]+)["'\`]`;
+  const own = [...js.matchAll(new RegExp(`\\bthis\\.(?:getAttribute|hasAttribute)${literal}`, "g"))].map((m) => m[1]);
+  const ownData = [...js.matchAll(/\bthis\.dataset\.(\w+)/g)].map((m) => `data-${m[1].replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
+  const parents = [...js.matchAll(/\.(?:parentElement|parentNode)\b[^;\n]*/g)].flatMap((m) => [
+    ...[...m[0].matchAll(new RegExp(`\\.(?:getAttribute|hasAttribute)${literal}`, "g"))].map((r) => r[1]),
+    ...[...m[0].matchAll(/\.dataset\.(\w+)/g)].map((r) => `data-${r[1].replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`),
+    ...[...m[0].matchAll(/\.(?:matches|closest)\(\s*["'`]([^"'`]*)["'`]/g)].flatMap((r) => [...r[1].matchAll(/\[\s*([\w-]+)/g)].map((a) => a[1])),
+  ]);
+  return { own: new Set([...own, ...ownData]), parents: new Set(parents) };
+};
+const selectorAttributes = () => {
+  const rules = [...css.replace(/@[\w-]+[^{;]*;/g, "").matchAll(/([^{}]+)\{/g)].flatMap((m) => m[1].split(",").map((part) => part.trim()));
+  return new Set(rules.filter((rule) => !rule.startsWith("@")).flatMap((rule) => [...rule.matchAll(/\[\s*([\w-]+)/g)].map((m) => m[1])));
+};
+const bundle = readFileSync(path.join(root, "../../priv/static/assets/bp-paper-editor.bundle.js"), "utf8");
+const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
+const reader = readdirSync(readerDir).filter((n) => n.endsWith(".ex")).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
+const allowedRead = (name) => known(name) || HTML_ATTRIBUTES.has(name) || [bundle, reader].some((text) => written(name, text));
+
+check("every attribute the source reads off its own element is declared, written by the bundle or the reader, hidden, editor-internal or a reach-in", () => {
+  const { own } = ownOrParentReads();
+  assert.ok(own.has("data-vocabulary") && own.has("editable"), "the own-attribute scan found nothing");
+  assert.deepEqual([...own].filter((n) => !allowedRead(n)).sort(), []);
+});
+
+check("every attribute the source reads off a parent is declared, written by the bundle or the reader, hidden, editor-internal or a reach-in", () => {
+  assert.deepEqual([...ownOrParentReads().parents].filter((n) => !allowedRead(n)).sort(), []);
+});
+
+check("every attribute a stylesheet selector names, anywhere in it, is declared, written by the bundle or the reader, hidden, editor-internal or a reach-in", () => {
+  const attrs = selectorAttributes();
+  assert.ok(attrs.has("data-paper-palette") && attrs.has("contenteditable"), "the selector scan found nothing");
+  assert.deepEqual([...attrs].filter((n) => !allowedRead(n)).sort(), []);
 });
 
 check("every reach-in the test allows is named in EMBED-CONTRACT.md's Known reach-ins", () => {

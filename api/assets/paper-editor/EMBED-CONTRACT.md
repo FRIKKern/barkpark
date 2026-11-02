@@ -780,7 +780,7 @@ The other way round, the editor's stylesheet styles host DOM it does not own:
 | Reach-in | Host | Where |
 |---|---|---|
 | `[data-block-id]`: dark-mode overrides for server-painted blocks | Studio, the reader | `src/styles.css` |
-| `[data-bp-paper-conflict]`: the conflict banner | Studio (`bp-paper-editor-hooks.js`) | `src/styles.css` |
+| `[data-bp-paper-conflict]`: the conflict banner, and its `[data-conflict-detail]` and `[data-conflict-message]` | Studio (`bp-paper-editor-hooks.js`) | `src/styles.css` |
 
 ## Invariants
 
