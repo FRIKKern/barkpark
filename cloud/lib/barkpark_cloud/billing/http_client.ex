@@ -73,6 +73,31 @@ defmodule BarkparkCloud.Billing.HttpClient do
   end
 
   @doc """
+  `request/1` that also returns the response headers, as lowercased
+  `{name, value}` string pairs. For callers that need a header such as `etag`
+  (`BarkparkCloud.GitHub.LatestRelease`). Same transport and options.
+  """
+  @spec request_with_headers(request_map()) ::
+          {:ok, %{status: non_neg_integer(), body: binary(), headers: [{String.t(), String.t()}]}}
+          | {:error, term()}
+  def request_with_headers(%{method: method} = req) do
+    {request_arg, http_opts, opts} = to_httpc(req)
+
+    case :httpc.request(method, request_arg, http_opts, opts) do
+      {:ok, {{_http_version, status, _reason_phrase}, resp_headers, resp_body}} ->
+        headers =
+          Enum.map(resp_headers, fn {k, v} ->
+            {k |> to_string() |> String.downcase(), to_string(v)}
+          end)
+
+        {:ok, %{status: status, body: to_string(resp_body), headers: headers}}
+
+      {:error, reason} ->
+        {:error, {:http_client, reason}}
+    end
+  end
+
+  @doc """
   PURE mapping from the gateway request map to the `:httpc.request/4` argument
   tuple `{request_arg, http_opts, opts}` — no network, unit-testable.
 

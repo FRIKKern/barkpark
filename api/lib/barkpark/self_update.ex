@@ -57,6 +57,19 @@ defmodule Barkpark.SelfUpdate do
   @spec check_now() :: map()
   def check_now, do: call_checker(:check_now)
 
+  @doc """
+  Ask the Checker for an upstream check now, without waiting for it. The
+  result lands in `status/0` when the check finishes. Returns `:ok`, or
+  `:disabled` when no Checker runs. Never raises.
+  """
+  @spec refresh() :: :ok | :disabled
+  def refresh do
+    case Process.whereis(Checker) do
+      nil -> :disabled
+      pid -> GenServer.cast(pid, :refresh)
+    end
+  end
+
   defp call_checker(msg) do
     case Process.whereis(Checker) do
       nil ->

@@ -150,7 +150,14 @@ defmodule BarkparkWeb.SelfUpdateController do
     end
   end
 
-  def status(conn, _params) do
+  def status(conn, params) do
+    # `?refresh=1` asks the Checker for an upstream check now. Barkpark Cloud
+    # sends it when it has seen a release this box does not report yet. The
+    # check runs in the background, so this response still carries the cached
+    # verdict and the next read carries the fresh one. Rate-limited in the
+    # Checker.
+    if params["refresh"] in ["1", "true"], do: Barkpark.SelfUpdate.refresh()
+
     # `check` is the CHECKER's view (is an update available?) riding along
     # with the runner state — one admin GET gives a control plane everything:
     # Barkpark Cloud polls this to light up its per-instance update badge.
