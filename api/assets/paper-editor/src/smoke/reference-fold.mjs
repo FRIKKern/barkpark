@@ -53,7 +53,6 @@ function applyOps(prevBlocks, ops) {
   };
 
   for (const op of ops) {
-    const before = blocks;
     switch (op.op) {
       case "append-block": {
         if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
@@ -112,25 +111,8 @@ function applyOps(prevBlocks, ops) {
       default:
         throw new Error(`applyOps: unknown op ${JSON.stringify(op)}`);
     }
-    const grown = duplicateGrowth(before, blocks);
-    if (grown) throw new Error(`${op.op}: duplicate id ${grown}`);
   }
   return blocks;
 }
 
-function idsAtAnyDepth(value, out = []) {
-  if (value && typeof value === "object") {
-    if (typeof value.id === "string") out.push(value.id);
-    for (const [key, child] of Object.entries(value)) if (key !== "id") idsAtAnyDepth(child, out);
-  }
-  return out;
-}
-
-function duplicateGrowth(before, after) {
-  const was = idsAtAnyDepth(before);
-  const now = idsAtAnyDepth(after);
-  const count = (ids, id) => ids.filter((x) => x === id).length;
-  return now.find((id) => count(now, id) > 1 && count(now, id) > count(was, id));
-}
-
-export { applyOps, idsAtAnyDepth };
+export { applyOps };

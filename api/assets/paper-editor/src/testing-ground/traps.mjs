@@ -1,4 +1,10 @@
-import { idsAtAnyDepth } from "../smoke/reference-fold.mjs";
+export function idsAtAnyDepth(value, out = []) {
+  if (value && typeof value === "object") {
+    if (typeof value.id === "string") out.push(value.id);
+    for (const [key, child] of Object.entries(value)) if (key !== "id") idsAtAnyDepth(child, out);
+  }
+  return out;
+}
 
 export function duplicateIds(blocks) {
   const seen = new Set();

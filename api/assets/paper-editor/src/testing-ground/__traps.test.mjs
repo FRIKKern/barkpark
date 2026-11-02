@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { applyOps } from "../smoke/reference-fold.mjs";
 import { trip } from "./drills/trip.mjs";
 import { barkparkFold } from "./barkpark-fold.mjs";
 import { createFakeHost } from "./fake-host.mjs";
@@ -37,18 +36,20 @@ for (const name of readdirSync(pack)) {
   assert.deepEqual(duplicateIds([{ id: `s-${type}`, ...input }]), [], `${type}: the pack sample opens with no duplicate ids`);
 }
 
-assert.throws(() => applyOps(trip, nestedEnter.ops), /replace-block: duplicate id p-day/, "the reference fold refuses the nested Enter batch, as patch.ex does");
+const fold = referenceFold.apply;
+await assert.rejects(fold(trip, nestedEnter.ops), /replace-block: duplicate id p-day/, "the reference fold refuses the nested Enter batch, as patch.ex does");
 const legacy = [...structuredClone(split), { id: "p-new", type: "paragraph", content: [] }];
-assert.doesNotThrow(() => applyOps(split, [{ op: "patch-block", id: "p-after", patch: { content: [] } }]), "a duplicate already there stays editable");
-assert.throws(() => applyOps(trip, [{ op: "insert-after", afterId: "p-after", block: { id: "s-new", type: "section", blocks: [{ id: "p-twin", type: "paragraph", content: [] }, { id: "p-twin", type: "paragraph", content: [] }] } }]),
+await assert.doesNotReject(fold(split, [{ op: "patch-block", id: "p-after", patch: { content: [] } }]), "a duplicate already there stays editable");
+await assert.rejects(fold(trip, [{ op: "insert-after", afterId: "p-after", block: { id: "s-new", type: "section", blocks: [{ id: "p-twin", type: "paragraph", content: [] }, { id: "p-twin", type: "paragraph", content: [] }] } }]),
   /insert-after: duplicate id p-twin/, "a new id that arrives twice in one op is refused too");
-assert.throws(() => applyOps(legacy, [{ op: "insert-after", afterId: "p-new", block: { id: "p-day", type: "paragraph", content: [] } }]), /duplicate id p-day/);
+await assert.rejects(fold(legacy, [{ op: "insert-after", afterId: "p-new", block: { id: "p-day", type: "paragraph", content: [] } }]), /duplicate id p-day/);
+assert.deepEqual(await fold(trip, [{ op: "patch-block", id: "p-day", patch: { content: [] } }, { op: "remove-block", id: "p-after" }]).then((b) => b.map((x) => x.id)), trip.map((x) => x.id).filter((id) => id !== "p-after"), "every op of a batch folds, in order");
 
 const refused = lights({ ...calm, refusals: ["replace-block: duplicate id p-day"] });
 assert.equal(light(refused, "refused-batches").ok, false);
 assert.match(light(refused, "refused-batches").words, /refused 1 batch: replace-block: duplicate id p-day\. Edits after it do not save\./);
 
-const believed = applyOps(trip, [{ op: "patch-block", id: "p-after", patch: { content: [{ type: "text", value: "Home by nine." }] } }]);
+const believed = await fold(trip, [{ op: "patch-block", id: "p-after", patch: { content: [{ type: "text", value: "Home by nine." }] } }]);
 assert.deepEqual(foldDrift(trip, believed), { at: 2, id: "p-after" }, "a fold that dropped the op drifts at the block it dropped");
 assert.equal(foldDrift(believed, structuredClone(believed)), null);
 assert.deepEqual(foldDrift(trip, trip.slice(0, 2)), { at: 2, id: "p-after" }, "a block the server kept and the editor dropped is drift");
