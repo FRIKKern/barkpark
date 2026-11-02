@@ -1,19 +1,23 @@
 // Writes host-profile/surface.json: what the committed build offers a host, what it
-// needs from one, what it keeps to itself, and the reach-ins between them.
+// needs from one, the page vocabulary it shares with the reader, what it keeps to
+// itself, and the reach-ins between them.
 //   declared  index.d.ts's names for the editor's elements (canvas, editor, both,
 //             window, css); __contract_truth.test.mjs holds it equal to
 //             EMBED-CONTRACT.md's Surface index.
 //   host      index.d.ts's names the host supplies (picker, mermaid).
 //   reachIns  EMBED-CONTRACT.md's Known reach-ins, by kind.
-//   internal  read off the build a host loads, minus declared and reachIns:
-//             - private members: the prototype's, a mounted element's own, and
-//               every `this._x` in the source, which also finds the ones set later;
+//   reader    PortableDoc's page vocabulary: the classes and data-* attributes the
+//             reader writes (lib/barkpark/portable_doc/render), which the editor
+//             paints too and bp-paper-surface.css styles. A host may style them.
+//   internal  read off the build a host loads, minus declared, reachIns and reader:
+//             - private members of each element: the prototype's, a mounted
+//               element's own, and every `this._x` in the element's class body,
+//               which also finds the ones set later;
 //             - classes in bp-paper-editor.css and in every string and template
-//               chunk of the bundle (scripts/writes.mjs), less tags, ids and the
-//               classes the reader writes (class="..." in
-//               lib/barkpark/portable_doc/render: PortableDoc's page vocabulary,
-//               styled by bp-paper-surface.css, the reader's sheet);
-//             - data-* attributes the bundle writes or its TipTap schema renders;
+//               chunk of the bundle (scripts/writes.mjs), less tags and ids;
+//             - data-* attributes the bundle writes (every one its TipTap schema
+//               renders is declared, reader vocabulary or a bundle string too;
+//               __surface.test.mjs holds that);
 //             - events the bundle dispatches.
 // A host profile checks a host's sources against this file.
 //
@@ -24,7 +28,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { declaredInTypes, HOST_SUPPLIED, reachInsInContract } from "../src/contract-surface.mjs";
-import { classWords, readerClasses, schemaAttributes, writtenAttributes } from "./writes.mjs";
+import { classWords, readerAttributes, readerClasses, writtenAttributes } from "./writes.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const assets = path.join(root, "../../priv/static/assets");
@@ -68,18 +72,21 @@ export async function mountedMembers(window, tag) {
   window.document.body.append(el);
   await new Promise((resolve) => setTimeout(resolve, 50));
   const members = [...Object.getOwnPropertyNames(window.customElements.get(tag).prototype), ...Object.getOwnPropertyNames(el)].filter((n) => n.startsWith("_"));
-  const schema = schemaAttributes(el._editor.schema);
   el.remove();
-  return { members, schema };
+  return members;
 }
 
-const sourceText = (dir) => readdirSync(dir).filter((n) => n.endsWith(".js")).map((n) => readFileSync(path.join(dir, n), "utf8")).join("\n");
+export const elementClassBody = (text) => {
+  const start = text.search(/^class \w+ extends HTMLElement \{/m);
+  if (start === -1) throw new Error("no custom element class at column 0");
+  return text.slice(start, text.indexOf("\n}", start) + 2);
+};
 
 export async function surface() {
   const types = declaredInTypes(readFileSync(path.join(root, "index.d.ts"), "utf8"));
   const reachIns = reachInsInContract(readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"));
   const names = new Set([...types, ...reachIns].map((k) => k.split("|").at(-1)));
-  const internal = (list) => sorted(list).filter((n) => !names.has(n));
+  const outside = (list) => sorted(list).filter((n) => !names.has(n));
 
   const js = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
   const css = readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8");
@@ -89,10 +96,12 @@ export async function surface() {
   dom.window.eval(js);
   const canvas = await mountedMembers(dom.window, "bp-paper-canvas");
   const editorEl = await mountedMembers(dom.window, "bp-paper-editor");
-  const canvasSource = sourceText(path.join(root, "src/canvas"));
-  const editorSource = sourceText(path.join(root, "src"));
+  const canvasSource = elementClassBody(readFileSync(path.join(root, "src/canvas/index.js"), "utf8"));
+  const editorSource = elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8"));
   const editor = dom.window.customElements.get("bp-paper-editor");
-  const notClass = new Set([...notClasses(js), ...readerClasses(reader)]);
+  const page = { classes: outside(readerClasses(reader)), attributes: outside(readerAttributes(reader)) };
+  const notClass = new Set([...notClasses(js), ...page.classes]);
+  const internal = (list) => outside(list).filter((n) => !page.attributes.includes(n));
 
   return {
     contract: editor.CONTRACT_VERSION,
@@ -101,13 +110,14 @@ export async function surface() {
     declared: grouped([...types].filter((k) => !HOST_SUPPLIED.has(k.split("|")[1]))),
     host: grouped([...types].filter((k) => HOST_SUPPLIED.has(k.split("|")[1]))),
     reachIns: byKind(reachIns),
+    reader: page,
     internal: {
       members: {
-        canvas: internal([...canvas.members, ...sourceMembers(canvasSource)]),
-        editor: internal([...editorEl.members, ...sourceMembers(editorSource)]),
+        canvas: internal([...canvas, ...sourceMembers(canvasSource)]),
+        editor: internal([...editorEl, ...sourceMembers(editorSource)]),
       },
       classes: internal([...stylesheetClasses(css), ...classWords(js)].filter((n) => !notClass.has(n))),
-      attributes: internal([...writtenAttributes(js), ...canvas.schema, ...editorEl.schema].filter((n) => n.startsWith("data-"))),
+      attributes: internal(writtenAttributes(js).filter((n) => n.startsWith("data-"))),
       events: internal(bundleEvents(js)),
     },
   };

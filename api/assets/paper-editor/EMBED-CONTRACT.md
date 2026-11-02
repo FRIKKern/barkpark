@@ -720,21 +720,29 @@ use (`picker`, `mermaid`: Host-supplied pieces). CSS tokens are in Styling.
   starts with an attribute), that is neither declared nor on the test's short list
   of editor-internal names nor a reach-in listed by kind (Known reach-ins);
 - the source reads an attribute off its own element, a parent or the document
-  root (`getAttribute`, `hasAttribute`, `getAttributeNode`, `attributes[…]`,
-  `dataset.x`, `dataset["x"]`, a destructured `dataset`, `matches`, `closest`;
-  receivers `this`, `parentElement`, `parentNode`, `offsetParent`, `getRootNode()`,
-  `document.documentElement`, `document.body`, `document.getElementById(…)`,
-  `document.querySelector(…)`), or a stylesheet selector names one, that is not
-  declared, written by the build or the reader, a global HTML attribute,
-  editor-internal or a reach-in;
+  root (`getAttribute`, `hasAttribute`, `getAttributeNode`, `getAttributeNS`,
+  `hasAttributeNS`, `attributes[…]`, `dataset.x`, `dataset["x"]`, `"x" in
+  dataset`, a destructured `dataset`, `matches`, `closest`; receivers `this`,
+  `parentElement`, `parentNode`, `offsetParent`, `getRootNode()`, and
+  `.documentElement`, `.body`, `.getElementById(…)`, `.querySelector(…)`,
+  `.querySelectorAll(…)` on `document` or `ownerDocument`; `?.` counts as `.`
+  anywhere in the chain, and a chain wrapped over lines is joined), or a
+  stylesheet selector names one (anywhere in it, also inside `@supports
+  selector(…)` and `@scope (…)`), that is not declared, written by the build or
+  the reader, a global HTML attribute, editor-internal or a reach-in;
 - an upstream token in Styling is no longer read by the stylesheet.
 
 What the scan does not see, so a review has to: a stored reference or an alias of
 `this` (`const host = this.parentElement; host.getAttribute(…)`), a computed
-attribute or event name (`getAttribute(name)`, `` addEventListener(`${x}`) ``), a
-loop over `attributes` or `getAttributeNames()`, an `on*` handler property, and a
-public property first set after mount. It does not read the hosts; a host checks
-its own sources against `host-profile/surface.json`.
+attribute or event name (`getAttribute(name)`, `` addEventListener(`${x}`) ``,
+`this[prop]`), a loop over `attributes`, `getAttributeNames()` or the dataset's
+keys (`Object.keys(this.dataset)`), an `on*` handler property, and a public
+property first set after mount. It does not read the hosts; a host checks
+its own sources against `host-profile/surface.json`, whose groups are `declared`
+and `host` (index.d.ts), `reachIns` (the table below), `reader` (PortableDoc's page
+vocabulary: the classes and `data-*` the reader writes, which a host may style)
+and `internal` (the rest of what the build writes; members only those of the two
+element classes).
 
 | Kind | On | Names |
 |---|---|---|

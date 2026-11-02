@@ -1,26 +1,29 @@
 // __surface.test.mjs — host-profile/surface.json is what the committed build gives.
 //
 // scripts/surface.mjs reads declared and host out of index.d.ts, reachIns out of
-// EMBED-CONTRACT.md and internal out of the committed bundle and dist stylesheet,
-// through the readers in scripts/writes.mjs. This fails when:
+// EMBED-CONTRACT.md, reader out of the reader's templates and internal out of the
+// committed bundle and dist stylesheet, through the readers in scripts/writes.mjs.
+// This fails when:
 //   - the committed file differs from a fresh read (naming each name that moved);
 //   - its versions are not this package's;
 //   - declared and host are not index.d.ts, or reachIns is not EMBED-CONTRACT.md;
 //   - a reader misses a form on a small fixture, one name per form;
 //   - a reader misses a name only it finds in the real build;
+//   - a member of an element is read from outside the element's class;
+//   - a data-* attribute the TipTap schema renders is in no group;
 //   - a class Studio's shell stylesheet restyles, which the bundle writes (or
-//     whose BEM block it writes), is not in surface.json or written by the reader;
-//   - a name hosts outside this repo restyle today is missing;
-//   - a name sits in two of the contract, reachIns and internal.
+//     whose BEM block it writes), is in no group;
+//   - a name hosts outside this repo restyle today is not in its group;
+//   - a name sits in two of the contract, reachIns, reader and internal.
 //
 // Run: node src/__surface.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
-import { bundleEvents, mountedMembers, notClasses, render, sourceMembers, stylesheetClasses, surface, surfacePath } from "../scripts/surface.mjs";
+import { bundleEvents, elementClassBody, mountedMembers, notClasses, render, sourceMembers, stylesheetClasses, surface, surfacePath } from "../scripts/surface.mjs";
 import { classWords, lex, readerAttributes, readerClasses, schemaAttributes, writtenAttributes } from "../scripts/writes.mjs";
 import { declaredInTypes, reachInsInContract } from "./contract-surface.mjs";
 
@@ -45,7 +48,7 @@ const leaves = (value, at = []) => Array.isArray(value) ? value.map((n) => `${at
 await check("the committed surface.json is a fresh read of the committed build", () => {
   const committed = readFileSync(surfacePath, "utf8");
   if (committed === render(fresh)) return;
-  const [was, now] = [JSON.parse(committed), fresh].map((s) => new Set(leaves({ contract: [s.contract], editor: [s.editor], build: [s.build], declared: s.declared, host: s.host, reachIns: s.reachIns, internal: s.internal })));
+  const [was, now] = [JSON.parse(committed), fresh].map((s) => new Set(leaves({ contract: [s.contract], editor: [s.editor], build: [s.build], declared: s.declared, host: s.host, reachIns: s.reachIns, reader: s.reader, internal: s.internal })));
   const moved = [...[...now].filter((l) => !was.has(l)).map((l) => `+ ${l}`), ...[...was].filter((l) => !now.has(l)).map((l) => `- ${l}`)];
   assert.fail(`run npm run build in api/assets/paper-editor and commit host-profile/surface.json\n${moved.join("\n") || "(same names, different bytes)"}`);
 });
@@ -94,7 +97,7 @@ await check("each reader finds every form on a fixture", async () => {
   assert.throws(() => lex("x = `${a"), /lexer ended inside 1 template expression/);
   assert.deepEqual(lex(`const r = /[/a/']/; x = 'bp-y'`).strings, ["bp-y"]);
   assert.deepEqual(lex(`x = "bp-open`).strings, ["bp-open"]);
-  assert.deepEqual(reachInsInContract("## Known reach-ins\n| Kind | Names |\n|---|---|\n| member | `a` |\n| Who | `b` |\n| event | `c` | x |\n## Next\n| event | `d` |\n"), new Set(["member|a"]));
+  assert.deepEqual(reachInsInContract("## Known reach-ins\n| Kind | Names |\n|---|---|\n| member | `a` |\n| expando | `b`, `c` |\n| attribute | `d` |\n| class | `e` |\n| event | `f` |\n| Who | `g` |\n| event | `h` | x |\n## Next\n| event | `i` |\n"), new Set(["member|a", "expando|b", "expando|c", "attribute|d", "class|e", "event|f"]));
   assert.deepEqual(notClasses(`customElements.define("bp-tag",X);document.createElement("bp-made");document.getElementById("bp-id1");n.id="bp-id2";`).sort(), ["bp-id1", "bp-id2", "bp-made", "bp-tag"]);
   assert.deepEqual(bundleEvents(`new CustomEvent("bp-a");new Event('bp-b');`), ["bp-a", "bp-b"]);
 
@@ -129,11 +132,19 @@ await check("each reader finds every form on a fixture", async () => {
   };
   assert.deepEqual(schemaAttributes(schema).sort(), ["data-box", "data-child-of-bare", "data-docid", "data-from-dom-wrapper", "data-from-node", "data-nested", "href"]);
 
-  const ex = `~s(<div class=" bp-r1  bp-r2" data-r1="x">) <> ~s(<span class=\\"bp-r3\\">) %{"data-r2" => 1}`;
-  assert.deepEqual(readerClasses(ex).sort(), ["bp-r1", "bp-r2", "bp-r3"]);
+  const ex = [
+    `@moduledoc """`, `Styled by .bp-in-moduledoc and [data-in-moduledoc="x"].`, `"""`,
+    `~s(<div class=" bp-r1  plain-r2" data-r1="x">) <> ~s(<span class=\\"bp-r3\\">) %{"data-r2" => 1}`,
+    `~s|<div class="bp-card#{tone} bp-tone--#{t} #{cls}">| # .bp-in-comment data-in-comment="x"`,
+    `nav_class = if sticky, do: "bp-toc bp-toc--sticky", else: "bp-toc"`,
+    `  # mirrors .bp-in-line-comment`,
+  ].join("\n");
+  assert.deepEqual(readerClasses(ex).sort(), ["bp-card", "bp-r1", "bp-r3", "bp-toc", "bp-toc--sticky", "plain-r2"]);
   assert.deepEqual(readerAttributes(ex).sort(), ["data-r1", "data-r2"]);
 
   assert.deepEqual(sourceMembers(`this._set = 1; this._called(); other._not;`), ["_set", "_called"]);
+  assert.equal(elementClassBody("class Helper { m() { this._a = 1; } }\nclass El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}\nfunction after() { this._c = 1; }\n"), "class El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}");
+  assert.throws(() => elementClassBody("class Helper {}"), /no custom element class/);
   const dom = new JSDOM("<!doctype html><body></body>", { runScripts: "outside-only" });
   dom.window.eval(`customElements.define("bp-fixture", class extends HTMLElement {
     constructor() { super(); this._own = 1; }
@@ -142,49 +153,70 @@ await check("each reader finds every form on a fixture", async () => {
     publicThing() {}
     has_underscore() {}
   });`);
-  assert.deepEqual((await mountedMembers(dom.window, "bp-fixture")).members.sort(), ["_editor", "_onThing", "_own"]);
+  assert.deepEqual((await mountedMembers(dom.window, "bp-fixture")).sort(), ["_editor", "_onThing", "_own"]);
 });
 
 await check("each reader finds a name only it finds in the real build", () => {
   const { members, classes, attributes, events } = fresh.internal;
-  assert.deepEqual(lacks(members.canvas, ["_editor", "_noteInlineObjectSave", "_onDrop", "_pendingFocus"]), [], "canvas members: own, prototype, prototype _on*, source-only");
-  assert.deepEqual(lacks(members.editor, ["_editor", "_requestTableStructure"]), [], "editor members");
-  assert.deepEqual(lacks(classes, ["hljs-keyword", "ProseMirror-widget", "bp-slash-menu", "bp-link-preview__head"]), [], "classes: stylesheet, string, ternary template, const + template");
-  assert.deepEqual(lacks(attributes, ["data-pm-slice", "data-tiptap-style", "data-bp-figure-constraint", "data-bp-opaque-mark", "data-valueref"]), [], "attributes: setAttribute, template name, dataset, addAttributes helper, schema output");
+  assert.deepEqual(lacks(members.canvas, ["_editor", "_noteInlineObjectSave", "_onDrop", "_pendingFocus"]), [], "canvas members: own, prototype, prototype _on*, class body only");
+  assert.deepEqual(lacks(members.editor, ["_editor", "_requestTableStructure", "_onKeyDown", "_discardTableDraft"]), [], "editor members: own, prototype, prototype _on*, class body only");
+  assert.deepEqual(lacks(classes, ["hljs-keyword", "ProseMirror-widget", "prosemirror-dropcursor-block", "tiptap", "bp-slash-menu", "bp-link-preview__head"]), [], "classes: stylesheet, string, each prefix, ternary template, const + template");
+  assert.deepEqual(lacks(attributes, ["data-pm-slice", "data-tiptap-style", "data-bp-figure-constraint", "data-bp-opaque-mark"]), [], "attributes: setAttribute, template name, dataset, addAttributes helper");
+  assert.deepEqual(lacks(fresh.reader.classes, ["text-dim", "bp-table__td", "bp-callout"]), [], "reader classes: class=\"…\" token, a helper's string, both");
+  assert.deepEqual(lacks(fresh.reader.attributes, ["data-p", "data-valueref"]), [], "reader attributes: attr=, a key");
   assert.deepEqual(lacks(events, ["bp-canvas-image-pick"]), [], "events");
   assert.deepEqual(attributes.filter((a) => !a.startsWith("data-")), [], "only data-* attributes; the schema also renders fallback, anchor, field");
 });
 
-await check("what is not internal stays out: tags, the reader's classes, classes only bp-paper-surface.css styles, reach-ins", () => {
-  const { classes, events } = fresh.internal;
+await check("what is not internal stays out: tags, reader vocabulary, reach-ins, and names set only outside the element classes", () => {
+  const { classes, attributes, events, members } = fresh.internal;
   const out = ["bp-paper-canvas", "bp-media-picker", "bp-callout", "bp-card", "bp-paper-article", "bp-sheet__td", "bp-mp-empty", "bp-ref-search-input"].filter((n) => classes.includes(n));
-  assert.deepEqual([...out, ...events.filter((e) => e === "bp-flush-node")], []);
+  const outAttributes = ["data-p", "data-valueref", "data-block-id"].filter((n) => attributes.includes(n));
+  const outMembers = ["_key", "_onScroll", "_input", "_el"].filter((n) => members.canvas.includes(n) || members.editor.includes(n));
+  assert.deepEqual([...out, ...outAttributes, ...outMembers, ...events.filter((e) => e === "bp-flush-node")], []);
 });
 
-await check("every class Studio's shell stylesheet restyles that the bundle writes, or whose BEM block it writes, is in surface.json or written by the reader", () => {
+await check("every data-* attribute the TipTap schema renders, on either element, is in a group", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true, url: "http://localhost/" });
+  dom.window.BP_PAPER_EDITOR_NO_INJECT = true;
+  dom.window.eval(readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8"));
+  const rendered = [];
+  for (const tag of ["bp-paper-canvas", "bp-paper-editor"]) {
+    const el = dom.window.document.createElement(tag);
+    dom.window.document.body.append(el);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    rendered.push(...schemaAttributes(el._editor.schema).filter((a) => a.startsWith("data-")));
+    el.remove();
+  }
+  const grouped = new Set([fresh.declared, fresh.host, fresh.reachIns, fresh.reader, fresh.internal].flatMap((group) => leaves(group).map((l) => l.split(": ")[1])));
+  assert.ok(rendered.includes("data-valueref"), "the schema scan found nothing");
+  assert.deepEqual([...new Set(rendered)].filter((a) => !grouped.has(a)).sort(), []);
+});
+
+await check("every class Studio's shell stylesheet restyles that the bundle writes, or whose BEM block it writes, is in a group", () => {
   const bundle = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
   const shell = stylesheetClasses(readFileSync(path.join(assets, "bp-paper-editor-shell.css"), "utf8"));
-  const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
-  const reader = new Set(readerClasses(readdirSync(readerDir).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n")));
-  const known = new Set([fresh.declared, fresh.host, fresh.reachIns, fresh.internal].flatMap((group) => leaves(group).map((l) => l.split(": ")[1])));
+  const known = new Set([fresh.declared, fresh.host, fresh.reachIns, fresh.reader, fresh.internal].flatMap((group) => leaves(group).map((l) => l.split(": ")[1])));
   const writes = (name) => new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(bundle);
   const editorStyled = [...new Set(shell)].filter((c) => /^(?:bp-|ProseMirror|tiptap|hljs)/.test(c) && (writes(c) || writes(c.split("__")[0])));
   assert.ok(editorStyled.length > 200, `only ${editorStyled.length} shell classes the bundle writes`);
-  assert.deepEqual(editorStyled.filter((c) => !known.has(c) && !reader.has(c)).sort(), []);
+  assert.deepEqual(editorStyled.filter((c) => !known.has(c)).sort(), []);
 });
 
-await check("names hosts outside this repo restyle today are internal", () => {
-  const hosts = {
-    "barkpark-studio app/src/styles.css:2063-2067": ["bp-canvas-image-menu", "bp-canvas-object-menu", "bp-slash-menu"],
-    "Barkdown app/renderer/paper-notion.css:167,183,200": ["bp-slash-menu", "bp-link-preview"],
-    "Barkdown app/renderer/vendor/bp-paper-popups.css": ["data-bp-paste-notice", "data-bp-text-boundary"],
-  };
+await check("names hosts outside this repo restyle today are in their group", () => {
   const internal = new Set([...fresh.internal.classes, ...fresh.internal.attributes]);
-  assert.deepEqual(Object.entries(hosts).flatMap(([where, names]) => names.filter((n) => !internal.has(n)).map((n) => `${n} (${where})`)), []);
+  const reader = new Set([...fresh.reader.classes, ...fresh.reader.attributes]);
+  const hosts = [
+    ["barkpark-studio app/src/styles.css:2063-2067", internal, ["bp-canvas-image-menu", "bp-canvas-object-menu", "bp-slash-menu"]],
+    ["Barkdown app/renderer/paper-notion.css:167,183,200", internal, ["bp-slash-menu", "bp-link-preview"]],
+    ["Barkdown app/renderer/paper-notion.css", reader, ["bp-callout", "bp-callout__body", "bp-callout__summary", "bp-section-divider", "bp-section-divider__mark", "bp-table", "bp-table__th"]],
+    ["Barkdown app/renderer/vendor/bp-paper-popups.css", internal, ["data-bp-paste-notice", "data-bp-text-boundary"]],
+  ];
+  assert.deepEqual(hosts.flatMap(([where, group, names]) => names.filter((n) => !group.has(n)).map((n) => `${n} (${where})`)), []);
 });
 
-await check("no name is in two of the contract (declared, host), reachIns and internal", () => {
-  const groups = { contract: { declared: fresh.declared, host: fresh.host }, reachIns: fresh.reachIns, internal: fresh.internal };
+await check("no name is in two of the contract (declared, host), reachIns, reader and internal", () => {
+  const groups = { contract: { declared: fresh.declared, host: fresh.host }, reachIns: fresh.reachIns, reader: fresh.reader, internal: fresh.internal };
   const owner = new Map();
   const twice = [];
   for (const [group, value] of Object.entries(groups)) {

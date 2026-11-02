@@ -17,12 +17,14 @@
 //     that starts with an attribute), that is neither declared nor listed below
 //     as editor-internal nor a reach-in EMBED-CONTRACT.md lists by kind;
 //   - the source reads an attribute off its own element (this.getAttribute,
-//     hasAttribute, getAttributeNode, attributes[...], dataset.x, dataset["x"],
-//     a destructured dataset, matches, closest; `?.` allowed) or off a parent or
-//     the document (parentElement, parentNode, offsetParent, getRootNode(),
-//     document.documentElement, body, getElementById(...), querySelector(...),
-//     then any of those reads later in the expression, lines joined where a chain
-//     wraps), or a stylesheet selector names an attribute anywhere in it, that is
+//     hasAttribute, getAttributeNode, get/hasAttributeNS, attributes[...],
+//     dataset.x, dataset["x"], "x" in dataset, a destructured dataset, matches,
+//     closest) or off a parent or the document (parentElement, parentNode,
+//     offsetParent, getRootNode(), document or ownerDocument .documentElement,
+//     .body, .getElementById(...), .querySelector(All)(...), then any of those
+//     reads later in the expression), with `?.` read as `.` everywhere and lines
+//     joined where a chain wraps, or a stylesheet selector names an attribute
+//     anywhere in it (also in @supports selector(...) and @scope (...)), that is
 //     neither declared, written by the build or the reader
 //     (lib/barkpark/portable_doc/render), a global HTML attribute,
 //     editor-internal nor a reach-in;
@@ -30,9 +32,9 @@
 //   - an upstream token in Styling is no longer read by the stylesheet;
 //   - the committed bundle's statics are not this source's versions and BUILD_SHA.
 // Its limits are EMBED-CONTRACT.md's (Surface index): a stored reference or an
-// alias of `this`, a computed attribute or event name, a loop over attributes or
-// getAttributeNames(), an on* handler property, and a public property first set
-// after mount (on an edit, a timer, a host call).
+// alias of `this`, a computed attribute or event name, a loop over attributes,
+// getAttributeNames() or the dataset's keys, an on* handler property, and a
+// public property first set after mount (on an edit, a timer, a host call).
 //
 // Run: node src/__contract_truth.test.mjs   (or: npm test)
 
@@ -60,7 +62,7 @@ const stripComments = (text) => text.replace(/(^|\s)\/\*[\s\S]*?\*\//g, "$1").re
 const sourceFiles = walk(path.join(root, "src")).filter((p) => /\.(js|css)$/.test(p) && !path.basename(p).startsWith("__"));
 const cssFiles = [path.join(root, "src/styles.css"), path.join(root, "../paper-surface/paper-surface.css"), path.join(root, "../paper-surface/code-tokens.css")];
 const rawJs = sourceFiles.filter((p) => p.endsWith(".js")).map((p) => readFileSync(p, "utf8")).join("\n");
-const js = stripComments(rawJs).replace(/\n\s*(?=\??\.(?!\.))/g, "");
+const js = stripComments(rawJs).replace(/\?\.(?=[(\[])/g, "").replace(/\?\.(?!\d)/g, ".").replace(/\n\s*(?=\.(?!\.))/g, "");
 const css = stripComments(cssFiles.map((p) => readFileSync(p, "utf8")).join("\n"));
 const source = `${js}\n${css}`;
 const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -214,8 +216,10 @@ check("every event the source listens for by a literal name is a DOM event, decl
   assert.deepEqual([...heard].filter((e) => !isDomEvent(e) && !known(e)).sort(), []);
 });
 
+const DOCUMENT = String.raw`(?:\bdocument|\.ownerDocument)`;
+
 check("every attribute and class the source reads off an ancestor or the document is declared, editor-internal or a reach-in", () => {
-  const selectors = [...js.matchAll(/(?:\.closest|document\.querySelector(?:All)?)\(\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const selectors = [...js.matchAll(new RegExp(String.raw`(?:\.closest|${DOCUMENT}\.querySelector(?:All)?)\(\s*(?:"([^"]*)"|'([^']*)'|\`([^\`]*)\`)`, "g"))].map((m) => m[1] ?? m[2] ?? m[3]);
   const rules = [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => m[1].split(",").map((part) => part.trim()));
   const leading = rules.flatMap((rule) => /^(?::root|html|:host|body)?((?:\[[^\]]+\])+)(?=[\s>~+]|$)/.exec(rule)?.[1] ?? []);
   const read = new Set([...selectors, ...leading].flatMap((sel) => [...sel.matchAll(/\[(data-[\w-]+)|\.(bp-[\w-]+)/g)].map((m) => m[1] ?? m[2])));
@@ -223,31 +227,38 @@ check("every attribute and class the source reads off an ancestor or the documen
   assert.deepEqual([...read].filter((n) => !known(n)).sort(), []);
 });
 
-const READ = /^(?:\?\.|\.)\s*(?:(?:getAttribute|hasAttribute|getAttributeNode)\s*(?:\?\.)?\(\s*["'`]([\w-]+)["'`]|attributes\s*(?:\?\.)?(?:\[\s*["'`]([\w-]+)["'`]|\.getNamedItem\(\s*["'`]([\w-]+)["'`])|dataset\s*(?:\?\.)?(?:\.(\w+)|\[\s*["'`](\w+)["'`])|(?:matches|closest)\s*(?:\?\.)?\(\s*["'`]([^"'`]*)["'`])/;
-const readNames = (m) => m[1] ?? m[2] ?? m[3] ? [m[1] ?? m[2] ?? m[3]] : m[4] ?? m[5] ? [dataName(m[4] ?? m[5])] : [...m[6].matchAll(/\[\s*([\w-]+)/g)].map((a) => a[1]);
-const readsInTail = (tail) => [...tail.matchAll(/\??\.\s*(?:getAttribute|hasAttribute|getAttributeNode|attributes|dataset|matches|closest)\b[^;\n]*/g)].flatMap((m) => {
+const READ = /^\.\s*(?:(?:getAttribute|hasAttribute|getAttributeNode)\s*\(\s*["'`]([\w-]+)["'`]|(?:getAttributeNS|hasAttributeNS)\s*\([^,)]*,\s*["'`]([\w-]+)["'`]|attributes\s*(?:\[\s*["'`]([\w-]+)["'`]|\.getNamedItem\(\s*["'`]([\w-]+)["'`])|dataset\s*(?:\.(\w+)|\[\s*["'`](\w+)["'`])|(?:matches|closest)\s*\(\s*["'`]([^"'`]*)["'`])/;
+const readNames = (m) => m[1] ?? m[2] ?? m[3] ?? m[4] ? [m[1] ?? m[2] ?? m[3] ?? m[4]] : m[5] ?? m[6] ? [dataName(m[5] ?? m[6])] : [...m[7].matchAll(/\[\s*([\w-]+)/g)].map((a) => a[1]);
+const readsInTail = (tail) => [...tail.matchAll(/\.\s*(?:getAttribute|hasAttribute|getAttributeNode|getAttributeNS|hasAttributeNS|attributes|dataset|matches|closest)\b[^;\n]*/g)].flatMap((m) => {
   const read = READ.exec(m[0]);
   return read ? readNames(read) : [];
 });
-const PARENT = String.raw`(?:\.(?:parentElement|parentNode|offsetParent)\b|\.getRootNode\(\s*\)|\bdocument\.(?:documentElement|body)\b|\bdocument\.(?:getElementById|querySelector)\([^)]*\))`;
-const destructured = (receiver) => [...js.matchAll(new RegExp(String.raw`\{([^{}]*)\}\s*=\s*${receiver}\??\.dataset\b`, "g"))]
+const PARENT = String.raw`(?:\.(?:parentElement|parentNode|offsetParent)\b|\.getRootNode\(\s*\)|${DOCUMENT}\.(?:documentElement|body)\b|${DOCUMENT}\.(?:getElementById|querySelector(?:All)?)\([^)]*\))`;
+const destructured = (receiver) => [...js.matchAll(new RegExp(String.raw`\{([^{}]*)\}\s*=\s*${receiver}\.dataset\b`, "g"))]
   .flatMap((m) => m[1].split(",").map((part) => part.split(":")[0].trim()).filter(Boolean).map(dataName));
+const inDataset = (receiver) => [...js.matchAll(new RegExp(String.raw`["'\`](\w+)["'\`]\s+in\s+${receiver}\.dataset\b`, "g"))].map((m) => dataName(m[1]));
 const ownOrParentReads = () => ({
   own: new Set([
-    ...[...js.matchAll(/\bthis(?=\s*\??\.)/g)].flatMap((m) => {
+    ...[...js.matchAll(/\bthis(?=\s*\.)/g)].flatMap((m) => {
       const read = READ.exec(js.slice(m.index + 4, m.index + 400));
       return read ? readNames(read) : [];
     }),
     ...destructured(String.raw`\bthis`),
+    ...inDataset(String.raw`this`),
   ]),
   parents: new Set([
     ...[...js.matchAll(new RegExp(`${PARENT}[^;\\n]*`, "g"))].flatMap((m) => readsInTail(m[0])),
-    ...destructured(String.raw`[\w$.?]*${PARENT}`),
+    ...destructured(String.raw`[\w$.]*${PARENT}`),
+    ...inDataset(String.raw`[\w$.]*${PARENT}`),
   ]),
 });
 const selectorAttributes = () => {
   const rules = [...css.replace(/@[\w-]+[^{;]*;/g, "").matchAll(/([^{}]+)\{/g)].flatMap((m) => m[1].split(",").map((part) => part.trim()));
-  return new Set(rules.filter((rule) => !rule.startsWith("@")).flatMap((rule) => [...rule.matchAll(/\[\s*([\w-]+)/g)].map((m) => m[1])));
+  const selectors = rules.flatMap((rule) => !rule.startsWith("@") ? [rule]
+    : rule.startsWith("@supports") ? [...rule.matchAll(/selector\(((?:[^()]|\([^()]*\))*)\)/g)].map((m) => m[1])
+    : rule.startsWith("@scope") ? [...rule.matchAll(/\(((?:[^()]|\([^()]*\))*)\)/g)].map((m) => m[1])
+    : []);
+  return new Set(selectors.flatMap((rule) => [...rule.matchAll(/\[\s*([\w-]+)/g)].map((m) => m[1])));
 };
 const bundle = readFileSync(path.join(root, "../../priv/static/assets/bp-paper-editor.bundle.js"), "utf8");
 const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");

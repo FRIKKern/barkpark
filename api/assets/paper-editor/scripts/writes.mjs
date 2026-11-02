@@ -141,15 +141,22 @@ export function writtenAttributes(js) {
   return [...new Set(found.filter((name) => name && !name.endsWith("-")))];
 }
 
+const elixirCode = (ex) => ex.replace(/@(?:module)?doc\s+(?:~S)?"""[\s\S]*?"""/g, "").replace(/(?<=^|\s)#(?!\{)[^\n]*/gm, "");
+
 export function readerAttributes(ex) {
+  const code = elixirCode(ex);
   return [...new Set([
-    ...[...ex.matchAll(/(?<![\w-])(data-[\w-]+)=/g)].map((m) => m[1]),
-    ...[...ex.matchAll(/["'](data-[\w-]+)["']\s*(?::|=>)/g)].map((m) => m[1]),
+    ...[...code.matchAll(/(?<![\w-])(data-[\w-]+)=/g)].map((m) => m[1]),
+    ...[...code.matchAll(/["'](data-[\w-]+)["']\s*(?::|=>)/g)].map((m) => m[1]),
   ])];
 }
 
 export function readerClasses(ex) {
-  return [...new Set([...ex.matchAll(/class=\\?"([^"\\]*)/g)].flatMap((m) => m[1].split(/\s+/).filter(Boolean)))];
+  const code = elixirCode(ex);
+  return [...new Set([
+    ...[...code.matchAll(/class=\\?"([^"\\]*)/g)].flatMap((m) => m[1].split(/\s+/).filter((token) => /^-?[_a-zA-Z][\w-]*$/.test(token))),
+    ...(code.match(CLASS_WORD) ?? []).filter((word) => !/[-_]$/.test(word)),
+  ])];
 }
 
 export function schemaAttributes(schema) {
