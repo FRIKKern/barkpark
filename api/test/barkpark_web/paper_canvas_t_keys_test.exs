@@ -11,7 +11,7 @@ defmodule BarkparkWeb.PaperCanvasTKeysTest do
   alias BarkparkWeb.StudioLocale
 
   @pinned_misses %{
-    {"canvas/index.js:1083", "an expression it cannot follow"} =>
+    {"canvas/index.js:1101", "an expression it cannot follow"} =>
       "PLACEHOLDER.heading is a function; a heading returns at line 1081, before this line",
     {"canvas/paste-vocabulary.js:182", "a list built at run time"} =>
       "the names a paste left out: DROP_NAMES values and block:<type>, collected while pasting",
