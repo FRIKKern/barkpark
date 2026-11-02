@@ -1466,21 +1466,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp table_align_attr(_aligns, _area, _r, _c), do: ""
 
   defp table_span_lookup(n) do
+    lens = row_lengths(n)
+
     {origins, covered, _left} =
       n
       |> Map.get("spans", [])
-      |> Enum.reduce({%{}, MapSet.new(), cell_count(n)}, fn
-        %{"row" => r0, "col" => c0, "rowspan" => rs, "colspan" => cs}, {origins, covered, left}
-        when rs * cs <= left ->
-          covered =
-            for r <- r0..(r0 + rs - 1),
-                c <- c0..(c0 + cs - 1),
-                {r, c} != {r0, c0},
-                reduce: covered do
-              set -> MapSet.put(set, {r, c})
-            end
+      |> Enum.reduce({%{}, MapSet.new(), cell_count(lens)}, fn
+        %{"row" => r0, "col" => c0, "rowspan" => rs, "colspan" => cs},
+        {origins, covered, left} = acc ->
+          case stored_cells(lens, r0, c0, rs, cs) do
+            [{^r0, ^c0} | rest] = cells when length(cells) <= left ->
+              {Map.put_new(origins, {r0, c0}, {rs, cs}), Enum.into(rest, covered),
+               left - length(cells)}
 
-          {Map.put_new(origins, {r0, c0}, {rs, cs}), covered, left - rs * cs}
+            _ ->
+              acc
+          end
 
         _span, acc ->
           acc
@@ -1681,20 +1682,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # no <td>). Malformed entries are ignored; with overlapping ranges the
   # first listed wins (a covered anchor is simply skipped at emission time).
   defp sheet_merge_lookup(n) do
+    lens = row_lengths(n)
+
     {anchors, covered, _left} =
       n
       |> Map.get("merges")
       |> List.wrap()
-      |> Enum.reduce({%{}, MapSet.new(), cell_count(n)}, fn
-        [r, c, rs, cs], {anchors, covered, left}
+      |> Enum.reduce({%{}, MapSet.new(), cell_count(lens)}, fn
+        [r, c, rs, cs], {anchors, covered, left} = acc
         when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
-               r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap and
-               rs * cs <= left ->
-          covered =
-            for(rr <- r..(r + rs - 1), cc <- c..(c + cs - 1), {rr, cc} != {r, c}, do: {rr, cc})
-            |> Enum.into(covered)
+               r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap ->
+          case stored_cells(lens, r, c, rs, cs) do
+            [{^r, ^c} | rest] = cells when length(cells) <= left ->
+              {Map.put(anchors, {r, c}, {rs, cs}), Enum.into(rest, covered), left - length(cells)}
 
-          {Map.put(anchors, {r, c}, {rs, cs}), covered, left - rs * cs}
+            _ ->
+              acc
+          end
 
         _other, acc ->
           acc
@@ -1703,7 +1707,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     {anchors, covered}
   end
 
-  defp cell_count(n), do: n |> Map.get("rows", []) |> Enum.sum_by(&length/1)
+  defp row_lengths(n), do: n |> Map.get("rows", []) |> Enum.map(&length/1) |> List.to_tuple()
+
+  defp cell_count(lens), do: lens |> Tuple.to_list() |> Enum.sum()
+
+  defp stored_cells(lens, r0, c0, rs, cs) do
+    for r <- r0..(min(r0 + rs, tuple_size(lens)) - 1)//1,
+        c <- c0..(min(c0 + cs, elem(lens, r)) - 1)//1,
+        do: {r, c}
+  end
 
   defp span_attr(anchors, r, c) do
     case Map.fetch(anchors, {r, c}) do

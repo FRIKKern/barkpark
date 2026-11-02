@@ -32,13 +32,13 @@ export function splitLines(s: unknown): string[] {
   return arr
 }
 
-function diffChunks(a: string[], b: string[]): DiffLine[] {
+function diffWithin(a: string[], b: string[], left: number): [DiffLine[], number] {
   const m = a.length
   const n = b.length
-  if (m === 0 && n === 0) return []
-  if (m > MAX_DIFF_LINES || n > MAX_DIFF_LINES || m * n > MAX_DIFF_CELLS) {
+  if (m === 0 && n === 0) return [[], left]
+  if (m > MAX_DIFF_LINES || n > MAX_DIFF_LINES || m * n > left) {
     // Oversized: coarse whole-block diff (all removed, then all added).
-    return [...a.map((t) => ({ op: '-', text: t })), ...b.map((t) => ({ op: '+', text: t }))]
+    return [[...a.map((t) => ({ op: '-', text: t })), ...b.map((t) => ({ op: '+', text: t }))], left]
   }
   // DP-LCS grid, (m+1)×(n+1), zero border. `noUncheckedIndexedAccess` is on, so
   // row/cell accesses use `!` where the index is provably in-bounds.
@@ -75,11 +75,11 @@ function diffChunks(a: string[], b: string[]): DiffLine[] {
     out.unshift({ op: '+', text: b[j - 1]! })
     j--
   }
-  return out
+  return [out, left - m * n]
 }
 
 function diffLines(oldText: unknown, newText: unknown): DiffLine[] {
-  return diffChunks(splitLines(oldText), splitLines(newText))
+  return diffWithin(splitLines(oldText), splitLines(newText), MAX_DIFF_CELLS)[0]
 }
 
 /* ── shape classify (ChatToolRenderer.classify) ────────────────────────────── */
@@ -96,9 +96,14 @@ function classify(input: unknown): 'edit' | 'write' | 'multi_edit' | 'generic' {
 
 function multiEditLines(edits: unknown): DiffLine[] {
   if (!Array.isArray(edits)) return []
+  let left = MAX_DIFF_CELLS
   const hunks = edits
     .filter(isMap)
-    .map((e) => diffLines(e.old_string, e.new_string))
+    .map((e) => {
+      const [hunk, rest] = diffWithin(splitLines(e.old_string), splitLines(e.new_string), left)
+      left = rest
+      return hunk
+    })
     .filter((h) => h.length > 0)
   const out: DiffLine[] = []
   hunks.forEach((h, idx) => {

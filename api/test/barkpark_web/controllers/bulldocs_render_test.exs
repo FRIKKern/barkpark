@@ -401,15 +401,21 @@ defmodule BarkparkWeb.BulldocsRenderTest do
         {us, resp} = bounded(fn -> post_render(body, token) end)
         assert us < 1_000_000, "#{name} took #{div(us, 1000)} ms"
 
-        if name == "toc" do
-          assert resp.status == 422
+        cond do
+          name == "toc" ->
+            assert resp.status == 422
 
-          assert error(resp)["violations"] == [
-                   %{"code" => "value_not_allowed", "path" => "/blocks/0/depth"}
-                 ]
-        else
-          assert resp.status == 200, "#{name}: #{String.slice(resp.resp_body, 0, 200)}"
-          assert Jason.decode!(resp.resp_body)["html"] =~ "<"
+            assert error(resp)["violations"] == [
+                     %{"code" => "value_not_allowed", "path" => "/blocks/0/depth"}
+                   ]
+
+          name in ["nested columns", "nested section"] ->
+            assert resp.status == 422
+            assert [%{"code" => "too_deep"}] = error(resp)["violations"]
+
+          true ->
+            assert resp.status == 200, "#{name}: #{String.slice(resp.resp_body, 0, 200)}"
+            assert Jason.decode!(resp.resp_body)["html"] =~ "<"
         end
       end
     end

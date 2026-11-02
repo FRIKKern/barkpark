@@ -31,9 +31,45 @@ defmodule Barkpark.PortableDoc.LimitDocs do
        }},
       {"heatmap",
        %{"type" => "heatmap", "cells" => [List.duplicate(1, 2000) | List.duplicate([1], 1999)]}},
-      {"route", %{"type" => "route", "polyline" => String.duplicate("~", 60_000) <> "???"}}
+      {"route", %{"type" => "route", "polyline" => String.duplicate("~", 60_000) <> "???"}},
+      {"record table",
+       %{
+         "type" => "table",
+         "columns" => List.duplicate(%{"key" => "k"}, 1000),
+         "rows" => List.duplicate(%{}, 1000)
+       }},
+      {"tool diff",
+       %{
+         "type" => "chat-tool-diff",
+         "input" => %{
+           "file_path" => "f",
+           "old_string" => String.duplicate("a\n", 2000),
+           "new_string" => String.duplicate("b\n", 2000)
+         }
+       }},
+      {"multi edit",
+       %{
+         "type" => "chat-tool-diff",
+         "input" => %{
+           "file_path" => "f",
+           "edits" =>
+             List.duplicate(
+               %{
+                 "old_string" => String.duplicate("a\n", 2000),
+                 "new_string" => String.duplicate("b\n", 2000)
+               },
+               5
+             )
+         }
+       }},
+      {"nested columns", nest(&%{"type" => "columns", "columns" => [[&1]]})},
+      {"nested section", nest(&%{"type" => "section", "blocks" => [&1]})},
+      {"big number", %{"type" => "heatmap", "cells" => [[Integer.pow(10, 400), 1]]}}
     ]
   end
+
+  def nest(wrap, depth \\ 4000),
+    do: Enum.reduce(1..depth, %{"type" => "paragraph", "text" => "leaf"}, fn _, b -> wrap.(b) end)
 
   def bounded(fun) do
     parent = self()
