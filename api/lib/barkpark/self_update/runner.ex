@@ -86,12 +86,21 @@ defmodule Barkpark.SelfUpdate.Runner do
   scope, so on a box with systemd a service restart no longer kills the build
   at all: the run is re-attached (its pid is alive) and finishes on its own.
   The resume rule covers what is left: a reboot, or a box without the scope.
+
+  On a blue/green slot box the run is `deploy/instance-deploy.sh`, which retires
+  the slot this process runs in. That script moves itself under
+  `scripts/build-guard.sh` when it starts inside a barkpark unit's cgroup, and
+  writes the same flight record with `engine: "instance-deploy"`. It writes
+  `phase=restart outcome=applied` after the new slot passes its health gate, so
+  the Runner in the new slot reads the finished run as exit 0
+  (task-212dfd3376d57aef).
   """
 
   use GenServer
 
   require Logger
 
+  alias Barkpark.BuildInfo
   alias Barkpark.SelfUpdate.FailureReport
   alias Barkpark.Sites.BuildLogScrub
 
@@ -490,7 +499,8 @@ defmodule Barkpark.SelfUpdate.Runner do
             os_pid: os_pid,
             orphan?: false,
             attempt: attempt,
-            env: env
+            env: env,
+            from_commit: from_commit(state, attempt)
         }
 
         _ = persist_start(state)
@@ -500,6 +510,19 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:error, reason}
     end
   end
+
+  # The commit the box served when the run began. A resume runs in the BEAM the
+  # restart brought up, which may already be the new build, so it inherits the
+  # first attempt's value instead of reading its own.
+  defp from_commit(state, attempt) when attempt > 1, do: Map.get(state, :from_commit)
+  defp from_commit(_state, _attempt), do: known_commit(serving_commit())
+
+  # The commit this server process was built from. Configurable so tests can
+  # stand in for a box that restarted onto another build.
+  defp serving_commit, do: Keyword.get(config(), :serving_commit) || BuildInfo.commit()
+
+  defp known_commit(sha) when is_binary(sha) and sha not in ["", "unknown"], do: sha
+  defp known_commit(_sha), do: nil
 
   defp max_resumes do
     case Keyword.get(config(), :max_resumes, @default_max_resumes) do
@@ -537,7 +560,8 @@ defmodule Barkpark.SelfUpdate.Runner do
       os_pid: nil,
       orphan?: false,
       attempt: 1,
-      env: []
+      env: [],
+      from_commit: nil
     }
   end
 
@@ -670,7 +694,8 @@ defmodule Barkpark.SelfUpdate.Runner do
       "started_at" => DateTime.to_iso8601(state.started_at),
       "os_pid" => state.os_pid,
       "attempt" => state.attempt,
-      "env" => Map.new(state.env)
+      "env" => Map.new(state.env),
+      "from_commit" => state.from_commit
     })
   rescue
     error -> record_failed(:manifest, error)
@@ -789,7 +814,8 @@ defmodule Barkpark.SelfUpdate.Runner do
           run_id: run_id,
           os_pid: pid_or_nil(manifest["os_pid"]),
           attempt: attempt_of(manifest["attempt"]),
-          env: env_of(manifest["env"])
+          env: env_of(manifest["env"]),
+          from_commit: known_commit(manifest["from_commit"])
       }
 
       case read_json(@terminal_file) do
@@ -875,8 +901,9 @@ defmodule Barkpark.SelfUpdate.Runner do
            [
              "[runner] service restarted during this run; #{where}",
              "[runner] deploy stuck: the service restarted during this run and during its " <>
-               "resume (attempt #{state.attempt}); not retrying. The box keeps serving its old " <>
-               "build. Deploy again once the restarts are explained."
+               "resume (attempt #{state.attempt}); not retrying. " <>
+               serving_sentence(serving_commit(), state.from_commit, record && record["sha"]) <>
+               " Deploy again once the restarts are explained."
            ], false}
 
         may_resume? and resumable?(state) ->
@@ -908,6 +935,43 @@ defmodule Barkpark.SelfUpdate.Runner do
 
     if resume?, do: Map.put(state, :resume?, true), else: state
   end
+
+  @doc """
+  The sentence the stuck line uses for which build the box serves. It names
+  only what is known: the commit this server runs (`serving`), the commit the
+  run started from (`from`) and the commit deploy-rebuild was deploying
+  (`target`, from its flight record). Short and full shas compare by prefix.
+  """
+  @spec serving_sentence(term(), term(), term()) :: String.t()
+  def serving_sentence(serving, from, target) do
+    serving = known_commit(serving)
+    from = known_commit(from)
+    target = known_commit(target)
+
+    cond do
+      serving == nil ->
+        "Which build the box serves now is unknown."
+
+      same_commit?(serving, target) ->
+        "This server runs commit #{serving}, the new build."
+
+      same_commit?(serving, from) ->
+        "This server runs commit #{serving}, the old build the run started from."
+
+      from != nil ->
+        "This server runs commit #{serving}; the run started from #{from}" <>
+          if(target, do: " and was deploying #{target}", else: "") <>
+          ". Whether that is the old or the new build is unknown."
+
+      true ->
+        "This server runs commit #{serving}. Whether that is the old or the new build is unknown."
+    end
+  end
+
+  defp same_commit?(a, b) when is_binary(a) and is_binary(b),
+    do: String.starts_with?(a, b) or String.starts_with?(b, a)
+
+  defp same_commit?(_a, _b), do: false
 
   defp resumable?(state) do
     state.mode == :self_update and state.attempt <= max_resumes() and recent?(state)

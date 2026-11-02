@@ -109,6 +109,8 @@ async function standInModule(make) {
   }
 }
 
+export const startLine = (builds, url, fold) => `testing ground on ${builds.map((b) => `${b.label} at ${b.sha}`).join(" beside ")}: ${url}${fold ? ` · fold: ${fold.name}` : ""}`;
+
 export async function start({ builds = [mainBuild()], port = 0, fold = null, standIn = readerStandIn, bp = "bp" } = {}) {
   const reader = await standInModule(standIn);
   const page = (name) => () => readFileSync(join(SRC, "testing-ground/page", name));
@@ -205,6 +207,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const { url } = await start({ builds, port: port === undefined ? 4417 : Number(port), fold });
-  console.log(`testing ground on ${builds.map((b) => `${b.label} at ${b.sha}`).join(" beside ")}: ${url}${fold ? ` · fold: ${fold.name}` : ""}`);
+  console.log(startLine(builds, url, fold));
   if (!args.includes("--no-open")) spawn("open", [url], { stdio: "ignore", detached: true }).unref();
 }

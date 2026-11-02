@@ -22,22 +22,29 @@ function authoredBlockIds(block) {
 
 export const authoredIds = (blocks) => blocks.flatMap(authoredBlockIds);
 
-const count = (ids, id) => ids.filter((x) => x === id).length;
-
-function refuseDuplicateGrowth(before, after, op) {
-  const was = authoredIds(before);
-  const now = authoredIds(after);
-  const grown = now.find((id) => count(now, id) > 1 && count(now, id) > count(was, id));
-  if (grown) throw new Error(`${op.op}: duplicate id ${grown}`);
-}
+const tally = (blocks) => authoredIds(blocks).reduce((counts, id) => counts.set(id, (counts.get(id) ?? 0) + 1), new Map());
+const named = (op) => [op.id, op.afterId, op.after].filter((id) => typeof id === "string");
 
 export const referenceFold = {
   name: "Reference fold (the JS mirror of patch.ex)",
-  apply: async (blocks, ops) => ops.reduce((before, op) => {
-    const after = applyOps(before, [op]);
-    refuseDuplicateGrowth(before, after, op);
-    return after;
-  }, blocks),
+  apply: async (blocks, ops) => {
+    const start = tally(blocks);
+    const repeated = (counts, id) => counts.get(id) > 1 && counts.get(id) > (start.get(id) ?? 0);
+    const adder = new Map();
+    let now = blocks;
+    let counts = start;
+    for (const op of ops) {
+      const repeat = named(op).find((id) => repeated(counts, id));
+      if (repeat) throw new Error(`${op.op}: duplicate id ${repeat}`);
+      now = applyOps(now, [op]);
+      const next = tally(now);
+      for (const [id, n] of next) if (n > (counts.get(id) ?? 0)) adder.set(id, op.op);
+      counts = next;
+    }
+    const left = [...counts.keys()].find((id) => repeated(counts, id));
+    if (left) throw new Error(`${adder.get(left)}: duplicate id ${left}`);
+    return now;
+  },
 };
 
 export const serverFold = (name) => ({

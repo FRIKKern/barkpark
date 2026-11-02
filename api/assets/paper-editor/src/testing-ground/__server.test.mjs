@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reportArgs } from "./repro.mjs";
-import { start } from "./server.mjs";
+import { start, startLine } from "./server.mjs";
 
 const SERVER = fileURLToPath(new URL("./server.mjs", import.meta.url));
 const standIn = async () => "export const render = () => 'stand-in';";
@@ -197,6 +197,7 @@ const quiet = cli(["main", "--no-open", "--port=0"]);
 try {
   const line = await quiet.printed(/\n/);
   assert.match(line, /^testing ground on main at [0-9a-f]{10}: http:\/\/127\.0\.0\.1:\d+\/\n$/, "no fold switch named");
+  assert.equal(startLine([{ label: "contract 1.19", sha: "648bfeeb44" }, { label: "PR #25044", sha: "615c445c4b" }], "http://127.0.0.1:4417/"), "testing ground on contract 1.19 at 648bfeeb44 beside PR #25044 at 615c445c4b: http://127.0.0.1:4417/", "two builds are named in order");
 } finally {
   quiet.stop();
 }

@@ -186,7 +186,8 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   defp multi_edit_lines(edits) when is_list(edits) do
     edits
     |> Enum.filter(&is_map/1)
-    |> Enum.map(fn e -> TextDiff.diff_lines(e["old_string"], e["new_string"]) end)
+    |> Enum.map(&{&1["old_string"], &1["new_string"]})
+    |> TextDiff.diff_many()
     |> Enum.reject(&(&1 == []))
     |> Enum.intersperse([%{op: "gap", text: ""}])
     |> List.flatten()

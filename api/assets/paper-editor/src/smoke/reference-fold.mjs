@@ -26,7 +26,7 @@ function applyOps(prevBlocks, ops) {
   const idExists = (list, id) =>
     Array.isArray(list) && list.some((b) => b && (b.id === id || idExists(b.blocks, id)));
 
-  // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the block
+  // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the first block
   // `id` at TOP LEVEL or nested inside any block's `blocks` (a section body) at any
   // depth, and replace it with `fn(target)` (an ARRAY of 0/1/many blocks). Returns a
   // NEW tree (never mutates input) or null when the id is absent everywhere.
@@ -35,12 +35,12 @@ function applyOps(prevBlocks, ops) {
     const walk = (arr) => {
       const out = [];
       for (const b of arr || []) {
-        if (b && b.id === id) {
+        if (!found && b && b.id === id) {
           found = true;
           for (const nb of fn(b)) out.push(nb);
           continue;
         }
-        if (b && Array.isArray(b.blocks)) {
+        if (!found && b && Array.isArray(b.blocks)) {
           out.push({ ...b, blocks: walk(b.blocks) });
         } else {
           out.push(b);

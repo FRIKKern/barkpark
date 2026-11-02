@@ -1648,8 +1648,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp chat_multi_edit_lines(edits) when is_list(edits) do
     edits
     |> Enum.filter(&is_map/1)
-    |> Enum.map(fn e -> chat_diff(Map.get(e, "old_string"), Map.get(e, "new_string")) end)
+    |> Enum.map(&{Map.get(&1, "old_string"), Map.get(&1, "new_string")})
+    |> TextDiff.diff_many()
     |> Enum.reject(&(&1 == []))
+    |> Enum.map(fn hunk -> Enum.map(hunk, &%{"op" => &1.op, "text" => &1.text}) end)
     |> Enum.intersperse([%{"op" => "gap", "text" => ""}])
     |> List.flatten()
   end

@@ -84,7 +84,7 @@ caretAt(left, "p-a", 6);
 caretAt(right, "p-b", 1);
 key("Enter");
 same("Enter goes in where the left caret is, not where the right one was");
-assert.deepEqual(lines(left).slice(0, 4), ["paragraph:/Alpha", "paragraph:", "paragraph:", "paragraph:/Beta"]);
+assert.deepEqual(lines(left).slice(0, 3), ["paragraph:/Alpha", "paragraph:", "paragraph:/Beta"], "Enter at the end of a line opens the empty line below, as main does since #25044");
 typeLeft("Fog");
 same("typed text follows into the new line, whose id differs on each side");
 key("Backspace");
@@ -146,7 +146,11 @@ assert.equal(lines(right)[0], "paragraph:/Al!", "a caret past the end of a short
 right._editor.view.dispatch(right._editor.state.tr.insertText("pha", alpha + 3));
 same("the blocks agree again");
 const twins = (canvas) => { const out = []; canvas._editor.state.doc.forEach((node, at) => { if (node.attrs.bpId === alphaId) out.push(at); }); return out; };
-assert.equal(twins(left).length, 2, "the split left two blocks with one id, as D01 shows");
+for (const canvas of [left, right]) {
+  const [at] = twins(canvas);
+  canvas._editor.view.dispatch(canvas._editor.state.tr.insert(at + canvas._editor.state.doc.nodeAt(at).nodeSize, canvas._editor.schema.nodes.paragraph.create({ bpId: alphaId }, canvas._editor.schema.text("Twin"))));
+}
+assert.equal(twins(left).length, 2, "two blocks with one id, as old builds make on Enter");
 left._editor.commands.setTextSelection(twins(left)[1] + 1);
 caretAt(right, "p-z", 1);
 typeLeft("^");

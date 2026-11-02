@@ -118,7 +118,8 @@ await scene("D07 counts how often ArrowDown skips the hidden empty line", "?doc=
   assert.match(words, /^↓ skipped the empty line in [0-8] of [0-8] tries\.( The caret stayed put [1-8] times?\.)?$/);
   const { tries, hits, stayed } = await page.evaluate(() => window.testingGround.state.tally);
   assert.equal(tries + stayed, 8);
-  assert.equal(await page.getAttribute(".tg-tally", "class"), hits > 0 || stayed > 0 ? "tg-tally tg-tally--red" : "tg-tally");
+  assert.equal(hits, 0, "ArrowDown never lands in a hidden empty line on this build");
+  assert.equal(await page.getAttribute(".tg-tally", "class"), stayed > 0 ? "tg-tally tg-tally--red" : "tg-tally");
   console.log(`      D07 on this build: ${words}`);
   await page.evaluate(() => window.testingGround.openDoc("drill:D01"));
   assert.equal(await page.isVisible(".tg-tally"), false);
@@ -134,6 +135,21 @@ await scene("D07 counts a caret that never leaves the line as stayed put, not as
   assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 0 tries. The caret stayed put 8 times.");
   assert.equal(await page.getAttribute(".tg-tally", "class"), "tg-tally tg-tally--red");
 }, (page) => page.addInitScript(() => document.addEventListener("keydown", (event) => { if (event.key === "ArrowDown") event.preventDefault(); }, true)));
+
+await scene("D07 paints the tally red when the caret lands in the hidden empty line", "?doc=drill:D07", async (page) => {
+  await play(page, drill("D07"));
+  assert.deepEqual(await page.evaluate(() => window.testingGround.state.tally), { tries: 8, hits: 8, stayed: 0 });
+  assert.equal(await page.textContent(".tg-tally"), "↓ skipped the empty line in 0 of 8 tries.");
+  assert.equal(await page.getAttribute(".tg-tally", "class"), "tg-tally tg-tally--red");
+}, (page) => page.addInitScript(() => document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  setTimeout(() => {
+    const { view } = window.testingGround.state.canvases[0]._editor;
+    const { state } = view;
+    view.dispatch(state.tr.setSelection(state.selection.constructor.create(state.doc, state.doc.child(0).nodeSize + 1)));
+  });
+}, true)));
 
 await scene("under the hood: batches with the server's answer, the diff and the saved doc", "?doc=drill:D02", async (page) => {
   await page.click(".tg-tab");
@@ -389,17 +405,28 @@ if (process.env.TG_TRY) {
 }
 
 if (process.env.TG_BARKPARK) {
-  const fold = barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN);
-  await t.checkAsync("a batch patch.ex refuses comes back with Barkpark's own answer", () =>
-    assert.rejects(fold.apply([{ id: "p-a", type: "paragraph", content: [] }], [{ op: "patch-block", id: "p-missing", patch: { content: [] } }]), /^Error: Barkpark answered 4\d\d to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*p-missing/));
-  const local = await start({ fold });
+  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });
   const page = await browser.newPage();
-  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
+  const openLocal = async () => {
     await page.goto(`${local.url}?doc=drill:D02`);
     await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
+  };
+  await t.checkAsync("D02 through a local Barkpark: patch.ex saves every batch", async () => {
+    await openLocal();
     await play(page, drill("D02"));
+    assert.deepEqual(red(await lightsOf(page)), []);
+  });
+  await t.checkAsync("a batch that adds a second p-after comes back refused with Barkpark's own answer", async () => {
+    await openLocal();
+    await page.evaluate(() => {
+      const { host } = window.testingGround.state;
+      const real = host.fold;
+      host.fold = { name: real.name, apply: (blocks, ops) => real.apply(blocks, [...ops, { op: "insert-after", afterId: "p-after", block: { id: "p-after", type: "paragraph", content: [] } }]) };
+    });
+    await play(page, { steps: [{ click: { text: "Home by dark.", at: "end" } }, { type: "!" }] });
     const lights = await lightsOf(page);
-    assert.deepEqual(red(lights), []);
+    assert.deepEqual(red(lights), ["refused-batches"]);
+    assert.match(lights["refused-batches"].words, /Barkpark answered 422 to POST \/v1\/data\/doc\/production\/post\/tg-\d+\/ops: .*"code":"invalid_op"/);
   });
   await page.close();
   await local.close();
