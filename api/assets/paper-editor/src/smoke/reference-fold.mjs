@@ -20,13 +20,13 @@
 //                   RECURSES into section children
 //   replace-block → replace the block by id wholesale; RECURSES into section children
 //                   (the container coarse path — the whole rebuilt subtree)
-function applyOps(prevBlocks, ops) {
+function applyOps(prevBlocks, ops, { batch = false } = {}) {
   let blocks = (prevBlocks || []).map((b) => ({ ...b }));
   const idAt = (id) => blocks.findIndex((b) => b && b.id === id);
   const idExists = (list, id) =>
     Array.isArray(list) && list.some((b) => b && (b.id === id || idExists(b.blocks, id)));
 
-  // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the block
+  // transformAtId(blocks, id, fn) — mirror patch.ex transform_at_id: find the first block
   // `id` at TOP LEVEL or nested inside any block's `blocks` (a section body) at any
   // depth, and replace it with `fn(target)` (an ARRAY of 0/1/many blocks). Returns a
   // NEW tree (never mutates input) or null when the id is absent everywhere.
@@ -35,12 +35,12 @@ function applyOps(prevBlocks, ops) {
     const walk = (arr) => {
       const out = [];
       for (const b of arr || []) {
-        if (b && b.id === id) {
+        if (!found && b && b.id === id) {
           found = true;
           for (const nb of fn(b)) out.push(nb);
           continue;
         }
-        if (b && Array.isArray(b.blocks)) {
+        if (!found && b && Array.isArray(b.blocks)) {
           out.push({ ...b, blocks: walk(b.blocks) });
         } else {
           out.push(b);
@@ -55,14 +55,14 @@ function applyOps(prevBlocks, ops) {
   for (const op of ops) {
     switch (op.op) {
       case "append-block": {
-        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
+        if (!batch && op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`append-block: duplicate id ${op.block.id}`);
         }
         blocks = [...blocks, { ...op.block }];
         break;
       }
       case "insert-after": {
-        if (op.block && op.block.id != null && idExists(blocks, op.block.id)) {
+        if (!batch && op.block && op.block.id != null && idExists(blocks, op.block.id)) {
           throw new Error(`insert-after: duplicate id ${op.block.id}`);
         }
         const next = transformAtId(blocks, op.afterId, (target) => [target, { ...op.block }]);
