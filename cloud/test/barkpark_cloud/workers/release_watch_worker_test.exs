@@ -174,8 +174,7 @@ defmodule BarkparkCloud.Workers.ReleaseWatchWorkerTest do
     assert ReleaseWatchWorker.unaware?(
              %{
                update_latest_release: nil,
-               update_unavailable_reason: nil,
-               update_state: "unknown"
+               update_unavailable_reason: nil
              },
              "0.2.34"
            )
@@ -183,8 +182,7 @@ defmodule BarkparkCloud.Workers.ReleaseWatchWorkerTest do
     refute ReleaseWatchWorker.unaware?(
              %{
                update_latest_release: nil,
-               update_unavailable_reason: nil,
-               update_state: "disabled"
+               update_unavailable_reason: "unreachable"
              },
              "0.2.34"
            )

@@ -51,8 +51,8 @@ defmodule BarkparkCloud.Workers.ReleaseWatchWorker do
   @doc """
   Whether a box's row does not yet show `release`. A box that last answered
   with no release and no refusal is included, since it has no verdict to keep.
-  A box whose last read failed (`update_unavailable_reason` set) or whose
-  checker is disabled is left to the hourly sweep.
+  A box whose last read failed (`update_unavailable_reason` set) is left to the
+  hourly sweep.
   """
   @spec unaware?(map(), String.t()) :: boolean()
   def unaware?(bp, release) do
@@ -60,7 +60,7 @@ defmodule BarkparkCloud.Workers.ReleaseWatchWorker do
 
     case LatestRelease.parse(bp.update_latest_release) do
       {:ok, shown} -> shown < latest
-      :error -> bp.update_unavailable_reason == nil and bp.update_state != "disabled"
+      :error -> bp.update_unavailable_reason == nil
     end
   end
 
