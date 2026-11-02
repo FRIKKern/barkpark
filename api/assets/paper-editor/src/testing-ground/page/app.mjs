@@ -5,6 +5,8 @@ import { lights } from "../traps.mjs";
 import { paintHood } from "./hood.mjs";
 import { lines, settle, visibility } from "./measure.mjs";
 import { paintReader } from "./reader.mjs";
+import { recorder } from "./record.mjs";
+import { wireReport } from "./report.mjs";
 import { tallyWords, watchTally } from "./tally.mjs";
 
 const $ = (selector) => document.querySelector(selector);
@@ -36,6 +38,8 @@ const ui = {
   hood: $('[data-section="hood"]'),
   hoodEl: { fold: $(".tg-fold"), batches: $(".tg-batches"), diff: $(".tg-diff"), json: $(".tg-json") },
 };
+
+const record = recorder(ui.edit, () => state.canvases);
 
 function remember() {
   const next = new URLSearchParams({ doc: state.key });
@@ -85,6 +89,7 @@ function openDoc(key) {
   if (key !== state.key) state.tally = { tries: 0, hits: 0, stayed: 0 };
   state.key = key;
   state.reload = null;
+  record.clear();
   const doc = docs.get(key);
   state.host = createFakeHost({ fold: build.fold ? serverFold(build.fold) : referenceFold, blocks: doc.blocks, onChange: changed });
   mountCanvases();
@@ -99,6 +104,7 @@ function openDoc(key) {
 }
 
 async function reload() {
+  record.note({ kind: "reload" });
   const [canvas] = state.canvases;
   await settle(canvas, state.host);
   const before = lines(canvas);
@@ -112,9 +118,9 @@ function changed() {
   if (ui.hood.open) paintHood(ui.hoodEl, { host: state.host, start: doc.blocks });
 }
 
-function paintLights() {
+function currentLights() {
   const [canvas] = state.canvases;
-  const list = lights({
+  return lights({
     visibility: visibility(canvas),
     believed: canvas.blocks,
     saved: state.host.saved,
@@ -123,6 +129,26 @@ function paintLights() {
     settled: !state.host.busy,
     reload: state.reload,
   });
+}
+
+function snapshot() {
+  const { host } = state;
+  return {
+    v: 1,
+    build: { label: build.label, sha: build.sha },
+    fold: host.fold.name,
+    doc: state.key,
+    width: ui.phone.checked ? "phone" : "desk",
+    theme: ui.dark.checked ? "dark" : "light",
+    start: docs.get(state.key).blocks,
+    events: record.events(),
+    batches: host.batches.map(({ seq, ops, answer }) => ({ seq, ops, answer })),
+    red: currentLights().filter((light) => light.ok === false).map(({ key, words }) => ({ key, words })),
+  };
+}
+
+function paintLights() {
+  const list = currentLights();
   const shown = JSON.stringify(list);
   if (shown === state.shown) return;
   state.shown = shown;
@@ -179,5 +205,6 @@ watchTally(ui.edit, () => {
 });
 $(".tg-build").textContent = `Editor build: ${build.label} at ${build.sha}`;
 $(".tg-stamp").textContent = `${build.label} at ${build.sha}`;
+wireReport({ what: $(".tg-report-what"), show: $(".tg-report-show"), preview: $(".tg-report-preview"), file: $(".tg-report-file"), result: $(".tg-report-result") }, snapshot);
 setInterval(paintLights, 200);
-window.testingGround = { state, reload, openDoc, setDrawer, paintLights, settle: () => settle(state.canvases[0], state.host) };
+window.testingGround = { state, reload, openDoc, setDrawer, paintLights, snapshot, settle: () => settle(state.canvases[0], state.host) };

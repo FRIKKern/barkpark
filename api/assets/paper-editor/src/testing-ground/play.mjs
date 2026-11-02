@@ -35,6 +35,20 @@ export const doors = {
     await page.locator(".tg-edit").getByRole("button", { name, exact: true }).first().click();
     await caretRead(page);
   },
+  async caret(page, { id, offset }) {
+    await page.evaluate(([id, offset]) => {
+      const editor = window.testingGround.state.canvases[0]._editor;
+      let at = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (at === null && node.attrs.bpId === id) at = pos + 1 + offset;
+        return at === null;
+      });
+      if (at === null) throw new Error(`no block ${id} in the doc`);
+      editor.view.focus();
+      editor.commands.setTextSelection(at);
+    }, [id, offset]);
+    await caretRead(page);
+  },
   async dblclick(page, { word }) {
     const { x, y } = await boxOf(page, word, "middle");
     await page.mouse.dblclick(x, y);

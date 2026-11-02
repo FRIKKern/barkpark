@@ -6,5 +6,8 @@ export function verdict(drill, lights, tally, errors) {
   const red = drill.green.filter((key) => lights[key].ok !== "true").map((key) => lights[key].words);
   if (drill.tally && tally.hits !== drill.repeat) red.push(tallyWords(tally));
   red.push(...errors.map((error) => `page error: ${error}`));
-  return { ok: red.length === 0, words: red.length ? red.join(" · ") : `${[...drill.green, ...(drill.tally ? ["the tally"] : [])].join(", ")} green` };
+  const checked = [...drill.green, ...(drill.tally ? ["the tally"] : [])];
+  if (red.length) return { ok: false, words: red.join(" · ") };
+  if (!checked.length) return { ok: false, words: "nothing to check: no light was red when this was recorded, so add a check to the drill" };
+  return { ok: true, words: `${checked.join(", ")} green` };
 }

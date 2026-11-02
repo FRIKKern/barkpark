@@ -34,6 +34,7 @@ assert.deepEqual(verdict(d01, lit(), quiet, ["boom"]), { ok: false, words: "page
 assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 8, stayed: 0 }, []), { ok: true, words: "the tally green" });
 assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 0, stayed: 0 }, []), { ok: false, words: "↓ skipped the empty line in 8 of 8 tries." });
 assert.deepEqual(verdict(d07, lit(), { tries: 7, hits: 7, stayed: 1 }, []), { ok: false, words: "↓ skipped the empty line in 0 of 7 tries. The caret stayed put 1 time." }, "a caret that stays put did not land either");
+assert.deepEqual(verdict({ ...d01, green: [] }, lit(), quiet, []), { ok: false, words: "nothing to check: no light was red when this was recorded, so add a check to the drill" }, "a drill that checks nothing cannot pass");
 assert.equal(needsHands(drills.find((d) => d.id === "D06")).say, "In the top editor, type at the end of \"Window A types here.\"");
 assert.equal(needsHands(d01), undefined);
 
@@ -46,11 +47,16 @@ for (const [args, why] of [
   [["D01", "--build=1.99"], /no recorded tree for contract 1\.99/],
   [["D01", "--build=x"], /a build is main, a PR number or a contract like 1\.19, got x/],
   [["D01", "--build=main", "--build=1.19"], /--build given twice/],
+  [["--repro=a.json", "--repro=b.json"], /--repro given twice/],
+  [["D01", "--repro=a.json"], /a repro or drill names, not both/],
+  [["--repro="], /unknown or malformed flag --repro=/],
+  [["--repro=/no/such/repro.json"], /--repro=\/no\/such\/repro\.json is not a repro: ENOENT/],
+  [[`--repro=${fileURLToPath(import.meta.url)}`], /is not a repro: Unexpected token/],
 ]) {
   const run = spawnSync(process.execPath, [DRILL, ...args], { encoding: "utf8", timeout: 20000 });
   assert.equal(run.status, 2, `${args.join(" ")} is a usage error`);
   assert.match(run.stderr, why);
-  assert.match(run.stderr, /usage: npm run drill <drill id …> \| all \[-- --build=<main \| PR number \| contract like 1\.19>\]\n  drills: D01, D02, D03, D04, D05, D06, D07/);
+  assert.match(run.stderr, /usage: npm run drill <drill id …> \| all \[-- --build=<main \| PR number \| contract like 1\.19>\]\n       npm run drill -- --repro=<repro\.json> \[--build=…\]\n  drills: D01, D02, D03, D04, D05, D06, D07/);
 }
 
 console.log("PASS  testing-ground drills: one file is a checklist and a script, and the runner's verdict reads its lights");

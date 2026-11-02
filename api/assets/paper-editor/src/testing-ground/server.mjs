@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { barkparkFold } from "./barkpark-fold.mjs";
 import { besideMain, makeBuild, pickBuild } from "./builds.mjs";
+import { reportArgs } from "./repro.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const REPO = join(SRC, "../../../..");
@@ -61,16 +62,43 @@ function inside(root, rel) {
   return path.startsWith(root + sep) && extname(path) in TYPES && existsSync(path) ? path : null;
 }
 
-async function foldThrough(fold, req, res) {
+async function readJson(req) {
   let body = "";
   for await (const chunk of req) body += chunk;
-  const { blocks, ops } = JSON.parse(body);
+  return JSON.parse(body);
+}
+
+function answer(res, status, value) {
+  res.statusCode = status;
+  res.end(JSON.stringify(value));
+}
+
+async function foldThrough(fold, req, res) {
   try {
-    res.end(JSON.stringify({ blocks: await fold.apply(blocks, ops) }));
+    const { blocks, ops } = await readJson(req);
+    answer(res, 200, { blocks: await fold.apply(blocks, ops) });
   } catch (error) {
-    res.statusCode = 422;
-    res.end(JSON.stringify({ error: error.message }));
+    answer(res, 422, { error: error.message });
   }
+}
+
+async function reportThrough(bp, path, req, res) {
+  let args;
+  try {
+    args = reportArgs(await readJson(req));
+  } catch (error) {
+    return answer(res, 400, { error: error.message });
+  }
+  if (path === "/report/preview") return answer(res, 200, { args });
+  execFile(bp, args, { timeout: 60000 }, (error, stdout, stderr) => {
+    const last = stdout.trim().split("\n").at(-1);
+    if (error) return answer(res, 502, { error: `bp failed: ${(stderr || error.message).trim().split("\n").slice(-3).join(" ")}` });
+    try {
+      answer(res, 200, { id: JSON.parse(last).id });
+    } catch {
+      answer(res, 502, { error: `bp answered without a task id: ${last}` });
+    }
+  });
 }
 
 async function standInModule(make) {
@@ -81,7 +109,7 @@ async function standInModule(make) {
   }
 }
 
-export async function start({ builds = [mainBuild()], port = 0, fold = null, standIn = readerStandIn } = {}) {
+export async function start({ builds = [mainBuild()], port = 0, fold = null, standIn = readerStandIn, bp = "bp" } = {}) {
   const reader = await standInModule(standIn);
   const page = (name) => () => readFileSync(join(SRC, "testing-ground/page", name));
   const files = {
@@ -110,13 +138,14 @@ export async function start({ builds = [mainBuild()], port = 0, fold = null, sta
     const build = builds[Number(index)];
     const split = rest === asked && builds.length > 1;
     const path = rest === "/" ? (split ? "/split.html" : "/index.html") : rest;
-    if (fold && req.method === "POST" && path === "/fold") {
+    const posts = ["/report", "/report/preview", ...(fold ? ["/fold"] : [])];
+    if (req.method === "POST" && posts.includes(path)) {
       if (req.headers["content-type"] !== TYPES[".json"]) {
         res.statusCode = 415;
-        return res.end("the fold takes application/json only");
+        return res.end("posts take application/json only");
       }
       res.setHeader("content-type", TYPES[".json"]);
-      return foldThrough(fold, req, res);
+      return path === "/fold" ? foldThrough(fold, req, res) : reportThrough(bp, path, req, res);
     }
     const route = build && { ...files, ...perBuild(build) }[path];
     const file = path.startsWith("/src/") && inside(SRC, path.slice(5));

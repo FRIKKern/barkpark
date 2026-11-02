@@ -102,7 +102,9 @@ body {
 .tg-tally--red { color: var(--tg-red); }
 .tg-steps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 6px; }
 .tg-batches { padding-left: 20px; margin: 0; display: grid; gap: 4px; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: 12px; word-break: break-all; }
-.tg-diff, .tg-json { margin: 0; max-height: 280px; overflow: auto; padding: 8px; background: var(--tg-bg); border: 1px solid var(--tg-rule); font-size: 12px; }
+.tg-diff, .tg-json, .tg-report-preview { margin: 0; max-height: 280px; overflow: auto; padding: 8px; background: var(--tg-bg); border: 1px solid var(--tg-rule); font-size: 12px; }
+.tg-report-preview { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tg-report-what { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; font: inherit; }
 
 @media (max-width: 700px) {
   .tg-with-reader .tg-panes { grid-template-columns: 1fr; }

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exitRig, skip, tally } from "./__rig.mjs";
 import { drills } from "./testing-ground/drills/index.mjs";
@@ -7,6 +9,7 @@ import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
 import { chromium } from "./testing-ground/chromium.mjs";
 import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
 import { makeBuild, pickBuild } from "./testing-ground/builds.mjs";
+import { reportArgs } from "./testing-ground/repro.mjs";
 import { mainBuild, REPO, start } from "./testing-ground/server.mjs";
 
 const ONLY = process.env.TG_ONLY;
@@ -17,7 +20,13 @@ try {
 } catch (error) {
   process.exit(skip(`__testing_ground_page.mjs — ${error.message.split("\n")[0]}`));
 }
-const server = await start();
+const scratch = mkdtempSync(join(tmpdir(), "tg-rig-"));
+process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
+const filed = join(scratch, "argv.json");
+const fakeBp = join(scratch, "bp");
+writeFileSync(fakeBp, `#!${process.execPath}\nrequire("fs").writeFileSync(${JSON.stringify(filed)}, JSON.stringify(process.argv.slice(2)));\nconsole.log(JSON.stringify({ id: "task-rig" }));\n`);
+chmodSync(fakeBp, 0o755);
+const server = await start({ bp: fakeBp });
 const t = tally();
 
 async function open(query = "", prepare = async () => {}) {
@@ -52,7 +61,7 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.equal(await page.isVisible(".tg-tab-dot"), false);
   await page.click(".tg-tab");
   assert.equal(await page.isVisible("#tg-drawer"), true);
-  assert.deepEqual(await page.$$eval("#tg-drawer summary", (s) => s.map((x) => x.textContent)), ["Live checks", "Preview and test docs", "Versions", "Under the hood"]);
+  assert.deepEqual(await page.$$eval("#tg-drawer summary", (s) => s.map((x) => x.textContent)), ["Report a bug", "Live checks", "Preview and test docs", "Versions", "Under the hood"]);
   assert.match(await page.textContent(".tg-build"), /^Editor build: main at [0-9a-f]{7,}$/);
   assert.deepEqual(red(await lightsOf(page)), []);
   assert.equal(await page.isVisible(".tg-steps"), false, "a block sample has no checklist");
@@ -267,21 +276,59 @@ await t.checkAsync("split screen: two builds side by side, each named with its s
     assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload, and the keys after a reload go across once");
   }));
 
-const runner = "npm run drill plays drills as tests: D01 fails on main with its red light, D04 passes, D06 needs hands";
-if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
-  const run = spawn(process.execPath, [new URL("./testing-ground/drill.mjs", import.meta.url).pathname, "D01", "D04", "D06"]);
+function runDrill(...args) {
+  const run = spawn(process.execPath, [new URL("./testing-ground/drill.mjs", import.meta.url).pathname, ...args]);
   let out = "";
   run.stdout.on("data", (d) => (out += d));
   run.stderr.on("data", (d) => (out += d));
   const deadline = setTimeout(() => run.kill(), 120000);
-  const code = await new Promise((resolve) => run.on("exit", resolve));
-  clearTimeout(deadline);
-  assert.equal(code, 1, out);
-  assert.deepEqual(out.replace(/[0-9a-f]{10}/g, "<sha>").trim().split("\n"), [
+  return new Promise((resolve) => run.on("exit", (code) => { clearTimeout(deadline); resolve({ code, lines: out.replace(/[0-9a-f]{10}/g, "<sha>").trim().split("\n") }); }));
+}
+
+async function preview(page) {
+  await page.click(".tg-report-show");
+  await page.waitForSelector(".tg-report-show:not([disabled])");
+}
+
+await scene("Report a bug shows exactly what bp gets, files it, and its repro replays as a drill that fails on main", "?doc=drill:D01", async (page) => {
+  await play(page, drill("D01"));
+  await page.click(".tg-tab");
+  await page.click('[data-section="report"] summary');
+  assert.match(await page.textContent('[data-section="report"] .tg-note'), /^Test docs only\./);
+  assert.equal(await page.isDisabled(".tg-report-file"), true, "nothing to file before the preview");
+  await preview(page);
+  assert.equal(await page.textContent(".tg-report-preview"), "Say what went wrong first.");
+  assert.equal(await page.isDisabled(".tg-report-file"), true);
+  await page.fill(".tg-report-what", "Six Enters left one line");
+  await preview(page);
+  const repro = await page.evaluate(() => window.testingGround.snapshot());
+  const args = reportArgs({ what: "Six Enters left one line", repro });
+  assert.equal(await page.textContent(".tg-report-preview"), ["bp", ...args].join("\n"), "the preview is every argument bp will get");
+  assert.deepEqual(repro.events.map((e) => e.key || e.text || `${e.kind}${e.id ? ` ${e.id} ${e.offset}` : ""}`), ["caret p-e 0", "Enter", "Enter", "Enter", "Enter", "Enter", "Enter", "x", "Backspace", "reload"]);
+  assert.deepEqual(repro.red.map((light) => light.key), ["hidden-blocks"]);
+  assert.deepEqual([repro.build.label, repro.doc, repro.width, repro.theme], ["main", "drill:D01", "desk", "light"]);
+  await page.fill(".tg-report-what", "Six Enters left one line!");
+  assert.equal(await page.isDisabled(".tg-report-file"), true, "an edit after the preview needs a new preview");
+  await page.fill(".tg-report-what", "Six Enters left one line");
+  await preview(page);
+  await page.click(".tg-report-file");
+  await page.waitForFunction(() => document.querySelector(".tg-report-result").textContent);
+  assert.equal(await page.textContent(".tg-report-result"), "Filed task-rig. An agent replays it with npm run drill -- --repro.");
+  assert.deepEqual(JSON.parse(readFileSync(filed, "utf8")), args, "bp got exactly what the preview showed");
+  const file = join(scratch, "repro.json");
+  writeFileSync(file, JSON.stringify(repro));
+  const { code, lines } = await runDrill(`--repro=${file}`);
+  assert.deepEqual([code, lines], [1, ["FAIL  R Repro from main at <sha> on main at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown)."]]);
+});
+
+const runner = "npm run drill plays drills as tests: D01 fails on main with its red light, D04 passes, D06 needs hands";
+if (!ONLY || runner.includes(ONLY)) await t.checkAsync(runner, async () => {
+  const { code, lines } = await runDrill("D01", "D04", "D06");
+  assert.deepEqual([code, lines], [1, [
     "FAIL  D01 Empty-line Enter on main at <sha>: Hidden blocks — red 6 lines are in the doc but hidden on screen (9 blocks, 2 shown).",
     "PASS  D04 Select and Enter on main at <sha>: hidden-blocks green",
     'HANDS D06 Two windows on main at <sha>: needs hands at "In the top editor, type at the end of "Window A types here.""',
-  ]);
+  ]]);
 });
 
 if (process.env.TG_TRY) {

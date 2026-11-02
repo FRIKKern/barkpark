@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { reportArgs } from "./repro.mjs";
 import { start } from "./server.mjs";
 
 const SERVER = fileURLToPath(new URL("./server.mjs", import.meta.url));
@@ -70,6 +71,51 @@ try {
   await two.close();
 }
 
+const bpDir = mkdtempSync(join(tmpdir(), "tg-bp-"));
+process.on("exit", () => rmSync(bpDir, { recursive: true, force: true }));
+const fakeBp = (name, body) => {
+  const path = join(bpDir, name);
+  writeFileSync(path, `#!${process.execPath}\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+};
+const said = join(bpDir, "argv.json");
+const bpOk = fakeBp("bp-ok", `require("fs").writeFileSync(${JSON.stringify(said)}, JSON.stringify(process.argv.slice(2))); console.error("draft note"); console.log("published"); console.log(JSON.stringify({ id: "task-fake1", status: "published" }));`);
+const bpDown = fakeBp("bp-down", `console.error("bp: 401 unauthorized\\nrun bp login"); process.exit(3);`);
+const bpOdd = fakeBp("bp-odd", `console.log("created, somehow");`);
+const report = { what: "Six Enters left one line", repro: { v: 1, build: { label: "main", sha: "aaaaaaaaaa" }, fold: "stub", doc: "drill:D01", width: "desk", theme: "light", start: [], events: [], batches: [], red: [] } };
+const postJson = (url, body) => get(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const filing = await start({ standIn, bp: bpOk });
+try {
+  const preview = await postJson(`${filing.url}report/preview`, report);
+  assert.deepEqual([preview.status, JSON.parse(preview.body).args], [200, reportArgs(report)], "the preview is the exact bp argv");
+  assert.equal(existsSync(said), false, "a preview runs nothing");
+  const filed = await postJson(`${filing.url}report`, report);
+  assert.deepEqual([filed.status, JSON.parse(filed.body)], [200, { id: "task-fake1" }]);
+  assert.deepEqual(JSON.parse(readFileSync(said, "utf8")), reportArgs(report), "bp got exactly what the preview showed");
+  assert.deepEqual([(await postJson(`${filing.url}b/0/report/preview`, report)).status], [200], "a frame posts under its own path");
+  const empty = await postJson(`${filing.url}report`, { ...report, what: " " });
+  assert.deepEqual([empty.status, JSON.parse(empty.body)], [400, { error: "Say what went wrong first." }]);
+  const garbled = await get(`${filing.url}report`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+  assert.equal(garbled.status, 400, "a body that is not JSON is answered");
+  assert.equal((await get(`${filing.url}report`, { method: "POST", body: JSON.stringify(report) })).status, 415, "another origin cannot post a plain form that files a task");
+  assert.equal((await get(`${filing.url}report`)).status, 404, "GET files nothing");
+  assert.equal((await get(`${filing.url}fold`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 404, "no fold switch, still no /fold");
+} finally {
+  await filing.close();
+}
+for (const [bp, error] of [[bpDown, "bp failed: bp: 401 unauthorized run bp login"], [bpOdd, "bp answered without a task id: created, somehow"], [join(bpDir, "no-such-bp"), /^bp failed: .*ENOENT/]]) {
+  const failing = await start({ standIn, bp });
+  try {
+    const answer = await postJson(`${failing.url}report`, report);
+    assert.equal(answer.status, 502);
+    if (typeof error === "string") assert.equal(JSON.parse(answer.body).error, error);
+    else assert.match(JSON.parse(answer.body).error, error);
+  } finally {
+    await failing.close();
+  }
+}
+
 const broken = await start({ standIn: async () => { throw new Error("no react here\nmore"); } });
 try {
   assert.equal((await get(`${broken.url}reader-standin.js`)).body, 'export const render = () => { throw new Error("The stand-in reader did not build: no react here"); };');
@@ -87,6 +133,8 @@ try {
   assert.deepEqual([ok.status, ok.type, JSON.parse(ok.body)], [200, "application/json", { blocks: [{ id: "a" }, { id: "b" }] }]);
   const no = await get(`${switched.url}fold`, { method: "POST", headers: json, body: JSON.stringify({ blocks: [], ops: [{ op: "bad" }] }) });
   assert.deepEqual([no.status, JSON.parse(no.body)], [422, { error: "refused: bad" }]);
+  assert.equal((await get(`${switched.url}fold`, { method: "POST", headers: json, body: "{" })).status, 422, "a garbled batch is answered, and the server lives on");
+  assert.equal((await get(switched.url)).status, 200);
 } finally {
   await switched.close();
 }

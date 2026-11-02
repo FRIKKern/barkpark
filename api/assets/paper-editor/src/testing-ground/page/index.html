@@ -36,6 +36,16 @@
       <button class="tg-close" type="button" aria-label="Close tools">×</button>
     </header>
 
+    <details class="tg-section" data-section="report">
+      <summary>Report a bug</summary>
+      <p class="tg-note">Test docs only. A report becomes a Barkpark task that agents read: what you write, this doc, the keys you pressed in the last 5 minutes and the lights.</p>
+      <textarea class="tg-report-what" rows="3" placeholder="What went wrong?" aria-label="What went wrong?"></textarea>
+      <button class="tg-report-show" type="button">Show what will be sent</button>
+      <pre class="tg-report-preview" hidden></pre>
+      <button class="tg-report-file" type="button" disabled>File the task</button>
+      <p class="tg-report-result" role="status"></p>
+    </details>
+
     <details class="tg-section" data-section="checks" open>
       <summary>Live checks</summary>
       <ul class="tg-lights"></ul>
