@@ -47,7 +47,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.ChangeEvents
   alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
+  alias Barkpark.Content.Papers.RemintLedger
+
+  alias Barkpark.PortableDoc.{
+    BlockIds,
+    FieldVocabulary,
+    HtmlSanitizer,
+    Patch,
+    Projection,
+    Render,
+    Slots
+  }
+
   alias Barkpark.PortableDoc.TableEditing
   alias Barkpark.Repo.IdempotencyStore
 
@@ -1599,8 +1610,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          :ok <- preflight_table_editor_ops(blocks, ops),
-         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
-         {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
+         {:ok, blocks, healed} <- heal_revision_fenced_ids(blocks, if_rev),
+         now = System.os_time(:second),
+         ledger = doc.content |> RemintLedger.load(now) |> RemintLedger.record(healed, now),
+         {:ok, folded, {block_ids, ledger}} <-
+           fold_paper_ops_in_context(blocks, ops, ledger, now, opts),
+         block_ids = Enum.uniq(Enum.map(healed, &elem(&1, 1)) ++ block_ids),
+         doc = %{
+           doc
+           | content: RemintLedger.put(doc.content || %{}, RemintLedger.settle(ledger, folded))
+         },
          no_op? =
            ops == [] or
              (folded == blocks and
@@ -2159,26 +2178,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # collecting the affected block id per op against the post-op state. Halts on
   # the first failure (returning that op's tagged error) so a partial batch is
   # never persisted. Affected ids are de-duped while preserving first-seen order.
-  defp fold_paper_ops_in_context(blocks, ops, opts) do
+  defp fold_paper_ops_in_context(blocks, ops, ledger, now, opts) do
     case Keyword.get(opts, :canvas_run_context) do
       nil ->
-        fold_paper_ops(blocks, ops)
+        fold_paper_ops(
+          blocks,
+          ops,
+          paper_fold(ledger, now, [], Papers.Template.paper_declarations())
+        )
 
       %{container_kind: "document"} = context ->
         # The segment owns local ordering, but locks and declarations belong to
         # the whole Paper. Check the spliced result before any write can occur.
-        with {:ok, folded, ids} <-
-               CanvasRunContext.map_run(blocks, context, &fold_paper_ops(&1, ops, [])),
+        with {:ok, folded, folded_ids} <-
+               CanvasRunContext.map_run(
+                 blocks,
+                 context,
+                 &fold_paper_ops(&1, ops, paper_fold(ledger, now, blocks))
+               ),
              {:ok, folded} <-
                Patch.validate_result(blocks, folded, %{"op" => "canvas-run"},
                  constraints: Papers.Template.paper_declarations()
                ) do
-          {:ok, folded, ids}
+          {:ok, folded, folded_ids}
         end
 
       context ->
         CanvasRunContext.map_run(blocks, context, fn run_blocks ->
-          fold_paper_ops(run_blocks, ops, [])
+          fold_paper_ops(run_blocks, ops, paper_fold(ledger, now, blocks))
         end)
     end
   end
@@ -2191,12 +2218,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
 
-  defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
+  defp heal_revision_fenced_ids(blocks, if_rev) do
+    case project_revision_fenced_ids(blocks, if_rev) do
+      {:ok, projected} ->
+        {:ok, projected, []}
+
+      {:error, {:duplicate_id, _id}} ->
+        heal_repeated_ids(blocks)
+    end
+  end
+
+  defp heal_repeated_ids(blocks) do
+    {healed, pairs} = BlockIds.remint_repeated_ids(blocks, MapSet.new())
+
+    with {:ok, projected} <- project_block_ids_safely(healed) do
+      {:ok, projected, pairs}
+    end
+  end
+
+  defp fold_paper_ops(blocks, ops, fold) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
     # every op of the atomic fold, so a batch op that breaks a cardinality /
     # relative-order rule halts the fold exactly like a locked-block op (the
     # paper stays UNCHANGED). Same declaration set as the single-op path.
-    Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
+    Enum.reduce_while(ops, {:ok, blocks, [], [], fold.ledger}, fn op,
+                                                                  {:ok, acc, ids, applied, ledger} ->
       # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
       # once after it. Two defects share this one root — the batch used to read
       # its receipt one step BEFORE the id existed, and to thread a still-id-less
@@ -2223,8 +2269,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # id-bearing ops is byte-identical through it, and the post-fold
       # `ensure_block_ids` at the caller is then a no-op that stays as the
       # belt-and-braces chokepoint.
-      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
-           {:ok, patched} <- Patch.apply_patch(acc, applied_op, constraints: constraints),
+      with {:ok, lowered} <- lower_editor_block_op(acc, op),
+           ledger = RemintLedger.forget_named(ledger, lowered),
+           {applied_op, ledger} = RemintLedger.route(ledger, acc, lowered, fold.now),
+           true <- not is_nil(applied_op) || {:skipped, ledger},
+           {:ok, patched, reminted} <-
+             Patch.apply_patch_reminting(acc, applied_op,
+               constraints: fold.constraints,
+               duplicates: :batch,
+               document_blocks: fold.document_blocks
+             ),
            next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(applied_op, next) do
         new_ids =
@@ -2233,12 +2287,26 @@ defmodule Barkpark.Content.Papers.BlockOps do
             id -> if id in ids, do: ids, else: ids ++ [id]
           end
 
-        {:cont, {:ok, next, new_ids}}
+        ledger = RemintLedger.record(ledger, reminted, fold.now)
+        {:cont, {:ok, next, new_ids, [applied_op | applied], ledger}}
       else
+        {:skipped, ledger} -> {:cont, {:ok, acc, ids, applied, ledger}}
         {:error, _reason} = err -> {:halt, err}
       end
     end)
+    |> case do
+      {:ok, folded, ids, applied, ledger} ->
+        with :ok <- Patch.refuse_new_duplicates(blocks, folded, Enum.reverse(applied)) do
+          {:ok, folded, {ids, ledger}}
+        end
+
+      {:error, _reason} = err ->
+        err
+    end
   end
+
+  defp paper_fold(ledger, now, document_blocks, constraints \\ []),
+    do: %{ledger: ledger, now: now, document_blocks: document_blocks, constraints: constraints}
 
   # The CURRENT streaming rev (no bump) — used by the empty-batch no-op receipt.
   defp paper_current_rev(%Document{content: content}) when is_map(content) do
@@ -2869,14 +2937,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp fold_document_ops(blocks, ops) do
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, results} ->
       with {:ok, applied_op} <- lower_editor_block_op(acc, op),
-           {:ok, patched} <- Patch.apply_patch(acc, applied_op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op, duplicates: :batch),
            next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(applied_op, next) do
         result = %{
           block: affected.block,
           block_id: affected.block_id,
           op_kind: Map.get(op, "op"),
-          position: affected.position
+          position: affected.position,
+          applied_op: applied_op
         }
 
         {:cont, {:ok, next, [result | results]}}
@@ -2885,8 +2954,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
     end)
     |> case do
-      {:ok, folded, results} -> {:ok, folded, Enum.reverse(results)}
-      {:error, _reason} = err -> err
+      {:ok, folded, results} ->
+        results = Enum.reverse(results)
+
+        with :ok <-
+               Patch.refuse_new_duplicates(blocks, folded, Enum.map(results, & &1.applied_op)) do
+          {:ok, folded, Enum.map(results, &Map.delete(&1, :applied_op))}
+        end
+
+      {:error, _reason} = err ->
+        err
     end
   end
 
