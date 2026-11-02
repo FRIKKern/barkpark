@@ -51,7 +51,7 @@ export function commandsFor(paths) {
   mix("api");
   mix("cloud");
   for (const p of paths) {
-    if (p.includes(".yml: ")) out.push(p);
+    if (p.includes(".yml: ")) continue;
     else if (p.endsWith(".exs")) continue;
     else if (p.endsWith(".go")) out.push(`go test ${shellArg(`./${dirname(p)}`)} -count=1`);
     else if (p.startsWith("apps/mobile/")) out.push(`cd apps/mobile && pnpm exec jest ${shellArg(relative("apps/mobile", p))}`);

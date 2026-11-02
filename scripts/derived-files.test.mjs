@@ -111,7 +111,6 @@ test("reach names the command that runs each kind of test", () => {
       "cd apps/mobile && pnpm exec jest __tests__/conformance.test.tsx",
       "cd js && pnpm --filter @barkpark/react exec vitest run tests/conformance.test.tsx",
       "cd api/assets/paper-editor && node src/__surface.test.mjs",
-      ".github/workflows/x.yml: Step",
     ],
   );
 });

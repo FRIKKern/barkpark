@@ -96,6 +96,7 @@ test("reach quotes changed test paths and Go package directories", () => {
     "js/packages/react/tests/a;echo_PWN.test.tsx",
     "api/assets/paper-editor/src/a space.test.mjs",
     "scripts/a'quote;echo_PWN.test.mjs",
+    ".github/workflows/a.yml: Step",
   ]), [
     "cd api && mix test 'test/a space_test.exs'",
     "go test './internal/a;echo_PWN' -count=1",
