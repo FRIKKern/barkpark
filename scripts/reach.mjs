@@ -20,8 +20,7 @@ const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" })
 const paths = (args) => git(args).split("\0").filter(Boolean);
 
 export function changedPaths(base) {
-  if (!base || base.startsWith("-")) throw new Error("base must name a commit");
-  const sha = git(["rev-parse", "--verify", `${base}^{commit}`]).trim();
+  const sha = git(["rev-parse", "--verify", "--end-of-options", `${base}^{commit}`]).trim();
   return [...new Set([
     ...paths(["diff", "--name-only", "-z", `${sha}...HEAD`]),
     ...paths(["diff", "--name-only", "-z", "HEAD"]),
@@ -79,7 +78,7 @@ export function report(base, paths) {
   } else out.push("", "derived files: none reached");
   const run = [...new Set([
     ...steps.flatMap((s) => s.check ? [s.check] : [s.write]),
-    ...commandsFor([...new Set([...gates.filter((g) => !g.includes(".yml: ")), ...tests])]),
+    ...commandsFor([...new Set([...gates, ...tests])]),
   ])];
   if (run.length) out.push("", "run:", ...run.map((c) => `  ${c}`));
   return out.join("\n");

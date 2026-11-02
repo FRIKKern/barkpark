@@ -106,3 +106,50 @@ test("reach quotes changed test paths and Go package directories", () => {
     "node 'scripts/a'\\''quote;echo_PWN.test.mjs'",
   ]);
 });
+
+
+test("regen accepts valid base and hyphenated step names", () => {
+  assert.deepEqual(parseArgs(["--base", "topic-with-dash"]), { check: false, base: "topic-with-dash", only: [] });
+  assert.deepEqual(parseArgs(["--only", "golden-pack"]), { check: false, base: null, only: ["golden-pack"] });
+});
+
+test("reach defaults to origin/main and rejects empty revisions without shell options", (t) => {
+  const f = fixture(t, []);
+  f.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  f.git("branch", "topic-with-dash");
+  assert.match(f.run("reach").stdout, /^reach: 0 changed path/);
+  assert.equal(f.run("reach", "").status, 2);
+  assert.match(f.run("reach", "topic-with-dash").stdout, /^reach: 0 changed path/);
+  assert.equal(f.run("reach", "--all").status, 2);
+});
+
+test("check reports a successful but stale writer and restores it", (t) => {
+  const f = fixture(t, [{ name: "one", write: "printf generated > tracked.txt" }]);
+  const result = f.run("regen", "--check");
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /stale:/);
+  assert.equal(f.git("status", "--porcelain"), "");
+});
+
+test("check succeeds on unchanged outputs, ordinary generation leaves its outputs", (t) => {
+  const f = fixture(t, [{ name: "one", write: "printf 'original\\n' > tracked.txt" }]);
+  assert.equal(f.run("regen", "--check").status, 0);
+  assert.equal(f.git("status", "--porcelain"), "");
+  assert.equal(f.run("regen").status, 0);
+});
+
+test("reach selects runner paths by full prefix and file suffix", () => {
+  assert.deepEqual(commandsFor([
+    "scripts/a.test.js",
+    "scripts/a.mjs.backup",
+    "scripts/a.js.backup",
+    "scripts/a.go.test.mjs",
+    "scripts/apps/mobile/a.test.mjs",
+    "scripts/api/assets/paper-editor/a.test.mjs",
+  ]), [
+    "node scripts/a.test.js",
+    "node scripts/a.go.test.mjs",
+    "node scripts/apps/mobile/a.test.mjs",
+    "node scripts/api/assets/paper-editor/a.test.mjs",
+  ]);
+});
