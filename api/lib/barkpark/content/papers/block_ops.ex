@@ -433,7 +433,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- validate_render_shapes_for_type(type, blocks),
          :ok <- maybe_reject_hollow_result(type, blocks),
          :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
-         :ok <- check_new_portable_doc_errors(type, existing_paper_blocks(existing), blocks),
+         :ok <- NewErrors.check(existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
            encrypt_blocks_for_type(
              type,
@@ -2605,9 +2605,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp document_revless_attempt(opts, fun, 1), do: fun.(opts)
 
   defp document_revless_attempt(opts, fun, attempts) do
+    queued = Warnings.snapshot()
+
     case fun.(Keyword.put(opts, :document_revless_cas, true)) do
-      {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
-      other -> other
+      {:error, {:rev_mismatch, _}} ->
+        Warnings.restore(queued)
+        document_revless_attempt(opts, fun, attempts - 1)
+
+      other ->
+        other
     end
   end
 
@@ -2812,7 +2818,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # Owner ruling #35 item 4: a bound block can set any content field, so the
     # op answers to the mutate door's guards (claim, close, plugin fences)
     # before it writes. See `Content.Mutations.ensure_content_write_guards/5`.
-    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts),
+    # PortableDoc RATCHET (R4.5): the ops may not ADD a validation error, as on
+    # the paper op paths; only the blocks they touched are validated.
+    with :ok <- NewErrors.check_touched(blocks, new_blocks),
+         :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts),
          {:ok, saved} <- Content.upsert_document(type, attrs, dataset, opts) do
       {:ok, saved, attrs["doc_id"]}
     end
@@ -3372,7 +3381,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
            FieldVocabulary.validate(
              FieldVocabulary.from_field(field_def),
              touched_vocabulary_targets(new_blocks, ops)
-           ) do
+           ),
+         :ok <- NewErrors.check_touched(blocks, new_blocks) do
       scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
       content =
@@ -3704,13 +3714,6 @@ defmodule Barkpark.Content.Papers.BlockOps do
     "This #{type} block would render empty — its text is authored under a key " <>
       "the renderer ignores. Move the prose into the block's content field."
   end
-
-  # PortableDoc RATCHET (R4.5) on the upsert door: papers only. Sessions and
-  # other block docs are not checked yet.
-  defp check_new_portable_doc_errors(@paper_type, stored, written),
-    do: NewErrors.check(stored, written)
-
-  defp check_new_portable_doc_errors(_type, _stored, _written), do: :ok
 
   @doc """
   The blocks of the paper an ingest at `slug` would replace, found by the
