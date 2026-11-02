@@ -73,7 +73,7 @@ export async function play(page, drill) {
     await page.evaluate((key) => window.testingGround.openDoc(key), `drill:${drill.id}`);
     await page.waitForFunction(() => window.testingGround.state.canvases[0]._editor);
     await once(page, drill.steps);
-    await page.waitForFunction((run) => window.testingGround.state.tally.tries > run, run);
+    await page.waitForFunction((run) => { const { tries, stayed } = window.testingGround.state.tally; return tries + stayed > run; }, run);
   }
 }
 
