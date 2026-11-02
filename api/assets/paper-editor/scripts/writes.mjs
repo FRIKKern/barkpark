@@ -16,18 +16,8 @@ export function lex(js) {
   let last = "";
   let word = "";
   let i = 0;
-  const readString = (quote) => {
-    let text = "";
-    for (i++; i < js.length && js[i] !== quote; i++) {
-      if (js[i] === "\\") text += js[++i];
-      else text += js[i];
-    }
-    i++;
-    return text;
-  };
-  const readTemplate = () => {
-    const parts = [""];
-    for (i++; i < js.length; i++) {
+  const templateText = (parts) => {
+    for (; i < js.length; i++) {
       const ch = js[i];
       if (ch === "\\") parts[parts.length - 1] += js[++i];
       else if (ch === "`") {
@@ -37,73 +27,57 @@ export function lex(js) {
       } else if (ch === "$" && js[i + 1] === "{") {
         stack.push({ parts, depth: 0, start: i + 2 });
         i += 2;
-        return "expression";
+        return;
       } else parts[parts.length - 1] += ch;
-    }
-  };
-  const resumeTemplate = (frame) => {
-    frame.parts.push(js.slice(frame.start, i), "");
-    for (i++; i < js.length; i++) {
-      const ch = js[i];
-      if (ch === "\\") frame.parts[frame.parts.length - 1] += js[++i];
-      else if (ch === "`") {
-        i++;
-        templates.push(frame.parts);
-        return;
-      } else if (ch === "$" && js[i + 1] === "{") {
-        stack.push({ parts: frame.parts, depth: 0, start: i + 2 });
-        i += 2;
-        return;
-      } else frame.parts[frame.parts.length - 1] += ch;
     }
   };
   while (i < js.length) {
     const ch = js[i];
-    const top = stack[stack.length - 1];
+    const top = stack.at(-1);
     if (ch === '"' || ch === "'") {
-      strings.push(readString(ch));
+      let text = "";
+      for (i++; i < js.length && js[i] !== ch; i++) text += js[i] === "\\" ? js[++i] : js[i];
+      i++;
+      strings.push(text);
       last = '"';
-      word = "";
     } else if (ch === "`") {
-      readTemplate();
+      i++;
+      templateText([""]);
       last = '"';
-      word = "";
+    } else if (ch === "}" && top?.depth === 0) {
+      stack.pop();
+      top.parts.push(js.slice(top.start, i), "");
+      i++;
+      templateText(top.parts);
+      last = '"';
     } else if (ch === "/" && js[i + 1] === "/") {
       while (i < js.length && js[i] !== "\n") i++;
     } else if (ch === "/" && js[i + 1] === "*") {
-      i = js.indexOf("*/", i + 2) + 2;
-      if (i === 1) i = js.length;
+      const end = js.indexOf("*/", i + 2);
+      i = end === -1 ? js.length : end + 2;
     } else if (ch === "/" && (last === "" || REGEX_AFTER.has(last) || REGEX_KEYWORDS.has(word))) {
       let inClass = false;
-      for (i++; i < js.length; i++) {
+      for (i++; i < js.length && (js[i] !== "/" || inClass); i++) {
         if (js[i] === "\\") i++;
         else if (js[i] === "[") inClass = true;
         else if (js[i] === "]") inClass = false;
-        else if (js[i] === "/" && !inClass) break;
       }
-      for (i++; /[a-z]/.test(js[i] ?? ""); i++);
-      last = "/re";
-      word = "";
-    } else if (ch === "{" && top) {
-      top.depth++;
-      last = ch;
-      word = "";
       i++;
-    } else if (ch === "}" && top && top.depth === 0) {
-      resumeTemplate(stack.pop());
-      last = '"';
-      word = "";
+      last = "/re";
     } else {
-      if (ch === "}" && top) top.depth--;
+      if (top && ch === "{") top.depth++;
+      if (top && ch === "}") top.depth--;
       if (/[\w$]/.test(ch)) {
-        word = /[\w$]/.test(js[i - 1] ?? "") ? word + ch : ch;
+        word = /[\w$]/.test(js.charAt(i - 1)) ? word + ch : ch;
         last = "w";
       } else if (!/\s/.test(ch)) {
         last = ch;
         word = "";
       }
       i++;
+      continue;
     }
+    word = "";
   }
   if (stack.length) throw new Error(`lexer ended inside ${stack.length} template expression(s)`);
   return { strings, templates };
@@ -188,7 +162,7 @@ export function schemaAttributes(schema) {
     if (spec.dom) return visit(spec.dom);
     if (!Array.isArray(spec)) return;
     const [, second, ...rest] = spec;
-    const attrs = second && typeof second === "object" && !Array.isArray(second) && typeof second.nodeType !== "number" ? second : null;
+    const attrs = second && typeof second === "object" && !Array.isArray(second) ? second : null;
     for (const key of Object.keys(attrs ?? {})) attributes.add(key.replace(/^\S+\s/, "").toLowerCase());
     for (const child of attrs ? rest : [second, ...rest]) if (Array.isArray(child)) visit(child);
   };

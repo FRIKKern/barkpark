@@ -19,7 +19,7 @@
 //
 // Run: node scripts/surface.mjs   (npm run build runs it; src/__surface.test.mjs
 // fails when the committed file is stale)
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
@@ -65,7 +65,6 @@ export const sourceMembers = (text) => [...text.matchAll(/\bthis\.(_[A-Za-z]\w*)
 
 export async function mountedMembers(window, tag) {
   const el = window.document.createElement(tag);
-  if (tag === "bp-paper-editor") el.setAttribute("data-block", JSON.stringify({ id: "p1", type: "paragraph", content: [] }));
   window.document.body.append(el);
   await new Promise((resolve) => setTimeout(resolve, 50));
   const members = [...Object.getOwnPropertyNames(window.customElements.get(tag).prototype), ...Object.getOwnPropertyNames(el)].filter((n) => n.startsWith("_"));
@@ -74,11 +73,7 @@ export async function mountedMembers(window, tag) {
   return { members, schema };
 }
 
-const walk = (dir) => readdirSync(dir).flatMap((name) => {
-  const p = path.join(dir, name);
-  return statSync(p).isDirectory() ? walk(p) : [p];
-});
-const sourceText = (files) => files.filter((p) => p.endsWith(".js") && !path.basename(p).startsWith("__")).map((p) => readFileSync(p, "utf8")).join("\n");
+const sourceText = (dir) => readdirSync(dir).filter((n) => n.endsWith(".js")).map((n) => readFileSync(path.join(dir, n), "utf8")).join("\n");
 
 export async function surface() {
   const types = declaredInTypes(readFileSync(path.join(root, "index.d.ts"), "utf8"));
@@ -94,8 +89,8 @@ export async function surface() {
   dom.window.eval(js);
   const canvas = await mountedMembers(dom.window, "bp-paper-canvas");
   const editorEl = await mountedMembers(dom.window, "bp-paper-editor");
-  const canvasSource = sourceText(walk(path.join(root, "src/canvas")));
-  const editorSource = sourceText(readdirSync(path.join(root, "src")).map((n) => path.join(root, "src", n)).filter((p) => statSync(p).isFile()));
+  const canvasSource = sourceText(path.join(root, "src/canvas"));
+  const editorSource = sourceText(path.join(root, "src"));
   const editor = dom.window.customElements.get("bp-paper-editor");
   const notClass = new Set([...notClasses(js), ...readerClasses(reader)]);
 
