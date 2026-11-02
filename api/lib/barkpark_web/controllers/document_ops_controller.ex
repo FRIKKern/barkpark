@@ -45,7 +45,7 @@ defmodule BarkparkWeb.DocumentOpsController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
+  alias Barkpark.Content.{Errors, Warnings}
   alias BarkparkWeb.ErrorResponse
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -141,6 +141,7 @@ defmodule BarkparkWeb.DocumentOpsController do
         opts = opts ++ [if_rev: if_rev]
 
         fence = if params["fence"] == "blocks", do: [fence: :blocks], else: []
+        Warnings.reset()
 
         Content.apply_field_block_ops(target, type, field, ops, dataset, opts ++ fence)
         |> draft_gone_under(target, type, dataset, opts)
@@ -148,7 +149,7 @@ defmodule BarkparkWeb.DocumentOpsController do
     end
   end
 
-  defp field_ops_response({:ok, result}, conn), do: json(conn, %{result: result})
+  defp field_ops_response({:ok, result}, conn), do: json(conn, with_warnings(%{result: result}))
 
   defp field_ops_response({:error, {:no_such_field, field}}, conn),
     do: invalid_op(conn, "#{inspect(field)} is not a field of this type")
@@ -166,6 +167,7 @@ defmodule BarkparkWeb.DocumentOpsController do
 
   defp run_op(conn, doc_id, type, body, dataset, opts) do
     target = edit_target(doc_id, type, dataset, opts)
+    Warnings.reset()
 
     result =
       case body do
@@ -175,8 +177,17 @@ defmodule BarkparkWeb.DocumentOpsController do
       |> draft_gone_under(target, type, dataset, opts)
 
     case result do
-      {:ok, result} -> json(conn, %{result: result})
+      {:ok, result} -> json(conn, with_warnings(%{result: result}))
       error -> op_error_response(error, conn)
+    end
+  end
+
+  # The PortableDoc ratchet's report-only warning (R4.5) rides the success body;
+  # the key is omitted when nothing was queued.
+  defp with_warnings(body) do
+    case Warnings.drain() do
+      [] -> body
+      warnings -> Map.put(body, :warnings, warnings)
     end
   end
 

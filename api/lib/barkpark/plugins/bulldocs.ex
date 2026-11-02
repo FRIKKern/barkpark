@@ -46,10 +46,12 @@ defmodule Barkpark.Plugins.Bulldocs do
   @impl Barkpark.Plugin
   def structure_placement, do: :main
 
-  alias Barkpark.Content.Papers.Hollow
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.Papers.{BlockOps, Hollow}
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Bulldocs.ReadableBody
   alias Barkpark.PortableDoc.BodyWalk
+  alias Barkpark.PortableDoc.Validate.NewErrors
 
   # Resolved at RUNTIME, deliberately not frozen into an attribute.
   # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
@@ -84,7 +86,8 @@ defmodule Barkpark.Plugins.Bulldocs do
       before_save: [
         &validate_paper_template/1,
         &reject_hollow_published_save/1,
-        &reject_unreadable_paper_body/1
+        &reject_unreadable_paper_body/1,
+        &reject_new_portable_doc_errors/1
       ],
       before_publish: [&reject_hollow_paper_publish/1],
       before_delete: [&refuse_master_with_live_instances/1]
@@ -173,6 +176,30 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   defp reject_unreadable_paper_body(_payload), do: :ok
+
+  # PortableDoc RATCHET (R4.5) on the mutate door: a paper write through the
+  # Writer may not ADD a validation error, as on ingest and the op paths. The
+  # stored side is the row it overwrites, or, for a draft's first write, the
+  # published paper the draft will replace (found by the write's own tenant).
+  defp reject_new_portable_doc_errors(%{doc: %{"type" => "paper"} = doc} = payload) do
+    stored = stored_paper_blocks(doc, payload[:prev_doc], payload[:dataset])
+
+    case NewErrors.check(stored, get_in(doc, ["content", "blocks"])) do
+      :ok -> :ok
+      {:error, {:halted, message}} -> {:halt, message}
+    end
+  end
+
+  defp reject_new_portable_doc_errors(_payload), do: :ok
+
+  defp stored_paper_blocks(_doc, %Document{content: content}, _dataset),
+    do: get_in(content || %{}, ["blocks"]) || []
+
+  defp stored_paper_blocks(%{"doc_id" => "drafts." <> id} = doc, nil, dataset)
+       when is_binary(dataset),
+       do: BlockOps.stored_paper_blocks(id, dataset, doc)
+
+  defp stored_paper_blocks(_doc, _prev_doc, _dataset), do: []
 
   defp published_surface_write?(doc) do
     doc_id = doc["doc_id"] || doc["_id"]
