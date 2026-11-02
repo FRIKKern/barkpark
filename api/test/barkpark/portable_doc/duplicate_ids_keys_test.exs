@@ -22,7 +22,8 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
     keys = Enum.map(@scenes, &{&1["contract"], &1["scene"], &1["order"]})
 
     for contract <- ~w(1.14 1.15 1.16 1.17 1.18 1.19 1.20 1.21 tree pr-25040),
-        scene <- ~w(nested-enter-keep-typing nested-enter-back-up nested-enter-retype-line),
+        scene <-
+          ~w(nested-enter-keep-typing nested-enter-back-up nested-enter-retype-line nested-enter-pause-type-above nested-enter-line-start steps-enter tabs-enter),
         order <- ~w(reply-first echo-first) do
       assert {contract, scene, order} in keys
     end
@@ -42,7 +43,9 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
       {:ok, _} =
         Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: before}))
 
-      doubt? = @scene["scene"] == "nested-enter-retype-line" and @scene["contract"] != "pr-25040"
+      doubt? =
+        @scene["scene"] == "nested-enter-retype-line" and
+          @scene["contract"] not in ["tree", "pr-25040"]
 
       for {batch, echo} <- Enum.zip(batches, echoes) do
         rev = get_in(Content.get_paper(slug).content, ["rev"])
@@ -50,7 +53,10 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
         log =
           capture_log(fn ->
             assert {:ok, _receipt} =
-                     Content.apply_paper_block_ops(slug, batch, "production", if_rev: rev)
+                     Content.apply_paper_block_ops(slug, batch, "production",
+                       if_rev: rev,
+                       remint_writer: "lv:keys"
+                     )
           end)
 
         refute log =~ "Mist."
@@ -88,13 +94,28 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
     end
   end
 
-  defp ids(blocks), do: Enum.flat_map(blocks, &[&1["id"] | ids(Map.get(&1, "blocks", []))])
+  defp ids(blocks) do
+    Enum.flat_map(blocks, fn block ->
+      [block["id"] | ids(Map.get(block, "blocks", []))] ++
+        Enum.flat_map(rows(block), &[&1["id"] | ids(&1["blocks"])])
+    end)
+  end
+
+  defp rows(block), do: Map.get(block, "steps", []) ++ Map.get(block, "tabs", [])
 
   defp lines(blocks) do
     Enum.flat_map(blocks, fn
-      %{"type" => "section", "blocks" => children} -> lines(children)
-      %{"content" => content} -> [Enum.map_join(content, &(&1["value"] || ""))]
-      %{"text" => text} -> [text]
+      %{"type" => "section", "blocks" => children} ->
+        lines(children)
+
+      %{"type" => type} = block when type in ["steps", "tabs"] ->
+        rows(block) |> Enum.flat_map(&lines(&1["blocks"]))
+
+      %{"content" => content} ->
+        [Enum.map_join(content, &(&1["value"] || ""))]
+
+      %{"text" => text} ->
+        [text]
     end)
   end
 end

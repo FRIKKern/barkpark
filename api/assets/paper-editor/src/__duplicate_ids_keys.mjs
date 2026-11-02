@@ -60,13 +60,25 @@ const PAGE = (contract) => `<!doctype html><html><head><meta charset="utf-8">
   canvas.acknowledgedSaves = true;
   const remint = (blocks) => {
     const seen = new Set();
+    const rows = (list) => list.map((row) => {
+      seen.add(row.id);
+      return Array.isArray(row.blocks) ? { ...row, blocks: walk(row.blocks, row.id) } : row;
+    });
     const walk = (list, parent) => list.map((block, index) => {
       const id = block.id != null && seen.has(block.id) ? parent + "-" + index : block.id;
       seen.add(id);
-      return Array.isArray(block.blocks) ? { ...block, id, blocks: walk(block.blocks, id) } : { ...block, id };
+      const out = { ...block, id };
+      if (Array.isArray(block.blocks)) out.blocks = walk(block.blocks, id);
+      for (const key of ["steps", "tabs"]) if (Array.isArray(block[key])) out[key] = rows(block[key]);
+      return out;
     });
     return walk(blocks, "block");
   };
+  window.__ids = (blocks) => blocks.flatMap((block) => [
+    block.id,
+    ...window.__ids(block.blocks || []),
+    ...[...(block.steps || []), ...(block.tabs || [])].flatMap((row) => [row.id, ...window.__ids(row.blocks || [])]),
+  ]);
   canvas.addEventListener("bp-canvas-ops", (event) => {
     const { seq, ops } = event.detail;
     window.__batches.push(JSON.parse(JSON.stringify(ops)));
@@ -209,6 +221,23 @@ const TRIP = [
   p("p-after", "Home by dark."),
 ];
 
+const STEPS = [
+  { id: "st", type: "steps", steps: [{ id: "r-1", title: "One", blocks: [p("p-s", "Pack the tent.")] }] },
+  p("p-after", "Home by dark."),
+];
+const TABS = [
+  { id: "tb", type: "tabs", tabs: [{ id: "r-1", label: "One", blocks: [p("p-s", "Pack the tent.")] }] },
+  p("p-after", "Home by dark."),
+];
+const enterInRow = async (page) => {
+  await clickEnd(page, "Pack the tent.");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Boots.");
+  await settle(page);
+  await page.keyboard.type(" Laces.");
+  await settle(page);
+};
+
 const SCENES = [
   ["move-up", UP, ["Original X. More.", "Original Y.Alpha.", "Beta."], async (page) => {
     await dragSelection(page, "Original X.", "Original Y.", "Alpha.");
@@ -250,6 +279,27 @@ const SCENES = [
     await page.keyboard.type("Mist.");
     await settle(page);
   }],
+  ["nested-enter-pause-type-above", TRIP, ["Left the car park at six. Abc"], async (page) => {
+    await clickEnd(page, "Left the car park at six.");
+    await page.keyboard.press("Enter");
+    await settle(page);
+    await clickEnd(page, "Left the car park at six.");
+    for (const typed of [" A", "b", "c"]) {
+      await page.keyboard.type(typed);
+      await settle(page);
+    }
+  }],
+  ["nested-enter-line-start", TRIP, ["So then Left the car park at six."], async (page) => {
+    await clickAt(page, await edgeOf(page, "Left the car park at six.", false), "the caret before the line");
+    await page.keyboard.press("Enter");
+    await settle(page);
+    for (const typed of ["So ", "then "]) {
+      await page.keyboard.type(typed);
+      await settle(page);
+    }
+  }],
+  ["steps-enter", STEPS, ["Pack the tent.", "Boots. Laces."], enterInRow],
+  ["tabs-enter", TABS, ["Pack the tent.", "Boots. Laces."], enterInRow],
 ];
 const ORDERS = {
   "move-up": ["reply-first"],
@@ -257,6 +307,10 @@ const ORDERS = {
   "nested-enter-keep-typing": ["reply-first", "echo-first"],
   "nested-enter-back-up": ["reply-first", "echo-first"],
   "nested-enter-retype-line": ["reply-first", "echo-first"],
+  "nested-enter-pause-type-above": ["reply-first", "echo-first"],
+  "nested-enter-line-start": ["reply-first", "echo-first"],
+  "steps-enter": ["reply-first", "echo-first"],
+  "tabs-enter": ["reply-first", "echo-first"],
 };
 
 const recorded = [];
@@ -285,10 +339,9 @@ try {
             await reload.close();
           }
           await page.evaluate(() => document.getElementById("canvas")._editor.view.dom.blur());
-          await waitFor(page, "the client to take the last echo's ids after a blur", (want) => {
-            const ids = (blocks) => blocks.flatMap((b) => [b.id, ...ids(b.blocks || [])]);
-            return JSON.stringify(ids(document.getElementById("canvas").blocks)) === want;
-          }, JSON.stringify(idsOf(echoes.at(-1))));
+          const want = JSON.stringify(await page.evaluate((echo) => window.__ids(echo), echoes.at(-1)));
+          await waitFor(page, "the client to take the last echo's ids after a blur",
+            (want) => JSON.stringify(window.__ids(document.getElementById("canvas").blocks)) === want, want);
           recorded.push({ contract, commit, scene, order, before, batches, echoes, client_after: client, seen, typed });
         } finally {
           await page.close();
@@ -313,10 +366,6 @@ try {
   server.close();
 }
 exitRig(t.passes, t.failures);
-
-function idsOf(blocks) {
-  return blocks.flatMap((block) => [block.id, ...idsOf(block.blocks || [])]);
-}
 
 function oneScenePerLine({ recorded_by, scenes }) {
   return `{"recorded_by":${JSON.stringify(recorded_by)},"scenes":[\n${scenes.map((scene) => JSON.stringify(scene)).join(",\n")}\n]}\n`;
