@@ -79,14 +79,19 @@ test("a Bulldocs layout edit reaches the pack's pages and all six reports, not t
 
 test("a module a rendered block reads outside render/ reaches every HTML golden", () => {
   for (const path of [
+    "api/lib/barkpark/portable_doc/constraints.ex",
+    "api/lib/barkpark/portable_doc/validate.ex",
     "api/lib/barkpark/portable_doc/text_diff.ex",
     "api/lib/barkpark/chat/tool_rows.ex",
-    "api/lib/barkpark/plugins/sheets/core.ex",
   ]) {
     const hit = names([path]);
     for (const n of ["golden-pack", "email-golden", "conformance-elixir", "studio-snapshot", "reader-style-goldens"])
       assert.ok(hit.includes(n), `${path}: ${n}`);
   }
+});
+
+test("a Sheets plugin edit does not reach unrelated HTML goldens", () => {
+  assert.deepEqual(names(["api/lib/barkpark/plugins/sheets/core.ex"]), []);
 });
 
 test("a Studio component the editor renders reaches the snapshot only", () => {

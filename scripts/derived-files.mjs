@@ -25,8 +25,6 @@ const RENDERED = [
   "api/lib/barkpark/portable_doc/tiers.ex",
   "api/lib/barkpark/portable_doc/validate.ex",
   "api/lib/barkpark/chat/tool_rows.ex",
-  "api/lib/barkpark/plugins/sheets.ex",
-  "api/lib/barkpark/plugins/sheets/**",
 ];
 // The golden pack wraps rendered blocks in the Bulldocs reader page for each
 // locale Tenancy exposes.
