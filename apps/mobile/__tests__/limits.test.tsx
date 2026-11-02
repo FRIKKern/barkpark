@@ -304,6 +304,12 @@ describe('deep values', () => {
     expect(render({ type: 'paragraph', content: [{ type: 'code', children: [deepArrays(20000)] }] })).toContain('a')
   })
 
+  it('reads nothing from code children given as one node, not a list', () => {
+    const text = render({ type: 'paragraph', content: ['before ', { type: 'code', children: { type: 'text', value: 'hidden' } }] })
+    expect(text).toContain('before')
+    expect(text).not.toContain('hidden')
+  })
+
   it('reads a deeply nested list value as its text', () => {
     const text = render({ type: 'arrayOf', label: 'L', value: [deepArrays(20000), { b: [1, 2], a: true }] })
     expect(text).toContain('1. a')
