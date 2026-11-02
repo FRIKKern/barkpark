@@ -110,3 +110,25 @@ body {
   .tg-drawer-open .tg-stage { margin-right: 0; }
   .tg-drawer-open .tg-tab { display: none; }
 }
+
+.tg-stamp {
+  position: fixed;
+  top: 8px;
+  left: 12px;
+  margin: 0;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--tg-soft);
+}
+
+.tg-split { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+.tg-split-head { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--tg-rule); font-size: 13px; }
+.tg-split-head strong { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tg-split-note { grid-column: 1 / -1; margin: 0; color: var(--tg-soft); }
+.tg-split-frames { display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+.tg-frame { width: 100%; height: 100%; border: 0; }
+.tg-frame + .tg-frame { border-left: 1px solid var(--tg-rule); }
+
+@media (max-width: 900px) {
+  .tg-split-head, .tg-split-frames { grid-template-columns: 1fr; }
+  .tg-frame + .tg-frame { border-left: 0; border-top: 1px solid var(--tg-rule); }
+}

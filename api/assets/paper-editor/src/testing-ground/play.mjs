@@ -17,7 +17,7 @@ async function boxOf(page, text, at) {
   return box;
 }
 
-async function caretRead(page) {
+export async function caretRead(page) {
   await page.waitForFunction(() => {
     const view = window.testingGround.state.canvases[0]._editor.view;
     const dom = getSelection();

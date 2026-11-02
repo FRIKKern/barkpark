@@ -9,7 +9,7 @@ import { tallyWords, watchTally } from "./tally.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 const json = (url) => fetch(url).then((r) => r.json());
-const [build, samples, fragments] = await Promise.all([json("/build.json"), json("/pack/samples.json"), json("/pack/fragments.json")]);
+const [build, samples, fragments] = await Promise.all([json("build.json"), json("/pack/samples.json"), json("/pack/fragments.json")]);
 await customElements.whenDefined("bp-paper-canvas");
 
 const docs = new Map([
@@ -52,7 +52,7 @@ function paintFleet(root) {
   }
 }
 
-function mountCanvases() {
+function mountCanvases(reload = false) {
   for (const canvas of state.canvases) state.host.detach(canvas);
   const windows = docs.get(state.key).drill?.windows || 1;
   state.canvases = Array.from({ length: windows }, () => {
@@ -71,6 +71,7 @@ function mountCanvases() {
     shell.append(body);
     return shell;
   }));
+  parent.postMessage({ tg: "mounted", key: state.key, reload }, location.origin);
 }
 
 function paintTally() {
@@ -100,7 +101,7 @@ async function reload() {
   const [canvas] = state.canvases;
   await settle(canvas, state.host);
   const before = lines(canvas);
-  mountCanvases();
+  mountCanvases(true);
   state.reload = { before, after: lines(state.canvases[0]) };
 }
 
@@ -176,5 +177,6 @@ watchTally(ui.edit, () => {
   return rule && { rule, canvas: state.canvases[0], tally: state.tally, counted: paintTally };
 });
 $(".tg-build").textContent = `Editor build: ${build.label} at ${build.sha}`;
+$(".tg-stamp").textContent = `${build.label} at ${build.sha}`;
 setInterval(paintLights, 200);
 window.testingGround = { state, reload, openDoc, setDrawer, paintLights, settle: () => settle(state.canvases[0], state.host) };

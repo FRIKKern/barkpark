@@ -45,6 +45,34 @@ await assert.rejects(fold(trip, [{ op: "insert-after", afterId: "p-after", block
 await assert.rejects(fold(legacy, [{ op: "insert-after", afterId: "p-new", block: { id: "p-day", type: "paragraph", content: [] } }]), /duplicate id p-day/);
 assert.deepEqual(await fold(trip, [{ op: "patch-block", id: "p-day", patch: { content: [] } }, { op: "remove-block", id: "p-after" }]).then((b) => b.map((x) => x.id)), trip.map((x) => x.id).filter((id) => id !== "p-after"), "every op of a batch folds, in order");
 
+const para = (id, value = "") => ({ id, type: "paragraph", content: value ? [{ type: "text", value }] : [] });
+const two = [{ id: "s-1", type: "section", blocks: [para("p-x", "Moved")] }, { id: "s-2", type: "section", blocks: [] }, para("p-a")];
+assert.deepEqual(await fold(two, [{ op: "patch-block", id: "s-2", patch: { blocks: [para("p-x", "Moved")] } }, { op: "patch-block", id: "s-1", patch: { blocks: [] } }]).then(authoredIds), ["s-1", "s-2", "p-x", "p-a"], "a move whose id sits twice mid-batch applies");
+const doubled = { op: "patch-block", id: "s-2", patch: { blocks: [para("p-x", "Moved")] } };
+await assert.rejects(fold(two, [doubled, { op: "replace-block", id: "p-a", block: { id: "p-a", type: "section", blocks: [para("p-x")] } }]), /^Error: replace-block: duplicate id p-x$/, "a repeat the batch leaves is refused, naming the last op that added a copy");
+await assert.rejects(fold(two, [doubled, { op: "remove-block", id: "p-a" }]), /^Error: patch-block: duplicate id p-x$/, "a later op that adds no copy is not the one named");
+await assert.rejects(fold(two, [doubled, { op: "insert-after", afterId: "p-x", block: para("p-new") }]), /^Error: insert-after: duplicate id p-x$/, "an afterId naming a batch-made repeat is refused");
+await assert.rejects(fold(two, [doubled, { op: "move-block", id: "p-a", after: "p-x" }]), /^Error: move-block: duplicate id p-x$/, "an after naming a batch-made repeat is refused");
+await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-x", patch: { content: [] } }]), /^Error: patch-block: duplicate id p-x$/, "an op naming an id the batch made repeated is refused, naming that op");
+const twins = [{ id: "s-1", type: "section", blocks: [para("p-y", "Y"), para("p-x", "X")] }, { id: "s-2", type: "section", blocks: [] }, para("p-a")];
+const doubledTwice = { op: "patch-block", id: "s-2", patch: { blocks: [para("p-y", "Y"), para("p-x", "X")] } };
+await assert.rejects(fold(twins, [doubledTwice]), /^Error: patch-block: duplicate id p-y$/, "of two repeats one op leaves, the first in doc order is named, as patch.ex does");
+await assert.rejects(fold(twins, [doubledTwice, { op: "move-block", id: "p-y", after: "p-x" }]), /^Error: move-block: duplicate id p-x$/, "an op naming two repeats names after before id, in patch.ex's key order");
+await assert.rejects(fold(two, [doubled, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: patch-block: id not found p-gone$/, "a leftover repeat plus a later bad op answers the later error");
+await assert.rejects(fold(two, [{ op: "append-block", block: para("p-a") }, { op: "patch-block", id: "p-gone", patch: {} }]), /^Error: append-block: duplicate id p-a$/, "append-block and insert-after still refuse an id that exists, at that op, inside a batch");
+await assert.rejects(fold(two, [{ op: "insert-after", afterId: "s-2", block: para("p-a") }, { op: "remove-block", id: "p-a" }]), /^Error: insert-after: duplicate id p-a$/, "an insert of an id a later op would remove is refused at the insert");
+const vectors = JSON.parse(readFileSync(new URL("./batch-vectors.json", import.meta.url), "utf8"));
+for (const { name, doc, ops, answer } of vectors.cases) {
+  const folded = fold(doc.blocks, ops);
+  if (answer.ok) assert.deepEqual(await folded, answer.value.blocks, `patch.ex at ${vectors.barkpark}: ${name}`);
+  else if (answer.error.code === "duplicate_id") await assert.rejects(folded, new RegExp(`^Error: ${answer.error.op}: duplicate id ${answer.error.target}$`), `patch.ex at ${vectors.barkpark}: ${name}`);
+  else await assert.rejects(folded, new RegExp(`^Error: ${answer.error.op}: .*not found ${answer.error.target}$`), `patch.ex at ${vectors.barkpark}: ${name}`);
+}
+assert.equal(vectors.cases.length, 9);
+const pair = [para("p-d", "First"), para("p-d", "Second")];
+assert.deepEqual(await fold(pair, [{ op: "patch-block", id: "p-d", patch: { content: [] } }]).then((b) => b.map((x) => x.content.length)), [0, 1], "an op on a repeat that was there before the batch takes the first match");
+await assert.rejects(fold(pair, [{ op: "append-block", block: para("p-d") }]), /^Error: append-block: duplicate id p-d$/, "a legacy pair that grows is refused");
+
 const leaf = (id) => ({ id, type: "paragraph", content: [] });
 assert.deepEqual(authoredIds([
   { id: "s", type: "section", blocks: [leaf("s1")] },
@@ -162,6 +190,20 @@ assert.deepEqual([first, second].map((c) => c.calls.map(([name]) => name)), [["i
 await raced.idle();
 assert.deepEqual(JSON.stringify(raced.saved).match(/Home by nine\.|Fog\./g), ["Fog.", "Home by nine."], "two windows with a batch in flight at once both keep their edit: folds run one after another");
 assert.deepEqual(raced.refusals, []);
+
+const surfaced = [];
+process.on("unhandledRejection", (error) => surfaced.push(error.message));
+let calls = 0;
+const touchy = createFakeHost({ fold: lagging, blocks: trip, onChange: () => { if (++calls === 1) throw new Error("onChange broke"); } });
+const lone = stubCanvas();
+touchy.attach(lone);
+send(lone, edit, 1);
+send(lone, [{ op: "patch-block", id: "p-day", patch: { content: [{ type: "text", value: "Fog." }] } }], 2);
+await touchy.idle().catch(() => {});
+await new Promise((r) => setTimeout(r, 20));
+assert.deepEqual(JSON.stringify(touchy.saved).match(/Home by nine\.|Fog\./g), ["Fog.", "Home by nine."], "a throwing onChange does not stall the batches after it");
+assert.equal(touchy.busy, false);
+assert.deepEqual(surfaced, ["onChange broke"], "and its error still surfaces");
 
 assert.deepEqual(blockDiff(trip, [trip[0], { ...trip[2], content: [] }, { id: "p-new", type: "paragraph" }]), ["~ p-after (paragraph)", "+ p-new (paragraph)", "- s-day (section)"]);
 assert.deepEqual(blockDiff(trip, structuredClone(trip)), []);

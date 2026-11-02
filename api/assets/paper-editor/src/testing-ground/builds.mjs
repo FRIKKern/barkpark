@@ -1,0 +1,69 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const REPLAY = "api/test/fixtures/portable_doc/old_client_replay";
+const TREE = ["api/assets/paper-editor", "api/assets/paper-surface", "api/priv/static/assets"];
+const READER = "api/lib/barkpark/portable_doc/render";
+
+const live = new Set();
+process.on("exit", () => { for (const root of live) rmSync(root, { recursive: true, force: true }); });
+
+const gitIn = (repo) => (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+function recordedContracts(repo) {
+  return readdirSync(join(repo, REPLAY)).map((name) => name.replace(/\.json$/, "")).sort();
+}
+
+function contractCommit(repo, version) {
+  const file = join(repo, REPLAY, `${version}.json`);
+  if (!existsSync(file)) throw new Error(`no recorded tree for contract ${version}; recorded: ${recordedContracts(repo).join(", ")}`);
+  return JSON.parse(readFileSync(file, "utf8")).commit;
+}
+
+function prHead(git, number) {
+  const sha = git("ls-remote", "origin", `refs/pull/${number}/head`).split("\t")[0];
+  if (!sha) throw new Error(`no PR #${number} on origin`);
+  const branches = git("ls-remote", "origin", "refs/heads/*").split("\n").map((line) => line.split("\t")[0]);
+  if (!branches.includes(sha)) throw new Error(`PR #${number} is not a branch on origin; npm run try builds only those`);
+  try {
+    git("cat-file", "-e", `${sha}^{commit}`);
+  } catch {
+    git("fetch", "-q", "--no-write-fetch-head", "origin", sha);
+  }
+  return sha;
+}
+
+export const buildEnv = (env) => Object.fromEntries(["PATH", "HOME", "TMPDIR"].map((name) => [name, env[name]]));
+
+export const besideMain = (names) => (names.length === 1 && names[0] !== "main" ? ["main", ...names] : names.length ? names : ["main"]);
+
+export function pickBuild(which, { repo, git = gitIn(repo) }) {
+  if (/^[1-9]\d*$/.test(which)) return { label: `PR #${which}`, sha: prHead(git, which) };
+  if (/^\d+\.\d+$/.test(which)) return { label: `contract ${which}`, sha: contractCommit(repo, which) };
+  throw new Error(`a build is main, a PR number or a contract like 1.19, got ${which}`);
+}
+
+export function makeBuild({ label, sha }, { repo, modules = join(repo, "api/assets/paper-editor/node_modules") }) {
+  const root = mkdtempSync(join(tmpdir(), "tg-build-"));
+  live.add(root);
+  const remove = () => {
+    rmSync(root, { recursive: true, force: true });
+    live.delete(root);
+  };
+  try {
+    const reader = spawnSync("git", ["cat-file", "-e", `${sha}:${READER}`], { cwd: repo }).status === 0 ? [READER] : [];
+    const tar = spawnSync("git", ["archive", sha, ...TREE, ...reader], { cwd: repo, maxBuffer: 1 << 30 });
+    if (tar.status !== 0) throw new Error(`git archive ${sha}: ${tar.stderr.toString().trim()}`);
+    execFileSync("tar", ["-x", "-C", root], { input: tar.stdout, stdio: ["pipe", "ignore", "pipe"] });
+    const editor = join(root, TREE[0]);
+    cpSync(modules, join(editor, "node_modules"), { recursive: true, verbatimSymlinks: true });
+    const built = spawnSync("npm", ["run", "build"], { cwd: editor, encoding: "utf8", timeout: 120000, env: buildEnv(process.env) });
+    if (built.status !== 0) throw new Error(`npm run build for ${label} at ${sha.slice(0, 10)} failed:\n${`${built.stdout}${built.stderr}`.trim().split("\n").slice(-20).join("\n")}`);
+  } catch (error) {
+    remove();
+    throw error;
+  }
+  return { label, sha: sha.slice(0, 10), dir: join(root, TREE[2]), remove };
+}

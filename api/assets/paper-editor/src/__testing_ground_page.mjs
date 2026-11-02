@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import { exitRig, skip, tally } from "./__rig.mjs";
 import { drills } from "./testing-ground/drills/index.mjs";
 import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
-import { lightsOf, play } from "./testing-ground/play.mjs";
-import { start } from "./testing-ground/server.mjs";
+import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
+import { besideMain, makeBuild, pickBuild } from "./testing-ground/builds.mjs";
+import { mainBuild, start } from "./testing-ground/server.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const ONLY = process.env.TG_ONLY;
@@ -270,6 +271,91 @@ await scene("every test doc opens: 7 drills and 80 block samples, none with a du
   const windows = await page.evaluate(() => { window.testingGround.openDoc("drill:D06"); return [...document.querySelectorAll(".tg-edit bp-paper-canvas")].map((c) => c.liveRemote); });
   assert.deepEqual(windows, [true, true], "D06 opens two windows on one host, each taking the other's saves live");
 });
+
+async function split(builds, query, fn) {
+  const pair = await start({ builds });
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await page.goto(`${pair.url}${query}`);
+    await page.waitForFunction(() => [...document.querySelectorAll(".tg-frame")].every((f) => f.contentWindow.testingGround?.state.canvases[0]?._editor));
+    const frames = page.frames().filter((frame) => frame.url().includes("/b/"));
+    await fn(page, frames);
+    assert.deepEqual(errors, [], "page errors");
+  } finally {
+    await page.close();
+    await pair.close();
+  }
+}
+const saved = (frame) => frame.evaluate(async () => { await window.testingGround.settle(); return window.testingGround.state.host.saved.map((b) => b.content.map((c) => c.value).join("")); });
+const keyOf = (frame) => frame.evaluate(() => window.testingGround.state.key);
+
+await t.checkAsync("split screen: two builds side by side, each named with its sha; the left window's keys, doc and reload go into the right", () =>
+  split([{ ...mainBuild(), label: "left build" }, { ...mainBuild(), label: "right build" }], "?doc=drill:D01", async (page, [left, right]) => {
+    assert.deepEqual(await page.$$eval(".tg-split-label", (ls) => ls.map((l) => l.textContent.replace(/[0-9a-f]{10}/, "<sha>"))), ["Left: left build at <sha>", "Right: right build at <sha>"]);
+    assert.deepEqual([await left.textContent(".tg-stamp"), await right.textContent(".tg-stamp")].map((s) => s.replace(/[0-9a-f]{10}$/, "<sha>")), ["left build at <sha>", "right build at <sha>"]);
+    await left.evaluate(() => window.testingGround.reload());
+    await right.waitForFunction(() => window.testingGround.state.reload !== null);
+    await left.click("text=Beta");
+    await caretRead(left);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Fog");
+    await page.keyboard.press("Backspace");
+    assert.deepEqual(await saved(right), await saved(left), "both builds hold the same doc");
+    assert.deepEqual((await saved(left)).slice(-1), ["Fo"]);
+    await right.click("text=Alpha");
+    await caretRead(right);
+    await page.keyboard.type("Z");
+    assert.equal((await saved(left)).includes("Alpha"), true, "keys typed on the right stay on the right");
+    await left.evaluate(() => window.testingGround.openDoc("drill:D02"));
+    await right.waitForFunction(() => window.testingGround.state.key === "drill:D02");
+    assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload, and the keys after a reload go across once");
+  }));
+
+await t.checkAsync("split screen: after a mirrored Enter the right caret stays where the right build put it, so typing lands there", () =>
+  split([{ ...mainBuild(), label: "left build" }, { ...mainBuild(), label: "right build" }], "?doc=drill:D01", async (page, [left, right]) => {
+    await right.evaluate(() => {
+      const canvas = window.testingGround.state.canvases[0];
+      canvas.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        let beta;
+        canvas._editor.state.doc.forEach((node, at) => { if (node.textContent === "Beta") beta = at + 1; });
+        canvas._editor.commands.setTextSelection(beta);
+      }, true);
+    });
+    await left.click("text=Alpha");
+    await caretRead(left);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("xy");
+    assert.deepEqual(await saved(left), ["Alpha", "xy", "Beta"], "the left build opens the empty line below");
+    assert.deepEqual(await saved(right), ["Alpha", "", "xyBeta"], "the right build's Enter put its caret in Beta, and the typing followed it there");
+  }));
+
+if (process.env.TG_TRY) {
+  const [left, right] = besideMain(process.env.TG_TRY.split(" ")).map((name) => (name === "main" ? mainBuild() : makeBuild(pickBuild(name, { repo: REPO }), { repo: REPO })));
+  await t.checkAsync(`D01 split: ${left.label} lights hidden blocks red, ${right.label} keeps every light green`, () =>
+    split([left, right], "?doc=drill:D01", async (page, [leftFrame, rightFrame]) => {
+      await leftFrame.getByRole("button", { name: "Edit empty paragraph" }).click();
+      await caretRead(leftFrame);
+      for (let i = 0; i < 6; i++) await page.keyboard.press("Enter");
+      await page.keyboard.type("x");
+      await page.keyboard.press("Backspace");
+      await leftFrame.evaluate(() => window.testingGround.reload());
+      await rightFrame.waitForFunction(() => window.testingGround.state.reload !== null);
+      assert.deepEqual(red(await lightsOf(leftFrame)), ["hidden-blocks"]);
+      assert.deepEqual(red(await lightsOf(rightFrame)), []);
+      if (process.env.TG_SHOTS) {
+        for (const frame of [leftFrame, rightFrame]) await frame.evaluate(() => window.testingGround.setDrawer(true));
+        await page.screenshot({ path: join(process.env.TG_SHOTS, `split-D01-${process.env.TG_TRY.replace(" ", "-vs-")}.png`) });
+      }
+    }));
+  for (const build of [left, right]) build.remove?.();
+}
 
 if (process.env.TG_BARKPARK) {
   const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN) });

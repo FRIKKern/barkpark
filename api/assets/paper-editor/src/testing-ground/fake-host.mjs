@@ -21,7 +21,7 @@ export function createFakeHost({ fold, blocks, onChange }) {
       canvas.addEventListener("bp-canvas-ops", (event) => {
         const answering = answer(canvas, event.detail);
         pending.add(answering);
-        answering.then(() => pending.delete(answering));
+        answering.finally(() => pending.delete(answering));
       });
     },
     detach(canvas) {
@@ -34,8 +34,9 @@ export function createFakeHost({ fold, blocks, onChange }) {
     const batch = { seq, ops: structuredClone(ops), at: Date.now() };
     host.batches.push(batch);
     canvas.identifyOpsRequest(seq, requestId);
-    folding = folding.then(() => foldBatch(canvas, batch, { ops, seq, requestId }));
-    return folding;
+    const turn = folding.then(() => foldBatch(canvas, batch, { ops, seq, requestId }));
+    folding = turn.catch(() => {});
+    return turn;
   }
 
   async function foldBatch(canvas, batch, { ops, seq, requestId }) {
