@@ -229,7 +229,11 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "title" => :string,
       "variant" => :string
     },
-    "sheet" => %{"ref" => :string, "snapshot" => :object, "tab" => :integer},
+    "sheet" => %{
+      "ref" => :string,
+      "snapshot" => {:object, %{"merges" => {:array, {:array, {:integer, 0, 200_000}}}}},
+      "tab" => :integer
+    },
     "stage" => %{
       "detail" => :string,
       "files" => :array,
@@ -290,7 +294,7 @@ defmodule Barkpark.PortableDoc.Spec.Fields do
       "title" => :string
     },
     "toc" => %{
-      "depth" => :integer,
+      "depth" => {:integer, 1, 6},
       "items" => {:array, :object},
       "numbered" => :boolean,
       "sticky" => :boolean

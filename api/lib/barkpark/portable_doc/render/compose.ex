@@ -2411,7 +2411,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp toc_level(_), do: 1
 
-  defp toc_depth(depth) when is_integer(depth) and depth > 0, do: depth
+  defp toc_depth(depth) when is_integer(depth) and depth > 0, do: min(depth, 6)
   defp toc_depth(_), do: 2
 
   defp toc_list_wrapper(false, _style),

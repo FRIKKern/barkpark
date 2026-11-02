@@ -473,7 +473,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     row_labels = block |> get("rowLabels") |> string_list()
     col_labels = block |> get("colLabels") |> string_list()
-    cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+    cols = heat_cols(grid)
 
     head =
       if col_labels == [] do
@@ -533,7 +533,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     bins = quantile_bins(grid)
     row_labels = block |> get("rowLabels") |> string_list()
     col_labels = block |> get("colLabels") |> string_list()
-    weeks = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+    weeks = heat_cols(grid)
 
     head =
       if col_labels == [] do
@@ -591,7 +591,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     show_marg = get(block, "marginals") == true
     row_labels = block |> get("rowLabels") |> string_list()
     col_labels = block |> get("colLabels") |> string_list()
-    cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+    cols = heat_cols(grid)
 
     # Row / column sums for the marginals; ragged rows contribute 0 (gap rule).
     row_sums = Enum.map(grid, &Enum.sum/1)
@@ -680,6 +680,13 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   defp matrix_cell(bin, v, false) do
     ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
+  end
+
+  defp heat_cols(grid) do
+    grid
+    |> Enum.map(&length/1)
+    |> Enum.max()
+    |> min(div(2 * Enum.sum_by(grid, &length/1), length(grid)))
   end
 
   defp bin_class(-1), do: "bp-heat__c--z"
@@ -1718,7 +1725,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       row_labels = block |> get("rowLabels") |> string_list()
       col_labels = block |> get("colLabels") |> string_list()
-      cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+      cols = heat_cols(grid)
 
       label_td =
         ~s|style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 8px 2px 0;text-align:right"|
@@ -2035,7 +2042,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   # One varint chunk: 5-bit groups, char − 63, bit 0x20 continues; the sign
   # rides the low bit (zig-zag).
-  defp decode_chunk(<<c, rest::binary>>, shift, acc) when c >= 63 and c <= 126 do
+  defp decode_chunk(<<c, rest::binary>>, shift, acc) when c >= 63 and c <= 126 and shift <= 30 do
     acc = acc ||| (c - 63 &&& 0x1F) <<< shift
 
     if (c - 63 &&& 0x20) != 0 do
