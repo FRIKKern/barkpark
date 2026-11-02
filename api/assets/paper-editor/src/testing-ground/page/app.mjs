@@ -168,4 +168,4 @@ for (const [name, apply] of Object.entries(views)) {
 new MutationObserver(() => paintFleet(ui.edit)).observe(ui.edit, { childList: true, subtree: true });
 $(".tg-build").textContent = `Editor build: ${build.label} at ${build.sha}`;
 setInterval(paintLights, 200);
-window.testingGround = { state, reload, openDoc, setDrawer, settle: () => settle(state.canvases[0], state.host) };
+window.testingGround = { state, reload, openDoc, setDrawer, paintLights, settle: () => settle(state.canvases[0], state.host) };

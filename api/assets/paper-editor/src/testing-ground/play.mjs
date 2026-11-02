@@ -71,6 +71,5 @@ export async function play(page, drill) {
 }
 
 export async function lightsOf(page) {
-  await page.waitForTimeout(450);
-  return page.evaluate(() => Object.fromEntries([...document.querySelectorAll(".tg-light")].map((li) => [li.dataset.trap, { ok: li.dataset.ok, words: li.textContent }])));
+  return page.evaluate(() => window.testingGround.paintLights() || Object.fromEntries([...document.querySelectorAll(".tg-light")].map((li) => [li.dataset.trap, { ok: li.dataset.ok, words: li.textContent }])));
 }
