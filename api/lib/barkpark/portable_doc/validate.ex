@@ -4,8 +4,10 @@ defmodule Barkpark.PortableDoc.Validate do
   JSON-pointer paths and order as `@portable-doc/validate`
   (FRIKKern/portable-doc `packages/validate/index.js`, codes in its `CODES.md`).
 
-  **Never on a write yet.** `POST /v1/plugins/bulldocs/render` calls it before
-  it renders, and stores nothing; turning it on for a write is a later decision.
+  `POST /v1/plugins/bulldocs/render` calls it before it renders, and stores
+  nothing. Paper writes call it through `Barkpark.PortableDoc.Validate.NewErrors`,
+  which counts only the errors a write adds and is report-only until
+  `:portable_doc_refuse_new_errors` is on.
 
   The checks come from `priv/portable_doc/spec/blocks.schema.json`, the schema
   the JS validator reads, compiled once at build time by
@@ -74,6 +76,23 @@ defmodule Barkpark.PortableDoc.Validate do
     do: {:error, [%{code: :not_a_doc, path: "/blocks"}]}
 
   def validate(_doc, _schema), do: {:error, [%{code: :not_a_doc, path: ""}]}
+
+  @doc """
+  The errors and block ids (`{id, path}`) of the one top-level block at
+  `/blocks/<index>`, in walk order, without `duplicate_block_id`: the one rule
+  that spans blocks (`duplicate_errors/1`). `validate/2` on a doc is every
+  block's errors in order, then `duplicate_errors/1` of every block's ids.
+  """
+  @spec check_top_block(term(), non_neg_integer(), Schema.t()) ::
+          {[error()], [{String.t(), String.t()}]}
+  def check_top_block(block, index, schema \\ @schema) do
+    {errors, ids} = check(block, schema.root, pointer("/blocks", index), 0, schema, {[], []})
+    {Enum.reverse(errors), Enum.reverse(ids)}
+  end
+
+  @doc "A `duplicate_block_id` error at every later `{id, path}` of an id seen before."
+  @spec duplicate_errors([{String.t(), String.t()}]) :: [error()]
+  def duplicate_errors(ids), do: duplicates(ids)
 
   defp walk(blocks, base, schema) do
     {errors, ids} =
