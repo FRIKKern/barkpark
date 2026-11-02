@@ -1,0 +1,110 @@
+:root {
+  --tg-bg: var(--paper-bg, #f6faf9);
+  --tg-ink: var(--paper-ink, #1b2421);
+  --tg-soft: var(--paper-ink-soft, #4d5a55);
+  --tg-rule: var(--paper-rule, #d8e2de);
+  --tg-panel: var(--paper-bg-deep, #eaf1ee);
+  --tg-red: #c2372b;
+  --tg-green: #23885a;
+  --tg-drawer: min(380px, 100vw);
+}
+
+:root[data-theme="dark"] {
+  --tg-red: #f08a80;
+  --tg-green: #5fcf9c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--tg-bg);
+  color: var(--tg-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.tg-stage {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 120px;
+  transition: max-width 0.2s;
+}
+
+.tg-with-reader .tg-stage { max-width: 1440px; }
+.tg-panes { display: grid; gap: 40px; }
+.tg-with-reader .tg-panes { grid-template-columns: 1fr 1fr; }
+.tg-window + .tg-window { margin-top: 32px; padding-top: 32px; border-top: 1px dashed var(--tg-rule); }
+.tg-read { border-left: 1px solid var(--tg-rule); padding-left: 32px; min-width: 0; }
+.tg-read-label { margin: 0 0 16px; font-size: 13px; color: var(--tg-soft); }
+
+.tg-phone .tg-stage {
+  max-width: 390px;
+  padding: 24px 16px 96px;
+  border-inline: 1px solid var(--tg-rule);
+  min-height: 100vh;
+}
+.tg-phone .tg-panes { grid-template-columns: 1fr; }
+.tg-phone .tg-read { border-left: 0; padding-left: 0; border-top: 1px solid var(--tg-rule); padding-top: 24px; }
+
+.tg-drawer-open .tg-stage { margin-right: var(--tg-drawer); }
+
+.tg-tab {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--tg-rule);
+  border-radius: 999px;
+  background: var(--tg-bg);
+  color: var(--tg-ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.tg-drawer-open .tg-tab { right: calc(var(--tg-drawer) + 16px); }
+.tg-tab-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--tg-red); }
+
+.tg-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 30;
+  width: var(--tg-drawer);
+  overflow-y: auto;
+  padding: 16px 18px 48px;
+  background: var(--tg-panel);
+  border-left: 1px solid var(--tg-rule);
+  font-size: 14px;
+}
+.tg-drawer-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+.tg-note { flex-basis: 100%; order: 3; color: var(--tg-soft); font-size: 12px; }
+.tg-close { margin-left: auto; border: 0; background: none; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+
+.tg-section { border-top: 1px solid var(--tg-rule); padding: 10px 0; }
+.tg-section summary { cursor: pointer; font-weight: 600; }
+.tg-section h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tg-soft); }
+.tg-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.tg-row select { flex: 1; min-width: 0; font: inherit; }
+
+.tg-lights { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 10px; }
+.tg-light { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }
+.tg-lamp { width: 14px; height: 14px; margin-top: 2px; border-radius: 50%; background: var(--tg-green); }
+.tg-light--red .tg-lamp { background: var(--tg-red); }
+.tg-light--wait .tg-lamp { background: transparent; border: 2px solid var(--tg-soft); }
+.tg-light--red strong { color: var(--tg-red); }
+.tg-words { color: var(--tg-soft); }
+
+.tg-reload { font: inherit; padding: 6px 12px; cursor: pointer; }
+.tg-steps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.tg-batches { padding-left: 20px; margin: 0; display: grid; gap: 4px; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: 12px; word-break: break-all; }
+.tg-diff, .tg-json { margin: 0; max-height: 280px; overflow: auto; padding: 8px; background: var(--tg-bg); border: 1px solid var(--tg-rule); font-size: 12px; }
+
+@media (max-width: 700px) {
+  .tg-with-reader .tg-panes { grid-template-columns: 1fr; }
+  .tg-read { border-left: 0; padding-left: 0; }
+  .tg-drawer-open .tg-stage { margin-right: 0; }
+  .tg-drawer-open .tg-tab { display: none; }
+}

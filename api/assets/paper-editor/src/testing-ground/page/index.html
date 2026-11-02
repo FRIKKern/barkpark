@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor testing ground</title>
+  <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
+  <link id="bp-paper-editor-styles" rel="stylesheet" href="/build/bp-paper-editor.css">
+  <link rel="stylesheet" href="/build/bp-paper-editor-shell.css">
+  <link rel="stylesheet" href="/pack/paper-surface.css">
+  <link rel="stylesheet" href="/pack/code-tokens.css">
+  <link rel="stylesheet" href="/src/testing-ground/page/style.css">
+  <script src="/build/bp-paper-editor.bundle.js" defer></script>
+  <script type="module" src="/src/testing-ground/page/app.mjs"></script>
+</head>
+<body>
+  <main class="tg-stage">
+    <div class="tg-panes">
+      <section class="tg-edit" aria-label="Editor"></section>
+      <section class="tg-read" aria-label="Reader" hidden>
+        <p class="tg-read-label"></p>
+        <article class="bp-paper-surface tg-read-body"></article>
+      </section>
+    </div>
+  </main>
+
+  <button class="tg-tab" type="button" aria-expanded="false" aria-controls="tg-drawer">
+    Tools <span class="tg-tab-dot" hidden></span>
+  </button>
+
+  <aside id="tg-drawer" class="tg-drawer" aria-label="Tools" hidden>
+    <header class="tg-drawer-head">
+      <strong>Tools</strong>
+      <span class="tg-note">Test docs only. Never paste real notes here.</span>
+      <button class="tg-close" type="button" aria-label="Close tools">×</button>
+    </header>
+
+    <details class="tg-section" data-section="checks" open>
+      <summary>Live checks</summary>
+      <ul class="tg-lights"></ul>
+      <button class="tg-reload" type="button">Reload</button>
+    </details>
+
+    <details class="tg-section" data-section="preview" open>
+      <summary>Preview and test docs</summary>
+      <label class="tg-row">Test doc <select class="tg-doc"></select></label>
+      <label class="tg-row"><input type="checkbox" class="tg-reader"> Reader beside the editor</label>
+      <label class="tg-row"><input type="checkbox" class="tg-phone"> Phone width</label>
+      <label class="tg-row"><input type="checkbox" class="tg-dark"> Dark mode</label>
+      <ol class="tg-steps" hidden></ol>
+    </details>
+
+    <details class="tg-section" data-section="versions">
+      <summary>Versions</summary>
+      <p class="tg-build"></p>
+    </details>
+
+    <details class="tg-section" data-section="hood">
+      <summary>Under the hood</summary>
+      <p class="tg-fold"></p>
+      <h4>Batches sent</h4>
+      <ol class="tg-batches"></ol>
+      <h4>Changed since the doc opened</h4>
+      <pre class="tg-diff"></pre>
+      <h4>Saved doc</h4>
+      <pre class="tg-json"></pre>
+    </details>
+  </aside>
+</body>
+</html>
