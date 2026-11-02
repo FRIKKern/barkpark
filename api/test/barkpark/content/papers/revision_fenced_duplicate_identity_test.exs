@@ -6,24 +6,14 @@ defmodule Barkpark.Content.Papers.RevisionFencedDuplicateIdentityTest do
   @dataset "production"
   @duplicate "duplicate-form"
 
-  test "revision-fenced single, batch, and form writes reject globally ambiguous ids" do
-    for kind <- [:single, :batch, :form] do
+  test "revision-fenced single and form writes reject globally ambiguous ids" do
+    for kind <- [:single, :form] do
       {slug, rev, before} = seed_duplicate_paper!(kind)
 
       result =
         case kind do
           :single ->
             Content.apply_paper_block_op(slug, patch(@duplicate, "Wrong target"), @dataset,
-              if_rev: rev
-            )
-
-          :batch ->
-            Content.apply_paper_block_ops_once(
-              slug,
-              [patch(@duplicate, "Wrong target")],
-              @dataset,
-              Ecto.UUID.generate(),
-              "user:duplicate-batch",
               if_rev: rev
             )
 
@@ -43,6 +33,24 @@ defmodule Barkpark.Content.Papers.RevisionFencedDuplicateIdentityTest do
       assert result == {:error, {:duplicate_id, @duplicate}}
       assert Content.get_paper(slug).content == before
     end
+  end
+
+  test "a revision-fenced batch on a doc that already holds the id twice applies, editing the first match like an unfenced one" do
+    {slug, rev, _before} = seed_duplicate_paper!(:batch)
+
+    assert {:ok, _receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [patch(@duplicate, "Batch")],
+               @dataset,
+               Ecto.UUID.generate(),
+               "user:duplicate-batch",
+               if_rev: rev
+             )
+
+    [columns, top_level] = Content.paper_blocks(slug)
+    assert get_in(columns, ["columns", Access.at(0), Access.at(0), "title"]) == "Batch"
+    assert top_level == form(@duplicate, "Top-level")
   end
 
   test "stale revision refusal precedes duplicate-id projection on every fenced path" do

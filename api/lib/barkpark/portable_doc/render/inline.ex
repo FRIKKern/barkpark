@@ -56,11 +56,9 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   #     understates a search snippet but never blanks a rendered surface — left
   #     alone deliberately rather than changed without a measured need.
 
-  def compose_inline_children(nodes) when is_list(nodes) do
-    nodes
-    |> unwrap_block_wrappers()
-    |> Enum.map(&compose_inline(&1, false))
-  end
+  @max_inline_depth Barkpark.PortableDoc.Validate.max_depth()
+
+  def compose_inline_children(nodes) when is_list(nodes), do: compose_children(nodes, 0)
 
   # Tolerate scalar cells (a plain string where a list of inline nodes was
   # expected — common in tables emitted by upstream converters that flatten
@@ -101,7 +99,18 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     end)
   end
 
-  def compose_inline(%{"type" => "text"} = n, inside_link) do
+  def compose_inline(node, inside_link), do: compose_inline(node, inside_link, 0)
+
+  defp compose_children(nodes, depth) do
+    nodes
+    |> unwrap_block_wrappers()
+    |> Enum.map(&compose_inline(&1, false, depth))
+  end
+
+  defp compose_inline(_node, _inside_link, depth) when depth >= @max_inline_depth,
+    do: Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+
+  defp compose_inline(%{"type" => "text"} = n, inside_link, depth) do
     # Coerce a non-string `value` — a raw API/SDK/CLI mutate can persist a number
     # (or, worse, a map/list) where a text leaf's string was expected. Binaries
     # pass through, numbers stringify, anything else (map/list/bool/nil) → "" so
@@ -125,72 +134,89 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       end
 
     case Map.get(n, "marks") do
-      nil -> value
-      [] -> value
-      marks when is_list(marks) -> apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
-      _ -> value
+      nil ->
+        value
+
+      [] ->
+        value
+
+      marks when is_list(marks) and depth + length(marks) >= @max_inline_depth ->
+        Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+
+      marks when is_list(marks) ->
+        apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
+
+      _ ->
+        value
     end
   end
 
-  def compose_inline(%{"type" => "strong"} = n, inside_link) do
+  defp compose_inline(%{"type" => "strong"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "weight" => "bold",
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
-  def compose_inline(%{"type" => "em"} = n, inside_link) do
+  defp compose_inline(%{"type" => "em"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "italic" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
-  def compose_inline(%{"type" => type} = n, inside_link)
-      when type in ["strikethrough", "strike", "s"] do
+  defp compose_inline(%{"type" => type} = n, inside_link, depth)
+       when type in ["strikethrough", "strike", "s"] do
     %{
       "kind" => "PdText",
       "strike" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
-  def compose_inline(%{"type" => "underline"} = n, inside_link) do
+  defp compose_inline(%{"type" => "underline"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "underline" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
   # `highlight` — a marked run (`==text==` in the editor, `<mark>` in BPML). Author
   # data like `color`: the walker paints it as a semantic <mark> on the surface and
   # as an inline background off-surface.
-  def compose_inline(%{"type" => "highlight"} = n, inside_link) do
+  defp compose_inline(%{"type" => "highlight"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "highlight" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
   # `sub` / `sup` — subscript and superscript runs (`<sub>`/`<sup>` in BPML and on
   # both surfaces: semantic tags, no inline property).
-  def compose_inline(%{"type" => "sub"} = n, inside_link) do
+  defp compose_inline(%{"type" => "sub"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "sub" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
-  def compose_inline(%{"type" => "sup"} = n, inside_link) do
+  defp compose_inline(%{"type" => "sup"} = n, inside_link, depth) do
     %{
       "kind" => "PdText",
       "sup" => true,
-      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+      "children" =>
+        Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     }
   end
 
@@ -217,12 +243,13 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # `test/barkpark/portable_doc/render/inline_code_source_parity_test.exs`, the
   # SDK via `js/packages/react/tests/inline-code-source.parity.test.ts`, and the
   # Go TUI via `internal/pdrender/inline_code_source_parity_test.go`.
-  def compose_inline(%{"type" => "code"} = n, _inside_link) do
+  defp compose_inline(%{"type" => "code"} = n, _inside_link, _depth) do
     %{"kind" => "PdInlineCode", "value" => inline_code_source(n)}
   end
 
-  def compose_inline(%{"type" => "link"} = n, inside_link) do
-    children = Enum.map(Map.get(n, "children", []), &compose_inline_for_link_children(&1, true))
+  defp compose_inline(%{"type" => "link"} = n, inside_link, depth) do
+    children =
+      Enum.map(Map.get(n, "children", []), &compose_inline_for_link_children(&1, true, depth + 1))
 
     if inside_link do
       # Nested link — flatten to a plain text wrapper to keep links non-recursive.
@@ -235,8 +262,8 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # Internal-link node kinds (storage model A — first-class AST nodes, not
   # Markdown). Targets are UNRESOLVED here; a render-time resolver task turns
   # them into hrefs/titles. Renderers degrade gracefully (raw target/name text).
-  def compose_inline(%{"type" => "wikilink"} = n, inside_link) do
-    children = Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+  defp compose_inline(%{"type" => "wikilink"} = n, inside_link, depth) do
+    children = Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link, depth + 1))
     base = %{"kind" => "PdWikilink", "target" => Map.get(n, "target", ""), "children" => children}
 
     base =
@@ -255,7 +282,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     end
   end
 
-  def compose_inline(%{"type" => "blockref"} = n, _inside_link) do
+  defp compose_inline(%{"type" => "blockref"} = n, _inside_link, _depth) do
     %{
       "kind" => "PdBlockref",
       "target" => Map.get(n, "target", ""),
@@ -263,7 +290,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
-  def compose_inline(%{"type" => "tag"} = n, _inside_link) do
+  defp compose_inline(%{"type" => "tag"} = n, _inside_link, _depth) do
     %{"kind" => "PdTag", "name" => Map.get(n, "name", "")}
   end
 
@@ -274,7 +301,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # the token system); `strong` fills the chip, the "worse than danger" step a
   # four-band scale needs. `note` renders beneath the chip. Non-string fields
   # degrade to "" — a chip never crashes a cell.
-  def compose_inline(%{"type" => "chip"} = n, _inside_link) do
+  defp compose_inline(%{"type" => "chip"} = n, _inside_link, _depth) do
     %{
       "kind" => "PdChip",
       "tone" => string_or_empty(Map.get(n, "tone")),
@@ -292,7 +319,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # and are never interpreted here. Resolution happens at walk time off the
   # palette's `:values` map (see `Papers.resolve_values_in_blocks/3`); compose
   # stays pure.
-  def compose_inline(%{"type" => "valueref"} = n, _inside_link) do
+  defp compose_inline(%{"type" => "valueref"} = n, _inside_link, _depth) do
     %{
       "kind" => "PdValueref",
       "target" => Map.get(n, "target", ""),
@@ -314,10 +341,13 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # so the walker can hand it to a renderer the caller registered under
   # `:inline_objects`, and otherwise shows `inline_object_text/1` in a span
   # (an empty one when the node has no text-carrying key).
-  def compose_inline(%{"type" => type} = n, inside_link) do
+  defp compose_inline(%{"type" => type} = n, inside_link, depth) do
     case Map.get(n, "children") do
       children when is_list(children) and children != [] ->
-        %{"kind" => "PdText", "children" => Enum.map(children, &compose_inline(&1, inside_link))}
+        %{
+          "kind" => "PdText",
+          "children" => Enum.map(children, &compose_inline(&1, inside_link, depth + 1))
+        }
 
       # A block-shaped node (`content` key, e.g. an empty paragraph wrapper)
       # is not an inline object and keeps composing to "".
@@ -338,10 +368,13 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # a raw mutate persisted) → DEGRADE, never raise. Reuses the unknown-type
   # children-degrade body: render children when present, else "". Must sit AFTER
   # the unknown-type clause so a typed node still hits its specific clause first.
-  def compose_inline(%{} = n, inside_link) do
+  defp compose_inline(%{} = n, inside_link, depth) do
     case Map.get(n, "children") do
       children when is_list(children) and children != [] ->
-        %{"kind" => "PdText", "children" => Enum.map(children, &compose_inline(&1, inside_link))}
+        %{
+          "kind" => "PdText",
+          "children" => Enum.map(children, &compose_inline(&1, inside_link, depth + 1))
+        }
 
       _ ->
         ""
@@ -351,23 +384,23 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # Tolerate scalar inline nodes — upstream converters (and the list-block
   # `items: [["a"]]` shape in the public ingest contract) flatten text-only
   # inlines to bare strings/numbers. Mirrors `compose_inline_children/1`.
-  def compose_inline(s, _inside_link) when is_binary(s), do: s
-  def compose_inline(n, _inside_link) when is_number(n), do: to_string(n)
+  defp compose_inline(s, _inside_link, _depth) when is_binary(s), do: s
+  defp compose_inline(n, _inside_link, _depth) when is_number(n), do: to_string(n)
 
   # A bare list where an inline node was expected (`[["a"]]` cells flattened one
   # level too shallow) → wrap the composed children in a PdText so the contained
   # text survives instead of crashing the walker on a list child.
-  def compose_inline(l, _inside_link) when is_list(l) do
-    %{"kind" => "PdText", "children" => compose_inline_children(l)}
+  defp compose_inline(l, _inside_link, depth) when is_list(l) do
+    %{"kind" => "PdText", "children" => compose_children(l, depth + 1)}
   end
 
   # Final catch-all — nil / booleans / anything else compose to "" (matches Go
   # pdrender's degrade), so a poisoned inline node never sinks its siblings.
-  def compose_inline(_, _inside_link), do: ""
+  defp compose_inline(_, _inside_link, _depth), do: ""
 
   # Link children are PdText | string only.
-  defp compose_inline_for_link_children(node, inside_link) do
-    case compose_inline(node, inside_link) do
+  defp compose_inline_for_link_children(node, inside_link, depth) do
+    case compose_inline(node, inside_link, depth) do
       s when is_binary(s) -> s
       %{"kind" => "PdText"} = t -> t
       # `code` or a flattened nested link → wrap in a PdText so the type holds.

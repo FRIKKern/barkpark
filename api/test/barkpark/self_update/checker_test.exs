@@ -213,6 +213,58 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
     assert status.notes_url == nil
   end
 
+  defp await_status(pred, attempts \\ 100) do
+    status = SelfUpdate.status()
+
+    cond do
+      pred.(status) -> status
+      attempts > 0 -> Process.sleep(20) && await_status(pred, attempts - 1)
+      true -> status
+    end
+  end
+
+  test "refresh/0 without a running Checker is :disabled, never raises" do
+    assert Process.whereis(Checker) == nil
+    assert SelfUpdate.refresh() == :disabled
+  end
+
+  test "refresh/0 starts an out-of-cycle check whose result lands in status/0" do
+    prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
+    start_supervised!({Checker, @quiet_opts})
+
+    assert SelfUpdate.status().checked_at == nil
+    assert SelfUpdate.refresh() == :ok
+
+    status = await_status(&(&1.latest_release == "999.0.0"))
+    assert status.state == :behind
+  end
+
+  test "a refresh within the floor of the last check is dropped" do
+    prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
+    start_supervised!({Checker, @quiet_opts ++ [refresh_floor_ms: 60_000]})
+
+    :ok = SelfUpdate.refresh()
+    assert await_status(&(&1.latest_release == "999.0.0")).latest_release == "999.0.0"
+
+    # Upstream moves on, but a second refresh inside the floor starts nothing.
+    prime(latest: {:ok, %{release: "1000.0.0", tag: "v1000.0.0"}})
+    :ok = SelfUpdate.refresh()
+    Process.sleep(150)
+    assert SelfUpdate.status().latest_release == "999.0.0"
+  end
+
+  test "a refresh after the floor starts a new check" do
+    prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
+    start_supervised!({Checker, @quiet_opts ++ [refresh_floor_ms: 0]})
+
+    :ok = SelfUpdate.refresh()
+    assert await_status(&(&1.latest_release == "999.0.0")).latest_release == "999.0.0"
+
+    prime(latest: {:ok, %{release: "1000.0.0", tag: "v1000.0.0"}})
+    :ok = SelfUpdate.refresh()
+    assert await_status(&(&1.latest_release == "1000.0.0")).latest_release == "1000.0.0"
+  end
+
   test "the pre-first-check status is the :unknown baseline" do
     prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
     start_supervised!({Checker, @quiet_opts})

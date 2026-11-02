@@ -208,6 +208,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"* * * * *", BarkparkCloud.Health.StalenessWorker},
     {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker},
     {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker},
+    {"*/3 * * * *", BarkparkCloud.Workers.ReleaseWatchWorker},
     {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker},
     {"7,22,37,52 * * * *", BarkparkCloud.Workers.UsageSamplerWorker},
     {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
@@ -1663,7 +1664,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # dr-bl-rate-notice: 18 -> 19 (DeployRateAlertWorker).
     # ssw9-bl-artifact-retention-quota: 19 -> 20 (Sites.ArtifactReaper).
     # cch-bl-lifecycle-token-reaper: 20 -> 21 (Workers.LifecycleTokenReaper).
-    assert detail =~ "21 rows"
+    # release watch: 21 -> 22 (Workers.ReleaseWatchWorker).
+    assert detail =~ "22 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 

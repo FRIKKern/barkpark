@@ -1246,13 +1246,26 @@ func slotUnitMarker(b cloudclient.Barkpark) string {
 		// the next deploy has nowhere to cut over TO.
 		parts = append(parts, fmt.Sprintf("serving on %s; %s",
 			strings.Join(serving, "+"), slotUnitFailureClause(failed)))
+		parts = append(parts, slotUnitServingContradiction(b)...)
+	case len(serving) > 0:
+		// A slot serves and nothing failed. That is the normal state and needs
+		// no sentence, unless the gate says the box is down. Then the two
+		// readings disagree in the other direction.
+		if c := slotUnitServingContradiction(b); len(c) > 0 {
+			parts = append(parts, "serving on "+strings.Join(serving, "+"))
+			parts = append(parts, c...)
+		}
 	case len(failed) > 0:
 		// Failed AND nothing serving. Still not a rung — `health_status` is the
 		// field that owns "is this box answering" and it is on the same row — but
 		// the contradiction is named when health disagrees.
 		parts = append(parts, "NO slot is serving; "+slotUnitFailureClause(failed))
 		parts = append(parts, slotUnitHealthContradiction(b)...)
-	case len(slots) > 0 && len(serving) == 0:
+	case len(slots) > 0 && singleUnitBox(b, slots):
+		// Nothing failed, nothing serving, and the BEAM the agent measured runs
+		// outside the pair. This box serves through one barkpark.service and has
+		// never used the slot units, so idle slots are its normal state.
+	case len(slots) > 0:
 		// Nothing failed and nothing serving: every slot is inactive/activating.
 		// A mid-cutover beat looks exactly like this for a few seconds, so it is
 		// only worth a sentence when health claims the box is UP — that is a
@@ -1345,6 +1358,47 @@ func slotUnitReason(u cloudclient.SlotUnit) string {
 		return fmt.Sprintf("status %d", int(*u.ExecMainStatus))
 	}
 	return fmt.Sprintf("%s %d", result, int(*u.ExecMainStatus))
+}
+
+// singleUnitBox reports a box that serves through one barkpark.service rather
+// than the blue/green pair. The agent reports no unit mode, so this reads two
+// facts it already sends on every beat. beam_pid says a BEAM is running.
+// beam_slot is empty when that BEAM's cgroup carries no barkpark-slot@ unit.
+// Measured 2026-11-02 on gyl, dnd, dooodo, jarl, regnskap and remote-studio:
+// beam_pid set, beam_slot empty, both slot units inactive/dead. On guerrilla,
+// a slot box, beam_slot reads "green" and matches the serving unit.
+//
+// The pid must also belong to no slot unit, so a slot box whose cgroup read
+// failed is not mistaken for a single-unit box. No BEAM reading means no
+// evidence, and the caller keeps the slot-box rule.
+func singleUnitBox(b cloudclient.Barkpark, slots []cloudclient.SlotUnit) bool {
+	p := b.Pressure
+	if p == nil || p.BeamPID == nil {
+		return false
+	}
+	pid := strings.TrimSpace(*p.BeamPID)
+	if pid == "" || pid == "0" {
+		return false
+	}
+	if p.BeamSlot != nil && strings.TrimSpace(*p.BeamSlot) != "" {
+		return false
+	}
+	for _, u := range slots {
+		if u.MainPID != nil && strconv.FormatInt(int64(*u.MainPID), 10) == pid {
+			return false
+		}
+	}
+	return true
+}
+
+// slotUnitServingContradiction is the reverse disagreement: systemd says a
+// slot is serving and the health gate says the box is down. "unknown" is not
+// a reading, so only an explicit "down" counts.
+func slotUnitServingContradiction(b cloudclient.Barkpark) []string {
+	if b.HealthStatus != "down" {
+		return nil
+	}
+	return []string{"health says down — systemd and the gate disagree"}
 }
 
 // slotUnitHealthContradiction is the sentence that only exists because two

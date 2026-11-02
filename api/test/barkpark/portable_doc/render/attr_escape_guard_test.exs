@@ -90,6 +90,10 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
     {"data_viz.ex", "class", "cls"} =>
       "tone_class/2 allowlists the tone in its case-clause guard (~w(info ok warn danger)) and otherwise returns the literal base class",
     {"data_viz.ex", "class", "k"} => "Enum.map_join(0..3, …)'s integer bin index",
+    {"data_viz.ex", "style", "pad"} =>
+      "heat_cells/5's pad = cols - length(row), an integer count of missing cells",
+    {"data_viz.ex", "colspan", "pad"} =>
+      "heat_cells/5's pad = cols - length(row), an integer count of missing cells",
     {"data_viz.ex", "style", "meta_ink"} =>
       "route_html/2: \"\" on :article, else \"color:\" <> email_skin(:evergreen).muted — a theme literal, never author text",
     {"data_viz.ex", "style", "caption_ink"} =>

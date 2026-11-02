@@ -152,7 +152,8 @@ defmodule Barkpark.PortableDoc.Patch do
     # Locks are checked FIRST so a displaced locked block keeps its
     # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
     # never mask one.
-    with {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
+    with :ok <- check_named_repeat(blocks, op, Keyword.get(opts, :duplicates)),
+         {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
       validate_result(blocks, new_blocks, op, opts)
     end
   end
@@ -160,7 +161,8 @@ defmodule Barkpark.PortableDoc.Patch do
   @doc false
   def validate_result(blocks, new_blocks, op, opts) do
     with {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
-         {:ok, new_blocks} <- check_duplicate_ratchet(blocks, new_blocks, op) do
+         {:ok, new_blocks} <-
+           check_op_duplicates(blocks, new_blocks, op, Keyword.get(opts, :duplicates)) do
       check_constraints(blocks, new_blocks, op, opts)
     end
   end
@@ -190,13 +192,73 @@ defmodule Barkpark.PortableDoc.Patch do
   def apply_patches(doc_or_blocks, ops), do: apply_patches(doc_or_blocks, ops, [])
 
   def apply_patches(doc_or_blocks, ops, opts) when is_list(ops) do
-    Enum.reduce_while(ops, {:ok, doc_or_blocks}, fn op, {:ok, acc} ->
-      case apply_patch(acc, op, opts) do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
+    start = blocks_of(doc_or_blocks)
+    batch_opts = Keyword.put(opts, :duplicates, {:batch, start})
+
+    with {:ok, result} <-
+           Enum.reduce_while(ops, {:ok, doc_or_blocks}, fn op, {:ok, acc} ->
+             case apply_patch(acc, op, batch_opts) do
+               {:ok, next} -> {:cont, {:ok, next}}
+               {:error, _} = err -> {:halt, err}
+             end
+           end),
+         :ok <- refuse_new_duplicates(start, blocks_of(result), ops) do
+      {:ok, result}
+    end
   end
+
+  @doc """
+  The end-of-batch duplicate judgment behind `apply_patches/3`, for a fold that
+  applies each op with `duplicates: {:batch, start_blocks}`. An id may sit twice
+  while the batch runs (a move lands in its new section before it leaves the
+  old one); only an id the whole batch leaves repeated, more often than before
+  it, is refused, naming the last op that added a copy.
+  """
+  @spec refuse_new_duplicates(blocks(), blocks(), [op()]) ::
+          :ok | {:error, {:duplicate_id, String.t(), String.t()}}
+  def refuse_new_duplicates(before_blocks, after_blocks, ops) do
+    case new_duplicate(before_blocks, after_blocks) do
+      nil -> :ok
+      id -> {:error, {:duplicate_id, id, op_adding_copy(before_blocks, ops, id)}}
+    end
+  end
+
+  defp new_duplicate(before_blocks, after_blocks) do
+    before_counts = id_counts(before_blocks)
+    after_ids = authored_ids(after_blocks)
+    after_counts = Enum.frequencies(after_ids)
+    Enum.find(after_ids, &added_repeat?(after_counts, before_counts, &1))
+  end
+
+  defp added_repeat?(counts, before_counts, id),
+    do: Map.get(counts, id, 0) > 1 and counts[id] > Map.get(before_counts, id, 0)
+
+  defp op_adding_copy(blocks, ops, id) do
+    {_blocks, kind} =
+      Enum.reduce_while(ops, {blocks, op_kind(List.last(ops))}, fn op, {acc, kind} ->
+        case apply_patch(acc, op, duplicates: {:batch, blocks}) do
+          {:ok, next} ->
+            if id_count(next, id) > id_count(acc, id),
+              do: {:cont, {next, op_kind(op)}},
+              else: {:cont, {next, kind}}
+
+          {:error, _} ->
+            {:halt, {acc, kind}}
+        end
+      end)
+
+    kind
+  end
+
+  defp id_counts(blocks), do: blocks |> authored_ids() |> Enum.frequencies()
+
+  defp id_count(blocks, id), do: Enum.count(authored_ids(blocks), &(&1 == id))
+
+  defp op_kind(%{"op" => kind}) when is_binary(kind), do: kind
+  defp op_kind(_op), do: "batch"
+
+  defp blocks_of(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp blocks_of(blocks) when is_list(blocks), do: blocks
 
   @doc """
   The set of block ids a batch of `ops` WRITES — inserts a new block under,
@@ -479,13 +541,7 @@ defmodule Barkpark.PortableDoc.Patch do
   # legacy duplicates remain editable: only an occurrence count that grows
   # beyond both one and its pre-op count is rejected.
   defp check_duplicate_ratchet(before_blocks, after_blocks, %{"op" => op_kind}) do
-    before_counts = before_blocks |> authored_ids() |> Enum.frequencies()
-    after_ids = authored_ids(after_blocks)
-    after_counts = Enum.frequencies(after_ids)
-
-    case Enum.find(after_ids, fn id ->
-           after_counts[id] > 1 and after_counts[id] > Map.get(before_counts, id, 0)
-         end) do
+    case new_duplicate(before_blocks, after_blocks) do
       nil -> {:ok, after_blocks}
       id -> {:error, {:duplicate_id, id, op_kind}}
     end
@@ -493,6 +549,27 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp check_duplicate_ratchet(_before_blocks, after_blocks, _op),
     do: {:ok, after_blocks}
+
+  defp check_op_duplicates(_before_blocks, after_blocks, _op, {:batch, _start}),
+    do: {:ok, after_blocks}
+
+  defp check_op_duplicates(before_blocks, after_blocks, op, _duplicates),
+    do: check_duplicate_ratchet(before_blocks, after_blocks, op)
+
+  defp check_named_repeat(blocks, op, {:batch, start}) when is_map(op) do
+    counts = id_counts(blocks)
+    start_counts = id_counts(start)
+
+    case op
+         |> Map.take(["id", "afterId", "after"])
+         |> Map.values()
+         |> Enum.find(&added_repeat?(counts, start_counts, &1)) do
+      nil -> :ok
+      id -> {:error, {:duplicate_id, id, op_kind(op)}}
+    end
+  end
+
+  defp check_named_repeat(_blocks, _op, _duplicates), do: :ok
 
   defp authored_ids(blocks) when is_list(blocks),
     do: Enum.flat_map(blocks, &authored_block_ids/1)

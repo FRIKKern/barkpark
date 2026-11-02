@@ -266,7 +266,8 @@ defmodule Barkpark.PortableDoc.Render do
 
     in_locale(opts, fn ->
       block
-      |> prepare_block(opts)
+      |> within_depth(opts)
+      |> prepare_block(Map.put(opts, :depth_checked, true))
       |> compose_block(style, theme)
       |> render_html(Map.put(opts, :doctype, false))
     end)
@@ -326,6 +327,75 @@ defmodule Barkpark.PortableDoc.Render do
     do: Map.put(block, "_render_opts", opts)
 
   defp carry_render_opts(block, _opts), do: block
+
+  @block_slots Map.merge(
+                 %{
+                   "section" => [["blocks", :each]],
+                   "columns" => [["columns", :each, :each]],
+                   "terminal" => [["blocks", :each], ["children", :each]],
+                   "expandable" => [["blocks", :each], ["children", :each]],
+                   "tabs" => [["tabs", :each, "blocks", :each]],
+                   "steps" => [
+                     ["steps", :each, "blocks", :each],
+                     ["steps", :each, "children", :each]
+                   ],
+                   "figure" => [["child"]],
+                   "card" => [
+                     ["slots", "action", :each],
+                     ["slots", "body", :each],
+                     ["slots", "media", :each],
+                     ["slots", "title", :each]
+                   ],
+                   "callout" => [["slots", "body", :each]],
+                   "note" => [
+                     ["slots", "body", :each],
+                     ["slots", "label", :each],
+                     ["slots", "lead", :each]
+                   ],
+                   "stage" => [
+                     ["slots", "detail", :each],
+                     ["slots", "kind", :each],
+                     ["slots", "title", :each]
+                   ]
+                 },
+                 Map.new(
+                   ~w(list ordered-list numbered_list bulletList bullet_list bulleted-list bulleted_list),
+                   &{&1, [["items", :each, "children", :each]]}
+                 )
+               )
+
+  @doc false
+  def block_slots, do: @block_slots
+
+  defp within_depth(block, %{depth_checked: true}), do: block
+  defp within_depth(block, _opts), do: cap_depth(block, 0)
+
+  defp cap_depth(block, depth) when is_map(block) do
+    if depth >= Barkpark.PortableDoc.Validate.max_depth() do
+      %{
+        "type" => "paragraph",
+        "text" => Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+      }
+    else
+      @block_slots
+      |> Map.get(Map.get(block, "type"), [])
+      |> Enum.reduce(block, fn path, block ->
+        update_path(block, path, &cap_depth(&1, depth + 1))
+      end)
+    end
+  end
+
+  defp cap_depth(block, _depth), do: block
+
+  defp update_path(value, [], fun), do: fun.(value)
+
+  defp update_path(list, [:each | path], fun) when is_list(list),
+    do: Enum.map(list, &update_path(&1, path, fun))
+
+  defp update_path(map, [key | path], fun) when is_map_key(map, key),
+    do: Map.update!(map, key, &update_path(&1, path, fun))
+
+  defp update_path(value, _path, _fun), do: value
 
   # A bound block whose schema field is `encrypted: true` stores its value as a
   # FieldCipher envelope (`%{"_bpenc" => …}`) — ciphertext-at-rest. The renderer
