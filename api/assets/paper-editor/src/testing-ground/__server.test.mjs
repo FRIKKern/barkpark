@@ -96,6 +96,13 @@ try {
   quiet.stop();
 }
 
+const fixed = cli(["--no-open"]);
+try {
+  assert.match(await fixed.printed(/4417/), /testing ground on main: http:\/\/127\.0\.0\.1:4417\/|EADDRINUSE.*4417/, "npm run try listens on 4417 unless told otherwise");
+} finally {
+  fixed.stop();
+}
+
 const local = cli(["--barkpark=http://127.0.0.1:4999", "--no-open", "--port=0"], { BARKPARK_TG_TOKEN: "t" });
 try {
   assert.match(await local.printed(/fold:/), /testing ground on main: http:\/\/127\.0\.0\.1:\d+\/ · fold: Local Barkpark at http:\/\/127\.0\.0\.1:4999/);

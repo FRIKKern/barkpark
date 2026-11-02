@@ -65,7 +65,7 @@ export function sentDuplicates(batches) {
 export function lights({ visibility, believed, saved, batches, refusals, settled, reload }) {
   const hidden = hiddenBlocks(visibility);
   const dupes = [...new Set([...duplicateIds(believed), ...duplicateIds(saved), ...sentDuplicates(batches)])];
-  const drift = settled ? foldDrift(saved, believed) : null;
+  const drift = foldDrift(saved, believed);
   const lost = reload ? lostKeys(reload.before, reload.after) : null;
   return [
     {

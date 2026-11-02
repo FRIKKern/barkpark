@@ -170,7 +170,7 @@ await scene("the reader shows the golden HTML, then the labeled stand-in after a
   assert.match(await page.textContent(".tg-read-label"), /^Golden reader HTML/);
   assert.match(await page.innerHTML(".tg-read-body"), /This is a warning callout body\./);
   await play(page, { steps: [{ click: { text: "callout body.", at: "end" } }, { type: " Edited" }] });
-  await page.waitForFunction(() => document.querySelector(".tg-read-label").textContent.startsWith("Stand-in"));
+  await page.waitForFunction(() => document.querySelector(".tg-read-body").textContent.includes("Edited"));
   assert.match(await page.textContent(".tg-read-label"), /^Stand-in: the @barkpark\/react render of this doc, not the golden reader\./);
   assert.match(await page.textContent(".tg-read-body"), /callout body\. Edited/);
   await page.click(".tg-tab");
