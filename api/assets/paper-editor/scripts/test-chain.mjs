@@ -28,7 +28,7 @@ export function chain(pkg = PKG) {
   return [...FIRST, ...found];
 }
 
-if (realpathSync(process.argv[1]) === SELF) {
+if (process.argv[1] && realpathSync(process.argv[1]) === SELF) {
   const args = process.argv.slice(2);
   const list = args.length === 1 && args[0] === "--list";
   if (args.length > 0 && !list) {
@@ -41,10 +41,11 @@ if (realpathSync(process.argv[1]) === SELF) {
   }
   const files = chain();
   for (const file of files) {
-    const { status, signal } = spawnSync(process.execPath, [file], { cwd: PKG, stdio: "inherit" });
+    const { status, signal, error } = spawnSync(process.execPath, [file], { cwd: PKG, stdio: "inherit" });
     if (status !== 0) {
-      console.error(`npm test: ${file} ${signal ? `was killed by ${signal}` : `exited ${status}`}`);
-      process.exit(signal ? 1 : status);
+      const why = error ? `could not start: ${error.message}` : signal ? `was killed by ${signal}` : `exited ${status}`;
+      console.error(`npm test: ${file} ${why}`);
+      process.exit(status === null ? 1 : status);
     }
   }
   console.log(`npm test: ${files.length} files passed`);

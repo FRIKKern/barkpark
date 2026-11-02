@@ -12,10 +12,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { FIRST } from "../scripts/test-chain.mjs";
 
 const RUNNER = fileURLToPath(new URL("../scripts/test-chain.mjs", import.meta.url));
@@ -41,7 +41,7 @@ function inPackage(plant, play) {
     const log = join(root, "ran.log");
     mkdirSync(join(pkg, "scripts"), { recursive: true });
     writeFileSync(join(pkg, "scripts/test-chain.mjs"), readFileSync(RUNNER));
-    for (const file of [...ORDER, "src/__helper.mjs", "src/canvas/notes.test.mjs"]) {
+    for (const file of [...ORDER, "src/__helper.mjs", "src/canvas/notes.test.mjs", "src/__x.test.js"]) {
       mkdirSync(join(pkg, dirname(file)), { recursive: true });
       writeFileSync(join(pkg, file), `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(log)}, ${JSON.stringify(`${file}\n`)});\n${plant[file] ?? ""}\n`);
     }
@@ -96,6 +96,26 @@ scene("run through an absolute symlink to the runner: the whole chain still runs
     const r = run(link, root);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(ran(), ORDER);
+  });
+});
+
+scene("a test file that cannot start (node gone mid-chain) fails the chain, exit 1, and names it", () => {
+  inPackage({}, ({ root, pkg, ran }) => {
+    const node = join(root, "node copy");
+    copyFileSync(process.execPath, node);
+    writeFileSync(join(pkg, FIRST[0]), `import { unlinkSync } from "node:fs";\nunlinkSync(${JSON.stringify(node)});\n`);
+    const r = spawnSync(node, [join(pkg, "scripts/test-chain.mjs")], { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 1, r.stderr);
+    assert.deepEqual(ran(), []);
+    assert.match(r.stderr.trim().split("\n").at(-1), new RegExp(`^npm test: ${FIRST[1]} could not start: `));
+  });
+});
+
+scene("imported from node -e, the runner runs nothing and does not throw", () => {
+  inPackage({}, ({ root, pkg, ran }) => {
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(join(pkg, "scripts/test-chain.mjs")).href)})`], { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(ran(), []);
   });
 });
 
