@@ -1,25 +1,37 @@
-// Writes host-profile/surface.json: what the committed build offers a host and what
-// it keeps to itself. "declared" is index.d.ts (which __contract_truth.test.mjs holds
-// equal to EMBED-CONTRACT.md's Surface index). "internal" is read off the build a
-// host actually loads: the bundle's private members (on the prototype and on a
-// mounted element), the classes in the dist stylesheets and in the bundle's class strings, the data-* attributes the
-// bundle writes and the events it dispatches, each minus what is declared. A host profile (R2.3) is checked against this file, so a
-// host can tell a contract name from an internal one from a name of its own.
+// Writes host-profile/surface.json: what the committed build offers a host, what it
+// needs from one, what it keeps to itself, and the reach-ins between them.
+//   declared  index.d.ts's names for the editor's elements (canvas, editor, both,
+//             window, css); __contract_truth.test.mjs holds it equal to
+//             EMBED-CONTRACT.md's Surface index.
+//   host      index.d.ts's names the host supplies (picker, mermaid).
+//   reachIns  EMBED-CONTRACT.md's Known reach-ins, by kind.
+//   internal  read off the build a host loads, minus declared and reachIns:
+//             - private members: the prototype's, a mounted element's own, and
+//               every `this._x` in the source, which also finds the ones set later;
+//             - classes in bp-paper-editor.css and in every string and template
+//               chunk of the bundle (scripts/writes.mjs), less tags, ids and the
+//               classes the reader writes (class="..." in
+//               lib/barkpark/portable_doc/render: PortableDoc's page vocabulary,
+//               styled by bp-paper-surface.css, the reader's sheet);
+//             - data-* attributes the bundle writes or its TipTap schema renders;
+//             - events the bundle dispatches.
+// A host profile checks a host's sources against this file.
 //
 // Run: node scripts/surface.mjs   (npm run build runs it; src/__surface.test.mjs
 // fails when the committed file is stale)
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
-import { declaredInTypes } from "../src/contract-surface.mjs";
+import { declaredInTypes, HOST_SUPPLIED, reachInsInContract } from "../src/contract-surface.mjs";
+import { classWords, readerClasses, schemaAttributes, writtenAttributes } from "./writes.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const assets = path.join(root, "../../priv/static/assets");
+const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
 export const surfacePath = path.join(root, "host-profile/surface.json");
 
 const sorted = (list) => [...new Set(list)].sort();
-const words = (text) => text.split(/\s+/);
 
 const grouped = (keys) => {
   const out = {};
@@ -30,55 +42,78 @@ const grouped = (keys) => {
   return out;
 };
 
-const stylesheetClasses = (css) =>
-  [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => [...m[1].matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((c) => c[1]));
+const byKind = (keys) => {
+  const out = {};
+  for (const key of [...keys].sort()) {
+    const [kind, name] = key.split("|");
+    (out[kind] ??= []).push(name);
+  }
+  return out;
+};
 
-const bundleClasses = (js) => [
-  ...[...js.matchAll(/classList\.(?:add|remove|toggle|contains|replace)\(([^)]*)\)/g)].flatMap((m) => [...m[1].matchAll(/["'`]([\w\s-]+)["'`]/g)].flatMap((s) => words(s[1]))),
-  ...[...js.matchAll(/(?:className\s*=|class\s*:|["']class["']\s*:|setAttribute\(\s*["']class["']\s*,)\s*["'`]([\w\s-]+)["'`]/g)].flatMap((m) => words(m[1])),
-  ...[...js.matchAll(/\sclass=\\?["']([\w\s-]+)\\?["']/g)].flatMap((m) => words(m[1])),
-  ...[...js.matchAll(/["'`\s.](bp-[a-z0-9][\w-]*__[\w-]*[a-z0-9])/g)].map((m) => m[1]),
+export const stylesheetClasses = (css) =>
+  [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)].flatMap((m) => [...m[1].matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((c) => c[1]));
+
+export const bundleEvents = (js) => [...js.matchAll(/new\s+(?:Custom)?Event\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]);
+
+export const notClasses = (js) => [
+  ...[...js.matchAll(/(?:customElements\.define|createElement|getElementById)\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]),
+  ...[...js.matchAll(/\.id\s*=\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]),
 ];
 
-const bundleAttributes = (js) => [
-  ...js.matchAll(/(?:set|toggle)Attribute\(\s*["'`](data-[\w-]+)["'`]/g),
-  ...js.matchAll(/["'`](data-[\w-]+)["'`]\s*:/g),
-  ...js.matchAll(/(?<![\w-])(data-[\w-]+)=\\?["'`$]/g),
-].map((m) => m[1]);
+export const sourceMembers = (text) => [...text.matchAll(/\bthis\.(_[A-Za-z]\w*)/g)].map((m) => m[1]);
 
-const bundleEvents = (js) => [...js.matchAll(/new\s+CustomEvent\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]);
+export async function mountedMembers(window, tag) {
+  const el = window.document.createElement(tag);
+  if (tag === "bp-paper-editor") el.setAttribute("data-block", JSON.stringify({ id: "p1", type: "paragraph", content: [] }));
+  window.document.body.append(el);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const members = [...Object.getOwnPropertyNames(window.customElements.get(tag).prototype), ...Object.getOwnPropertyNames(el)].filter((n) => n.startsWith("_"));
+  const schema = schemaAttributes(el._editor.schema);
+  el.remove();
+  return { members, schema };
+}
+
+const walk = (dir) => readdirSync(dir).flatMap((name) => {
+  const p = path.join(dir, name);
+  return statSync(p).isDirectory() ? walk(p) : [p];
+});
+const sourceText = (files) => files.filter((p) => p.endsWith(".js") && !path.basename(p).startsWith("__")).map((p) => readFileSync(p, "utf8")).join("\n");
 
 export async function surface() {
-  const declared = declaredInTypes(readFileSync(path.join(root, "index.d.ts"), "utf8"));
-  const names = new Set([...declared].map((k) => k.split("|")[2]));
-  const undeclared = (list) => sorted(list).filter((n) => !names.has(n));
+  const types = declaredInTypes(readFileSync(path.join(root, "index.d.ts"), "utf8"));
+  const reachIns = reachInsInContract(readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"));
+  const names = new Set([...types, ...reachIns].map((k) => k.split("|").at(-1)));
+  const internal = (list) => sorted(list).filter((n) => !names.has(n));
 
   const js = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
-  const css = ["bp-paper-editor.css", "bp-paper-surface.css"].map((f) => readFileSync(path.join(assets, f), "utf8")).join("\n");
+  const css = readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8");
+  const reader = readdirSync(readerDir).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true, url: "http://localhost/" });
   dom.window.BP_PAPER_EDITOR_NO_INJECT = true;
   dom.window.eval(js);
-  const element = (tag) => dom.window.customElements.get(tag);
-  const privateMembers = async (tag) => {
-    const el = dom.window.document.createElement(tag);
-    dom.window.document.body.append(el);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const own = Object.getOwnPropertyNames(el);
-    el.remove();
-    return sorted([...Object.getOwnPropertyNames(element(tag).prototype), ...own].filter((n) => n.startsWith("_")));
-  };
-  const editor = element("bp-paper-editor");
+  const canvas = await mountedMembers(dom.window, "bp-paper-canvas");
+  const editorEl = await mountedMembers(dom.window, "bp-paper-editor");
+  const canvasSource = sourceText(walk(path.join(root, "src/canvas")));
+  const editorSource = sourceText(readdirSync(path.join(root, "src")).map((n) => path.join(root, "src", n)).filter((p) => statSync(p).isFile()));
+  const editor = dom.window.customElements.get("bp-paper-editor");
+  const notClass = new Set([...notClasses(js), ...readerClasses(reader)]);
 
   return {
     contract: editor.CONTRACT_VERSION,
     editor: editor.EDITOR_VERSION,
     build: editor.BUILD_SHA,
-    declared: grouped(declared),
+    declared: grouped([...types].filter((k) => !HOST_SUPPLIED.has(k.split("|")[1]))),
+    host: grouped([...types].filter((k) => HOST_SUPPLIED.has(k.split("|")[1]))),
+    reachIns: byKind(reachIns),
     internal: {
-      members: { canvas: await privateMembers("bp-paper-canvas"), editor: await privateMembers("bp-paper-editor") },
-      classes: undeclared([...stylesheetClasses(css), ...bundleClasses(js)]),
-      attributes: undeclared(bundleAttributes(js)),
-      events: undeclared(bundleEvents(js)),
+      members: {
+        canvas: internal([...canvas.members, ...sourceMembers(canvasSource)]),
+        editor: internal([...editorEl.members, ...sourceMembers(editorSource)]),
+      },
+      classes: internal([...stylesheetClasses(css), ...classWords(js)].filter((n) => !notClass.has(n))),
+      attributes: internal([...writtenAttributes(js), ...canvas.schema, ...editorEl.schema].filter((n) => n.startsWith("data-"))),
+      events: internal(bundleEvents(js)),
     },
   };
 }

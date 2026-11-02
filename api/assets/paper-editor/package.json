@@ -54,6 +54,7 @@
     "index.d.ts",
     "contract.d.ts",
     "EMBED-CONTRACT.md",
+    "host-profile/surface.json",
     "THIRD-PARTY-NOTICES.txt",
     "third-party-notices.json",
     "LICENSE"

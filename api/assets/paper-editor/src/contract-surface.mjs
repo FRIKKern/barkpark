@@ -1,7 +1,10 @@
 // contract-surface.mjs — reads the declared surface out of index.d.ts and out of
 // EMBED-CONTRACT.md's "Surface index", as sets of "kind|element|name" keys, so
 // __contract_truth.test.mjs can compare the two with each other and with the
-// element classes. Node only; not part of the bundle.
+// element classes. The declared surface has the names the editor offers (canvas,
+// editor, both, window, css) and the names it needs the host to supply (picker,
+// mermaid). It also reads the reach-ins EMBED-CONTRACT.md's "Known reach-ins" lists
+// by kind. Node only; not part of the bundle.
 
 const body = (src, open) => {
   const start = src.indexOf(open);
@@ -58,6 +61,11 @@ export function declaredInTypes(dts) {
     if (at === -1) throw new Error(`index.d.ts has no ${name}`);
     return [...dts.slice(at, dts.indexOf(";", at)).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   };
+  for (const tag of names(body(body(dts, "declare global "), "interface HTMLElementTagNameMap "), /^\s+"(bp-paper-[\w-]+)"\s*:/)) add("tag", tag.slice("bp-paper-".length), [tag]);
+  add("tag", "picker", union("BpHostPickerTag"));
+  add("member", "picker", names(body(dts, "export interface BpHostPickerElement "), MEMBER));
+  add("attribute", "picker", names(body(dts, "export interface BpHostPickerAttributes "), KEY));
+  add("member", "mermaid", names(body(dts, "export interface BarkparkPaperMermaidRuntime "), MEMBER));
   add("class", "canvas", union("BpPaperPublicClass"));
   add("host class", "canvas", union("BpPaperHostClass"));
   add("token", "css", union("BpPaperThemeToken"));
@@ -74,5 +82,21 @@ export function declaredInContract(md) {
     for (const m of cells[3].matchAll(/`([^`]+)`/g)) keys.add(`${cells[1]}|${cells[2]}|${m[1]}`);
   }
   for (const m of md.matchAll(/`(--(?:paper|bp)-[a-z0-9-]+)`/g)) keys.add(`token|css|${m[1]}`);
+  return keys;
+}
+
+export const HOST_SUPPLIED = new Set(["picker", "mermaid"]);
+export const REACH_IN_KINDS = new Set(["member", "expando", "attribute", "class", "event"]);
+
+export function reachInsInContract(md) {
+  const start = md.indexOf("## Known reach-ins");
+  if (start === -1) throw new Error("EMBED-CONTRACT.md has no Known reach-ins");
+  const section = md.slice(start, md.indexOf("\n## ", start + 4));
+  const keys = new Set();
+  for (const row of section.split("\n")) {
+    const cells = row.split("|").map((c) => c.trim());
+    if (cells.length !== 4 || !REACH_IN_KINDS.has(cells[1])) continue;
+    for (const m of cells[2].matchAll(/`([^`]+)`/g)) keys.add(`${cells[1]}|${m[1]}`);
+  }
   return keys;
 }
