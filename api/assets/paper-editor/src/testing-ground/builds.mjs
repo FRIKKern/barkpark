@@ -9,7 +9,7 @@ const TREE = ["api/assets/paper-editor", "api/assets/paper-surface", "api/priv/s
 const gitIn = (repo) => (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 function recordedContracts(repo) {
-  return readdirSync(join(repo, REPLAY)).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+  return readdirSync(join(repo, REPLAY)).map((name) => name.replace(/\.json$/, "")).sort();
 }
 
 function contractCommit(repo, version) {
@@ -41,8 +41,7 @@ export function makeBuild({ label, sha }, { repo, modules = join(repo, "api/asse
   try {
     const tar = spawnSync("git", ["archive", sha, ...TREE], { cwd: repo, maxBuffer: 1 << 30 });
     if (tar.status !== 0) throw new Error(`git archive ${sha}: ${tar.stderr.toString().trim()}`);
-    const untar = spawnSync("tar", ["-x", "-C", root], { input: tar.stdout });
-    if (untar.status !== 0) throw new Error(`tar: ${untar.stderr.toString().trim()}`);
+    execFileSync("tar", ["-x", "-C", root], { input: tar.stdout, stdio: ["pipe", "ignore", "pipe"] });
     const editor = join(root, TREE[0]);
     symlinkSync(modules, join(editor, "node_modules"));
     const built = spawnSync("npm", ["run", "build"], { cwd: editor, encoding: "utf8", timeout: 120000 });
