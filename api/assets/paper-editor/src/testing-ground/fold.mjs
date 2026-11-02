@@ -23,7 +23,7 @@ function authoredBlockIds(block) {
 export const authoredIds = (blocks) => blocks.flatMap(authoredBlockIds);
 
 const tally = (blocks) => authoredIds(blocks).reduce((counts, id) => counts.set(id, (counts.get(id) ?? 0) + 1), new Map());
-const named = (op) => [op.id, op.afterId, op.after].filter((id) => typeof id === "string");
+const named = (op) => [op.after, op.afterId, op.id].filter((id) => typeof id === "string");
 
 export const referenceFold = {
   name: "Reference fold (the JS mirror of patch.ex)",

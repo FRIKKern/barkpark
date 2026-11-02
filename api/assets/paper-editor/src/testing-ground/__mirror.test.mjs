@@ -182,6 +182,25 @@ right = await mount();
 caretAt(left, "p-a", 3);
 key("Enter");
 assert.deepEqual(lines(right).slice(0, 2), ["paragraph:/Al", "paragraph:/pha"], "a window remounted after a reload is the one that follows");
+const solo = await mount();
+const old = await mount();
+mirror(document.body, () => solo, () => old);
+old.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  event.stopPropagation();
+  caretAt(old, "p-b", 1);
+}, true);
+const ids = (canvas) => { const out = []; canvas._editor.state.doc.forEach((node) => out.push(`${node.attrs.bpId}:${node.textContent}`)); return out; };
+caretAt(solo, "p-a", 6);
+const { view } = solo._editor;
+view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+for (const char of "xy") {
+  view.dom.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: char, bubbles: true, cancelable: true }));
+  view.dispatch(view.state.tr.insertText(char));
+}
+assert.deepEqual(ids(solo).slice(0, 3), ["p-a:Alpha", "p-e:xy", "p-b:Beta"], "the left build puts the caret in the empty line below");
+assert.deepEqual(ids(old).slice(0, 3), ["p-a:Alpha", "p-e:", "p-b:xyBeta"], "after a mirrored Enter the right caret stays where the right build's Enter put it, so typing lands there");
 assert.deepEqual(thrown, [], "nothing threw");
 assert.deepEqual(warned, [], "no warnings, so a selected block is mirrored as a selected block");
 

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { besideMain, makeBuild, pickBuild } from "./builds.mjs";
+import { besideMain, buildEnv, makeBuild, pickBuild } from "./builds.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
@@ -26,10 +26,11 @@ for (const bad of ["x", "1.19.0", "0", "-3", "25044a", "", "1.19 "])
   assert.throws(() => pickBuild(bad, { repo: REPO, git: noGit }), /^Error: a build is main, a PR number or a contract like 1\.19, got /, JSON.stringify(bad));
 
 const HEAD_25044 = "cebb1356c442dcead429139234577210e0c65c52";
-function remote(have) {
+function remote(have, branch = true) {
   const calls = [];
   const run = (...args) => {
     calls.push(args.join(" "));
+    if (args[0] === "ls-remote" && args[2] === "refs/heads/*") return `${"1".repeat(40)}\trefs/heads/main${branch ? `\n${HEAD_25044}\trefs/heads/pd/enter` : ""}`;
     if (args[0] === "ls-remote") return args[2] === "refs/pull/25044/head" ? `${HEAD_25044}\trefs/pull/25044/head` : "";
     if (args[0] === "cat-file" && !have) throw new Error("missing");
     return "";
@@ -38,11 +39,15 @@ function remote(have) {
 }
 const known = remote(true);
 assert.deepEqual(pickBuild("25044", { repo: REPO, git: known.run }), { label: "PR #25044", sha: HEAD_25044 });
-assert.deepEqual(known.calls, ["ls-remote origin refs/pull/25044/head", `cat-file -e ${HEAD_25044}^{commit}`], "a head already here is not fetched");
+assert.deepEqual(known.calls, ["ls-remote origin refs/pull/25044/head", "ls-remote origin refs/heads/*", `cat-file -e ${HEAD_25044}^{commit}`], "a head already here is not fetched");
 const fresh = remote(false);
 pickBuild("25044", { repo: REPO, git: fresh.run });
 assert.equal(fresh.calls.at(-1), `fetch -q --no-write-fetch-head origin ${HEAD_25044}`, "a missing head is fetched by sha, with no ref and no FETCH_HEAD");
 assert.throws(() => pickBuild("24700", { repo: REPO, git: remote(true).run }), /^Error: no PR #24700 on origin$/);
+const stranger = remote(false, false);
+assert.throws(() => pickBuild("25044", { repo: REPO, git: stranger.run }), /^Error: PR #25044 is not a branch on origin; npm run try builds only those$/);
+assert.deepEqual(stranger.calls, ["ls-remote origin refs/pull/25044/head", "ls-remote origin refs/heads/*"], "a PR head on no branch of origin is neither fetched nor built");
+assert.deepEqual(buildEnv({ PATH: "/bin", HOME: "/h", TMPDIR: "/t", BARKPARK_TG_TOKEN: "planted", NODE_OPTIONS: "--require=x" }), { PATH: "/bin", HOME: "/h", TMPDIR: "/t" }, "a build gets PATH, HOME and TMPDIR only");
 
 const head = git("rev-parse", "HEAD");
 const committed = Number(git("log", "-1", "--format=%ct", "HEAD")) * 1000;
@@ -55,7 +60,7 @@ try {
   const bundle = join(built.dir, "bp-paper-editor.bundle.js");
   assert.ok(readFileSync(bundle, "utf8").includes(`"${version}"`), `the bundle carries contract ${version}`);
   assert.ok(statSync(bundle).mtimeMs > committed, "the bundle was built here, not just unpacked from the commit");
-  assert.ok(statSync(join(root, "api/assets/paper-editor/node_modules")).isDirectory(), "the tree borrows this checkout's node_modules");
+  assert.ok(lstatSync(join(root, "api/assets/paper-editor/node_modules")).isDirectory(), "the tree builds with its own copy of node_modules, so a build cannot write this checkout's");
 } finally {
   built.remove();
 }

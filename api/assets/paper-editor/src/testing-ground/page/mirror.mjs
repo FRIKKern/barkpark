@@ -25,7 +25,19 @@ function place(view, where) {
   return pos;
 }
 
+const hand = new WeakMap();
+let keyed = false;
+
+function watch(editor) {
+  if (hand.has(editor)) return;
+  hand.set(editor, true);
+  editor.on("transaction", ({ transaction }) => { if (transaction.selectionSet && !transaction.docChanged && !keyed) hand.set(editor, true); });
+}
+
 function follow(from, to) {
+  watch(from._editor);
+  if (!hand.get(from._editor)) return;
+  hand.set(from._editor, false);
   const source = from._editor.view;
   const { from: a, to: b } = source.state.selection;
   const [x, y] = [a, b].map((pos) => place(to._editor.view, spot(source, pos)));
@@ -54,11 +66,15 @@ function paste(view, data) {
 }
 
 export function mirror(root, source, target) {
-  const on = (type, act) => root.addEventListener(type, (event) => {
-    const from = source();
-    if (!from._editor.view.dom.contains(event.target)) return;
-    act(event, from, target());
-  }, true);
+  const on = (type, act) => {
+    root.addEventListener(type, (event) => {
+      const from = source();
+      if (!from._editor.view.dom.contains(event.target)) return;
+      keyed = true;
+      act(event, from, target());
+    }, true);
+    root.addEventListener(type, () => { keyed = false; });
+  };
   on("keydown", (event, from, to) => {
     if (!KEYS.has(event.key) && !event.metaKey && !event.ctrlKey) return;
     follow(from, to);

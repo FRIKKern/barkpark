@@ -94,7 +94,7 @@ try {
 const bin = mkdtempSync(join(tmpdir(), "tg-open-"));
 writeFileSync(join(bin, "open"), `#!/bin/sh\necho "$1" >> "${join(bin, "opened")}"\n`);
 chmodSync(join(bin, "open"), 0o755);
-writeFileSync(join(bin, "npm"), "#!/bin/sh\necho \"fake npm: no build\"\nexit 1\n");
+writeFileSync(join(bin, "npm"), "#!/bin/sh\necho \"fake npm: no build, planted ${TG_PLANTED:-unset}\"\nexit 1\n");
 chmodSync(join(bin, "npm"), 0o755);
 process.on("exit", () => rmSync(bin, { recursive: true, force: true }));
 const children = new Set();
@@ -115,7 +115,7 @@ function cli(args, env = {}) {
       while (!re.test(out) && Date.now() < until && child.exitCode === null) await new Promise((r) => setTimeout(r, 50));
       return out;
     },
-    stop: () => child.kill(),
+    stop: (signal) => child.kill(signal),
   };
 }
 
@@ -140,10 +140,10 @@ for (const [args, why, env] of [
   assert.match(out, /usage: npm run try \[main \| <PR number> \| <contract like 1\.19>\] \[<second build>\]/);
 }
 
-const failed = await cli(["1.19", "--no-open", "--port=0"]).exited;
+const failed = await cli(["1.19", "--no-open", "--port=0"], { TG_PLANTED: "leaked" }).exited;
 assert.equal(failed.code, 1, "a build that fails stops npm run try");
 assert.match(failed.out, /^building contract 1\.19 at 648bfeeb44\n/);
-assert.match(failed.out, /npm run try: (git archive 648bfeeb44|npm run build for contract 1\.19 at 648bfeeb44 failed:\nfake npm: no build)/);
+assert.match(failed.out, /npm run try: (git archive 648bfeeb44|npm run build for contract 1\.19 at 648bfeeb44 failed:\nfake npm: no build, planted unset)/, "a build runs with PATH, HOME and TMPDIR only");
 
 const quiet = cli(["main", "--no-open", "--port=0"]);
 try {
@@ -154,6 +154,10 @@ try {
   quiet.stop();
 }
 assert.equal((await quiet.exited).code, 143, "npm run try exits 128 + 15 on SIGTERM");
+const interrupted = cli(["main", "--no-open", "--port=0"]);
+await interrupted.printed(/\n/);
+interrupted.stop("SIGINT");
+assert.equal((await interrupted.exited).code, 130, "npm run try exits 128 + 2 on SIGINT");
 
 const fixed = cli(["--no-open"]);
 try {

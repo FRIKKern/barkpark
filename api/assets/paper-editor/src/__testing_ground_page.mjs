@@ -314,6 +314,28 @@ await t.checkAsync("split screen: two builds side by side, each named with its s
     assert.equal(await keyOf(right), "drill:D02", "the right window follows the left one's doc and reload, and the keys after a reload go across once");
   }));
 
+await t.checkAsync("split screen: after a mirrored Enter the right caret stays where the right build put it, so typing lands there", () =>
+  split([{ ...mainBuild(), label: "left build" }, { ...mainBuild(), label: "right build" }], "?doc=drill:D01", async (page, [left, right]) => {
+    await right.evaluate(() => {
+      const canvas = window.testingGround.state.canvases[0];
+      canvas.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        let beta;
+        canvas._editor.state.doc.forEach((node, at) => { if (node.textContent === "Beta") beta = at + 1; });
+        canvas._editor.commands.setTextSelection(beta);
+      }, true);
+    });
+    await left.click("text=Alpha");
+    await caretRead(left);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("xy");
+    assert.deepEqual(await saved(left), ["Alpha", "xy", "Beta"], "the left build opens the empty line below");
+    assert.deepEqual(await saved(right), ["Alpha", "", "xyBeta"], "the right build's Enter put its caret in Beta, and the typing followed it there");
+  }));
+
 if (process.env.TG_TRY) {
   const [left, right] = besideMain(process.env.TG_TRY.split(" ")).map((name) => (name === "main" ? mainBuild() : makeBuild(pickBuild(name, { repo: REPO }), { repo: REPO })));
   await t.checkAsync(`D01 split: ${left.label} lights hidden blocks red, ${right.label} keeps every light green`, () =>
