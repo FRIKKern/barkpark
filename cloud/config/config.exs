@@ -349,6 +349,12 @@ config :barkpark_cloud, Oban,
        # instance's OWN update verdict (GET /v1/admin/self-update) onto its
        # row. Offset to :17 so it never stampedes with the on-the-hour jobs.
        {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker},
+       # The release watch: every 3 min, one conditional GitHub tags read. For
+       # 30 min after a new release appears, re-read the boxes whose rows do
+       # not show it with ?refresh=1, so they re-check now instead of within
+       # the hour. Reads only; the rollout worker below keeps its own gates.
+       # 20 anonymous GitHub calls an hour, shared with the commit-distance arm.
+       {"*/3 * * * *", BarkparkCloud.Workers.ReleaseWatchWorker},
        # isu-w4: the fleet autoupdate rollout — every 5 min, advance the
        # opt-out auto-rollout by ONE health-gated instance (trigger a `behind`
        # box, wait for it to settle `current`, then advance). Cheap per tick (≤1

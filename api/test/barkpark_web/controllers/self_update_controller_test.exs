@@ -142,6 +142,61 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
     end
   end
 
+  describe "GET ?refresh=1" do
+    @fake Barkpark.SelfUpdate.Client.Fake
+
+    setup do
+      prior = Application.get_env(:barkpark, @fake)
+      Application.put_env(:barkpark, @fake, latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
+
+      on_exit(fn ->
+        if prior,
+          do: Application.put_env(:barkpark, @fake, prior),
+          else: Application.delete_env(:barkpark, @fake)
+      end)
+
+      # Timers an hour out: only the refresh can start a check.
+      start_supervised!(
+        {Barkpark.SelfUpdate.Checker, initial_delay_ms: 3_600_000, check_interval_ms: 3_600_000}
+      )
+
+      :ok
+    end
+
+    defp check_of(conn, path),
+      do: conn |> admin_conn() |> get(path) |> json_response(200) |> Map.fetch!("check")
+
+    defp await_check(conn, deadline) do
+      check = check_of(conn, "/v1/admin/self-update")
+
+      if check["latest_release"] || System.monotonic_time(:millisecond) >= deadline do
+        check
+      else
+        Process.sleep(20)
+        await_check(conn, deadline)
+      end
+    end
+
+    test "starts an upstream check and answers with the cached verdict", %{conn: conn} do
+      # Without refresh the box has not checked yet.
+      assert check_of(conn, "/v1/admin/self-update")["checked_at"] == nil
+
+      # The refresh answers at once with the cached verdict.
+      assert check_of(conn, "/v1/admin/self-update?refresh=1")["state"] in ["unknown", "behind"]
+
+      # The background check lands for the next read.
+      check = await_check(conn, System.monotonic_time(:millisecond) + 2_000)
+      assert check["latest_release"] == "999.0.0"
+      assert check["state"] == "behind"
+    end
+
+    test "a plain GET never starts a check", %{conn: conn} do
+      assert check_of(conn, "/v1/admin/self-update")["checked_at"] == nil
+      Process.sleep(100)
+      assert check_of(conn, "/v1/admin/self-update")["checked_at"] == nil
+    end
+  end
+
   describe "enabled runner" do
     # The other polarity of the probe: an ARMED box says so without being
     # triggered. Both polarities are required — a key hardcoded to either value

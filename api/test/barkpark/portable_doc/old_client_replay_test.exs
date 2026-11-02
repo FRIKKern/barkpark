@@ -105,11 +105,11 @@ defmodule Barkpark.PortableDoc.OldClientReplayTest do
 
       @scene Enum.find(recording["scenes"], &(&1["scene"] == "nested-enter"))
 
-      test "nested-enter: Patch refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
+      test "nested-enter: Patch refuses the repeated id an old editor's split sends; current editors never send it and a stale tab reloads into one" do
         assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_patch(@scene)
       end
 
-      test "nested-enter: the canvas batch write refuses the split section paragraph's repeated id until task-42d085f7431b8417" do
+      test "nested-enter: the canvas batch write refuses the repeated id an old editor's split sends; current editors never send it and a stale tab reloads into one" do
         assert {:error, {:duplicate_id, "p-day", "replace-block"}} = through_batch_write(@scene)
       end
     end

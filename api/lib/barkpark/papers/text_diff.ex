@@ -24,6 +24,14 @@ defmodule Barkpark.Papers.TextDiff do
   defdelegate diff_lines(old_text, new_text), to: TextDiff
 
   @doc """
+  Diff many pairs on one shared budget. See `Barkpark.PortableDoc.TextDiff.diff_many/1`.
+  """
+  @spec diff_many([{String.t() | nil, String.t() | nil}]) :: [
+          [%{op: String.t(), text: String.t()}]
+        ]
+  defdelegate diff_many(pairs), to: TextDiff
+
+  @doc """
   Render diff chunks to HTML. See `Barkpark.PortableDoc.TextDiff.format_diff_html/1`.
   """
   @spec format_diff_html([%{op: String.t(), text: String.t()}]) :: String.t()

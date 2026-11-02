@@ -8809,12 +8809,25 @@
     var state = "intact";
     if (failedSlots.length || failedSites.length || (truncated !== null && truncated > 0)) state = "failed";
     else if (!rows.length) state = "empty";
-    else if (slots.length && !serving.length) state = "idle";
+    else if (slots.length && !serving.length) state = slotUnitsBeamOutside(p, slots) ? "single" : "idle";
     else if (serving.length) state = "serving";
     return {
       state: state, slots: slots, serving: serving,
       failedSlots: failedSlots, failedSites: failedSites, truncated: truncated,
+      beamPid: state === "single" ? String(p.beam_pid).trim() : null,
     };
+  }
+
+  // Pure: does the BEAM the agent measured run outside the blue/green pair?
+  // The Go twin is singleUnitBox in internal/cli/cloud_status_cmd.go. beam_pid
+  // set, beam_slot empty, and the pid belongs to no slot unit: the box serves
+  // through one barkpark.service and its idle slots are normal.
+  function slotUnitsBeamOutside(p, slots) {
+    var pid = (p && (typeof p.beam_pid === "string" || typeof p.beam_pid === "number"))
+      ? String(p.beam_pid).trim() : "";
+    if (pid === "" || pid === "0") return false;
+    if (typeof p.beam_slot === "string" && p.beam_slot.trim() !== "") return false;
+    return !slots.some(function (u) { return u.mainPid !== null && String(u.mainPid) === pid; });
   }
 
   // Pure: the failed slot(s) named with the two facts that decide what an
@@ -8868,6 +8881,8 @@
       parts.push("NO slot is serving; " + slotUnitFailureClause(m.failedSlots));
     } else if (m.serving.length) {
       parts.push("serving on " + m.serving.map(function (u) { return u.name; }).join("+"));
+    } else if (m.state === "single") {
+      parts.push("serving through one unit; the BEAM (pid " + m.beamPid + ") runs outside the blue/green pair");
     } else if (m.slots.length) {
       // Nothing failed and nothing serving: every slot is inactive/activating.
       // A mid-cutover beat looks exactly like this for a few seconds.

@@ -100,6 +100,8 @@ defmodule Barkpark.PortableDoc.Render.Chrome do
       "%{on} of %{total}" => gettext("%{on} of %{total}", on: "%{on}", total: "%{total}"),
       "Sheet truncated — showing the first %{n} rows" =>
         gettext("Sheet truncated — showing the first %{n} rows", n: "%{n}"),
+      "Table too large to show" => gettext("Table too large to show"),
+      "Nested too deep to show" => gettext("Nested too deep to show"),
       # task status vocabulary (design/status-manifest.json labels)
       "open" => pgettext("task status", "open"),
       "ready" => pgettext("task status", "ready"),

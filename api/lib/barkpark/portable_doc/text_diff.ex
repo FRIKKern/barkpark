@@ -40,7 +40,7 @@ defmodule Barkpark.PortableDoc.TextDiff do
   emits at its border, so output stays byte-identical below the cap.
   """
 
-  # Size guard for `diff_chunks/2` — above either bound we skip the O(m·n) grid
+  # Size guard for `diff_within/3` — above either bound we skip the O(m·n) grid
   # and emit the degraded whole-block diff instead. See @moduledoc.
   @max_diff_lines 2000
   @max_diff_cells 4_000_000
@@ -55,9 +55,25 @@ defmodule Barkpark.PortableDoc.TextDiff do
   """
   @spec diff_lines(String.t() | nil, String.t() | nil) :: [%{op: String.t(), text: String.t()}]
   def diff_lines(old_text, new_text) do
-    a = split_lines(old_text)
-    b = split_lines(new_text)
-    diff_chunks(a, b)
+    {chunks, _left} = diff_within(split_lines(old_text), split_lines(new_text), @max_diff_cells)
+    chunks
+  end
+
+  @doc """
+  `diff_lines/2` over a list of `{old_text, new_text}` pairs, one chunk list per
+  pair. The pairs share one `@max_diff_cells` budget: a pair whose grid no longer
+  fits gets the whole-block diff.
+  """
+  @spec diff_many([{String.t() | nil, String.t() | nil}]) :: [
+          [%{op: String.t(), text: String.t()}]
+        ]
+  def diff_many(pairs) do
+    {hunks, _left} =
+      Enum.map_reduce(pairs, @max_diff_cells, fn {old_text, new_text}, left ->
+        diff_within(split_lines(old_text), split_lines(new_text), left)
+      end)
+
+    hunks
   end
 
   @doc """
@@ -95,25 +111,25 @@ defmodule Barkpark.PortableDoc.TextDiff do
   end
 
   # Classic DP-LCS over the two line arrays, then backtrack to chunks. We index
-  # the lines as 1-based maps so the DP grid lookups are O(1) (Elixir lists are
-  # not random-access). The DP table is a map keyed by {i, j}; absent keys
-  # (any i==0 or j==0 border) read as 0 — the JS Int32Array's zero border.
-  defp diff_chunks([], []), do: []
+  # the lines as 1-based maps so the backtrack lookups are O(1) (Elixir lists are
+  # not random-access). The DP table is a tuple of rows, each row a binary of
+  # 16-bit cells with a zero border — the JS Int32Array's zero border.
+  defp diff_within([], [], left), do: {[], left}
 
-  defp diff_chunks(a, b) do
+  defp diff_within(a, b, left) do
     m = length(a)
     n = length(b)
 
-    if m > @max_diff_lines or n > @max_diff_lines or m * n > @max_diff_cells do
+    if m > @max_diff_lines or n > @max_diff_lines or m * n > left do
       # Oversized input: skip the O(m·n) grid and emit the coarse whole-block
       # diff (every old line removed, then every new line added) — byte-identical
       # to what backtrack emits at its border, but O(m + n) memory.
-      Enum.map(a, &%{op: "-", text: &1}) ++ Enum.map(b, &%{op: "+", text: &1})
+      {Enum.map(a, &%{op: "-", text: &1}) ++ Enum.map(b, &%{op: "+", text: &1}), left}
     else
       ai = index_map(a)
       bi = index_map(b)
       dp = build_dp(ai, bi, m, n)
-      backtrack(ai, bi, dp, m, n, [])
+      {backtrack(ai, bi, dp, m, n, []), left - m * n}
     end
   end
 
@@ -124,30 +140,34 @@ defmodule Barkpark.PortableDoc.TextDiff do
     |> Map.new(fn {line, idx} -> {idx, line} end)
   end
 
-  defp dp_at(_dp, i, j) when i == 0 or j == 0, do: 0
-  defp dp_at(dp, i, j), do: Map.get(dp, {i, j}, 0)
+  defp dp_at(dp, i, j), do: dp |> elem(i) |> cell(j)
 
-  # Fill dp[i][j] for 1..m × 1..n exactly as the JS double loop does.
-  defp build_dp(ai, bi, m, n) do
-    Enum.reduce(1..m//1, %{}, fn i, dp ->
-      Enum.reduce(1..n//1, dp, fn j, dp ->
-        value =
-          if Map.fetch!(ai, i) == Map.fetch!(bi, j) do
-            dp_at(dp, i - 1, j - 1) + 1
-          else
-            left = dp_at(dp, i - 1, j)
-            up = dp_at(dp, i, j - 1)
-            if left >= up, do: left, else: up
-          end
-
-        Map.put(dp, {i, j}, value)
-      end)
-    end)
+  defp cell(row, j) do
+    offset = 2 * j
+    <<_::binary-size(offset), value::16, _::binary>> = row
+    value
   end
 
-  # Backtrack from (m, n) to (0, 0), prepending chunks so the final list is in
-  # forward document order (the JS builds reversed then reverses; prepending
-  # gives the same order without a final reverse).
+  defp build_dp(ai, bi, m, n) do
+    b = Enum.map(1..n//1, &Map.fetch!(bi, &1))
+    first = :binary.copy(<<0::16>>, n + 1)
+
+    {rows, _last} =
+      Enum.map_reduce(1..m//1, first, fn i, <<diagonal::16, above::binary>> ->
+        row = dp_row(b, Map.fetch!(ai, i), above, diagonal, 0, <<0::16>>)
+        {row, row}
+      end)
+
+    List.to_tuple([first | rows])
+  end
+
+  defp dp_row([], _line, _above, _diagonal, _left, row), do: row
+
+  defp dp_row([b_line | b], line, <<up::16, above::binary>>, diagonal, left, row) do
+    value = if line == b_line, do: diagonal + 1, else: max(up, left)
+    dp_row(b, line, above, up, value, <<row::binary, value::16>>)
+  end
+
   defp backtrack(_ai, _bi, _dp, 0, 0, acc), do: acc
 
   defp backtrack(ai, bi, dp, i, j, acc) when i > 0 and j > 0 do
