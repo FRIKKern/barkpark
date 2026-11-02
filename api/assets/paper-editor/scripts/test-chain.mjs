@@ -1,7 +1,3 @@
-// npm test: FIRST in order, then every other src/**/__*.test.mjs sorted, each in its own
-// node process from the package root, stopping at the first failure. A test runs because
-// its file exists (task-2f7cb25af65df103). Pinned by src/__test_chain_runner.test.mjs.
-
 import { spawnSync } from "node:child_process";
 import { readdirSync, realpathSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
