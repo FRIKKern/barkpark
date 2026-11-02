@@ -700,6 +700,11 @@
         "env": {}
       },
       {
+        "name": "derived-files: the regen/reach map sends each diff to the derived files and gates it reaches",
+        "run": "node --check scripts/derived-files.mjs\nnode --check scripts/regen.mjs\nnode --check scripts/reach.mjs\nnode scripts/node-test-floor.mjs --floor 1 scripts/derived-files.test.mjs\n",
+        "env": {}
+      },
+      {
         "name": "cp-ops: choice list == scripts/cp-ops.sh arms (both ways) and every arm's ssh argv matches its golden",
         "run": "bash -n scripts/cp-ops.sh\nbash scripts/cp-ops.test.sh\n",
         "env": {}
