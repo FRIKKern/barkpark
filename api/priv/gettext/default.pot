@@ -9329,6 +9329,11 @@ msgstr ""
 msgid "Enter a whole number."
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:316
+#, elixir-autogen, elixir-format
+msgid "Enter a whole number from 1 to 6."
+msgstr ""
+
 #: lib/barkpark_web/components/field_inputs.ex:773
 #: lib/barkpark_web/studio_locale.ex:316
 #, elixir-autogen, elixir-format

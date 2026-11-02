@@ -592,13 +592,18 @@
         if (field.value === field.defaultValue) return;
         const value = field.value.trim();
         const gaugeMaximum = editor === "paper-gauge-list-editor" && field.name === "max";
-        const valid = editor === "paper-toc-editor"
+        const tocDepth = editor === "paper-toc-editor" && field.name === "depth";
+        const valid = tocDepth
+          ? positiveInteger(value) && Number(value) <= 6
+          : editor === "paper-toc-editor"
           ? positiveInteger(value)
           : gaugeMaximum
             ? field.value === "" || (finiteNumber(value) && Number(value) > 0)
             : finiteNumber(value);
         if (!valid) {
-          field.setCustomValidity?.(editor === "paper-toc-editor"
+          field.setCustomValidity?.(tocDepth
+            ? bpPaperT(form, "Enter a whole number from 1 to 6.")
+            : editor === "paper-toc-editor"
             ? bpPaperT(form, "Enter a positive whole number.")
             : gaugeMaximum ? bpPaperT(form, "Enter a number greater than zero, or leave blank for automatic.")
               : bpPaperT(form, "Enter a number."));

@@ -9332,6 +9332,11 @@ msgstr "Skriv inn et positivt heltall."
 msgid "Enter a whole number."
 msgstr "Skriv inn et heltall."
 
+#: lib/barkpark_web/studio_locale.ex:316
+#, elixir-autogen, elixir-format
+msgid "Enter a whole number from 1 to 6."
+msgstr "Skriv inn et heltall fra 1 til 6."
+
 #: lib/barkpark_web/components/field_inputs.ex:773
 #: lib/barkpark_web/studio_locale.ex:316
 #, elixir-autogen, elixir-format
