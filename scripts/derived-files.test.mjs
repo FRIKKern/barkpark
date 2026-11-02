@@ -81,6 +81,12 @@ test("every gate file and every mix task a step names exists", () => {
   }
 });
 
+test("every command changes directory at most once (each runs from the repo root)", () => {
+  for (const s of STEPS)
+    for (const cmd of [s.check, s.write].filter(Boolean))
+      assert.ok((cmd.match(/(^|&& |\()cd /g) || []).length <= 1, `${s.name}: ${cmd}`);
+});
+
 test("reach names the command that runs each kind of test", () => {
   assert.deepEqual(
     commandsFor([

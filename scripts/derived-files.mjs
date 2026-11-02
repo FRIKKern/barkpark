@@ -15,6 +15,7 @@ const RENDER = [
   "api/lib/barkpark/portable_doc/slots.ex",
 ];
 const GETTEXT = ["api/priv/gettext/**/*.po", "api/lib/barkpark_web/studio_locale.ex"];
+const SNAPSHOT = "test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs:182";
 const PACK_GATES = [
   "api/test/barkpark/portable_doc/golden_pack_test.exs",
   "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs",
@@ -113,7 +114,7 @@ export const STEPS = [
       "api/lib/mix/tasks/barkpark.chat.gen_golden_*.ex",
     ],
     after: ["design-emit"],
-    write: `${MIX} barkpark.chat.gen_golden_toolrows && ${MIX} barkpark.chat.gen_golden_transcript`,
+    write: `${MIX} barkpark.chat.gen_golden_toolrows && MIX_ENV=test mix barkpark.chat.gen_golden_transcript`,
     gates: [
       "api/test/barkpark/chat_golden_toolrows_parity_test.exs",
       "api/test/barkpark/chat_golden_transcript_parity_test.exs",
@@ -198,8 +199,8 @@ export const STEPS = [
     name: "studio-snapshot",
     inputs: [...GETTEXT, ...RENDER, "api/lib/barkpark_web/live/studio/**"],
     after: ["design-emit"],
-    check: `${MIX} test test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs:182`,
-    write: `rm -f api/test/barkpark_web/live/studio/snapshots/paper_editor_flag_off.html && (${MIX} test test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs:182 >/dev/null 2>&1; true) && ${MIX} test test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs:182`,
+    check: `${MIX} test ${SNAPSHOT}`,
+    write: `cd api && rm -f test/barkpark_web/live/studio/snapshots/paper_editor_flag_off.html && (MIX_ENV=test mix test ${SNAPSHOT} >/dev/null 2>&1; true) && MIX_ENV=test mix test ${SNAPSHOT}`,
     gates: ["api/test/barkpark_web/live/studio/studio_live_paper_canvas_test.exs"],
   },
   {
