@@ -98,6 +98,16 @@ test("a Studio component the editor renders reaches the snapshot only", () => {
   assert.deepEqual(names(["api/lib/barkpark_web/components/field_inputs.ex"]), ["studio-snapshot"]);
 });
 
+test("the paper editor's server dependencies reach the Studio snapshot", () => {
+  for (const path of [
+    "api/lib/barkpark/content.ex",
+    "api/lib/barkpark/content/papers/block_ops.ex",
+    "api/lib/barkpark/portable_doc/block_ids.ex",
+  ])
+    assert.ok(names([path]).includes("studio-snapshot"), path);
+  assert.ok(names(["api/lib/barkpark/content/papers/block_ops.ex"]).includes("golden-pack"));
+});
+
 test("every input glob matches a tracked file", () => {
   const files = execSync("git ls-files", { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 }).split("\n");
   for (const s of STEPS)

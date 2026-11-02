@@ -43,6 +43,9 @@ const PAPER_EDITOR_VIEW = [
   "api/lib/barkpark_web/paper_canvas_lease.ex",
   "api/lib/barkpark/portable_doc/projection.ex",
   "api/lib/barkpark/portable_doc/table_editing.ex",
+  "api/lib/barkpark/portable_doc/block_ids.ex",
+  "api/lib/barkpark/content.ex",
+  "api/lib/barkpark/content/papers/block_ops.ex",
   "api/lib/barkpark/content/papers/template.ex",
 ];
 const GETTEXT = ["api/priv/gettext/**/*.po", "api/lib/barkpark_web/studio_locale.ex"];
