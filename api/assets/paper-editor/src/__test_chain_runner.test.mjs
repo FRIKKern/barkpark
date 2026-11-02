@@ -1,12 +1,13 @@
 // __test_chain_runner.test.mjs — what scripts/test-chain.mjs does with its chain: it
 // runs every file, in chain order, and stops at the first that fails, with that file's
-// exit code and its name. The census pins chain(); this pins the loop around it.
+// exit code and its name. The census pins chain(); this pins the loop around it, and
+// that the census itself goes red on a package.json that dodges the runner.
 //
 // Each scene copies the runner into a fresh package under the temp folder whose path has
 // a space, a % and a non-ASCII letter, with logging stub tests at every depth, and runs it
 // from another folder (the runner must set the cwd itself). src/Upper sorts before
-// src/__a but is listed after it, so the order is the runner's sort, not the folder's. The temp folder is removed
-// after every scene, red or green.
+// src/__a but is listed after it, so the order is the runner's sort, not the folder's.
+// The temp folder is removed after every scene, red or green.
 // Run: node src/__test_chain_runner.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
@@ -18,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { FIRST } from "../scripts/test-chain.mjs";
 
 const RUNNER = fileURLToPath(new URL("../scripts/test-chain.mjs", import.meta.url));
+const CENSUS = fileURLToPath(new URL("./__test_chain_census.mjs", import.meta.url));
 const REST = ["src/Upper/__k.test.mjs", "src/__a.test.mjs", "src/__m.test.mjs", "src/canvas/__b.test.mjs", "src/canvas/__z.test.mjs", "src/deep/x/__q.test.mjs"];
 const ORDER = [...FIRST, ...REST];
 
@@ -107,6 +109,32 @@ scene("--list prints the chain and runs nothing", () => {
     assert.deepEqual(ran(), ORDER, "only the first run ran anything");
   });
 });
+
+const TEST = { test: "node scripts/test-chain.mjs" };
+for (const [what, scripts, gone, says] of [
+  ["a clean package", TEST, null, null],
+  ["a pretest hook", { pretest: "node src/__x.mjs", ...TEST }, null, "package.json has a pretest script"],
+  ["a posttest hook", { ...TEST, posttest: "node src/__x.mjs" }, null, "package.json has a posttest script"],
+  ["a test script that is not the runner", { test: "node src/__smoke.mjs" }, null, `package.json's test script is "node src/__smoke.mjs"`],
+  ["a FIRST file gone from disk", TEST, "src/__rig.test.mjs", "src/__rig.test.mjs is in the chain but does not exist on disk"],
+]) {
+  scene(`the census on ${what}: ${says ? "red, and it says why" : "0 drift"}`, () => {
+    inPackage({}, ({ root, pkg }) => {
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ scripts }));
+      writeFileSync(join(pkg, "src/__test_chain_census.mjs"), readFileSync(CENSUS));
+      if (gone) rmSync(join(pkg, gone));
+      const r = run(join(pkg, "src/__test_chain_census.mjs"), root);
+      if (!says) {
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout.trim(), `test-chain census: ${REST.length + 3} test files on disk, ${ORDER.length} files in the chain — reconciled, 0 drift`);
+      } else {
+        assert.equal(r.status, 1);
+        assert.ok(r.stderr.includes(`  - ${says}`), r.stderr);
+        assert.equal(r.stderr.trim().split("\n").at(-1), "test-chain census: FAIL (1 problem)");
+      }
+    });
+  });
+}
 
 if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
 console.log("\ntest-chain runner: all checks passed");
