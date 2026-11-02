@@ -49,6 +49,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
+  alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
@@ -431,6 +432,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- validate_render_shapes_for_type(type, blocks),
          :ok <- maybe_reject_hollow_result(type, blocks),
          :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
+         :ok <- check_new_portable_doc_errors(type, existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
            encrypt_blocks_for_type(
              type,
@@ -1046,6 +1048,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
            |> ensure_block_ids()
            |> normalize_render_shapes()
            |> hydrate_changed_sheet_blocks(blocks, doc, dataset, slug),
+         # PortableDoc RATCHET (R4.5): the op may not ADD a validation error;
+         # report-only until :portable_doc_refuse_new_errors is on (NewErrors).
+         :ok <- NewErrors.check(blocks, new_blocks),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -1685,6 +1690,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
          normalized = folded |> ensure_block_ids() |> normalize_render_shapes(),
+         # Same PortableDoc RATCHET as the single-op path, on the batch RESULT.
+         :ok <- NewErrors.check(blocks, normalized),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
@@ -3668,6 +3675,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # The stored blocks of the existing paper row (the prev side of the upsert
   # ratchet), or [] for a brand-new paper / an HTML-only row.
+  # PortableDoc RATCHET (R4.5) on the upsert door: papers only. Sessions and
+  # other block docs are not checked yet.
+  defp check_new_portable_doc_errors(@paper_type, stored, written),
+    do: NewErrors.check(stored, written)
+
+  defp check_new_portable_doc_errors(_type, _stored, _written), do: :ok
+
+  @doc """
+  The blocks of the paper an ingest at `slug` would replace, found by the
+  write's own tenant rule (`scope_attrs` carries `"workspace_id"` and
+  `"project_id"` as ingest stamps them); `[]` when there is none. The validate
+  dry run reads it so its PortableDoc ratchet (R4.5) agrees with the write.
+  """
+  def stored_paper_blocks(slug, dataset, scope_attrs) when is_binary(slug),
+    do:
+      @paper_type
+      |> get_existing_blocks_doc_for_write(slug, dataset, scope_attrs)
+      |> existing_paper_blocks()
+
   defp existing_paper_blocks(nil), do: []
 
   defp existing_paper_blocks(%Document{} = existing),

@@ -111,8 +111,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
-  alias Barkpark.Content.Papers.MixedWriteGuard
+  alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
   alias Barkpark.PortableDoc.{Render, Validate}
+  alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
   alias BarkparkWeb.{ErrorResponse, StudioLocale}
@@ -182,11 +183,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
           }
         }
 
-        violations =
-          paper_wall_violations(conn, ref, paper_scope_opts(conn, params)) ++
-            paper_structure_violations(blocks)
+        scope = paper_scope_opts(conn, params)
 
-        json(conn, %{valid: violations == [], violations: violations})
+        violations =
+          paper_wall_violations(conn, ref, scope) ++ paper_structure_violations(blocks)
+
+        json(conn, with_portable_doc_check(conn, params, violations, slug, blocks))
     end
   end
 
@@ -770,6 +772,64 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp validate_normalize(%{} = params) do
     {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
+  end
+
+  # The write's PortableDoc ratchet (R4.5), dry: the errors these blocks would
+  # ADD to the paper ingest would replace at `slug` (found by ingest's own
+  # tenant rule, `BlockOps.stored_paper_blocks/3`; none stored: every error). While the
+  # ratchet is report-only they ride `warnings` with the entry the write queues,
+  # and `valid` is unchanged; once it refuses they are violations, so the dry
+  # run and the write agree.
+  defp with_portable_doc_check(conn, params, violations, slug, blocks) do
+    scope_attrs =
+      case resolve_write_scope(conn, params) do
+        {:ok, {ws_id, project_id}} -> %{"workspace_id" => ws_id, "project_id" => project_id}
+        _ -> %{}
+      end
+
+    dataset = blank_to_nil(params["dataset"]) || Content.paper_default_dataset()
+    stored = BlockOps.stored_paper_blocks(slug, dataset, scope_attrs)
+
+    written =
+      if is_list(blocks),
+        do: blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes(),
+        else: blocks
+
+    {added, existing} = NewErrors.split(stored, written)
+    message = NewErrors.message(added, existing)
+
+    cond do
+      added == [] ->
+        %{valid: violations == [], violations: violations}
+
+      NewErrors.refuse?() ->
+        added =
+          Enum.map(
+            added,
+            &%{
+              code: "portable_doc-#{&1.code}",
+              path: &1.path,
+              message: "#{&1.code} at #{&1.path}"
+            }
+          )
+
+        %{valid: false, violations: violations ++ added}
+
+      true ->
+        %{
+          valid: violations == [],
+          violations: violations,
+          warnings: [
+            %{
+              code: "portable_doc_invalid",
+              severity: "warning",
+              message: message,
+              violations: added,
+              existing: existing
+            }
+          ]
+        }
+    end
   end
 
   defp bpml_violation(e),
@@ -1563,6 +1623,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
+        Warnings.reset()
 
         case Content.apply_paper_block_op(
                slug,
@@ -1573,15 +1634,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
           {:ok, result} ->
             conn
             |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: slug,
-              op: result.op_kind,
-              rev: result.rev,
-              block_id: result.block_id,
-              fragment_html: result.fragment_html,
-              position: result.position
-            })
+            |> json(
+              with_warnings(%{
+                ok: true,
+                slug: slug,
+                op: result.op_kind,
+                rev: result.rev,
+                block_id: result.block_id,
+                fragment_html: result.fragment_html,
+                position: result.position
+              })
+            )
 
           {:error, :not_found} ->
             conn
@@ -1652,19 +1715,25 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         dataset = params["dataset"] || Content.paper_default_dataset()
 
+        # Opens the advisory queue: the PortableDoc ratchet's report-only warning
+        # (R4.5) rides the success receipt via with_warnings/1.
+        Warnings.reset()
+
         case Content.apply_paper_block_ops(slug, ops, dataset, op_opts) do
           {:ok, result} ->
             # MINIMAL receipt — slug + op-count + new rev + affected block ids.
             # fragment_html is deliberately SUPPRESSED on the batch path.
             conn
             |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: result.slug,
-              op_count: result.op_count,
-              rev: result.rev,
-              block_ids: result.block_ids
-            })
+            |> json(
+              with_warnings(%{
+                ok: true,
+                slug: result.slug,
+                op_count: result.op_count,
+                rev: result.rev,
+                block_ids: result.block_ids
+              })
+            )
 
           {:error, :precondition_failed} ->
             conn
@@ -1810,6 +1879,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # The caller's resolved scope, as apply_op reads it: without it
         # `get_scoped_paper/3` fell back to the Default workspace for EVERY caller,
         # so an admin token bound to another workspace proposed into Default's papers.
+        Warnings.reset()
+
         case Content.propose_paper_blocks(
                slug,
                ops,
@@ -1820,21 +1891,23 @@ defmodule BarkparkWeb.BulldocsIngestController do
           {:ok, receipt} ->
             conn
             |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: receipt.slug,
-              draft_id: receipt.draft_id,
-              rev: receipt.rev,
-              applied_block_ids: receipt.applied_block_ids,
-              skipped_block_ids: receipt.skipped_block_ids,
-              provenance: receipt.provenance,
-              # The approval path — the EXISTING publish gate, spelled out so an
-              # agent holding this receipt needs no second lookup.
-              approve_via: %{
-                mutate: %{publish: %{id: receipt.slug, type: "paper"}},
-                endpoint: "/v1/data/mutate/#{dataset}"
-              }
-            })
+            |> json(
+              with_warnings(%{
+                ok: true,
+                slug: receipt.slug,
+                draft_id: receipt.draft_id,
+                rev: receipt.rev,
+                applied_block_ids: receipt.applied_block_ids,
+                skipped_block_ids: receipt.skipped_block_ids,
+                provenance: receipt.provenance,
+                # The approval path — the EXISTING publish gate, spelled out so an
+                # agent holding this receipt needs no second lookup.
+                approve_via: %{
+                  mutate: %{publish: %{id: receipt.slug, type: "paper"}},
+                  endpoint: "/v1/data/mutate/#{dataset}"
+                }
+              })
+            )
 
           {:error, :not_found} ->
             conn
@@ -1856,6 +1929,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
               code: "invalid_proposal",
               message: message
             })
+
+          # A paper ratchet's veto (the PortableDoc ratchet once refusing, R4.5):
+          # the reason VERBATIM with 409, as apply_op answers it.
+          {:error, {:halted, reason}} ->
+            conn
+            |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
           # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
           {:error, {:constraint, message, op_kind}} ->
