@@ -39,7 +39,7 @@ if (!existsSync(srcRoot) || !statSync(srcRoot).isDirectory()) {
   process.exit(1);
 }
 
-const scripts = JSON.parse(readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).scripts || {};
+const { scripts } = JSON.parse(readFileSync(path.join(pkgRoot, 'package.json'), 'utf8'));
 const onDisk = walk(srcRoot).sort();
 const named = chain(pkgRoot);
 const inChain = new Set(named);
