@@ -87,6 +87,11 @@ test("every command changes directory at most once (each runs from the repo root
       assert.ok((cmd.match(/(^|&& |\()cd /g) || []).length <= 1, `${s.name}: ${cmd}`);
 });
 
+test("an env switch sits next to the command it is for, never in front of a cd", () => {
+  for (const s of STEPS)
+    for (const cmd of [s.check, s.write].filter(Boolean)) assert.doesNotMatch(cmd, /[A-Z_]+=\S+ cd /, s.name);
+});
+
 test("reach names the command that runs each kind of test", () => {
   assert.deepEqual(
     commandsFor([

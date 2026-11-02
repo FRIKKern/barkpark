@@ -144,7 +144,7 @@ export const STEPS = [
   conformance("elixir", {
     inputs: [...RENDER, "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex"],
     check: `${MIX} barkpark.portable_doc.conformance`,
-    write: `CONFORMANCE_WRITE=1 ${MIX} barkpark.portable_doc.conformance`,
+    write: `cd api && CONFORMANCE_WRITE=1 MIX_ENV=test mix barkpark.portable_doc.conformance`,
     gate: "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex",
   }),
   conformance("editor-canvas", {
@@ -208,7 +208,7 @@ export const STEPS = [
     inputs: [...RENDER, ...GETTEXT, "api/lib/barkpark/plugins/bulldocs/**"],
     after: ["design-emit"],
     check: `${MIX} test test/barkpark_web/live/bulldocs_reader_style_default_test.exs`,
-    write: `REGEN_READER_STYLE_GOLDENS=1 ${MIX} test test/barkpark_web/live/bulldocs_reader_style_default_test.exs`,
+    write: `cd api && REGEN_READER_STYLE_GOLDENS=1 MIX_ENV=test mix test test/barkpark_web/live/bulldocs_reader_style_default_test.exs`,
     gates: ["api/test/barkpark_web/live/bulldocs_reader_style_default_test.exs"],
   },
   {
@@ -216,7 +216,7 @@ export const STEPS = [
     inputs: [...GETTEXT, "api/lib/barkpark_web/live/studio/**", "api/lib/barkpark/studio_chat/**"],
     after: ["design-emit"],
     check: `${MIX} test test/barkpark_web/live/studio/chat_render_golden_test.exs`,
-    write: `GOLDEN_REGEN=1 ${MIX} test test/barkpark_web/live/studio/chat_render_golden_test.exs`,
+    write: `cd api && GOLDEN_REGEN=1 MIX_ENV=test mix test test/barkpark_web/live/studio/chat_render_golden_test.exs`,
     gates: ["api/test/barkpark_web/live/studio/chat_render_golden_test.exs"],
   },
 ];
