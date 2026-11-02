@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exitRig, skip, tally } from "./__rig.mjs";
 import { drills } from "./testing-ground/drills/index.mjs";
+import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
 import { lightsOf, play } from "./testing-ground/play.mjs";
 import { start } from "./testing-ground/server.mjs";
 
@@ -140,6 +141,21 @@ await scene("every test doc opens: 6 drills and 80 block samples, none with a du
   const windows = await page.evaluate(() => { window.testingGround.openDoc("drill:D06"); return document.querySelectorAll(".tg-edit bp-paper-canvas").length; });
   assert.equal(windows, 2, "D06 opens two windows on one host");
 });
+
+if (process.env.TG_BARKPARK) {
+  const local = await start({ fold: barkparkFold(process.env.TG_BARKPARK, process.env.BARKPARK_TG_TOKEN || "barkpark-dev-token") });
+  const page = await browser.newPage();
+  await t.checkAsync("D02 through a local Barkpark: patch.ex itself refuses the batch", async () => {
+    await page.goto(`${local.url}?doc=drill:D02`);
+    await page.waitForFunction(() => window.testingGround?.state.canvases[0]?._editor && document.querySelector(".tg-light"));
+    await play(page, drill("D02"));
+    const lights = await lightsOf(page);
+    assert.deepEqual(red(lights), ["duplicate-ids", "refused-batches", "lost-keys"]);
+    assert.match(lights["refused-batches"].words, /invalid_op/);
+  });
+  await page.close();
+  await local.close();
+}
 
 await browser.close();
 await server.close();

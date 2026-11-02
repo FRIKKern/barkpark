@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { applyOps } from "../smoke/reference-fold.mjs";
 import { trip } from "./drills/trip.mjs";
+import { barkparkFold } from "./barkpark-fold.mjs";
 import { createFakeHost } from "./fake-host.mjs";
 import { referenceFold } from "./fold.mjs";
 import { duplicateIds, foldDrift, hiddenBlocks, lights, lostKeys, sentDuplicates } from "./traps.mjs";
@@ -91,5 +92,10 @@ assert.deepEqual(a.calls.slice(3).map(([name, seq]) => [name, seq]), [["identify
 assert.deepEqual(host.refusals, ["replace-block: duplicate id p-day"]);
 assert.deepEqual(host.batches.map((x) => x.answer.ok), [true, false]);
 assert.equal(host.inflight, 0);
+
+for (const origin of ["https://guerrilla.barkpark.cloud", "http://localhost.example.com:4000", "http://127.0.0.1.example.com", "http://10.0.0.5:4000"])
+  assert.throws(() => barkparkFold(origin, "t"), /is not this machine/, `${origin} is refused before any request`);
+for (const origin of ["http://localhost:4817", "http://127.0.0.1:4817", "http://127.0.0.2:4000", "http://[::1]:4000"])
+  assert.match(barkparkFold(origin, "t").name, /^Local Barkpark at /);
 
 console.log("PASS  testing-ground traps: each light goes red on the bug it names");
