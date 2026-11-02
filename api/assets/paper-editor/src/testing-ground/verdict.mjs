@@ -4,7 +4,7 @@ export const needsHands = (drill) => drill.steps.find((step) => step.hands);
 
 export function verdict(drill, lights, tally, errors) {
   const red = drill.green.filter((key) => lights[key].ok !== "true").map((key) => lights[key].words);
-  if (drill.tally && tally.hits !== drill.repeat) red.push(tallyWords(tally));
+  if (drill.tally && tally.tries - tally.hits !== drill.repeat) red.push(tallyWords(tally));
   red.push(...errors.map((error) => `page error: ${error}`));
   const checked = [...drill.green, ...(drill.tally ? ["the tally"] : [])];
   if (red.length) return { ok: false, words: red.join(" · ") };

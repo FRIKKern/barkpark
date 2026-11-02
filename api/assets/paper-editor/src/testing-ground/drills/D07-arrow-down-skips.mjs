@@ -2,12 +2,12 @@ const p = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "te
 
 export default {
   id: "D07",
-  title: "ArrowDown into a hidden empty line",
+  title: "ArrowDown skips the hidden empty line",
   green: [],
   doc: [p("p-a", "Alpha"), p("p-e", ""), p("p-b", "Beta")],
   steps: [
     { say: "Click at the end of \"Alpha\"", click: { text: "Alpha", at: "end" } },
-    { say: "Press ↓ once; the caret should land on the empty line", key: "ArrowDown" },
+    { say: "Press ↓ once; the caret should skip the hidden empty line and land on \"Beta\"", key: "ArrowDown" },
   ],
   repeat: 8,
   tally: { from: "p-a", to: "p-e" },

@@ -32,9 +32,9 @@ assert.deepEqual(verdict(d01, lit({ "hidden-blocks": ["false", "Hidden blocks �
 assert.deepEqual(verdict(d01, lit({ "lost-keys": ["null", "Lost keys: reload to check"] }), quiet, []), { ok: false, words: "Lost keys: reload to check" }, "a light with no verdict is not green");
 assert.deepEqual(verdict(d01, lit({ "duplicate-ids": ["false", "dup"] }), quiet, []), { ok: true, words: "hidden-blocks, lost-keys green" }, "only the drill's own lights decide");
 assert.deepEqual(verdict(d01, lit(), quiet, ["boom"]), { ok: false, words: "page error: boom" });
-assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 8, stayed: 0 }, []), { ok: true, words: "the tally green" });
-assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 0, stayed: 0 }, []), { ok: false, words: "↓ skipped the empty line in 8 of 8 tries." });
-assert.deepEqual(verdict(d07, lit(), { tries: 7, hits: 7, stayed: 1 }, []), { ok: false, words: "↓ skipped the empty line in 0 of 7 tries. The caret stayed put 1 time." }, "a caret that stays put did not land either");
+assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 0, stayed: 0 }, []), { ok: true, words: "the tally green" }, "ArrowDown never lands in a hidden empty line, so a skip is green");
+assert.deepEqual(verdict(d07, lit(), { tries: 8, hits: 1, stayed: 0 }, []), { ok: false, words: "↓ skipped the empty line in 7 of 8 tries." });
+assert.deepEqual(verdict(d07, lit(), { tries: 7, hits: 0, stayed: 1 }, []), { ok: false, words: "↓ skipped the empty line in 7 of 7 tries. The caret stayed put 1 time." }, "a caret that stays put did not skip either");
 assert.deepEqual(verdict({ ...d01, green: [] }, lit(), quiet, []), { ok: false, words: "nothing to check: no light was red when this was recorded, so add a check to the drill" }, "a drill that checks nothing cannot pass");
 assert.equal(needsHands(drills.find((d) => d.id === "D06")).say, "In the top editor, type at the end of \"Window A types here.\"");
 assert.equal(needsHands(d01), undefined);
