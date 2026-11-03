@@ -24,6 +24,11 @@ listed checksum is verified before either server or Chrome starts:
 npm run hosts -- --candidate=/path/to/staged-editor --output=/path/to/portable-doc/docs/images
 ```
 
+The candidate bundle must differ from the committed baseline bundle. During
+the replay, Chromium fetches and hashes each served bundle; the E12 report
+records those browser-observed identities and refuses a source or digest
+mismatch before comparing the two normalized save logs.
+
 Strict mode exits nonzero while any E01–E12 journey is unavailable. During
 incremental development, `--allow-unavailable` writes the partial artifacts and
 `hosts/manifest.json`; the manifest remains `incomplete`, so it cannot be
