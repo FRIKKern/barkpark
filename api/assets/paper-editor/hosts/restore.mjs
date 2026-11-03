@@ -78,7 +78,7 @@ function loadCandidate(tarball, expectedDigest, extraction) {
   const packageDir = join(extraction, "package");
   const metadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
   assert.equal(metadata.name, "@portable-doc/editor");
-  assert.equal(metadata.version, "1.0.0");
+  assert.equal(metadata.version, "0.1.0-alpha.1");
   assert.equal(metadata.barkpark?.contractVersion, "1.22.0");
   const dist = join(packageDir, "dist");
   const lines = FILES.map((name) => `${sha256(readFileSync(join(dist, name)))}  ${name}`);

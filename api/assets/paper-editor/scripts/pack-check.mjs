@@ -10,7 +10,7 @@
 //   3. no source, test, script or node_modules file leaks in;
 //   4. the packed browser assets are byte-identical to the files
 //      Phoenix serves from api/priv/static/assets;
-//   5. the version policy holds: package major equals the contract major, and
+//   5. the version policy holds: pre-1.0 alpha packages may ship the existing contract, otherwise majors match, and
 //      `barkpark.contractVersion` equals CONTRACT_VERSION.
 // Exits 1 on any failure. Prints the file list and the tarball size.
 import fs from "node:fs";
@@ -93,7 +93,8 @@ for (const name of [
 
 const [pkgMajor] = pkg.version.split(".");
 const [contractMajor] = CONTRACT_VERSION.split(".");
-if (pkgMajor !== contractMajor) fail(`version ${pkg.version} has major ${pkgMajor}; CONTRACT_VERSION ${CONTRACT_VERSION} has major ${contractMajor}`);
+const isInitialAlpha = /^0\.\d+\.\d+-alpha\.\d+$/.test(pkg.version);
+if (!isInitialAlpha && pkgMajor !== contractMajor) fail(`version ${pkg.version} has major ${pkgMajor}; CONTRACT_VERSION ${CONTRACT_VERSION} has major ${contractMajor}`);
 if (pkg.barkpark?.contractVersion !== CONTRACT_VERSION) {
   fail(`package.json barkpark.contractVersion is ${pkg.barkpark?.contractVersion}; src/contract.js says ${CONTRACT_VERSION}`);
 }

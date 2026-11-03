@@ -104,7 +104,7 @@ A host that syncs with a server uses `applyServerBlocks`, `resolveConflictWithSe
 
 ## Versions
 
-The package major version equals the major of `CONTRACT_VERSION`. A breaking change to the embed contract raises both. Minor and patch releases ship editor changes that keep the contract. `package.json` records the contract version under `barkpark.contractVersion`, and `npm run pack:check` fails when the two disagree.
+Pre-1.0 alpha packages can ship the existing embed contract. For stable releases, the package major version equals the major of `CONTRACT_VERSION`. A breaking change to the embed contract raises both. Minor and patch releases ship editor changes that keep the contract. `package.json` records the contract version under `barkpark.contractVersion`, and `npm run pack:check` fails when the two disagree.
 
 ## Licence
 
