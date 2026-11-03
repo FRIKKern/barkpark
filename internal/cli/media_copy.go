@@ -59,32 +59,14 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 	if err := os.MkdirAll(filepath.Join(dir, "files"), 0o755); err != nil {
 		return useError(out, "failed", fmt.Sprintf("export --media: %v", err), exitGeneric)
 	}
-	var assets []mediaCopyAsset
-	for offset := 0; ; {
-		u := ctxScopedURL(ctx, "/v1/media/"+url.PathEscape(dataset)+"?limit=500&offset="+strconv.Itoa(offset))
-		status, body, err := doRequest("GET", u, ctxAuthHeaders(ctx), nil)
-		if err != nil {
-			return useError(out, "request_failed", fmt.Sprintf("export --media: listing media: %v", err), exitGeneric)
-		}
-		if status < 200 || status >= 300 {
-			ae := classifyError(status, body)
-			renderError(out, ae)
-			return ae.exit
-		}
-		var page struct {
-			Result struct {
-				Assets  []mediaCopyAsset `json:"assets"`
-				HasMore bool             `json:"hasMore"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal(body, &page); err != nil {
-			return useError(out, "unreadable_response", fmt.Sprintf("export --media: the media list did not parse: %v", err), exitGeneric)
-		}
-		assets = append(assets, page.Result.Assets...)
-		if !page.Result.HasMore || len(page.Result.Assets) == 0 {
-			break
-		}
-		offset += len(page.Result.Assets)
+	assets, status, body, err := listDatasetMedia(ctx, dataset)
+	if err != nil {
+		return useError(out, "request_failed", fmt.Sprintf("export --media: listing media: %v", err), exitGeneric)
+	}
+	if status < 200 || status >= 300 {
+		ae := classifyError(status, body)
+		renderError(out, ae)
+		return ae.exit
 	}
 
 	// The files are read from the same scope the list came from, which
@@ -130,6 +112,36 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 	return exitOK
 }
 
+// listDatasetMedia reads every page of GET /v1/media/:dataset. A non-2xx
+// answer comes back as its status and body, with a nil error.
+func listDatasetMedia(ctx manifest.Context, dataset string) ([]mediaCopyAsset, int, []byte, error) {
+	var assets []mediaCopyAsset
+	for offset := 0; ; {
+		u := ctxScopedURL(ctx, "/v1/media/"+url.PathEscape(dataset)+"?limit=500&offset="+strconv.Itoa(offset))
+		status, body, err := doRequest("GET", u, ctxAuthHeaders(ctx), nil)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		if status < 200 || status >= 300 {
+			return nil, status, body, nil
+		}
+		var page struct {
+			Result struct {
+				Assets  []mediaCopyAsset `json:"assets"`
+				HasMore bool             `json:"hasMore"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, 0, nil, fmt.Errorf("the media list did not parse: %v", err)
+		}
+		assets = append(assets, page.Result.Assets...)
+		if !page.Result.HasMore || len(page.Result.Assets) == 0 {
+			return assets, status, nil, nil
+		}
+		offset += len(page.Result.Assets)
+	}
+}
+
 func mediaFileSHA1(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -149,7 +161,32 @@ type importMedia struct {
 	dir    string
 	assets []mediaCopyAsset
 	ids    map[string]bool
-	paths  map[string]string // id -> target path, filled by upload
+	paths  map[string]string // id -> target path, filled by plan and upload
+
+	// Filled by plan from the target's media list (task-634da0d58fbf2543).
+	planned  bool
+	send     []mediaCopyAsset    // not on the target, or replaced
+	skipped  int                 // on the target with the same size and SHA-1
+	sizeOnly int                 // of skipped: matched by size, one side had no SHA-1
+	differ   []mediaCopyMismatch // on the target with other bytes
+	replace  bool                // differ is deleted on the target and sent again
+}
+
+// mediaCopyMismatch is an asset id the target already holds with bytes that
+// differ from the export's file.
+type mediaCopyMismatch struct {
+	ID         string `json:"id"`
+	Size       int64  `json:"size"`
+	SHA1       string `json:"sha1,omitempty"`
+	TargetSize int64  `json:"targetSize"`
+	TargetSHA1 string `json:"targetSha1,omitempty"`
+}
+
+func (d mediaCopyMismatch) String() string {
+	if d.Size != d.TargetSize {
+		return fmt.Sprintf("%s (target %d bytes, export %d bytes)", d.ID, d.TargetSize, d.Size)
+	}
+	return fmt.Sprintf("%s (target sha1 %s, export sha1 %s)", d.ID, d.TargetSHA1, d.SHA1)
 }
 
 func readImportMedia(dir string) (*importMedia, error) {
@@ -180,19 +217,115 @@ func (m *importMedia) owns(r *importRow) bool {
 	return r.Type == "mediaAsset" && m.ids[strings.TrimPrefix(strings.TrimPrefix(r.ID, "drafts."), "asset-")]
 }
 
-// upload sends every file with its id and checks the id and SHA-1 the server
-// answers with.
+// plan compares the export's files with what the target already holds
+// (task-634da0d58fbf2543). A file whose id the target lists with the same size,
+// and the same SHA-1 when both sides have one, is skipped: a resumed import
+// sends only what the stopped run did not. A file whose id the target lists
+// with another size or SHA-1 is a mismatch. The import refuses it unless
+// replace is set, and then deletes the target's file and sends the export's.
+func (m *importMedia) plan(target []mediaCopyAsset, replace bool) {
+	held := make(map[string]mediaCopyAsset, len(target))
+	for _, t := range target {
+		held[t.ID] = t
+	}
+	m.planned, m.replace = true, replace
+	m.send, m.differ, m.skipped, m.sizeOnly = nil, nil, 0, 0
+	for _, a := range m.assets {
+		t, ok := held[a.ID]
+		if !ok {
+			m.send = append(m.send, a)
+			continue
+		}
+		bothHashed := a.SHA1 != "" && t.SHA1 != ""
+		if t.Size == a.Size && (!bothHashed || strings.EqualFold(t.SHA1, a.SHA1)) {
+			m.skipped++
+			if !bothHashed {
+				m.sizeOnly++
+			}
+			m.paths[a.ID] = t.Path
+			continue
+		}
+		m.differ = append(m.differ, mediaCopyMismatch{ID: a.ID, Size: a.Size, SHA1: a.SHA1, TargetSize: t.Size, TargetSHA1: t.SHA1})
+		if replace {
+			m.send = append(m.send, a)
+		}
+	}
+}
+
+// refused reports whether the target holds ids with other bytes and the
+// caller did not allow replacing them.
+func (m *importMedia) refused() bool { return len(m.differ) > 0 && !m.replace }
+
+// refusal is the message for refused.
+func (m *importMedia) refusal(scope string) string {
+	names := make([]string, 0, len(m.differ))
+	for _, d := range m.differ {
+		names = append(names, d.String())
+	}
+	return fmt.Sprintf("import: %s already holds %d media file(s) under the same asset id with other bytes: %s. Nothing was written.",
+		scope, len(m.differ), strings.Join(names, ", "))
+}
+
+// planSummary is the line that says what the media step will do or did.
+func (m *importMedia) planSummary(verb string) string {
+	replaced := 0
+	if m.replace {
+		replaced = len(m.differ)
+	}
+	s := fmt.Sprintf("%d media file(s) %s, %d already on the target and skipped", len(m.send), verb, m.skipped)
+	if replaced > 0 {
+		s += fmt.Sprintf(", %d of the sent replace a file with other bytes", replaced)
+	}
+	if m.sizeOnly > 0 {
+		s += fmt.Sprintf(". %d skipped file(s) were matched by size only, because the target or the export has no SHA-1 for them", m.sizeOnly)
+	}
+	return s
+}
+
+// upload sends each file the plan did not skip with its id, and checks the id
+// and SHA-1 the server answers with. Without a plan it sends every file.
 func (m *importMedia) upload(out *writer, ctx manifest.Context, dataset string) error {
 	u := ctxScopedURL(ctx, "/v1/media/"+url.PathEscape(dataset)+"/upload")
-	for k, a := range m.assets {
+	send := m.assets
+	if m.planned {
+		send = m.send
+	}
+	replace := map[string]bool{}
+	if m.replace {
+		for _, d := range m.differ {
+			replace[d.ID] = true
+		}
+	}
+	for k, a := range send {
+		if replace[a.ID] {
+			if err := deleteTargetMedia(ctx, dataset, a.ID); err != nil {
+				return fmt.Errorf("replacing media %s: %v", a.ID, err)
+			}
+		}
 		path, err := m.uploadOne(u, ctx, a)
 		if err != nil {
 			return fmt.Errorf("uploading media %s: %v", a.ID, err)
 		}
 		m.paths[a.ID] = path
 		if !out.machineOut() && (k+1)%25 == 0 {
-			out.errf("import: %d of %d media file(s) uploaded", k+1, len(m.assets))
+			out.errf("import: %d of %d media file(s) uploaded", k+1, len(send))
 		}
+	}
+	return nil
+}
+
+// deleteTargetMedia removes the target's file under id so the export's file
+// can take the id. force=true passes the where-used guard: the documents that
+// reference the id keep it, and the upload that follows fills it again.
+func deleteTargetMedia(ctx manifest.Context, dataset, id string) error {
+	u := ctxScopedURL(ctx, "/v1/media/"+url.PathEscape(dataset)+"/"+url.PathEscape(id)+"?force=true")
+	status, body, err := doRequest("DELETE", u, ctxAuthHeaders(ctx), nil)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		ae := classifyError(status, body)
+		return fmt.Errorf("the delete answered %d: %s", status, ae.errorMessage())
 	}
 	return nil
 }
