@@ -444,7 +444,7 @@ export const Section = Node.create({
         // reveal below; at rest / view mode an empty title is hidden.
         const editable = editor.isEditable;
         titleEl.contentEditable = editable ? "true" : "false";
-        titleEl.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
+        titleEl.hidden = !hasTitle && !(editable && titleFocused);
       };
 
       // Reveal an empty title line on hover/focus so a section can GAIN a title in the
@@ -452,7 +452,7 @@ export const Section = Node.create({
       let titleFocused = false;
       const onTitleFocus = () => {
         titleFocused = true;
-        if (editor.isEditable) titleEl.style.display = "";
+        if (editor.isEditable) titleEl.hidden = false;
       };
       const onTitleBlur = () => {
         titleFocused = false;

@@ -20,7 +20,16 @@ await import("./index.js");
 
 const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"));
 const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id"];
-const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls";
+const CHROME = [
+  ".ProseMirror-trailingBreak",
+  ".ProseMirror-separator",
+  ".ProseMirror-gapcursor",
+  ".bp-paper-contextual-controls",
+  ".bp-cols__c > .bp-resting-scaffold",
+  ".bp-cols__c > .bp-scaffold-control",
+  ".bp-canvas-section > .bp-canvas-section__controls",
+  ".bp-canvas-section > [data-test-id=paper-section-title][hidden]",
+].join(", ");
 
 function paint(canvas, block) {
   let hostPainted = false;

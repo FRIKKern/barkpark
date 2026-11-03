@@ -623,6 +623,7 @@
 .bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
   display: none;
 }
+.bp-paper-editor-body .bp-cols__c > .bp-resting-scaffold { display: none; }
 .bp-paper-editor-body .bp-scaffold-control {
   position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
   padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);

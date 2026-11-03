@@ -85,20 +85,15 @@ export const Columns = Node.create({
   addAttributes() {
     return {
       ...idAttributes("columns"),
-      // cols — the static column count → `--bp-cols:N`. Projected off the source
-      // column count (run-convert.js columnsBlockToNode); parseHTML reads data-cols
-      // so a setContent of the rendered wrapper round-trips the count. renderHTML
-      // stamps data-cols (the count also drives the inline style in the node
-      // renderHTML below, which sees node.attrs.cols directly).
+      // Read legacy editor markup and the current reader-shaped wrapper.
       cols: {
         default: null,
         parseHTML: (el) => {
-          const raw = el.getAttribute("data-cols");
-          const n = raw == null ? null : parseInt(raw, 10);
+          const raw = el.getAttribute("data-cols") ?? el.style.getPropertyValue("--bp-cols");
+          const n = parseInt(raw, 10);
           return Number.isFinite(n) ? n : null;
         },
-        renderHTML: (attrs) =>
-          attrs.cols != null ? { "data-cols": String(attrs.cols) } : {},
+        rendered: false,
       },
     };
   },
