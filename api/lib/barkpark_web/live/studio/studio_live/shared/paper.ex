@@ -1578,12 +1578,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # here: the widget only ADDS an editable query surface on top of the existing paint.
   @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
-  # R6 missing-five: bounded reader-render receivers that paint through bpFleet but
-  # are not component-fleet members. Structured fields remain contextual boundaries
-  # on new Studio mounts; this paint path serves compatibility/nested mounted canvases.
-  # pre-gate-badge is canvas-eligible and uses this same producer. Keep aligned with
-  # run-convert.js CANVAS_STATIC_RENDER_TYPES.
-  @canvas_static_render_types ~w(arrayOf codelist composite localizedText pre-gate-badge)
+  # R6 static reader compatibility: bounded reader-render receivers that paint through
+  # bpFleet but are not component-fleet members. Structured fields and paper-links remain contextual
+  # boundaries on new Studio mounts; this paint path serves compatibility/nested mounted
+  # canvases. pre-gate-badge is canvas-eligible and uses this same producer. Keep aligned
+  # with run-convert.js CANVAS_STATIC_RENDER_TYPES.
+  @canvas_static_render_types ~w(arrayOf codelist composite localizedText paper-links pre-gate-badge)
 
   # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet
   # block (keep it OUT of @fleet_render_types so it never drags through
