@@ -125,7 +125,7 @@ defmodule BarkparkWeb.LoginSignInMethodsTest do
       verify_domain(o, "nosso.example")
 
       assert route(conn, "ann@nosso.example") == %{"sso" => false}
-      refute login_page(build_conn()) =~ "/v1/auth/sso/route"
+      refute login_page(scoped_conn()) =~ "/v1/auth/sso/route"
     end
 
     test "an email with no password still needs both fields", %{conn: conn} do
@@ -166,7 +166,7 @@ defmodule BarkparkWeb.LoginSignInMethodsTest do
 
     test "the button starts the Entra flow at login.microsoftonline.com", %{conn: conn} do
       [href] = conn |> login_page() |> sso_hrefs()
-      location = build_conn() |> get(href) |> redirected_to(302)
+      location = scoped_conn() |> get(href) |> redirected_to(302)
 
       assert String.starts_with?(location, @entra <> "/oauth2/v2.0/authorize?")
     end
@@ -271,12 +271,12 @@ defmodule BarkparkWeb.LoginSignInMethodsTest do
              }
 
       to =
-        build_conn()
+        scoped_conn()
         |> post("/login/account", %{"email" => "ann@samlco.example", "password" => ""})
         |> redirected_to(302)
 
       assert to == "/v1/auth/saml/samlco/start"
-      assert build_conn() |> get(to) |> redirected_to(302) =~ "https://idp.example.com/sso?"
+      assert scoped_conn() |> get(to) |> redirected_to(302) =~ "https://idp.example.com/sso?"
     end
 
     test "with two connected orgs, routing works and names neither on the page",
@@ -300,10 +300,10 @@ defmodule BarkparkWeb.LoginSignInMethodsTest do
       assert LazyHTML.attribute(password, "required") == []
 
       assert %{"start_url" => "/v1/auth/saml/bravo/start", "sso_only" => true} =
-               route(build_conn(), "x@bravo.example")
+               route(scoped_conn(), "x@bravo.example")
 
       assert %{"start_url" => "/v1/auth/oidc/alpha/start", "sso_only" => false} =
-               route(build_conn(), "x@alpha.example")
+               route(scoped_conn(), "x@alpha.example")
     end
 
     test "a password still signs in through the password door", %{conn: conn} do
@@ -356,7 +356,7 @@ defmodule BarkparkWeb.LoginSignInMethodsTest do
       assert conn |> get("/login/account?return_to=%2Fw%2Fpensum") |> redirected_to(302) ==
                "/login?return_to=%2Fw%2Fpensum"
 
-      assert build_conn()
+      assert scoped_conn()
              |> get("/login/account?return_to=https%3A%2F%2Fevil.example")
              |> redirected_to(302) == "/login"
     end
