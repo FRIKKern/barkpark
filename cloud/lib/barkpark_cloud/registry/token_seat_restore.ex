@@ -13,8 +13,9 @@ defmodule BarkparkCloud.Registry.TokenSeatRestore do
            {"workspaces": [slug], "apply": bool}
 
   The box decides what may be restored. It reads the token's predecessors from
-  its own `token_minted` audit rows, follows only revoked minters, and restores
-  only seats one of them held, never above that predecessor's role
+  its own `token_minted` and `token_revoked` audit rows, follows only minters
+  that rotated themselves out, and restores only seats one of them held,
+  never above that predecessor's role
   (`Barkpark.Auth.TokenSeatRestore` in api/). Cloud sends no lineage of its
   own, so a wrong or hostile request to Cloud cannot widen what the box
   allows. Without `apply` the box writes nothing and answers with the plan.
