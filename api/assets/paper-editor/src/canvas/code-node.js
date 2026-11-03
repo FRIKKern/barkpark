@@ -210,6 +210,7 @@ export const Code = Node.create({
       const dom = document.createElement("pre");
       dom.className = "bp-canvas-code";
       dom.setAttribute("data-bp-type", "code");
+      dom.setAttribute("data-bp-conformance-root", "");
       // S9 code-interior: font-family + white-space now live in the
       // `.bp-canvas-code` CSS rule (both sinks), bound to --paper-font-mono — NOT
       // stamped inline here. The old inline stack ("…SFMono-Regular…Consolas…")

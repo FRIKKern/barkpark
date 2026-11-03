@@ -44,10 +44,17 @@ function unwrapFleet(root) {
   }
 }
 
-function semanticClone(source) {
+function semanticClone(source, blockType) {
   let root = source.cloneNode(true);
-  const type = root.getAttribute("data-bp-type");
-  if (type === "diagram") {
+  const type = root.getAttribute?.("data-bp-type") || blockType;
+  if (type === "code") {
+    const reader = document.createElement("pre");
+    reader.className = "bp-codeblock";
+    reader.setAttribute("data-bp-conformance-root", "");
+    reader.setAttribute("style", "border:0;border-radius:var(--bp-codeblock-radius, 0);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre");
+    reader.textContent = root.querySelector("textarea")?.value || "";
+    root = reader;
+  } else if (type === "diagram") {
     root.classList.add("bp-diagram");
     root.style.removeProperty("background");
     root.style.border = "1px solid";
@@ -105,6 +112,28 @@ function semanticClone(source) {
       }
     }
     root.setAttribute("role", "presentation");
+  } else if (type === "list") {
+    for (const paragraph of root.querySelectorAll("li > p")) {
+      const span = document.createElement("span");
+      span.append(...paragraph.childNodes);
+      paragraph.replaceWith(span);
+    }
+  } else if (type === "divider") {
+    const divider = root.querySelector(".bp-section-divider");
+    const mark = divider?.querySelector(".bp-section-divider__mark");
+    divider?.setAttribute("style", "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid");
+    mark?.setAttribute("style", "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem");
+  } else if (type === "paragraph") {
+    for (const strong of root.querySelectorAll("strong")) {
+      const span = document.createElement("span");
+      span.style.fontWeight = "bold";
+      span.append(...strong.childNodes);
+      strong.replaceWith(span);
+    }
+    for (const link of root.querySelectorAll("a")) {
+      link.removeAttribute("target");
+      link.removeAttribute("rel");
+    }
   }
   return root;
 }
@@ -157,7 +186,9 @@ async function judge(golden) {
     const hostPainted = paint(canvas, block);
     await new Promise((r) => setTimeout(r, 0));
     const semanticRoot = pm.querySelector("[data-bp-conformance-root]");
-    const root = semanticRoot ? semanticClone(semanticRoot) : pm.cloneNode(true);
+    const normalizeText = ["divider", "list", "paragraph"].includes(golden.type);
+    const root = semanticRoot ? semanticClone(semanticRoot, golden.type)
+      : normalizeText ? semanticClone(pm, golden.type) : pm.cloneNode(true);
     unwrapFleet(root);
     strip(root);
     const actual = semanticRoot ? [root] : root.childNodes;

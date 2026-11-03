@@ -195,8 +195,8 @@ export const Blockquote = Node.create({
       ...roleAttributes("blockquote"),
       cite: {
         default: null,
-        parseHTML: (el) => el.getAttribute("data-bp-cite"),
-        renderHTML: (attrs) => (attrs.cite ? { "data-bp-cite": attrs.cite } : {}),
+        parseHTML: (el) => el.getAttribute("data-bp-cite") || el.querySelector(":scope > cite")?.textContent || null,
+        renderHTML: () => ({}),
       },
     };
   },
