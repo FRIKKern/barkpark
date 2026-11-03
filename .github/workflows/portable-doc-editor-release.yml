@@ -1,0 +1,67 @@
+name: PortableDoc editor release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after the release gates are signed off
+        type: boolean
+        default: false
+      approved_sha256:
+        description: SHA-256 of the tarball tested by the app matrix (required for publish)
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: api/assets/paper-editor
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.0'
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.18.0
+      - run: npm ci
+      - name: Verify the exact release tarball and dry-run publish
+        run: |
+          test "$(node -p 'require("./package.json").name')" = '@portable-doc/editor'
+          npm run pack:check -- "$RUNNER_TEMP/editor-release"
+          cd "$RUNNER_TEMP/editor-release"
+          sha256sum portable-doc-editor-*.tgz > SHA256SUMS
+          npm publish portable-doc-editor-*.tgz --access public --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-doc-editor
+          path: ${{ runner.temp }}/editor-release/
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: pack
+    runs-on: ubuntu-24.04
+    environment: portable-doc-editor-release
+    permissions:
+      id-token: write
+    concurrency: portable-doc-editor-publish
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.0'
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.18.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable-doc-editor
+      - name: Verify approved digest and publish with provenance
+        env:
+          APPROVED_SHA256: ${{ inputs.approved_sha256 }}
+        run: |
+          sha256sum --check SHA256SUMS
+          test "$(cut -d ' ' -f 1 SHA256SUMS)" = "$APPROVED_SHA256"
+          npm publish portable-doc-editor-*.tgz --access public --provenance

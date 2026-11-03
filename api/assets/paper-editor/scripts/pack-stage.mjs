@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copies the files @barkpark/paper-editor ships into dist/ and LICENSE.
+// Copies the files @portable-doc/editor ships into dist/ and LICENSE.
 //
 // `npm run build` writes the bundle and stylesheet into api/priv/static/assets,
 // where Phoenix serves them. npm pack can only include files under this

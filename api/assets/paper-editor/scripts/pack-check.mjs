@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Packs @barkpark/paper-editor with `npm pack` and checks the tarball.
+// Packs @portable-doc/editor with `npm pack` and checks the tarball.
 //
 // It runs `prepack` (build, notices --check, stage) and then `npm pack`, so
 // it also proves a clean checkout can produce the package. The checks:
@@ -23,6 +23,7 @@ import { CONTRACT_VERSION } from "../src/contract.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const assets = path.resolve(root, "../../priv/static/assets");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const outputDir = process.argv[2];
 const failures = [];
 const fail = (msg) => failures.push(msg);
 
@@ -102,10 +103,14 @@ if (shipped.CONTRACT_VERSION !== CONTRACT_VERSION) fail("dist/contract.js does n
 console.log(`${packed.name}@${packed.version}  ${packed.filename}`);
 for (const f of packed.files) console.log(`  ${String(f.size).padStart(8)}  ${f.path}`);
 console.log(`files: ${packed.entryCount}  packed: ${packed.size} bytes  unpacked: ${packed.unpackedSize} bytes`);
-fs.rmSync(tmp, { recursive: true, force: true });
-
 if (failures.length) {
+  fs.rmSync(tmp, { recursive: true, force: true });
   for (const f of failures) console.error(`FAIL  ${f}`);
   process.exit(1);
 }
+if (outputDir) {
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.copyFileSync(tarball, path.join(outputDir, packed.filename));
+}
+fs.rmSync(tmp, { recursive: true, force: true });
 console.log("OK pack-check");

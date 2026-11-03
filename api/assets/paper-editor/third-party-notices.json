@@ -1,5 +1,5 @@
 {
-  "package": "@barkpark/paper-editor",
+  "package": "@portable-doc/editor",
   "generator": "scripts/third-party-notices.mjs",
   "packages": [
     {

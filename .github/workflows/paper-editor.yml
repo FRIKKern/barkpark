@@ -10,7 +10,7 @@ name: paper-editor
 #   1. convert.js round-trip regressions  -> npm run smoke
 #   2. stale committed bundle             -> rebuild + git diff --exit-code
 #   3. stale committed stylesheet         -> rebuild + git diff --exit-code
-#   4. @barkpark/paper-editor package     -> npm run pack:check
+#   4. @portable-doc/editor package     -> npm run pack:check
 # `npm run build` emits THREE artifacts -- the IIFE bundle and
 # bp-paper-editor.css (the stylesheet the LiveView editor and the web demo
 # load) from src/, plus bp-paper-surface.css (task-7fb8088ab39c7a36: the SAME
@@ -145,14 +145,14 @@ jobs:
           fi
           exit "$stale"
 
-      # The npm package @barkpark/paper-editor. pack:check runs prepack (build,
+      # The npm package @portable-doc/editor. pack:check runs prepack (build,
       # third-party notices --check, copy into dist/), packs the tarball, and
       # fails unless it holds the bundle, both stylesheets, the mermaid helper,
       # the types, README, EMBED-CONTRACT, LICENSE and the notices, with the
       # bundle and CSS byte-identical to api/priv/static/assets. A stale
       # THIRD-PARTY-NOTICES.txt after a dependency bump fails here: run
       # `npm run notices` and commit the result.
-      - name: Pack @barkpark/paper-editor and inspect the tarball
+      - name: Pack @portable-doc/editor and inspect the tarball
         run: npm run pack:check
 
   # ── the RENDERED half of the narrow-viewport sweep ──────────────────────────
