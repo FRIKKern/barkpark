@@ -131,5 +131,6 @@ supported provenance environment. For subsequent releases, configure the npm
 trusted publisher for `FRIKKern/barkpark`, workflow
 `portable-doc-editor-release.yml`, and environment
 `portable-doc-editor-release`. Protect that GitHub environment with required
-reviewers and restrict deployment to `main` before enabling publish dispatches.
+reviewers and restrict deployment to `main`. Then set the environment variable
+`PORTABLE_DOC_EDITOR_PUBLISH_ENABLED` to `true` in that GitHub environment.
 Supply the SHA-256 from the approved app matrix when dispatching a publish.

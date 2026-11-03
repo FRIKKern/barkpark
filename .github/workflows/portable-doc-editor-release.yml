@@ -60,8 +60,10 @@ jobs:
           name: portable-doc-editor
       - name: Verify approved digest and publish with provenance
         env:
+          PUBLISH_ENABLED: ${{ vars.PORTABLE_DOC_EDITOR_PUBLISH_ENABLED }}
           APPROVED_SHA256: ${{ inputs.approved_sha256 }}
         run: |
+          test "$PUBLISH_ENABLED" = true
           sha256sum --check SHA256SUMS
           test "$(cut -d ' ' -f 1 SHA256SUMS)" = "$APPROVED_SHA256"
           npm publish portable-doc-editor-*.tgz --access public --provenance
