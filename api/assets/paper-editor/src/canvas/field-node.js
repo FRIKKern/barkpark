@@ -111,6 +111,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { FIELD_SETTINGS_TYPES, buildFieldSettings } from "./field-settings.js";
 import { t } from "../i18n.js";
+import { safeUrl } from "../safe-url.js";
 
 // The TipTap node NAME is `bpField` (the canvas naming convention, like
 // bpCode/bpDiagram). The portable-doc `bpType` is the specific field-* kind
@@ -177,6 +178,158 @@ export function toFieldNumber(value) {
   if (typeof value !== "string" || value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+// The article reader's field row, painted as real DOM so Edit and View share the
+// same resting surface. Authoring controls are mounted beside this by the node
+// view and revealed only while the field is active; they never replace or
+// re-synthesize the reader value.
+function buildFieldReader(node, fieldType) {
+  const dom = document.createElement("div");
+  dom.className = "bp-field";
+  const label = document.createElement("span");
+  label.className = "bp-field__l";
+  const value = document.createElement("div");
+  value.className = "bp-field__v";
+  dom.append(label, value);
+
+  const stringish = (input) =>
+    typeof input === "string" || typeof input === "boolean"
+      ? String(input)
+      : typeof input === "number" && Number.isFinite(input)
+        ? String(input)
+        : "";
+  const textValue = (text) => {
+    const display = stringish(text);
+    const span = document.createElement("span");
+    span.textContent = display.trim() === "" ? "—" : display;
+    value.replaceChildren(span);
+  };
+  const mediaUrl = (raw) => {
+    const text = stringish(raw).trim();
+    if (!text.startsWith("{")) return text;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed.url === "string" && parsed.url ? parsed.url : text;
+    } catch (_) {
+      return text;
+    }
+  };
+  const paint = (n, { referenceTitle = "" } = {}) => {
+    const attrs = (n && n.attrs) || {};
+    const raw = attrs.value;
+    label.textContent = stringish(attrs.label);
+    value.replaceChildren();
+    if (fieldType === "field-boolean") {
+      textValue(t(raw === true ? "Yes" : "No"));
+    } else if (fieldType === "field-select") {
+      const options = Array.isArray(attrs.options) ? attrs.options : [];
+      const selected = options.find((option) => option && option.value === raw);
+      textValue(selected ? (Object.hasOwn(selected, "label") ? selected.label : selected.value) : raw);
+    } else if (fieldType === "field-datetime") {
+      textValue(typeof raw === "string" ? raw.replace(/T/g, " ") : raw);
+    } else if (fieldType === "field-color") {
+      const hex = stringish(raw);
+      if (!hex) {
+        const none = document.createElement("span");
+        none.className = "bp-field__none";
+        none.textContent = "—";
+        value.appendChild(none);
+      } else {
+        const swatch = document.createElement("i");
+        swatch.className = "bp-field__swatch";
+        const background = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : "transparent";
+        swatch.setAttribute("style", `background:${background}`);
+        const mono = document.createElement("span");
+        mono.className = "bp-field__mono";
+        mono.textContent = hex;
+        value.append(swatch, mono);
+      }
+    } else if (fieldType === "field-number") {
+      const number = toFieldNumber(raw);
+      const unit = stringish(attrs.unit).trim();
+      textValue(number == null ? "—" : `${String(number)}${unit ? ` ${unit}` : ""}`);
+    } else if (fieldType === "field-reference") {
+      const stored = stringish(raw);
+      textValue(stored ? referenceTitle || stored : "—");
+    } else if (fieldType === "field-image") {
+      const src = mediaUrl(raw);
+      if (!src) {
+        const none = document.createElement("span");
+        none.className = "bp-field__none";
+        none.textContent = t("No image");
+        value.appendChild(none);
+      } else {
+        const image = document.createElement("img");
+        image.className = "bp-field__img";
+        image.setAttribute("src", safeUrl(src));
+        image.setAttribute("alt", stringish(attrs.label));
+        value.appendChild(image);
+      }
+    } else {
+      textValue(raw);
+    }
+  };
+  paint(node);
+  return { dom, paint, parts: [label, value] };
+}
+
+// Reader-at-rest interaction: the canonical row is the only visible surface
+// until an author clicks it or presses Enter/Space. Escape or leaving the field
+// restores the reader row. The editor island remains mounted throughout, so
+// existing controls, picker state, debounce and persistence semantics are kept.
+function mountFieldEditorState({ dom, readerParts, editorDom, editor, focusTarget }) {
+  let active = false;
+  if (editor.isEditable) dom.tabIndex = 0;
+  const paint = () => {
+    for (const part of readerParts) part.hidden = active;
+    editorDom.hidden = !active;
+    editorDom.style.display = active ? "contents" : "none";
+  };
+  const activate = () => {
+    if (active || !editor.isEditable) return;
+    active = true;
+    paint();
+    queueMicrotask(() => {
+      const target = typeof focusTarget === "function" ? focusTarget() : focusTarget;
+      if (target && typeof target.focus === "function") target.focus();
+    });
+  };
+  const deactivate = ({ focus = false } = {}) => {
+    if (!active) return;
+    active = false;
+    paint();
+    if (focus && typeof dom.focus === "function") dom.focus();
+  };
+  const onClick = (event) => {
+    if (!active && readerParts.some((part) => part.contains(event.target))) activate();
+  };
+  const onKey = (event) => {
+    if (!active && event.target === dom && (event.key === "Enter" || event.key === " " || event.key === "Spacebar")) {
+      event.preventDefault();
+      activate();
+    } else if (active && event.key === "Escape") {
+      event.preventDefault();
+      deactivate({ focus: true });
+    }
+  };
+  const onFocusOut = () => queueMicrotask(() => {
+    if (active && !dom.contains(dom.ownerDocument.activeElement)) deactivate();
+  });
+  const onProgrammaticActivate = () => activate();
+  dom.addEventListener("click", onClick);
+  dom.addEventListener("keydown", onKey);
+  dom.addEventListener("focusout", onFocusOut);
+  dom.addEventListener("bp-activate-field-editor", onProgrammaticActivate);
+  paint();
+  return {
+    destroy() {
+      dom.removeEventListener("click", onClick);
+      dom.removeEventListener("keydown", onKey);
+      dom.removeEventListener("focusout", onFocusOut);
+      dom.removeEventListener("bp-activate-field-editor", onProgrammaticActivate);
+    },
+  };
 }
 
 // True when a number control holds input the server would refuse: text the browser
@@ -613,11 +766,15 @@ export const Field = Node.create({
         }
       }
 
-      const dom = document.createElement("div");
-      dom.className = "bp-canvas-field";
+      const reader = buildFieldReader(node, fieldType);
+      const dom = reader.dom;
+      dom.classList.add("bp-canvas-field");
       dom.setAttribute("data-bp-type", "field");
       dom.setAttribute("data-field-type", fieldType);
       applyLockCue(dom, node);
+      const editorDom = document.createElement("div");
+      editorDom.className = "bp-canvas-field-editor";
+      editorDom.setAttribute("contenteditable", "false");
 
       // The human label (a non-PM, non-editable caption beside the control).
       // Build the native control for this field type. The control is the EDIT
@@ -636,10 +793,13 @@ export const Field = Node.create({
       control.setAttribute("contenteditable", "false");
       control.setAttribute("data-test-id", "paper-field-" + fieldType);
 
-      dom.appendChild(labelEl);
-      dom.appendChild(control);
+      editorDom.appendChild(labelEl);
+      editorDom.appendChild(control);
+      dom.appendChild(editorDom);
       // A bound block's n/max badge and unbind × (field-binding.js, contract 1.13.0).
       const binding = mountFieldBinding(dom, { editor, getPos });
+      const bindingDom = dom.querySelector(":scope > .bp-canvas-field-binding");
+      if (bindingDom) editorDom.appendChild(bindingDom);
       // field-number shows its unit (if any) after the input, as quiet text. The
       // input and unit share the row's value column. Painted in place (paintUnit)
       // so a unit edited in the settings disclosure keeps the control's focus.
@@ -687,6 +847,7 @@ export const Field = Node.create({
           }
         }
         label.paint(n);
+        reader.paint(n);
         if (settings) settings.paint(n);
         binding.paint(n);
       };
@@ -714,7 +875,15 @@ export const Field = Node.create({
             },
           })
         : null;
-      if (settings) dom.appendChild(settings.dom);
+      if (settings) editorDom.appendChild(settings.dom);
+
+      const editorState = mountFieldEditorState({
+        dom,
+        readerParts: reader.parts,
+        editorDom,
+        editor,
+        focusTarget: control,
+      });
 
       paint(node);
 
@@ -806,6 +975,7 @@ export const Field = Node.create({
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
           label.destroy();
+          editorState.destroy();
           if (settings) settings.destroy();
           binding.destroy();
           control.removeEventListener(eventName, scheduleWrite);
@@ -926,11 +1096,15 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   const tag = PICKER_TAG[fieldType] || "bp-media-picker";
   const scope = canvasScope(editor);
 
-  const dom = document.createElement("div");
-  dom.className = "bp-canvas-field bp-canvas-field-picker";
+  const reader = buildFieldReader(node, fieldType);
+  const dom = reader.dom;
+  dom.classList.add("bp-canvas-field", "bp-canvas-field-picker");
   dom.setAttribute("data-bp-type", "field");
   dom.setAttribute("data-field-type", fieldType);
   applyLockCue(dom, node);
+  const editorDom = document.createElement("div");
+  editorDom.className = "bp-canvas-field-editor";
+  editorDom.setAttribute("contenteditable", "false");
 
   // The human label (a non-PM, non-editable caption beside the picker) — same as the
   // native variant + the per-block render (paper_editor.ex:816/828).
@@ -996,9 +1170,12 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     picker.setAttribute("ref-type", (node.attrs && node.attrs.refType) || "");
   }
 
-  dom.appendChild(labelEl);
-  dom.appendChild(picker);
+  editorDom.appendChild(labelEl);
+  editorDom.appendChild(picker);
+  dom.appendChild(editorDom);
   const binding = mountFieldBinding(dom, { editor, getPos });
+  const bindingDom = dom.querySelector(":scope > .bp-canvas-field-binding");
+  if (bindingDom) editorDom.appendChild(bindingDom);
 
   // ── the featured-image PLACEHOLDER affordance (t13) ─────────────────────────
   //
@@ -1074,7 +1251,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   };
 
   if (placeholder) {
-    dom.appendChild(placeholder);
+    editorDom.appendChild(placeholder);
     placeholder.addEventListener("click", openPicker);
     placeholder.addEventListener("keydown", onPlaceholderKey);
     placeholder.addEventListener("contextmenu", onPlaceholderContext);
@@ -1105,7 +1282,19 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
 
   // LIFT the BarkparkFieldBlockBridge picker branch: the picker's bp-change detail.value
   // IS the new value (identity), forwarded as a patch-block{value}.
-  const onChange = (e) => commit(coercePickerValue(e.detail));
+  let referenceTitle = "";
+  let referenceTitleValue = "";
+  let paintedValue = value == null ? "" : String(value);
+  const onChange = (e) => {
+    const nextValue = coercePickerValue(e.detail);
+    if (fieldType === "field-reference") {
+      const titleEl = picker.querySelector && picker.querySelector(".ref-selected-title");
+      referenceTitle = titleEl ? String(titleEl.textContent || "").trim() : "";
+      referenceTitleValue = nextValue;
+      reader.paint({ attrs: { ...node.attrs, value: nextValue } }, { referenceTitle });
+    }
+    commit(nextValue);
+  };
   picker.addEventListener("bp-change", onChange);
   dom.addEventListener("bp-flush-node", label.flush);
 
@@ -1117,8 +1306,16 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   const paint = (n) => {
     const v = n.attrs && n.attrs.value;
     const str = v == null ? "" : String(v);
+    if (str !== paintedValue) {
+      paintedValue = str;
+      if (fieldType === "field-reference" && str !== referenceTitleValue) {
+        referenceTitle = "";
+        referenceTitleValue = "";
+      }
+    }
     if (picker.value !== str) picker.value = str;
     label.paint(n);
+    reader.paint(n, { referenceTitle });
     binding.paint(n);
 
     // Show the ghost frame ONLY for an asset-less image picker that has not yet been
@@ -1137,6 +1334,13 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // Initialize placeholder/picker visibility from the seed value (the WC seeds its own
   // value via the attribute above; this only toggles the ghost-frame overlay).
   paint(node);
+  const editorState = mountFieldEditorState({
+    dom,
+    readerParts: reader.parts,
+    editorDom,
+    editor,
+    focusTarget: () => picker.querySelector("input, button, [tabindex]") || picker,
+  });
 
   return {
     dom,
@@ -1157,6 +1361,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     ignoreMutation: () => true,
     destroy: () => {
       label.destroy();
+      editorState.destroy();
       binding.destroy();
       dom.removeEventListener("bp-flush-node", label.flush);
       picker.removeEventListener("bp-change", onChange);
@@ -1173,22 +1378,27 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
 // cannot browse (an item-share edit grant authorizes writes to this one paper, not
 // dataset discovery) and when the picker WC failed to build (`failed`).
 function buildPickerReadOnlyView(node, fieldType, { failed = false } = {}) {
-  const dom = document.createElement("div");
-  dom.className = "bp-canvas-field bp-canvas-field-picker";
+  const reader = buildFieldReader(node, fieldType);
+  const dom = reader.dom;
+  dom.classList.add("bp-canvas-field", "bp-canvas-field-picker");
   dom.setAttribute("data-bp-type", "field");
   dom.setAttribute("data-field-type", fieldType);
   if (failed) dom.setAttribute("data-node-view-failed", "true");
   applyLockCue(dom, node);
-  const labelEl = document.createElement("label");
-  labelEl.className = "bp-canvas-field-label";
-  labelEl.textContent = (node.attrs && node.attrs.label) || "";
-  const current = document.createElement("output");
-  current.className = "bp-canvas-field-control bp-paper-picker-current";
-  current.setAttribute("data-test-id", "paper-picker-current");
-  const value = node.attrs && node.attrs.value;
-  current.textContent = value == null ? "" : String(value);
-  dom.appendChild(labelEl);
-  dom.appendChild(current);
+
+  // A failed media picker must remain inspectable without relying on the image
+  // request succeeding. The canonical reader intentionally paints only the image;
+  // this extra stored-value text belongs solely to the degraded node-view path.
+  const failedImageValue = failed && fieldType === "field-image"
+    ? document.createElement("span")
+    : null;
+  const paintFailedValue = () => {
+    if (!failedImageValue) return;
+    failedImageValue.className = "bp-field__fallback";
+    failedImageValue.textContent = String((node.attrs && node.attrs.value) || "");
+    reader.parts[1].appendChild(failedImageValue);
+  };
+  paintFailedValue();
 
   return {
     dom,
@@ -1197,9 +1407,8 @@ function buildPickerReadOnlyView(node, fieldType, { failed = false } = {}) {
       if (((updatedNode.attrs && updatedNode.attrs.bpType) || "") !== fieldType) return false;
       node = updatedNode;
       applyLockCue(dom, node);
-      labelEl.textContent = (node.attrs && node.attrs.label) || "";
-      const next = node.attrs && node.attrs.value;
-      current.textContent = next == null ? "" : String(next);
+      reader.paint(node);
+      paintFailedValue();
       return true;
     },
     stopEvent: () => true,
