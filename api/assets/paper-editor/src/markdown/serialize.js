@@ -12,7 +12,7 @@
 //
 // ── the shapes it serializes (verified against the real code) ────────────────
 //
-// INLINE TREE (convert.js:12-21, :141-177; compose.ex render):
+// INLINE TREE (convert.js inline conversion; compose.ex render):
 //   { type:"text",  value }                     leaf
 //   { type:"code",  value }                     leaf — inline code
 //   { type:"strong",        children:[ … ] }    **x**
@@ -244,8 +244,8 @@ function serializeList(block) {
 // > body line 2
 //
 // collapsible adds a "+"/"-" suffix after the ]: "+" = expandable-but-open,
-// "-" = collapsed. A non-collapsible callout has NO suffix. Mirrors the editor's
-// _maybeCalloutShorthand regex  ^>\s*\[!(\w+)\]([+-]?)\s$  (canvas/index.js:1096).
+// "-" = collapsed. A non-collapsible callout has NO suffix. Mirrors the editor
+// canvas _maybeCalloutShorthand parser: ^>\s*\[!(\w+)\]([+-]?)\s$.
 // A plain quote is `> ` lines. A quote carrying a cite/attribution has no markdown
 // form that survives the round trip, so it rides the sentinel like any other extra.
 function serializeBlockquote(block) {
