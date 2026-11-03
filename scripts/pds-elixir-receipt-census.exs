@@ -1047,6 +1047,7 @@ defmodule PDS.Census do
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete, :status_only_receipt},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/datasets/:dataset", "BarkparkWeb.DatasetController", :delete, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/datasets/:dataset/empty", "BarkparkWeb.DatasetController", :empty, :status_only_receipt},
     {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete, :status_only_receipt},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke, :status_only_receipt},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete, :status_only_receipt},

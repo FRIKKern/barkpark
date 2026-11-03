@@ -410,4 +410,145 @@ defmodule BarkparkWeb.DatasetControllerTest do
       assert :ets.lookup(Runs, {project.id, "j10-7"}) == []
     end
   end
+
+  describe "POST /v1/datasets/:dataset/empty (task-ccb2ade789293904)" do
+    setup %{ws: ws, project: project} do
+      {:ok, _} =
+        Barkpark.Content.upsert_schema(%{"name" => "post", "title" => "Post"}, "production",
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "production")
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "production")
+      on_exit(fn -> Application.delete_env(:barkpark, :dataset_delete_wait_ms) end)
+      :ok
+    end
+
+    defp empty_dataset(raw, ws, project, name, query \\ "") do
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> post("/w/#{ws.slug}/p/#{project.slug}/v1/datasets/#{name}/empty#{query}")
+    end
+
+    defp schemas_in(dataset),
+      do:
+        Repo.aggregate(
+          from(s in Barkpark.Content.SchemaDefinition, where: s.dataset_id == ^dataset.id),
+          :count
+        )
+
+    test "production without its name as confirmation is refused 409 and keeps its documents",
+         %{ws: ws, project: project, tokens: tokens} do
+      production = Tenancy.get_dataset(project, "production")
+
+      assert %{"error" => %{"code" => "production_confirmation_required"}} =
+               json_response(empty_dataset(tokens.owner, ws, project, "production"), 409)
+
+      assert %{"error" => %{"code" => "production_confirmation_required"}} =
+               json_response(
+                 empty_dataset(
+                   tokens.owner,
+                   ws,
+                   project,
+                   "production",
+                   "?confirm-production=j10-7"
+                 ),
+                 409
+               )
+
+      assert documents_in(production) == 2
+    end
+
+    test "production with confirmation is emptied, and the dataset and its schemas stay",
+         %{ws: ws, project: project, tokens: tokens} do
+      production = Tenancy.get_dataset(project, "production")
+      schemas = schemas_in(production)
+      assert schemas > 0
+
+      conn =
+        empty_dataset(tokens.owner, ws, project, "production", "?confirm-production=production")
+
+      assert %{
+               "emptied" => true,
+               "documents" => 2,
+               "media_files" => 0,
+               "dataset" => %{"id" => id}
+             } =
+               json_response(conn, 200)
+
+      assert id == production.id
+      assert Repo.get(Dataset, production.id)
+      assert documents_in(production) == 0
+      assert schemas_in(production) == schemas
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+    end
+
+    test "answers 202 with progress and what remains, then the receipt",
+         %{ws: ws, project: project, tokens: tokens} do
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+
+      assert %{
+               "emptying" => true,
+               "dataset" => "j10-7",
+               "dataset_id" => id,
+               "remaining" => remaining
+             } =
+               json_response(empty_dataset(tokens.owner, ws, project, "j10-7"), 202)
+
+      assert %{"documents" => _, "media_files" => _} = remaining
+
+      conn = until_emptied(tokens.owner, ws, project, "j10-7", "?dataset_id=#{id}")
+      assert %{"emptied" => true, "documents" => 1} = json_response(conn, 200)
+      assert dataset?(project, "j10-7")
+    end
+
+    defp until_emptied(raw, ws, project, name, query, tries \\ 200) do
+      conn = empty_dataset(raw, ws, project, name, query)
+
+      if conn.status == 202 and tries > 0 do
+        Process.sleep(50)
+        until_emptied(raw, ws, project, name, query, tries - 1)
+      else
+        conn
+      end
+    end
+
+    test "a member is refused 403", %{ws: ws, project: project, tokens: tokens} do
+      assert %{"error" => %{"code" => "forbidden"}} =
+               json_response(empty_dataset(tokens.member, ws, project, "j10-7"), 403)
+
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+    end
+
+    test "an empty while a delete of the name runs answers 503 and deletes nothing",
+         %{ws: ws, project: project, tokens: tokens} do
+      live = Tenancy.get_dataset(project, "j10-7").id
+      run = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(run, :kill) end)
+      :ets.insert(Runs, {{project.id, "j10-7"}, {:running, run}, live, 0})
+
+      assert %{"error" => %{"details" => %{"reason" => "dataset_delete_running"}}} =
+               json_response(empty_dataset(tokens.owner, ws, project, "j10-7"), 503)
+
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      :ets.delete(Runs, {project.id, "j10-7"})
+    end
+
+    test "GET /v1/capabilities advertises dataset.empty with --confirm-production",
+         %{tokens: tokens} do
+      manifest =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{tokens.owner}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert %{
+               "auth_tier" => "scoped_admin",
+               "writes" => true,
+               "http" => %{"method" => "POST", "path_template" => "/v1/datasets/:dataset/empty"},
+               "flags" => [%{"name" => "confirm-production"}]
+             } = Enum.find(manifest["commands"], &(&1["id"] == "dataset.empty"))
+    end
+  end
 end

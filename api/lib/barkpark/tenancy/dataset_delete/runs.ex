@@ -16,6 +16,13 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   dataset whole. Each run holds one pool connection, so at most `max_runs/0`
   run at once on a node and the rest answer `{:error, :busy}`.
 
+  `opts[:op]` `:empty` runs `DatasetDelete.empty/2` the same way
+  (task-ccb2ade789293904). Its row is keyed `{project_id, slug, :empty}`, so a
+  delete's receipt never answers an empty. A delete and an empty of one name
+  never run at once: the second answers `{:error, {:running, op}}`. An empty's
+  `opts[:progress]` is replaced by a row `{{:progress, key}, counts}` that
+  `progress/3` reads while it runs.
+
   Node-local ETS, one row per `{project_id, slug}`:
   `{key, {:running, pid} | {:done, result}, dataset_id, at}`. A run is bound to
   the dataset it started on. A poll names that dataset (`opts[:dataset_id]`)
@@ -56,7 +63,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
           term() | {:running, binary()}
   def delete(project_id, slug, dataset, opts, wait_ms) do
     {polled, opts} = Keyword.pop(opts, :dataset_id)
-    key = {project_id, slug}
+    key = key(project_id, slug, Keyword.get(opts, :op, :delete))
     current = dataset && dataset.id
 
     case :ets.lookup(@table, key) do
@@ -95,6 +102,21 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
     end
   end
 
+  @doc "The counts an empty of `slug` reported last, or nil when none runs."
+  @spec progress(binary(), String.t()) :: map() | nil
+  def progress(project_id, slug) do
+    case :ets.lookup(@table, {:progress, key(project_id, slug, :empty)}) do
+      [{_, counts}] -> counts
+      [] -> nil
+    end
+  end
+
+  defp key(project_id, slug, :delete), do: {project_id, slug}
+  defp key(project_id, slug, :empty), do: {project_id, slug, :empty}
+
+  defp sibling({project_id, slug}), do: {{project_id, slug, :empty}, :empty}
+  defp sibling({project_id, slug, :empty}), do: {{project_id, slug}, :delete}
+
   defp fresh(_key, nil, _polled, _opts, _wait_ms), do: {:error, :not_found}
 
   defp fresh(key, %Dataset{id: id} = dataset, polled, opts, wait_ms) when polled in [nil, id],
@@ -105,7 +127,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   defp start(key, dataset, opts, wait_ms) do
     case GenServer.call(__MODULE__, {:start, key, dataset, opts}) do
       :ok -> wait(key, dataset.id, now() + wait_ms)
-      {:error, :busy} = busy -> busy
+      {:error, _} = refused -> refused
     end
   end
 
@@ -113,10 +135,14 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   def handle_call({:start, key, dataset, opts}, {caller, _tag}, state) do
     sweep()
     running = live_runs()
+    {other, other_op} = sibling(key)
 
     cond do
       live?(key) ->
         {:reply, :ok, state}
+
+      live?(other) ->
+        {:reply, {:error, {:running, other_op}}, state}
 
       running >= max_runs() ->
         {:reply, {:error, :busy}, state}
@@ -158,7 +184,8 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
 
   defp run(key, dataset, opts) do
     {on_deleted, opts} = Keyword.pop!(opts, :on_deleted)
-    result = DatasetDelete.delete(dataset, opts)
+    {op, opts} = Keyword.pop(opts, :op, :delete)
+    result = run_op(op, key, dataset, opts)
 
     with {:ok, receipt} <- result do
       try do
@@ -169,6 +196,14 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
     end
 
     :ets.insert(@table, {key, {:done, result}, dataset.id, now()})
+    :ets.delete(@table, {:progress, key})
+  end
+
+  defp run_op(:delete, _key, dataset, opts), do: DatasetDelete.delete(dataset, opts)
+
+  defp run_op(:empty, key, dataset, opts) do
+    report = fn counts -> :ets.insert(@table, {{:progress, key}, counts}) end
+    DatasetDelete.empty(dataset, Keyword.put(opts, :progress, report))
   end
 
   defp wait(key, id, deadline) do

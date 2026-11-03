@@ -18,19 +18,30 @@ import (
 // the answer is not 202, so the command still ends on the receipt. The repeat
 // names the dataset the 202 named (?dataset_id=), so it never deletes a
 // dataset that took the name after the first one went.
+//
+// `bp dataset empty` (task-ccb2ade789293904) is the same protocol on a POST.
+// Its 202 also carries `remaining` {documents, media_files}, and each repeat
+// prints that line so a 60,000-document empty shows it is moving.
 
 const defaultDatasetDeletePoll = 2 * time.Second
 
 var datasetDeletePoll = defaultDatasetDeletePoll
 
 func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest, status int, body []byte, ct string, err error) (int, []byte, string, error) {
-	if cmd.ID != "dataset.delete" {
+	if cmd.ID != "dataset.delete" && cmd.ID != "dataset.empty" {
 		return status, body, ct, err
+	}
+	doing := "deleting"
+	if cmd.ID == "dataset.empty" {
+		doing = "emptying"
 	}
 	waited := false
 	for err == nil && status == http.StatusAccepted {
+		if line := remainingLine(body); line != "" {
+			out.errf("bp: %s", line)
+		}
 		if !waited {
-			out.errf("bp: the server is still deleting the dataset; asking again every %s", datasetDeletePoll)
+			out.errf("bp: the server is still %s the dataset; asking again every %s", doing, datasetDeletePoll)
 			waited = true
 			at, perr := pollURL(req.url, body)
 			if perr != nil {
@@ -47,6 +58,20 @@ func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest,
 		out.errf("bp: the dataset is gone, and another DELETE already read its receipt")
 	}
 	return status, body, ct, err
+}
+
+// remainingLine reads an empty's 202 progress, or "" when the 202 has none.
+func remainingLine(accepted []byte) string {
+	var running struct {
+		Remaining *struct {
+			Documents  int `json:"documents"`
+			MediaFiles int `json:"media_files"`
+		} `json:"remaining"`
+	}
+	if json.Unmarshal(accepted, &running) != nil || running.Remaining == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d documents and %d media files left", running.Remaining.Documents, running.Remaining.MediaFiles)
 }
 
 func pollURL(raw string, accepted []byte) (string, error) {

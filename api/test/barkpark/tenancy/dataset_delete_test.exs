@@ -516,4 +516,102 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     assert Repo.get(Dataset, dataset.id)
     assert census(dataset, ws) == before
   end
+
+  describe "empty/2 (task-ccb2ade789293904)" do
+    setup do
+      Application.put_env(:barkpark, :dataset_empty_chunk, 1)
+      on_exit(fn -> Application.delete_env(:barkpark, :dataset_empty_chunk) end)
+    end
+
+    test "deletes the documents and media chunk by chunk and keeps the dataset and its schemas",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-empty-1", user)
+      before = census(dataset, ws)
+      parent = self()
+
+      assert {:ok, receipt} =
+               DatasetDelete.empty(dataset,
+                 progress: fn counts -> send(parent, {:progress, counts}) end
+               )
+
+      assert %{documents: 2, media_files: 1} = receipt
+      assert Repo.get(Dataset, dataset.id)
+
+      after_empty = census(dataset, ws)
+      assert after_empty.documents == 0
+      assert after_empty.media == 0
+      assert after_empty.schemas == before.schemas
+      assert DatasetDelete.remaining(dataset) == %{documents: 0, media_files: 0}
+
+      # One report per committed chunk of one row: start, media, two documents.
+      assert_received {:progress, %{phase: :media, media_files: 0, documents: 0}}
+      assert_received {:progress, %{phase: :media, media_files: 1, documents: 0}}
+      assert_received {:progress, %{phase: :documents, media_files: 1, documents: 1}}
+      assert_received {:progress, %{phase: :documents, media_files: 1, documents: 2}}
+
+      assert [event] =
+               Repo.all(
+                 from e in Audit.Event,
+                   where: e.workspace_id == ^ws.id and e.action == "dataset_emptied"
+               )
+
+      assert %{"dataset" => "j10-empty-1", "documents" => 2, "media_files" => 1} = event.metadata
+      assert Audit.verify_chain(ws.id) == :ok
+    end
+
+    test "empties production and leaves the other datasets alone",
+         %{ws: ws, project: project, user: user} do
+      production = seed(ws, project, "production", user)
+      sibling = seed(ws, project, "j10-empty-2", user)
+      sibling_before = census(sibling, ws)
+
+      assert {:ok, %{documents: 2, media_files: 1}} = DatasetDelete.empty(production)
+
+      assert Repo.get(Dataset, production.id)
+      assert %{documents: 0, media: 0} = census(production, ws)
+      assert census(sibling, ws) == sibling_before
+    end
+
+    test "an empty dataset answers a zero receipt", %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-empty-3", user)
+      assert {:ok, _} = DatasetDelete.empty(dataset)
+      assert {:ok, %{documents: 0, media_files: 0}} = DatasetDelete.empty(dataset)
+    end
+
+    defmodule HaltSecondDeleteHook do
+      @moduledoc false
+      def lifecycle_hooks, do: %{before_delete: [&__MODULE__.halt_second/1]}
+
+      def halt_second(_payload) do
+        n = Process.get(:empty_test_deletes, 0) + 1
+        Process.put(:empty_test_deletes, n)
+        if n == 2, do: {:halt, "second"}, else: :ok
+      end
+    end
+
+    test "a run that stops keeps what it committed, and the next run finishes",
+         %{ws: ws, project: project, user: user} = ctx do
+      dataset = seed(ws, project, "j10-empty-4", user)
+      Barkpark.PluginEnv.with_plugins([HaltSecondDeleteHook], ctx)
+
+      assert {:error, {:halted, "second"}} = DatasetDelete.empty(dataset)
+      assert DatasetDelete.remaining(dataset).documents == 1
+
+      assert {:ok, %{documents: 1}} = DatasetDelete.empty(dataset)
+      assert DatasetDelete.remaining(dataset) == %{documents: 0, media_files: 0}
+    end
+
+    test "media a document outside the dataset embeds is refused before anything goes",
+         %{ws: ws, project: project} do
+      {:ok, shown} = create_media_file_in!(ws, project, %{}, "j10-empty-5")
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-empty-5")
+      path = WhereUsed.delivery_path(shown)
+      {:ok, _} = create_document_in!(ws, project, "post", %{"body" => path}, "production")
+      dataset = Tenancy.get_dataset(project, "j10-empty-5")
+
+      assert {:error, {:media_referenced, [%{media_id: media_id}]}} = DatasetDelete.empty(dataset)
+      assert media_id == shown.id
+      assert DatasetDelete.remaining(dataset) == %{documents: 1, media_files: 1}
+    end
+  end
 end

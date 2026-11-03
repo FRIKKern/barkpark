@@ -1,12 +1,12 @@
 <!-- doc-tier: human | canonical-for: self-host-move | budget: 1500tok -->
 # Move an instance from a VM to Container Apps
 
-These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backup holds the database and media but no key, so the keys move by hand. A rehearsal on 2026-10-27 with 333 documents and 12 media files was down 123 seconds: stop 6, backup 1, restore 11, update 20 and ready 85. That rehearsal restored from the VM before the template made Postgres private. A move between two private deployments on 2026-10-27 took 38 seconds for the restore job and 200 seconds from the second deployment to `/readyz`. `scripts/instance-move-rehearsal.sh` rehearses backup, restore and boot on one machine.
+These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backup holds the database and media but no key, so the keys move by hand. A rehearsal on 2026-10-27 with 333 documents and 12 media files was down 123 seconds. A move between two private deployments on 2026-10-27 took 38 seconds for the restore job and 200 seconds from the second deployment to `/readyz`. `scripts/instance-move-rehearsal.sh` rehearses backup, restore and boot on one machine.
 
 1. Run the same Barkpark version and the same `BARKPARK_PLUGINS` on both sides. Each boot registers the core `tag` schema and the schemas and codelists of every plugin on `BARKPARK_PLUGINS`, and an unset `BARKPARK_PLUGINS` means every bundled plugin. The rehearsal target had it unset and its first boot added 77 schema definitions and 167 codelists to a source with 9 and 3. `bp instance init` writes `BARKPARK_PLUGINS=media`. When both sides match, the first boot adds nothing. A newer image adds only the new schemas and codelists of those plugins. The restore's counts run before the boot, so compare `bp schema ls` afterwards.
 2. Deploy the target in restore mode with the source's keys. Run `bp instance init --target containerapps`, then copy into `barkpark.env` the source's `SECRET_KEY_BASE`, `PREVIEW_JWT_SECRET`, `BARKPARK_CLOAK_KEY`, `BARKPARK_KEK` and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` from `/opt/barkpark/.env`, and `BARKPARK_KEK_PREVIOUS`, `BARKPARK_INGEST_TOKEN`, `BARKPARK_KEK_VERSION`, `BARKPARK_OPERATOR_TOKEN_IDS` and `BARKPARK_PLUGINS` if the source sets them. `main.example.bicepparam` reads them under the same names. A new cloak key or KEK makes TOTP, SSO secrets and encrypted fields unreadable. Set `restoreMode = true`, and put the address of the machine that will copy the backup in `operatorIpRanges`. The template then creates everything but the app, so nothing migrates the empty database.
 3. Freeze writes with `sudo systemctl stop barkpark`. Barkpark has no read-only switch.
-4. Back up to `/var/tmp/move` as [the backup section](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) shows. `.env` writes the URL as `ecto://`, and bp needs `postgresql://`.
+4. Back up to `/var/tmp/move` as [the backup section](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) shows. `.env` writes the URL as `ecto://`; bp needs `postgresql://`.
 5. Postgres has no public endpoint, so the restore runs in the job `barkpark-ops` inside the network. Copy the backup to the `backups` share, restore it, and wait for the execution to show `Succeeded`. The restore checks every per-type count and media checksum and exits 1 on any difference. Its output is in Log Analytics.
 
    ```bash
@@ -23,7 +23,7 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
 
 ## Copy one dataset over the API
 
-Use this when you cannot reach the source's database. It needs a token with read access on the source and write access on the target, and no server access.
+Use this when you cannot reach the source's database or servers. It needs a token that reads the source and writes the target.
 
 ```bash
 bp -s <source> -w <ws> -d production export --out backup.ndjson --media media
@@ -39,3 +39,4 @@ bp -s <target> -w <ws> -d production import backup.ndjson --media media
 - A file stored before 2026-10-10 lacks a SHA-1 until a backfill. Both commands check and count it by size.
 - An older target ignores `mediaFileId` and stores a new id. The import then stops at the first file, before any document.
 - Media file ids are unique per instance. An import with `--media` into a second dataset on the same instance is refused with 409 at the first file, so copy media to another instance.
+- Empty the target first with `bp -s <target> -w <ws> -p <project> dataset empty production --confirm-production production`. It keeps the dataset and schemas.

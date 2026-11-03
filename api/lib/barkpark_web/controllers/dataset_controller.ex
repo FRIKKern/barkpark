@@ -39,6 +39,7 @@ defmodule BarkparkWeb.DatasetController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.DatasetDelete
   alias Barkpark.Tenancy.DatasetDelete.Runs
   alias BarkparkWeb.ErrorResponse
 
@@ -150,6 +151,164 @@ defmodule BarkparkWeb.DatasetController do
       {:error, _} = err ->
         err
     end
+  end
+
+  @doc """
+  `POST /w/:ws/p/:proj/v1/datasets/:dataset/empty` — delete every document
+  and media file of the dataset and keep the dataset, its schemas, webhooks,
+  tokens and history (task-ccb2ade789293904). `bp dataset empty <name>`.
+
+  `production` needs `?confirm-production=production`, else 409
+  `production_confirmation_required`. The empty runs off the request in
+  chunks (`DatasetDelete.empty/2`). After 5 s it answers 202
+  `{emptying: true, dataset, dataset_id, progress, remaining}`, where `progress`
+  counts what is deleted so far and `remaining` what the dataset still holds.
+  The same POST with `?dataset_id=` polls. The 200 is
+  `{emptied: true, dataset, documents, media_files}`. A 503 means the run
+  stopped; what it deleted stays deleted and the next POST continues.
+  """
+  def empty(conn, %{"dataset" => name}) do
+    with true <- Tenancy.Dataset.valid_slug?(name),
+         %Tenancy.Project{} = project <- conn.assigns[:current_project],
+         dataset = Tenancy.get_dataset(project, name),
+         :ok <- confirmed(conn, name),
+         polled = conn.params["dataset_id"],
+         {:ok, receipt} <-
+           Runs.delete(
+             project.id,
+             name,
+             dataset,
+             [
+               op: :empty,
+               dataset_id: polled,
+               actor: conn.assigns[:api_token],
+               on_deleted: fn _receipt -> :ok end
+             ],
+             wait_ms()
+           ) do
+      json(conn, %{
+        emptied: true,
+        dataset: %{id: receipt.dataset.id, slug: receipt.dataset.slug, name: receipt.dataset.name},
+        documents: receipt.documents,
+        media_files: receipt.media_files
+      })
+    else
+      {:running, id} ->
+        conn
+        |> put_status(:accepted)
+        |> json(%{
+          emptying: true,
+          dataset: name,
+          dataset_id: id,
+          progress: progress_json(Runs.progress(conn.assigns.current_project.id, name)),
+          remaining: remaining_json(conn.assigns.current_project, name)
+        })
+
+      :unconfirmed ->
+        ErrorResponse.emit_custom(
+          conn,
+          409,
+          "production_confirmation_required",
+          "emptying production deletes every document and media file in it",
+          %{dataset: name},
+          "Send ?confirm-production=#{name} (bp dataset empty #{name} --confirm-production #{name})."
+        )
+
+      {:error, {:running, other}} ->
+        conn
+        |> put_resp_header("retry-after", "30")
+        |> ErrorResponse.emit_custom(
+          503,
+          "storage_unavailable",
+          "a dataset #{other} of #{inspect(name)} is running",
+          %{reason: "dataset_#{other}_running"},
+          "Nothing was deleted. Send the POST again after Retry-After."
+        )
+
+      {:error, :busy} ->
+        conn
+        |> put_resp_header("retry-after", "30")
+        |> ErrorResponse.emit_custom(
+          503,
+          "storage_unavailable",
+          "#{Runs.max_runs()} dataset deletes or empties are already running on this node",
+          %{reason: "dataset_empty_busy"},
+          "Transient: nothing was deleted. Send the POST again after Retry-After."
+        )
+
+      falsy when falsy in [nil, false] ->
+        not_found(conn, name)
+
+      {:error, :not_found} ->
+        not_found(conn, name)
+
+      {:error, {:media_referenced, files}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          409,
+          "dataset_media_referenced",
+          "documents outside this dataset embed #{length(files)} of its media files",
+          %{media: files},
+          "Remove those references, then empty the dataset again."
+        )
+
+      {:error, {:empty_stuck, kind}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          503,
+          "storage_unavailable",
+          "the empty stopped: #{kind} rows remain that their delete door does not find",
+          %{
+            reason: "dataset_empty_stuck",
+            remaining: remaining_json(conn.assigns.current_project, name)
+          },
+          "What was deleted stays deleted. Report the request_id."
+        )
+
+      {:error, {:delete_failed, reason}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          503,
+          "storage_unavailable",
+          "the dataset empty stopped (#{reason}); what it deleted stays deleted",
+          %{
+            reason: "dataset_empty_#{reason}",
+            remaining: remaining_json(conn.assigns.current_project, name)
+          },
+          "Send the POST again to continue."
+        )
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp confirmed(_conn, name) when name != "production", do: :ok
+
+  defp confirmed(conn, name),
+    do: if(conn.params["confirm-production"] == name, do: :ok, else: :unconfirmed)
+
+  defp progress_json(nil), do: nil
+
+  defp progress_json(counts),
+    do: %{phase: counts.phase, media_files: counts.media_files, documents: counts.documents}
+
+  defp remaining_json(project, name) do
+    case Tenancy.get_dataset(project, name) do
+      nil -> %{documents: 0, media_files: 0}
+      dataset -> DatasetDelete.remaining(dataset)
+    end
+  end
+
+  defp not_found(conn, name) do
+    ErrorResponse.emit_custom(
+      conn,
+      404,
+      "not_found",
+      "no dataset #{inspect(name)} in this project",
+      %{},
+      "`bp workspace dataset-ls` lists the datasets in this project."
+    )
   end
 
   defp receipt_json(receipt) do

@@ -74,6 +74,13 @@ const destroyManifestJSON = `{
      "args":[{"name":"dataset","required":true,"type":"string","summary":"Dataset slug."}],
      "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
      "default_output":"json","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
+    {"id":"dataset.empty","noun":"dataset","verb":"empty","summary":"Empty a dataset.",
+     "http":{"method":"POST","path_template":"/v1/datasets/:dataset/empty"},
+     "auth_tier":"scoped_admin",
+     "args":[{"name":"dataset","required":true,"type":"string","summary":"Dataset slug."}],
+     "flags":[{"name":"confirm-production","type":"string","summary":"The dataset's name again."}],
+     "writes":true,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"json","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
     {"id":"ticket-key.ls","noun":"ticket-key","verb":"ls","summary":"List ticket keys.",
      "http":{"method":"GET","path_template":"/v1/plugins/tickets/keys"},
      "auth_tier":"admin","args":[],"flags":[],
@@ -114,7 +121,8 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 	}
 	h.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.seen = append(h.seen, r.Method+" "+r.URL.Path)
-		if r.Method == http.MethodDelete {
+		emptyPost := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/empty")
+		if r.Method == http.MethodDelete || emptyPost {
 			h.queries = append(h.queries, r.URL.RawQuery)
 		}
 		status := h.status
@@ -138,7 +146,7 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/plugins/tickets/keys":
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(testTicketKeysBody))
-		case r.Method == http.MethodDelete && len(h.deletes) > 0:
+		case (r.Method == http.MethodDelete || emptyPost) && len(h.deletes) > 0:
 			code := h.deletes[0]
 			h.deletes = h.deletes[1:]
 			body := h.accepted
