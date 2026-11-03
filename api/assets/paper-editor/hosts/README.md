@@ -39,6 +39,24 @@ The same full `source-commit` and checksum contract applies to an explicit
 baseline. This historical A/B replay is separate from a native host's
 same-backend upgrade or rollback evidence.
 
+`npm run host:restore` covers that separate rollback case. It verifies an exact
+packaged candidate, maps all six package assets, then switches a loopback
+Barkpark host from the candidate to a preserved served baseline. One disposable
+Paper backend stays alive across both phases. The reader, web, and Studio field
+routes record their browser-loaded asset hashes; candidate and restored clients
+must each save and reload the same Paper:
+
+```sh
+npm run host:restore -- \
+  --candidate-tarball=/path/to/portable-doc-editor.tgz \
+  --candidate-sha256=<sha256> \
+  --baseline=/path/to/preserved-served-assets \
+  --output=/path/to/evidence
+```
+
+The runner binds only to loopback and does not read tokens or production
+configuration.
+
 Strict mode exits nonzero while any E01–E12 journey is unavailable. During
 incremental development, `--allow-unavailable` writes the partial artifacts and
 `hosts/manifest.json`; the manifest remains `incomplete`, so it cannot be
