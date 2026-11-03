@@ -6,17 +6,17 @@
 // asserts the renderHTML DOMOutputSpec matches the reader's structure so a
 // future reader-side drift is caught in review.
 //
-// Reader target — Barkpark.PortableDoc.Render.Figures.section_divider_html/0
-// (figures.ex:33-37), which emits exactly:
-//   <div style="position:relative;text-align:center;margin:2.4rem 0;
-//               border-top:1px solid var(--paper-rule, #e6e2d8)">
-//     <span style="position:relative;top:-0.7rem;display:inline-block;
-//                  padding:0 0.8rem;background:var(--paper-bg, #f6faf9);
-//                  color:var(--paper-ink-soft, #6a6a6a);font-size:1.1rem">§</span>
+// Reader target — Barkpark.PortableDoc.Render.Figures.section_divider_html/0,
+// which emits exactly:
+//   <div class="bp-section-divider"
+//        style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid">
+//     <span class="bp-section-divider__mark"
+//           style="position:relative;top:-0.7rem;display:inline-block;
+//                  padding:0 0.8rem;font-size:1.1rem">§</span>
 //   </div>
-// The edit side binds the same tokens via a class (.bp-section-divider /
-// .bp-section-divider__mark) instead of inline styles; this test locks the
-// element structure + glyph + bp-attrs stamp + atom-ness.
+// The shared reader stylesheet binds the colour tokens through those classes;
+// layout remains inline in both sinks. This test locks the element structure,
+// exact layout, semantic-root selector, glyph, bp-attrs stamp and atom-ness.
 //
 // Run: node src/__divider_parity.test.mjs   (or: npm test)
 
@@ -48,12 +48,21 @@ check("outer <div> carries the .bp-section-divider class + surviving bp-attrs st
   assert.ok(String(spec[1].class).includes("bp-section-divider"));
   assert.equal(spec[1]["data-bp-type"], "divider"); // bp-attrs stamp survives on the outer element
   assert.equal(spec[1]["data-bp-id"], "d1");
+  assert.equal(spec[1]["data-bp-conformance-root"], "");
+  assert.equal(
+    spec[1].style,
+    "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid",
+  );
 });
 
 check("inner mark is a <span> holding the literal § glyph (figures.ex:36)", () => {
   const mark = spec[2];
   assert.equal(mark[0], "span"); // reader inner <span>
   assert.ok(String(mark[1].class).includes("bp-section-divider__mark"));
+  assert.equal(
+    mark[1].style,
+    "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem",
+  );
   assert.equal(mark[mark.length - 1], "§"); // the literal glyph
 });
 

@@ -225,7 +225,11 @@ export const Diagram = Node.create({
       dom.setAttribute("data-bp-type", "diagram");
 
       const figure = document.createElement("figure");
-      figure.className = "bp-canvas-diagram-figure";
+      // The mounted preview is the reader surface, not comparator-owned chrome.
+      // Keep the canvas hook for edit-only styling, but bind the same semantic
+      // class and inline layout contract Figures.diagram_html/3 emits. The
+      // shared paper-surface stylesheet owns the ground and rule colours.
+      figure.className = "bp-diagram bp-canvas-diagram-figure";
       figure.setAttribute("data-bp-type", "diagram");
       figure.setAttribute("data-bp-conformance-root", "");
       figure.setAttribute(
@@ -233,8 +237,7 @@ export const Diagram = Node.create({
         "margin:var(--bp-air-figure, 1.6rem) 0 0;" +
           "margin-inline:var(--bp-evidence-pull, 0px);" +
           "width:var(--bp-evidence-width, 100%);box-sizing:border-box;" +
-          "padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);" +
-          "border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;" +
+          "padding:1.2rem;border:1px solid;border-radius:4px;" +
           "overflow-x:auto",
       );
       const preview = document.createElement("pre");

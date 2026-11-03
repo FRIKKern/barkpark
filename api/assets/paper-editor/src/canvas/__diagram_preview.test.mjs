@@ -92,6 +92,20 @@ try {
 
   assert.ok(figure && preview && caption && disclosure && area,
     "the mounted node uses reader figure anatomy plus disclosed edit controls");
+  assert.ok(figure.classList.contains("bp-diagram"),
+    "the mounted semantic root binds the reader's diagram token selector");
+  assert.equal(
+    figure.getAttribute("style"),
+    "margin:var(--bp-air-figure, 1.6rem) 0 0;" +
+      "margin-inline:var(--bp-evidence-pull, 0px);" +
+      "width:var(--bp-evidence-width, 100%);box-sizing:border-box;" +
+      "padding:1.2rem;border:1px solid;border-radius:4px;overflow-x:auto",
+    "the mounted semantic root carries the reader's exact inline layout",
+  );
+  assert.equal(figure.style.background, "",
+    "the shared reader token rule, not inline canvas paint, owns the diagram ground");
+  assert.equal(figure.style.borderColor, "",
+    "the shared reader token rule, not inline canvas paint, owns the diagram rule colour");
   assert.equal(disclosure.open, false, "raw source controls are closed at rest");
   assert.equal(preview.dataset.bpSrc, "graph TD\n  A-->B",
     "the canonical theme rerender source is stashed on the Mermaid host");
