@@ -263,12 +263,7 @@ defmodule Barkpark.Media.WhereUsed do
     |> Enum.reject(&is_nil(&1.id))
     |> Enum.group_by(&{&1.dataset, MediaFile.scope_opts(&1)})
     |> Enum.reduce(%{}, fn {{dataset, scope}, group}, acc ->
-      asset_docs =
-        Barkpark.Plugins.Media.Assets.find_by_media_file_ids(
-          Enum.map(group, &to_string(&1.id)),
-          dataset,
-          scope
-        )
+      asset_docs = Barkpark.Media.asset_docs_for_files(group, dataset, scope)
 
       targets =
         Enum.flat_map(group, fn file ->
