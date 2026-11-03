@@ -285,7 +285,6 @@ export const Section = Node.create({
       const hrTop = document.createElement("hr");
       hrTop.className = "bp-hr";
       hrTop.contentEditable = "false";
-      hrTop.style.borderTopWidth = "1px";
 
       // The EDITABLE title chrome — a contentEditable island writing node.attrs.title.
       // It is NOT PM content (the code/diagram non-PM-island precedent, but editable
@@ -396,6 +395,8 @@ export const Section = Node.create({
         // block+ children into whichever the body class is.
         const layout = n.attrs && n.attrs.layout;
         const grid = isGridLayout(layout);
+        hrTop.style.borderTopWidth = grid ? "" : "1px";
+        hrBot.style.borderTopWidth = hrTop.style.borderTopWidth;
         if (grid) {
           const tracks = gridTracks(layout);
           body.className = "bp-section__grid";
