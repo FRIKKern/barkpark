@@ -80,13 +80,21 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 	}
 	client := newTransferClient()
 	pacer := newMediaPacer(defaultMediaRatePerMinute)
-	fetched := 0
+	fetched, sizeOnly := 0, 0
 	for k, a := range assets {
 		if !safeBlobPath(a.Path) || strings.ContainsAny(a.ID, `/\`) || a.ID == "" {
 			return useError(out, "unreadable_response", fmt.Sprintf("export --media: asset %q has an unsafe id or path %q", a.ID, a.Path), exitGeneric)
 		}
 		dest := filepath.Join(dir, "files", a.ID)
-		if sum, err := mediaFileSHA1(dest); err == nil && sum == a.SHA1 {
+		// A source row born before media_files.sha1 lists sha1 null
+		// (task-bd147cfe26a6f1f0). Its file is checked by size only, here and
+		// after the read below, and the report counts it.
+		if a.SHA1 == "" {
+			sizeOnly++
+			if fi, err := os.Stat(dest); err == nil && fi.Mode().IsRegular() && fi.Size() == a.Size {
+				continue
+			}
+		} else if sum, err := mediaFileSHA1(dest); err == nil && sum == a.SHA1 {
 			continue
 		}
 		ref := mediaBlobRef{path: a.Path, size: a.Size, sizeKnown: true, project: project}
@@ -109,6 +117,9 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 		return useError(out, "failed", fmt.Sprintf("export --media: %v", err), exitGeneric)
 	}
 	out.errf("exported %d media file(s) to %s (%d read now, %d already there)", len(assets), dir, fetched, len(assets)-fetched)
+	if sizeOnly > 0 {
+		out.errf("export: %d of %d media file(s) have no SHA-1 on the source and were checked by size only. The source can hash them with Barkpark.Release.backfill_media_sha1/1", sizeOnly, len(assets))
+	}
 	return exitOK
 }
 

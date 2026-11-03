@@ -147,6 +147,32 @@ defmodule BarkparkWeb.Integration.V1MediaUploadDedupTest do
     assert list.(sha1(other))["result"]["assets"] == []
   end
 
+  # The Pensum rehearsal on 2026-11-03 (#24192) read sha1 null for every file
+  # of an older dataset. The cause was rows born before the column, not the
+  # list: it returns the stored hash, and null only for a row that has none
+  # (task-bd147cfe26a6f1f0).
+  @tag :requires_plugins
+  test "GET /v1/media/:ds returns the stored sha1, and null for a row born before the column",
+       %{conn: conn} do
+    hashed = unique_bytes()
+    older = unique_bytes()
+    hashed_id = json_response(upload(conn, hashed), 201)["result"]["id"]
+    older_id = json_response(upload(scoped_conn(), older), 201)["result"]["id"]
+    Repo.update_all(where(MediaFile, [m], m.id == ^older_id), set: [sha1: nil])
+
+    by_id =
+      scoped_conn()
+      |> authed()
+      |> get(~p"/v1/media/production?limit=200")
+      |> json_response(200)
+      |> get_in(["result", "assets"])
+      |> Map.new(&{&1["id"], &1})
+
+    assert by_id[hashed_id]["sha1"] == sha1(hashed)
+    assert Map.has_key?(by_id[older_id], "sha1")
+    assert by_id[older_id]["sha1"] == nil
+  end
+
   test "backfill_sha1 hashes a row born before the column" do
     bytes = unique_bytes()
     {:ok, file} = Media.upload(text_upload(bytes), "production")
