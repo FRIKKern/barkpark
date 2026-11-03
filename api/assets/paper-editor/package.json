@@ -81,6 +81,7 @@
     "fullbleed:render": "node src/__compose_fullbleed_render.mjs",
     "enter-empty-line:keys": "node src/__enter_empty_line_keys.mjs",
     "caret-before-keys:keys": "node src/__caret_before_keys_keys.mjs",
+    "diff-note:keys": "node src/__diff_note_keys.mjs",
     "picker:render": "node src/canvas/__picker_footer_render.mjs",
     "test": "node scripts/test-chain.mjs",
     "notices": "node scripts/third-party-notices.mjs",

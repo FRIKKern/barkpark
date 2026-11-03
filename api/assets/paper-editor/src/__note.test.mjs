@@ -23,7 +23,6 @@ window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: window.navigator });
 const { Editor } = await import("@tiptap/core");
-const { AllSelection, TextSelection } = await import("@tiptap/pm/state");
 const { default: StarterKit } = await import("@tiptap/starter-kit");
 const { Note } = await import("./canvas/note-node.js");
 const { Opaque } = await import("./canvas/opaque-node.js");
@@ -38,6 +37,29 @@ const fieldValue = (field, value) => {
   else field.textContent = value;
 };
 const readField = field => "value" in field ? field.value : field.textContent;
+const escapeHTML = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+const noteHTML = node => {
+  const label = escapeHTML(node.attrs.label || "");
+  const lead = String(node.attrs.lead || "").trim();
+  const leadHTML = lead ? `<b>${escapeHTML(lead)}</b> ` : "";
+  return `<div class="bp-note"><span class="bp-note__k">${label}</span><div class="bp-note__d">${leadHTML}${escapeHTML(node.textContent || "")}</div></div>`;
+};
+const paintNotes = (root, editor, blocks) => {
+  const sources = new Map(blocks.map(block => [block.id, block]));
+  editor.state.doc.forEach(node => {
+    if (node.type.name !== "note") return;
+    const id = node.attrs.bpId || "";
+    const host = [...root.querySelectorAll("[data-bp-fleet-id]")]
+      .find(element => element.getAttribute("data-bp-fleet-id") === id);
+    const hole = host?.querySelector("[data-bp-fleet-body]");
+    if (!hole) return;
+    const sourceBlock = sources.get(id) || docToBlocks({ type: "doc", content: [node.toJSON()] })[0];
+    const html = noteHTML(node);
+    if (hole.dispatchEvent(new CustomEvent("bp-fleet-paint", { detail: { html, sourceBlock }, cancelable: true })))
+      hole.innerHTML = html;
+  });
+};
 const mountCanvas = blocks => {
   const canvas = document.createElement("bp-paper-canvas");
   canvas.acknowledgedSaves = true;
@@ -45,6 +67,7 @@ const mountCanvas = blocks => {
   const batches = [];
   canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail));
   document.body.appendChild(canvas);
+  paintNotes(canvas, canvas._editor, blocks);
   return { canvas, batches };
 };
 async function mountedCheck(name, fn) {
@@ -64,7 +87,9 @@ const original = {
 function mount(block) {
   const element = document.createElement("div");
   document.body.appendChild(element);
-  return new Editor({ element, extensions: [StarterKit.configure({ trailingNode: false }), Note, Opaque], content: runToTiptap([block]) });
+  const editor = new Editor({ element, extensions: [StarterKit.configure({ trailingNode: false }), Note, Opaque], content: runToTiptap([block]) });
+  paintNotes(element, editor, [block]);
+  return editor;
 }
 try {
   check("note mounted: schema retains full carrier and label input emits lossless folded edit", () => {
@@ -88,10 +113,10 @@ try {
       assert.deepEqual(runToOps([expected], editor.getJSON()), []);
     } finally { editor.destroy(); }
   });
-  check("note mounted: body contentDOM edit preserves leaf metadata", () => {
+  check("note mounted: body model edit preserves leaf metadata behind the native reader text node", () => {
     const editor = mount(original);
     try {
-      assert.ok(editor.view.dom.querySelector(".bp-canvas-note__body"));
+      assert.ok(editor.view.dom.querySelector('[data-test-id="paper-note-body"]'));
       const node = editor.state.doc.firstChild;
       editor.commands.insertContentAt({ from: 1, to: node.nodeSize - 1 }, "Changed body");
       const expected = structuredClone(original);
@@ -107,7 +132,7 @@ try {
       const guard = editor.view.dom.querySelector('[data-test-id="paper-opaque-note"]');
       assert.ok(guard);
       assert.equal(guard.getAttribute("contenteditable"), "false");
-      assert.equal(editor.view.dom.querySelector("input, .bp-canvas-note__body"), null);
+      assert.equal(editor.view.dom.querySelector("input, [data-test-id='paper-note-body']"), null);
       assert.deepEqual(docToBlocks(editor.getJSON()), [unsupported]);
       assert.deepEqual(runToOps([unsupported], editor.getJSON()), []);
     } finally { editor.destroy(); }
@@ -128,7 +153,7 @@ try {
       const editor = mount(before);
       try {
         assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
-        assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+        assert.equal(editor.view.dom.querySelector("[data-test-id='paper-note-body'], [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
         assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
         assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
         assert.deepEqual(runToOps([before], editor.getJSON()), []);
@@ -186,7 +211,7 @@ try {
           assert.deepEqual(runToOps([before], editor.getJSON()), []);
           if (!editable) {
             assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
-            assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body"), null);
+            assert.equal(editor.view.dom.querySelector("[data-test-id='paper-note-body']"), null);
             continue;
           }
           assert.equal(editor.state.doc.firstChild.type.name, "note");
@@ -255,7 +280,7 @@ try {
             try {
               assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
               assert.ok(editor.view.dom.querySelector('[data-test-id="paper-opaque-note"]'));
-              assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+              assert.equal(editor.view.dom.querySelector("[data-test-id='paper-note-body'], [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
               assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
               assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
               assert.deepEqual(runToOps([before], editor.getJSON()), []);
@@ -279,7 +304,7 @@ try {
         try {
           assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
           assert.ok(editor.view.dom.querySelector('[data-test-id="paper-opaque-note"]'));
-          assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+          assert.equal(editor.view.dom.querySelector("[data-test-id='paper-note-body'], [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
           assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
           assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
           assert.deepEqual(runToOps([before], editor.getJSON()), []);
@@ -303,7 +328,7 @@ try {
         const editor = mount(before);
         try {
           assert.equal(editor.state.doc.firstChild.type.name, "note");
-          assert.ok(editor.view.dom.querySelector(".bp-canvas-note__body"));
+          assert.ok(editor.view.dom.querySelector("[data-test-id='paper-note-body']"));
           assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
           assert.deepEqual(runToOps([before], editor.getJSON()), []);
           if (carrier === "label" || carrier === "lead") {
@@ -331,18 +356,29 @@ try {
       const editor = mount(before);
       try {
         const label = editor.view.dom.querySelector('[data-test-id="paper-note-label"]');
-        const leadEl = editor.view.dom.querySelector('[data-test-id="paper-note-lead"]');
-        const body = editor.view.dom.querySelector('.bp-canvas-note__body');
+        const body = editor.view.dom.querySelector('[data-test-id="paper-note-body"]');
+        const leadEl = body.querySelector(":scope > b");
+        const fallbackLead = editor.view.dom.querySelector('input[data-test-id="paper-note-lead"]');
         assert.equal(label.tagName, "SPAN");
-        assert.equal(leadEl.tagName, "B", "wrapping bold inline lead, not a fixed-width input");
-        assert.equal(body.tagName, "SPAN", "same inline formatting context");
-        assert.equal(leadEl.textContent, (lead || "").trim());
-        assert.equal(leadEl.parentElement.nextSibling.textContent, (lead || "").trim() ? " " : "", "exact reader separator; absent lead adds no space");
+        assert.equal(label.className, "bp-note__k");
+        assert.equal(body.tagName, "DIV");
+        assert.equal(body.className, "bp-note__d");
+        if ((lead || "").trim()) {
+          assert.equal(leadEl.tagName, "B", "the canonical reader bold element is the editing host");
+          assert.equal(leadEl.textContent, lead.trim());
+          assert.equal(body.textContent, `${lead.trim()} Body text that continues on the same line and wraps naturally at the available width.`);
+          assert.equal(leadEl.nextSibling.getAttribute("data-bp-note-separator"), "", "the PM widget owns only the reader separator");
+          assert.equal(leadEl.nextSibling.textContent, " ");
+        } else {
+          assert.equal(leadEl, null, "an absent reader lead gains no element inside canonical paint");
+          assert.equal(fallbackLead.hidden, false, "the optional lead remains addable outside the reader paint");
+        }
+        assert.ok([...body.childNodes].every(node => node.nodeType === Node.TEXT_NODE || node.tagName === "B" || node.hasAttribute?.("data-bp-note-separator")));
         assert.deepEqual(docToBlocks(editor.getJSON()), [before], "visual trimming never normalizes source");
       } finally { editor.destroy(); }
     });
   }
-  check("note CSS mirrors the reader contract and current root-linked shell without claiming geometry", () => {
+  check("note server paint uses the reader stylesheet instead of a second note-row CSS family", () => {
     const css = path => readFileSync(new URL(path, import.meta.url), "utf8");
     const styles = css("./styles.css");
     const shell = css("../../../priv/static/assets/bp-paper-editor-shell.css");
@@ -350,9 +386,8 @@ try {
     assert.ok(root.includes('/assets/bp-paper-editor-shell.css'));
     const noteRules = text => text.split("\n").map(line => line.trim()).filter(line => line.startsWith(".bp-canvas-note") || line.startsWith("@media (max-width: 520px) { .bp-canvas-note"));
     assert.deepEqual(noteRules(styles), noteRules(shell));
-    assert.match(styles, /\.bp-canvas-note \{[^}]*margin: 0;/);
-    assert.match(styles, /\.bp-canvas-note__k \{[^}]*font-size: 0\.75rem;/);
-    assert.doesNotMatch(styles.match(/\.bp-canvas-note__d \{[^}]*\}/)[0], /flex|gap:/);
+    const rowRules = noteRules(styles).filter(line => line.startsWith(".bp-canvas-note {") || line.startsWith(".bp-canvas-note__") || line.startsWith("@media"));
+    assert.deepEqual(rowRules, [], "the host contributes no competing note-row layout or typography");
   });
   check("note preview nested surface neutralizes only page geometry in both CSS copies", () => {
     const selector = ".bp-paper-surface .bp-canvas-note-preview > .bp-paper-surface";
@@ -413,7 +448,7 @@ try {
       const lead = canvas.querySelector('[data-test-id="paper-note-lead"]');
       lead.focus();
       lead.dispatchEvent(new window.Event("compositionstart"));
-      lead.textContent = "Composed lead";
+      fieldValue(lead, "Composed lead");
       lead.dispatchEvent(new window.Event("input", { bubbles: true }));
       assert.equal(canvas.hasPendingChanges(), true);
       assert.equal(canvas.flushPendingChanges(), false, "unfinished composition stays pending, not a false saved exit");
@@ -421,14 +456,14 @@ try {
       const foreign = [{ ...original, custom: { duringComposition: true } }];
       canvas.applyServerBlocks(foreign);
       assert.deepEqual(canvas._pendingServerBlocks, foreign);
-      assert.equal(lead.textContent, "Composed lead");
+      assert.equal(readField(lead), "Composed lead");
       lead.dispatchEvent(new window.Event("compositionend"));
       assert.equal(canvas.flushPendingChanges(), true);
       assert.equal(batches.length, 1);
       assert.deepEqual(applyOps(foreign, batches[0].ops), [{ ...foreign[0], lead: "Composed lead" }]);
     } finally { canvas.remove(); await tick(); }
   });
-  await mountedCheck("note canvas: lead visual trim/focus is a no-op and native history updates the island", async () => {
+  await mountedCheck("note canvas: canonical lead trim is a no-op and native history updates the island", async () => {
     const before = { ...original, lead: "  Original lead  " };
     const { canvas, batches } = mountCanvas([before]);
     try {
@@ -443,7 +478,7 @@ try {
       assert.equal(batches.length, 0);
       assert.deepEqual(docToBlocks(canvas._editor.getJSON()), [before]);
       lead.focus();
-      lead.textContent = "History edit";
+      fieldValue(lead, "History edit");
       lead.dispatchEvent(new window.Event("input", { bubbles: true }));
       lead.dispatchEvent(new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
       assert.equal(lead.textContent, "  Original lead  ");
@@ -476,7 +511,7 @@ try {
       assert.deepEqual(docToBlocks(canvas._editor.getJSON()), [foreign]);
       assert.equal(canvas.flushPendingChanges(), false);
       const label = canvas.querySelector('[data-test-id="paper-note-label"]');
-      label.textContent = "After encoding change";
+      fieldValue(label, "After encoding change");
       label.dispatchEvent(new window.Event("input", { bubbles: true }));
       canvas.flushPendingChanges();
       const expected = structuredClone(foreign);
@@ -522,7 +557,7 @@ try {
         const record = ({ transaction }) => editedSteps.push(...transaction.steps);
         canvas._editor.on("transaction", record);
         const input = canvas.querySelector(`[data-test-id="paper-note-${field}"]`);
-        input.textContent = `Saved ${field}`;
+        fieldValue(input, `Saved ${field}`);
         input.dispatchEvent(new window.Event("input", { bubbles: true }));
         canvas._editor.off("transaction", record);
         assert.equal(canvas.flushPendingChanges(), true, "history edit emits a batch");
@@ -585,7 +620,7 @@ try {
       const { canvas, batches } = mountCanvas(before);
       try {
         const input = canvas.querySelector(`[data-test-id="paper-note-${field}"]`);
-        input.textContent = "Local B";
+        fieldValue(input, "Local B");
         input.dispatchEvent(new window.Event("input", { bubbles: true }));
         canvas.flushPendingChanges();
         const saved = applyOps(before, batches[0].ops);
@@ -621,7 +656,7 @@ try {
           assert.equal(canvas._editor.state.doc.firstChild.attrs.bpId, null);
           const originalValue = canvas._editor.state.doc.firstChild.attrs[field];
           const input = canvas.querySelector(`[data-test-id="paper-note-${field}"]`);
-          input.textContent = `New ${field}`;
+          fieldValue(input, `New ${field}`);
           input.dispatchEvent(new window.Event("input", { bubbles: true }));
           assert.equal(batches.length, 0, "edit precedes any save acknowledgement");
 
@@ -836,100 +871,52 @@ try {
   }
 
 
-  for (const composingLead of [false, true]) {
-    await mountedCheck(`note empty-body click: ${composingLead ? "live composed absent lead" : "committed lead"} collapses AllSelection without replacing siblings`, async () => {
-      const before = [
-        { id: "prior-paragraph", type: "paragraph", custom: { keep: [null, 3] },
-          content: [{ type: "text", value: "Prior paragraph", extra: true }] },
-        { id: "empty-note", type: "note", label: "Target", ...(composingLead ? {} : { lead: "Nonempty lead" }), text: "", custom: { keep: 7 } },
-        { id: "sibling-note", type: "note", label: "Sibling", lead: "Sibling lead", text: "Sibling body", custom: { keep: [false] } },
-      ];
-      const { canvas, batches } = mountCanvas(before);
-      try {
-        await tick();
-        const editor = canvas._editor;
-        const projectedBefore = docToBlocks(editor.getJSON());
-        const paragraph = editor.state.doc.child(0).toJSON();
-        const sibling = editor.state.doc.child(2).toJSON();
-        const pos = editor.state.doc.child(0).nodeSize;
-        assert.equal(editor.state.doc.childCount, 3);
-        assert.equal(editor.state.doc.nodeAt(pos).type.name, "note");
-        if (composingLead) {
-          const lead = canvas.querySelector(".bp-canvas-note__lead");
-          lead.focus();
-          lead.dispatchEvent(new window.Event("compositionstart", { bubbles: true }));
-          fieldValue(lead, "Live composed lead");
-          lead.dispatchEvent(new window.Event("input", { bubbles: true }));
-          assert.equal(editor.state.doc.nodeAt(pos).attrs.lead, null, "IME draft has not committed to the model");
-          assert.equal(readField(lead), "Live composed lead");
-          assert.equal(canvas.querySelector(".bp-canvas-note").hasAttribute("data-note-pending"), true);
-        }
-        editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
-        const desc = canvas.querySelector(".bp-canvas-note__d");
-        const event = new window.MouseEvent("mousedown", { button: 0, bubbles: true, cancelable: true });
-        desc.dispatchEvent(event);
-        assert.equal(event.defaultPrevented, true);
-        assert.ok(editor.state.selection instanceof TextSelection);
-        assert.equal(editor.state.selection.empty, true);
-        assert.equal(editor.state.selection.from, pos + 1);
-        await tick();
-        assert.equal(editor.view.hasFocus(), true);
-        assert.equal(window.getSelection().isCollapsed, true);
-        assert.equal(editor.state.selection.from, pos + 1);
-        if (composingLead) {
-          assert.equal(editor.state.doc.nodeAt(pos).attrs.lead, "Live composed lead", "focus transfer blurs and commits the composition");
-          assert.equal(canvas.querySelector(".bp-canvas-note").hasAttribute("data-note-pending"), false);
-        }
-        editor.view.dispatch(editor.state.tr.insertText("Only target body"));
-        assert.deepEqual(editor.state.doc.child(0).toJSON(), paragraph);
-        assert.deepEqual(editor.state.doc.child(2).toJSON(), sibling);
-        const expected = structuredClone(before);
-        expected[1].text = "Only target body";
-        if (composingLead) expected[1].lead = "Live composed lead";
-        const projectedAfter = structuredClone(projectedBefore);
-        projectedAfter[1] = expected[1];
-        assert.deepEqual(docToBlocks(editor.getJSON()), projectedAfter);
-        assert.equal(canvas.flushPendingChanges(), true);
-        assert.equal(batches.length, 1);
-        assert.deepEqual(applyOps(before, batches[0].ops), expected);
-      } finally { canvas.remove(); await tick(); }
-    });
-
-  }
-
-  for (const control of [
-    { name: "no lead", lead: null },
-    { name: "blank lead", lead: "   " },
-    { name: "nonempty body", text: "Body" },
-    { name: "noneditable", editable: false },
-    { name: "middle button", mouse: { button: 1 } },
-    { name: "secondary button", mouse: { button: 2 } },
-    ...["shiftKey", "ctrlKey", "metaKey", "altKey"].map(key => ({ name: key, mouse: { [key]: true } })),
-    { name: "body child target", child: true },
-  ]) {
-    await mountedCheck(`note empty-body click: leaves ${control.name} gesture native`, async () => {
-      const before = [{ id: "gesture-note", type: "note", label: "Label", lead: "Lead", text: "",
-        ...(Object.hasOwn(control, "lead") ? { lead: control.lead } : {}),
-        ...(Object.hasOwn(control, "text") ? { text: control.text } : {}) }];
-      const { canvas, batches } = mountCanvas(before);
-      try {
-        await tick();
-        const editor = canvas._editor;
-        if (control.editable === false) editor.setEditable(false);
-        editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
-        const selection = editor.state.selection;
-        // Observe the NodeView boundary without jsdom attempting native hit-testing.
-        canvas.querySelector(".bp-canvas-note__d").addEventListener("mousedown", event => event.stopPropagation());
-        const event = new window.MouseEvent("mousedown", { button: 0, bubbles: true, cancelable: true, ...control.mouse });
-        canvas.querySelector(control.child ? ".bp-canvas-note__body" : ".bp-canvas-note__d").dispatchEvent(event);
-        assert.equal(event.defaultPrevented, false);
-        assert.ok(editor.state.selection.eq(selection));
-        assert.deepEqual(docToBlocks(editor.getJSON()), before);
-        assert.equal(canvas.flushPendingChanges(), false);
-        assert.deepEqual(batches, []);
-      } finally { canvas.remove(); await tick(); }
-    });
-  }
+  await mountedCheck("note native body edits preserve siblings, bold lead and multiline escaped text", async () => {
+    const before = [
+      { id: "prior-paragraph", type: "paragraph", content: [{ type: "text", value: "Prior" }] },
+      { id: "native-note", type: "note", label: "<Label>", lead: " Bold & lead ", text: "line 1\nline <2>" },
+      { id: "sibling-note", type: "note", label: "Sibling", lead: "Keep", text: "Sibling body" },
+    ];
+    const { canvas, batches } = mountCanvas(before);
+    try {
+      const note = [...canvas.querySelectorAll(".bp-canvas-note")]
+        .find(element => element.getAttribute("data-bp-fleet-id") === "native-note");
+      const label = note.querySelector('[data-test-id="paper-note-label"]');
+      const lead = note.querySelector('[data-test-id="paper-note-lead"]');
+      const body = note.querySelector('[data-test-id="paper-note-body"]');
+      assert.equal(label.textContent, "<Label>");
+      assert.equal(lead.tagName, "B");
+      assert.equal(lead.textContent, "Bold & lead");
+      assert.equal(body.textContent, "Bold & lead line 1\nline <2>");
+      assert.equal(lead.nextSibling.getAttribute("data-bp-note-separator"), "");
+      assert.equal(lead.nextSibling.textContent, " ");
+      assert.equal(body.lastChild.nodeValue, "line 1\nline <2>");
+      assert.match(body.innerHTML, /^<b[^>]*>Bold &amp; lead<\/b><span[^>]*data-bp-note-separator[^>]*> <\/span>line 1\nline &lt;2&gt;$/);
+      paintNotes(canvas, canvas._editor, before);
+      let notePos = null;
+      canvas._editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "note" && node.attrs.bpId === "native-note") notePos = pos;
+      });
+      assert.notEqual(notePos, null);
+      const noteNode = canvas._editor.state.doc.nodeAt(notePos);
+      canvas._editor.commands.insertContentAt(
+        { from: notePos + 1, to: notePos + noteNode.nodeSize - 1 },
+        "changed & kept\nnext <line>",
+      );
+      canvas.flushPendingChanges();
+      const expected = structuredClone(before);
+      expected[1].text = "changed & kept\nnext <line>";
+      assert.deepEqual(docToBlocks(canvas._editor.getJSON()), expected);
+      assert.equal(batches.length, 1);
+      assert.deepEqual(applyOps(before, batches[0].ops), expected);
+      assert.deepEqual(docToBlocks(canvas._editor.getJSON())[0], before[0]);
+      assert.deepEqual(docToBlocks(canvas._editor.getJSON())[2], before[2]);
+      canvas.undo();
+      assert.deepEqual(docToBlocks(canvas._editor.getJSON()), before, "undo survives a host repaint");
+      canvas.redo();
+      assert.deepEqual(docToBlocks(canvas._editor.getJSON()), expected, "redo survives a host repaint");
+    } finally { canvas.remove(); await tick(); }
+  });
 
 } finally { window.close(); }
 report();
