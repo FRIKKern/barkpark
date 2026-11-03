@@ -34,6 +34,7 @@ type goldenCase struct {
 
 type conformanceRow struct {
 	Type   string   `json:"type"`
+	Via    string   `json:"via,omitempty"`
 	Status string   `json:"status"`
 	Diff   []string `json:"diff,omitempty"`
 }
@@ -380,6 +381,53 @@ func diffEquation(actual string, expected []string) []string {
 	return diffWordsFrom(equationRunes(actual), equationRunes(strings.Join(expected, " ")))
 }
 
+func nativeStructureType(typ string) bool {
+	return typ == "divider" || typ == "image" || typ == "video"
+}
+
+func nativeStructureDiff(typ string, expected, rendered map[string]any, text string) []string {
+	var diff []string
+	require := func(ok bool, message string) {
+		if !ok {
+			diff = append(diff, message)
+		}
+	}
+	requireBox := func(name string) {
+		require(strings.Contains(text, "╭") && strings.Contains(text, "╰"), name+": missing visible box")
+	}
+
+	switch typ {
+	case "divider":
+		at := strings.Index(text, "§")
+		require(strings.Count(text, "§") == 1, "divider: missing single section mark")
+		require(at > 0 && strings.Contains(text[:at], "─") && strings.Contains(text[at+len("§"):], "─"), "divider: missing rule on both sides of mark")
+	case "image":
+		require(attrStr(rendered, "src") == attrStr(expected, "src"), fmt.Sprintf("image src: %q != %q", attrStr(rendered, "src"), attrStr(expected, "src")))
+		head := "🖼 " + sanitizeText(strings.TrimSpace(attrStr(expected, "alt")))
+		if dims := imageDims(expected); dims != "" {
+			head += " · " + dims
+		}
+		head += " (view in Studio)"
+		require(strings.Contains(text, head), fmt.Sprintf("image: missing canonical placeholder %q", head))
+		requireBox("image")
+	case "video":
+		src := attrStr(expected, "src")
+		require(attrStr(rendered, "src") == src, fmt.Sprintf("video src: %q != %q", attrStr(rendered, "src"), src))
+		require(strings.Contains(text, "▶ Video"), "video: missing honest degrade label")
+		captions := len(itemMaps(expected, "captions"))
+		if captions > 0 {
+			label := fmt.Sprintf("%d caption track", captions)
+			if captions != 1 {
+				label += "s"
+			}
+			require(strings.Contains(text, label), fmt.Sprintf("video: missing %s", label))
+		}
+		require(strings.Contains(text, "open in browser"), "video: missing handoff label")
+		requireBox("video")
+	}
+	return diff
+}
+
 func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	if _, ok := reg.blocks[c.Type]; !ok {
 		return conformanceRow{Type: c.Type, Status: "missing"}
@@ -389,10 +437,17 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 		return conformanceVerdict(c.Type, []string{"decode: " + err.Error()})
 	}
 	expected := goldenWords(c.Shape)
-	if len(expected) == 0 {
+	if len(expected) == 0 && !nativeStructureType(c.Type) {
 		return conformanceRow{Type: c.Type, Status: "unchecked"}
 	}
 	text := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()}))
+	if nativeStructureType(c.Type) {
+		var authored map[string]any
+		if err := json.Unmarshal(c.Input, &authored); err != nil {
+			return conformanceVerdict(c.Type, []string{"decode expected structure: " + err.Error()})
+		}
+		return conformanceVerdictVia(c.Type, "native-structure", nativeStructureDiff(c.Type, authored, blocks[0].Attrs, text))
+	}
 	// Multi-column terminal layouts are read row-major in plain text while the
 	// canonical DOM is read cell-major. Duel likewise keeps values and the
 	// authored delta on separate visual rows. For those layouts, conformance is
@@ -427,13 +482,17 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 }
 
 func conformanceVerdict(typ string, diff []string) conformanceRow {
+	return conformanceVerdictVia(typ, "", diff)
+}
+
+func conformanceVerdictVia(typ, via string, diff []string) conformanceRow {
 	if len(diff) == 0 {
-		return conformanceRow{Type: typ, Status: "pass"}
+		return conformanceRow{Type: typ, Via: via, Status: "pass"}
 	}
 	if len(diff) > conformanceDiffCap {
 		diff = append(diff[:conformanceDiffCap:conformanceDiffCap], fmt.Sprintf("… %d more", len(diff)-conformanceDiffCap))
 	}
-	return conformanceRow{Type: typ, Status: "fail", Diff: diff}
+	return conformanceRow{Type: typ, Via: via, Status: "fail", Diff: diff}
 }
 
 func runConformance(pack string, reg *Registry) (conformanceReport, error) {
@@ -588,9 +647,72 @@ func TestConformanceRefusesARunnerThatCannotSeeMissing(t *testing.T) {
 
 func TestConformanceNeverPassesACaseWithNoWords(t *testing.T) {
 	reg := DefaultRegistry(LightTheme())
-	r := conformanceRowFor(reg, goldenCase{Type: "divider", Input: json.RawMessage(`{"type":"divider"}`), Shape: []json.RawMessage{json.RawMessage(`{"tag":"hr","children":[]}`)}})
+	r := conformanceRowFor(reg, goldenCase{Type: "paragraph", Input: json.RawMessage(`{"type":"paragraph","content":[]}`), Shape: []json.RawMessage{json.RawMessage(`{"tag":"p","children":[]}`)}})
 	if r.Status != "unchecked" {
 		t.Errorf("a case with no golden words read %s", r.Status)
+	}
+}
+
+func TestNativeStructuralConformanceUsesRenderedEvidenceAndRedsMutants(t *testing.T) {
+	_, cases, err := loadGoldenPack(conformancePack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType := map[string]goldenCase{}
+	for _, c := range cases {
+		if nativeStructureType(c.Type) {
+			byType[c.Type] = c
+		}
+	}
+	reg := DefaultRegistry(LightTheme())
+	ctx := RenderCtx{Width: 100, Theme: LightTheme(), Profile: NoColor}
+	render := func(c goldenCase, input json.RawMessage) (Block, string) {
+		blocks, err := Decode([]byte("[" + string(input) + "]"))
+		if err != nil {
+			t.Fatalf("decode %s: %v", c.Type, err)
+		}
+		return blocks[0], ansi.Strip(reg.RenderDoc(blocks, ctx))
+	}
+	expectedAttrs := func(c goldenCase) map[string]any {
+		var attrs map[string]any
+		if err := json.Unmarshal(c.Input, &attrs); err != nil {
+			t.Fatalf("expected %s: %v", c.Type, err)
+		}
+		return attrs
+	}
+
+	for _, typ := range []string{"divider", "image", "video"} {
+		c, ok := byType[typ]
+		if !ok {
+			t.Fatalf("golden pack missing %s", typ)
+		}
+		block, text := render(c, c.Input)
+		if diff := nativeStructureDiff(typ, expectedAttrs(c), block.Attrs, text); diff != nil {
+			t.Fatalf("canonical %s structure: %v\n%s", typ, diff, text)
+		}
+		if diff := nativeStructureDiff(typ, expectedAttrs(c), block.Attrs, ""); diff == nil {
+			t.Fatalf("empty %s text must not pass structural conformance", typ)
+		}
+	}
+
+	divider := byType["divider"]
+	dividerBlock, _ := render(divider, divider.Input)
+	if diff := nativeStructureDiff("divider", expectedAttrs(divider), dividerBlock.Attrs, "§"); len(diff) == 0 {
+		t.Fatal("divider without its rule must fail")
+	}
+
+	image := byType["image"]
+	wrongImage := json.RawMessage(`{"type":"image","src":"https://cdn.example.com/wrong.png","alt":"Cover art","width":640,"height":360}`)
+	imageBlock, imageText := render(image, wrongImage)
+	if diff := nativeStructureDiff("image", expectedAttrs(image), imageBlock.Attrs, imageText); len(diff) == 0 {
+		t.Fatal("image with the wrong decoded source must fail")
+	}
+
+	video := byType["video"]
+	videoBlock, videoText := render(video, video.Input)
+	videoText = strings.ReplaceAll(videoText, "open in browser", "")
+	if diff := nativeStructureDiff("video", expectedAttrs(video), videoBlock.Attrs, videoText); len(diff) == 0 {
+		t.Fatal("video without its handoff label must fail")
 	}
 }
 

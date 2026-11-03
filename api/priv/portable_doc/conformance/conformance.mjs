@@ -236,6 +236,44 @@ export function diffEquation(actualText, expected) {
   return diffWordsFrom(equationRunes(actualText), equationRunes(expected.join(" ")));
 }
 
+const structuralTypes = new Set(["divider", "image", "video"]);
+
+export function pdrenderStructuralVerdict(golden, actualText, renderedInput = golden.input) {
+  if (!structuralTypes.has(golden.type)) return undefined;
+  const diff = [];
+  const require = (ok, message) => { if (!ok) diff.push(message); };
+  const requireBox = (name) => require(actualText.includes("╭") && actualText.includes("╰"), `${name}: missing visible box`);
+
+  if (golden.type === "divider") {
+    const at = actualText.indexOf("§");
+    require(actualText.split("§").length === 2, "divider: missing single section mark");
+    require(at > 0 && actualText.slice(0, at).includes("─") && actualText.slice(at + 1).includes("─"), "divider: missing rule on both sides of mark");
+  }
+
+  if (golden.type === "image") {
+    require(renderedInput.src === golden.input.src, `image src: ${JSON.stringify(renderedInput.src)} != ${JSON.stringify(golden.input.src)}`);
+    let head = `🖼 ${String(golden.input.alt || "").trim()}`;
+    if (Number(golden.input.width) > 0 && Number(golden.input.height) > 0) head += ` · ${golden.input.width}×${golden.input.height}`;
+    head += " (view in Studio)";
+    require(actualText.includes(head), `image: missing canonical placeholder ${JSON.stringify(head)}`);
+    requireBox("image");
+  }
+
+  if (golden.type === "video") {
+    require(renderedInput.src === golden.input.src, `video src: ${JSON.stringify(renderedInput.src)} != ${JSON.stringify(golden.input.src)}`);
+    require(actualText.includes("▶ Video"), "video: missing honest degrade label");
+    const captions = Array.isArray(golden.input.captions) ? golden.input.captions.filter((caption) => caption && typeof caption === "object").length : 0;
+    if (captions > 0) {
+      const label = `${captions} caption track${captions === 1 ? "" : "s"}`;
+      require(actualText.includes(label), `video: missing ${label}`);
+    }
+    require(actualText.includes("open in browser"), "video: missing handoff label");
+    requireBox("video");
+  }
+
+  return { via: "native-structure", diff };
+}
+
 export function columnMajorText(actualText) {
   const lines = actualText.split("\n");
   const starts = [];

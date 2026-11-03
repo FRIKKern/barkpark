@@ -98,7 +98,14 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
         assert row["status"] in ~w(pass fail missing unchecked)
         assert row["status"] == "fail" == match?([_ | _], row["diff"])
         assert row["status"] != "unchecked" or report["compare"] == "text"
-        assert Map.get(row, "via", "host-paint") == "host-paint"
+
+        via = Map.get(row, "via", "host-paint")
+        assert via in ~w(host-paint native-structure)
+
+        if via == "native-structure" do
+          assert name in ~w(pdrender pdrender-wasm)
+          assert row["type"] in ~w(divider image video)
+        end
       end
     end
   end
