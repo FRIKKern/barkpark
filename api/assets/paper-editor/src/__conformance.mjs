@@ -27,6 +27,8 @@ const CHROME = [
   ".bp-paper-contextual-controls",
   ".bp-cols__c > .bp-resting-scaffold",
   ".bp-cols__c > .bp-scaffold-control",
+  ".bp-canvas-tabs > .bp-canvas-rows__foot",
+  ".bp-canvas-tabs .bp-tabs__panel > .bp-canvas-row__head",
   ".bp-canvas-section > .bp-canvas-section__controls",
   ".bp-canvas-section > [data-test-id=paper-section-title][hidden]",
 ].join(", ");
@@ -54,6 +56,8 @@ function strip(root) {
   // wrapper normalized back to the reader's bare text node for shape comparison.
   for (const separator of root.querySelectorAll("span[data-bp-note-separator]"))
     separator.replaceWith(document.createTextNode(separator.textContent));
+  for (const body of root.querySelectorAll(".bp-canvas-tabs .bp-tabs__panel > .bp-canvas-row__body"))
+    body.replaceWith(...body.childNodes);
   for (const el of root.querySelectorAll("*")) {
     PLUMBING_ATTRS.forEach((a) => el.removeAttribute(a));
     for (const c of [...el.classList]) if (c.startsWith("ProseMirror") || c.startsWith("bp-canvas-")) el.classList.remove(c);

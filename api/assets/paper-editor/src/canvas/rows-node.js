@@ -13,9 +13,8 @@
 // contentDOM. Chrome: a "×" per row and an "add" button on the container, both plain
 // PM transactions.
 //
-// The reader shows tabs as a strip with one panel visible; the canvas stacks every
-// panel with its label above it (`bp-tabs--editor`, the class the reader's stylesheet
-// already reserves for an editing surface), because an author edits all of them.
+// The canvas uses the reader tab strip and keeps all panels mounted and visible
+// so authors can move the caret across panels. Each panel has a label editor.
 // Steps use the reader's own <ol class="bp-steps"> / <li class="bp-steps__step"> /
 // .bp-steps__title / .bp-steps__body markup, so the counters and rail paint by class.
 //
@@ -49,10 +48,10 @@ export const ROWS_SPECS = {
     rowName: "bpTab",
     containerTag: "div",
     rowTag: "div",
-    containerClass: "bp-tabs bp-tabs--editor bp-canvas-rows bp-canvas-tabs",
-    rowClass: "bp-tabs__section bp-canvas-row",
+    containerClass: "bp-tabs bp-canvas-rows bp-canvas-tabs",
+    rowClass: "bp-tabs__panel bp-canvas-row",
     titleClass: "bp-tabs__tab bp-tabs__tab--active bp-canvas-row__title",
-    bodyClass: "bp-tabs__panel bp-canvas-row__body",
+    bodyClass: "bp-canvas-row__body",
     titlePlaceholder: "Tab label",
     addLabel: "+ tab",
     rowWord: "tab",
@@ -273,12 +272,20 @@ function makeContainer(spec, RowNode) {
 
     addNodeView() {
       return ({ node, editor, getPos }) => {
+        const tabs = spec.bpType === "tabs";
         const wrap = document.createElement("div");
-        wrap.className = "bp-canvas-rows__wrap";
+        wrap.className = tabs ? spec.containerClass : "bp-canvas-rows__wrap";
         wrap.setAttribute("data-bp-type", spec.bpType);
 
         const dom = document.createElement(spec.containerTag);
-        dom.className = spec.containerClass;
+        dom.className = tabs ? "bp-tabs__panels" : spec.containerClass;
+        const strip = tabs ? document.createElement("div") : null;
+        if (strip) {
+          strip.className = "bp-tabs__strip";
+          strip.setAttribute("role", "tablist");
+          strip.contentEditable = "false";
+          wrap.appendChild(strip);
+        }
 
         const foot = document.createElement("div");
         foot.className = "bp-canvas-rows__foot";
@@ -312,31 +319,81 @@ function makeContainer(spec, RowNode) {
         };
         addBtn.addEventListener("click", onAdd);
 
-        const paint = () => {
+        let activeTab = 0;
+        const paint = (current) => {
           foot.style.display = editor.isEditable ? "" : "none";
+          if (!strip) return;
+          activeTab = Math.min(activeTab, current.childCount - 1);
+          current.forEach((row, _offset, index) => {
+            let button = strip.children[index];
+            if (!button) {
+              button = document.createElement("button");
+              button.type = "button";
+              button.setAttribute("role", "tab");
+              button.dataset.tabIndex = String(index);
+              button.addEventListener("click", () => {
+                if (selectTab(index)) dom.children[index]?.querySelector("input")?.focus();
+              });
+              strip.appendChild(button);
+            }
+            const selected = index === activeTab;
+            button.className = selected ? "bp-tabs__tab bp-tabs__tab--active" : "bp-tabs__tab";
+            button.setAttribute("aria-selected", String(selected));
+            button.tabIndex = selected ? 0 : -1;
+            button.textContent = row.attrs.title || "";
+          });
+          while (strip.children.length > current.childCount) strip.lastElementChild.remove();
+          queueMicrotask(() => {
+            Array.from(dom.children).forEach((panel, index) => {
+              panel.dataset.tabIndex = String(index);
+            });
+          });
         };
-        paint();
+        const selectTab = (index) => {
+          const pos = getPos?.();
+          const current = pos == null ? null : editor.state.doc.nodeAt(pos);
+          if (current?.type.name !== spec.containerName || index >= current.childCount) return false;
+          activeTab = index;
+          paint(current);
+          return true;
+        };
+        const onTabKeydown = (event) => {
+          const count = strip.children.length;
+          const destinations = {
+            ArrowLeft: (activeTab + count - 1) % count,
+            ArrowRight: (activeTab + 1) % count,
+            Home: 0,
+            End: count - 1,
+          };
+          const index = destinations[event.key];
+          if (!Number.isInteger(index) || !selectTab(index)) return;
+          event.preventDefault();
+          strip.children[index].focus();
+        };
+        strip?.addEventListener("keydown", onTabKeydown);
+        paint(node);
 
         return {
           dom: wrap,
           contentDOM: dom,
           update: (updated) => {
             if (updated.type.name !== spec.containerName) return false;
-            paint();
+            paint(updated);
             return true;
           },
           stopEvent: (e) => {
             const t = e && e.target;
-            return !!(t && foot.contains(t));
+            return !!(t && (foot.contains(t) || strip?.contains(t)));
           },
           ignoreMutation: (m) => {
             if (m.type === "selection") return false;
             if (m.type === "attributes" && (m.target === wrap || m.target === dom)) return true;
-            if (foot.contains(m.target)) return true;
+            if (foot.contains(m.target) || strip?.contains(m.target)) return true;
             return !dom.contains(m.target);
           },
           destroy: () => {
             addBtn.removeEventListener("click", onAdd);
+            strip?.removeEventListener("keydown", onTabKeydown);
           },
         };
       };
