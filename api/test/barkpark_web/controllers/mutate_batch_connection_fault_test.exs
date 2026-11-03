@@ -67,6 +67,37 @@ defmodule BarkparkWeb.MutateBatchConnectionFaultTest do
     assert {:error, :not_found} = Content.get_document("drafts." <> id, "post", @dataset)
   end
 
+  # task-61dbf8a21cd155d1: on a 2 vCPU test instance an import batch got 500
+  # `internal_error` after 15 s because the pool timeout came back as a VALUE,
+  # which `Content.Errors` had no clause for. The import client resends a
+  # smaller batch only on 503 `storage_unavailable`.
+  test "a pool timeout RETURNED by the batch is the typed 503, and nothing is written", %{
+    token: t
+  } do
+    Application.put_env(
+      :barkpark,
+      :writer_fault,
+      {:batch_rollback,
+       DBConnection.ConnectionError.exception(
+         "client #PID<0.1.0> timed out because it queued and checked out the connection for longer than 15000ms"
+       )}
+    )
+
+    id = "batch-returned-#{System.unique_integer([:positive])}"
+
+    {resp, log} = ExUnit.CaptureLog.with_log(fn -> mutate(t, id) end)
+
+    assert resp.status == 503, resp.resp_body
+    error = Jason.decode!(resp.resp_body)["error"]
+    assert error["code"] == "storage_unavailable"
+    assert error["reason"] == "connection_unavailable"
+    refute resp.resp_body =~ "internal_error"
+    refute log =~ "no build/1 clause matched"
+
+    Application.delete_env(:barkpark, :writer_fault)
+    assert {:error, :not_found} = Content.get_document("drafts." <> id, "post", @dataset)
+  end
+
   test "any other exception at the same site still propagates (the rescue is narrow)", %{token: t} do
     Application.put_env(
       :barkpark,

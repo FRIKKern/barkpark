@@ -222,6 +222,21 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"connection_unavailable_read",
        {:error, {:connection_unavailable, :read, "tcp recv: closed"}}, "storage_unavailable", 503,
        [:reason]},
+      # A pool or queue timeout RETURNED as a value (task-61dbf8a21cd155d1):
+      # the bare struct and a tagged tuple carrying one. Same write arm as
+      # `connection_unavailable` above.
+      {"pool_timeout_returned",
+       {:error,
+        DBConnection.ConnectionError.exception(
+          "connection not available and request was dropped from queue after 2000ms",
+          :queue_timeout
+        )}, "storage_unavailable", 503, [:reason]},
+      {"pool_timeout_returned_tagged",
+       {:error,
+        {:batch,
+         DBConnection.ConnectionError.exception(
+           "client #PID<0.1.0> timed out because it queued and checked out the connection for longer than 15000ms"
+         )}}, "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},

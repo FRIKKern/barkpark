@@ -45,6 +45,8 @@ type importFakeServer struct {
 	// that cannot finish the batch inside its connection checkout limit does.
 	slowOver   int
 	slowStatus int
+	// slowBody, when set, replaces the slow answer's body.
+	slowBody string
 }
 
 type importFakeRequest struct {
@@ -139,6 +141,10 @@ func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.slowOver > 0 && len(req.Mutations) > f.slowOver {
 		w.WriteHeader(f.slowStatus)
+		if f.slowBody != "" {
+			_, _ = w.Write([]byte(f.slowBody))
+			return
+		}
 		_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"storage is unavailable"}}`))
 		return
 	}
@@ -658,6 +664,38 @@ func TestRunImportHalvesABatchTheServerCannotFinish(t *testing.T) {
 				t.Errorf("stdout = %q, want 4 batches and the size it ended with", stdout)
 			}
 		})
+	}
+}
+
+// task-61dbf8a21cd155d1: a database pool timeout during an import batch now
+// answers the server's real 503 envelope, code storage_unavailable with reason
+// connection_unavailable and its own hint. Before the fix it was a 500
+// internal_error and the import stopped. The client halves the batch and
+// finishes.
+func TestRunImportHalvesABatchOnAPoolTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "backup.ndjson")
+	var b strings.Builder
+	for n := 0; n < 40; n++ {
+		fmt.Fprintf(&b, `{"_id":"p-%04d","_type":"post","title":"t"}`+"\n", n)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := newImportFakeServer(t)
+	dst.slowOver, dst.slowStatus = 20, http.StatusServiceUnavailable
+	dst.slowBody = `{"error":{"code":"storage_unavailable","reason":"connection_unavailable",` +
+		`"message":"the database connection pool timed out before this request finished.",` +
+		`"hint":"Transient: the database connection dropped mid-write.","request_id":"req-1"}}`
+	code, stdout, stderr := runImportForTest(t, dst.ctx(), globals{}, path)
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if len(dst.docs) != 40 {
+		t.Fatalf("target holds %d documents, want 40", len(dst.docs))
+	}
+	if !strings.Contains(stderr, "HTTP 503 storage_unavailable") || !strings.Contains(stderr, "Sending 10 documents per batch") {
+		t.Errorf("stderr does not show the 503 retry at a smaller size:\n%s", stderr)
 	}
 }
 
