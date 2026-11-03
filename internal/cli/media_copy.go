@@ -327,6 +327,17 @@ func deleteTargetMedia(ctx manifest.Context, dataset, id string) error {
 		ae := classifyError(status, body)
 		return fmt.Errorf("the delete answered %d: %s", status, ae.errorMessage())
 	}
+	if err := builtinWriteReceiptErr("import media replace", status, body); err != nil {
+		return err
+	}
+	var receipt struct {
+		Result struct {
+			Deleted string `json:"deleted"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &receipt); err != nil || receipt.Result.Deleted != id {
+		return fmt.Errorf("the delete receipt does not name %s as deleted: %s", id, bodyPreview(body))
+	}
 	return nil
 }
 
