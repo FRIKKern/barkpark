@@ -1,8 +1,12 @@
-import type { ReactElement, ReactNode } from 'react'
-import { Linking } from 'react-native'
+import { Image, Linking, Pressable, Text, View } from 'react-native'
 
-import { renderBlockNative } from '../src/papers/portabledoc/blocks'
+import {
+  MISSING,
+  conform,
+} from '../../../api/priv/portable_doc/conformance/conformance.mjs'
+import { BLOCK_RENDERERS, renderBlockNative } from '../src/papers/portabledoc/blocks'
 import { light } from '../src/ui/theme'
+import { mobileStructuralVerdict } from './support/mobileStructuralConformance'
 
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
@@ -17,62 +21,8 @@ const goldens = [
   require('../../../api/priv/portable_doc/goldens/blocks/video.golden.json') as Golden,
 ]
 
-interface Walk {
-  text: string
-  styles: Record<string, unknown>[]
-  images: { uri?: string; accessibilityLabel?: string }[]
-  presses: (() => void)[]
-}
-
-function isElement(node: unknown): node is ReactElement {
-  return !!node && typeof node === 'object' && 'props' in (node as object) && '$$typeof' in (node as object)
-}
-
-function typeName(type: unknown): string {
-  if (typeof type === 'string') return type
-  if (typeof type === 'function') {
-    const candidate = type as { displayName?: string; name: string }
-    return candidate.displayName ?? candidate.name
-  }
-  if (type !== null && typeof type === 'object') {
-    const candidate = type as { displayName?: string; render?: { name?: string } }
-    return candidate.displayName ?? candidate.render?.name ?? ''
-  }
-  return ''
-}
-
-function walkNode(node: ReactNode, acc: Walk): void {
-  if (node === null || node === undefined || typeof node === 'boolean') return
-  if (typeof node === 'string' || typeof node === 'number') {
-    acc.text += String(node)
-    return
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) walkNode(child as ReactNode, acc)
-    return
-  }
-  if (!isElement(node)) return
-
-  const props = node.props as Record<string, unknown>
-  const rawStyle = props.style
-  if (rawStyle !== undefined) {
-    const parts = Array.isArray(rawStyle) ? rawStyle : [rawStyle]
-    acc.styles.push(Object.assign({}, ...parts.filter(Boolean)) as Record<string, unknown>)
-  }
-  if (typeName(node.type) === 'Image') {
-    acc.images.push({
-      uri: (props.source as { uri?: string } | undefined)?.uri,
-      accessibilityLabel: typeof props.accessibilityLabel === 'string' ? props.accessibilityLabel : undefined,
-    })
-  }
-  if (typeof props.onPress === 'function') acc.presses.push(props.onPress as () => void)
-  walkNode(props.children as ReactNode, acc)
-}
-
-function render(golden: Golden): Walk {
-  const acc: Walk = { text: '', styles: [], images: [], presses: [] }
-  walkNode(renderBlockNative(golden.input, { theme: light }, 0), acc)
-  return acc
+function render(golden: Golden) {
+  return renderBlockNative(golden.input, { theme: light }, 0)
 }
 
 describe('mobile source coverage for text-uncheckable conformance goldens', () => {
@@ -81,33 +31,75 @@ describe('mobile source coverage for text-uncheckable conformance goldens', () =
     for (const golden of goldens) expect(golden.input.type).toBe(golden.type)
   })
 
-  it('paints the divider golden as a visible native rule with its section mark', () => {
-    const output = render(goldens[0]!)
-    expect(output.text).toBe('§')
-    expect(output.styles).toContainEqual(expect.objectContaining({ height: 1, alignSelf: 'stretch' }))
+  it.each(goldens)('passes $type through its native structural arm', (golden) => {
+    expect(mobileStructuralVerdict(golden, render(golden))).toEqual({ diff: [], via: 'native-structure' })
   })
 
-  it('preserves the image golden source, accessible name, and authored ratio', () => {
-    const output = render(goldens[1]!)
-    expect(output.images).toEqual([
-      { uri: 'https://cdn.example.com/cover.png', accessibilityLabel: 'Cover art' },
+  it('produces explicit native-structure pass rows without relabeling the text comparator', async () => {
+    const report = await conform({
+      renderer: 'mobile',
+      compare: 'text',
+      judge(golden) {
+        if (!(golden.type in BLOCK_RENDERERS)) return MISSING
+        return mobileStructuralVerdict(golden, render(golden)) ?? MISSING
+      },
+    })
+    expect(report.rows.filter(({ type }) => ['divider', 'image', 'video'].includes(type))).toEqual([
+      { type: 'divider', via: 'native-structure', status: 'pass' },
+      { type: 'image', via: 'native-structure', status: 'pass' },
+      { type: 'video', via: 'native-structure', status: 'pass' },
     ])
-    expect(output.styles).toContainEqual(expect.objectContaining({ width: '100%', aspectRatio: 640 / 360 }))
   })
 
-  it('renders the video golden as an honest poster-backed handoff with its track count', () => {
+  it('the video handoff opens the canonical source URL', () => {
     const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true)
     try {
-      const output = render(goldens[2]!)
-      expect(output.text).toContain('▶ Video · 1 caption track · open in browser')
-      expect(output.images).toEqual([
-        { uri: 'https://ex.com/demo-poster.jpg', accessibilityLabel: '' },
-      ])
-      expect(output.presses).toHaveLength(1)
-      output.presses[0]?.()
+      const output = render(goldens[2]!) as { props: { children: { props: { onPress: () => void } }[] } }
+      output.props.children[0]!.props.onPress()
       expect(open).toHaveBeenCalledWith('https://ex.com/demo.mp4')
     } finally {
       open.mockRestore()
     }
+  })
+
+  it('reds a divider mutant that keeps the mark but drops the rule', () => {
+    const verdict = mobileStructuralVerdict(goldens[0]!, <Text>§</Text>)
+    expect(verdict?.diff).toContain('divider: missing visible 1px stretched rule')
+  })
+
+  it('reds an image mutant that points at a different asset', () => {
+    const verdict = mobileStructuralVerdict(
+      goldens[1]!,
+      <Image
+        source={{ uri: 'https://cdn.example.com/wrong.png' }}
+        accessibilityLabel="Cover art"
+        style={{ width: '100%', aspectRatio: 640 / 360 }}
+      />,
+    )
+    expect(verdict?.diff).toContain(
+      'image src: "https://cdn.example.com/wrong.png" != "https://cdn.example.com/cover.png"',
+    )
+  })
+
+  it('reds a video mutant that looks right but has no handoff target', () => {
+    const verdict = mobileStructuralVerdict(
+      goldens[2]!,
+      <View>
+        <Image source={{ uri: 'https://ex.com/demo-poster.jpg' }} />
+        <Text>▶ Video · 1 caption track · open in browser</Text>
+      </View>,
+    )
+    expect(verdict?.diff).toContain('video handoff count: 0 != 1')
+  })
+
+  it('reds a video mutant that drops the canonical caption-track evidence', () => {
+    const verdict = mobileStructuralVerdict(
+      goldens[2]!,
+      <Pressable onPress={() => undefined}>
+        <Image source={{ uri: 'https://ex.com/demo-poster.jpg' }} />
+        <Text>▶ Video · open in browser</Text>
+      </Pressable>,
+    )
+    expect(verdict?.diff).toContain('video: missing 1 caption track')
   })
 })
