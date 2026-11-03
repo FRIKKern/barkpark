@@ -12,6 +12,9 @@
   ],
   "uses": {
     "canvas": {
+      "tag": [
+        "bp-paper-canvas"
+      ],
       "DOM attribute": [
         "data-bp-fleet-body",
         "data-bp-fleet-id",
@@ -355,6 +358,7 @@
         "bp-canvas-term__title-input",
         "bp-canvas-video",
         "bp-cmd-input",
+        "bp-cmd-palette",
         "bp-cols__atom",
         "bp-expandable__summary",
         "bp-find-match",
@@ -362,7 +366,16 @@
         "bp-link-pill",
         "bp-link-pill__btn",
         "bp-link-pill__label",
+        "bp-link-preview",
+        "bp-link-preview__actions",
+        "bp-link-preview__addr",
+        "bp-link-preview__addr--subtitle",
+        "bp-link-preview__badge",
+        "bp-link-preview__btn",
+        "bp-link-preview__excerpt",
+        "bp-link-preview__head",
         "bp-link-preview__remove",
+        "bp-link-preview__title",
         "bp-paper-body",
         "bp-paper-cards-config",
         "bp-paper-contextual-controls",
@@ -386,13 +399,7 @@
         "bp-paper-stats-config",
         "bp-paper-surface",
         "bp-resting-scaffold",
-        "bp-role-byline",
-        "bp-role-ingress",
-        "bp-role-pullquote",
         "bp-scaffold-control",
-        "bp-section--declaration",
-        "bp-section--framed",
-        "bp-section--wide",
         "bp-section__body",
         "bp-slash-desc",
         "bp-slash-eyebrow",
@@ -403,13 +410,13 @@
         "bp-slash-item",
         "bp-slash-label",
         "bp-slash-list",
-        "bp-table__spark",
-        "bp-table__td",
+        "bp-slash-menu",
         "bp-table__td--num",
         "bp-table__td--spark",
         "bp-table__th--num",
         "bp-table__th--spark",
-        "bp-tabs__tab"
+        "bp-tabs--editor",
+        "data-bp-text-boundary"
       ],
       "why": "bp-paper-editor-shell.css is the editor half of Studio's shell: it restyles the canvas's node views, block handle and menu, slash menu, format bubble and pickers, held in lockstep with src/styles.css by view_edit_parity_test"
     },
@@ -440,12 +447,6 @@
         "bp-paper-editor-body"
       ],
       "why": "the hooks find the contextual editor and the editor body by class to place focus"
-    },
-    {
-      "names": [
-        "bp-ref-search-input"
-      ],
-      "why": "root.html.heex styles the reference picker's search input"
     },
     {
       "names": [

@@ -10,6 +10,9 @@
   ],
   "uses": {
     "canvas": {
+      "tag": [
+        "bp-paper-canvas"
+      ],
       "DOM attribute": [
         "target"
       ],
@@ -17,6 +20,11 @@
         "data-bp-theme",
         "data-paper-palette",
         "data-theme"
+      ]
+    },
+    "editor": {
+      "tag": [
+        "bp-paper-editor"
       ]
     },
     "window": {
@@ -74,17 +82,9 @@
   "internals": [
     {
       "names": [
-        "bp-paper-surface",
-        "bp-table__td"
+        "bp-paper-surface"
       ],
-      "why": "the page's own stylesheet scopes the reading font and a wide table's first column with the classes the canvas paints too"
-    },
-    {
-      "names": [
-        "bp-tabs__tab",
-        "bp-tabs__tab--active"
-      ],
-      "why": "the page's tab script switches tabs on the reader's markup by the class names the canvas's tabs node uses too"
+      "why": "the page's own stylesheet scopes the reading font with the surface class the canvas paints too"
     }
   ]
 }

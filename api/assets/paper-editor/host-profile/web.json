@@ -15,6 +15,9 @@
       ]
     },
     "editor": {
+      "tag": [
+        "bp-paper-editor"
+      ],
       "attribute": [
         "editable"
       ],
