@@ -7,6 +7,12 @@ const scalar = value => typeof value === "string" || typeof value === "number";
 // stored string (a file-tree line) — a read/write pair over the item. `verbatim`
 // keeps leading/trailing whitespace the reader paints (white-space: pre).
 const valueOf = (field, item) => field.read ? field.read(item) : item[field.key];
+const testId = label => `paper-inline-${String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
+const hideEditorSemantics = el => {
+  el.removeAttribute("role");
+  el.removeAttribute("aria-label");
+  el.removeAttribute("aria-multiline");
+};
 
 // `collection` names the block key holding the rows (default `items`; pipeline
 // `nodes`, lineage `entries`, …); a field with `index: null` is a block-level key.
@@ -25,13 +31,10 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
     for (const { el, item, index, key, label, read, write, verbatim } of describeFields(body, sourceBlock || getBlock())) {
       const value = read ? read(item) : item?.[key];
       if (!el || !object(item) || item.locked === true || item.query != null || !scalar(value)) continue;
-      fields.set(el, { index, key, read, write, verbatim, original: value, shown: el.textContent });
+      fields.set(el, { index, key, label, read, write, verbatim, original: value, shown: el.textContent });
       el.contentEditable = "plaintext-only";
-      el.setAttribute("role", "textbox");
-      el.setAttribute("aria-label", label);
-      el.setAttribute("aria-multiline", "false");
+      el.setAttribute("data-test-id", testId(label));
       el.tabIndex = 0;
-      el.style.cursor = "text";
     }
   }
 
@@ -42,6 +45,7 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
       const enabled = allowed() && object(item) && item.locked !== true && item.query == null;
       el.contentEditable = enabled ? "plaintext-only" : "false";
       el.tabIndex = enabled ? 0 : -1;
+      if (!enabled) hideEditorSemantics(el);
       if (!item || (composing && document.activeElement === el)) continue;
       const value = valueOf(field, item);
       const shown = value === field.original ? field.shown : scalar(value)
@@ -99,6 +103,7 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
   }
   function onBlur(event) {
     if (!fields.has(event.target)) return;
+    hideEditorSemantics(event.target);
     composing = false;
     onInput(event);
     // Moving between native hosts must not detach the destination mid-click.
@@ -109,12 +114,19 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
       paint(html, source);
     } else refresh();
   }
+  function onFocus(event) {
+    const field = fields.get(event.target);
+    if (!field || event.target.contentEditable !== "plaintext-only") return;
+    event.target.setAttribute("role", "textbox");
+    event.target.setAttribute("aria-label", field.label);
+    event.target.setAttribute("aria-multiline", "false");
+  }
   const onStart = event => { if (fields.has(event.target)) composing = true; };
   const onEnd = event => { composing = false; onInput(event); };
   const onBeforeInput = event => {
     if (fields.has(event.target) && ["insertParagraph", "insertLineBreak"].includes(event.inputType)) event.preventDefault();
   };
-  const events = { "bp-fleet-paint": onPaint, input: onInput, keydown: onKey,
+  const events = { "bp-fleet-paint": onPaint, input: onInput, keydown: onKey, focusin: onFocus,
     focusout: onBlur, compositionstart: onStart, compositionend: onEnd, beforeinput: onBeforeInput };
   for (const [type, listener] of Object.entries(events)) body.addEventListener(type, listener);
   return {

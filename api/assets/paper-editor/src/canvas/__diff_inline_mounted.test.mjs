@@ -40,7 +40,7 @@ function mount() {
   return { host, block, batches };
 }
 function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("input", { bubbles: true })); }
-const rows = host => [...host.querySelectorAll('[aria-label^="Diff line"]')];
+const rows = host => [...host.querySelectorAll('[data-test-id^="paper-inline-diff-line"]')];
 
 try {
   const { host, block, batches } = mount();

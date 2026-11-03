@@ -53,9 +53,9 @@ function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("in
 try {
   const { host, block, batches } = mount();
   try {
-    const labels = host.querySelectorAll('[aria-label="Note label"]');
-    const leads = host.querySelectorAll('[aria-label="Note lead"]');
-    const bodies = host.querySelectorAll('[aria-label="Note body"]');
+    const labels = host.querySelectorAll('[data-test-id="paper-inline-note-label"]');
+    const leads = host.querySelectorAll('[data-test-id="paper-inline-note-lead"]');
+    const bodies = host.querySelectorAll('[data-test-id="paper-inline-note-body"]');
     assert.equal(labels.length, 2, "every row's label edits where it reads");
     assert.equal(leads.length, 1, "a lead edits where it reads; a row without one paints none");
     assert.equal(bodies.length, 2, "every row's body edits where it reads");
@@ -86,20 +86,20 @@ try {
 
   for (const attrs of [{ locked: true }, { query: { source: "derived" } }]) {
     const r = mount(attrs);
-    try { assert.equal(r.host.querySelector('[aria-label="Note label"]'), null); }
+    try { assert.equal(r.host.querySelector('[data-test-id="paper-inline-note-label"]'), null); }
     finally { r.host.remove(); }
   }
 
   const slotted = mount({ items: [{ slots: { body: [{ type: "paragraph", content: [{ type: "text", value: "Slot" }] }] }, label: "S" }, { label: "P4", text: "No lead here." }] });
   try {
-    assert.equal(slotted.host.querySelectorAll('[aria-label="Note label"]').length, 1,
+    assert.equal(slotted.host.querySelectorAll('[data-test-id="paper-inline-note-label"]').length, 1,
       "a slot-materialized row paints from its slots, so it stays panel-edited");
   } finally { slotted.host.remove(); }
 
   const mismatch = mount();
   try {
     paint(mismatch.host, `<div class="bp-notes">${row("P1", "One vocabulary.", "Only one row.")}</div>`);
-    assert.equal(mismatch.host.querySelector('[aria-label="Note label"]'), null, "a mismatched paint never maps onto an arbitrary item");
+    assert.equal(mismatch.host.querySelector('[data-test-id="paper-inline-note-label"]'), null, "a mismatched paint never maps onto an arbitrary item");
   } finally { mismatch.host.remove(); }
   console.log("notes inline: label/lead/body edit in place, reader bytes kept, locked/query/slot rows and mismatched paints refused");
 } finally { window.close(); }

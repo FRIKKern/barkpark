@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
 // r2b click-to-edit census (task-bbfdcf4c80b8300d): authored text in pipeline,
 // lineage, duel, heatmap, chart and form/questionnaire paints was read-only in
 // Edit (0/n in place). Each stored string the reader paints now edits where it
 // reads; numbers and derived readouts stay panel-edited; reader bytes are kept.
+for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+  assert.match(readFileSync(new URL(file, import.meta.url), "utf8"),
+    /\[data-bp-fleet-body\] \[contenteditable="plaintext-only"\]\s*\{\s*cursor:\s*text;/,
+    `${file}: native inline fields keep the text cursor without changing reader DOM`);
+}
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 for (const name of ["customElements", "CustomEvent", "document", "DOMParser", "Element", "Event", "EventTarget", "HTMLElement", "KeyboardEvent", "MouseEvent", "MutationObserver", "Node", "NodeFilter", "Selection", "Text"]) globalThis[name] = window[name];
 globalThis.window = window;
@@ -37,7 +43,7 @@ function type(host, el, text) {
   host.flushPendingChanges();
   el.blur();
 }
-const hosts = (host) => [...host.querySelectorAll("[data-bp-fleet-body] [role=textbox]")];
+const hosts = (host) => [...host.querySelectorAll("[data-bp-fleet-body] [data-test-id^='paper-inline-']")];
 const lastPatch = (batches) => batches.at(-1)?.ops.at(-1)?.patch;
 
 const cases = [
@@ -98,7 +104,16 @@ try {
       const els = hosts(host);
       assert.deepEqual(els.map(el => el.textContent), c.painted, `${c.block.type}: every painted stored string edits in place`);
       assert.equal(hole.textContent, before, `${c.block.type}: decoration keeps the reader's painted text`);
-      els[0].focus(); els[0].blur(); host.flushPendingChanges();
+      assert.equal(els[0].hasAttribute("role"), false, `${c.block.type}: resting reader markup has no editor role`);
+      assert.equal(els[0].hasAttribute("aria-label"), false, `${c.block.type}: resting reader markup has no editor name`);
+      assert.equal(els[0].style.cursor, "", `${c.block.type}: resting reader markup has no inline editor style`);
+      els[0].focus();
+      assert.equal(els[0].getAttribute("role"), "textbox", `${c.block.type}: focused field exposes its editing role`);
+      assert.ok(els[0].getAttribute("aria-label"), `${c.block.type}: focused field exposes its editing name`);
+      els[0].blur();
+      assert.equal(els[0].hasAttribute("role"), false, `${c.block.type}: blur restores reader-shaped markup`);
+      assert.equal(els[0].hasAttribute("aria-label"), false, `${c.block.type}: blur removes transient editor naming`);
+      host.flushPendingChanges();
       assert.deepEqual(batches, [], `${c.block.type}: focus/blur is not an authored change`);
       type(host, els[c.edit[0]], c.edit[1]);
       const expected = structuredClone(c.block);

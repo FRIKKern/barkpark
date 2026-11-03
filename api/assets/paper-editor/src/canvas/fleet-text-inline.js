@@ -145,7 +145,7 @@ export function wireFleetTextInline(body, options, type) {
   // An option's text sits inside its <label>: a click there places the caret and
   // must not also check the painted radio.
   const onClick = event => {
-    const host = event.target.closest?.("[role=textbox]");
+    const host = event.target.closest?.("[data-test-id^='paper-inline-']");
     if (host && body.contains(host) && host.closest("label")) event.preventDefault();
   };
   body.addEventListener("click", onClick);
