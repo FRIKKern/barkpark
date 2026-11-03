@@ -34,11 +34,13 @@
 //                                    `git show origin/main:api/priv/static/assets/bp-paper-editor-shell.css`
 //   BP_PARITY_PLANT='sel{decl}'      append a rule to the Edit pages only — the
 //                                    planted-change proof that the matrix can red
+//   BP_PARITY_REMOVE_DIAGRAM=1       remove the mounted Mermaid root — the
+//                                    readiness proof that a missing diagram reds
 //   BP_PARITY_REPORT_ONLY=1          print everything, never exit non-zero
 //   BP_REQUIRE_CHROME=1              no Chromium is a failure, not a SKIP (CI)
 //   BP_PARITY_RENDER_API=/path/api   render with a separately compiled api tree
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +58,23 @@ const ARTIFACTS = process.env.BP_PARITY_ARTIFACTS || join(TMP, "artifacts");
 const REPORT_ONLY = process.env.BP_PARITY_REPORT_ONLY === "1";
 const SHELL_CSS = process.env.BP_PARITY_SHELL_CSS || join(REPO, "api/priv/static/assets/bp-paper-editor-shell.css");
 const PLANT = process.env.BP_PARITY_PLANT || "";
+const REMOVE_DIAGRAM = process.env.BP_PARITY_REMOVE_DIAGRAM === "1";
 const KNOWN = JSON.parse(readFileSync(join(HERE, "view-edit-parity.known.json"), "utf8")).entries;
+
+function gitIdentity(path) {
+  const resolvedPath = realpathSync(path);
+  try {
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: resolvedPath, encoding: "utf8" }).trim();
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedPath, encoding: "utf8" }).trim();
+    const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=no", "--", "."], { cwd: resolvedPath, encoding: "utf8" }).trim();
+    return { path: resolvedPath, gitRoot: root, sha, trackedDirty: status !== "" };
+  } catch {
+    return { path: resolvedPath, git: "unavailable" };
+  }
+}
+
+const SOURCE_IDENTITY = gitIdentity(PACKAGE);
+const RENDER_API_IDENTITY = gitIdentity(RENDER_API);
 
 mkdirSync(ARTIFACTS, { recursive: true });
 
@@ -359,7 +377,7 @@ function pageFor(surface, scenario) {
     page = page.replace(/<article id="paper-body"[^>]*>[\s\S]*?<\/article>/, () => pages.editor);
   }
   const setup = {
-    reader: `setTimeout(measure, 0);`,
+    reader: `waitForDiagramRender(measure);`,
     canvas: `
 const host = document.createElement("bp-paper-canvas");
 host.setAttribute("editable", "true");
@@ -369,7 +387,7 @@ customElements.whenDefined("bp-paper-canvas").then(() => {
   const ready = () => {
     if (!host.querySelector(".ProseMirror")) return setTimeout(ready, 20);
     paintFleet();
-    setTimeout(measure, 0);
+    waitForDiagramRender(measure);
   };
   ready();
 });`,
@@ -387,7 +405,7 @@ customElements.whenDefined("bp-paper-canvas").then(() => {
     const pending = runs.filter((run) => !run.querySelector(".ProseMirror"));
     if (pending.length && tries++ < 150) return setTimeout(ready, 20);
     paintFleet();
-    setTimeout(measure, 0);
+    waitForDiagramRender(measure);
   };
   ready();
 });`,
@@ -404,6 +422,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 const SURFACE = ${JSON.stringify(surface)};
 const FIXTURE_META = ${JSON.stringify(FIXTURES.map((block) => ({ id: block.id, type: block.type, probe: probeFor(block) })))};
+let REMOVE_DIAGRAM = ${JSON.stringify(REMOVE_DIAGRAM)};
 ${MEASURE}
 // Fleet widgets (stats, chart, notes, task-list, ...) paint server HTML into a
 // hole; the LiveView pushes Render.render_block/2 output, so paint exactly that.
@@ -413,6 +432,35 @@ function paintFleet() {
     const id = hole.closest("[data-bp-fleet-id]").getAttribute("data-bp-fleet-id");
     if (FLEET_PAINT[id] != null) hole.innerHTML = FLEET_PAINT[id];
   }
+}
+function waitForDiagramRender(done) {
+  let tries = 0;
+  const check = () => {
+    if (REMOVE_DIAGRAM) {
+      const diagram = document.querySelector("pre.mermaid");
+      if (diagram) {
+        diagram.remove();
+        REMOVE_DIAGRAM = false;
+      }
+    }
+    const expected = FIXTURE_META.filter((meta) => meta.type === "diagram").length;
+    const diagrams = Array.from(document.querySelectorAll("pre.mermaid"));
+    const pending = diagrams.filter((pre) =>
+      pre.getAttribute("data-processed") !== "true" || !pre.querySelector("svg")
+    );
+    if (diagrams.length >= expected && !pending.length) return setTimeout(done, 0);
+    if (tries++ < 200) return setTimeout(check, 20);
+    const roots = pending.map((pre) =>
+      pre.closest("[data-block-id],[data-bp-id],[data-bp-type]")?.getAttribute("data-block-id") ||
+      pre.closest("[data-block-id],[data-bp-id],[data-bp-type]")?.getAttribute("data-bp-id") ||
+      pre.closest("[data-block-id],[data-bp-id],[data-bp-type]")?.getAttribute("data-bp-type") ||
+      "unknown"
+    );
+    if (diagrams.length < expected) roots.push("missing:" + (expected - diagrams.length));
+    document.getElementById("parity-status").textContent =
+      "BP_PARITY_ERROR=diagram render timed out: " + roots.join(",");
+  };
+  check();
 }
 ${setup}
 </script>`;
@@ -437,7 +485,7 @@ function runPage(surface, scenario) {
 }
 
 const fixtureIds = FIXTURES.map((block) => block.id);
-const report = { generatedAt: new Date().toISOString(), chromium: CHROME, shellCss: SHELL_CSS, plant: PLANT || null, fixtures: FIXTURES.map(({ id, type }) => ({ id, type })), scenarios: {} };
+const report = { generatedAt: new Date().toISOString(), sourceIdentity: SOURCE_IDENTITY, renderApiIdentity: RENDER_API_IDENTITY, chromium: CHROME, shellCss: SHELL_CSS, plant: PLANT || null, removeDiagram: REMOVE_DIAGRAM, fixtures: FIXTURES.map(({ id, type }) => ({ id, type })), scenarios: {} };
 const seen = new Set();
 let total = 0, knownCount = 0, unexpectedCount = 0, compared = 0;
 
