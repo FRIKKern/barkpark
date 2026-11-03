@@ -52,6 +52,13 @@ import (
 // `"dataset":""` would not reproduce it.
 func devPullTar(t *testing.T, profile, dataset string, blobs map[string][]byte) []byte {
 	t.Helper()
+	return devPullTarIDs(t, profile, dataset, blobs, nil)
+}
+
+// devPullTarIDs is devPullTar with a media_files id column when ids is not
+// nil: ids maps a blob path to its media_files row id.
+func devPullTarIDs(t *testing.T, profile, dataset string, blobs map[string][]byte, ids map[string]string) []byte {
+	t.Helper()
 	var fields []string
 	fields = append(fields, `"format":"bp-export-v1"`, `"workspace_slug":"acme"`)
 	if profile != "" {
@@ -60,11 +67,18 @@ func devPullTar(t *testing.T, profile, dataset string, blobs map[string][]byte) 
 	if dataset != "" {
 		fields = append(fields, fmt.Sprintf(`"dataset":%q`, dataset))
 	}
-	fields = append(fields, `"tables":[{"name":"documents","columns":["id","type"]},{"name":"media_files","columns":["path","size"]}]`)
+	mediaCols := `["path","size"]`
+	if ids != nil {
+		mediaCols = `["id","path","size"]`
+	}
+	fields = append(fields, `"tables":[{"name":"documents","columns":["id","type"]},{"name":"media_files","columns":`+mediaCols+`}]`)
 	manifest := "{" + strings.Join(fields, ",") + "}"
 
 	var dump strings.Builder
 	for _, p := range sortedBlobPaths(blobs) {
+		if ids != nil {
+			dump.WriteString(ids[p] + "\t")
+		}
 		dump.WriteString(p + "\t" + strconv.Itoa(len(blobs[p])) + "\n")
 	}
 	// Members deliberately out of "nice" order: the grain reader must not assume
@@ -112,6 +126,8 @@ type devPullSourceOpts struct {
 	failBlob         string // this blob path answers 500
 	truncateBlob     string // this blob answers FEWER bytes than the manifest declares
 	missingBlob      string // this blob path answers 404 "media blob missing"
+	// mediaIDs gives the bundle a media_files id column: blob path → row id.
+	mediaIDs map[string]string
 	// rateLimited answers 429 this many times per blob path before serving it,
 	// with retryAfter as the Retry-After header ("" sends none).
 	rateLimited int
@@ -133,7 +149,7 @@ func devPullSourceServer(t *testing.T, o devPullSourceOpts) (*httptest.Server, *
 	t.Helper()
 	probe := &devPullSourceProbe{}
 	limited := map[string]int{}
-	bundle := devPullTar(t, o.profile, o.dataset, o.blobs)
+	bundle := devPullTarIDs(t, o.profile, o.dataset, o.blobs, o.mediaIDs)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/export"):

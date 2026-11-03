@@ -202,19 +202,36 @@ defmodule BarkparkWeb.ExportController do
             Exception.format(:error, error, __STACKTRACE__)
         )
 
-        mark_incomplete(conn, n)
+        mark_incomplete(conn, n, incomplete_cause(error))
     end
   end
+
+  # The cause the marker names. `bp export` prints it, so an operator learns
+  # WHY a backup stopped without reading the server log. A dropped database
+  # connection is named in full because it is the one known way an export of
+  # a large dataset ends: the streaming transaction ran past @stream_timeout.
+  # Anything else names the exception module only. Its message can quote row
+  # content, and the marker travels into backup files.
+  @doc false
+  def incomplete_cause(%DBConnection.ConnectionError{}) do
+    "the database connection dropped (DBConnection.ConnectionError). The export holds one " <>
+      "transaction for at most #{div(@stream_timeout, 60_000)} minutes, so a dataset that " <>
+      "takes longer to stream stops here; export it one type at a time (bp export --type <t>)"
+  end
+
+  def incomplete_cause(%{__struct__: module}), do: "the server raised #{inspect(module)}"
+  def incomplete_cause(_other), do: "the server raised an error"
 
   defp count(counter), do: :counters.get(counter, 1)
 
   # The terminating NDJSON line that distinguishes a truncated dump from a
   # complete one. No `_id`/`_type`, so a restore keyed on document identity
   # cannot ingest it as content.
-  defp mark_incomplete(conn, delivered) do
+  defp mark_incomplete(conn, delivered, cause) do
     marker =
       Jason.encode!(%{
         "_barkpark_export" => "incomplete",
+        "_cause" => cause,
         "_delivered" => delivered,
         "_error" => "the export failed mid-stream; this backup is INCOMPLETE"
       }) <> "\n"

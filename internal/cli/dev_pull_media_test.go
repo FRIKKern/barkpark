@@ -304,6 +304,105 @@ func TestDevPullListsAMissingBlobAndDoesNotFail(t *testing.T) {
 	}
 }
 
+// TestDevPullNamesAMissingBlobByAssetID: the bundle's media_files id is the
+// asset document's id without its "asset-" prefix. A file the source answers
+// 404 for is named by that asset id in the receipt, the machine receipt and
+// the .missing.txt list (task-610177501686e7fb), because that is the id an
+// editor finds the broken image by.
+func TestDevPullNamesAMissingBlobByAssetID(t *testing.T) {
+	workspaceEnvIsolate(t)
+	ids := map[string]string{
+		"2026/01/a.png": "5be61e4b-6f6c-4fc5-b8e8-4544b55a2214",
+		"2026/01/b.jpg": "a28974d6-6f4f-45e7-bf17-d45189f5e325",
+	}
+	src, _ := devPullSourceServer(t, devPullSourceOpts{
+		profile: "dev", dataset: "production", blobs: devPullBlobs, missingBlob: "2026/01/a.png", mediaIDs: ids,
+	})
+	tgt, _ := devPullTargetServer(t, devPullTargetOpts{})
+	devPullSaveServers(t, src.URL, tgt.URL)
+
+	bundle := filepath.Join(t.TempDir(), "b.tar")
+	stdout, stderr, code := runDevPullCmd(t, globals{}, "table",
+		"prod", "laptop", "acme/production", "--yes", "--bundle", bundle)
+	if code != exitOK {
+		t.Fatalf("exit = %d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "asset-5be61e4b-6f6c-4fc5-b8e8-4544b55a2214  2026/01/a.png") {
+		t.Fatalf("receipt does not name the asset id:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "asset-a28974d6") {
+		t.Fatalf("receipt names the file that arrived as missing:\n%s", stdout)
+	}
+	list, err := os.ReadFile(bundle + ".missing.txt")
+	if err != nil || string(list) != "asset-5be61e4b-6f6c-4fc5-b8e8-4544b55a2214\t2026/01/a.png\n" {
+		t.Fatalf("missing list file = %q, %v", list, err)
+	}
+
+	jsonBundle := filepath.Join(t.TempDir(), "j.tar")
+	jout, jerr, jcode := runDevPullCmd(t, globals{}, "json",
+		"prod", "laptop", "acme/production", "--yes", "--bundle", jsonBundle)
+	if jcode != exitOK {
+		t.Fatalf("json exit = %d\nstdout:%s\nstderr:%s", jcode, jout, jerr)
+	}
+	var receipt struct {
+		Media struct {
+			Missing       []string            `json:"missing"`
+			MissingAssets []map[string]string `json:"missing_assets"`
+		} `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(jout), &receipt); err != nil {
+		t.Fatalf("machine receipt does not parse: %v\n%s", err, jout)
+	}
+	if len(receipt.Media.Missing) != 1 || receipt.Media.Missing[0] != "2026/01/a.png" {
+		t.Errorf("media.missing = %v, want the one path", receipt.Media.Missing)
+	}
+	if len(receipt.Media.MissingAssets) != 1 ||
+		receipt.Media.MissingAssets[0]["asset_id"] != "asset-5be61e4b-6f6c-4fc5-b8e8-4544b55a2214" ||
+		receipt.Media.MissingAssets[0]["path"] != "2026/01/a.png" {
+		t.Errorf("media.missing_assets = %v, want the asset id and path", receipt.Media.MissingAssets)
+	}
+}
+
+// TestDevPullWaitsOutRateLimitsThenListsMissingByAssetID joins the two halves
+// of the parent criterion: 429s in the media phase are waited out on the
+// server's Retry-After, and the run still ends with the one file the source
+// does not hold, named by asset id.
+func TestDevPullWaitsOutRateLimitsThenListsMissingByAssetID(t *testing.T) {
+	workspaceEnvIsolate(t)
+	slept := fakeMediaClock(t)
+	src, _ := devPullSourceServer(t, devPullSourceOpts{
+		profile: "dev", dataset: "production", blobs: devPullBlobs, missingBlob: "2026/01/a.png",
+		mediaIDs:    map[string]string{"2026/01/a.png": "m-a", "2026/01/b.jpg": "m-b"},
+		rateLimited: 2, retryAfter: "7",
+	})
+	tgt, tprobe := devPullTargetServer(t, devPullTargetOpts{})
+	devPullSaveServers(t, src.URL, tgt.URL)
+
+	bundle := filepath.Join(t.TempDir(), "b.tar")
+	stdout, stderr, code := runDevPullCmd(t, globals{}, "table",
+		"prod", "laptop", "acme/production", "--yes", "--bundle", bundle)
+	if code != exitOK {
+		t.Fatalf("exit = %d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	sevens := 0
+	for _, d := range *slept {
+		if d == 7*time.Second {
+			sevens++
+		}
+	}
+	if sevens < 2 {
+		t.Errorf("waits = %v, want at least two 7s Retry-After waits", *slept)
+	}
+	if len(tprobe.blobPUTs) != 1 {
+		t.Errorf("target pushes = %v, want the one file that exists", tprobe.blobPUTs)
+	}
+	for _, want := range []string{"asset-m-a  2026/01/a.png", "retried after the server's Retry-After"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("receipt lacks %q:\n%s", want, stdout)
+		}
+	}
+}
+
 // TestDevPullAServerErrorStillFails: only a 404 is listed. A 500 is a real
 // failure and keeps the pull from importing.
 func TestDevPullAServerErrorStillFails(t *testing.T) {

@@ -629,7 +629,9 @@ type blobReport struct {
 	failures []string
 	// missing names files the source answered 404 for, when the caller asked
 	// for a missing file to be listed rather than failed (blobFetchOpts).
-	missing []string
+	// missingRefs carries the same files with their asset ids.
+	missing     []string
+	missingRefs []mediaBlobRef
 	// throttled counts 429 answers that were waited out and retried; waited
 	// is the total time spent waiting on them.
 	throttled int
@@ -770,6 +772,7 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string, opts 
 		if ferr != nil {
 			if opts.listMissing && exit == exitNotFound {
 				rep.missing = append(rep.missing, p)
+				rep.missingRefs = append(rep.missingRefs, ref)
 				continue
 			}
 			rep.fail(out, p, ferr.Error(), exit)
@@ -1013,6 +1016,28 @@ type mediaBlobRef struct {
 	size      int64
 	sizeKnown bool
 	project   string
+	// id is the media_files row id. The row's asset document is
+	// "asset-<id>" (Barkpark.Plugins.Media.Assets). "" when the bundle
+	// declares no id column.
+	id string
+}
+
+// assetID is the id of the asset document this file belongs to, or "" when
+// the bundle did not say.
+func (r mediaBlobRef) assetID() string {
+	if r.id == "" {
+		return ""
+	}
+	return "asset-" + r.id
+}
+
+// missingLine names one missing file: its asset id and its path, tab
+// separated, or the path alone when the asset id is unknown.
+func (r mediaBlobRef) missingLine() string {
+	if id := r.assetID(); id != "" {
+		return id + "\t" + r.path
+	}
+	return r.path
 }
 
 // bundleMediaRefs reads a bp-export-v1 tar and returns the media_files rows'
@@ -1098,6 +1123,15 @@ func bundleMediaIndex(bundlePath string) ([]mediaBlobRef, string, error) {
 
 	// project_id → slug. Optional at every step: a bundle without the column or
 	// the member keeps project "" and the fetch uses the default project.
+	// The row id names the asset document ("asset-<id>"), so a file the
+	// source no longer holds can be reported by the id an editor sees.
+	if idIdx, ierr := manifestColumnIndex(manifestBytes, "media_files", "id"); ierr == nil {
+		ids := copyColumnByPath(dumpBytes, idx, idIdx)
+		for i := range refs {
+			refs[i].id = ids[refs[i].path]
+		}
+	}
+
 	projIdx, perr := manifestColumnIndex(manifestBytes, "media_files", "project_id")
 	if perr == nil && len(projectsBytes) > 0 {
 		slugs := projectSlugsByID(manifestBytes, projectsBytes)
