@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchChrome, navigate, evaluate, waitFor } from "./browser.mjs";
@@ -11,20 +12,38 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUTPUT = join(HERE, "artifacts");
 
 function usage(why) {
-  throw new Error(`${why}\nusage: npm run hosts -- [--output=<directory>] [--allow-unavailable] [--host=<id>]`);
+  throw new Error(`${why}\nusage: npm run hosts -- [--output=<directory>] [--candidate=<staged-build-directory>] [--allow-unavailable] [--host=<id>]`);
 }
 
 export function options(args) {
-  const known = /^--(output=.+|host=[a-z0-9-]+|allow-unavailable)$/;
+  const known = /^--(output=.+|candidate=.+|host=[a-z0-9-]+|allow-unavailable)$/;
   const bad = args.find((arg) => !known.test(arg));
   if (bad) usage(`unknown or malformed option ${bad}`);
   const value = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const duplicates = ["output", "host"].filter((name) => args.filter((arg) => arg.startsWith(`--${name}=`)).length > 1);
+  const duplicates = ["output", "candidate", "host"].filter((name) => args.filter((arg) => arg.startsWith(`--${name}=`)).length > 1);
   if (args.filter((arg) => arg === "--allow-unavailable").length > 1) duplicates.push("allow-unavailable");
   if (duplicates.length) usage(`--${duplicates[0]} given twice`);
   const host = value("host");
   if (host && !profiles.some((entry) => entry.id === host)) usage(`unknown host ${host}`);
-  return { output: resolve(value("output") || DEFAULT_OUTPUT), host, allowUnavailable: args.includes("--allow-unavailable") };
+  return { output: resolve(value("output") || DEFAULT_OUTPUT), candidate: value("candidate") && resolve(value("candidate")), host, allowUnavailable: args.includes("--allow-unavailable") };
+}
+
+export function stagedBuild(dir) {
+  const sha = readFileSync(join(dir, "source-commit"), "utf8").trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`candidate source-commit is not a full Git SHA: ${JSON.stringify(sha)}`);
+  const sums = readFileSync(join(dir, "SHA256SUMS"), "utf8").trim().split("\n").map((line) => {
+    const match = line.match(/^([0-9a-f]{64})  ([a-z0-9][a-z0-9.-]*)$/);
+    if (!match) throw new Error(`malformed candidate SHA256SUMS line: ${JSON.stringify(line)}`);
+    return { expected: match[1], name: match[2] };
+  });
+  for (const { expected, name } of sums) {
+    const actual = createHash("sha256").update(readFileSync(join(dir, name))).digest("hex");
+    if (actual !== expected) throw new Error(`candidate checksum mismatch for ${name}: wanted ${expected}, got ${actual}`);
+  }
+  for (const name of ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"]) {
+    if (!sums.some((entry) => entry.name === name)) throw new Error(`candidate SHA256SUMS does not cover ${name}`);
+  }
+  return { label: "candidate", sha, dir, bundleSha256: sums.find(({ name }) => name === "bp-paper-editor.bundle.js").expected };
 }
 
 async function screenshot(cdp, path) {
@@ -335,6 +354,83 @@ async function e10(cdp, root, host, baseUrl) {
   return { id: "E10", state: "passed", artifacts };
 }
 
+async function preparePickerCanvas(cdp) {
+  await evaluate(cdp, `(() => {
+    const canvas = window.testingGround.state.canvases[0];
+    canvas.setAttribute('data-picker-browse', 'true');
+    canvas.setAttribute('data-dataset', 'production');
+    canvas.setAttribute('data-scope-prefix', '/w/hosts/p/journeys');
+    canvas.applyServerBlocks(structuredClone(window.testingGround.state.host.saved));
+  })()`);
+}
+
+async function pick(cdp, selector, value) {
+  await waitFor(cdp, `Boolean(document.querySelector(${JSON.stringify(selector)}))`);
+  await evaluate(cdp, `(() => {
+    const picker = document.querySelector(${JSON.stringify(selector)});
+    picker.value = ${JSON.stringify(value)};
+    picker.dispatchEvent(new CustomEvent('bp-change', { bubbles: true, detail: { value: ${JSON.stringify(value)} } }));
+  })()`);
+  await settle(cdp);
+  await waitFor(cdp, `JSON.stringify(window.testingGround.state.host.saved).includes(${JSON.stringify(value)})`);
+}
+
+async function e11(cdp, root, host, baseUrl, enabled) {
+  if (!enabled) return { id: "E11", state: "not-applicable", reason: "picker journey applies to Studio hosts" };
+  const frames = [];
+  await viewport(cdp, 1280, 800);
+  await navigate(cdp, `${baseUrl}?doc=sample:field-image`);
+  await waitFor(cdp, "Boolean(customElements.get('bp-media-picker')) && Boolean(customElements.get('bp-reference-picker'))");
+  await preparePickerCanvas(cdp);
+  await pick(cdp, "bp-media-picker", "https://example.test/host-image.png");
+  const image = join(root, "journeys", `${host}--E11--image.png`);
+  await screenshot(cdp, image); frames.push(image);
+  await navigate(cdp, `${baseUrl}?doc=sample:field-reference`);
+  await preparePickerCanvas(cdp);
+  await pick(cdp, "bp-reference-picker", "paper-host-reference");
+  const reference = join(root, "journeys", `${host}--E11--reference.png`);
+  await screenshot(cdp, reference); frames.push(reference);
+  await navigate(cdp, `${baseUrl}?doc=sample:card`);
+  await preparePickerCanvas(cdp);
+  await pick(cdp, 'bp-media-picker[chrome="ghost"]', "https://example.test/card-media.png");
+  const card = join(root, "journeys", `${host}--E11--card.png`);
+  await screenshot(cdp, card); frames.push(card);
+  const output = join(root, "journeys", `${host}--E11.gif`);
+  gif(frames, output);
+  return { id: "E11", state: "passed", assertions: ["real media picker saved image", "real reference picker saved document", "card ghost picker saved media"], artifacts: [...frames, output].map((path) => path.slice(root.length + 1)) };
+}
+
+async function replaySave(cdp, baseUrl, marker, screenshotPath) {
+  await viewport(cdp, 1280, 800);
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await focusLastParagraph(cdp);
+  await cdp.send("Input.insertText", { text: marker });
+  await settle(cdp);
+  await waitFor(cdp, `JSON.stringify(window.testingGround.state.host.saved).includes(${JSON.stringify(marker)})`);
+  await screenshot(cdp, screenshotPath);
+  return await evaluate(cdp, "window.testingGround.state.host.batches.map(({ at, answer, ...batch }) => batch)");
+}
+
+async function e12(cdp, root, host, mainUrl, candidateUrl, candidate) {
+  if (!candidateUrl) return { id: "E12", state: "unavailable", reason: "rerun with --candidate=<verified staged editor directory>" };
+  const marker = " upgrade-replay-save";
+  const baselineImage = join(root, "journeys", `${host}--E12--baseline.png`);
+  const candidateImage = join(root, "journeys", `${host}--E12--candidate.png`);
+  const baseline = await replaySave(cdp, mainUrl, marker, baselineImage);
+  const replayed = await replaySave(cdp, candidateUrl, marker, candidateImage);
+  const compatible = JSON.stringify(baseline) === JSON.stringify(replayed);
+  if (!compatible) throw new Error(`${host} E12: candidate save ops differ from baseline`);
+  const report = join(root, "journeys", `${host}--E12-replay.json`);
+  writeFileSync(report, JSON.stringify({
+    baseline: { label: "main", ops: baseline },
+    candidate: { label: candidate.label, sourceCommit: candidate.sha, bundleSha256: candidate.bundleSha256, ops: replayed },
+    compatible,
+  }, null, 2) + "\n");
+  const output = join(root, "journeys", `${host}--E12.gif`);
+  gif([baselineImage, candidateImage], output);
+  return { id: "E12", state: "passed", assertions: ["baseline client saved", "candidate client saved", "operation replay is byte-equal"], artifacts: [baselineImage, candidateImage, report, output].map((path) => path.slice(root.length + 1)) };
+}
+
 export async function run(args = process.argv.slice(2)) {
   const opts = options(args);
   mkdirSync(join(opts.output, "hosts"), { recursive: true });
@@ -343,11 +439,41 @@ export async function run(args = process.argv.slice(2)) {
   let testingGround;
   let server;
   let browser;
-  const manifest = { schema: 1, tools: { chrome: null, ffmpeg: ffmpegVersion() }, hosts: [], journeys };
+  let candidateGround;
+  let candidateServer;
+  let cleaned = false;
+  async function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    const closers = [browser, candidateServer, candidateGround, server, testingGround].filter(Boolean);
+    const failures = [];
+    for (const resource of closers) {
+      try { await resource.close(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw failures[0];
+  }
+  const signals = new Map([["SIGINT", 130], ["SIGTERM", 143]]);
+  const handlers = new Map([...signals].map(([signal, code]) => [signal, async () => {
+    try { await cleanup(); } finally { process.exit(code); }
+  }]));
+  for (const [signal, handler] of handlers) process.once(signal, handler);
+  const candidate = opts.candidate && stagedBuild(opts.candidate);
+  const runtimeJourneys = journeys.map((journey) => {
+    if (journey.id !== "E12") return journey;
+    const { reason, ...rest } = journey;
+    return candidate
+      ? { ...rest, state: "available", sourceCommit: candidate.sha, bundleSha256: candidate.bundleSha256 }
+      : { ...rest, state: "unavailable", reason };
+  });
+  const manifest = { schema: 1, tools: { chrome: null, ffmpeg: ffmpegVersion() }, hosts: [], journeys: runtimeJourneys };
   try {
     const { start } = await import("../src/testing-ground/server.mjs");
     testingGround = await start();
     server = await startHostServer({ testingGround });
+    if (candidate) {
+      candidateGround = await start({ builds: [candidate] });
+      candidateServer = await startHostServer({ testingGround: candidateGround });
+    }
     browser = await launchChrome();
     manifest.tools.chrome = { version: browser.chrome.version, words: browser.chrome.words };
     for (const host of selected) {
@@ -366,16 +492,17 @@ export async function run(args = process.argv.slice(2)) {
         await e07(browser.cdp, opts.output, host.id, url),
         await e08(browser.cdp, opts.output, host.id, url),
         await e10(browser.cdp, opts.output, host.id, url),
+        await e11(browser.cdp, opts.output, host.id, url, host.pickers),
+        await e12(browser.cdp, opts.output, host.id, url, candidateServer && `${candidateServer.url}/hosts/${host.id}/`, candidate),
       ];
       manifest.hosts.push({ ...host, state: "passed", results });
-      console.log(`${host.id}: E01-E08, E10 passed`);
+      console.log(`${host.id}: E01-E08, E10${host.pickers ? "-E11" : ""}${candidate ? ", E12" : ""} passed`);
     }
   } finally {
-    if (browser) await browser.close();
-    if (server) await server.close();
-    if (testingGround) await testingGround.close();
+    for (const [signal, handler] of handlers) process.removeListener(signal, handler);
+    await cleanup();
   }
-  const unavailable = journeys.filter((journey) => journey.state === "unavailable");
+  const unavailable = runtimeJourneys.filter((journey) => journey.state === "unavailable");
   manifest.state = unavailable.length ? "incomplete" : "passed";
   const manifestPath = join(opts.output, "hosts", "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");

@@ -1,9 +1,15 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { profiles, profile, hostCss } from "./profiles.mjs";
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
+
 function page(html, entry) {
+  const pickers = entry.pickers ? '\n  <script src="/host-assets/bp-media-picker.js" defer></script>\n  <script src="/host-assets/bp-reference-picker.js" defer></script>' : "";
   return html
-    .replace("<head>", `<head>\n  <base href=\"/\">\n  <style>${hostCss(entry)}</style>\n  <script>window.__BP_HOST_PROFILE__=${JSON.stringify(entry)};<\/script>`)
+    .replace("<head>", `<head>\n  <base href=\"/\">\n  <style>${hostCss(entry)}</style>\n  <script>window.__BP_HOST_PROFILE__=${JSON.stringify(entry)};<\/script>${pickers}`)
     .replace("<body>", `<body class=\"${entry.className.split(" ").map((name) => `host-${name}`).join(" ")}\">`)
     .replace("<title>Editor testing ground</title>", `<title>${entry.title} host journey</title>`);
 }
@@ -26,6 +32,12 @@ export async function startHostServer({ testingGround }) {
     if (asked.pathname === "/hosts.json") {
       res.setHeader("content-type", "application/json");
       return res.end(JSON.stringify(profiles));
+    }
+    const asset = asked.pathname.match(/^\/host-assets\/(bp-(?:media|reference)-picker\.js)$/)?.[1];
+    if (asset) {
+      res.setHeader("content-type", "text/javascript");
+      res.setHeader("cache-control", "no-store");
+      return res.end(readFileSync(join(REPO, "api/priv/static/assets", asset)));
     }
     try {
       const upstream = await fetch(new URL(asked.pathname + asked.search, testingGround.url));
