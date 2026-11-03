@@ -1,0 +1,81 @@
+<.form
+  :let={_f}
+  for={%{}}
+  as={:account}
+  action={~p"/login/account"}
+  method="post"
+  data-account-form
+>
+  <input type="hidden" name="return_to" value={@return_to} />
+
+  <div class="form-group">
+    <label class="form-label" for="account_email"><%= gettext("Email") %></label>
+    <input
+      type="email"
+      name="email"
+      id="account_email"
+      class="form-input"
+      autocomplete="username"
+      autofocus
+      required
+      placeholder={gettext("you@example.com")}
+    />
+  </div>
+
+  <div class="form-group" data-password-group>
+    <div class="bp-auth-label-row">
+      <label class="form-label" for="account_password"><%= gettext("Password") %></label>
+      <a href={~p"/login/reset"}><%= gettext("Forgot password?") %></a>
+    </div>
+    <div class="bp-auth-input-affix">
+      <input
+        type="password"
+        name="password"
+        id="account_password"
+        class="form-input"
+        autocomplete="current-password"
+        required={not @routing}
+        placeholder="••••••••••••"
+      />
+      <button
+        type="button"
+        class="bp-auth-eye"
+        data-eye-for="account_password"
+        tabindex="-1"
+        aria-label={gettext("Show password")}
+        data-show-label={gettext("Show password")}
+        data-hide-label={gettext("Hide password")}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <%= if @routing do %>
+    <%!-- Email routing hides the password field for an SSO-only domain; a
+         break-glass account opens it again here. --%>
+    <p class="bp-auth-note" data-password-reveal hidden>
+      <button type="button" class="bp-auth-link"><%= gettext("Use a password instead (break-glass accounts)") %></button>
+    </p>
+  <% end %>
+
+  <button
+    type="submit"
+    class={["bp-auth-btn", @quiet && "bp-auth-btn-quiet"]}
+    data-account-submit
+    data-sso-label={gettext("Continue with single sign-on")}
+  >
+    <%= gettext("Sign in") %>
+  </button>
+</.form>

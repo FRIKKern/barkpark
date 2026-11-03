@@ -20,7 +20,7 @@ defmodule BarkparkWeb.SamlController do
 
   require Logger
 
-  def start(conn, %{"org_slug" => slug}) do
+  def start(conn, %{"org_slug" => slug} = params) do
     case Saml.connection_for_org_slug(slug) do
       nil ->
         ErrorResponse.emit_custom(
@@ -31,7 +31,10 @@ defmodule BarkparkWeb.SamlController do
         )
 
       c ->
-        redirect(conn, external: Saml.authn_redirect_url(c, slug))
+        # The /login page's button keeps its same-origin `return_to` as the
+        # RelayState (task-9963609c3ef5276f). Anything else sends none.
+        relay = BarkparkWeb.ReturnTo.safe_path(params["return_to"]) || ""
+        redirect(conn, external: Saml.authn_redirect_url(c, slug, relay))
     end
   end
 
@@ -88,8 +91,11 @@ defmodule BarkparkWeb.SamlController do
           # (Accept: text/html) lands IN Studio — the cookie above is its
           # credential. Non-HTML callers (interop suite, SDKs) keep the JSON
           # contract byte-identical.
+          # The RelayState comes back from the IdP, and an IdP-initiated
+          # response can carry any value, so only a same-origin path is used.
           if browser?(conn) do
-            conn |> Phoenix.Controller.redirect(to: "/studio")
+            to = BarkparkWeb.ReturnTo.safe_path(conn.params["RelayState"]) || "/studio"
+            conn |> Phoenix.Controller.redirect(to: to)
           else
             conn
             |> put_status(:created)

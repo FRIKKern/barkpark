@@ -1496,6 +1496,8 @@ defmodule BarkparkWeb.Router do
 
     get("/login", SessionController, :new)
     post("/login", SessionController, :create)
+    # The account form posts to /login/account; a reload there lands on /login.
+    get("/login/account", SessionController, :account_page)
     # Account sign-in (studio-user-login): email+password against the core
     # auth system, with the TOTP/recovery second step. Mints `user_session`.
     post("/logout", SessionController, :delete)

@@ -13136,3 +13136,53 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "path/to/file"
 msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with Microsoft"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with Microsoft (SAML)"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with single sign-on"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with single sign-on (SAML)"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/account_form.html.heex
+#, elixir-autogen, elixir-format
+msgid "Continue with single sign-on"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/account_form.html.heex
+#, elixir-autogen, elixir-format
+msgid "Use a password instead (break-glass accounts)"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Sign in with a password (break-glass accounts)"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Sign in with a passkey"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "The passkey could not be used. Try again, or sign in another way."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Using enterprise SSO? Enter your work email and continue without a password."
+msgstr ""
