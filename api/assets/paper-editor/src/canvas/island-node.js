@@ -25,6 +25,7 @@ import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
+import { texToMathMlRow } from "./equation-mathml.js";
 
 // ── field codecs ──────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ export const ISLAND_SPECS = {
     preview(attrs, el) {
       const tex = (attrs.tex || "").trim();
       el.className = "bp-equation" + (tex ? "" : " bp-equation--empty") + " bp-canvas-island__preview";
+      el.setAttribute("data-bp-type", "equation");
+      el.setAttribute("data-bp-conformance-root", "");
       el.textContent = "";
       if (!tex) {
         // An empty block in the editor asks for its input, as the video block does; the
@@ -92,10 +95,10 @@ export const ISLAND_SPECS = {
         el.textContent = t("No equation yet — type TeX below");
         return;
       }
-      const code = document.createElement("code");
-      code.className = "bp-canvas-equation__tex";
-      code.textContent = tex;
-      el.appendChild(code);
+      const math = document.createElement("math");
+      if (attrs.display === true) math.setAttribute("display", "block");
+      math.innerHTML = texToMathMlRow(tex);
+      el.appendChild(math);
     },
   },
   footnote: {
