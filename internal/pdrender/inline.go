@@ -404,28 +404,28 @@ func (ir InlineRenderer) applyMarks(value string, marks []any, ctx RenderCtx, in
 		}
 	}
 
-	var rendered string
 	if codeChip {
-		// The chip style carries its own bg; layer the accumulated emphasis on
-		// top by rendering the chip first, then re-styling is not additive in
-		// lipgloss, so we apply InlineCode merged with the emphasis flags.
-		rendered = ir.theme.inlineCodeWith(style).Render(value)
-	} else {
-		rendered = style.Render(value)
+		style = ir.theme.inlineCodeWith(style)
 	}
+	if hasLink {
+		style = style.Foreground(ir.theme.Link.GetForeground()).Underline(true)
+	}
+	rendered := style.Render(value)
 
 	if hasLink {
-		return ir.renderLink(linkHref, rendered, ctx)
+		return ir.wrapLink(linkHref, rendered, ctx)
 	}
 	return rendered
 }
 
-// renderLink wraps already-styled text in the link presentation: underline +
-// link color, plus an OSC 8 hyperlink when the profile supports it, else a dim
-// " (href)" suffix so the URL is still reachable on a dumb terminal.
 func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
+	return ir.wrapLink(href, ir.theme.Link.Render(text), ctx)
+}
+
+// wrapLink adds OSC 8 around a styled label, or a dim URL suffix on terminals
+// without hyperlink support.
+func (ir InlineRenderer) wrapLink(href, styled string, ctx RenderCtx) string {
 	href = sanitizeURL(strings.TrimSpace(href))
-	styled := ir.theme.Link.Render(text)
 	if href == "" {
 		return styled
 	}
