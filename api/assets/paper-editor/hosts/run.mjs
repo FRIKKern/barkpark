@@ -386,6 +386,8 @@ async function e09(cdp, root, host, baseUrl) {
   })()`);
   const expected = "Read ≠ Edit — red The reader and editor differ at block 1 (s-callout).";
   if (verdict.ok !== "false" || verdict.words !== expected) throw new Error(`${host} E09: expected the frozen known-red diagnostic ${JSON.stringify(expected)}, got ${JSON.stringify(verdict)}`);
+  await evaluate(cdp, `document.querySelector('.tg-tab').click()`);
+  await waitFor(cdp, `!document.querySelector('.tg-drawer').hidden`);
   const artifact = join(root, "journeys", `${host}--E09--known-red.png`);
   await screenshot(cdp, artifact);
   return { id: "E09", state: "passed", kind: "diagnostic-negative", expected: "red", assertions: ["Read/Edit trap settled", "known callout mismatch was detected at s-callout"], artifacts: [artifact.slice(root.length + 1)] };
