@@ -11,14 +11,10 @@
 //
 // ── VIEW⇄EDIT PARITY (the DESIGN-1 carve-out) ────────────────────────────────
 //
-// CHROME = `bp-canvas-stage*` ONLY. UNLIKE card-node.js (whose node-view emits the
-// reader's own model-B bare-semantic shapes to inherit the surface paint), the stage
-// node-view does NOT emit the reader pipeline-node cell class — it STAYS in the §3 forbidden
-// list so the still-verbatim-carried legacy `pipeline` fleet keeps its gate protection.
-// The reader (Components.stage_html/1, server-side) paints the real cell; here the cell
-// look is hand-mirrored by dedicated `bp-canvas-stage*` CSS (styles.css embedder +
-// paper-surface.css + root.html.heex Studio copy). The saved bytes are the source of
-// truth, so a saved stage reader-renders the identical cell regardless of this preview.
+// The node-view emits the reader's real `bp-pnode` cell and direct semantic field
+// children. Native inputs remain mounted in a `.bp-paper-contextual-controls` island;
+// the conformance runner removes that editor-only island and compares the remaining
+// DOM directly with Components.stage_html/1. `bp-canvas-stage*` remains edit-only.
 //
 // ── the data shape ───────────────────────────────────────────────────────────
 //
@@ -161,6 +157,20 @@ export const Stage = Node.create({
       dom.setAttribute("contenteditable", "false");
       dom.setAttribute("data-test-id", "paper-stage");
 
+      const semanticFields = Object.fromEntries(
+        ["k", "t", "d", "f", "src"].map((key) => {
+          const el = document.createElement("div");
+          el.className = `bp-pnode__${key}`;
+          return [key, el];
+        }),
+      );
+
+      const controls = document.createElement("div");
+      controls.className = "bp-paper-contextual-controls bp-canvas-stage__controls";
+      controls.setAttribute("contenteditable", "false");
+      controls.style.cssText =
+        "position:static;opacity:1;pointer-events:auto;width:100%;max-width:none;color:inherit;font:inherit;z-index:auto;display:flex;flex-direction:column";
+
       const mkInput = (cls, placeholder, testId) => {
         const el = document.createElement("input");
         el.type = "text";
@@ -187,7 +197,8 @@ export const Stage = Node.create({
       srcLabel.appendChild(srcCheckbox);
       srcLabel.appendChild(srcText);
 
-      dom.append(kindInput, titleInput, detailInput, filesInput, srcLabel);
+      controls.append(kindInput, titleInput, detailInput, filesInput, srcLabel);
+      dom.append(controls);
 
       // Paint the controls from the node's current attrs. Re-run on every update() so an
       // external attr change (an echo, an undo) reflects. Guard "only write when differs"
@@ -196,7 +207,26 @@ export const Stage = Node.create({
         const a = (n && n.attrs) || {};
         const editable = editor.isEditable;
         const src = stageTruthy(a.source);
-        dom.className = src ? "bp-canvas-stage bp-canvas-stage--src" : "bp-canvas-stage";
+        const sourceAccent = a.source === true;
+        dom.className = sourceAccent
+          ? "bp-pnode bp-pnode--src bp-canvas-stage bp-canvas-stage--src"
+          : "bp-pnode bp-canvas-stage";
+
+        const semanticValues = {
+          k: stageStr(a.kind),
+          t: stageStr(a.title),
+          d: stageStr(a.detail),
+          f: stageStr(a.files),
+          src: typeof a.source === "string" ? a.source : "",
+        };
+        for (const el of Object.values(semanticFields)) el.remove();
+        for (const [key, el] of Object.entries(semanticFields)) {
+          const value = semanticValues[key];
+          if (value !== "") {
+            el.textContent = value;
+            dom.insertBefore(el, controls);
+          }
+        }
 
         const setVal = (el, v) => {
           if (el.value !== v) el.value = v;
