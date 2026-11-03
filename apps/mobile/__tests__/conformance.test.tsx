@@ -1,4 +1,5 @@
 import { act, create, type ReactTestRenderer, type ReactTestRendererJSON } from 'react-test-renderer'
+import { Linking } from 'react-native'
 
 import {
   MISSING,
@@ -12,6 +13,7 @@ import {
 } from '../../../api/priv/portable_doc/conformance/conformance.mjs'
 import { BLOCK_RENDERERS, renderBlockNative } from '../src/papers/portabledoc/blocks'
 import { light } from '../src/ui/theme'
+import { mobileStructuralVerdict } from './support/mobileStructuralConformance'
 
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
@@ -24,11 +26,24 @@ function textOf(node: Host): string {
   return (node.children ?? []).map(textOf).join(' ')
 }
 
+function observePressTarget(press: () => void): string | undefined {
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true)
+  try {
+    press()
+    return open.mock.calls[0]?.[0]
+  } finally {
+    open.mockRestore()
+  }
+}
+
 function judge(golden: GoldenCase) {
   if (!(golden.type in BLOCK_RENDERERS)) return MISSING
+  const output = renderBlockNative(golden.input, { theme: light }, 0)
+  const structural = mobileStructuralVerdict(golden, output, observePressTarget)
+  if (structural !== undefined) return structural
   let tree!: ReactTestRenderer
   act(() => {
-    tree = create(<>{renderBlockNative(golden.input, { theme: light }, 0)}</>)
+    tree = create(<>{output}</>)
   })
   const text = textOf(tree.toJSON())
   act(() => tree.unmount())
@@ -48,6 +63,14 @@ describe('mobile renderer conformance against the golden pack', () => {
     const report = await conform({ renderer: 'mobile', compare: 'text', judge })
     expect(report.rows.filter((row) => target.has(row.type))).toEqual(
       [...target].map((type) => ({ type, status: 'pass' })),
+    )
+  })
+
+  it('passes the three wordless media rows through native structure', async () => {
+    const target = new Set(['divider', 'image', 'video'])
+    const report = await conform({ renderer: 'mobile', compare: 'text', judge })
+    expect(report.rows.filter((row) => target.has(row.type))).toEqual(
+      [...target].map((type) => ({ type, via: 'native-structure', status: 'pass' })),
     )
   })
 

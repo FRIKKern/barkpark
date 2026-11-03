@@ -103,7 +103,7 @@ defmodule Barkpark.PortableDoc.ConformanceTest do
         assert via in ~w(host-paint native-structure)
 
         if via == "native-structure" do
-          assert name in ~w(pdrender pdrender-wasm)
+          assert name in ~w(mobile pdrender pdrender-wasm)
           assert row["type"] in ~w(divider image video)
         end
       end
