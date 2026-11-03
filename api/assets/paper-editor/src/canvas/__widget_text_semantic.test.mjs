@@ -1,18 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
-
-const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-assert.match(
-  css,
-  /\.bp-canvas-term__title-input\s*\{[^}]*font-family:\s*var\(--paper-font-mono\);[^}]*font-size:\s*0\.76rem;[^}]*line-height:\s*1\.6;[^}]*color:\s*var\(--paper-ink-soft\);/s,
-  "terminal title input keeps the reader title typography outside its semantic span",
-);
-assert.match(
-  css,
-  /\.bp-canvas-term__foot-input\s*\{[^}]*font-family:\s*var\(--paper-font-mono\);[^}]*font-size:\s*0\.75rem;[^}]*line-height:\s*1\.6;[^}]*color:\s*var\(--paper-ink-soft\);/s,
-  "terminal footer input keeps the reader footer typography outside its semantic node",
-);
 
 const jsdom = new JSDOM("<!doctype html><body></body>", {
   pretendToBeVisual: true,
@@ -114,10 +101,20 @@ assert.ok(
   terminalBar?.querySelector(":scope > .bp-paper-contextual-controls.bp-canvas-term__bar-controls input"),
   "terminal title input remains mounted outside the semantic title",
 );
+const terminalTitleInput = terminalBar?.querySelector(".bp-canvas-term__title-input");
+assert.equal(terminalTitleInput?.style.fontFamily, "var(--paper-font-mono)");
+assert.equal(terminalTitleInput?.style.fontSize, "0.76rem");
+assert.equal(terminalTitleInput?.style.lineHeight, "1.6");
+assert.equal(terminalTitleInput?.style.color, "var(--paper-ink-soft)");
 const terminalFoot = terminal.dom.querySelector(":scope > .bp-term__foot");
 assert.equal(terminalFoot?.childNodes.length, 1);
 assert.equal(terminalFoot?.firstChild?.nodeType, window.Node.TEXT_NODE);
 assert.equal(terminalFoot?.firstChild?.nodeValue, "q to quit");
+const terminalFootInput = terminal.dom.querySelector(".bp-canvas-term__foot-input");
+assert.equal(terminalFootInput?.style.fontFamily, "var(--paper-font-mono)");
+assert.equal(terminalFootInput?.style.fontSize, "0.75rem");
+assert.equal(terminalFootInput?.style.lineHeight, "1.6");
+assert.equal(terminalFootInput?.style.color, "var(--paper-ink-soft)");
 
 terminal.update({
   type: { name: Terminal.name },

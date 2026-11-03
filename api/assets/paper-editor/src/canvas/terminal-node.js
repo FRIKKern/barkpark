@@ -207,6 +207,10 @@ export const Terminal = Node.create({
       titleInput.className = "bp-canvas-term__title-input";
       titleInput.setAttribute("type", "text");
       titleInput.setAttribute("placeholder", t("title"));
+      titleInput.style.fontFamily = "var(--paper-font-mono)";
+      titleInput.style.fontSize = "0.76rem";
+      titleInput.style.lineHeight = "1.6";
+      titleInput.style.color = "var(--paper-ink-soft)";
       titleInput.addEventListener("input", () => {
         const v = titleInput.value;
         setAttrs({ title: v === "" ? null : v });
@@ -263,6 +267,10 @@ export const Terminal = Node.create({
       footInput.className = "bp-canvas-term__foot-input";
       footInput.setAttribute("type", "text");
       footInput.setAttribute("placeholder", t("footer"));
+      footInput.style.fontFamily = "var(--paper-font-mono)";
+      footInput.style.fontSize = "0.75rem";
+      footInput.style.lineHeight = "1.6";
+      footInput.style.color = "var(--paper-ink-soft)";
       footInput.addEventListener("input", () => {
         const v = footInput.value;
         setAttrs({ footer: v === "" ? null : v });
