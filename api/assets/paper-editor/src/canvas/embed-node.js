@@ -613,6 +613,14 @@ export function readerPaintClass(editor) {
 // reads as an intentional placeholder, not a broken block. Unknown kinds fall back
 // to the raw type so a never-seen fleet kind still shows SOMETHING legible.
 const FLEET_KIND_LABELS = {
+  // Static reader receivers used to mount as opaque carried blocks. Keep their
+  // established placeholder text while the server paint is loading.
+  arrayOf: "↪ arrayOf",
+  codelist: "↪ codelist",
+  composite: "↪ composite",
+  localizedText: "↪ localizedText",
+  "paper-links": "↪ paper-links",
+  "pre-gate-badge": "↪ pre-gate-badge",
   "api-endpoint": "API endpoint",
   "bar-chart": "Bar chart",
   "code-tabs": "Code tabs",
