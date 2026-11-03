@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "1.0.0",
-  "build": "200d469afd51",
+  "build": "3140f322536a",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -980,6 +980,7 @@
       "ProseMirror-trailingBreak",
       "ProseMirror-widget",
       "ProseMirrorClipboard",
+      "bp-activate-field-editor",
       "bp-block-drop",
       "bp-block-handle",
       "bp-block-handle--dragging",
@@ -1036,6 +1037,7 @@
       "bp-canvas-field-color",
       "bp-canvas-field-control",
       "bp-canvas-field-datetime",
+      "bp-canvas-field-editor",
       "bp-canvas-field-image-empty",
       "bp-canvas-field-image-empty-hint",
       "bp-canvas-field-image-empty-icon",
@@ -1110,8 +1112,11 @@
       "bp-canvas-row",
       "bp-canvas-row__body",
       "bp-canvas-row__head",
+      "bp-canvas-row__head--editing",
+      "bp-canvas-row__head--semantic",
       "bp-canvas-row__remove",
       "bp-canvas-row__title",
+      "bp-canvas-row__title-editor",
       "bp-canvas-rows",
       "bp-canvas-rows__add",
       "bp-canvas-rows__foot",
@@ -1124,6 +1129,7 @@
       "bp-canvas-source",
       "bp-canvas-stage",
       "bp-canvas-stage--src",
+      "bp-canvas-stage__controls",
       "bp-canvas-stage__d",
       "bp-canvas-stage__f",
       "bp-canvas-stage__k",
@@ -1154,7 +1160,7 @@
       "bp-canvas-term",
       "bp-canvas-term__add-foot",
       "bp-canvas-term__atom",
-      "bp-canvas-term__foot",
+      "bp-canvas-term__bar-controls",
       "bp-canvas-term__foot-chrome",
       "bp-canvas-term__foot-input",
       "bp-canvas-term__live-toggle",
@@ -1172,6 +1178,7 @@
       "bp-conflict-title",
       "bp-expandable__summary",
       "bp-expandable__summary--empty",
+      "bp-field__fallback",
       "bp-find-match",
       "bp-find-match--active",
       "bp-fleet-datum",
@@ -1243,7 +1250,6 @@
       "bp-paper-format__sep",
       "bp-paper-lock-note",
       "bp-paper-notes-config",
-      "bp-paper-picker-current",
       "bp-paper-stats-config",
       "bp-paper-surface",
       "bp-paper-table-edit-status",
@@ -1265,7 +1271,6 @@
       "bp-table__td--spark",
       "bp-table__th--num",
       "bp-table__th--spark",
-      "bp-tabs--editor",
       "bp-wikilink-empty",
       "bp-wikilink-foot",
       "bp-wikilink-foot-sep",
@@ -1340,9 +1345,11 @@
       "data-bp-child-type",
       "data-bp-cite",
       "data-bp-config",
+      "data-bp-conformance-root",
       "data-bp-datum-field",
       "data-bp-datum-index",
       "data-bp-datum-scaffold",
+      "data-bp-figure-caption-text",
       "data-bp-figure-constraint",
       "data-bp-fleet",
       "data-bp-fragment",
@@ -1357,6 +1364,7 @@
       "data-bp-query",
       "data-bp-rest",
       "data-bp-src",
+      "data-bp-table-cell-content",
       "data-bp-tasklist",
       "data-bp-text-boundary",
       "data-bp-title",
@@ -1425,6 +1433,7 @@
       "data-width"
     ],
     "events": [
+      "bp-activate-field-editor",
       "bp-canvas-image-pick"
     ]
   }
