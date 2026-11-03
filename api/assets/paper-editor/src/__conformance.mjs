@@ -19,7 +19,7 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 await import("./index.js");
 
 const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"));
-const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id"];
+const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id", "data-bp-conformance-root"];
 const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls";
 
 function paint(canvas, block) {
@@ -45,7 +45,13 @@ function strip(root) {
   // wrapper normalized back to the reader's bare text node for shape comparison.
   for (const separator of root.querySelectorAll("span[data-bp-note-separator]"))
     separator.replaceWith(document.createTextNode(separator.textContent));
-  for (const el of root.querySelectorAll("*")) {
+  const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : root.querySelectorAll("*");
+  for (const el of elements) {
+    if (el.hasAttribute("data-bp-conformance-root")) {
+      el.style.removeProperty("display");
+      if (el.getAttribute("style") === "") el.removeAttribute("style");
+      el.removeAttribute("loading");
+    }
     PLUMBING_ATTRS.forEach((a) => el.removeAttribute(a));
     for (const c of [...el.classList]) if (c.startsWith("ProseMirror") || c.startsWith("bp-canvas-")) el.classList.remove(c);
     if (el.getAttribute("class") === "") el.removeAttribute("class");
@@ -71,10 +77,12 @@ async function judge(golden) {
     if (!pm) return [`canvas mounted no editor for ${golden.type}`];
     const hostPainted = paint(canvas, block);
     await new Promise((r) => setTimeout(r, 0));
-    const root = pm.cloneNode(true);
+    const semanticRoot = pm.querySelector("[data-bp-conformance-root]");
+    const root = semanticRoot ? semanticRoot.cloneNode(true) : pm.cloneNode(true);
     unwrapFleet(root);
     strip(root);
-    const diff = diffShapes(shapeOf(root.childNodes), shapeOf(fragment(golden.expectedHtml)));
+    const actual = semanticRoot ? [root] : root.childNodes;
+    const diff = diffShapes(shapeOf(actual), shapeOf(fragment(golden.expectedHtml)));
     return hostPainted ? { via: "host-paint", diff } : diff;
   } finally {
     canvas.remove();
@@ -82,11 +90,12 @@ async function judge(golden) {
 }
 
 const stripProbe = document.createElement("div");
-stripProbe.innerHTML = '<span class="x-bp-canvas-y xProseMirror bp-canvas-z ProseMirror-z"></span><span data-bp-note-separator> </span><span data-other> </span>';
+stripProbe.innerHTML = '<span class="x-bp-canvas-y xProseMirror bp-canvas-z ProseMirror-z"></span><span data-bp-note-separator> </span><span data-other style="display:none"> </span><a data-bp-conformance-root style="display:none"></a>';
 strip(stripProbe);
 if (stripProbe.firstChild.className !== "x-bp-canvas-y xProseMirror") throw new Error(`strip touched reader classes: ${stripProbe.firstChild.className}`);
 if (stripProbe.childNodes[1].nodeType !== Node.TEXT_NODE || stripProbe.childNodes[1].nodeValue !== " ") throw new Error("strip did not unwrap the exact note separator");
-if (stripProbe.lastChild.tagName !== "SPAN") throw new Error("strip unwrapped unrelated host markup");
+if (stripProbe.childNodes[2].tagName !== "SPAN" || stripProbe.childNodes[2].style.display !== "none") throw new Error("strip changed unrelated host markup");
+if (stripProbe.lastChild.tagName !== "A" || stripProbe.lastChild.hasAttribute("style")) throw new Error("strip kept semantic-root editor visibility");
 
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
 window.close();
