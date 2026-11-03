@@ -32,6 +32,10 @@ An instance without outgoing mail cannot send a password reset link, so the owne
 
 Then sign in with `bp auth login <email> <password> --totp_code <code>`. While the organization allows only SSO, each such sign-in writes a `breakglass_login` audit event.
 
+Step 1 needs open signup. With `BARKPARK_SIGNUP=off` set, unset it and restart for the time it takes to create the account.
+
+While the organization allows only SSO, a password reset or sign-in link request for one of its members sends no mail. The answer is the same as for an unknown address, and the server writes an `auth_method_not_allowed` audit event.
+
 ## Domain verification
 
 `bp org domain-add <org> <domain>` prints a TXT record value, `barkpark-verify=...`. Publish it as a TXT record on the domain itself, such as `gyldendal.no`, not on a subdomain. `bp org domain-verify <org> <domain>` then checks it. A verified domain does two things:

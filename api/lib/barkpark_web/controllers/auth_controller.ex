@@ -45,7 +45,24 @@ defmodule BarkparkWeb.AuthController do
   # produces BOTH errors). We therefore always strip the :email signal from any
   # 422 body, so existing-email+weak-password and new-email+weak-password are
   # byte-identical (password error only).
-  def register(conn, %{"email" => email, "password" => password}) do
+  # BARKPARK_SIGNUP=off closes this door for every caller: an instance whose
+  # accounts come only from SSO creates none here. The refusal names no address,
+  # so it reveals nothing about which ones are registered.
+  def register(conn, params) do
+    if Application.get_env(:barkpark, :signup, true) do
+      do_register(conn, params)
+    else
+      error(
+        conn,
+        403,
+        "signup_closed",
+        "this instance does not accept new accounts",
+        "sign in through your organization's single sign-on"
+      )
+    end
+  end
+
+  defp do_register(conn, %{"email" => email, "password" => password}) do
     case Accounts.register_user(%{email: email, password: password}) do
       {:ok, user} ->
         send_confirmation(user)
@@ -67,7 +84,8 @@ defmodule BarkparkWeb.AuthController do
     end
   end
 
-  def register(conn, _), do: error(conn, 400, "bad_request", "email and password are required")
+  defp do_register(conn, _),
+    do: error(conn, 400, "bad_request", "email and password are required")
 
   # ── Login (+ TOTP second factor) ────────────────────────────────────────────
 
@@ -704,18 +722,43 @@ defmodule BarkparkWeb.AuthController do
 
   def request_reset(conn, %{"email" => email}) do
     # Always 200 — never reveal whether the email is registered.
-    if user = Accounts.get_user_by_email(email) do
-      {:ok, token} = Accounts.build_email_token(user, "reset")
-      UserNotifier.deliver_reset(user.email, build_url("/auth/reset/", token))
-    else
-      # CONSENTED: no account behind this address, so there is nobody the reset
-      # was withheld FROM. Named rather than silent so the branch is greppable
-      # with every other withhold; records nothing, so a probe cannot amplify
-      # into writes and a probed address is never persisted.
-      NotificationWithhold.record("reset", :no_recipient_by_construction)
+    user = Accounts.get_user_by_email(email)
+
+    cond do
+      user && BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "password") ->
+        # The org allows no password sign-in for this user, so a reset link
+        # would open nothing. Send none and answer as for an unknown address.
+        audit_email_door_closed(conn, user, "password")
+
+      user ->
+        {:ok, token} = Accounts.build_email_token(user, "reset")
+        UserNotifier.deliver_reset(user.email, build_url("/auth/reset/", token))
+
+      true ->
+        # CONSENTED: no account behind this address, so there is nobody the reset
+        # was withheld FROM. Named rather than silent so the branch is greppable
+        # with every other withhold; records nothing, so a probe cannot amplify
+        # into writes and a probed address is never persisted.
+        NotificationWithhold.record("reset", :no_recipient_by_construction)
     end
 
     json(conn, %{ok: true})
+  end
+
+  # A reset or magic-link request for a user whose org policy closes that door.
+  # The caller gets the unknown-address answer; the operator gets this event.
+  defp audit_email_door_closed(conn, user, method) do
+    Audit.emit_best_effort(%{
+      category: "auth",
+      action: "auth_method_not_allowed",
+      subject: user.id,
+      actor_type: "anonymous",
+      metadata: %{
+        "reason" => "org_allowed_auth_methods",
+        "method" => method,
+        "path" => conn.request_path
+      }
+    })
   end
 
   @doc """
@@ -725,48 +768,56 @@ defmodule BarkparkWeb.AuthController do
   identical to request-reset).
   """
   def request_magic_link(conn, %{"email" => email}) do
-    # `build_login_token/1` deliberately returns THREE shapes; a catch-all here
-    # used to collapse the last two into one silence, discarding the distinction
-    # the context module had just made. A stranger probing an address and a real
-    # user whose token mint failed are NOT the same event.
-    case Accounts.build_login_token(email) do
-      {:ok, token, user} ->
-        UserNotifier.deliver_magic_link(user.email, build_url("/auth/magic/", token))
+    user = if is_binary(email), do: Accounts.get_user_by_email(email)
 
-      :no_user ->
-        NotificationWithhold.record("magic_link", :no_recipient_by_construction)
+    if user && BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "magic_link") do
+      # The consume step would refuse this user, so mint and send nothing and
+      # answer as for an unknown address.
+      audit_email_door_closed(conn, user, "magic_link")
+    else
+      # `build_login_token/1` deliberately returns THREE shapes; a catch-all here
+      # used to collapse the last two into one silence, discarding the distinction
+      # the context module had just made. A stranger probing an address and a real
+      # user whose token mint failed are NOT the same event.
+      case Accounts.build_login_token(email) do
+        {:ok, token, user} ->
+          UserNotifier.deliver_magic_link(user.email, build_url("/auth/magic/", token))
 
-      {:error, changeset} ->
-        # PURE ECHO — DECLARED-HONEST (task-ef7f93eebba52fd3). This failure arm
-        #
-        # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
-        # space. The census counts that literal substring corpus-wide and its
-        # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
-        # be counted AS a receipt. Re-spacing it here reds the census.
-        # falls through to the SAME `ok:true` the success path returns, and
-        # that merge is DELIBERATE, not an oversight.
-        #
-        # WHY IT MUST MERGE. A mint failure is only reachable for an address that
-        # RESOLVED to a user — `build_login_token/1` returns `:no_user` before it
-        # ever tries to insert. So any receipt that let a caller tell "minted"
-        # from "mint failed" would be an account-existence oracle by a second
-        # route, defeating the @doc's anti-enumeration contract above. The
-        # receipt claims only "the request was accepted"; it never claims "a link
-        # was sent", so merging costs the caller no true statement.
-        #
-        # WHERE THE DISTINCTION LIVES INSTEAD. Out of band, on the operator's
-        # side: this `NotificationWithhold.record/3` writes a `:dispatch_crashed`
-        # audit event with `detail: "token_mint_failed"`, separable by query from
-        # the consented `:no_recipient_by_construction` skip — proved in
-        # `Barkpark.Accounts.NotificationWithholdTest` and
-        # `BarkparkWeb.AuthNotificationWithholdTest`.
-        NotificationWithhold.record("magic_link", :dispatch_crashed,
-          user_id: Ecto.Changeset.get_field(changeset, :user_id),
-          detail: "token_mint_failed"
-        )
+        :no_user ->
+          NotificationWithhold.record("magic_link", :no_recipient_by_construction)
+
+        {:error, changeset} ->
+          # PURE ECHO — DECLARED-HONEST (task-ef7f93eebba52fd3). This failure arm
+          #
+          # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+          # space. The census counts that literal substring corpus-wide and its
+          # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+          # be counted AS a receipt. Re-spacing it here reds the census.
+          # falls through to the SAME `ok:true` the success path returns, and
+          # that merge is DELIBERATE, not an oversight.
+          #
+          # WHY IT MUST MERGE. A mint failure is only reachable for an address that
+          # RESOLVED to a user — `build_login_token/1` returns `:no_user` before it
+          # ever tries to insert. So any receipt that let a caller tell "minted"
+          # from "mint failed" would be an account-existence oracle by a second
+          # route, defeating the @doc's anti-enumeration contract above. The
+          # receipt claims only "the request was accepted"; it never claims "a link
+          # was sent", so merging costs the caller no true statement.
+          #
+          # WHERE THE DISTINCTION LIVES INSTEAD. Out of band, on the operator's
+          # side: this `NotificationWithhold.record/3` writes a `:dispatch_crashed`
+          # audit event with `detail: "token_mint_failed"`, separable by query from
+          # the consented `:no_recipient_by_construction` skip — proved in
+          # `Barkpark.Accounts.NotificationWithholdTest` and
+          # `BarkparkWeb.AuthNotificationWithholdTest`.
+          NotificationWithhold.record("magic_link", :dispatch_crashed,
+            user_id: Ecto.Changeset.get_field(changeset, :user_id),
+            detail: "token_mint_failed"
+          )
+      end
     end
 
-    # The single receipt all three arms reach. Splitting it is the change
+    # The single receipt every arm reaches. Splitting it is the change
     # `BarkparkWeb.UndeclaredSuccessReceiptTest` exists to red.
     json(conn, %{ok: true})
   end

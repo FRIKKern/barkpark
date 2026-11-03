@@ -11,7 +11,10 @@ defmodule Barkpark.Sso.SocialTest do
   defmodule MockHTTP do
     @behaviour Barkpark.Sso.Social.HTTP
     @impl true
-    def post_form(_url, _params), do: {:ok, %{"access_token" => "access-token-123"}}
+    def post_form(url, _params) do
+      send(self(), {:token_url, url})
+      {:ok, %{"access_token" => "access-token-123"}}
+    end
 
     # Two distinct provider surfaces: the userinfo document, and github's
     # GET /user/emails list (a JSON ARRAY) which is the only place its
@@ -59,6 +62,46 @@ defmodule Barkpark.Sso.SocialTest do
 
   defp callback(provider),
     do: Social.handle_callback(Social.provider(provider), "code", "https://bp/cb")
+
+  describe "microsoft tenant (BARKPARK_MICROSOFT_TENANT)" do
+    setup do
+      on_exit(fn -> Application.delete_env(:barkpark, :microsoft_tenant) end)
+    end
+
+    test "unset, the authorize and token URLs use the common tenant" do
+      enable("microsoft")
+      userinfo("common@example.com", "mc1")
+
+      assert Social.authorize_url(Social.provider("microsoft"), "st", "https://bp/cb") =~
+               "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?"
+
+      assert {:ok, _} = callback("microsoft")
+      assert_received {:token_url, "https://login.microsoftonline.com/common/oauth2/v2.0/token"}
+    end
+
+    test "set, the authorize and token URLs use that tenant" do
+      tenant = "11111111-2222-3333-4444-555555555555"
+      Application.put_env(:barkpark, :microsoft_tenant, tenant)
+      enable("microsoft")
+      userinfo("tenant@example.com", "mt1")
+
+      url = Social.authorize_url(Social.provider("microsoft"), "st", "https://bp/cb")
+      assert url =~ "https://login.microsoftonline.com/#{tenant}/oauth2/v2.0/authorize?"
+      refute url =~ "/common/"
+
+      assert {:ok, _} = callback("microsoft")
+      assert_received {:token_url, token_url}
+      assert token_url == "https://login.microsoftonline.com/#{tenant}/oauth2/v2.0/token"
+    end
+
+    test "the tenant setting leaves google untouched" do
+      Application.put_env(:barkpark, :microsoft_tenant, "contoso.onmicrosoft.com")
+      enable("google")
+
+      assert Social.authorize_url(Social.provider("google"), "st", "https://bp/cb") =~
+               "https://accounts.google.com/o/oauth2/v2/auth?"
+    end
+  end
 
   test "each provider (google, github, microsoft) mints a user" do
     for {provider, id} <- [{"google", "g1"}, {"github", "h1"}, {"microsoft", "m1"}] do
