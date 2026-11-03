@@ -150,6 +150,28 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
     assert marker["_barkpark_export"] == "incomplete"
     assert marker["_delivered"] == 1
     refute Map.has_key?(marker, "_id")
+
+    # The marker names the cause, so `bp export` can print it. It names the
+    # exception module only, never a message that could quote row content.
+    assert marker["_cause"] =~ ~r/^the server raised [A-Z]/
+  end
+
+  test "a dropped database connection is named with the stream limit and the way around it" do
+    cause =
+      BarkparkWeb.ExportController.incomplete_cause(%DBConnection.ConnectionError{
+        message: "tcp recv: closed"
+      })
+
+    assert cause =~ "database connection dropped"
+    assert cause =~ "10 minutes"
+    assert cause =~ "bp export --type"
+  end
+
+  test "an unknown error names only its module" do
+    assert BarkparkWeb.ExportController.incomplete_cause(%ArgumentError{
+             message: "secret row text"
+           }) ==
+             "the server raised ArgumentError"
   end
 
   @bump_sql "UPDATE documents SET inserted_at = $2 WHERE id = $1"

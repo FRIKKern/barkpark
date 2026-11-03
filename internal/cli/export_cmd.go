@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,9 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("On success the document count and byte total are reported on stderr.")
 		out.outf("An interrupted or truncated stream exits NON-ZERO and names the output")
 		out.outf("as PARTIAL — a backup that exits 0 is a backup that streamed to the end.")
+		out.outf("When the server stops early it ends the stream with an incomplete")
+		out.outf("marker that names the cause. bp export prints that cause, exits")
+		out.outf("non-zero and keeps the marker as the last line of the output.")
 		out.outf("")
 		out.outf("--out <file> streams into <file>.partial and renames it onto")
 		out.outf("<file> only after a clean completion, together with a <file>.meta")
@@ -169,9 +173,10 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// disk — no second read, nothing to drift.
 	var docs int
 	var byteCount int64
+	// writeLine puts one line in the output. It does not count documents:
+	// the server's incomplete marker goes through it too, and is no document.
 	writeLine := func(line string) error {
 		out.outf("%s", line)
-		docs++
 		byteCount += int64(len(line)) + 1 // +1 for the newline `outf` adds
 		return nil
 	}
@@ -215,16 +220,26 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		writeLine = func(line string) error {
 			n, err := io.WriteString(sink, line+"\n")
 			byteCount += int64(n)
-			if err != nil {
-				return err
-			}
-			docs++
-			return nil
+			return err
 		}
 		target = partialPath
 	}
 
-	err := client.Export(sigCtx, opts, writeLine)
+	err := client.Export(sigCtx, opts, func(line string) error {
+		if err := writeLine(line); err != nil {
+			return err
+		}
+		docs++
+		return nil
+	})
+
+	// The server cut the export and said so in-band. The marker goes into the
+	// output after the documents that did arrive, so the file carries its own
+	// proof of truncation and `bp import` refuses it even with no sidecar.
+	var incomplete *apiclient.ExportIncompleteError
+	if errors.As(err, &incomplete) {
+		_ = writeLine(incomplete.Line)
+	}
 
 	// The output is PARTIAL whenever the stream did not run to completion. An
 	// operator redirecting into a file (`bp export > backup.ndjson`) otherwise

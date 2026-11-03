@@ -373,7 +373,7 @@ func runDevPull(out *writer, g globals, args []string) int {
 		project = refs[0].project
 	}
 	fetched, blobBytes := -1, int64(0)
-	var missing []string
+	var missing []mediaBlobRef
 	throttled, waited := 0, time.Duration(0)
 	if noMedia {
 		out.progressf("Media files skipped (--no-media): %d media record(s) travel in the bundle without their files", len(refs))
@@ -390,7 +390,7 @@ func runDevPull(out *writer, g globals, args []string) int {
 			}.render(out)
 		}
 		fetched, blobBytes = rep.moved, rep.bytes
-		missing = rep.missing
+		missing = rep.missingRefs
 		out.progressf("Fetched %d blob(s) → %s", fetched, blobDir)
 		if len(missing) > 0 {
 			out.progressf("%d media file(s) are missing on the source (404); their records still travel", len(missing))
@@ -464,7 +464,11 @@ func runDevPull(out *writer, g globals, args []string) int {
 	missingFile := ""
 	if len(missing) > 0 && (!ownDir || keep) {
 		missingFile = bundle + ".missing.txt"
-		if err := os.WriteFile(missingFile, []byte(strings.Join(missing, "\n")+"\n"), 0o644); err != nil {
+		lines := make([]string, len(missing))
+		for i, m := range missing {
+			lines[i] = m.missingLine()
+		}
+		if err := os.WriteFile(missingFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 			out.errf("bp: could not write the missing-file list %s: %v", missingFile, err)
 			missingFile = ""
 		}
@@ -514,11 +518,31 @@ type devPullResult struct {
 	uploadedBytes      int64
 	noMedia            bool
 	mediaRecords       int
-	missing            []string
+	missing            []mediaBlobRef
 	missingFile        string
 	throttled          int
 	waited             time.Duration
 	notCarried         devPullNotCarried
+}
+
+// devPullMissingPaths lists the missing files' paths, the shape the machine
+// receipt's "missing" key has always had.
+func devPullMissingPaths(refs []mediaBlobRef) []string {
+	var paths []string
+	for _, m := range refs {
+		paths = append(paths, m.path)
+	}
+	return paths
+}
+
+// devPullMissingAssets lists each missing file with its asset id. asset_id is
+// "" when the bundle declared no media_files id column.
+func devPullMissingAssets(refs []mediaBlobRef) []map[string]string {
+	out := []map[string]string{}
+	for _, m := range refs {
+		out = append(out, map[string]string{"asset_id": m.assetID(), "path": m.path})
+	}
+	return out
 }
 
 // devPullMissingShown caps how many missing paths the human receipt prints;
@@ -537,11 +561,12 @@ func devPullReceipt(out *writer, r devPullResult) int {
 			"bundle":    map[string]any{"path": r.bundle, "removed": r.cleaned, "resumed": r.resumed},
 			"blobs":     map[string]any{"fetched": r.blobsFetched, "uploaded": r.blobsUploaded, "bytes_fetched": r.blobBytes, "bytes_received": r.uploadedBytes},
 			"media": map[string]any{
-				"mode":         map[bool]string{true: "skipped", false: "files"}[r.noMedia],
-				"records":      r.mediaRecords,
-				"missing":      missingOrEmpty(r.missing),
-				"rate_limited": r.throttled,
-				"waited_ms":    r.waited.Milliseconds(),
+				"mode":           map[bool]string{true: "skipped", false: "files"}[r.noMedia],
+				"records":        r.mediaRecords,
+				"missing":        missingOrEmpty(devPullMissingPaths(r.missing)),
+				"missing_assets": devPullMissingAssets(r.missing),
+				"rate_limited":   r.throttled,
+				"waited_ms":      r.waited.Milliseconds(),
 			},
 			"not_carried": r.notCarried,
 		}
@@ -596,12 +621,16 @@ func devPullReceipt(out *writer, r devPullResult) int {
 	}
 	if len(r.missing) > 0 {
 		out.outf("  missing    %d media file(s) the source answered 404 for; their records were imported, their files do not exist on the source:", len(r.missing))
-		for i, p := range r.missing {
+		for i, m := range r.missing {
 			if i == devPullMissingShown {
 				out.outf("             … and %d more", len(r.missing)-devPullMissingShown)
 				break
 			}
-			out.outf("             %s", p)
+			if id := m.assetID(); id != "" {
+				out.outf("             %s  %s", id, m.path)
+			} else {
+				out.outf("             %s", m.path)
+			}
 		}
 		if r.missingFile != "" {
 			out.outf("             full list: %s", r.missingFile)
@@ -946,8 +975,9 @@ own entry's token — credentials are never read from the environment.
               dev profile does not copy, and print the commands to recreate them
 
 A media file the source answers 404 for does not exist to move. It is listed in
-the receipt as missing on the source, its record still lands, and the pull does
-not fail on it.
+the receipt as missing on the source by asset id and path, its record still
+lands, and the pull does not fail on it. With --keep or --bundle the full list
+is written to <bundle>.missing.txt, one "asset-<id><TAB><path>" line per file.
 
 arguments:
   <source-server>   saved server name, display name, or URL to pull FROM

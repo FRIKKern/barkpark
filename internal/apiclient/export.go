@@ -10,6 +10,7 @@ package apiclient
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,53 @@ type ExportOpts struct {
 	Type string
 	// Perspective picks published | drafts | raw (server default raw); "" = default.
 	Perspective string
+}
+
+// ExportIncompleteError is the server saying, in the stream itself, that it
+// stopped early. The export controller commits its 200 before the first
+// document, so a failure after that point cannot change the status. It ends the
+// body with one `{"_barkpark_export":"incomplete", ...}` line instead and closes
+// the chunked stream cleanly. The framing is then attestable and complete, so
+// only this line tells a cut export from a whole one.
+//
+// Line is the marker verbatim. A caller that writes the stream to a file can
+// append it, so `bp import` refuses the file later even with no sidecar.
+type ExportIncompleteError struct {
+	Delivered int    // documents the server says it sent before it stopped
+	Received  int    // documents this client received
+	Cause     string // the server's named cause; "" from a server that names none
+	Line      string
+}
+
+func (e *ExportIncompleteError) Error() string {
+	cause := e.Cause
+	if cause == "" {
+		cause = "the server did not name a cause; its log has the error"
+	}
+	return fmt.Sprintf("the server ended the export early after %d documents: %s", e.Received, cause)
+}
+
+// exportMarkerKey is the one key the controller's incomplete marker carries
+// and no document does.
+const exportMarkerKey = "_barkpark_export"
+
+// parseExportMarker reports whether line is the server's incomplete marker.
+// A document whose content merely mentions the key is not: the key must be a
+// top-level member and the line must carry no _id.
+func parseExportMarker(line string, received int) (*ExportIncompleteError, bool) {
+	if !strings.Contains(line, `"`+exportMarkerKey+`"`) {
+		return nil, false
+	}
+	var m struct {
+		Marker    *string `json:"_barkpark_export"`
+		ID        *string `json:"_id"`
+		Delivered int     `json:"_delivered"`
+		Cause     string  `json:"_cause"`
+	}
+	if err := json.Unmarshal([]byte(line), &m); err != nil || m.Marker == nil || m.ID != nil {
+		return nil, false
+	}
+	return &ExportIncompleteError{Delivered: m.Delivered, Received: received, Cause: m.Cause, Line: line}, true
 }
 
 // Export streams the dataset's documents (GET /v1/data/export/:dataset) and
@@ -104,6 +152,11 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 		line := scanner.Text()
 		if line == "" {
 			continue
+		}
+		// The marker is the last line the server writes. It is not a document,
+		// so it never reaches onDoc and never counts.
+		if marker, ok := parseExportMarker(line, docs); ok {
+			return marker
 		}
 		if err := onDoc(line); err != nil {
 			return err
