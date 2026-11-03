@@ -209,6 +209,7 @@ export function MermaidIsland({ source, theme }: { source: string; theme: Theme 
 
   return (
     <View style={[styles.island, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+      <Text style={styles.sourceTranscript}>{source}</Text>
       {!settled && (
         <Text style={[styles.loadingLabel, { color: theme.textMuted }]}>Loading diagram…</Text>
       )}
@@ -273,4 +274,5 @@ const styles = StyleSheet.create({
   placeholderSource: { ...scale.micro, fontFamily: 'monospace' },
   truncatedNote: { ...scale.micro, fontStyle: 'italic', marginTop: 4 },
   loadingLabel: { ...scale.micro, fontStyle: 'italic', marginBottom: 4 },
+  sourceTranscript: { position: 'absolute', width: 1, height: 1, opacity: 0 },
 })

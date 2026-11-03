@@ -14,10 +14,10 @@
 //
 // TWO laws hold everywhere below:
 //
-//   1. NO DIFF ENGINE. The server ran TextDiff.diff_lines/2 once and carries
-//      the derived `lines:[{op,text}]` on the block. We render THOSE. Porting
-//      react's re-derived DP-LCS would fork a fourth diff engine, and a mobile
-//      re-derivation could disagree with the row Studio shows.
+//   1. SERVER LINES WIN. Live blocks carry the server-derived
+//      `lines:[{op,text}]`, and mobile renders those verbatim. Persisted
+//      PortableDoc may carry only the canonical input shape, so that absent-
+//      lines fallback mirrors @barkpark/react's bounded LCS exactly.
 //   2. NO HOOKS. Every renderer is a pure function of (block, ctx, key) so the
 //      jest suite walks the element trees without a native host — the same
 //      contract blocks.tsx keeps. The fold is therefore the HONEST STATIC fold
@@ -74,10 +74,97 @@ interface DiffLine {
   text: string
 }
 
+const MAX_DIFF_LINES = 2000
+const MAX_DIFF_CELLS = 4_000_000
+
+function splitDiffLines(value: unknown): string[] {
+  if (typeof value !== 'string' || value === '') return []
+  const lines = value.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  return lines
+}
+
+function diffWithin(a: string[], b: string[], left: number): [DiffLine[], number] {
+  const m = a.length
+  const n = b.length
+  if (m === 0 && n === 0) return [[], left]
+  if (m > MAX_DIFF_LINES || n > MAX_DIFF_LINES || m * n > left) {
+    return [[...a.map((text) => ({ op: '-', text })), ...b.map((text) => ({ op: '+', text }))], left]
+  }
+
+  const grid = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0))
+  for (let i = 1; i <= m; i++) {
+    const previous = grid[i - 1]!
+    const current = grid[i]!
+    for (let j = 1; j <= n; j++) {
+      current[j] = a[i - 1] === b[j - 1]
+        ? previous[j - 1]! + 1
+        : Math.max(previous[j]!, current[j - 1]!)
+    }
+  }
+
+  const rows: DiffLine[] = []
+  let i = m
+  let j = n
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      rows.unshift({ op: '=', text: a[i - 1]! })
+      i--
+      j--
+    } else if (grid[i - 1]![j]! >= grid[i]![j - 1]!) {
+      rows.unshift({ op: '-', text: a[i - 1]! })
+      i--
+    } else {
+      rows.unshift({ op: '+', text: b[j - 1]! })
+      j--
+    }
+  }
+  while (i > 0) rows.unshift({ op: '-', text: a[--i]! })
+  while (j > 0) rows.unshift({ op: '+', text: b[--j]! })
+  return [rows, left - m * n]
+}
+
+function derivedDiffLines(input: unknown): DiffLine[] {
+  if (!isMap(input)) return []
+
+  const kind = typeof input.file_path !== 'string'
+    ? 'generic'
+    : Array.isArray(input.edits) && input.edits.length > 0
+      ? 'multi_edit'
+      : typeof input.old_string === 'string' && typeof input.new_string === 'string'
+        ? 'edit'
+        : typeof input.content === 'string'
+          ? 'write'
+          : 'generic'
+
+  if (kind === 'edit') {
+    return diffWithin(splitDiffLines(input.old_string), splitDiffLines(input.new_string), MAX_DIFF_CELLS)[0]
+  }
+  if (kind === 'write') return diffWithin([], splitDiffLines(input.content), MAX_DIFF_CELLS)[0]
+  if (kind !== 'multi_edit') return []
+
+  let left = MAX_DIFF_CELLS
+  const rows: DiffLine[] = []
+  const edits = Array.isArray(input.edits) ? input.edits : []
+  for (const edit of edits.filter(isMap)) {
+    const [hunk, remaining] = diffWithin(
+      splitDiffLines(edit.old_string),
+      splitDiffLines(edit.new_string),
+      left,
+    )
+    left = remaining
+    if (hunk.length === 0) continue
+    if (rows.length > 0) rows.push({ op: 'gap', text: '' })
+    rows.push(...hunk)
+  }
+  return rows
+}
+
 function diffLines(b: Block): DiffLine[] {
-  return asList(b.lines)
-    .filter(isMap)
-    .map((l) => ({ op: str(l.op), text: str(l.text) }))
+  if (Array.isArray(b.lines)) {
+    return b.lines.filter(isMap).map((l) => ({ op: str(l.op), text: str(l.text) }))
+  }
+  return derivedDiffLines(b.input)
 }
 
 function countOp(lines: DiffLine[], op: string): number {

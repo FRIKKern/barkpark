@@ -409,7 +409,7 @@ const CENSUS: Record<string, Record<string, number>> = {
   // block) at one measure instead of two.
   'papers/portabledoc/blocks/core-code.tsx': {
     'roles.chatApparatus': 3,
-    'scale.micro': 3,
+    'scale.micro': 5,
     'scale.sm': 2,
     'scale.xs': 6,
   },
@@ -417,7 +417,7 @@ const CENSUS: Record<string, Record<string, number>> = {
     'roles.tocRow': 1,
     'scale.base': 1,
     'scale.md': 4,
-    'scale.micro': 1,
+    'scale.micro': 2,
     'scale.xs': 2,
   },
   'papers/portabledoc/blocks/core-doc.tsx': {

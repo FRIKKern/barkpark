@@ -2,7 +2,7 @@
   "renderer": "mobile",
   "compare": "text",
   "pack_stamp": "1ca9ca01d368484f4e7aa39003f9fb065595d29745f785d823154762b362be0b",
-  "ran_at_sha": "f89c89c512061ec58bed725164459701136a73df",
+  "ran_at_sha": "a2752b097c67d3d77b8e805ab36a464030221e22",
   "rows": [
     {
       "type": "action",
@@ -10,16 +10,7 @@
     },
     {
       "type": "api-endpoint",
-      "status": "fail",
-      "diff": [
-        "word 3/10 \"name\" not found in order",
-        "word 4/10 \"in\" not found in order",
-        "word 5/10 \"type\" not found in order",
-        "word 7/10 \"dataset\" not found in order",
-        "word 8/10 \"path\" not found in order",
-        "word 9/10 \"string\" not found in order",
-        "word 10/10 \"yes\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "arrayOf",
@@ -79,24 +70,11 @@
     },
     {
       "type": "chat-tool-diff",
-      "status": "fail",
-      "diff": [
-        "word 1/8 \"1\" not found in order",
-        "word 2/8 \"1\" not found in order",
-        "word 3/8 \"def\" not found in order",
-        "word 4/8 \"hello\" not found in order",
-        "word 5/8 \"do\" not found in order",
-        "word 6/8 \"new\" not found in order",
-        "word 7/8 \"old\" not found in order",
-        "word 8/8 \"end\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "code-tabs",
-      "status": "fail",
-      "diff": [
-        "word 4/4 \"fmt.println(1\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "code",
@@ -120,14 +98,7 @@
     },
     {
       "type": "diagram",
-      "status": "fail",
-      "diff": [
-        "word 1/8 \"graph\" not found in order",
-        "word 2/8 \"td\" not found in order",
-        "word 3/8 \"a[ingest\" not found in order",
-        "word 4/8 \"b[render\" not found in order",
-        "word 5/8 \"c[publish\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "diff",
@@ -323,13 +294,7 @@
     },
     {
       "type": "tabs",
-      "status": "fail",
-      "diff": [
-        "word 6/9 \"curl\" not found in order",
-        "word 7/9 \"fssl\" not found in order",
-        "word 8/9 \"install.sh\" not found in order",
-        "word 9/9 \"sh\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "task-board",
@@ -349,10 +314,7 @@
     },
     {
       "type": "terminal",
-      "status": "fail",
-      "diff": [
-        "word 3/9 \"live\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "toc",
