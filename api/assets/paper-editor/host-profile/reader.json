@@ -20,6 +20,9 @@
         "data-bp-theme",
         "data-paper-palette",
         "data-theme"
+      ],
+      "host class": [
+        "bp-paper-surface"
       ]
     },
     "editor": {
@@ -77,14 +80,6 @@
         "run"
       ],
       "why": "the page's own source.blocks (the /source fetch) and the Go wasm runtime's go.run, not the canvas's"
-    }
-  ],
-  "internals": [
-    {
-      "names": [
-        "bp-paper-surface"
-      ],
-      "why": "the page's own stylesheet scopes the reading font with the surface class the canvas paints too"
     }
   ]
 }

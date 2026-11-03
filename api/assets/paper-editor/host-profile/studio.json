@@ -61,7 +61,8 @@
       ],
       "host class": [
         "bp-paper-edit-field",
-        "bp-paper-editor"
+        "bp-paper-editor",
+        "bp-paper-surface"
       ],
       "inbound event": [
         "bp-change",
@@ -392,7 +393,6 @@
         "bp-paper-format__sep",
         "bp-paper-notes-config",
         "bp-paper-stats-config",
-        "bp-paper-surface",
         "bp-resting-scaffold",
         "bp-scaffold-control",
         "bp-section__body",
