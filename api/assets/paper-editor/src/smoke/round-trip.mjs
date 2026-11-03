@@ -768,14 +768,15 @@ check("S0 runToOps: reorder → single move-block, no patches", () => {
   assert.equal(ops.filter((o) => o.op === "patch-block").length, 0, "no patches");
 });
 
-// S0-f) mixed list with a still-OPAQUE non-prose block (composite) →
-//       runToTiptap emits a bpOpaque node carrying the block JSON VERBATIM, and
-//       runToOps round-trips it with NO op (the opaque block is deep-equal to the
+// S0-f) mixed list with a renderer-only non-prose block (composite) →
+//       runToTiptap emits a bpFleet node carrying the block JSON VERBATIM, and
+//       runToOps round-trips it with NO op (the carried block is deep-equal to the
 //       original). (S3.2 pulled the callout INTO the canvas; S3.5 pulled the 7
 //       NATIVE field-* types in; the run-splitter tail pulled the PICKER fields
 //       field-image / field-reference in too — so this case now uses `composite`, a
-//       NESTED-STRUCTURE field that stays a boundary / bpOpaque.)
-check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => {
+//       NESTED-STRUCTURE field that stays a contextual boundary on new mounts but
+//       has a server-painted compatibility receiver when projected.)
+check("S0 non-prose block: server-painted carry-through, zero ops on round-trip", () => {
   const field = {
     id: "f-1",
     type: "composite",
@@ -789,20 +790,20 @@ check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => 
   ];
   const doc = runToTiptap(blocks);
 
-  // The field projects to an opaque placeholder carrying the block verbatim.
-  const opaque = doc.content[1];
-  assert.equal(opaque.type, "bpOpaque");
-  assert.equal(opaque.attrs.bpId, "f-1");
-  assert.equal(opaque.attrs.bpType, "composite");
-  assert.deepEqual(opaque.attrs.bpBlock, field); // verbatim, deep-equal
-  assert.notEqual(opaque.attrs.bpBlock, field); // but NOT a shared ref
+  // The field projects to the generic server-paint receiver carrying the block verbatim.
+  const receiver = doc.content[1];
+  assert.equal(receiver.type, "bpFleet");
+  assert.equal(receiver.attrs.bpId, "f-1");
+  assert.equal(receiver.attrs.bpType, "composite");
+  assert.deepEqual(receiver.attrs.bpBlock, field); // verbatim, deep-equal
+  assert.notEqual(receiver.attrs.bpBlock, field); // but NOT a shared ref
 
-  // An untouched round-trip emits NO ops at all (opaque is not edited in S0).
+  // An untouched round-trip emits NO ops at all (the receiver is display-only in S0).
   const ops = runToOps(blocks, doc);
   assert.equal(ops.length, 0, "untouched mixed list round-trips with zero ops");
 
   // FOLD GATE: zero ops fold to the identical block list (order + content).
-  const folded = assertFolds(blocks, doc, ops, "S0-f opaque round-trip");
+  const folded = assertFolds(blocks, doc, ops, "S0-f server-painted round-trip");
   assert.deepEqual(folded.map((b) => b.id), ["h-1", "f-1", "p-1"]);
   assert.deepEqual(folded[1], field);
 });

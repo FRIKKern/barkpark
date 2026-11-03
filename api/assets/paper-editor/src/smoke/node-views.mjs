@@ -183,12 +183,12 @@ check("S3 runToOps: a divider between edited prose emits only the prose patches"
   assert.deepEqual(folded[2].content, [{ type: "text", value: "TWO!" }]);
 });
 
-// S3-f) STILL-OPAQUE — a NESTED-STRUCTURE field (composite), still a boundary, is
-//       STILL carried opaquely. (S3.5 pulled the 7 NATIVE field-* types into the canvas;
+// S3-f) SERVER-PAINTED — a NESTED-STRUCTURE field (composite), still a contextual
+//       boundary on new mounts, has a compatibility receiver when projected. S3.5 and
 //       the run-splitter tail pulled the PICKER fields field-image / field-reference in
-//       too — but composite / arrayOf / codelist / localizedText / section stay opaque
-//       boundaries, a separate nested-structure increment.)
-check("S3 runToTiptap: a composite field is STILL opaque (native + picker fields became canvas-handled, nested-structure fields did not)", () => {
+//       too; nested-structure fields keep their full contextual editor rather than an
+//       inline canvas editor.)
+check("S3 runToTiptap: a composite field uses the server-paint compatibility receiver", () => {
   const field = {
     id: "f-1",
     type: "composite",
@@ -196,7 +196,7 @@ check("S3 runToTiptap: a composite field is STILL opaque (native + picker fields
     value: { x: "v" },
   };
   const doc = runToTiptap([field]);
-  assert.equal(doc.content[0].type, "bpOpaque", "composite stays opaque");
+  assert.equal(doc.content[0].type, "bpFleet", "composite uses the server-paint receiver");
   assert.deepEqual(doc.content[0].attrs.bpBlock, field);
 });
 
@@ -831,15 +831,16 @@ check("S3.3 runToOps: a code block between edited prose emits only the prose pat
   assert.deepEqual(folded[2].content, [{ type: "text", value: "TWO!" }]);
 });
 
-// S3.3-h) STILL-OPAQUE — a non-canvas block (composite, a nested-structure field) is
-//   STILL carried opaquely. divider (S3), callout (S3.2), code (S3.3), diagram (S3.4),
+// S3.3-h) SERVER-PAINTED — a composite retains its contextual editor on new mounts,
+//   with a compatibility receiver when projected. divider (S3), callout (S3.2),
+//   code (S3.3), diagram (S3.4),
 //   the 7 NATIVE field-* types (S3.5), and the 2 PICKER fields field-image /
 //   field-reference (run-splitter tail) are ALL canvas-handled; composite / arrayOf /
-//   codelist / localizedText / section remain opaque boundaries.
-check("S3.3 runToTiptap: a composite field is STILL opaque (native + picker fields canvas-handled, nested-structure fields not)", () => {
+//   codelist / localizedText remain contextual boundaries.
+check("S3.3 runToTiptap: a composite field uses the server-paint compatibility receiver", () => {
   const field = { id: "f-1", type: "composite", fields: [], value: {} };
   const doc = runToTiptap([field]);
-  assert.equal(doc.content[0].type, "bpOpaque", "composite stays opaque");
+  assert.equal(doc.content[0].type, "bpFleet", "composite uses the server-paint receiver");
   assert.deepEqual(doc.content[0].attrs.bpBlock, field);
 });
 
@@ -1817,15 +1818,15 @@ check("S3.6 runToOps: [paragraph, sheet, embed, paragraph] round-trips with ZERO
   assert.deepEqual(folded[2], S36_EMBED, "embed survives verbatim");
 });
 
-// S3.6-h) STILL-OPAQUE — a NESTED-STRUCTURE field (composite), still a boundary, is
-//   STILL carried opaquely (NOT a read-only atom, NOT a control-atom). After S3.6
+// S3.6-h) SERVER-PAINTED — a NESTED-STRUCTURE field (composite), still a contextual
+//   boundary, uses a compatibility receiver (NOT a read-only atom/control-atom). After S3.6
 //   sheet/embed are canvas-eligible, and the run-splitter tail made field-image /
 //   field-reference canvas-eligible too — but composite / arrayOf / codelist /
-//   localizedText / section stay boundaries (a separate nested-structure increment).
-check("S3.6 runToTiptap: a composite field is STILL opaque (sheet/embed + pickers became canvas-eligible, nested-structure fields did not)", () => {
+//   localizedText stay contextual boundaries.
+check("S3.6 runToTiptap: a composite field uses the server-paint compatibility receiver", () => {
   const nested = { id: "cmp-1", type: "composite", fields: [], value: {} };
   const doc = runToTiptap([nested]);
-  assert.equal(doc.content[0].type, "bpOpaque", "composite stays opaque");
+  assert.equal(doc.content[0].type, "bpFleet", "composite uses the server-paint receiver");
   assert.notEqual(doc.content[0].type, BP_SHEET_NODE_NAME);
   assert.notEqual(doc.content[0].type, BP_EMBED_NODE_NAME);
   assert.notEqual(doc.content[0].type, "bpField", "composite is NOT a control-atom");
