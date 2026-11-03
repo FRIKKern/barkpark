@@ -327,6 +327,11 @@
           "minLength": 1,
           "description": "OPTIONAL (additive). The manifest/api version in which this command first appeared — used for version gating so a CLI can tell when a command is too new for the server it is pointed at. Free string, NOT in the required list."
         },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "OPTIONAL (additive). How many seconds a client should wait for one request of this command, when that can exceed the CLI's default 30 s. Present ONLY when the command declares one AND the caller opted in via ?timeouts=1, so released CLIs that strict-decode each command never see it. Absence means the CLI default."
+        },
         "views": {
           "$ref": "#/$defs/views",
           "description": "OPTIONAL (additive). Present ONLY when this command supports a brief/full projection (a token-thrifty card vs the full envelope) AND the caller opted in via ?views=1. Absence means the command is full-only. NOT in the required list — released CLIs that predate views still validate because the server withholds the key unless ?views=1 is sent (opt-in, mirroring `build`)."

@@ -358,6 +358,7 @@ defmodule Barkpark.Plugins.Capabilities do
     |> drop_switched_off_subsystems()
     |> maybe_put_build(base, opts)
     |> maybe_gate_views(opts)
+    |> maybe_gate_timeouts(opts)
     |> maybe_gate_chat(base, opts)
     |> maybe_gate_bpml(base, opts)
     |> maybe_put_token(base, opts)
@@ -455,6 +456,23 @@ defmodule Barkpark.Plugins.Capabilities do
     else
       Map.update(manifest, "commands", [], fn commands ->
         Enum.map(commands, &Map.delete(&1, "views"))
+      end)
+    end
+  end
+
+  # The command-level `timeout_seconds` key (task-597c98acab512fbf): how long
+  # bp should wait for one request of a command that can take longer than its
+  # default 30 s, such as a 100-file `media delete-many`. A client that stops
+  # waiting while the server finishes reports no result for work that was
+  # done. STRICTLY OPT-IN (`include_timeouts: true`, wired from `?timeouts=1`)
+  # for the reason `views` is: released bp binaries strict-decode every
+  # command, so an unconditional new key would refuse the whole manifest.
+  defp maybe_gate_timeouts(manifest, opts) do
+    if Keyword.get(opts, :include_timeouts, false) do
+      manifest
+    else
+      Map.update(manifest, "commands", [], fn commands ->
+        Enum.map(commands, &Map.delete(&1, "timeout_seconds"))
       end)
     end
   end
@@ -1893,6 +1911,9 @@ defmodule Barkpark.Plugins.Capabilities do
       ),
       # task-60a5883edeb49cbe. One request per 100 files instead of one per
       # file; an id already gone counts as done, so a retried batch is a 200.
+      # task-597c98acab512fbf: bp waits up to 300 s for one request. A batch
+      # takes about 1 s per 66 files over 20,000 documents locally, so this
+      # is a margin for a slow box, not the expected time.
       core_cmd(
         "media.delete-many",
         "media",
@@ -1911,6 +1932,7 @@ defmodule Barkpark.Plugins.Capabilities do
         ],
         writes: true,
         default_output: "json",
+        timeout_seconds: 300,
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -5145,6 +5167,15 @@ defmodule Barkpark.Plugins.Capabilities do
       case Keyword.fetch(opts, :views) do
         {:ok, views} -> Map.put(base, "views", views)
         :error -> base
+      end
+
+    base =
+      case Keyword.fetch(opts, :timeout_seconds) do
+        {:ok, seconds} when is_integer(seconds) and seconds > 0 ->
+          Map.put(base, "timeout_seconds", seconds)
+
+        :error ->
+          base
       end
 
     case Keyword.fetch(opts, :scoped_prefix) do

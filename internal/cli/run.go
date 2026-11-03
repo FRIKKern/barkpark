@@ -75,6 +75,12 @@ type manifestRequest struct {
 	// per-tool code. nil for every other command, which then takes the
 	// untouched single-shot send.
 	ledger *ledgerWrite
+
+	// timeout, when longer than dispatchClientTimeout, is the wall-clock budget
+	// the command declares in its manifest (Command.TimeoutSeconds). Zero keeps
+	// the default client. task-597c98acab512fbf: a 50-file media delete-many
+	// ran 172.7 s on the server while bp gave up at 30 s and printed nothing.
+	timeout time.Duration
 }
 
 // dispatchError is a build-stage failure (bad args / URL / body) surfaced by
@@ -248,8 +254,19 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		warnings: warnings,
 		// Resolved from the SAME argMap/cmdFlags the body was built from, so the
 		// row a read-back targets can never drift from the row the POST carries.
-		ledger: ledgerWriteFor(ctx, m, cmd, argMap, cmdFlags, headers),
+		ledger:  ledgerWriteFor(ctx, m, cmd, argMap, cmdFlags, headers),
+		timeout: declaredTimeout(cmd),
 	}, nil
+}
+
+// declaredTimeout is the command's manifest-declared wait, or zero when it
+// declares none or one no longer than the default dispatch budget.
+func declaredTimeout(cmd manifest.Command) time.Duration {
+	d := time.Duration(cmd.TimeoutSeconds) * time.Second
+	if d <= dispatchClientTimeout {
+		return 0
+	}
+	return d
 }
 
 // nonPublishedPerspectiveRequiresAuth reports whether this invocation is a
@@ -367,6 +384,12 @@ func sendManifestRequest(req *manifestRequest) (int, []byte, string, error) {
 	// other request keeps the single-shot path, byte-identical.
 	if req.ledger != nil {
 		return sendLedgerWrite(req)
+	}
+	// A command that declares a longer wait gets a client with that budget and
+	// the same retry policy. Only GET and HEAD are ever retried.
+	if req.timeout > 0 {
+		status, respBody, ct, _, err := doRequestUsing(dispatchClientWithTimeout(req.timeout), req.method, req.url, req.headers, req.body)
+		return status, respBody, ct, err
 	}
 	return doRequestCT(req.method, req.url, req.headers, req.body)
 }

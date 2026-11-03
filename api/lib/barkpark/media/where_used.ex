@@ -154,6 +154,157 @@ defmodule Barkpark.Media.WhereUsed do
   def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan(nil)
 
   @doc """
+  `referrers/1` for many blobs in one pass: `%{file.id => census}`, one entry
+  per file, each census the shape `referrers/1` answers.
+
+  The media delete-many door asks this (task-597c98acab512fbf). Asked one blob
+  at a time, the census cost two sequential scans of every draft and published
+  document's content as text plus one query per schema type, and the door and
+  the in-transaction recheck each paid it: about 2 s per file over 20,000
+  documents locally and 3.6 s per file on a 2 vCPU test VM. Here the textual
+  half is one scan per workspace for the whole list (`textual_many/1`) and the
+  structural half is one query per schema type per dataset
+  (`Content.Query.list_reference_holders_many/3`).
+  """
+  def referrers_many([]), do: %{}
+
+  def referrers_many(files) when is_list(files) do
+    files = Enum.uniq_by(files, & &1.id)
+    textual = textual_many(files)
+    structural = structural_many(files)
+    empty = %{count: 0, sample: []}
+
+    Map.new(files, fn file ->
+      {file.id,
+       merge_censuses(Map.get(textual, file.id, empty), Map.get(structural, file.id, empty))}
+    end)
+  end
+
+  # One scan per workspace for every blob in the list. A document matches blob
+  # P when its content text contains "/media/files/P", the containment
+  # `scan/3` tests with LIKE. Testing one LIKE per blob per row cost one pass
+  # over every row's text per blob: 100 blobs over 20,000 documents took
+  # 10.8 s. Instead each row's text is split once on "/media/files", and the
+  # row holds P when a piece after a split starts with "/P". That is the same
+  # test: "/media/files" cannot overlap itself, so the split finds every
+  # occurrence, and the piece after an occurrence runs to the next one, which
+  # cannot cut P short unless P itself contains "/media/files". Such a path is
+  # never minted, and if one exists it takes `scan/3` on its own. The `strpos`
+  # filter keeps rows with no delivery URL out of the split. Same row filters
+  # and tenant scope as `scan/3`.
+  defp textual_many(files) do
+    {odd, plain} =
+      files
+      |> Enum.filter(&is_binary(&1.path))
+      |> Enum.split_with(&String.contains?(&1.path, "/media/files"))
+
+    alone = Map.new(odd, &{&1.id, scan(delivery_path(&1), Map.get(&1, :workspace_id))})
+
+    plain
+    |> Enum.group_by(&Map.get(&1, :workspace_id))
+    |> Enum.reduce(alone, fn {workspace_id, group}, acc ->
+      paths = Enum.map(group, &("/" <> &1.path))
+      by_index = group |> Enum.with_index(1) |> Map.new(fn {file, i} -> {i, file.id} end)
+
+      candidates =
+        from(d in Document,
+          where: d.status in ["published", "draft"],
+          # The blob's own companion mediaAsset document is not a referrer; see
+          # `scan/3`.
+          where: d.type != "mediaAsset",
+          where: fragment("strpos((?)::text, '/media/files/') > 0", d.content),
+          select: %{
+            doc_id: d.doc_id,
+            type: d.type,
+            dataset: d.dataset,
+            title: d.title,
+            hits:
+              fragment(
+                """
+                ARRAY(SELECT DISTINCT p.i::int
+                      FROM unnest(string_to_array((?)::text, '/media/files')) WITH ORDINALITY AS s(piece, n)
+                      JOIN unnest(?::text[]) WITH ORDINALITY AS p(path, i)
+                        ON s.n > 1 AND starts_with(s.piece, p.path))
+                """,
+                d.content,
+                type(^paths, {:array, :string})
+              )
+          }
+        )
+        |> scope_to_owner_tenant(workspace_id)
+
+      rows =
+        from(c in subquery(candidates), where: fragment("cardinality(?) > 0", c.hits))
+        |> Repo.all(timeout: :timer.seconds(60))
+
+      Enum.reduce(rows, acc, fn row, acc ->
+        doc = Map.delete(row, :hits)
+
+        Enum.reduce(row.hits, acc, fn i, acc ->
+          Map.update(acc, Map.fetch!(by_index, i), %{count: 1, sample: [doc]}, fn census ->
+            sample =
+              if length(census.sample) < @sample_limit,
+                do: census.sample ++ [doc],
+                else: census.sample
+
+            %{count: census.count + 1, sample: sample}
+          end)
+        end)
+      end)
+    end)
+  end
+
+  # The structural half of `referrers/1` for many blobs: one pass per dataset
+  # and tenancy scope, through `Content.Query.list_reference_holders_many/3`.
+  # A blob with neither a companion asset document nor a Sanity id has nothing
+  # to match, as in `structural_referrers/1`.
+  defp structural_many(files) do
+    files
+    |> Enum.reject(&is_nil(&1.id))
+    |> Enum.group_by(&{&1.dataset, MediaFile.scope_opts(&1)})
+    |> Enum.reduce(%{}, fn {{dataset, scope}, group}, acc ->
+      asset_docs = Barkpark.Media.asset_docs_for_files(group, dataset, scope)
+
+      targets =
+        Enum.flat_map(group, fn file ->
+          asset_doc = Map.get(asset_docs, to_string(file.id))
+          patterns = sanity_ref_patterns(file)
+
+          case {asset_doc, patterns} do
+            {nil, []} ->
+              []
+
+            {nil, _} ->
+              [{file.id, "asset-" <> to_string(file.id), patterns}]
+
+            {doc, _} ->
+              [{file.id, Barkpark.Content.published_id(doc.doc_id), patterns}]
+          end
+        end)
+
+      ctx = %Barkpark.Content.CallerContext{
+        principal_type: :api_token,
+        is_admin: true,
+        roles: ["admin"]
+      }
+
+      targets
+      |> Barkpark.Content.Query.list_reference_holders_many(
+        dataset,
+        [caller_context: ctx] ++ scope
+      )
+      |> Enum.reduce(acc, fn {file_id, rows}, acc ->
+        sample =
+          Enum.map(rows, fn row ->
+            %{doc_id: row.doc_id, type: row.type, dataset: dataset, title: row.title}
+          end)
+
+        Map.put(acc, file_id, %{count: length(sample), sample: Enum.take(sample, @sample_limit)})
+      end)
+    end)
+  end
+
+  @doc """
   The textual census of `file` over documents NOT in `leaving`, a query of the
   `documents.id`s about to be deleted with it. A dataset delete asks this: the
   structural half is same-dataset only, so it leaves with the dataset.
@@ -403,9 +554,14 @@ defmodule Barkpark.Media.WhereUsed do
 
   Returns `%{forced: true, referencedByCount: count}`.
   """
-  def witness_forced_delete(conn, %MediaFile{} = file) do
-    %{count: count, sample: sample} = referrers(file)
+  def witness_forced_delete(conn, %MediaFile{} = file),
+    do: witness_forced_delete(conn, file, referrers(file))
 
+  @doc """
+  `witness_forced_delete/2` with the census already taken, so the delete-many
+  door can witness every forced file from one `referrers_many/1` pass.
+  """
+  def witness_forced_delete(conn, %MediaFile{} = file, %{count: count, sample: sample}) do
     doc_ids = Enum.map(sample, & &1.doc_id)
 
     Logger.warning(

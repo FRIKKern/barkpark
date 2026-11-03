@@ -96,6 +96,27 @@ func TestFetchSendsChatOptIn(t *testing.T) {
 	}
 }
 
+// Fetch opts into the command-level timeout_seconds key with ?timeouts=1
+// (task-597c98acab512fbf), in the same commit that models
+// Command.TimeoutSeconds.
+func TestFetchSendsTimeoutsOptIn(t *testing.T) {
+	var timeouts string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timeouts = r.URL.Query().Get("timeouts")
+		w.Header().Set("ETag", "e1")
+		_, _ = w.Write([]byte(minimalManifest))
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
+	if _, err := Fetch(c, nil); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if timeouts != "1" {
+		t.Errorf("GET /v1/capabilities timeouts param = %q, want \"1\"", timeouts)
+	}
+}
+
 // A nil cache disables caching — Fetch does an unconditional GET (no
 // If-None-Match) and parses fresh every time.
 func TestFetchNilCacheUnconditional(t *testing.T) {

@@ -800,16 +800,21 @@ defmodule BarkparkWeb.V1.MediaController do
   files in one request (task-60a5883edeb49cbe). Body `{"ids": [...] | "a,b,c",
   "force": bool}`. `bp media delete-many --ids a,b,c`.
 
-  Each id runs the single DELETE's steps: the file must be in `:dataset`, the
-  where-used guard refuses a referenced file unless `force` is true (and leaves
-  the same forced-delete witness), and `Media.delete_file/2` re-checks inside
-  its transaction. The batch is not atomic: each file goes on its own.
+  The single DELETE's guarantees hold for each id: the file must be in
+  `:dataset`, the where-used guard refuses a referenced file unless `force` is
+  true, and a forced file leaves the same witness. The work is batched
+  (task-597c98acab512fbf): one query reads the files, `Media.delete_files/2`
+  locks them and runs one where-used census for all of them inside its
+  transaction, and a forced batch is witnessed from one census. Asked one id
+  at a time the census ran twice per file and a 50-id request took 172.7 s on a
+  2 vCPU VM.
 
-  An id with no file in the dataset is `gone`, which counts as done: a retried
-  batch whose first attempt deleted some files answers 200 again. The 200 is
-  `{result: {deleted: [ids], gone: [ids], refused: []}}`. When any id is
-  refused the answer is 409 `conflict` with the same three lists in `details`;
-  the deleted ids stay deleted.
+  The batch is not atomic toward the caller: a refused id leaves the others
+  deleted. An id with no file in the dataset is `gone`, which counts as done:
+  a retried batch whose first attempt deleted some files answers 200 again.
+  The 200 is `{result: {deleted: [ids], gone: [ids], refused: []}}`. When any
+  id is refused the answer is 409 `conflict` with the same three lists in
+  `details`; the deleted ids stay deleted.
   """
   # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
   # Re-derive its @exclusion_anchors values from
@@ -820,10 +825,11 @@ defmodule BarkparkWeb.V1.MediaController do
     force? = params["force"] in [true, "true", "1"]
 
     with :ok <- require_write(conn),
-         {:ok, ids} <- delete_many_ids(params["ids"]) do
+         {:ok, ids} <- delete_many_ids(params["ids"]),
+         {:ok, outcomes} <- delete_many_run(conn, ids, dataset, scope, force?) do
       outcome =
         Enum.reduce(ids, %{deleted: [], gone: [], refused: []}, fn id, acc ->
-          case delete_many_one(conn, id, dataset, scope, force?) do
+          case Map.fetch!(outcomes, id) do
             :deleted -> Map.update!(acc, :deleted, &[id | &1])
             :gone -> Map.update!(acc, :gone, &[id | &1])
             {:refused, env} -> Map.update!(acc, :refused, &[Map.put(env, :id, id) | &1])
@@ -851,42 +857,57 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
-  defp delete_many_one(conn, id, dataset, scope, force?) do
-    with {:ok, file} <- Media.get_file(id, scope),
-         :ok <- ensure_dataset(file, dataset),
-         {:ok, override} <- delete_many_where_used(conn, file, force?),
-         {:ok, _deleted} <-
-           Media.delete_file(id, Keyword.merge(scope, where_used: :guard, override: override)) do
-      :deleted
-    else
-      {:error, :not_found} ->
-        :gone
+  # `{:ok, %{id => :deleted | :gone | {:refused, envelope}}}` for every id, or
+  # the write-admission refusal `Media.delete_files/2` answers for the batch.
+  defp delete_many_run(conn, ids, dataset, scope, force?) do
+    files = Media.get_files(ids, scope)
 
-      {:referenced, file, census} ->
-        {:refused, refusal(file, census)}
+    {present, gone} =
+      Enum.split_with(ids, fn id ->
+        match?(%{dataset: ^dataset}, Map.get(files, id))
+      end)
 
-      {:error, {:referenced, file, census}} ->
-        {:refused, refusal(file, census)}
+    present_files = Enum.map(present, &Map.fetch!(files, &1))
 
-      {:error, reason} ->
-        env = Errors.to_envelope(reason)
-        {:refused, %{code: env[:code], message: env[:message]}}
+    # A forced file is not re-checked inside the transaction, so its witness
+    # census is taken here, once for the whole batch.
+    entries =
+      if force? do
+        censuses = WhereUsed.referrers_many(present_files)
+
+        Enum.map(present_files, fn file ->
+          {file, WhereUsed.witness_forced_delete(conn, file, Map.fetch!(censuses, file.id))}
+        end)
+      else
+        Enum.map(present_files, &{&1, nil})
+      end
+
+    case Media.delete_files(entries, Keyword.merge(scope, where_used: :guard)) do
+      {:error, _reason} = error ->
+        error
+
+      results ->
+        by_file_id =
+          Map.new(results, fn {file_id, result} -> {file_id, delete_many_outcome(result)} end)
+
+        {:ok,
+         Map.new(gone, &{&1, :gone})
+         |> Map.merge(Map.new(present, fn id -> {id, Map.fetch!(by_file_id, files[id].id)} end))}
     end
+  end
+
+  defp delete_many_outcome(:deleted), do: :deleted
+  defp delete_many_outcome(:gone), do: :gone
+  defp delete_many_outcome({:referenced, file, census}), do: {:refused, refusal(file, census)}
+
+  defp delete_many_outcome({:error, reason}) do
+    env = Errors.to_envelope(reason)
+    {:refused, %{code: env[:code], message: env[:message]}}
   end
 
   defp refusal(file, census) do
     env = WhereUsed.refusal_envelope(file, census)
     %{code: env.code, message: env.message, referencedByCount: census.count}
-  end
-
-  defp delete_many_where_used(conn, file, true),
-    do: {:ok, WhereUsed.witness_forced_delete(conn, file)}
-
-  defp delete_many_where_used(_conn, file, false) do
-    case WhereUsed.referrers(file) do
-      %{count: 0} -> {:ok, nil}
-      census -> {:referenced, file, census}
-    end
   end
 
   defp delete_many_ids(raw) do

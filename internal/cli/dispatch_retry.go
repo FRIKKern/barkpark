@@ -71,3 +71,15 @@ func retryingDispatchClient() *http.Client {
 	})
 	return dispatchClient
 }
+
+// dispatchClientWithTimeout is retryingDispatchClient with a longer wall-clock
+// budget, for a command whose manifest declares timeout_seconds
+// (task-597c98acab512fbf). Built per call: such commands are rare and slow, so
+// a lost keep-alive connection costs nothing that matters.
+func dispatchClientWithTimeout(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     apiclient.NewRetryTransport(nil),
+		CheckRedirect: checkRedirect,
+	}
+}

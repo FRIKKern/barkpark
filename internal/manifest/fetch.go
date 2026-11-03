@@ -56,7 +56,8 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	// unknown key. Older servers ignore the params entirely (proven inert —
 	// byte-identical 200s). chat=1 rides in the SAME commit that models
 	// Manifest.Chat — no bp ever asks for a key it cannot decode.
-	url := client.BaseURL() + CapabilitiesPath + "?views=1&chat=1"
+	// timeouts=1 rides in the commit that models Command.TimeoutSeconds.
+	url := client.BaseURL() + CapabilitiesPath + "?views=1&chat=1&timeouts=1"
 
 	var (
 		key          string

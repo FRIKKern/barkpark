@@ -855,6 +855,36 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  `get_file/2` for many ids in one query: `%{id => %MediaFile{}}`, keyed by
+  the id as given. An id that is not a UUID, or has no row in scope, is absent.
+  """
+  @spec get_files([String.t()], keyword()) :: %{String.t() => MediaFile.t()}
+  def get_files(ids, opts \\ []) when is_list(ids) do
+    by_uuid =
+      Enum.reduce(ids, %{}, fn id, acc ->
+        case Repo.uuid_or_nil(id) do
+          nil -> acc
+          uuid -> Map.update(acc, uuid, [id], &[id | &1])
+        end
+      end)
+
+    if by_uuid == %{} do
+      %{}
+    else
+      MediaFile
+      |> where([m], m.id in ^Map.keys(by_uuid))
+      # global-read: the same scope as get_file/2, of which this is the batch form. An HTTP caller always passes the :shared_only sentinel or a real workspace (see get_file/2's doc); a nil workspace reaches only internal callers.
+      |> Content.Scope.scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> Repo.all()
+      |> Enum.flat_map(fn file -> Enum.map(Map.fetch!(by_uuid, file.id), &{&1, file}) end)
+      |> Map.new()
+    end
+  end
+
+  @doc """
   Get a media file by its storage-relative path.
 
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); when present
@@ -1285,6 +1315,215 @@ defmodule Barkpark.Media do
         end
       end)
     end)
+  end
+
+  @doc """
+  Delete many media files in one transaction (task-597c98acab512fbf). The
+  media delete-many door calls this; `delete_file/2` is the one-file verb and
+  its doc explains each step this repeats.
+
+  `entries` is a list of `{%MediaFile{}, override}`, where `override` is nil or
+  the forced-delete witness `WhereUsed.witness_forced_delete/3` returned.
+  `opts` carries the `:where_used` policy (required, as for `delete_file/2`),
+  the tenancy scope and an optional `:caller_context`.
+
+  One transaction locks every row, asks `WhereUsed.referrers_many/1` once for
+  every unforced file under the `:guard` policy, and deletes each unreferenced
+  row with its `mediaAsset` document. The census used to run twice per file,
+  at the door and again inside each file's own transaction. That was four
+  scans of every document per file and made a 50-file request take 172.7 s on
+  a 2 vCPU VM. After the commit the CDN purge goes out as one request for all
+  paths and the blob deletes run eight at a time.
+
+  When deleting one file's asset document fails, the whole transaction rolls
+  back, that file gets its error, and the others run again in a new
+  transaction. A failure that names no file falls back to `delete_file/2` for
+  each remaining file.
+
+  Returns `%{file.id => outcome}` where outcome is `:deleted`, `:gone` (no
+  row any more), `{:referenced, file, census}` or `{:error, reason}`.
+  """
+  @spec delete_files([{MediaFile.t(), map() | nil}], keyword()) ::
+          %{String.t() => term()} | {:error, term()}
+  def delete_files(entries, opts) when is_list(entries) and is_list(opts),
+    do: Door.admit(fn -> admitted_delete_files(entries, opts) end)
+
+  defp admitted_delete_files(entries, opts) do
+    policy = where_used_policy!(opts)
+    seat = Keyword.take(opts, [:caller_context])
+    entries = Enum.uniq_by(entries, fn {file, _override} -> file.id end)
+
+    # A forced delete changes what readers see, so it needs the publish seat,
+    # as `delete_file/2` checks. One check covers every forced entry.
+    {entries, refused} =
+      if Enum.any?(entries, fn {_file, override} -> override end) do
+        case Barkpark.Content.LiveWriteGate.check_seat(opts) do
+          :ok ->
+            {entries, %{}}
+
+          {:error, reason} ->
+            {forced, plain} = Enum.split_with(entries, fn {_file, override} -> override end)
+            {plain, Map.new(forced, fn {file, _} -> {file.id, {:error, reason}} end)}
+        end
+      else
+        {entries, %{}}
+      end
+
+    # The webhook payload describes the asset document as it was before the
+    # delete, as in `delete_found_file/4`.
+    docs =
+      Map.new(entries, fn {file, _override} ->
+        {file.id, asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))}
+      end)
+
+    delete_files_batch(entries, policy == :guard, seat, docs, opts, refused)
+  end
+
+  defp delete_files_batch([], _recheck?, _seat, _docs, _opts, results), do: results
+
+  defp delete_files_batch(entries, recheck?, seat, docs, opts, results) do
+    case delete_rows_with_asset_docs(entries, recheck?, seat) do
+      {:ok, %{deleted: deleted, gone: gone, referenced: referenced}} ->
+        run_delete_effects(deleted, docs)
+
+        results
+        |> Map.merge(Map.new(deleted, fn {file, _} -> {file.id, :deleted} end))
+        |> Map.merge(Map.new(gone, &{&1, :gone}))
+        |> Map.merge(
+          Map.new(referenced, fn {file, census} -> {file.id, {:referenced, file, census}} end)
+        )
+
+      {:error, {:file, id, reason}} ->
+        outcome =
+          case reason do
+            {:row, cs} -> if stale?(cs), do: :gone, else: {:error, cs}
+            {:asset_doc, inner} -> {:error, {:asset_doc_delete_failed, inner}}
+          end
+
+        rest = Enum.reject(entries, fn {file, _} -> file.id == id end)
+        delete_files_batch(rest, recheck?, seat, docs, opts, Map.put(results, id, outcome))
+
+      {:error, _unattributed} ->
+        policy = Keyword.fetch!(opts, :where_used)
+
+        Enum.reduce(entries, results, fn {file, override}, acc ->
+          one =
+            case delete_file(file.id, Keyword.merge(opts, where_used: policy, override: override)) do
+              {:ok, _deleted} -> :deleted
+              {:error, :not_found} -> :gone
+              {:error, {:referenced, _file, _census} = referenced} -> referenced
+              {:error, reason} -> {:error, reason}
+            end
+
+          Map.put(acc, file.id, one)
+        end)
+    end
+  end
+
+  # The batch twin of `delete_row_with_asset_doc/3`: one transaction, every row
+  # locked first, one census for the unforced files, then each delete. A failed
+  # delete rolls back with the file's id so the caller can drop it and retry.
+  defp delete_rows_with_asset_docs(entries, recheck?, seat) do
+    Barkpark.Content.Broadcast.with_deferred_queue(fn ->
+      Repo.transaction(fn ->
+        ids = Enum.map(entries, fn {file, _} -> file.id end)
+
+        present =
+          from(f in MediaFile,
+            where: f.id in ^ids,
+            order_by: f.id,
+            lock: "FOR UPDATE",
+            select: f.id
+          )
+          |> Repo.all()
+          |> MapSet.new()
+
+        {live, gone} =
+          Enum.split_with(entries, fn {file, _} -> MapSet.member?(present, file.id) end)
+
+        censuses =
+          if recheck?,
+            do: Barkpark.Media.WhereUsed.referrers_many(for({file, nil} <- live, do: file)),
+            else: %{}
+
+        {referenced, to_delete} =
+          Enum.split_with(live, fn {file, override} ->
+            is_nil(override) and match?(%{count: n} when n > 0, Map.get(censuses, file.id))
+          end)
+
+        Enum.each(to_delete, fn {file, _override} ->
+          case Repo.delete(file, stale_error_field: :id) do
+            {:ok, _deleted} ->
+              case delete_asset_doc(file, seat) do
+                :ok ->
+                  # DB-only hook, inside the transaction; see
+                  # `delete_row_with_asset_doc/3`.
+                  _ =
+                    Barkpark.Plugins.Registry.run_after_media_delete(%{
+                      media_file_id: file.id,
+                      dataset: file.dataset
+                    })
+
+                {:error, reason} ->
+                  Repo.rollback({:file, file.id, {:asset_doc, reason}})
+              end
+
+            {:error, cs} ->
+              Repo.rollback({:file, file.id, {:row, cs}})
+          end
+        end)
+
+        %{
+          deleted: to_delete,
+          gone: Enum.map(gone, fn {file, _} -> file.id end),
+          referenced:
+            Enum.map(referenced, fn {file, _} -> {file, Map.fetch!(censuses, file.id)} end)
+        }
+      end)
+    end)
+  end
+
+  # The four effects `delete_found_file/4` queues, for a committed batch. Inside
+  # an outer transaction they are deferred one file at a time, as there. Outside
+  # one the CDN purge is one request for every path, the webhooks are queued
+  # (`Events.dispatch/5` returns at once) and the blob and rendition deletes run
+  # eight at a time, because a remote store answers each over the network.
+  defp run_delete_effects([], _docs), do: :ok
+
+  defp run_delete_effects(deleted, docs) do
+    if Repo.in_transaction?() do
+      Enum.each(deleted, fn {file, override} ->
+        defer_media_effect(fn ->
+          Cdn.invalidate(file)
+          Events.dispatch(file.dataset, "media.deleted", file, Map.get(docs, file.id), override)
+          Blobstore.delete(file)
+          Barkpark.Media.Renditions.delete_for_file(file.id)
+        end)
+      end)
+    else
+      deleted
+      |> Enum.flat_map(fn {file, _} -> Cdn.invalidation_paths(file) end)
+      |> Cdn.invalidate_paths()
+
+      Enum.each(deleted, fn {file, override} ->
+        Events.dispatch(file.dataset, "media.deleted", file, Map.get(docs, file.id), override)
+      end)
+
+      deleted
+      |> Task.async_stream(
+        fn {file, _} ->
+          # ROW-ADDRESSED, as in `delete_found_file/4`.
+          Blobstore.delete(file)
+          Barkpark.Media.Renditions.delete_for_file(file.id)
+        end,
+        max_concurrency: 8,
+        timeout: :timer.seconds(30),
+        on_timeout: :kill_task
+      )
+      |> Stream.run()
+    end
+
+    :ok
   end
 
   # Inside the delete's transaction: lock the file row (a second delete of it waits

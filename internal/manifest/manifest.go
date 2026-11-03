@@ -249,6 +249,12 @@ type Command struct {
 	// without a views declaration is full-only forever; the CLI/MCP consumers
 	// must never send a ?view= param for it.
 	Views *Views `json:"views,omitempty"`
+	// TimeoutSeconds, when set, is how long the CLI waits for one request of
+	// this command instead of its default 30 s (task-597c98acab512fbf). A
+	// 100-file media delete-many must not be abandoned while the server is
+	// still deleting. The server emits it only when the client opts in with
+	// ?timeouts=1, so older binaries never see the key.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // Views is a command's declared response-projection contract (frozen shape,
