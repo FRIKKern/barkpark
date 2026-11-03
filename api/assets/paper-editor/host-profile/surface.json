@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "1.0.0",
-  "build": "5272022e9d18",
+  "build": "7179d7238052",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -75,7 +75,8 @@
       ],
       "host class": [
         "bp-paper-edit-field",
-        "bp-paper-editor"
+        "bp-paper-editor",
+        "bp-paper-surface"
       ],
       "inbound event": [
         "bp-change",
@@ -1251,7 +1252,6 @@
       "bp-paper-lock-note",
       "bp-paper-notes-config",
       "bp-paper-stats-config",
-      "bp-paper-surface",
       "bp-paper-table-edit-status",
       "bp-resting-scaffold",
       "bp-scaffold-control",
