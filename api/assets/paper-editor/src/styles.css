@@ -1149,6 +1149,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 /* Canonical Note paint keeps its surface styling, not the enclosing page geometry. */
 .bp-paper-surface .bp-canvas-note-preview > .bp-paper-surface { max-width: none; max-inline-size: none; min-inline-size: 0; min-height: 0; margin: 0; padding: 0; }
 .bp-canvas-note__k[contenteditable="plaintext-only"], .bp-canvas-note__lead[contenteditable="plaintext-only"] { cursor: text; }
+[data-bp-fleet-body] [contenteditable="plaintext-only"] { cursor: text; }
 .bp-canvas-note__k:empty:focus::before, .bp-canvas-note__lead:empty:focus::before { content: attr(data-placeholder); color: var(--paper-ink-soft); opacity: 0.5; }
 .bp-canvas-note__k:focus, .bp-canvas-note__lead:focus { outline: 1px solid var(--paper-accent); outline-offset: 1px; border-radius: 4px; }
 @media (max-width: 520px) { .bp-canvas-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-canvas-note__k { justify-self: start; } }

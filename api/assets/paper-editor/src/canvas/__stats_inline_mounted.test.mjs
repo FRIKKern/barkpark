@@ -52,8 +52,8 @@ try {
   for (const type of ["stat", "stats", "stat-grid"]) {
     const { host, block, ops, html } = mount(type);
     try {
-      const label = host.querySelector('[aria-label="Stat label"]');
-      const value = host.querySelector('[aria-label="Stat value"]');
+      const label = host.querySelector('[data-test-id="paper-inline-stat-label"]');
+      const value = host.querySelector('[data-test-id="paper-inline-stat-value"]');
       assert.ok(label, `${type}: visible label is an inline textbox`);
       assert.ok(label.closest(".bp-canvas-stats-inline"), "Stats has its scoped reader-token boundary");
       assert.ok(value, `${type}: visible value is an inline textbox`);
@@ -79,19 +79,19 @@ try {
       else expected.items[0].label = "Edited directly";
       assert.deepEqual({ ...block, ...ops.at(-1).patch }, expected, "only the selected label changes");
       label.blur();
-      assert.equal(host.querySelector('[aria-label="Stat label"]').textContent, "Edited directly");
+      assert.equal(host.querySelector('[data-test-id="paper-inline-stat-label"]').textContent, "Edited directly");
     } finally { host.remove(); }
   }
   for (const attrs of [{ locked: true }, { query: { label: "live-data" } }]) {
     const { host, ops } = mount("stats", attrs);
     try {
-      assert.equal(host.querySelector('[aria-label="Stat value"]'), null, "locked/derived values are not authored inline");
+      assert.equal(host.querySelector('[data-test-id="paper-inline-stat-value"]'), null, "locked/derived values are not authored inline");
       host.flushPendingChanges(); assert.deepEqual(ops, []);
     } finally { host.remove(); }
   }
   const composition = mount("stats");
   try {
-    const label = composition.host.querySelector('[aria-label="Stat label"]');
+    const label = composition.host.querySelector('[data-test-id="paper-inline-stat-label"]');
     label.focus();
     input(label, "Two ");
     assert.equal(label.textContent, "Two ", "typing a space must not trim it before the next word");
@@ -103,7 +103,7 @@ try {
     assert.equal(composition.ops.at(-1).patch.items[0].label, "日本語");
     assert.deepEqual(composition.ops.at(-1).patch.items[1], composition.block.items[1]);
     label.blur();
-    const value = composition.host.querySelector('[aria-label="Stat value"]');
+    const value = composition.host.querySelector('[data-test-id="paper-inline-stat-value"]');
     value.focus(); input(value, "12.50 USD");
     composition.host.flushPendingChanges();
     assert.equal(composition.ops.at(-1).patch.items[0].value, "12.50 USD", "display strings are never numerically coerced");
@@ -124,13 +124,13 @@ try {
   const mixed = mount("stats", { items: [null, { value: "", label: "Hidden" }, { value: "20", label: "Days", extra: 7 }] });
   try {
     paint(mixed.host, `<div class="bp-stats"><div class="bp-dataviz--empty">Empty</div>${sibling}</div>`, mixed.block);
-    const label = mixed.host.querySelector('[aria-label="Stat label"]');
+    const label = mixed.host.querySelector('[data-test-id="paper-inline-stat-label"]');
     label.focus(); input(label, "Correct row"); mixed.host.flushPendingChanges();
     assert.deepEqual(mixed.ops.at(-1).patch.items, [null, { value: "", label: "Hidden" }, { value: "20", label: "Correct row", extra: 7 }]);
   } finally { mixed.host.remove(); }
   const concurrent = mount("stats", {}, true);
   try {
-    const label = concurrent.host.querySelector('[aria-label="Stat label"]');
+    const label = concurrent.host.querySelector('[data-test-id="paper-inline-stat-label"]');
     label.focus(); input(label, "Local draft");
     const remote = structuredClone(concurrent.block);
     remote.items.reverse();

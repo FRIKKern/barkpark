@@ -63,7 +63,7 @@ try {
     try {
       assert.equal(row.host.querySelector("[data-bp-fleet-body]").classList.contains("bp-paper-surface"),
         palette !== "legacy", "paint inherits the reader palette instead of restyling legacy content");
-      assert.ok(row.host.querySelector('[aria-label="Card title"]'), "legacy palette still supports native editing");
+      assert.ok(row.host.querySelector('[data-test-id="paper-inline-card-title"]'), "legacy palette still supports native editing");
     } finally { row.host.remove(); }
   }
   for (const type of ["figure", "task-list"]) {
@@ -75,8 +75,8 @@ try {
   }
   const { host, block, batches } = mount();
   try {
-    const title = host.querySelector('[aria-label="Card title"]');
-    const body = host.querySelector('[aria-label="Card body"]');
+    const title = host.querySelector('[data-test-id="paper-inline-card-title"]');
+    const body = host.querySelector('[data-test-id="paper-inline-card-body"]');
     assert.ok(title, "legacy Cards title edits where it is rendered");
     assert.ok(body, "legacy Cards body edits where it is rendered");
     assert.equal(title.contentEditable, "plaintext-only");
@@ -116,30 +116,30 @@ try {
   } finally { host.remove(); }
   for (const attrs of [{ locked: true }, { query: { source: "derived" } }]) {
     const row = mount(attrs);
-    try { assert.equal(row.host.querySelector('[aria-label="Card title"]'), null); }
+    try { assert.equal(row.host.querySelector('[data-test-id="paper-inline-card-title"]'), null); }
     finally { row.host.remove(); }
   }
   const mixed = mount({ items: [null, { title: "Title", text: "Body", extra: 7 }, { title: "Sibling", text: "Untouched" }] });
   try {
     paint(mixed.host, `<div class="bp-cards"><div class="bp-card"></div>${first}${second}</div>`);
-    const body = mixed.host.querySelector('[aria-label="Card body"]');
+    const body = mixed.host.querySelector('[data-test-id="paper-inline-card-body"]');
     body.focus(); input(body, "Correct source row"); mixed.host.flushPendingChanges();
     assert.deepEqual(mixed.batches.at(-1).ops.at(-1).patch.items,
       [null, { title: "Title", text: "Correct source row", extra: 7 }, { title: "Sibling", text: "Untouched" }]);
     body.blur();
     paint(mixed.host, `<div class="bp-cards">${first}</div>`);
-    assert.equal(mixed.host.querySelector('[aria-label="Card title"]'), null, "mismatched paint never maps onto an arbitrary item");
+    assert.equal(mixed.host.querySelector('[data-test-id="paper-inline-card-title"]'), null, "mismatched paint never maps onto an arbitrary item");
   } finally { mixed.host.remove(); }
   const numeric = mount({ items: [{ title: 12.5, text: "Body" }] });
   try {
     paint(numeric.host, `<div class="bp-cards">${first.replace(">Title<", ">12.5<")}</div>`);
-    const title = numeric.host.querySelector('[aria-label="Card title"]');
+    const title = numeric.host.querySelector('[data-test-id="paper-inline-card-title"]');
     title.focus(); title.blur(); numeric.host.flushPendingChanges();
     assert.deepEqual(numeric.batches, [], "no-op focus preserves a numeric title carrier");
   } finally { numeric.host.remove(); }
   const concurrent = mount({}, true);
   try {
-    const title = concurrent.host.querySelector('[aria-label="Card title"]');
+    const title = concurrent.host.querySelector('[data-test-id="paper-inline-card-title"]');
     title.focus(); input(title, "Local draft");
     const remote = structuredClone(concurrent.block);
     remote.items.reverse(); remote.audit.remote = true;

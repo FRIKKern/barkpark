@@ -48,7 +48,7 @@ function mount(attrs = {}) {
   return { host, block, batches };
 }
 function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("input", { bubbles: true })); }
-const lines = host => [...host.querySelectorAll('[aria-label^="File tree line"]')];
+const lines = host => [...host.querySelectorAll('[data-test-id^="paper-inline-file-tree-line"]')];
 
 try {
   const { host, block, batches } = mount();
@@ -58,7 +58,7 @@ try {
     assert.equal(rows[1].textContent, "├── diff.go ● created — renderer", "a line host carries its annotation verbatim");
     assert.equal(rows[1].contentEditable, "plaintext-only");
     assert.ok(rows[1].querySelector("span"), "decoration keeps the reader's annotation span");
-    const legend = host.querySelector('[aria-label="File tree legend"]');
+    const legend = host.querySelector('[data-test-id="paper-inline-file-tree-legend"]');
     assert.ok(legend, "the legend edits where it reads");
 
     rows[0].focus(); rows[0].blur(); host.flushPendingChanges();
@@ -85,7 +85,7 @@ try {
   try {
     paint(mismatch.host, tree([row("internal/"), row("├── other.go")]));
     assert.equal(lines(mismatch.host).length, 0, "a paint that does not match the stored lines 1:1 never maps onto them");
-    assert.ok(mismatch.host.querySelector('[aria-label="File tree legend"]'), "the legend is still its own field");
+    assert.ok(mismatch.host.querySelector('[data-test-id="paper-inline-file-tree-legend"]'), "the legend is still its own field");
   } finally { mismatch.host.remove(); }
   console.log("filetree inline: lines and legend edit in place, verbatim, one line patched; mismatched paints refused");
 } finally { window.close(); }
