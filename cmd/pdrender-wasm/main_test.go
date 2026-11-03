@@ -3,6 +3,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"syscall/js"
 	"testing"
@@ -37,5 +38,17 @@ func TestRenderTUI_EmptyArgs(t *testing.T) {
 	}
 	if !strings.Contains(html, "<pre>") {
 		t.Fatalf("renderTUI(empty args) = %q, want an error <pre> string", html)
+	}
+}
+
+func TestRenderTUI_MarkedLinkHasNoANSIBytes(t *testing.T) {
+	doc := `{"blocks":[{"type":"paragraph","content":[{"type":"text","value":"a marked link","marks":[{"type":"link","href":"https://example.com"},{"type":"bold"}]}]}]}`
+	html := renderTUI(js.Undefined(), []js.Value{js.ValueOf(doc), js.ValueOf(100), js.ValueOf("light")}).(string)
+	text := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, "")
+	if strings.ContainsRune(html, '\x1b') || text != "a marked link" {
+		t.Fatalf("marked link must render intact without escape bytes: %q", html)
+	}
+	if !strings.Contains(html, "font-weight:700") || !strings.Contains(html, "text-decoration:underline") {
+		t.Fatalf("marked link must keep emphasis and underline: %q", html)
 	}
 }
