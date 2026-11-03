@@ -1,7 +1,7 @@
-// Types for @barkpark/paper-editor.
+// Types for @portable-doc/editor.
 //
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
-// a side-effect `import "@barkpark/paper-editor"`) registers two custom
+// a side-effect `import "@portable-doc/editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
 // attributes, events, globals, public classes and theme tokens. EMBED-CONTRACT.md
 // (v1.22.0) is the normative spec for both elements; these types follow

@@ -1,5 +1,5 @@
 <!-- doc-tier: human | canonical-for: paper-editor-package | budget: 1800tok -->
-# @barkpark/paper-editor
+# @portable-doc/editor
 
 The Barkpark paper editor as a prebuilt bundle. Loading it registers two custom elements that work in any page or framework. `<bp-paper-canvas>` edits a whole paper in one document. `<bp-paper-editor>` edits one PortableDoc block. Barkpark Studio and the `/papers` reader load the same bytes from `api/priv/static/assets`.
 
@@ -8,14 +8,14 @@ The Barkpark paper editor as a prebuilt bundle. Loading it registers two custom 
 ## Install
 
 ```sh
-npm install @barkpark/paper-editor
+npm install @portable-doc/editor
 ```
 
 The package has no runtime dependencies. TipTap, ProseMirror, highlight.js and lowlight are bundled into `dist/bp-paper-editor.bundle.js`.
 
 ## Load it
 
-With tags, serve the files from `node_modules/@barkpark/paper-editor/dist/` and link them.
+With tags, serve the files from `node_modules/@portable-doc/editor/dist/` and link them.
 
 ```html
 <link id="bp-paper-editor-styles" rel="stylesheet" href="/vendor/bp-paper-editor.css" />
@@ -25,8 +25,8 @@ With tags, serve the files from `node_modules/@barkpark/paper-editor/dist/` and 
 With a bundler, import the script for its side effect and the stylesheet as a file.
 
 ```js
-import "@barkpark/paper-editor";
-import "@barkpark/paper-editor/style.css";
+import "@portable-doc/editor";
+import "@portable-doc/editor/style.css";
 ```
 
 A bundled stylesheet has no `id`, so also set `window.BP_PAPER_EDITOR_NO_INJECT = true` before the first element mounts. The next section explains why.
@@ -117,7 +117,20 @@ Run these from this directory after `npm ci`.
 ```sh
 npm test
 npm run pack:check   # builds, checks notices, packs, and inspects the tarball
-npm publish          # needs publish rights to the @barkpark scope
 ```
 
 `prepack` runs `npm run build`, checks the notices, and copies the built files into `dist/`.
+
+Run the **PortableDoc editor release** workflow in its default dry-run mode to
+get the verified tarball and SHA-256. Use that artifact for the app matrix and
+keep the matrix and rollback evidence with the release.
+
+After signoff, the npm scope owner bootstraps the package with 2FA using the
+verified tarball and `npm publish <tarball> --access public --provenance` in a
+supported provenance environment. For subsequent releases, configure the npm
+trusted publisher for `FRIKKern/barkpark`, workflow
+`portable-doc-editor-release.yml`, and environment
+`portable-doc-editor-release`. Protect that GitHub environment with required
+reviewers and restrict deployment to `main`. Then set the environment variable
+`PORTABLE_DOC_EDITOR_PUBLISH_ENABLED` to `true` in that GitHub environment.
+Supply the SHA-256 from the approved app matrix when dispatching a publish.

@@ -1,4 +1,4 @@
-// Types for @barkpark/paper-editor/contract (dist/contract.js, a copy of src/contract.js).
+// Types for @portable-doc/editor/contract (dist/contract.js, a copy of src/contract.js).
 // The module has no imports and no DOM access, so it loads in Node and in a browser.
 
 /** The embed contract version. EMBED-CONTRACT.md describes this version. */
