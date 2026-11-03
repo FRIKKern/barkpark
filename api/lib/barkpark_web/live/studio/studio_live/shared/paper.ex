@@ -1578,6 +1578,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # here: the widget only ADDS an editable query surface on top of the existing paint.
   @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
+  # R6 missing-five: bounded reader-render receivers that paint through bpFleet but
+  # are not component-fleet members. Structured fields remain contextual boundaries
+  # on new Studio mounts; this paint path serves compatibility/nested mounted canvases.
+  # pre-gate-badge is canvas-eligible and uses this same producer. Keep aligned with
+  # run-convert.js CANVAS_STATIC_RENDER_TYPES.
+  @canvas_static_render_types ~w(arrayOf codelist composite localizedText pre-gate-badge)
+
   # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet
   # block (keep it OUT of @fleet_render_types so it never drags through
   # task_previews/apply_preview OR renders the WHOLE figure). Instead the canvas
@@ -1680,9 +1687,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc """
-  A block that paints through the fleet channel: a component-fleet kind OR a
-  data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same
-  bp:block-html push, same render_block(:article) producer).
+  A block that paints through the fleet channel: a component-fleet kind, a
+  data-viz kind, or a bounded static-render compatibility kind (same bpFleet
+  atom, same bp:block-html push, same render_block(:article) producer).
 
   Made public for `BarkparkWeb.PaperFleetBlocksController`
   (task-4feb8efa46a0ed33), which filters a paper's top-level blocks to this
@@ -1694,7 +1701,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do:
       Map.get(block, "type") in @fleet_render_types or
         Map.get(block, "type") in @dataviz_render_types or
-        Map.get(block, "type") in @chat_render_types
+        Map.get(block, "type") in @chat_render_types or
+        Map.get(block, "type") in @canvas_static_render_types
 
   def fleet_block?(_), do: false
 
