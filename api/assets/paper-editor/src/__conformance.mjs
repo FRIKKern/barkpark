@@ -207,7 +207,6 @@ function semanticClone(source, blockType) {
     const actionLink = root.querySelector(":scope > a.bp-button");
     const actionIsland = root.querySelector(":scope > span > [data-test-id='paper-card-action-label']");
     if (actionLink && actionIsland?.style.display !== "none") {
-      actionLink.textContent = actionIsland.textContent || "";
       actionLink.style.removeProperty("display");
     } else if (actionLink?.style.display === "none") {
       actionLink.remove();
@@ -342,6 +341,7 @@ const semanticMutationProbes = [
   ["table", '<table class="bp-table" role="grid" data-bp-type="table" data-bp-conformance-root><tbody><tr><th>Surface</th></tr></tbody></table>', '<table class="bp-table" role="presentation"><thead><tr><th><span>Surface</span></th></tr></thead><tbody></tbody></table>'],
   ["callout", '<div class="definitely-not-the-reader-callout-class" data-bp-type="callout" data-bp-conformance-root><span><strong role="textbox">Heads up</strong></span> <div class="bp-callout__body">Body</div></div>', '<div class="bp-callout"><strong>Heads up</strong> <span>Body</span></div>'],
   ["card", '<article class="definitely-not-the-reader-card-class" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><h2><span>Title</span></h2></article>', '<div class="bp-card"><h2>Title</h2></div>'],
+  ["card", '<div class="bp-canvas-card bp-card" data-bp-type="card" data-bp-conformance-root><a class="bp-button" href="https://example.com" style="display:none">MUTATED SEMANTIC LINK</a><span><span data-test-id="paper-card-action-label">Open the board</span></span></div>', '<div class="bp-card"><a class="bp-button" href="https://example.com">Open the board</a></div>'],
   ["diagram", '<figure class="definitely-not-the-reader-diagram-class" data-bp-type="diagram" data-bp-conformance-root style="background:red"><pre class="mermaid">graph TD; A-->B</pre></figure>', '<figure class="bp-diagram" style="border:1px solid"><pre class="mermaid">graph TD; A-->B</pre></figure>'],
   ["divider", '<div class="bp-section-divider" data-bp-type="divider" data-bp-conformance-root><span class="bp-section-divider__mark">§</span></div>', '<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid"><span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem">§</span></div>'],
 ];
