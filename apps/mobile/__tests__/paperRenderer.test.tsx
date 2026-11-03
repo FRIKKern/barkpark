@@ -478,7 +478,7 @@ describe('paper-links', () => {
     expect(w.text).toContain('Continue reading')
     expect(w.text).toContain('Authored fallback title')
     expect(w.text).toContain('Authored fallback summary.')
-    expect(w.text).toContain('See how the writing system works.')
+    expect(w.text).toContain('Why it matters: See how the writing system works.')
     expect(w.pressables).toBe(0)
   })
 
@@ -505,6 +505,11 @@ describe('paper-links', () => {
     expect(w.text).toContain('paper updated · revision 7')
     expect(w.text).not.toContain('Authored fallback summary.')
     expect(w.pressables).toBe(1)
+  })
+
+  it('localizes the reason label as renderer chrome', () => {
+    const w = walk(renderBlockNative(block, { theme, locale: 'nb-NO' }, 0))
+    expect(w.text).toContain('Hvorfor det betyr noe: See how the writing system works.')
   })
 
   it('drops invalid refs and renders nothing when none remain', () => {

@@ -2,7 +2,7 @@
   "renderer": "mobile",
   "compare": "text",
   "pack_stamp": "1ca9ca01d368484f4e7aa39003f9fb065595d29745f785d823154762b362be0b",
-  "ran_at_sha": "bdfda62a25353c6bfcaa8f4724b126ec890fe55c",
+  "ran_at_sha": "96cce88b565ccea8c82d49110503bd046ea7e0b6",
   "rows": [
     {
       "type": "action",
@@ -255,12 +255,7 @@
     },
     {
       "type": "paper-links",
-      "status": "fail",
-      "diff": [
-        "word 21/29 \"why\" not found in order",
-        "word 22/29 \"it\" not found in order",
-        "word 23/29 \"matters\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "paragraph",
@@ -291,10 +286,7 @@
     },
     {
       "type": "route",
-      "status": "fail",
-      "diff": [
-        "word 7/7 \"testrunden\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "section",

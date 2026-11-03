@@ -165,6 +165,14 @@ describe('the five natives are registered and render in BOTH registers', () => {
   })
 })
 
+describe('route text order', () => {
+  it('keeps the destination caption after the route metadata', () => {
+    const route = datavizCases.find((entry) => entry.type === 'route')
+    expect(route).toBeDefined()
+    expect(walk(route!.block).text).toBe('sykling · 4.2 kmTestrunden')
+  })
+})
+
 /* ── 2. the honest empty states ────────────────────────────────────────────── */
 
 describe('empty/malformed data keeps the honest state', () => {
