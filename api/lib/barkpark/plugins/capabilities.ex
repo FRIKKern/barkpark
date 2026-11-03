@@ -1344,6 +1344,29 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # task-ccb2ade789293904. Keeps the dataset, its schemas, webhooks and
+      # tokens. Production needs --confirm-production <name>; the 202 carries
+      # progress and bp asks again until the receipt.
+      core_cmd(
+        "dataset.empty",
+        "dataset",
+        "empty",
+        "Delete every document and media file of a dataset in the active --workspace/--project, in the background, and keep the dataset and its schemas. Production needs --confirm-production production.",
+        "POST",
+        "/v1/datasets/:dataset/empty",
+        "scoped_admin",
+        args: [arg("dataset", true, "string", "Dataset slug, e.g. production.")],
+        flags: [
+          flag(
+            "confirm-production",
+            "string",
+            "The dataset's name again. Required when it is production."
+          )
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "data.counts",
         "data",

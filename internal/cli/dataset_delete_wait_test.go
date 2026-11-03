@@ -60,3 +60,58 @@ func TestDatasetDeleteAsksAgainUntilTheReceipt(t *testing.T) {
 		}
 	})
 }
+
+func TestDatasetEmptyAsksAgainWithProgressUntilTheReceipt(t *testing.T) {
+	const emptyPath = "POST /w/acme/p/site/v1/datasets/production/empty"
+	datasetDeletePoll = 0
+	t.Cleanup(func() { datasetDeletePoll = defaultDatasetDeletePoll })
+
+	t.Run("202 with remaining, then the 200 receipt; the confirmation rides every poll", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+		h.deletes = []int{http.StatusAccepted, http.StatusAccepted}
+		h.accepted = `{"emptying":true,"dataset":"production","dataset_id":"ds-1","remaining":{"documents":59895,"media_files":1307}}`
+
+		code, stdout, stderr := h.runDestroy(globals{yes: true}, "dataset", "empty", "production", "--confirm-production", "production")
+
+		sent := 0
+		for _, got := range h.seen {
+			if got == emptyPath {
+				sent++
+			}
+		}
+		if code != exitOK || sent != 3 {
+			t.Errorf("exit=%d posts=%d, want exit 0 after 3 POSTs; requests %v", code, sent, h.seen)
+		}
+		want := []string{
+			"confirm-production=production",
+			"confirm-production=production&dataset_id=ds-1",
+			"confirm-production=production&dataset_id=ds-1",
+		}
+		if strings.Join(h.queries, "|") != strings.Join(want, "|") {
+			t.Errorf("queries %q, want %q", h.queries, want)
+		}
+		if !strings.Contains(stderr, "still emptying") || !strings.Contains(stderr, "59895 documents and 1307 media files left") {
+			t.Errorf("the wait and its progress must be named on stderr:\n%s", stderr)
+		}
+		if strings.Contains(stdout, "emptying") {
+			t.Errorf("the receipt alone belongs on stdout:\n%s", stdout)
+		}
+	})
+
+	t.Run("without --yes off a TTY nothing is sent", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+
+		code, _, stderr := h.runDestroy(globals{}, "dataset", "empty", "production", "--confirm-production", "production")
+
+		for _, got := range h.seen {
+			if got == emptyPath {
+				t.Fatalf("an unconfirmed empty sent its POST; requests %v", h.seen)
+			}
+		}
+		if code == exitOK || !strings.Contains(stderr, "--yes") {
+			t.Errorf("exit=%d, want a refusal naming --yes:\n%s", code, stderr)
+		}
+	})
+}

@@ -150,6 +150,18 @@ var destroyTargets = map[string]destroyTarget{
 		lookupMatch: []string{"slug"},
 		previewCols: []string{"slug", "name", "id"},
 	},
+	// Irreversible for the content: every document and media file goes, the
+	// dataset and its schemas stay (task-ccb2ade789293904). Production also
+	// needs --confirm-production <name>, which the server checks.
+	"dataset.empty": {
+		kind:        "dataset content",
+		argName:     "dataset",
+		lookupNoun:  "workspace",
+		lookupVerb:  "dataset-ls",
+		lookupKey:   "datasets",
+		lookupMatch: []string{"slug"},
+		previewCols: []string{"slug", "name", "id"},
+	},
 	// Irreversible, and its own summary names the blast radius: a revoked
 	// ticket key is indistinguishable from a missing one, so every client
 	// holding it starts 401ing. Resolved through `ticket-key ls`.
@@ -166,7 +178,7 @@ var destroyTargets = map[string]destroyTarget{
 
 // destroyRefArgs re-resolves cmd's positional args so the gate can name the
 // same target the request will. It reports gated=false — and does no work —
-// for every command that is not in the registry, which is all but five of them.
+// for every command that is not in the registry, which is all but six of them.
 //
 // It re-runs splitArgs/bindArgs rather than threading the map out of
 // buildManifestRequest because both are PURE: they read only the declared arg

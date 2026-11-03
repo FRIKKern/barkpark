@@ -4313,6 +4313,8 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :scoped_admin])
 
     delete("/v1/datasets/:dataset", DatasetController, :delete)
+    # task-ccb2ade789293904: empty it and keep it, production with confirmation.
+    post("/v1/datasets/:dataset/empty", DatasetController, :empty)
   end
 
   # task-6224d34a5a8a6017 — the switcher's three LISTs also take a login session

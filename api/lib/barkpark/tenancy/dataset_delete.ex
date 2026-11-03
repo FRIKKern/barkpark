@@ -176,6 +176,168 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     end
   end
 
+  @doc """
+  Empty one dataset and keep it (task-ccb2ade789293904): its documents and
+  media go through the same doors a delete walks (`Content.delete_document/4`,
+  `Media.delete_file/2` with `where_used: :cascade`). The dataset row, its
+  schemas, webhooks, tokens, search config and revision history stay.
+  `production` may be emptied; the HTTP door asks for its name as confirmation.
+
+  Unlike `delete/2` this is not one transaction. It commits `:dataset_empty_chunk`
+  rows (default 200) per transaction, media first, then documents, so a 60,000
+  document dataset never holds one transaction for the whole walk. A run that
+  stops leaves what it committed deleted and the rest in place; the next run
+  continues. Media that a document outside the dataset embeds is refused
+  before anything is deleted (`{:media_referenced, files}`), as for a delete.
+
+  `opts[:progress]` is called after each chunk with
+  `%{phase: :media | :documents, media_files: n, documents: n}`, the counts
+  deleted so far. The run ends with one `content_mutation` / `dataset_emptied`
+  row on the workspace's audit chain.
+  """
+  @spec empty(Dataset.t(), keyword()) ::
+          {:ok,
+           %{dataset: Dataset.t(), documents: non_neg_integer(), media_files: non_neg_integer()}}
+          | {:error,
+             :not_found
+             | {:media_referenced, [map()]}
+             | {:empty_stuck, :media | :documents}
+             | {:delete_failed, :timeout | :contended | :database}
+             | term()}
+  def empty(%Dataset{} = dataset, opts \\ []) do
+    with %Project{} = project <- Repo.get(Project, dataset.project_id),
+         %Workspace{} = workspace <- Repo.get(Workspace, project.workspace_id) do
+      target = %{
+        dataset: dataset,
+        project: project,
+        workspace: workspace,
+        actor: Keyword.get(opts, :actor),
+        chunk: Application.get_env(:barkpark, :dataset_empty_chunk, 200)
+      }
+
+      progress = Keyword.get(opts, :progress, fn _ -> :ok end)
+      counts = %{phase: :media, media_files: 0, documents: 0}
+      progress.(counts)
+
+      with :ok <- refuse_referenced_media(target),
+           {:ok, counts} <- empty_walk(target, :media, counts, progress, @contended_attempts),
+           counts = %{counts | phase: :documents},
+           {:ok, counts} <- empty_walk(target, :documents, counts, progress, @contended_attempts),
+           {:ok, _event} <- audit_emptied(target, counts) do
+        {:ok, %{dataset: dataset, documents: counts.documents, media_files: counts.media_files}}
+      end
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc "How many documents and media files the dataset still holds."
+  @spec remaining(Dataset.t()) :: %{documents: non_neg_integer(), media_files: non_neg_integer()}
+  def remaining(%Dataset{} = dataset) do
+    with %Project{} = project <- Repo.get(Project, dataset.project_id),
+         %Workspace{} = workspace <- Repo.get(Workspace, project.workspace_id) do
+      target = %{dataset: dataset, project: project, workspace: workspace}
+
+      %{
+        documents: Document |> in_dataset(target) |> Repo.aggregate(:count),
+        media_files: MediaFile |> in_dataset(target) |> Repo.aggregate(:count)
+      }
+    else
+      nil -> %{documents: 0, media_files: 0}
+    end
+  end
+
+  defp empty_walk(target, kind, counts, progress, attempts) do
+    key = if kind == :media, do: :media_files, else: :documents
+
+    case empty_chunk(target, kind) do
+      {:ok, 0} ->
+        if remaining(target.dataset)[key] == 0,
+          do: {:ok, counts},
+          else: {:error, {:empty_stuck, kind}}
+
+      {:ok, n} ->
+        counts = Map.update!(counts, key, &(&1 + n))
+        progress.(counts)
+        empty_walk(target, kind, counts, progress, @contended_attempts)
+
+      {:error, {:delete_failed, :contended}} when attempts > 1 ->
+        empty_walk(target, kind, counts, progress, attempts - 1)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # One chunk is one transaction, run the way `run/1` runs a delete: audit rows
+  # buffered and appended last, broadcasts and media blob removal after commit.
+  defp empty_chunk(target, kind) do
+    Media.clear_deferred_media_effects()
+    audit_owner? = Audit.defer_emits() == :owner
+    started = System.monotonic_time(:millisecond)
+    walk = if kind == :media, do: &delete_media/1, else: &delete_documents/1
+
+    try do
+      result =
+        Broadcast.with_deferred_queue(fn ->
+          Repo.transaction(
+            fn ->
+              case walk.(target) do
+                {:ok, n} ->
+                  if audit_owner?, do: Audit.flush_deferred!()
+                  n
+
+                {:error, reason} ->
+                  Repo.rollback(reason)
+              end
+            end,
+            timeout: timeout_ms()
+          )
+        end)
+
+      case result do
+        {:ok, n} ->
+          if audit_owner?, do: Audit.finish_deferred(:committed)
+          Media.flush_deferred_media_effects()
+          {:ok, n}
+
+        {:error, reason} ->
+          Media.clear_deferred_media_effects()
+          {:error, rolled_back(reason, System.monotonic_time(:millisecond) - started)}
+      end
+    rescue
+      e in [DBConnection.ConnectionError, Postgrex.Error] ->
+        Media.clear_deferred_media_effects()
+        {:error, {:delete_failed, failure(e, System.monotonic_time(:millisecond) - started)}}
+
+      e ->
+        Media.clear_deferred_media_effects()
+        reraise(e, __STACKTRACE__)
+    after
+      if audit_owner?, do: Audit.finish_deferred(:rolled_back)
+      WriteScope.reset_request_memo()
+    end
+  end
+
+  defp audit_emptied(%{dataset: ds, project: p, workspace: ws, actor: actor}, counts) do
+    Audit.emit(%{
+      category: "content_mutation",
+      action: "dataset_emptied",
+      subject: ds.id,
+      actor_type: if(actor, do: "api_token", else: "system"),
+      actor_id: actor && to_string(actor.id),
+      workspace_id: ws.id,
+      project_id: p.id,
+      metadata: %{
+        "dataset" => ds.slug,
+        "project" => p.slug,
+        "workspace" => ws.slug,
+        "documents" => counts.documents,
+        "media_files" => counts.media_files
+      }
+    })
+  end
+
   defp retry_contended(target, attempts) do
     case run(target) do
       {:error, {:delete_failed, :contended}} when attempts > 1 ->
@@ -452,6 +614,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     MediaFile
     |> in_dataset(target)
     |> select([m], m.id)
+    |> chunk(target)
     |> Repo.all()
     |> Enum.reduce_while({:ok, 0}, fn id, {:ok, n} ->
       case Media.delete_file(id, workspace_id: ws.id, where_used: :cascade) do
@@ -468,6 +631,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     Document
     |> in_dataset(target)
     |> select([d], {d.doc_id, d.type})
+    |> chunk(target)
     |> Repo.all()
     |> Enum.map(fn {doc_id, type} -> {Content.published_id(doc_id), type} end)
     |> Enum.uniq()
@@ -479,6 +643,13 @@ defmodule Barkpark.Tenancy.DatasetDelete do
       end
     end)
   end
+
+  # A delete walks every row. An empty walks `target.chunk` rows per
+  # transaction, oldest id first, locked so a racing edit waits.
+  defp chunk(query, %{chunk: n}) when is_integer(n),
+    do: query |> order_by([x], asc: x.id) |> limit(^n) |> lock("FOR UPDATE")
+
+  defp chunk(query, _target), do: query
 
   defp sweep_authoring_exemptions(%Dataset{id: id, slug: slug}) do
     if OwnedTables.present?("authoring_exemptions") do
