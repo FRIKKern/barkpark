@@ -84,6 +84,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	fromLine := 0
 	batchBytes := importDefaultBatchBytes
 	mediaDir := ""
+	replaceMedia := false
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -97,6 +98,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			i++
 		case "--yes":
 			yes = true
+			i++
+		case "--replace-media":
+			replaceMedia = true
 			i++
 		case "--from-line":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--from-line")
@@ -130,7 +134,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return usageErrf(out, func() { usageImport(out, false) },
-					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --media / --yes)", a)
+					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --media / --replace-media / --yes)", a)
 			}
 			if path != "" {
 				return usageErrf(out, func() { usageImport(out, false) }, "import takes one file; got %q and %q", path, a)
@@ -141,6 +145,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	}
 	if path == "" {
 		return usageErrf(out, func() { usageImport(out, false) }, "import needs the NDJSON file a `bp export` wrote")
+	}
+	if replaceMedia && mediaDir == "" {
+		return usageErrf(out, func() { usageImport(out, false) }, "--replace-media works only with --media <dir>")
 	}
 
 	dataset := ctx.Dataset
@@ -215,6 +222,20 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			fmt.Sprintf("import: cannot read the ids already in %s: %v. Nothing was written.", scope, err), exitGeneric)
 	}
 
+	// The target's media list says which files a stopped run already sent
+	// (task-634da0d58fbf2543), so a resumed import skips them.
+	if media != nil {
+		held, status, body, err := listDatasetMedia(ctx, dataset)
+		if err == nil && (status < 200 || status >= 300) {
+			err = fmt.Errorf("%s", classifyError(status, body).errorMessage())
+		}
+		if err != nil {
+			return useError(out, "request_failed",
+				fmt.Sprintf("import: cannot read the media already in %s: %v. Nothing was written.", scope, err), exitGeneric)
+		}
+		media.plan(held, replaceMedia)
+	}
+
 	var collisions []string
 	for _, r := range ordered {
 		if r.Action == "skip" {
@@ -246,13 +267,28 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			refusedIDs = collisions
 		}
 		if media != nil && !out.machineOut() {
-			out.outf("dry run: %d media file(s) from %s would be uploaded with their asset ids", len(media.assets), mediaDir)
+			out.outf("dry run: from %s, %s", mediaDir, media.planSummary("would be uploaded with their asset ids"))
+			if media.refused() {
+				out.outf("dry run: %s", media.refusal(scope))
+			}
 		}
 		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs, sanity)
-		if refused {
+		if refused || (media != nil && media.refused()) {
 			return exitConflict
 		}
 		return exitOK
+	}
+
+	if media != nil && media.refused() {
+		details, _ := json.Marshal(map[string]any{"media": media.differ})
+		msg := media.refusal(scope)
+		remedy := "re-run with --replace-media to delete the target's file under each id and upload the exported one, or import into an empty dataset"
+		if !renderErrorEnvelopeRemedy(out, "conflict", msg, "", remedy, details, "") {
+			out.userErr("%s", msg)
+			out.errf("  hint: %s", remedy)
+			humanErrorCode(out, "conflict")
+		}
+		return exitConflict
 	}
 
 	if refused {
@@ -286,6 +322,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 	if media != nil {
+		if !out.machineOut() && media.skipped > 0 {
+			out.errf("import: %d of %d media file(s) are already on the target and are skipped", media.skipped, len(media.assets))
+		}
 		if err := media.upload(out, ctx, dataset); err != nil {
 			return useError(out, "request_failed",
 				fmt.Sprintf("import: %v. No document was written; run the import again to resume, the files already uploaded are kept.", err), exitGeneric)
@@ -353,12 +392,18 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	}
 	if media != nil {
 		payload["media"] = len(media.assets)
+		payload["media_uploaded"] = len(media.send)
+		payload["media_skipped"] = media.skipped
+		payload["media_size_only"] = media.sizeOnly
+		if media.replace {
+			payload["media_replaced"] = len(media.differ)
+		}
 	}
 	if out.emitStructured(payload) {
 		return exitOK
 	}
 	if media != nil {
-		out.outf("uploaded %d media file(s) with their asset ids", len(media.assets))
+		out.outf("%s", media.planSummary("uploaded with their asset ids"))
 	}
 	out.outf("imported %d documents into %s from %s (%d created, %d overwritten, %d skipped) in %d batch(es)",
 		applied, scope, path, counts["create"], counts["overwrite"], counts["skip"], sent)
@@ -743,7 +788,7 @@ func usageImport(out *writer, toStdout bool) {
 	if toStdout {
 		p = out.outf
 	}
-	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--media <dir>] [--yes]")
+	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--media <dir>] [--replace-media] [--yes]")
 	p("")
 	p("Restore a `bp export` NDJSON backup into the active dataset (set it with -d).")
 	p("")
@@ -767,7 +812,14 @@ func usageImport(out *writer, toStdout bool) {
 	p("  --media <dir>      upload the files a `bp export --media <dir>` wrote, with their")
 	p("                     asset ids, before the documents. The mediaAsset rows then")
 	p("                     overwrite the asset documents the uploads made, with fileInfo")
-	p("                     pointing at the target's copy. Run it again to resume")
+	p("                     pointing at the target's copy. Run it again to resume. The")
+	p("                     import first reads the target's media list and skips each")
+	p("                     file the target holds under the same id with the same size,")
+	p("                     and the same SHA-1 when both sides have one. It prints how")
+	p("                     many it skipped and how many of those it matched by size only")
+	p("  --replace-media    with --media: when the target holds an id with another size")
+	p("                     or SHA-1, delete the target's file and upload the exported")
+	p("                     one. Without it the import refuses and names those ids")
 	p("  --yes              skip the confirmation for a production target")
 	p("")
 	p("A batch holds at most 1000 mutations and is applied by the server as one")
