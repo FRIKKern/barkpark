@@ -418,6 +418,12 @@ const CANVAS_FLEET_TYPES = new Set([
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
 
+// Chat snapshots use the same reader paint channel without exposing chat actions.
+const CANVAS_CHAT_TYPES = new Set([
+  "chat-approval", "chat-plan", "chat-question",
+  "chat-thinking", "chat-todo", "chat-tool-diff",
+]);
+
 // pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds (reader emitters in
 // render/data_viz.ex; `stat-grid` is the accepted alias of `stats`). They ride the
 // SAME bpFleet node + server-paint channel as CANVAS_FLEET_TYPES — the whole block
@@ -685,7 +691,7 @@ function isCanvasReadOnlyAtomNode(nodeType) {
 function isCanvasFleetType(type) {
   // The DataViz kinds ride the same bpFleet node + server-paint channel
   // (pd-ee-dataviz-editors) — a parallel set, same projection.
-  return CANVAS_FLEET_TYPES.has(type) || CANVAS_DATAVIZ_TYPES.has(type);
+  return CANVAS_FLEET_TYPES.has(type) || CANVAS_DATAVIZ_TYPES.has(type) || CANVAS_CHAT_TYPES.has(type);
 }
 
 // True when a TipTap NODE type is the canvas fleet node ("bpFleet"). runToOps reads

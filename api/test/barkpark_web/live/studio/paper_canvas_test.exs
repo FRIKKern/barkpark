@@ -342,6 +342,28 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       end
     end
 
+    test "chat snapshots stay in the canvas run and paint the reader output" do
+      paper = BarkparkWeb.Studio.StudioLive.Shared.Paper
+
+      for type <- ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff) do
+        block =
+          "../../../../priv/portable_doc/goldens/blocks/#{type}.golden.json"
+          |> Path.expand(__DIR__)
+          |> File.read!()
+          |> Jason.decode!()
+          |> Map.fetch!("input")
+          |> Map.put("id", "chat")
+
+        blocks = [para("before"), block, para("after")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+        assert paper.fleet_block?(block)
+        assert %{"block_id" => "chat", "html" => html} = paper.fleet_render(block, %{})
+        assert html =~ "bp-#{type}"
+        refute html =~ "phx-click"
+      end
+    end
+
     test "t12a: [heading, task-board, paragraph] is ONE run (the fleet block no longer splits)" do
       blocks = [heading("h1"), task_board("b1"), para("p1")]
 
