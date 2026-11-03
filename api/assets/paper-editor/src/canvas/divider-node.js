@@ -96,8 +96,14 @@ export const Divider = Node.create({
   renderHTML({ HTMLAttributes }) {
     return [
       "div",
-      mergeAttributes(HTMLAttributes, { class: "bp-section-divider" }),
-      ["span", { class: "bp-section-divider__mark" }, "§"],
+      mergeAttributes(HTMLAttributes, {
+        class: "bp-section-divider",
+        style: "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid",
+      }),
+      ["span", {
+        class: "bp-section-divider__mark",
+        style: "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem",
+      }, "§"],
     ];
   },
 });
