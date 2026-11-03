@@ -386,10 +386,11 @@ try {
     );
   });
 
-  // The attr SET is unchanged by the retarget work and is still worth pinning: the new
+  // The semantic attr set is unchanged by the retarget work and is still worth pinning: the new
   // ref is written INSIDE the verbatim-carried block (bpBlock), not as a new top-level
   // attr, so the verbatim-carry contract and the id stamp are untouched. A `ref` attr
-  // appearing here would mean the block stopped riding verbatim.
+  // appearing here would mean the block stopped riding verbatim. Section placement
+  // metadata may ride separately on bpSectionCell without duplicating block content.
   check("§2 neither atom's NODE grew a top-level ref/target attr — the value still rides bpBlock", () => {
     for (const [label, nodeName, key] of [
       ["sheet", "bpSheet", "ref"],
@@ -399,9 +400,9 @@ try {
       assert.ok(node, `precondition: ${nodeName} is in the document`);
       const attrKeys = Object.keys(node.attrs).sort();
       assert.deepEqual(
-        attrKeys,
+        attrKeys.filter((attr) => attr !== "bpSectionCell"),
         ["bpBlock", "bpId", "bpType"],
-        `the ${label} atom's attr set changed from the audited {bpBlock,bpId,bpType}`,
+        `the ${label} atom's semantic attr set changed from the audited {bpBlock,bpId,bpType}`,
       );
       assert.ok(
         !(key in node.attrs),
@@ -756,7 +757,7 @@ try {
   check("§5c the chip moved to the new target and the node grew no top-level attr", () => {
     const node = nodeOfType("bpEmbed");
     assert.deepEqual(
-      Object.keys(node.attrs).sort(),
+      Object.keys(node.attrs).sort().filter((attr) => attr !== "bpSectionCell"),
       ["bpBlock", "bpId", "bpType"],
       "the retarget moved the target OUT of the verbatim-carried block",
     );
