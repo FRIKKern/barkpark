@@ -126,7 +126,7 @@ get the verified tarball and SHA-256. Use that artifact for the app matrix and
 keep the matrix and rollback evidence with the release.
 
 After signoff, the npm scope owner bootstraps the package with 2FA using the
-verified tarball and `npm publish <tarball> --access public --provenance` in a
+verified tarball and `npm publish <tarball> --access public --tag alpha --provenance` in a
 supported provenance environment. For subsequent releases, configure the npm
 trusted publisher for `FRIKKern/barkpark`, workflow
 `portable-doc-editor-release.yml`, and environment
