@@ -97,6 +97,13 @@ function makeRow(spec) {
           parseHTML: (el) => el.getAttribute("data-body-key") || "blocks",
           renderHTML: (attrs) => (attrs.bodyKey && attrs.bodyKey !== "blocks" ? { "data-body-key": attrs.bodyKey } : {}),
         },
+        // Internal provenance: an authored tabs row may validly omit `id`.
+        // Keep that omission through full-document reconstruction; a new row
+        // has the default false value and still receives a client id.
+        bpSourceIdMissing: {
+          default: false,
+          rendered: false,
+        },
       };
     },
 
@@ -304,7 +311,7 @@ function makeContainer(spec, RowNode) {
               const rowType = state.schema.nodes[spec.rowName];
               const paragraph = state.schema.nodes.paragraph;
               if (!rowType || !paragraph) return false;
-              const fresh = rowType.create({ bpId: null, title: null }, paragraph.create());
+              const fresh = rowType.create({ bpId: null, title: null, bpSourceIdMissing: false }, paragraph.create());
               tr.insert(pos + cur.nodeSize - 1, fresh);
               return true;
             })

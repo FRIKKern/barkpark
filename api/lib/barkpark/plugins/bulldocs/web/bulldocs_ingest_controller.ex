@@ -798,7 +798,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     written =
       if is_list(blocks),
-        do: blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes(),
+        do:
+          blocks
+          |> BlockOps.ensure_persisted_block_ids()
+          |> BlockOps.normalize_render_shapes(),
         else: blocks
 
     {added, existing} = NewErrors.split(stored, written)

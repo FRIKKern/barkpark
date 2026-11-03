@@ -21,6 +21,8 @@ function check(name, fn) {
 const p = (id, text) => ({ id, type: "paragraph", content: [{ type: "text", value: text }] });
 const STEPS = { id: "s1", type: "steps", steps: [{ id: "r1", title: "First", blocks: [p("c1", "Do this.")] }, { id: "r2", title: "Second", children: [p("c2", "Then that.")] }] };
 const TABS = { id: "t1", type: "tabs", tabs: [{ id: "u1", label: "One", blocks: [p("c3", "Tab one.")] }, { id: "u2", blocks: [] }] };
+const LEGACY_TABS = { id: "t-legacy", type: "tabs", tabs: [{ label: "Optional", blocks: [p("c-legacy", "Kept.")] }, { id: "t-legacy-tab-0", label: "Explicit", blocks: [] }] };
+const LEGACY_STEPS = { id: "s-legacy", type: "steps", steps: [{ title: "Required", blocks: [] }] };
 const NESTED = { id: "s2", type: "steps", steps: [{ id: "r3", title: "Outer", blocks: [{ id: "x1", type: "section", title: "In", blocks: [p("c4", "deep")] }] }] };
 
 check("runToTiptap: steps and tabs project to row containers with titles and nested content", () => {
@@ -48,6 +50,19 @@ check("a container child inside a row is bpOpaque (V1 forbid-nesting)", () => {
 
 check("docToBlocks: rows reconstruct byte-identically (ids, titles, body keys; an empty row stays empty)", () => {
   assert.deepEqual(docToBlocks(runToTiptap([STEPS, TABS, NESTED])), [STEPS, TABS, NESTED]);
+});
+
+check("docToBlocks: an optional missing tab-row id stays missing while an explicit id stays exact", () => {
+  assert.deepEqual(docToBlocks(runToTiptap([LEGACY_TABS])), [LEGACY_TABS]);
+  assert.match(docToBlocks(runToTiptap([LEGACY_STEPS]))[0].steps[0].id, /^c-/);
+});
+
+check("runToOps: reordering an optional-id row keeps the omission and a synthetic-looking explicit id", () => {
+  const doc = runToTiptap([LEGACY_TABS]);
+  doc.content[0].content.reverse();
+  const [op] = runToOps([LEGACY_TABS], doc);
+  assert.equal(op.op, "patch-block");
+  assert.deepEqual(op.patch.tabs.map((row) => row.id), ["t-legacy-tab-0", undefined]);
 });
 
 check("runToOps: unedited steps + tabs emit ZERO ops", () => {

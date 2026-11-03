@@ -3,8 +3,9 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
   Backfill canonical block SHAPE onto LEGACY papers — two passes at ONE
   chokepoint:
 
-    1. **id-less blocks** (R2 corpus fix) — fill a stable `id` on every block
-       that lacks one (`ensure_block_ids`).
+    1. **id-less blocks** (R2 corpus fix) — fill a stable `id` on every
+       addressable block that lacks one (`ensure_persisted_block_ids`), while
+       preserving a schema-valid absent plain-tabs row id.
     2. **flat-string list items** (obsidian list-item-crash fix) — coerce a
        legacy `items:["text", …]` (flat strings) to the canonical inline-array
        `items:[[%{"type"=>"text","value"=>"text"}], …]` (`normalize_list_items`).
@@ -30,7 +31,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
 
   New ingests are already safe — every write path that persists
   `content["blocks"]` now routes through BOTH
-  `Barkpark.Content.Papers.BlockOps.ensure_block_ids/1` AND
+  `Barkpark.Content.Papers.BlockOps.ensure_persisted_block_ids/1` AND
   `Barkpark.Content.Papers.BlockOps.normalize_list_items/1` (the paper upsert
   path, the document write path covering Sanity-shaped mutations + the legacy
   create controller, the op-fold paths, the scaffold). This module repairs the
@@ -182,7 +183,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
   defp plan_change(%Document{content: content} = doc) when is_map(content) do
     case Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        id_blocks = BlockOps.ensure_block_ids(blocks)
+        id_blocks = BlockOps.ensure_persisted_block_ids(blocks)
         new_blocks = BlockOps.normalize_render_shapes(id_blocks)
 
         cond do
