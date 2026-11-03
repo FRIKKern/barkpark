@@ -137,7 +137,9 @@ export async function waitFor(cdp, expression, { timeout = 15_000, interval = 50
 }
 
 export async function navigate(cdp, url) {
+  const token = `nav-${Date.now()}-${Math.random()}`;
+  await evaluate(cdp, `window.__hostsNavigationToken = ${JSON.stringify(token)}`);
   const { errorText } = await cdp.send("Page.navigate", { url });
   if (errorText) throw new Error(`navigation failed: ${errorText}`);
-  await waitFor(cdp, "document.readyState === 'complete' && Boolean(window.testingGround?.state?.canvases?.[0]?._editor)");
+  await waitFor(cdp, `window.__hostsNavigationToken !== ${JSON.stringify(token)} && document.readyState === 'complete' && Boolean(window.testingGround?.state?.canvases?.[0]?._editor)`);
 }

@@ -21,6 +21,7 @@ test("E01 through E12 are declared once and unavailable journeys explain why", (
   assert.deepEqual(journeys.map(({ id }) => id), Array.from({ length: 12 }, (_, index) => `E${String(index + 1).padStart(2, "0")}`));
   for (const journey of journeys) if (journey.state === "unavailable") assert.ok(journey.reason);
   assert.match(journeys.find(({ id }) => id === "E09").reason, /task-53f2fc33b834114f/);
+  assert.deepEqual(journeys.filter(({ state }) => state === "available").map(({ id }) => id), ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E10"]);
 });
 
 test("CLI is strict and --allow-unavailable is opt-in", () => {

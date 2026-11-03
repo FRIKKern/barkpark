@@ -21,7 +21,6 @@ incremental development, `--allow-unavailable` writes the partial artifacts and
 `hosts/manifest.json`; the manifest remains `incomplete`, so it cannot be
 mistaken for acceptance evidence. `--host=<id>` narrows a local run to one host.
 
-Current executable journeys are E01 (type and prove the fake host saved) and E10
-(desktop/phone, light/dark capture). The manifest gives a concrete reason for
+Current executable journeys are E01–E08 and E10. The manifest gives a concrete reason for
 every unavailable journey. E09 remains unavailable until TG2's sixth Read≠Edit
 light and known-red proof land under `task-53f2fc33b834114f`.

@@ -47,8 +47,60 @@ function gif(frames, path) {
   }
 }
 
+function ffmpegVersion() {
+  const ffmpeg = process.env.HOSTS_FFMPEG || "ffmpeg";
+  return execFileSync(ffmpeg, ["-version"], { encoding: "utf8" }).split("\n")[0];
+}
+
 async function viewport(cdp, width, height) {
   await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width <= 390 });
+}
+
+async function key(cdp, key, { code = key, modifiers = 0 } = {}) {
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code, modifiers });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
+}
+
+async function mod(cdp, shift = false) {
+  return (await evaluate(cdp, "navigator.platform.includes('Mac')")) ? 4 + (shift ? 8 : 0) : 2 + (shift ? 8 : 0);
+}
+
+async function focusText(cdp, text, canvas = 0, at = "end") {
+  await evaluate(cdp, `(() => {
+    const root = window.testingGround.state.canvases[${canvas}];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) if (node.data.includes(${JSON.stringify(text)})) break;
+    if (!node) throw new Error(${JSON.stringify(`text not found: ${text}`)});
+    const range = document.createRange(); range.setStart(node, ${at === "start" ? "0" : "node.data.length"}); range.collapse(true);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    node.parentElement.focus(); return true;
+  })()`);
+}
+
+async function focusLastParagraph(cdp) {
+  await evaluate(cdp, `(() => {
+    const p = document.querySelector('.ProseMirror p:last-of-type');
+    if (!p) throw new Error('no editable paragraph');
+    const range = document.createRange(); range.selectNodeContents(p); range.collapse(false);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    p.focus(); return true;
+  })()`);
+}
+
+async function settle(cdp) {
+  await evaluate(cdp, "window.testingGround.settle()");
+  await waitFor(cdp, "!window.testingGround.state.host.busy");
+}
+
+async function paste(cdp, { html = "", text = "" }) {
+  await evaluate(cdp, `(() => {
+    const data = new DataTransfer();
+    data.setData('text/html', ${JSON.stringify(html)});
+    data.setData('text/plain', ${JSON.stringify(text)});
+    return document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  })()`);
+  await settle(cdp);
 }
 
 async function e01(cdp, root, host) {
@@ -63,6 +115,207 @@ async function e01(cdp, root, host) {
   const output = join(root, "journeys", `${host}--E01.gif`);
   gif([before, after], output);
   return { id: "E01", state: "passed", artifacts: [before, after, output].map((path) => path.slice(root.length + 1)) };
+}
+
+async function e02(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=drill:D04`);
+  await focusText(cdp, "Pack the stove and the tent.");
+  const before = join(root, "journeys", `${host}--E02--before.png`);
+  await screenshot(cdp, before);
+  await key(cdp, "Enter");
+  await cdp.send("Input.insertText", { text: "Split marker" });
+  await settle(cdp);
+  await waitFor(cdp, "window.testingGround.state.host.saved.length === 2");
+  const split = join(root, "journeys", `${host}--E02--split.png`);
+  await screenshot(cdp, split);
+  await focusText(cdp, "Split marker", 0, "start");
+  await key(cdp, "Backspace");
+  await settle(cdp);
+  await waitFor(cdp, "window.testingGround.state.host.saved.length === 1 && JSON.stringify(window.testingGround.state.host.saved).includes('Split marker')");
+  const merged = join(root, "journeys", `${host}--E02--merged.png`);
+  await screenshot(cdp, merged);
+  const output = join(root, "journeys", `${host}--E02.gif`);
+  gif([before, split, merged], output);
+  return { id: "E02", state: "passed", artifacts: [before, split, merged, output].map((path) => path.slice(root.length + 1)) };
+}
+
+const markdownTable = "| Left | Center | Right |\n| :--- | :---: | ---: |\n| pipe \\| value | **bold** | [link](https://example.com) |";
+
+async function e03(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=drill:D05`);
+  await focusText(cdp, "Alpha");
+  const before = join(root, "journeys", `${host}--E03--before.png`);
+  await screenshot(cdp, before);
+  await paste(cdp, { html: "<p><strong>Rich marker</strong> and text</p><table><tbody><tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr></tbody></table>", text: "Rich marker and text\nA\tB\n1\t2" });
+  await waitFor(cdp, "JSON.stringify(window.testingGround.state.host.saved).includes('Rich marker') && window.testingGround.state.host.saved.some(b => b.type === 'table')");
+  const rich = await evaluate(cdp, "window.testingGround.state.host.saved");
+  if (!rich.some((block) => JSON.stringify(block).includes('"type":"strong"'))) throw new Error(`${host} E03: rich paste lost strong content: ${JSON.stringify(rich)}`);
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await focusLastParagraph(cdp);
+  await paste(cdp, { text: markdownTable });
+  await waitFor(cdp, "window.testingGround.state.host.saved.some(b => b.type === 'table' && JSON.stringify(b).includes('pipe | value') && JSON.stringify(b).includes('center') && JSON.stringify(b).includes('https://example.com'))");
+  const after = join(root, "journeys", `${host}--E03--after.png`);
+  await screenshot(cdp, after);
+  return { id: "E03", state: "passed", assertions: ["rich strong content preserved", "HTML table preserved", "GFM alignment and link preserved"], artifacts: [before, after].map((path) => path.slice(root.length + 1)) };
+}
+
+async function e04(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await focusLastParagraph(cdp);
+  const before = join(root, "journeys", `${host}--E04--before.png`);
+  await screenshot(cdp, before);
+  const initial = await evaluate(cdp, "JSON.stringify(window.testingGround.state.host.saved)");
+  await paste(cdp, { text: markdownTable });
+  const pasted = await evaluate(cdp, "JSON.stringify(window.testingGround.state.host.saved)");
+  if (pasted === initial) throw new Error(`${host} E04: paste made no saved change`);
+  const afterPaste = join(root, "journeys", `${host}--E04--paste.png`);
+  await screenshot(cdp, afterPaste);
+  await key(cdp, "z", { code: "KeyZ", modifiers: await mod(cdp) });
+  await settle(cdp);
+  await waitFor(cdp, `JSON.stringify(window.testingGround.state.host.saved) === ${JSON.stringify(initial)}`);
+  const undone = join(root, "journeys", `${host}--E04--undo.png`);
+  await screenshot(cdp, undone);
+  await key(cdp, "z", { code: "KeyZ", modifiers: await mod(cdp, true) });
+  await settle(cdp);
+  await waitFor(cdp, `JSON.stringify(window.testingGround.state.host.saved) === ${JSON.stringify(pasted)}`);
+  const redone = join(root, "journeys", `${host}--E04--redo.png`);
+  await screenshot(cdp, redone);
+  const output = join(root, "journeys", `${host}--E04.gif`);
+  gif([before, afterPaste, undone, redone], output);
+  return { id: "E04", state: "passed", artifacts: [before, afterPaste, undone, redone, output].map((path) => path.slice(root.length + 1)) };
+}
+
+async function e05(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await evaluate(cdp, `(() => {
+    const canvas = window.testingGround.state.canvases[0];
+    canvas.wikilinkSource = query => [{ title: 'Plan', id: 'n-plan', type: 'paper' }].filter(row => row.title.toLowerCase().includes(query.toLowerCase()));
+    canvas.wikilinkResolve = id => id === 'n-plan' ? { title: 'Roadmap' } : null;
+  })()`);
+  await focusLastParagraph(cdp);
+  const before = join(root, "journeys", `${host}--E05--before.png`);
+  await screenshot(cdp, before);
+  await cdp.send("Input.insertText", { text: " [[Plan]]" });
+  await waitFor(cdp, "JSON.stringify(window.testingGround.state.host.saved).includes('n-plan') && document.querySelector('.bp-wikilink-label')?.textContent === 'Roadmap'");
+  await paste(cdp, { text: " and [[plan|the plan]]" });
+  await waitFor(cdp, "JSON.stringify(window.testingGround.state.host.saved).includes('the plan') && document.querySelectorAll('[data-wikilink]').length >= 2");
+  const linked = join(root, "journeys", `${host}--E05--linked.png`);
+  await screenshot(cdp, linked);
+  await evaluate(cdp, `(() => {
+    const canvas = window.testingGround.state.canvases[0];
+    canvas.wikilinkResolve = id => id === 'n-plan' ? { title: 'Renamed roadmap' } : null;
+    canvas.refreshWikilinks();
+  })()`);
+  await waitFor(cdp, "[...document.querySelectorAll('.bp-wikilink-label')].some(el => el.textContent === 'Renamed roadmap') && [...document.querySelectorAll('[data-wikilink]')].some(el => el.textContent.includes('the plan'))");
+  const renamed = join(root, "journeys", `${host}--E05--renamed.png`);
+  await screenshot(cdp, renamed);
+  const output = join(root, "journeys", `${host}--E05.gif`);
+  gif([before, linked, renamed], output);
+  return { id: "E05", state: "passed", assertions: ["typed link resolved", "pasted alias preserved", "unaliased live title refreshed"], artifacts: [before, linked, renamed, output].map((path) => path.slice(root.length + 1)) };
+}
+
+async function openSlash(cdp) {
+  await focusLastParagraph(cdp);
+  await key(cdp, "Enter");
+  await cdp.send("Input.insertText", { text: "/" });
+  await waitFor(cdp, "document.querySelectorAll('.bp-slash-menu .bp-slash-item').length >= 40");
+}
+
+async function e06(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await openSlash(cdp);
+  const rows = await evaluate(cdp, `[...document.querySelectorAll('.bp-slash-menu .bp-slash-item')].map((row, index) => ({ index, type: row.dataset.type, label: row.querySelector('.bp-slash-label').textContent }))`);
+  if (rows.length < 40) throw new Error(`${host} E06: slash menu exposed ${rows.length} rows, wanted at least 40`);
+  const inserted = [];
+  for (const row of rows) {
+    await evaluate(cdp, "window.testingGround.openDoc('sample:paragraph')");
+    await waitFor(cdp, "Boolean(window.testingGround.state.canvases[0]?._editor)");
+    const baseline = await evaluate(cdp, "window.testingGround.state.host.saved.map(block => block.id)");
+    await openSlash(cdp);
+    await evaluate(cdp, `document.querySelectorAll('.bp-slash-menu .bp-slash-item')[${row.index}].dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
+    await settle(cdp);
+    const added = await evaluate(cdp, `window.testingGround.state.host.saved.filter(block => !${JSON.stringify(baseline)}.includes(block.id)).map(block => block.type)`);
+    if (!added.length) throw new Error(`${host} E06: ${row.label} (${row.type}) inserted no saved block`);
+    inserted.push({ ...row, savedTypes: added });
+  }
+  await viewport(cdp, 1600, 1200);
+  await evaluate(cdp, `(() => {
+    const results = ${JSON.stringify(inserted)};
+    document.body.replaceChildren();
+    const title = document.createElement('h1'); title.textContent = ${JSON.stringify(host)} + ' · E06 slash insertion sweep';
+    const note = document.createElement('p'); note.textContent = results.length + ' menu rows inserted a saved block';
+    const grid = document.createElement('div');
+    Object.assign(document.body.style, { margin: '24px', font: '15px/1.4 system-ui', background: '#f6faf9', color: '#15231f' });
+    Object.assign(grid.style, { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' });
+    for (const result of results) {
+      const cell = document.createElement('div');
+      cell.textContent = '✓ ' + result.label + ' → ' + result.savedTypes.join(', ');
+      Object.assign(cell.style, { padding: '8px 10px', border: '1px solid #c9d8d2', borderRadius: '6px', background: '#fff' });
+      grid.append(cell);
+    }
+    document.body.append(title, note, grid);
+  })()`);
+  const grid = join(root, "journeys", `${host}--E06-grid.png`);
+  await screenshot(cdp, grid);
+  return { id: "E06", state: "passed", assertions: [`${rows.length} slash rows each inserted a saved block`], artifacts: [grid.slice(root.length + 1)] };
+}
+
+async function installGate(cdp) {
+  await evaluate(cdp, `(() => {
+    const host = window.testingGround.state.host;
+    const online = host.fold;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let first = true;
+    host.fold = { name: 'offline gate', apply: async (blocks, ops) => {
+      if (first) { first = false; await gate; }
+      return online.apply(blocks, ops);
+    } };
+    window.__hostsReconnect = release;
+  })()`);
+}
+
+async function e07(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=drill:D06`);
+  await installGate(cdp);
+  const before = join(root, "journeys", `${host}--E07--before.png`);
+  await screenshot(cdp, before);
+  await focusText(cdp, "Window B edits here.", 1);
+  await cdp.send("Input.insertText", { text: " remote-arrived" });
+  await waitFor(cdp, "window.testingGround.state.host.busy");
+  await focusText(cdp, "Window A types here.", 0);
+  await cdp.send("Input.insertText", { text: " my-keys-win" });
+  await evaluate(cdp, "window.__hostsReconnect()");
+  await settle(cdp);
+  await waitFor(cdp, "JSON.stringify(window.testingGround.state.host.saved).includes('remote-arrived') && JSON.stringify(window.testingGround.state.host.saved).includes('my-keys-win') && window.testingGround.state.canvases.every(c => JSON.stringify(c.blocks).includes('remote-arrived') && JSON.stringify(c.blocks).includes('my-keys-win'))");
+  const after = join(root, "journeys", `${host}--E07--after.png`);
+  await screenshot(cdp, after);
+  const output = join(root, "journeys", `${host}--E07.gif`);
+  gif([before, after], output);
+  return { id: "E07", state: "passed", artifacts: [before, after, output].map((path) => path.slice(root.length + 1)) };
+}
+
+async function e08(cdp, root, host, baseUrl) {
+  await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  await installGate(cdp);
+  await focusLastParagraph(cdp);
+  const before = join(root, "journeys", `${host}--E08--before.png`);
+  await screenshot(cdp, before);
+  await cdp.send("Input.insertText", { text: " offline-pending" });
+  await waitFor(cdp, "window.testingGround.state.host.busy && !JSON.stringify(window.testingGround.state.host.saved).includes('offline-pending')");
+  const pending = join(root, "journeys", `${host}--E08--pending.png`);
+  await screenshot(cdp, pending);
+  await evaluate(cdp, "window.__hostsReconnect()");
+  await settle(cdp);
+  await waitFor(cdp, "JSON.stringify(window.testingGround.state.host.saved).includes('offline-pending')");
+  const after = join(root, "journeys", `${host}--E08--after.png`);
+  await screenshot(cdp, after);
+  const log = join(root, "journeys", `${host}--E08-ops.json`);
+  const batches = await evaluate(cdp, "window.testingGround.state.host.batches.map(({ at, ...batch }) => batch)");
+  writeFileSync(log, JSON.stringify(batches, null, 2) + "\n");
+  const output = join(root, "journeys", `${host}--E08.gif`);
+  gif([before, pending, after], output);
+  return { id: "E08", state: "passed", artifacts: [before, pending, after, log, output].map((path) => path.slice(root.length + 1)) };
 }
 
 async function e10(cdp, root, host, baseUrl) {
@@ -90,22 +343,32 @@ export async function run(args = process.argv.slice(2)) {
   let testingGround;
   let server;
   let browser;
-  const manifest = { schema: 1, chrome: null, hosts: [], journeys };
+  const manifest = { schema: 1, tools: { chrome: null, ffmpeg: ffmpegVersion() }, hosts: [], journeys };
   try {
     const { start } = await import("../src/testing-ground/server.mjs");
     testingGround = await start();
     server = await startHostServer({ testingGround });
     browser = await launchChrome();
-    manifest.chrome = { version: browser.chrome.version, words: browser.chrome.words };
+    manifest.tools.chrome = { version: browser.chrome.version, words: browser.chrome.words };
     for (const host of selected) {
       const url = `${server.url}/hosts/${host.id}/`;
       await viewport(browser.cdp, 1280, 800);
       await navigate(browser.cdp, `${url}?doc=sample:paragraph`);
       const pageProfile = await evaluate(browser.cdp, "window.__BP_HOST_PROFILE__");
       if (pageProfile.id !== host.id) throw new Error(`${host.id}: page profile mismatch`);
-      const results = [await e01(browser.cdp, opts.output, host.id), await e10(browser.cdp, opts.output, host.id, url)];
+      const results = [
+        await e01(browser.cdp, opts.output, host.id),
+        await e02(browser.cdp, opts.output, host.id, url),
+        await e03(browser.cdp, opts.output, host.id, url),
+        await e04(browser.cdp, opts.output, host.id, url),
+        await e05(browser.cdp, opts.output, host.id, url),
+        await e06(browser.cdp, opts.output, host.id, url),
+        await e07(browser.cdp, opts.output, host.id, url),
+        await e08(browser.cdp, opts.output, host.id, url),
+        await e10(browser.cdp, opts.output, host.id, url),
+      ];
       manifest.hosts.push({ ...host, state: "passed", results });
-      console.log(`${host.id}: E01, E10 passed`);
+      console.log(`${host.id}: E01-E08, E10 passed`);
     }
   } finally {
     if (browser) await browser.close();
