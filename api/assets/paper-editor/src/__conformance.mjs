@@ -19,7 +19,7 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 await import("./index.js");
 
 const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"));
-const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id", "data-bp-conformance-root"];
+const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id", "data-bp-conformance-root", "data-bp-fleet-id"];
 const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls";
 
 function paint(canvas, block) {
@@ -35,7 +35,78 @@ function paint(canvas, block) {
 }
 
 function unwrapFleet(root) {
-  for (const atom of root.querySelectorAll("[data-bp-fleet-id]")) atom.replaceWith(...atom.querySelector("[data-bp-fleet-body]").childNodes);
+  const atoms = root.matches?.("[data-bp-fleet-id]") ? [root] : root.querySelectorAll("[data-bp-fleet-id]");
+  for (const atom of atoms) {
+    const body = atom.querySelector("[data-bp-fleet-body]");
+    if (!body) continue;
+    if (atom === root && atom.hasAttribute("data-bp-conformance-root")) body.replaceWith(...body.childNodes);
+    else atom.replaceWith(...body.childNodes);
+  }
+}
+
+function semanticClone(source) {
+  let root = source.cloneNode(true);
+  const type = root.getAttribute("data-bp-type");
+  if (type === "diagram") {
+    root.classList.add("bp-diagram");
+    root.style.removeProperty("background");
+    root.style.border = "1px solid";
+  } else if (type === "expandable") {
+    const details = document.createElement("details");
+    details.className = "bp-expandable";
+    details.setAttribute("data-bp-conformance-root", "");
+    const summary = document.createElement("summary");
+    summary.textContent = root.querySelector(".bp-expandable__summary")?.value || "";
+    const body = root.querySelector(".bp-expandable__body");
+    details.append(summary, body || document.createElement("div"));
+    root = details;
+  } else if (type === "figure") {
+    if (root.getAttribute("role") === "group") root.removeAttribute("role");
+    root.style.overflowX = "auto";
+    const caption = root.querySelector("figcaption");
+    if (caption) {
+      const input = caption.querySelector("input");
+      caption.className = "bp-figcaption";
+      caption.textContent = input?.value || "";
+      caption.removeAttribute("style");
+    }
+  } else if (type === "steps") {
+    for (const row of root.querySelectorAll(":scope > li")) {
+      const head = row.querySelector(":scope > .bp-canvas-row__head");
+      if (!head) continue;
+      const title = document.createElement("div");
+      title.className = "bp-steps__title";
+      title.textContent = head.querySelector("input")?.value || "";
+      head.replaceWith(title);
+      const body = row.querySelector(":scope > .bp-steps__body");
+      if (body?.childNodes.length === 1 && body.firstElementChild?.tagName === "P" && !body.textContent) {
+        body.replaceChildren();
+      }
+    }
+  } else if (type === "table") {
+    root.querySelector(":scope > colgroup")?.remove();
+    const tbody = root.querySelector(":scope > tbody");
+    if (tbody) {
+      const headerRows = [];
+      while (tbody.firstElementChild?.querySelector(":scope > th:not([scope='row'])")) {
+        headerRows.push(tbody.removeChild(tbody.firstElementChild));
+      }
+      if (headerRows.length) {
+        const thead = document.createElement("thead");
+        thead.append(...headerRows);
+        root.insertBefore(thead, tbody);
+      }
+      for (const cell of root.querySelectorAll("th, td")) {
+        if (cell.childNodes.length === 1 && cell.firstChild.nodeType === Node.TEXT_NODE) {
+          const span = document.createElement("span");
+          span.append(...cell.childNodes);
+          cell.appendChild(span);
+        }
+      }
+    }
+    root.setAttribute("role", "presentation");
+  }
+  return root;
 }
 
 function strip(root) {
@@ -45,12 +116,20 @@ function strip(root) {
   // wrapper normalized back to the reader's bare text node for shape comparison.
   for (const separator of root.querySelectorAll("span[data-bp-note-separator]"))
     separator.replaceWith(document.createTextNode(separator.textContent));
+  const semanticRoot = root.nodeType === Node.ELEMENT_NODE && root.hasAttribute("data-bp-conformance-root");
   const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : root.querySelectorAll("*");
   for (const el of elements) {
     if (el.hasAttribute("data-bp-conformance-root")) {
       el.style.removeProperty("display");
       if (el.getAttribute("style") === "") el.removeAttribute("style");
       el.removeAttribute("loading");
+      el.removeAttribute("aria-hidden");
+    }
+    if (semanticRoot) {
+      el.removeAttribute("data-bp-src");
+      if (el.getAttribute("role") === "textbox") el.removeAttribute("role");
+      el.removeAttribute("aria-label");
+      el.removeAttribute("aria-multiline");
     }
     PLUMBING_ATTRS.forEach((a) => el.removeAttribute(a));
     for (const c of [...el.classList]) if (c.startsWith("ProseMirror") || c.startsWith("bp-canvas-")) el.classList.remove(c);
@@ -78,7 +157,7 @@ async function judge(golden) {
     const hostPainted = paint(canvas, block);
     await new Promise((r) => setTimeout(r, 0));
     const semanticRoot = pm.querySelector("[data-bp-conformance-root]");
-    const root = semanticRoot ? semanticRoot.cloneNode(true) : pm.cloneNode(true);
+    const root = semanticRoot ? semanticClone(semanticRoot) : pm.cloneNode(true);
     unwrapFleet(root);
     strip(root);
     const actual = semanticRoot ? [root] : root.childNodes;

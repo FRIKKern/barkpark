@@ -279,6 +279,10 @@ function makeContainer(spec, RowNode) {
 
         const dom = document.createElement(spec.containerTag);
         dom.className = spec.containerClass;
+        if (spec.bpType === "steps") {
+          dom.setAttribute("data-bp-type", spec.bpType);
+          dom.setAttribute("data-bp-conformance-root", "");
+        }
 
         const foot = document.createElement("div");
         foot.className = "bp-canvas-rows__foot";

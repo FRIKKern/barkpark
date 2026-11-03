@@ -95,6 +95,7 @@ export const Expandable = Node.create({
       const dom = document.createElement("div");
       dom.className = "bp-expandable bp-canvas-expandable";
       dom.setAttribute("data-bp-type", BP_TYPE);
+      dom.setAttribute("data-bp-conformance-root", "");
 
       // The summary island is an <input>, not a contentEditable: ProseMirror's focus
       // handler snaps the DOM selection back to its own selection ~20ms after anything
