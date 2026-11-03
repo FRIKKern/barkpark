@@ -275,15 +275,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
   @canvas_chat_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
 
-  # Reader-authored specialty blocks that mount as server-painted bpFleet atoms.
-  # They have no canvas-local HTML renderer: the mounted atom is a real host paint
-  # target and shared/paper.ex supplies canonical Render.render_block(:article)
-  # bytes. Kept separate from @canvas_fleet_types so classic fleet preview/editor
-  # ownership is unchanged.
-  #
-  # KEEP LOCKSTEP with run-convert.js CANVAS_SPECIALTY_TYPES and
-  # shared/paper.ex @specialty_render_types.
-  @canvas_specialty_types ~w(api-endpoint bar-chart code-tabs criteria-progress gauge-list route)
+  # Reader-authored specialty blocks remain contextual run boundaries in top-level
+  # LiveView papers. Their established panels own structured editing. JS still
+  # recognizes them in run-convert.js CANVAS_SPECIALTY_TYPES for nested and
+  # non-LiveView canvases, and shared/paper.ex @specialty_render_types supplies the
+  # canonical host-paint bytes to those receivers.
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
@@ -298,8 +294,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # except that JS keeps receive-only legacy recognition for form/questionnaire/figure/
   # section/columns/table while this partition intentionally routes them to contextual
   # boundary editors. The
-  # remaining boundaries also include nested-structure fields (composite / object /
-  # arrayOf / codelist / localizedText).
+  # remaining boundaries also include specialty blocks with contextual editors and
+  # nested-structure fields (composite / object / arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -316,8 +312,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_container_types ++
                   @canvas_widget_types ++
                   @canvas_dataviz_types ++
-                  @canvas_chat_types ++
-                  @canvas_specialty_types
+                  @canvas_chat_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**
