@@ -293,6 +293,42 @@ describe('chat-tool-diff', () => {
     expect(out).toContain('  end')
   })
 
+  it('preserves the canonical remove-first tie break for ambiguous LCS input', () => {
+    const out = text({
+      type: 'chat-tool-diff',
+      input: {
+        file_path: 'lib/tie.ex',
+        old_string: 'alpha\nbeta',
+        new_string: 'beta\nalpha',
+      },
+    })
+    const added = out.indexOf('+ beta')
+    const context = out.indexOf('  alpha')
+    const removed = out.indexOf('- beta')
+    expect(added).toBeGreaterThanOrEqual(0)
+    expect(context).toBeGreaterThan(added)
+    expect(removed).toBeGreaterThan(context)
+  })
+
+  it('keeps canonical additions-then-removals order when the inputs share no lines', () => {
+    const out = text({
+      type: 'chat-tool-diff',
+      input: {
+        file_path: 'lib/disjoint.ex',
+        old_string: 'old one\nold two',
+        new_string: 'new one\nnew two',
+      },
+    })
+    const addedOne = out.indexOf('+ new one')
+    const addedTwo = out.indexOf('+ new two')
+    const removedOne = out.indexOf('- old one')
+    const removedTwo = out.indexOf('- old two')
+    expect(addedOne).toBeGreaterThanOrEqual(0)
+    expect(addedTwo).toBeGreaterThan(addedOne)
+    expect(removedOne).toBeGreaterThan(addedTwo)
+    expect(removedTwo).toBeGreaterThan(removedOne)
+  })
+
   it('does not classify old/new content without the canonical file_path', () => {
     const out = text({
       type: 'chat-tool-diff',
