@@ -71,6 +71,8 @@
     "test:reader-canvas-render": "MIX_ENV=test node src/__reader_canvas_render.mjs",
     "test:view-edit-parity": "MIX_ENV=test node src/__view_edit_parity_matrix.mjs",
     "try": "node src/testing-ground/server.mjs",
+    "hosts": "node hosts/run.mjs",
+    "hosts:test": "node --test hosts/*.test.mjs",
     "testing-ground:page": "node src/__testing_ground_page.mjs",
     "smoke": "node src/__smoke.mjs",
     "nested-split:keys": "node src/__nested_split_keys.mjs",
