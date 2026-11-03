@@ -80,6 +80,11 @@ mkdirSync(ARTIFACTS, { recursive: true });
 
 const text = (value) => [{ type: "text", value }];
 const para = (id, value) => ({ id, type: "paragraph", content: text(value) });
+const SPECIALTY_TYPES = ["api-endpoint", "bar-chart", "code-tabs", "criteria-progress", "gauge-list", "route"];
+const specialtyFixture = (type) => ({
+  ...JSON.parse(readFileSync(join(REPO, "api/priv/portable_doc/goldens/blocks", `${type}.golden.json`), "utf8")).input,
+  id: `specialty-${type}`,
+});
 
 // The #16092 fixtures, the prose/tone/island fixtures the PR #20087 matrix
 // added, and the block types no instrument measured before: stats, chart,
@@ -126,7 +131,9 @@ const FIXTURES = [
   { id: "field-boolean", type: "field-boolean", label: "Published", value: true },
   { id: "field-select", type: "field-select", label: "Format", value: "option-2", options: [{ value: "option-1", label: "Paperback" }, { value: "option-2", label: "Hardcover" }] },
   { id: "form", type: "form", kind: "grill", questions: [{ id: "q1", prompt: "Ship it?", type: "yesno" }, { id: "q2", prompt: "Pick a surface", type: "single", options: ["Next", "Astro", "Phoenix"] }, { id: "q5", prompt: "Anything else?", type: "text" }] },
+  ...SPECIALTY_TYPES.map(specialtyFixture),
 ];
+const SPECIALTY_IDS = new Set(SPECIALTY_TYPES.map((type) => `specialty-${type}`));
 
 const SCENARIOS = [
   { name: "desktop-light", width: 1440, height: 4200, theme: "light", bucket: "wide" },
@@ -337,6 +344,12 @@ function ownersFor(root) {
   }
   return out;
 }
+function surfaceFor(root) {
+  if (SURFACE === "reader") return "reader";
+  if (root.closest("bp-paper-canvas")) return "canvas";
+  if (root.matches(".bp-paper-contextual-editor") || root.querySelector(".bp-paper-contextual-editor")) return "contextual";
+  return "other";
+}
 function measure() {
   // CONTROL on hidden() (task-ea3c30b496f03906): a control inside a CLOSED
   // <details> is not painted, one in its <summary> or in an OPEN <details> is.
@@ -354,7 +367,7 @@ function measure() {
   const cases = {};
   for (const meta of FIXTURE_META) {
     const root = rootFor(meta);
-    cases[meta.id] = root ? { owners: ownersFor(root) } : { missing: true };
+    cases[meta.id] = root ? { owners: ownersFor(root), surface: surfaceFor(root) } : { missing: true };
   }
   document.getElementById("parity-status").textContent = "BP_PARITY_RESULT=" + JSON.stringify(cases);
 }
@@ -421,7 +434,7 @@ window.addEventListener("unhandledrejection", (event) => {
   document.getElementById("parity-status").textContent = "BP_PARITY_ERROR=" + (event.reason && event.reason.stack || event.reason);
 });
 const SURFACE = ${JSON.stringify(surface)};
-const FIXTURE_META = ${JSON.stringify(FIXTURES.map((block) => ({ id: block.id, type: block.type, probe: probeFor(block) })))};
+const FIXTURE_META = ${JSON.stringify(FIXTURES.map((block) => ({ id: block.id, type: block.type, probe: probeFor(block), expectedLiveviewSurface: SPECIALTY_IDS.has(block.id) ? "contextual" : null })))};
 let REMOVE_DIAGRAM = ${JSON.stringify(REMOVE_DIAGRAM)};
 ${MEASURE}
 // Fleet widgets (stats, chart, notes, task-list, ...) paint server HTML into a
@@ -485,7 +498,7 @@ function runPage(surface, scenario) {
 }
 
 const fixtureIds = FIXTURES.map((block) => block.id);
-const report = { generatedAt: new Date().toISOString(), sourceIdentity: SOURCE_IDENTITY, renderApiIdentity: RENDER_API_IDENTITY, chromium: CHROME, shellCss: SHELL_CSS, plant: PLANT || null, removeDiagram: REMOVE_DIAGRAM, fixtures: FIXTURES.map(({ id, type }) => ({ id, type })), scenarios: {} };
+const report = { generatedAt: new Date().toISOString(), sourceIdentity: SOURCE_IDENTITY, renderApiIdentity: RENDER_API_IDENTITY, chromium: CHROME, shellCss: SHELL_CSS, plant: PLANT || null, removeDiagram: REMOVE_DIAGRAM, fixtures: FIXTURES.map(({ id, type }) => ({ id, type, expectedLiveviewSurface: SPECIALTY_IDS.has(id) ? "contextual" : null })), scenarios: {} };
 const seen = new Set();
 let total = 0, knownCount = 0, unexpectedCount = 0, compared = 0;
 
@@ -496,6 +509,13 @@ for (const scenario of SCENARIOS) {
   for (const surface of EDIT_SURFACES) {
     const edit = runPage(surface, scenario);
     const result = diffSurface({ surface, fixtures: fixtureIds, view, edit });
+    if (surface === "liveview") {
+      for (const id of SPECIALTY_IDS) {
+        if (edit[id]?.surface !== "contextual") {
+          result.differences.push({ surface, fixture: id, text: "(block)", axis: "edit-surface", view: "contextual", edit: edit[id]?.surface || "missing" });
+        }
+      }
+    }
     const { known, unexpected } = classify(result.differences, KNOWN, seen);
     compared += result.compared;
     total += result.differences.length;
