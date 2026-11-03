@@ -10,6 +10,11 @@ import { startHostServer } from "./server.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUTPUT = join(HERE, "artifacts");
+const REPO = join(HERE, "../../../..");
+const MAIN_ASSETS = join(REPO, "api/priv/static/assets");
+const BUNDLE = "bp-paper-editor.bundle.js";
+
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function usage(why) {
   throw new Error(`${why}\nusage: npm run hosts -- [--output=<directory>] [--candidate=<staged-build-directory>] [--allow-unavailable] [--host=<id>]`);
@@ -37,13 +42,30 @@ export function stagedBuild(dir) {
     return { expected: match[1], name: match[2] };
   });
   for (const { expected, name } of sums) {
-    const actual = createHash("sha256").update(readFileSync(join(dir, name))).digest("hex");
+    const actual = sha256(readFileSync(join(dir, name)));
     if (actual !== expected) throw new Error(`candidate checksum mismatch for ${name}: wanted ${expected}, got ${actual}`);
   }
   for (const name of ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"]) {
     if (!sums.some((entry) => entry.name === name)) throw new Error(`candidate SHA256SUMS does not cover ${name}`);
   }
-  return { label: "candidate", sha, dir, bundleSha256: sums.find(({ name }) => name === "bp-paper-editor.bundle.js").expected };
+  return { label: "candidate", sha, dir, bundleSha256: sums.find(({ name }) => name === BUNDLE).expected };
+}
+
+export function baselineBuild() {
+  const sha = execFileSync("git", ["log", "-1", "--format=%H", "--", `api/priv/static/assets/${BUNDLE}`], { cwd: REPO, encoding: "utf8" }).trim();
+  return { label: "main", sha, dir: MAIN_ASSETS, bundleSha256: sha256(readFileSync(join(MAIN_ASSETS, BUNDLE))) };
+}
+
+export function distinctBuilds(baseline, candidate) {
+  if (baseline.bundleSha256 === candidate.bundleSha256) throw new Error(`candidate bundle is byte-identical to baseline ${baseline.bundleSha256}; E12 needs two distinct clients`);
+  return true;
+}
+
+export function upgradeBuilds(candidateDir) {
+  const baseline = baselineBuild();
+  const candidate = candidateDir && stagedBuild(candidateDir);
+  if (candidate) distinctBuilds(baseline, candidate);
+  return { baseline, candidate };
 }
 
 async function screenshot(cdp, path) {
@@ -400,35 +422,52 @@ async function e11(cdp, root, host, baseUrl, enabled) {
   return { id: "E11", state: "passed", assertions: ["real media picker saved image", "real reference picker saved document", "card ghost picker saved media"], artifacts: [...frames, output].map((path) => path.slice(root.length + 1)) };
 }
 
-async function replaySave(cdp, baseUrl, marker, screenshotPath) {
+async function observedBuild(cdp) {
+  return await evaluate(cdp, `(async () => {
+    const [metadataResponse, bundleResponse] = await Promise.all([fetch('/build.json'), fetch('/build/${BUNDLE}')]);
+    if (!metadataResponse.ok || !bundleResponse.ok) throw new Error('build identity request failed');
+    const metadata = await metadataResponse.json();
+    const digest = await crypto.subtle.digest('SHA-256', await bundleResponse.arrayBuffer());
+    return { ...metadata, bundleSha256: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('') };
+  })()`);
+}
+
+function verifyObservedBuild(expected, observed, leg) {
+  if (observed.sha !== expected.sha) throw new Error(`${leg} loaded build ${observed.sha}, expected ${expected.sha}`);
+  if (observed.bundleSha256 !== expected.bundleSha256) throw new Error(`${leg} loaded bundle ${observed.bundleSha256}, expected ${expected.bundleSha256}`);
+}
+
+async function replaySave(cdp, baseUrl, marker, screenshotPath, expectedBuild) {
   await viewport(cdp, 1280, 800);
   await navigate(cdp, `${baseUrl}?doc=sample:paragraph`);
+  const build = await observedBuild(cdp);
+  verifyObservedBuild(expectedBuild, build, expectedBuild.label);
   await focusLastParagraph(cdp);
   await cdp.send("Input.insertText", { text: marker });
   await settle(cdp);
   await waitFor(cdp, `JSON.stringify(window.testingGround.state.host.saved).includes(${JSON.stringify(marker)})`);
   await screenshot(cdp, screenshotPath);
-  return await evaluate(cdp, "window.testingGround.state.host.batches.map(({ at, answer, ...batch }) => batch)");
+  return { build, ops: await evaluate(cdp, "window.testingGround.state.host.batches.map(({ at, answer, ...batch }) => batch)") };
 }
 
-async function e12(cdp, root, host, mainUrl, candidateUrl, candidate) {
+async function e12(cdp, root, host, mainUrl, candidateUrl, baselineBuild, candidate) {
   if (!candidateUrl) return { id: "E12", state: "unavailable", reason: "rerun with --candidate=<verified staged editor directory>" };
   const marker = " upgrade-replay-save";
   const baselineImage = join(root, "journeys", `${host}--E12--baseline.png`);
   const candidateImage = join(root, "journeys", `${host}--E12--candidate.png`);
-  const baseline = await replaySave(cdp, mainUrl, marker, baselineImage);
-  const replayed = await replaySave(cdp, candidateUrl, marker, candidateImage);
-  const compatible = JSON.stringify(baseline) === JSON.stringify(replayed);
+  const baseline = await replaySave(cdp, mainUrl, marker, baselineImage, baselineBuild);
+  const replayed = await replaySave(cdp, candidateUrl, marker, candidateImage, candidate);
+  const compatible = JSON.stringify(baseline.ops) === JSON.stringify(replayed.ops);
   if (!compatible) throw new Error(`${host} E12: candidate save ops differ from baseline`);
   const report = join(root, "journeys", `${host}--E12-replay.json`);
   writeFileSync(report, JSON.stringify({
-    baseline: { label: "main", ops: baseline },
-    candidate: { label: candidate.label, sourceCommit: candidate.sha, bundleSha256: candidate.bundleSha256, ops: replayed },
+    baseline: { label: baselineBuild.label, sourceCommit: baselineBuild.sha, expectedBundleSha256: baselineBuild.bundleSha256, loaded: baseline.build, ops: baseline.ops },
+    candidate: { label: candidate.label, sourceCommit: candidate.sha, expectedBundleSha256: candidate.bundleSha256, loaded: replayed.build, ops: replayed.ops },
     compatible,
   }, null, 2) + "\n");
   const output = join(root, "journeys", `${host}--E12.gif`);
   gif([baselineImage, candidateImage], output);
-  return { id: "E12", state: "passed", assertions: ["baseline client saved", "candidate client saved", "operation replay is byte-equal"], artifacts: [baselineImage, candidateImage, report, output].map((path) => path.slice(root.length + 1)) };
+  return { id: "E12", state: "passed", assertions: ["browser-loaded baseline and candidate bundles match their recorded SHA-256 identities", "baseline and candidate bundle identities differ", "baseline client saved", "candidate client saved", "operation replay is byte-equal"], artifacts: [baselineImage, candidateImage, report, output].map((path) => path.slice(root.length + 1)) };
 }
 
 export async function run(args = process.argv.slice(2)) {
@@ -457,7 +496,7 @@ export async function run(args = process.argv.slice(2)) {
     try { await cleanup(); } finally { process.exit(code); }
   }]));
   for (const [signal, handler] of handlers) process.once(signal, handler);
-  const candidate = opts.candidate && stagedBuild(opts.candidate);
+  const { baseline, candidate } = upgradeBuilds(opts.candidate);
   const runtimeJourneys = journeys.map((journey) => {
     if (journey.id !== "E12") return journey;
     const { reason, ...rest } = journey;
@@ -468,7 +507,7 @@ export async function run(args = process.argv.slice(2)) {
   const manifest = { schema: 1, tools: { chrome: null, ffmpeg: ffmpegVersion() }, hosts: [], journeys: runtimeJourneys };
   try {
     const { start } = await import("../src/testing-ground/server.mjs");
-    testingGround = await start();
+    testingGround = await start({ builds: [baseline] });
     server = await startHostServer({ testingGround });
     if (candidate) {
       candidateGround = await start({ builds: [candidate] });
@@ -493,7 +532,7 @@ export async function run(args = process.argv.slice(2)) {
         await e08(browser.cdp, opts.output, host.id, url),
         await e10(browser.cdp, opts.output, host.id, url),
         await e11(browser.cdp, opts.output, host.id, url, host.pickers),
-        await e12(browser.cdp, opts.output, host.id, url, candidateServer && `${candidateServer.url}/hosts/${host.id}/`, candidate),
+        await e12(browser.cdp, opts.output, host.id, url, candidateServer && `${candidateServer.url}/hosts/${host.id}/`, baseline, candidate),
       ];
       manifest.hosts.push({ ...host, state: "passed", results });
       console.log(`${host.id}: E01-E08, E10${host.pickers ? "-E11" : ""}${candidate ? ", E12" : ""} passed`);
