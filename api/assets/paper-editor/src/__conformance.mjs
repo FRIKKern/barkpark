@@ -180,7 +180,10 @@ function semanticClone(source, blockType) {
     }
 
     const body = root.querySelector(":scope > p");
-    if (body && !body.textContent && !body.querySelector(":scope > :not(.ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor)")) body.remove();
+    const hasAuthoredBody = body?.querySelector(
+      ":scope > :not(.ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor)",
+    );
+    if (body && !body.textContent && !hasAuthoredBody) body.remove();
 
     const actionLink = root.querySelector(":scope > a.bp-button");
     const actionIsland = root.querySelector(":scope > span > [data-test-id='paper-card-action-label']");
