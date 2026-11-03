@@ -4,7 +4,8 @@ import { referenceFold, serverFold } from "../fold.mjs";
 import { lights } from "../traps.mjs";
 import { paintHood } from "./hood.mjs";
 import { lines, settle, visibility } from "./measure.mjs";
-import { paintReader } from "./reader.mjs";
+import { readEditDiff } from "./read-edit.mjs";
+import { paintReader, renderStandIn } from "./reader.mjs";
 import { tallyWords, watchTally } from "./tally.mjs";
 
 const $ = (selector) => document.querySelector(selector);
@@ -18,7 +19,7 @@ const docs = new Map([
 ]);
 
 const params = new URLSearchParams(location.search);
-const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, shown: "", tally: { tries: 0, hits: 0, stayed: 0 } };
+const state = { key: docs.has(params.get("doc")) ? params.get("doc") : "sample:paragraph", host: null, canvases: [], reload: null, readEdit: null, readEditTurn: 0, shown: "", tally: { tries: 0, hits: 0, stayed: 0 } };
 
 const ui = {
   edit: $(".tg-edit"),
@@ -44,11 +45,34 @@ function remember() {
 }
 
 function paintFleet(root) {
+  let painted = false;
   for (const hole of root.querySelectorAll("[data-bp-fleet-id] [data-bp-fleet-body]:not([data-tg-painted])")) {
+    painted = true;
     hole.setAttribute("data-tg-painted", "");
     const type = hole.closest("[data-bp-type]")?.getAttribute("data-bp-type");
     const html = fragments[type];
     if (hole.dispatchEvent(new CustomEvent("bp-fleet-paint", { detail: { html }, cancelable: true }))) hole.innerHTML = html;
+  }
+  if (painted) compareReadEdit();
+}
+
+async function compareReadEdit() {
+  const turn = ++state.readEditTurn;
+  state.readEdit = null;
+  try {
+    const blocks = structuredClone(state.host.saved);
+    const html = await renderStandIn(blocks);
+    if (turn !== state.readEditTurn) return;
+    const reader = document.createElement("div");
+    reader.innerHTML = html;
+    const readerBlocks = reader.childElementCount === 1 && reader.firstElementChild.classList.contains("bp-paper-surface")
+      ? reader.firstElementChild
+      : reader;
+    const editor = state.canvases[0]?._editor?.view?.dom;
+    if (!editor) return;
+    state.readEdit = { diff: readEditDiff(readerBlocks, editor, blocks) };
+  } catch (error) {
+    if (turn === state.readEditTurn) state.readEdit = { error: error.message };
   }
 }
 
@@ -85,6 +109,7 @@ function openDoc(key) {
   if (key !== state.key) state.tally = { tries: 0, hits: 0, stayed: 0 };
   state.key = key;
   state.reload = null;
+  state.readEdit = null;
   const doc = docs.get(key);
   state.host = createFakeHost({ fold: build.fold ? serverFold(build.fold) : referenceFold, blocks: doc.blocks, onChange: changed });
   mountCanvases();
@@ -103,10 +128,12 @@ async function reload() {
   const before = lines(canvas);
   mountCanvases(true);
   state.reload = { before, after: lines(state.canvases[0]) };
+  changed();
 }
 
 function changed() {
   const doc = docs.get(state.key);
+  compareReadEdit();
   if (!ui.read.hidden) paintReader({ label: $(".tg-read-label"), body: $(".tg-read-body") }, { golden: doc.golden, start: doc.blocks, saved: state.host.saved });
   if (ui.hood.open) paintHood(ui.hoodEl, { host: state.host, start: doc.blocks });
 }
@@ -120,6 +147,7 @@ function paintLights() {
     batches: state.host.batches,
     refusals: state.host.refusals,
     settled: !state.host.busy,
+    readEdit: state.readEdit,
     reload: state.reload,
   });
   const shown = JSON.stringify(list);

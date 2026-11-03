@@ -4,12 +4,35 @@ import { JSDOM } from "jsdom";
 const { window } = new JSDOM("<!doctype html><body></body>");
 globalThis.document = window.document;
 const { paintHood } = await import("./page/hood.mjs");
+const { blockShapes, readEditDiff } = await import("./page/read-edit.mjs");
 const { paintReader } = await import("./page/reader.mjs");
 const { watchTally } = await import("./page/tally.mjs");
 
 const el = (tag = "div") => document.createElement(tag);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const p = (id, value) => ({ id, type: "paragraph", content: [{ type: "text", value }] });
+
+const roots = (html) => {
+  const root = el();
+  root.innerHTML = html;
+  return root;
+};
+const one = [p("p-a", "Alpha")];
+const read = roots('<p class="body">Alpha</p>');
+const wrappedRead = roots('<div class="bp-paper-surface"><p class="body">Alpha</p></div>');
+const matchingEdit = roots('<p class="body" data-bp-id="p-a" data-bp-type="paragraph">Alpha</p>');
+const mismatchedEdit = roots('<div class="body edit-only" data-bp-id="p-a">Alpha</div>');
+assert.deepEqual(blockShapes(matchingEdit, one), [{ id: "p-a", node: { tag: "p", classes: ["body"], attrs: {}, children: [{ text: "Alpha" }] } }]);
+assert.equal(readEditDiff(read, matchingEdit, one), null, "the saved id may ride only on the editor root without making a match red");
+assert.equal(readEditDiff(wrappedRead.firstElementChild, matchingEdit, one), null, "the React reader's host surface is not a document block");
+assert.deepEqual(readEditDiff(read, mismatchedEdit, one), { at: 0, id: "p-a" }, "tag and class drift turn the block red");
+
+const semanticRead = roots('<p><a href="/kept"><strong>Alpha</strong></a><img src="/paper.png" alt="Paper"></p>');
+const semanticEdit = roots('<p data-bp-id="p-a" contenteditable="true"><a href="/kept"><strong>Alpha</strong></a><img src="/paper.png" alt="Paper"><span class="ProseMirror-trailingBreak"><br></span></p><div class="bp-paper-contextual-controls">Edit</div>');
+assert.equal(readEditDiff(semanticRead, semanticEdit, one), null, "known editor plumbing is ignored without hiding semantic descendants");
+assert.deepEqual(readEditDiff(semanticRead, roots('<p><a href="/lost"><strong>Alpha</strong></a><img src="/paper.png" alt="Paper"></p>'), one), { at: 0, id: "p-a" }, "a changed link destination turns red");
+assert.deepEqual(readEditDiff(semanticRead, roots('<p><a href="/kept">Alpha</a><img src="/paper.png" alt="Paper"></p>'), one), { at: 0, id: "p-a" }, "a dropped strong mark turns red");
+assert.deepEqual(readEditDiff(semanticRead, roots('<p><a href="/kept"><strong>Alpha</strong></a></p>'), one), { at: 0, id: "p-a" }, "a missing image turns red");
 
 const hood = { fold: el("p"), batches: el("ol"), diff: el("pre"), json: el("pre") };
 paintHood(hood, {

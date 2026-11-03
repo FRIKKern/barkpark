@@ -67,7 +67,7 @@ export function sentDuplicates(batches) {
   return batches.flatMap(({ ops }) => ops.flatMap((op) => duplicateIds([op.block, op.patch])));
 }
 
-export function lights({ visibility, believed, saved, batches, refusals, settled, reload }) {
+export function lights({ visibility, believed, saved, batches, refusals, settled, readEdit, reload }) {
   const hidden = hiddenBlocks(visibility);
   const dupes = [...new Set([...duplicateIds(believed), ...duplicateIds(saved), ...sentDuplicates(batches)])];
   const drift = foldDrift(saved, believed);
@@ -104,6 +104,18 @@ export function lights({ visibility, believed, saved, batches, refusals, settled
         : drift
           ? `The server's copy differs from what the editor thinks it saved, from block ${drift.at + 1} (${drift.id}).`
           : "The server's copy matches the editor.",
+    },
+    {
+      key: "read-edit",
+      name: "Read ≠ Edit",
+      ok: settled && readEdit ? !readEdit.error && !readEdit.diff : null,
+      words: !settled || !readEdit
+        ? "Waiting for the reader and editor to settle."
+        : readEdit.error
+          ? `The reader did not render the saved doc: ${readEdit.error}.`
+          : readEdit.diff
+            ? `The reader and editor differ at block ${readEdit.diff.at + 1} (${readEdit.diff.id}).`
+            : "The reader and editor have the same block structure.",
     },
     {
       key: "lost-keys",
