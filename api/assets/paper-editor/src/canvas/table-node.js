@@ -470,6 +470,7 @@ export const BpTable = Node.create({
       // The READER table element + class, byte-identical to walk.ex.
       table.className = "bp-table";
       table.setAttribute("data-bp-type", "table");
+      table.setAttribute("data-bp-conformance-root", "");
       const tbody = document.createElement("tbody");
       // Column widths (plan #25): a <colgroup> ahead of the body, one <col> per column, and a
       // grip on every column's right edge that drags the width and commits it as an attribute.

@@ -174,6 +174,7 @@ export const Figure = Node.create({
       const dom = document.createElement("figure");
       dom.className = "bp-canvas-readonly bp-canvas-figure";
       dom.setAttribute("data-bp-type", "figure");
+      dom.setAttribute("data-bp-conformance-root", "");
       dom.setAttribute("data-bp-fleet-id", bpId);
       dom.setAttribute("contenteditable", "false");
       dom.setAttribute("data-test-id", "paper-figure");
