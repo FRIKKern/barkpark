@@ -73,6 +73,7 @@
     "try": "node src/testing-ground/server.mjs",
     "hosts": "node hosts/run.mjs",
     "hosts:test": "node --test hosts/*.test.mjs",
+    "host:restore": "node hosts/restore.mjs",
     "testing-ground:page": "node src/__testing_ground_page.mjs",
     "smoke": "node src/__smoke.mjs",
     "nested-split:keys": "node src/__nested_split_keys.mjs",
