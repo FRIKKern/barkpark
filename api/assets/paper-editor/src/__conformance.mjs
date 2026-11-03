@@ -28,6 +28,8 @@ const CHROME = [
   ".bp-canvas-field-editor",
   ".bp-cols__c > .bp-resting-scaffold",
   ".bp-cols__c > .bp-scaffold-control",
+  ".bp-canvas-tabs > .bp-canvas-rows__foot",
+  ".bp-canvas-tabs .bp-tabs__panel > .bp-canvas-row__head",
   ".bp-canvas-section > .bp-canvas-section__controls",
   ".bp-canvas-section > [data-test-id=paper-section-title][hidden]",
 ].join(", ");
@@ -240,6 +242,8 @@ function strip(root) {
   // wrapper normalized back to the reader's bare text node for shape comparison.
   for (const separator of root.querySelectorAll("span[data-bp-note-separator]"))
     separator.replaceWith(document.createTextNode(separator.textContent));
+  for (const body of root.querySelectorAll(".bp-canvas-tabs .bp-tabs__panel > .bp-canvas-row__body"))
+    body.replaceWith(...body.childNodes);
   const semanticRoot = root.nodeType === Node.ELEMENT_NODE && root.hasAttribute("data-bp-conformance-root");
   const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : root.querySelectorAll("*");
   for (const el of elements) {
