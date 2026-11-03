@@ -3,6 +3,7 @@
 import { Linking, Pressable, Text, View } from 'react-native'
 
 import { scale } from '../../../ui/typography'
+import { chromeWord } from '../chrome'
 import { asList, isMap, openableUrl, str } from '../model'
 import { bodyText, type Render } from '../register'
 
@@ -79,7 +80,9 @@ const paperLinks: Render = (b, ctx, key) => {
               <Text style={{ ...scale.md, fontWeight: '700', color: ctx.theme.accent }}>{ref.title}</Text>
               {ref.description !== '' && <Text style={{ ...bodyText(ctx), marginTop: 5 }}>{ref.description}</Text>}
               {ref.reason !== '' && (
-                <Text style={{ ...scale.sm, color: ctx.theme.textMuted, marginTop: 5 }}>{ref.reason}</Text>
+                <Text style={{ ...scale.sm, color: ctx.theme.textMuted, marginTop: 5 }}>
+                  <Text style={{ fontWeight: '700' }}>{chromeWord(ctx.locale, 'Why it matters:')}</Text> {ref.reason}
+                </Text>
               )}
               {ref.metadata !== '' && (
                 <Text style={{ ...scale.micro, color: ctx.theme.textMuted, marginTop: 8 }}>{ref.metadata}</Text>

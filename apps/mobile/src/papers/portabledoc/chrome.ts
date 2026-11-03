@@ -13,6 +13,7 @@ const STRINGS: Record<string, Record<string, string>> = {
   'nb-NO': {
     Source: 'Kilde',
     Sources: 'Kilder',
+    'Why it matters:': 'Hvorfor det betyr noe:',
     'Table too large to show': 'Tabellen er for stor til å vises',
     'Nested too deep to show': 'For dypt nestet til å vises',
   },
