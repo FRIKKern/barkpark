@@ -3647,6 +3647,7 @@ defmodule BarkparkWeb.Router do
     )
 
     post("/:dataset/upload", V1.MediaController, :upload)
+    post("/:dataset/delete-many", V1.MediaController, :delete_many)
     post("/:dataset/:id/checkout", V1.MediaController, :checkout)
     post("/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout)
     patch("/:dataset/:id", V1.MediaController, :update)
@@ -4287,6 +4288,7 @@ defmodule BarkparkWeb.Router do
     pipe_through(:scoped_media_mutate)
 
     post("/v1/media/:dataset/upload", V1.MediaController, :upload)
+    post("/v1/media/:dataset/delete-many", V1.MediaController, :delete_many)
     patch("/v1/media/:dataset/:id", V1.MediaController, :update)
     delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
   end

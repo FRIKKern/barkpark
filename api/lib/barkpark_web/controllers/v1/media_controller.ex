@@ -793,6 +793,131 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  @delete_many_max 100
+
+  @doc """
+  `POST /v1/media/:dataset/delete-many` — delete up to #{@delete_many_max} media
+  files in one request (task-60a5883edeb49cbe). Body `{"ids": [...] | "a,b,c",
+  "force": bool}`. `bp media delete-many --ids a,b,c`.
+
+  Each id runs the single DELETE's steps: the file must be in `:dataset`, the
+  where-used guard refuses a referenced file unless `force` is true (and leaves
+  the same forced-delete witness), and `Media.delete_file/2` re-checks inside
+  its transaction. The batch is not atomic: each file goes on its own.
+
+  An id with no file in the dataset is `gone`, which counts as done: a retried
+  batch whose first attempt deleted some files answers 200 again. The 200 is
+  `{result: {deleted: [ids], gone: [ids], refused: []}}`. When any id is
+  refused the answer is 409 `conflict` with the same three lists in `details`;
+  the deleted ids stay deleted.
+  """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # Re-derive its @exclusion_anchors values from
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # in the same commit: docs/ops/exclusion-anchor-rederive.md
+  def delete_many(conn, %{"dataset" => dataset} = params) do
+    scope = scope_opts(conn)
+    force? = params["force"] in [true, "true", "1"]
+
+    with :ok <- require_write(conn),
+         {:ok, ids} <- delete_many_ids(params["ids"]) do
+      outcome =
+        Enum.reduce(ids, %{deleted: [], gone: [], refused: []}, fn id, acc ->
+          case delete_many_one(conn, id, dataset, scope, force?) do
+            :deleted -> Map.update!(acc, :deleted, &[id | &1])
+            :gone -> Map.update!(acc, :gone, &[id | &1])
+            {:refused, env} -> Map.update!(acc, :refused, &[Map.put(env, :id, id) | &1])
+          end
+        end)
+        |> Map.new(fn {k, v} -> {k, Enum.reverse(v)} end)
+
+      if outcome.refused == [] do
+        json(conn, %{result: outcome, syncTags: ["bp:ds:#{dataset}:media"]})
+      else
+        env =
+          Errors.stamp(
+            %{
+              code: "conflict",
+              message:
+                "#{length(outcome.refused)} of #{length(ids)} media files were not deleted; " <>
+                  "the #{length(outcome.deleted)} deleted stay deleted",
+              details: outcome
+            },
+            conn
+          )
+
+        conn |> put_status(:conflict) |> json(%{error: env})
+      end
+    end
+  end
+
+  defp delete_many_one(conn, id, dataset, scope, force?) do
+    with {:ok, file} <- Media.get_file(id, scope),
+         :ok <- ensure_dataset(file, dataset),
+         {:ok, override} <- delete_many_where_used(conn, file, force?),
+         {:ok, _deleted} <-
+           Media.delete_file(id, Keyword.merge(scope, where_used: :guard, override: override)) do
+      :deleted
+    else
+      {:error, :not_found} ->
+        :gone
+
+      {:referenced, file, census} ->
+        {:refused, refusal(file, census)}
+
+      {:error, {:referenced, file, census}} ->
+        {:refused, refusal(file, census)}
+
+      {:error, reason} ->
+        env = Errors.to_envelope(reason)
+        {:refused, %{code: env[:code], message: env[:message]}}
+    end
+  end
+
+  defp refusal(file, census) do
+    env = WhereUsed.refusal_envelope(file, census)
+    %{code: env.code, message: env.message, referencedByCount: census.count}
+  end
+
+  defp delete_many_where_used(conn, file, true),
+    do: {:ok, WhereUsed.witness_forced_delete(conn, file)}
+
+  defp delete_many_where_used(_conn, file, false) do
+    case WhereUsed.referrers(file) do
+      %{count: 0} -> {:ok, nil}
+      census -> {:referenced, file, census}
+    end
+  end
+
+  defp delete_many_ids(raw) do
+    ids =
+      cond do
+        is_list(raw) -> Enum.filter(raw, &is_binary/1)
+        is_binary(raw) -> String.split(raw, ",")
+        true -> []
+      end
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    cond do
+      ids == [] ->
+        delete_many_error("give the media ids as ids: [\"a\", \"b\"] or \"a,b\"")
+
+      length(ids) > @delete_many_max ->
+        delete_many_error("at most #{@delete_many_max} ids per request; got #{length(ids)}")
+
+      true ->
+        {:ok, ids}
+    end
+  end
+
+  defp delete_many_error(message) do
+    {:error,
+     {:validation_failed, "body field ids", %{"ids" => [message]},
+      "Send 1 to #{@delete_many_max} media ids per request."}}
+  end
+
   # `:ok` to proceed, or a HALTED conn carrying the 409 census. Returning the
   # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
   # envelope reuses the public `conflict` code but carries a `details` census

@@ -256,4 +256,60 @@ defmodule BarkparkWeb.Integration.MutationsTest do
       assert {:error, :not_found} = Content.get_document("drafts.bulk-a", "post", "test")
     end
   end
+
+  describe "delete with ifExists (task-60a5883edeb49cbe)" do
+    test "without the flag one missing id refuses the whole batch 404", %{conn: conn} do
+      _ = create_draft!("ifx-1")
+
+      resp =
+        mutate(conn, %{
+          "mutations" => [
+            %{"delete" => %{"id" => "ifx-1", "type" => "post"}},
+            %{"delete" => %{"id" => "ifx-gone", "type" => "post"}}
+          ]
+        })
+
+      assert resp.status == 404
+      assert {:ok, _} = Content.get_document("drafts.ifx-1", "post", "test")
+    end
+
+    test "with ifExists a missing id is skipped and the rest of the batch lands", %{conn: conn} do
+      _ = create_draft!("ifx-2")
+
+      body =
+        conn
+        |> mutate(%{
+          "mutations" => [
+            %{"delete" => %{"id" => "ifx-gone", "type" => "post", "ifExists" => true}},
+            %{"delete" => %{"id" => "ifx-2", "type" => "post", "ifExists" => true}},
+            %{"delete" => %{"id" => "drafts.ifx-gone", "ifExists" => true}}
+          ]
+        })
+        |> json_response(200)
+
+      assert [%{"id" => "drafts.ifx-2", "operation" => "delete"}] = body["results"]
+      assert {:error, :not_found} = Content.get_document("drafts.ifx-2", "post", "test")
+    end
+
+    test "ifExists does not forgive a stale ifRevisionID", %{conn: conn} do
+      _ = create_draft!("ifx-3")
+
+      resp =
+        mutate(conn, %{
+          "mutations" => [
+            %{
+              "delete" => %{
+                "id" => "ifx-3",
+                "type" => "post",
+                "ifExists" => true,
+                "ifRevisionID" => "stale"
+              }
+            }
+          ]
+        })
+
+      assert resp.status == 412
+      assert {:ok, _} = Content.get_document("drafts.ifx-3", "post", "test")
+    end
+  end
 end

@@ -476,9 +476,11 @@ defmodule Barkpark.Content.Mutations do
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
     Enum.map_reduce(chunk, cache, fn {m, index}, cache ->
-      case with_exact_id(m, dataset, opts, fn m ->
+      case m
+           |> with_exact_id(dataset, opts, fn m ->
              apply_one(m, dataset, publish_opts(m, opts, cache))
-           end) do
+           end)
+           |> if_exists(m) do
         {:ok, doc, op} ->
           :ok = between_mutations_barrier()
           cache = note_create_if_not_exists_noop(m, op, doc, cache)
@@ -500,6 +502,15 @@ defmodule Barkpark.Content.Mutations do
       end
     end)
   end
+
+  # `{"delete": {"id": …, "ifExists": true}}` (task-60a5883edeb49cbe): an id
+  # that is already gone is done, not a failure, so a retried prune batch is not
+  # refused whole by the one id its first attempt deleted. It skips like the
+  # Sanity-shaped delete of a missing id above: no write, no result row. Only
+  # the 404 is forgiven; a stale `ifRevisionID` still answers 412. Without the
+  # flag a missing id is the 404 that rolls the batch back, as before.
+  defp if_exists({:error, :not_found}, %{"delete" => %{"ifExists" => true}}), do: :skip
+  defp if_exists(result, _mutation), do: result
 
   # A batch fails whole, so a 412 names the mutation that failed and the row it
   # compared: the client resends that one, not the batch one by one
