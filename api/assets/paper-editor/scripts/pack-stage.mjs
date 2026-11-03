@@ -20,6 +20,8 @@ export const STAGED = [
   [path.join(assets, "bp-paper-editor.css"), "dist/bp-paper-editor.css"],
   [path.join(assets, "bp-paper-editor-shell.css"), "dist/bp-paper-editor-shell.css"],
   [path.join(assets, "bp-paper-mermaid.js"), "dist/bp-paper-mermaid.js"],
+  [path.join(assets, "bp-paper-surface.css"), "dist/bp-paper-surface.css"],
+  [path.join(assets, "bp-paper-code.js"), "dist/bp-paper-code.js"],
   [path.join(root, "src/contract.js"), "dist/contract.js"],
   [path.resolve(root, "../../../LICENSE"), "LICENSE"],
 ];

@@ -42,6 +42,8 @@
     "./bp-paper-editor-shell.css": "./dist/bp-paper-editor-shell.css",
     "./mermaid": "./dist/bp-paper-mermaid.js",
     "./bp-paper-mermaid.js": "./dist/bp-paper-mermaid.js",
+    "./bp-paper-surface.css": "./dist/bp-paper-surface.css",
+    "./bp-paper-code.js": "./dist/bp-paper-code.js",
     "./contract": {
       "types": "./contract.d.ts",
       "default": "./dist/contract.js"
@@ -100,7 +102,7 @@
     "@tiptap/starter-kit": "3.31.4",
     "highlight.js": "11.12.0",
     "lowlight": "3.3.0",
-    "esbuild": "^0.28.2",
+    "esbuild": "0.28.2",
     "jsdom": "^25.0.0"
   }
 }
