@@ -9,29 +9,22 @@ import { wirePaintedTextInline } from "./painted-text-inline.js";
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const str = value => typeof value === "string" && value !== "";
 
-// Wrap a run's leading bare text node (a label followed by a badge span) in a
-// class-less span so it becomes its own host.
+// A run's leading/trailing bare text remains a text node in the reader's own
+// parent. The shared wire targets that node while protecting its sibling paint.
 function leadText(el) {
   const text = el?.firstChild;
   if (!text || text.nodeType !== 3 || text.nodeValue.trim() === "") return null;
-  const span = document.createElement("span");
-  text.replaceWith(span);
-  span.appendChild(text);
-  return span;
+  return text;
 }
-// A class-less span around a run's trailing bare text node (after a swatch <i>).
 function tailText(el) {
   const text = el?.lastChild;
   if (!text || text.nodeType !== 3 || text.nodeValue.trim() === "") return null;
-  const span = document.createElement("span");
-  text.replaceWith(span);
-  span.appendChild(text);
-  return span;
+  return text;
 }
 const rowsOf = (block, key) => (Array.isArray(block[key]) ? block[key] : []);
 // One field per stored string key that has a painted element.
-const keyed = (out, el, item, index, key, label) => {
-  if (el && object(item) && str(item[key])) out.push({ el, item, index, key, label });
+const keyed = (out, el, item, index, key, label, textNode = null) => {
+  if (el && object(item) && str(item[key])) out.push({ el, item, index, key, label, textNode });
 };
 // An element of a string array on `owner` (the block or a row).
 const arrayField = (out, el, owner, index, key, at, label) => {
@@ -70,7 +63,7 @@ const DESCRIBE = {
       const value = cell.querySelector(":scope > .bp-lineage__value");
       if (value) {
         keyed(out, value.querySelector(":scope > .bp-lineage__unit"), node, i, "unit", "Entry unit");
-        if (str(node.value)) keyed(out, leadText(value), node, i, "value", "Entry value");
+        if (str(node.value)) keyed(out, value, node, i, "value", "Entry value", leadText(value));
       }
       return out;
     });
@@ -89,7 +82,7 @@ const DESCRIBE = {
       const tr = trs[i];
       const label = tr.querySelector(":scope > .bp-duel__label");
       keyed(out, label?.querySelector(":scope > .bp-duel__delta"), row, i, "delta", "Row delta");
-      if (str(row.label)) keyed(out, leadText(label), row, i, "label", "Row label");
+      if (str(row.label)) keyed(out, label, row, i, "label", "Row label", leadText(label));
       const vals = tr.querySelectorAll(":scope > td.bp-duel__val");
       if (vals.length === 2) {
         keyed(out, vals[0], row, i, "valueA", "Value A");
@@ -114,7 +107,7 @@ const DESCRIBE = {
     const series = rowsOf(block, "series");
     const keys = [...body.querySelectorAll(".bp-chart__legend > .bp-chart__key")];
     if (series.length === keys.length && series.every(object))
-      series.forEach((s, i) => { if (str(s.label)) keyed(out, tailText(keys[i]), s, i, "label", "Series label"); });
+      series.forEach((s, i) => { if (str(s.label)) keyed(out, keys[i], s, i, "label", "Series label", tailText(keys[i])); });
     return out;
   } },
 };

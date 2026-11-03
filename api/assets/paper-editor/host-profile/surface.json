@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "1.0.0",
-  "build": "19a5c401351d",
+  "build": "62ba981f70de",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -1352,7 +1352,6 @@
       "data-bp-inline-opaque",
       "data-bp-inline-type",
       "data-bp-locked",
-      "data-bp-note-body",
       "data-bp-opaque",
       "data-bp-opaque-leaf",
       "data-bp-opaque-mark",

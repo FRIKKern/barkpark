@@ -38,12 +38,23 @@ function mount(block, html) {
 }
 function type(host, el, text) {
   el.focus();
-  el.textContent = text;
+  const ownText = [...el.childNodes].find(node => node.nodeType === 3 && node.nodeValue.trim() !== "");
+  if (el.children.length && ownText) ownText.nodeValue = (ownText.nodeValue.match(/^\s*/)?.[0] || "") + text;
+  else el.textContent = text;
   el.dispatchEvent(new Event("input", { bubbles: true }));
   host.flushPendingChanges();
   el.blur();
 }
 const hosts = (host) => [...host.querySelectorAll("[data-bp-fleet-body] [data-test-id^='paper-inline-']")];
+const shown = el => {
+  const ownText = [...el.childNodes].find(node => node.nodeType === 3 && node.nodeValue.trim() !== "");
+  return el.children.length && ownText ? ownText.nodeValue.trimStart() : el.textContent;
+};
+function caret(node, offset) {
+  const range = document.createRange();
+  range.setStart(node, offset); range.collapse(true);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+}
 const lastPatch = (batches) => batches.at(-1)?.ops.at(-1)?.patch;
 
 const cases = [
@@ -102,8 +113,34 @@ try {
     try {
       const before = hole.textContent;
       const els = hosts(host);
-      assert.deepEqual(els.map(el => el.textContent), c.painted, `${c.block.type}: every painted stored string edits in place`);
+      assert.deepEqual(els.map(shown), c.painted, `${c.block.type}: every painted stored string edits in place`);
       assert.equal(hole.textContent, before, `${c.block.type}: decoration keeps the reader's painted text`);
+      if (c.block.type === "lineage") assert.deepEqual(
+        [...hole.querySelector(".bp-lineage__value").childNodes].map(node => node.nodeType), [3, 1],
+        "lineage: value remains the reader's bare text beside its unit");
+      if (c.block.type === "duel") assert.deepEqual(
+        [...hole.querySelector(".bp-duel__label").childNodes].map(node => node.nodeType), [3, 1],
+        "duel: label remains the reader's bare text beside its delta");
+      if (c.block.type === "chart") assert.deepEqual(
+        [...hole.querySelector(".bp-chart__key").childNodes].map(node => node.nodeType), [1, 3],
+        "chart: legend remains the reader's swatch followed by bare text");
+      if (c.block.type === "chart") {
+        const key = hole.querySelector(".bp-chart__key");
+        key.focus();
+        const outside = document.createRange();
+        outside.selectNode(key.firstChild);
+        window.getSelection().removeAllRanges(); window.getSelection().addRange(outside);
+        const insert = new window.InputEvent("beforeinput", { inputType: "insertText", bubbles: true, cancelable: true });
+        key.dispatchEvent(insert);
+        assert.equal(insert.defaultPrevented, false, "chart: keyboard insertion recovers a caret inside the bare label text");
+        assert.equal(window.getSelection().anchorNode, key.lastChild);
+        caret(key.lastChild, 0);
+        const backspace = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+        key.dispatchEvent(backspace);
+        assert.equal(backspace.defaultPrevented, true, "chart: Backspace at the label boundary cannot remove the swatch");
+        assert.ok(key.querySelector(".bp-chart__swatch"), "chart: the reader swatch remains mounted");
+        key.blur();
+      }
       assert.equal(els[0].hasAttribute("role"), false, `${c.block.type}: resting reader markup has no editor role`);
       assert.equal(els[0].hasAttribute("aria-label"), false, `${c.block.type}: resting reader markup has no editor name`);
       assert.equal(els[0].style.cursor, "", `${c.block.type}: resting reader markup has no inline editor style`);
