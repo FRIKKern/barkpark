@@ -2,7 +2,7 @@
   "renderer": "pdrender-wasm",
   "compare": "text",
   "pack_stamp": "1ca9ca01d368484f4e7aa39003f9fb065595d29745f785d823154762b362be0b",
-  "ran_at_sha": "96cce88b565ccea8c82d49110503bd046ea7e0b6",
+  "ran_at_sha": "acedcaf0146b4a89d67a261a7ab3ca6f708384f4",
   "rows": [
     {
       "type": "action",
@@ -117,10 +117,7 @@
     },
     {
       "type": "criteria-progress",
-      "status": "fail",
-      "diff": [
-        "word 4/9 \"chapter\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "diagram",
@@ -139,17 +136,7 @@
     },
     {
       "type": "duel",
-      "status": "fail",
-      "diff": [
-        "word 8/19 \"478\" not found in order",
-        "word 10/19 \"121\" not found in order",
-        "word 11/19 \"add-oban-worker\" not found in order",
-        "word 13/19 \"1\" not found in order",
-        "word 14/19 \"788\" not found in order",
-        "word 15/19 \"2\" not found in order",
-        "word 16/19 \"743\" not found in order",
-        "word 17/19 \"sources\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "embed",
@@ -170,10 +157,7 @@
     },
     {
       "type": "eyebrow",
-      "status": "fail",
-      "diff": [
-        "word 1/1 \"dispatches\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-boolean",
@@ -253,10 +237,7 @@
     },
     {
       "type": "lineage",
-      "status": "fail",
-      "diff": [
-        "word 26/28 \"sources\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "list",
@@ -320,27 +301,15 @@
     },
     {
       "type": "stat-grid",
-      "status": "fail",
-      "diff": [
-        "word 4/6 \"3\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "stat",
-      "status": "fail",
-      "diff": [
-        "word 1/14 \"71\" not found in order",
-        "word 2/14 \"118\" not found in order",
-        "word 13/14 \"source\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "stats",
-      "status": "fail",
-      "diff": [
-        "word 4/8 \"3\" not found in order",
-        "word 6/8 \"sources\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "status-legend",

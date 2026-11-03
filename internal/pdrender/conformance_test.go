@@ -107,8 +107,21 @@ func conformanceWords(s string) []string {
 	return out
 }
 
+func conformanceWordsSplitPunctuation(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+}
+
 func diffWords(actual string, expected []string) []string {
-	seen := conformanceWords(actual)
+	return diffWordsFrom(conformanceWords(actual), expected)
+}
+
+func diffWordsSplitPunctuation(actual string, expected []string) []string {
+	return diffWordsFrom(normalizeFigureWords(conformanceWordsSplitPunctuation(actual)), conformanceWordsSplitPunctuation(strings.Join(expected, " ")))
+}
+
+func diffWordsFrom(seen, expected []string) []string {
 	var out []string
 	at := 0
 	for i, word := range expected {
@@ -128,6 +141,142 @@ func diffWords(actual string, expected []string) []string {
 	return out
 }
 
+func diffWordsUnordered(actual string, expected []string) []string {
+	available := map[string]int{}
+	for _, word := range normalizeFigureWords(conformanceWords(actual)) {
+		available[word]++
+	}
+	var out []string
+	for i, word := range expected {
+		if available[word] == 0 {
+			out = append(out, fmt.Sprintf("word %d/%d %q not found", i+1, len(expected), word))
+			continue
+		}
+		available[word]--
+	}
+	return out
+}
+
+func columnMajorText(actual string) string {
+	lines := strings.Split(actual, "\n")
+	var starts []int
+	for _, line := range lines {
+		runes := []rune(line)
+		for i := 0; i < len(runes); {
+			for i < len(runes) && unicode.IsSpace(runes[i]) {
+				i++
+			}
+			if i == len(runes) {
+				break
+			}
+			start := i
+			for i < len(runes) && !unicode.IsSpace(runes[i]) {
+				i++
+			}
+			if len(starts) == 0 || start-starts[len(starts)-1] >= 3 {
+				starts = append(starts, start)
+			}
+		}
+		break
+	}
+	if len(starts) < 2 {
+		return actual
+	}
+
+	var cells, footer []string
+	for col, start := range starts {
+		end := -1
+		if col+1 < len(starts) {
+			end = starts[col+1]
+		}
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "Kilde:") || strings.HasPrefix(trimmed, "Kilder:") ||
+				strings.HasPrefix(trimmed, "Source:") || strings.HasPrefix(trimmed, "Sources:") {
+				if col == 0 {
+					footer = append(footer, trimmed)
+				}
+				continue
+			}
+			runes := []rune(line)
+			if start >= len(runes) {
+				continue
+			}
+			to := len(runes)
+			if end >= 0 && end < to {
+				to = end
+			}
+			if part := strings.TrimSpace(string(runes[start:to])); part != "" {
+				cells = append(cells, part)
+			}
+		}
+	}
+	return strings.Join(append(cells, footer...), "\n")
+}
+
+func duelAssociationDiff(actual string, attrs map[string]any) []string {
+	lines := strings.Split(actual, "\n")
+	var out []string
+	for i, row := range itemMaps(attrs, "rows") {
+		label := sanitizeText(strings.TrimSpace(attrStr(row, "label")))
+		valueA := sanitizeText(strings.TrimSpace(attrStr(row, "valueA")))
+		valueB := sanitizeText(strings.TrimSpace(attrStr(row, "valueB")))
+		unit := sanitizeText(strings.TrimSpace(attrStr(row, "unit")))
+		if label == "" {
+			continue
+		}
+		armA, armB := valueA, valueB
+		if unit != "" {
+			armA += " " + unit
+			armB += " " + unit
+		}
+		expected := strings.Join(strings.Fields(label+" "+armA+" vs "+armB), " ")
+		associated := false
+		for _, line := range lines {
+			if strings.Join(strings.Fields(line), " ") == expected {
+				associated = true
+				break
+			}
+		}
+		if !associated {
+			out = append(out, fmt.Sprintf("row %d %q is not associated with values %q and %q", i+1, label, valueA, valueB))
+		}
+	}
+	return out
+}
+
+func normalizeFigureWords(words []string) []string {
+	out := append([]string(nil), words...)
+	for i, word := range out {
+		switch word {
+		case "kilde":
+			out[i] = "source"
+		case "kilder":
+			out[i] = "sources"
+		}
+	}
+	return out
+}
+
+func diffFigureWords(actual string, expected []string) []string {
+	return diffWordsFrom(normalizeFigureWords(conformanceWords(actual)), expected)
+}
+
+func diffTrackedEyebrow(actual string, expected []string) []string {
+	seen := conformanceWords(actual)
+	allSingle := len(seen) > 1
+	for _, word := range seen {
+		if len([]rune(word)) != 1 {
+			allSingle = false
+			break
+		}
+	}
+	if allSingle {
+		seen = []string{strings.Join(seen, "")}
+	}
+	return diffWordsFrom(seen, expected)
+}
+
 func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	if _, ok := reg.blocks[c.Type]; !ok {
 		return conformanceRow{Type: c.Type, Status: "missing"}
@@ -141,6 +290,27 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 		return conformanceRow{Type: c.Type, Status: "unchecked"}
 	}
 	text := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()}))
+	// Multi-column terminal layouts are read row-major in plain text while the
+	// canonical DOM is read cell-major. Duel likewise keeps values and the
+	// authored delta on separate visual rows. For those layouts, conformance is
+	// presence-with-multiplicity; order would report visible words as missing.
+	if c.Type == "duel" {
+		diff := diffWordsUnordered(text, expected)
+		diff = append(diff, duelAssociationDiff(text, blocks[0].Attrs)...)
+		return conformanceVerdict(c.Type, diff)
+	}
+	if c.Type == "stat-grid" || c.Type == "stats" {
+		return conformanceVerdict(c.Type, diffFigureWords(columnMajorText(text), expected))
+	}
+	if c.Type == "stat" {
+		return conformanceVerdict(c.Type, diffWordsSplitPunctuation(text, expected))
+	}
+	if c.Type == "lineage" {
+		return conformanceVerdict(c.Type, diffFigureWords(text, expected))
+	}
+	if c.Type == "eyebrow" {
+		return conformanceVerdict(c.Type, diffTrackedEyebrow(text, expected))
+	}
 	return conformanceVerdict(c.Type, diffWords(text, expected))
 }
 
@@ -234,6 +404,44 @@ func TestConformanceVerdictCapsTheDiffAtTwelveLines(t *testing.T) {
 	}
 	if r := conformanceVerdict("t", nil); r.Status != "pass" {
 		t.Errorf("no diff: %+v", r)
+	}
+}
+
+func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *testing.T) {
+	if got := conformanceWordsSplitPunctuation("71/118 add-error-shape"); !reflect.DeepEqual(got, []string{"71", "118", "add", "error", "shape"}) {
+		t.Fatalf("punctuation tokenization: %v", got)
+	}
+	if diff := diffWordsUnordered("3 target 5 today", []string{"5", "today", "3", "target"}); diff != nil {
+		t.Fatalf("row-major grid text should satisfy cell-major golden words: %v", diff)
+	}
+	if diff := diffWordsUnordered("one", []string{"one", "one"}); len(diff) != 1 {
+		t.Fatalf("unordered comparison must preserve multiplicity: %v", diff)
+	}
+	if diff := diffTrackedEyebrow("D I S P A T C H E S", []string{"dispatches"}); diff != nil {
+		t.Fatalf("tracked eyebrow should remain one semantic word: %v", diff)
+	}
+	if diff := diffFigureWords("Kilder: task:one", []string{"sources", "task:one"}); diff != nil {
+		t.Fatalf("localized provenance label should match the canonical word: %v", diff)
+	}
+	gridExpected := []string{"5", "today", "3", "target"}
+	if diff := diffFigureWords(columnMajorText("5     3\ntoday target"), gridExpected); diff != nil {
+		t.Fatalf("column-major grid should preserve each value/label pair: %v", diff)
+	}
+	if diff := diffFigureWords(columnMajorText("5     3\ntarget today"), gridExpected); diff == nil {
+		t.Fatal("swapped grid labels must not pass by word presence alone")
+	}
+	duel := map[string]any{"rows": []any{
+		map[string]any{"label": "first", "valueA": "1", "valueB": "2"},
+		map[string]any{"label": "second", "valueA": "3", "valueB": "4"},
+	}}
+	if diff := duelAssociationDiff("first  1 vs 2\nsecond  3 vs 4", duel); diff != nil {
+		t.Fatalf("duel associations: %v", diff)
+	}
+	if diff := duelAssociationDiff("first  3 vs 4\nsecond  1 vs 2", duel); diff == nil {
+		t.Fatal("swapped duel values must not pass by word presence alone")
+	}
+	if diff := duelAssociationDiff("first  2 vs 1\nsecond  3 vs 4", duel); diff == nil {
+		t.Fatal("swapped duel arms must not pass by word presence alone")
 	}
 }
 

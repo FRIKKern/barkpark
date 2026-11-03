@@ -57,3 +57,14 @@ func TestCriteriaProgressRendererEmptyIsSilent(t *testing.T) {
 		t.Fatalf("empty criteria-progress should render nothing, got %d lines", len(lines))
 	}
 }
+
+func TestCriteriaProgressRendererNeverTruncatesLabels(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "criteria-progress", Attrs: map[string]any{
+		"rows": []any{map[string]any{"label": "Survey every corpus chapter", "met": 2, "total": 5}},
+	}}
+	got := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 20, Theme: DarkTheme(), Profile: NoColor}), "\n"))
+	if !strings.Contains(got, "Survey every corpus\nchapter") || strings.Contains(got, "…") {
+		t.Fatalf("criteria-progress must wrap, not truncate, an authored label, got %q", got)
+	}
+}

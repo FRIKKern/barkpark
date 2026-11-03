@@ -149,6 +149,8 @@ const words = (s) =>
     .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
     .filter(Boolean);
 
+const wordsSplitPunctuation = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/gu).filter(Boolean);
+
 export const htmlText = (html) => html.replace(/<[^>]*>/g, "").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
 
 export function goldenWords(shape) {
@@ -159,8 +161,15 @@ export function goldenWords(shape) {
 }
 
 export function diffWords(actualText, expected) {
+  return diffWordsFrom(words(actualText), expected);
+}
+
+export function diffWordsSplitPunctuation(actualText, expected) {
+  return diffWordsFrom(normalizeFigureWords(wordsSplitPunctuation(actualText)), wordsSplitPunctuation(expected.join(" ")));
+}
+
+function diffWordsFrom(seen, expected) {
   if (expected.length === 0) return UNCHECKED;
-  const seen = words(actualText);
   const out = [];
   let at = 0;
   expected.forEach((word, i) => {
@@ -169,6 +178,57 @@ export function diffWords(actualText, expected) {
     else at = found + 1;
   });
   return out;
+}
+
+export function diffWordsUnordered(actualText, expected) {
+  if (expected.length === 0) return UNCHECKED;
+  const available = new Map();
+  for (const word of normalizeFigureWords(words(actualText))) available.set(word, (available.get(word) || 0) + 1);
+  const out = [];
+  expected.forEach((word, i) => {
+    if (!available.get(word)) out.push(`word ${i + 1}/${expected.length} "${word}" not found`);
+    else available.set(word, available.get(word) - 1);
+  });
+  return out;
+}
+
+const normalizeFigureWords = (seen) => seen.map((word) => word === "kilde" ? "source" : word === "kilder" ? "sources" : word);
+
+export function diffFigureWords(actualText, expected) {
+  return diffWordsFrom(normalizeFigureWords(words(actualText)), expected);
+}
+
+export function diffTrackedEyebrow(actualText, expected) {
+  let seen = words(actualText);
+  if (seen.length > 1 && seen.every((word) => [...word].length === 1)) seen = [seen.join("")];
+  return diffWordsFrom(seen, expected);
+}
+
+export function columnMajorText(actualText) {
+  const lines = actualText.split("\n");
+  const starts = [];
+  for (const line of lines) {
+    for (const match of line.matchAll(/\S+/g)) {
+      if (starts.length === 0 || match.index - starts.at(-1) >= 3) starts.push(match.index);
+    }
+    break;
+  }
+  if (starts.length < 2) return actualText;
+  const cells = [];
+  const footer = [];
+  starts.forEach((start, column) => {
+    const end = starts[column + 1];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (/^(?:Kilde|Kilder|Source|Sources):/.test(trimmed)) {
+        if (column === 0) footer.push(trimmed);
+        continue;
+      }
+      const part = line.slice(start, end).trim();
+      if (part) cells.push(part);
+    }
+  });
+  return [...cells, ...footer].join("\n");
 }
 
 function row(type, verdict) {
