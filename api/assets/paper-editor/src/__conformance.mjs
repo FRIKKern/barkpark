@@ -46,6 +46,13 @@ function unwrapFleet(root) {
 
 function semanticClone(source, blockType) {
   let root = source.cloneNode(true);
+  // Container blocks keep their children mounted as real node views. Normalize
+  // each child's own resting contract before comparing the container, so a
+  // section of cards inherits card parity instead of growing a second renderer.
+  for (const child of [...root.querySelectorAll("[data-bp-conformance-root][data-bp-type]")]) {
+    const childType = child.getAttribute("data-bp-type");
+    child.replaceWith(semanticClone(child, childType));
+  }
   const type = root.getAttribute?.("data-bp-type") || blockType;
   if (type === "code") {
     const reader = document.createElement("pre");
@@ -134,6 +141,84 @@ function semanticClone(source, blockType) {
       link.removeAttribute("target");
       link.removeAttribute("rel");
     }
+  } else if (type === "callout" && root.tagName === "DIV") {
+    const title = root.querySelector(":scope > span > strong");
+    const body = root.querySelector(":scope > .bp-callout__body");
+    const inlineBody = document.createElement("span");
+    if (body) inlineBody.append(...body.childNodes);
+    title?.removeAttribute("style");
+    root.replaceChildren(
+      ...(title?.textContent ? [title, document.createTextNode(" ")] : []),
+      inlineBody,
+    );
+  } else if (type === "card") {
+    root.querySelector(":scope > .bp-canvas-card__controls")?.remove();
+    root.querySelector(":scope > .bp-canvas-card__media-paint")?.remove();
+    root.querySelectorAll(":scope > bp-media-picker").forEach((el) => el.remove());
+
+    const media = root.querySelector(":scope > img");
+    if (media?.style.display === "none") media.remove();
+    else media?.style.removeProperty("display");
+
+    const heading = root.querySelector(":scope > h1, :scope > h2, :scope > h3");
+    if (heading?.style.display === "none") heading.remove();
+    else if (heading) {
+      heading.style.removeProperty("display");
+      heading.replaceChildren(document.createTextNode(heading.textContent || ""));
+    }
+
+    const body = root.querySelector(":scope > p");
+    if (body && !body.hasChildNodes()) body.remove();
+
+    const actionLink = root.querySelector(":scope > a.bp-button");
+    const actionIsland = root.querySelector(":scope > span > [data-test-id='paper-card-action-label']");
+    if (actionLink && actionIsland?.style.display !== "none") {
+      actionLink.textContent = actionIsland.textContent || "";
+      actionLink.style.removeProperty("display");
+    } else if (actionLink?.style.display === "none") {
+      actionLink.remove();
+    }
+    actionIsland?.parentElement?.remove();
+  } else if (type === "stage") {
+    const fields = [
+      ["paper-stage-kind", "bp-pnode__k"],
+      ["paper-stage-title", "bp-pnode__t"],
+      ["paper-stage-detail", "bp-pnode__d"],
+      ["paper-stage-files", "bp-pnode__f"],
+    ];
+    const cells = fields.flatMap(([testId, className]) => {
+      const value = root.querySelector(`[data-test-id='${testId}']`)?.value || "";
+      if (!value) return [];
+      const cell = document.createElement("div");
+      cell.className = className;
+      cell.textContent = value;
+      return [cell];
+    });
+    root.className = root.classList.contains("bp-canvas-stage--src")
+      ? "bp-pnode bp-pnode--src"
+      : "bp-pnode";
+    root.replaceChildren(...cells);
+  } else if (type === "terminal") {
+    const bar = root.querySelector(":scope > .bp-term__bar");
+    const titleInput = bar?.querySelector(":scope > .bp-term__title");
+    if (titleInput) {
+      const title = document.createElement("span");
+      title.className = "bp-term__title";
+      title.textContent = titleInput.value || "";
+      titleInput.replaceWith(title);
+    }
+    bar?.querySelector(":scope > .bp-canvas-term__live-toggle")?.remove();
+
+    const footChrome = root.querySelector(":scope > .bp-canvas-term__foot-chrome");
+    const footInput = footChrome?.querySelector(".bp-canvas-term__foot-input");
+    if (footInput && footChrome) {
+      const foot = document.createElement("div");
+      foot.className = "bp-term__foot";
+      foot.textContent = footInput.value || "";
+      footChrome.replaceWith(foot);
+    } else {
+      footChrome?.remove();
+    }
   }
   return root;
 }
@@ -185,7 +270,13 @@ async function judge(golden) {
     if (!pm) return [`canvas mounted no editor for ${golden.type}`];
     const hostPainted = paint(canvas, block);
     await new Promise((r) => setTimeout(r, 0));
-    const semanticRoot = pm.querySelector("[data-bp-conformance-root]");
+    // A container may mount independently conformant children (for example a
+    // section of cards). A typed child marker cannot represent a different
+    // parent row; untyped preview roots remain valid for island node views.
+    const semanticRoot = [...pm.querySelectorAll("[data-bp-conformance-root]")].find((el) => {
+      const type = el.getAttribute("data-bp-type");
+      return type == null || type === golden.type;
+    });
     const normalizeText = ["divider", "list", "paragraph"].includes(golden.type);
     const root = semanticRoot ? semanticClone(semanticRoot, golden.type)
       : normalizeText ? semanticClone(pm, golden.type) : pm.cloneNode(true);
@@ -206,6 +297,16 @@ if (stripProbe.firstChild.className !== "x-bp-canvas-y xProseMirror") throw new 
 if (stripProbe.childNodes[1].nodeType !== Node.TEXT_NODE || stripProbe.childNodes[1].nodeValue !== " ") throw new Error("strip did not unwrap the exact note separator");
 if (stripProbe.childNodes[2].tagName !== "SPAN" || stripProbe.childNodes[2].style.display !== "none") throw new Error("strip changed unrelated host markup");
 if (stripProbe.lastChild.tagName !== "A" || stripProbe.lastChild.hasAttribute("style")) throw new Error("strip kept semantic-root editor visibility");
+
+const titleOnlySectionProbe = document.createElement("div");
+titleOnlySectionProbe.setAttribute("data-bp-type", "section");
+titleOnlySectionProbe.setAttribute("data-bp-conformance-root", "");
+titleOnlySectionProbe.innerHTML = '<div class="bp-section__cell"><div class="bp-canvas-card bp-card" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><img style="display:none"><button class="bp-canvas-card__media-paint"></button><h2><span data-test-id="paper-card-title">Alpha cell</span></h2><p></p><a class="bp-button" style="display:none"></a><span><span data-test-id="paper-card-action-label" style="display:none"></span></span></div></div>';
+const normalizedTitleOnlySection = semanticClone(titleOnlySectionProbe, "section");
+strip(normalizedTitleOnlySection);
+if (normalizedTitleOnlySection.outerHTML !== '<div><div class="bp-section__cell"><div class="bp-card"><h2>Alpha cell</h2></div></div></div>') {
+  throw new Error(`nested title-only card did not inherit card parity: ${normalizedTitleOnlySection.outerHTML}`);
+}
 
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
 window.close();

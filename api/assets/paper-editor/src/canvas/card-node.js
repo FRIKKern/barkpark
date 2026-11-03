@@ -255,6 +255,7 @@ export const Card = Node.create({
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
       dom.setAttribute("data-bp-type", "card");
+      dom.setAttribute("data-bp-conformance-root", "");
 
       // ── light edit-only controls (hidden at rest; the section controls precedent).
       // The whole bar is PM-safe chrome OUTSIDE the contentDOM (body only): it is a

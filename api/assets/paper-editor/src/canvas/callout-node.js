@@ -276,6 +276,7 @@ export const Callout = Node.create({
         dom = document.createElement("details");
         dom.className = `bp-canvas-callout bp-callout bp-callout--${toneClass}`;
         dom.setAttribute("data-bp-type", "callout");
+        dom.setAttribute("data-bp-conformance-root", "");
 
         summary = document.createElement("summary");
         summary.className = "bp-callout__summary";
@@ -314,6 +315,7 @@ export const Callout = Node.create({
         dom = document.createElement("div");
         dom.className = `bp-canvas-callout bp-callout bp-callout--${toneClass}`;
         dom.setAttribute("data-bp-type", "callout");
+        dom.setAttribute("data-bp-conformance-root", "");
 
         // Run-in title: <strong> + a literal space. Hidden when absent, so a
         // live title edit toggles without adding/removing nodes.

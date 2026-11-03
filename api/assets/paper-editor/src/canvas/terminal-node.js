@@ -180,6 +180,7 @@ export const Terminal = Node.create({
       const dom = document.createElement("div");
       dom.className = "bp-term bp-canvas-term";
       dom.setAttribute("data-bp-type", "terminal");
+      dom.setAttribute("data-bp-conformance-root", "");
 
       // ── bar (chrome, contenteditable=false) ──
       const bar = document.createElement("div");
