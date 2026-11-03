@@ -114,6 +114,65 @@ defmodule BarkparkWeb.SamlControllerTest do
     |> Base.encode64()
   end
 
+  describe "return_to from the /login page (task-9963609c3ef5276f)" do
+    test "start carries a same-origin return_to as the RelayState", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+
+      location =
+        conn
+        |> get("/v1/auth/saml/#{@slug}/start?return_to=%2Fw%2Fpensum%2Fstudio")
+        |> redirected_to(302)
+
+      assert location =~ "https://idp.example.com/sso?"
+      query = location |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+      assert query["RelayState"] == "/w/pensum/studio"
+    end
+
+    test "start sends no RelayState for an off-site return_to", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+
+      location =
+        conn
+        |> get("/v1/auth/saml/#{@slug}/start?return_to=https%3A%2F%2Fevil.example%2F")
+        |> redirected_to(302)
+
+      query = location |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+      assert query["RelayState"] in [nil, ""]
+    end
+
+    test "a browser ACS lands on a same-origin RelayState path", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+
+      landed =
+        conn
+        |> put_req_header("accept", "text/html")
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("relay@samlctrl.com", i.key, i.cert_der),
+          "RelayState" => "/w/pensum/studio"
+        })
+
+      assert redirected_to(landed, 302) == "/w/pensum/studio"
+    end
+
+    test "a browser ACS ignores an off-site RelayState", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+
+      offsite =
+        conn
+        |> put_req_header("accept", "text/html")
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("relay2@samlctrl.com", i.key, i.cert_der),
+          "RelayState" => "//evil.example/"
+        })
+
+      assert redirected_to(offsite, 302) == "/studio"
+    end
+  end
+
   test "POST ACS consumes a signed response, mints a session, and JIT-provisions", %{conn: conn} do
     i = idp()
     {_org, ws} = setup_conn(i.cert_pem)

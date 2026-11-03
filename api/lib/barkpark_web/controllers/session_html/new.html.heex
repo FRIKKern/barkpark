@@ -8,81 +8,84 @@
 
     <.auth_flash flash={@flash} />
 
-    <%= if @cloud_login_href do %>
-      <a class="bp-auth-btn" href={@cloud_login_href} data-cloud-login>
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z" />
-        </svg>
-        <%= gettext("Log in with Barkpark Cloud") %>
-      </a>
-      <div class="bp-auth-divider"><span><%= gettext("or sign in with email") %></span></div>
+    <%= if @cloud_login_href || @sso_buttons != [] do %>
+      <div class="bp-auth-stack">
+        <%= if @cloud_login_href do %>
+          <a class="bp-auth-btn" href={@cloud_login_href} data-cloud-login>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z" />
+            </svg>
+            <%= gettext("Log in with Barkpark Cloud") %>
+          </a>
+        <% end %>
+        <%= for b <- @sso_buttons do %>
+          <a
+            class={["bp-auth-btn", @cloud_login_href && "bp-auth-btn-quiet"]}
+            href={b.href}
+            data-sso-button={b.protocol}
+          >
+            <%= if b.provider == :microsoft do %>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="rgb(242, 80, 34)" d="M2 2h9.5v9.5H2z" />
+                <path fill="rgb(127, 186, 0)" d="M12.5 2H22v9.5h-9.5z" />
+                <path fill="rgb(0, 164, 239)" d="M2 12.5h9.5V22H2z" />
+                <path fill="rgb(255, 185, 0)" d="M12.5 12.5H22V22h-9.5z" />
+              </svg>
+            <% else %>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+            <% end %>
+            {b.label}
+          </a>
+        <% end %>
+      </div>
+      <%= unless @sso_lead do %>
+        <div class="bp-auth-divider"><span><%= gettext("or sign in with email") %></span></div>
+      <% end %>
     <% end %>
 
-    <.form :let={_f} for={%{}} as={:account} action={~p"/login/account"} method="post">
-      <input type="hidden" name="return_to" value={@return_to} />
-
-      <div class="form-group">
-        <label class="form-label" for="account_email"><%= gettext("Email") %></label>
-        <input
-          type="email"
-          name="email"
-          id="account_email"
-          class="form-input"
-          autocomplete="username"
-          autofocus
-          required
-          placeholder={gettext("you@example.com")}
+    <%= if @sso_lead do %>
+      <%!-- SSO-only org (bp org auth-methods <org> sso): SSO leads. Password
+           sign-in stays one click away for break-glass accounts. --%>
+      <details data-password-signin>
+        <summary><%= gettext("Sign in with a password (break-glass accounts)") %></summary>
+        <.account_form
+          return_to={@return_to}
+          quiet={true}
+          routing={@sso_routing}
         />
-      </div>
-
-      <div class="form-group">
-        <div class="bp-auth-label-row">
-          <label class="form-label" for="account_password"><%= gettext("Password") %></label>
-          <a href={~p"/login/reset"}><%= gettext("Forgot password?") %></a>
-        </div>
-        <div class="bp-auth-input-affix">
-          <input
-            type="password"
-            name="password"
-            id="account_password"
-            class="form-input"
-            autocomplete="current-password"
-            required
-            placeholder="••••••••••••"
-          />
-          <button
-            type="button"
-            class="bp-auth-eye"
-            data-eye-for="account_password"
-            tabindex="-1"
-            aria-label={gettext("Show password")}
-            data-show-label={gettext("Show password")}
-            data-hide-label={gettext("Hide password")}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <button type="submit" class={["bp-auth-btn", @cloud_login_href && "bp-auth-btn-quiet"]}>
-        <%= gettext("Sign in") %>
-      </button>
-    </.form>
+      </details>
+    <% else %>
+      <.account_form
+        return_to={@return_to}
+        quiet={@cloud_login_href != nil or @sso_buttons != []}
+        routing={@sso_routing}
+      />
+    <% end %>
 
     <p class="bp-auth-alt">
       <%= gettext("or") %> <a href={~p"/login/magic"}><%= gettext("email me a sign-in link") %></a> — <%= gettext("no password needed") %>
     </p>
+
+    <%= if @passkey do %>
+      <%!-- Shown by the script below only when the browser has WebAuthn. --%>
+      <div class="bp-auth-passkey" data-passkey hidden>
+        <button
+          type="button"
+          class="bp-auth-btn bp-auth-btn-quiet"
+          data-passkey-button
+          data-return-to={@return_to}
+          data-error-label={gettext("The passkey could not be used. Try again, or sign in another way.")}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="9" cy="8" r="4" /><path d="M2 21v-1a6 6 0 0 1 9-5.2" /><circle cx="18" cy="15" r="2.5" /><path d="M18 17.5V22m0-2h2" />
+          </svg>
+          <%= gettext("Sign in with a passkey") %>
+        </button>
+        <p class="bp-auth-note" data-passkey-error role="alert" hidden></p>
+      </div>
+    <% end %>
 
     <details data-token-signin>
       <summary><%= gettext("Sign in with an API token instead") %></summary>
@@ -107,10 +110,18 @@
       </.form>
     </details>
 
-    <p class="bp-auth-foot">
-      <%= gettext("Using enterprise SSO? Open your organization's sign-in link") %> —
-      <code>/v1/auth/oidc/&lt;org&gt;/start</code> — <%= gettext("or ask your admin for it.") %>
-    </p>
+    <%= cond do %>
+      <% @sso_buttons != [] -> %>
+      <% @sso_routing -> %>
+        <p class="bp-auth-foot" data-sso-routing-hint>
+          <%= gettext("Using enterprise SSO? Enter your work email and continue without a password.") %>
+        </p>
+      <% true -> %>
+        <p class="bp-auth-foot">
+          <%= gettext("Using enterprise SSO? Open your organization's sign-in link") %> —
+          <code>/v1/auth/oidc/&lt;org&gt;/start</code> — <%= gettext("or ask your admin for it.") %>
+        </p>
+    <% end %>
   </div>
 
   <p class="bp-auth-pagefoot"><%= gettext("Barkpark — the self-hosted content studio") %></p>
@@ -127,4 +138,117 @@
       });
     });
   </script>
+
+  <%= if @sso_routing do %>
+    <script nonce={assigns[:csp_nonce]}>
+      // Email routing (task-9963609c3ef5276f): an address on a verified domain
+      // of an org with SSO continues to that org's IdP. Submitting with no
+      // password makes /login/account redirect there. An SSO-only domain hides
+      // the password field; break-glass accounts can open it again.
+      (function () {
+        var form = document.querySelector("[data-account-form]");
+        if (!form) return;
+        var email = form.querySelector("#account_email");
+        var group = form.querySelector("[data-password-group]");
+        var password = form.querySelector("#account_password");
+        var submit = form.querySelector("[data-account-submit]");
+        var reveal = form.querySelector("[data-password-reveal]");
+        var signInLabel = submit.textContent.trim();
+        var route = null, revealed = false, asked = null;
+
+        function render() {
+          var sso = !!(route && route.sso);
+          var hide = sso && route.sso_only && !revealed;
+          group.hidden = hide;
+          password.disabled = hide;
+          if (reveal) reveal.hidden = !hide;
+          submit.textContent = sso && (hide || password.value === "") ? submit.dataset.ssoLabel : signInLabel;
+        }
+
+        function check() {
+          var value = email.value.trim();
+          if (value === asked) return;
+          asked = value;
+          revealed = false;
+          if (value.indexOf("@") < 1) { route = null; render(); return; }
+          fetch("/v1/auth/sso/route", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify({ email: value })
+          })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (body) { if (email.value.trim() === value) { route = body; render(); } })
+            .catch(function () { route = null; render(); });
+        }
+
+        email.addEventListener("change", check);
+        email.addEventListener("blur", check);
+        password.addEventListener("input", render);
+        if (reveal) reveal.querySelector("button").addEventListener("click", function () {
+          revealed = true; render(); password.focus();
+        });
+      })();
+    </script>
+  <% end %>
+
+  <%= if @passkey do %>
+    <script nonce={assigns[:csp_nonce]}>
+      // Passkey sign-in: usernameless WebAuthn against /v1/auth/webauthn/login,
+      // which sets the session cookie. Shown only when the browser supports it.
+      (function () {
+        var box = document.querySelector("[data-passkey]");
+        if (!box || !window.PublicKeyCredential || !navigator.credentials) return;
+        box.hidden = false;
+        var btn = box.querySelector("[data-passkey-button]");
+        var err = box.querySelector("[data-passkey-error]");
+
+        function b64u(buf) {
+          var s = "", b = new Uint8Array(buf);
+          for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+          return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
+        function bytes(s) {
+          s = s.replace(/-/g, "+").replace(/_/g, "/");
+          while (s.length % 4) s += "=";
+          var bin = atob(s), out = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+          return out;
+        }
+        function post(path, body) {
+          return fetch(path, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify(body)
+          }).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+        }
+
+        btn.addEventListener("click", function () {
+          err.hidden = true;
+          btn.disabled = true;
+          post("/v1/auth/webauthn/login/challenge", {})
+            .then(function (c) {
+              return navigator.credentials
+                .get({ publicKey: { challenge: bytes(c.challenge), rpId: c.rp_id, userVerification: "preferred", timeout: 60000 } })
+                .then(function (cred) {
+                  return post("/v1/auth/webauthn/login", {
+                    credential_id: b64u(cred.rawId),
+                    authenticator_data: b64u(cred.response.authenticatorData),
+                    signature: b64u(cred.response.signature),
+                    client_data_json: b64u(cred.response.clientDataJSON),
+                    challenge_token: c.challenge_token
+                  });
+                });
+            })
+            .then(function () { window.location.assign(btn.dataset.returnTo || "/studio"); })
+            .catch(function () {
+              err.textContent = btn.dataset.errorLabel;
+              err.hidden = false;
+              btn.disabled = false;
+            });
+        });
+      })();
+    </script>
+  <% end %>
 </div>
