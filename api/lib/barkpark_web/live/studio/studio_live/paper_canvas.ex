@@ -264,6 +264,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # deliberately ABSENT from slash-insert.js CANVAS_SLASH_TYPES (data-bearing,
   # API-authored — an empty slash insert is meaningless).
   @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
+  @canvas_chat_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
@@ -294,7 +295,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types ++
-                  @canvas_dataviz_types
+                  @canvas_dataviz_types ++
+                  @canvas_chat_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**

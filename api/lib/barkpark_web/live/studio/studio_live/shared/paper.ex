@@ -1619,6 +1619,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
   # paper_canvas.ex @canvas_dataviz_types.
   @dataviz_render_types ~w(stat stats stat-grid heatmap chart duel lineage)
+  @chat_render_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
 
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
@@ -1692,7 +1693,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def fleet_block?(block) when is_map(block),
     do:
       Map.get(block, "type") in @fleet_render_types or
-        Map.get(block, "type") in @dataviz_render_types
+        Map.get(block, "type") in @dataviz_render_types or
+        Map.get(block, "type") in @chat_render_types
 
   def fleet_block?(_), do: false
 
