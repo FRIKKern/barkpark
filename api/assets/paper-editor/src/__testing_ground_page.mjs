@@ -73,7 +73,7 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
   assert.deepEqual(red(await lightsOf(page)), []);
   assert.equal(await page.isVisible(".tg-steps"), false, "a block sample has no checklist");
   assert.equal(await page.evaluate(() => window.testingGround.state.canvases[0].liveRemote), false, "one window keeps the canvas's own echo rules");
-  assert.deepEqual(await page.$$eval(".tg-light", (ls) => ls.map((l) => l.className)), ["tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--wait"]);
+  assert.deepEqual(await page.$$eval(".tg-light", (ls) => ls.map((l) => l.className)), ["tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--green", "tg-light tg-light--wait"]);
   const first = await page.$(".tg-light");
   await page.evaluate(() => { window.testingGround.paintLights(); window.testingGround.paintLights(); });
   assert.equal(await first.evaluate((li) => li.isConnected), true, "unchanged lights are not repainted, so their words stay selectable");
@@ -81,8 +81,8 @@ await scene("opens as a plain editor: drawer closed, no light red", "", async (p
 
 await scene("D01 on this build keeps every line on screen", "?doc=drill:D01", async (page) => {
   await play(page, drill("D01"));
-  assert.deepEqual(red(await lightsOf(page)), []);
-  assert.equal(await page.isVisible(".tg-tab-dot"), false);
+  assert.deepEqual(red(await lightsOf(page)), ["read-edit"], "the reader omits the saved empty block even though the editor keeps it visible");
+  assert.equal(await page.isVisible(".tg-tab-dot"), true);
   await page.click(".tg-tab");
   assert.deepEqual(await page.$$eval(".tg-steps li", (li) => li.map((x) => x.textContent)), drill("D01").steps.map((s) => s.say));
   assert.equal(await page.isVisible(".tg-tally"), false);
@@ -92,7 +92,7 @@ await scene("lines hidden on screen light hidden blocks red, with a red dot on t
   await page.addStyleTag({ content: ".ProseMirror > :nth-child(n+2) { display: none !important; }" });
   await play(page, { steps: [{ click: { text: "Alpha", at: "end" } }, { type: "y" }] });
   const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["hidden-blocks"]);
+  assert.deepEqual(red(lights), ["hidden-blocks", "read-edit"]);
   assert.match(lights["hidden-blocks"].words, /^Hidden blocks — red 1 line is in the doc but hidden on screen \(3 blocks, 1 shown\)/);
   assert.equal(await page.getAttribute('[data-trap="hidden-blocks"]', "class"), "tg-light tg-light--red");
   assert.equal(await page.isVisible(".tg-tab-dot"), true);
@@ -177,14 +177,14 @@ await scene("under the hood: batches with the server's answer, the diff and the 
 
 await scene("D02 on this build: one id per line, every batch saved, no key lost", "?doc=drill:D02", async (page) => {
   await play(page, drill("D02"));
-  assert.deepEqual(red(await lightsOf(page)), []);
+  assert.deepEqual(red(await lightsOf(page)), ["read-edit"], "the section and nested callout keep their known reader/editor structure mismatch");
 });
 
 await scene("a refusing fold lights refused batches, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
   await page.evaluate(() => { window.testingGround.state.host.fold = { name: "refuses every batch", apply: async () => { throw new Error("patch-block: refused by the test"); } }; });
   await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "zz" }] });
   const lights = await lightsOf(page);
-  assert.deepEqual(red(lights), ["refused-batches"]);
+  assert.deepEqual(red(lights), ["refused-batches", "read-edit"]);
   assert.match(lights["refused-batches"].words, /patch-block: refused by the test/);
   await play(page, { steps: [{ reload: true }] });
   assert.match((await lightsOf(page))["lost-keys"].words, /2 characters you typed did not come back after the reload: "zz"/);
@@ -193,7 +193,7 @@ await scene("a refusing fold lights refused batches, then lost keys after a relo
 await scene("a fold that drops ops lights fold drift, then lost keys after a reload", "?doc=sample:paragraph", async (page) => {
   await page.evaluate(() => { window.testingGround.state.host.fold = { name: "drops every op", apply: async (blocks) => blocks }; });
   await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "zz" }] });
-  assert.deepEqual(red(await lightsOf(page)), ["fold-drift"]);
+  assert.deepEqual(red(await lightsOf(page)), ["fold-drift", "read-edit"]);
   await play(page, { steps: [{ reload: true }] });
   const lights = await lightsOf(page);
   assert.deepEqual(red(lights), ["lost-keys"], "the reload took the server's copy, so the editor and server agree again");
@@ -203,7 +203,7 @@ await scene("a fold that drops ops lights fold drift, then lost keys after a rel
 await scene("typing and a reload on a sound build keep every light green", "?doc=sample:paragraph", async (page) => {
   await play(page, { steps: [{ click: { text: "inside it, ", at: "end" } }, { type: "ok " }, { key: "Enter" }, { type: "next" }, { reload: true }] });
   const lights = await lightsOf(page);
-  assert.deepEqual(Object.values(lights).map((l) => l.ok), ["true", "true", "true", "true", "true"]);
+  assert.deepEqual(Object.values(lights).map((l) => l.ok), ["true", "true", "true", "true", "true", "true"]);
   const words = await page.evaluate(() => window.testingGround.state.host.saved.map((b) => b.content.map((n) => n.value || n.children?.[0]?.value).join("")));
   assert.deepEqual(words, ["A body paragraph with bold emphasis inside it, ok ", "nexta marked link and a link node."]);
 });
@@ -219,6 +219,16 @@ await scene("the reader shows the golden HTML, then the labeled stand-in after a
   await page.uncheck(".tg-reader");
   await play(page, { steps: [{ click: { text: "Edited", at: "end" } }, { type: "Z" }] });
   assert.doesNotMatch(await page.textContent(".tg-read-body"), /EditedZ/, "a hidden reader is not repainted");
+});
+
+await scene("Read ≠ Edit lights a known E09 mismatch red", "?doc=sample:callout", async (page) => {
+  await page.waitForFunction(() => {
+    const light = document.querySelector('[data-trap="read-edit"]');
+    return light && light.dataset.ok !== "null";
+  });
+  const light = (await lightsOf(page))["read-edit"];
+  assert.equal(light.ok, "false");
+  assert.match(light.words, /Read ≠ Edit — red The reader and editor differ at block 1 \(s-callout\)\./);
 });
 
 await scene("a stand-in that throws shows its error in the reader", "?doc=drill:D01&reader=1", async (page) => {

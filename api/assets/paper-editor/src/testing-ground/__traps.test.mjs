@@ -9,7 +9,7 @@ import { tallyWords } from "./page/tally.mjs";
 import { canonical, duplicateIds, foldDrift, hiddenBlocks, lights, lostKeys, sentDuplicates } from "./traps.mjs";
 
 const light = (list, key) => list.find((l) => l.key === key);
-const calm = { visibility: [true], believed: [], saved: [], batches: [], refusals: [], settled: true, reload: null };
+const calm = { visibility: [true], believed: [], saved: [], batches: [], refusals: [], settled: true, readEdit: { diff: null }, reload: null };
 
 const d01OnMain = [true, false, false, false, false, false, false, true, true];
 assert.deepEqual(hiddenBlocks(d01OnMain), { doc: 9, shown: 3, hidden: 6, extra: 5 });
@@ -109,6 +109,12 @@ assert.notEqual(canonical({ a: [1, 2] }), canonical({ a: [2, 1] }));
 assert.notEqual(canonical({ a: "1" }), canonical({ a: 1 }));
 assert.equal(light(lights({ ...calm, saved: trip, believed }), "fold-drift").ok, false);
 assert.equal(light(lights({ ...calm, saved: trip, believed, settled: false }), "fold-drift").ok, null, "no verdict while a batch is in flight");
+
+assert.equal(light(lights(calm), "read-edit").ok, true);
+const unlike = light(lights({ ...calm, readEdit: { diff: { at: 0, id: "p-a" } } }), "read-edit");
+assert.equal(unlike.ok, false);
+assert.match(unlike.words, /differ at block 1 \(p-a\)/);
+assert.equal(light(lights({ ...calm, readEdit: null }), "read-edit").ok, null);
 
 assert.deepEqual(lostKeys(["Trip", "Left at six.Fog by eight.Ice"], ["Trip", "Left at six.Ice"]), { count: 13, chars: "Fog by eight." });
 assert.deepEqual(lostKeys(["Alpha", "", "Beta"], ["Alpha", "Beta"]), { count: 0, chars: "" }, "an empty line is not a key");

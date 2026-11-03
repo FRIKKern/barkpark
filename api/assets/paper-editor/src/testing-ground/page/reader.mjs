@@ -3,7 +3,7 @@ import { canonical } from "../traps.mjs";
 let standIn;
 let latest = 0;
 
-async function renderStandIn(blocks) {
+export async function renderStandIn(blocks) {
   standIn ||= import("/reader-standin.js");
   return (await standIn).render(blocks);
 }
