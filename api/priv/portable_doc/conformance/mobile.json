@@ -2,7 +2,7 @@
   "renderer": "mobile",
   "compare": "text",
   "pack_stamp": "1ca9ca01d368484f4e7aa39003f9fb065595d29745f785d823154762b362be0b",
-  "ran_at_sha": "96cce88b565ccea8c82d49110503bd046ea7e0b6",
+  "ran_at_sha": "f89c89c512061ec58bed725164459701136a73df",
   "rows": [
     {
       "type": "action",
@@ -279,10 +279,7 @@
     },
     {
       "type": "roadmap",
-      "status": "fail",
-      "diff": [
-        "word 9/10 \"draft\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "route",
@@ -336,10 +333,7 @@
     },
     {
       "type": "task-board",
-      "status": "fail",
-      "diff": [
-        "word 5/30 \"draft\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "task-detail",
@@ -347,33 +341,11 @@
     },
     {
       "type": "task-list",
-      "status": "fail",
-      "diff": [
-        "word 1/14 \"0\" not found in order",
-        "word 2/14 \"in\" not found in order",
-        "word 3/14 \"flight\" not found in order",
-        "word 4/14 \"1\" not found in order",
-        "word 5/14 \"ready\" not found in order",
-        "word 6/14 \"0\" not found in order",
-        "word 7/14 \"done\" not found in order",
-        "word 8/14 \"0\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "tasks",
-      "status": "fail",
-      "diff": [
-        "word 1/20 \"1\" not found in order",
-        "word 2/20 \"in\" not found in order",
-        "word 3/20 \"flight\" not found in order",
-        "word 4/20 \"1\" not found in order",
-        "word 5/20 \"ready\" not found in order",
-        "word 6/20 \"1\" not found in order",
-        "word 7/20 \"done\" not found in order",
-        "word 8/20 \"25\" not found in order",
-        "word 15/20 \"p0\" not found in order",
-        "word 18/20 \"draft\" not found in order"
-      ]
+      "status": "pass"
     },
     {
       "type": "terminal",
