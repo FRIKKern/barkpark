@@ -1,4 +1,4 @@
-import { MISSING, cli, columnMajorText, diffFigureWords, diffTrackedEyebrow, diffWords, diffWordsSplitPunctuation, diffWordsUnordered, goldenWords, htmlText } from "../../api/priv/portable_doc/conformance/conformance.mjs";
+import { MISSING, cli, columnMajorText, columnWiseText, diffEquation, diffFigureWords, diffTabSections, diffTrackedEyebrow, diffWords, diffWordsSplitPunctuation, diffWordsUnordered, goldenWords, htmlText, tabPanelWords } from "../../api/priv/portable_doc/conformance/conformance.mjs";
 import { loadRenderTUI } from "./load.mjs";
 
 const render = await loadRenderTUI();
@@ -9,6 +9,11 @@ function judge(golden) {
   const expected = goldenWords(golden.shape);
   if (golden.type === "duel") return [...diffWordsUnordered(text, expected), ...duelAssociationDiff(text, golden.input)];
   if (golden.type === "stat-grid" || golden.type === "stats") return diffFigureWords(columnMajorText(text), expected);
+  if (golden.type === "columns") return diffWords(columnWiseText(text), expected);
+  if (golden.type === "code-tabs" || golden.type === "tabs") {
+    return diffTabSections(text, (golden.input.tabs || []).map((tab) => String(tab.label || "").trim()), tabPanelWords(golden.shape));
+  }
+  if (golden.type === "equation") return diffEquation(text, expected);
   if (golden.type === "stat") return diffWordsSplitPunctuation(text, expected);
   if (golden.type === "lineage") return diffFigureWords(text, expected);
   if (golden.type === "eyebrow") return diffTrackedEyebrow(text, expected);

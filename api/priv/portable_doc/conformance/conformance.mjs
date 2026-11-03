@@ -204,6 +204,38 @@ export function diffTrackedEyebrow(actualText, expected) {
   return diffWordsFrom(seen, expected);
 }
 
+const hasClass = (node, name) => !("text" in node) && (node.classes || []).includes(name);
+
+export function tabPanelWords(shape) {
+  const panels = [];
+  const collect = (node) => "text" in node ? words(node.text) : (node.children || []).flatMap(collect);
+  const walk = (node) => {
+    if (hasClass(node, "bp-code-tabs__panel") || hasClass(node, "bp-tabs__panel")) {
+      panels.push(collect(node));
+      return;
+    }
+    for (const child of node.children || []) if (!("text" in child)) walk(child);
+  };
+  for (const node of shape) walk(node);
+  return panels;
+}
+
+export function diffTabSections(actualText, labels, panels) {
+  if (labels.length !== panels.length) return [`tab labels/panels: ${labels.length} != ${panels.length}`];
+  const expected = labels.flatMap((label, i) => [...words(label), ...panels[i]]);
+  return diffWordsFrom(words(actualText), expected);
+}
+
+const SCRIPT_DIGITS = new Map([..."⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉"].map((digit, i) => [digit, String(i % 10)]));
+
+const equationRunes = (text) => [...text.toLowerCase()]
+  .map((rune) => SCRIPT_DIGITS.get(rune) || rune)
+  .filter((rune) => /[\p{L}\p{N}]/u.test(rune));
+
+export function diffEquation(actualText, expected) {
+  return diffWordsFrom(equationRunes(actualText), equationRunes(expected.join(" ")));
+}
+
 export function columnMajorText(actualText) {
   const lines = actualText.split("\n");
   const starts = [];
@@ -229,6 +261,21 @@ export function columnMajorText(actualText) {
     }
   });
   return [...cells, ...footer].join("\n");
+}
+
+export function columnWiseText(actualText) {
+  const columns = [];
+  for (const raw of actualText.split("\n")) {
+    const line = raw.replace(/[ \t]+$/, "");
+    if (!line) continue;
+    const parts = line.split(/[ \t]{3,}/);
+    while (columns.length < parts.length) columns.push([]);
+    parts.forEach((part, i) => {
+      part = part.trim();
+      if (part) columns[i].push(part);
+    });
+  }
+  return columns.flat().join("\n");
 }
 
 function row(type, verdict) {

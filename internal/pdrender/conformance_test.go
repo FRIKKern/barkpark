@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -73,6 +74,7 @@ func loadGoldenPack(dir string) (string, []goldenCase, error) {
 
 type shapeNode struct {
 	Text     *string     `json:"text"`
+	Classes  []string    `json:"classes"`
 	Children []shapeNode `json:"children"`
 }
 
@@ -214,6 +216,32 @@ func columnMajorText(actual string) string {
 	return strings.Join(append(cells, footer...), "\n")
 }
 
+var columnGap = regexp.MustCompile(`[ \t]{3,}`)
+
+func columnWiseText(actual string) string {
+	var columns [][]string
+	for _, line := range strings.Split(actual, "\n") {
+		line = strings.TrimRight(line, " \t")
+		if line == "" {
+			continue
+		}
+		parts := columnGap.Split(line, -1)
+		for len(columns) < len(parts) {
+			columns = append(columns, nil)
+		}
+		for i, part := range parts {
+			if part = strings.TrimSpace(part); part != "" {
+				columns[i] = append(columns[i], part)
+			}
+		}
+	}
+	var ordered []string
+	for _, column := range columns {
+		ordered = append(ordered, column...)
+	}
+	return strings.Join(ordered, "\n")
+}
+
 func duelAssociationDiff(actual string, attrs map[string]any) []string {
 	lines := strings.Split(actual, "\n")
 	var out []string
@@ -277,6 +305,81 @@ func diffTrackedEyebrow(actual string, expected []string) []string {
 	return diffWordsFrom(seen, expected)
 }
 
+func tabPanelWords(shape []json.RawMessage) [][]string {
+	var panels [][]string
+	var collect func(shapeNode) []string
+	collect = func(node shapeNode) []string {
+		if node.Text != nil {
+			return conformanceWords(*node.Text)
+		}
+		var out []string
+		for _, child := range node.Children {
+			out = append(out, collect(child)...)
+		}
+		return out
+	}
+	var walk func(shapeNode)
+	walk = func(node shapeNode) {
+		for _, class := range node.Classes {
+			if class == "bp-code-tabs__panel" || class == "bp-tabs__panel" {
+				panels = append(panels, collect(node))
+				return
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	for _, raw := range shape {
+		var node shapeNode
+		_ = json.Unmarshal(raw, &node)
+		walk(node)
+	}
+	return panels
+}
+
+func diffTabSections(actual string, labels []string, panels [][]string) []string {
+	if len(labels) != len(panels) {
+		return []string{fmt.Sprintf("tab labels/panels: %d != %d", len(labels), len(panels))}
+	}
+	var expected []string
+	for i, label := range labels {
+		expected = append(expected, conformanceWords(label)...)
+		expected = append(expected, panels[i]...)
+	}
+	return diffWordsFrom(conformanceWords(actual), expected)
+}
+
+func diffTabMajor(actual string, shape []json.RawMessage, attrs map[string]any) []string {
+	var labels []string
+	for _, tab := range itemMaps(attrs, "tabs") {
+		labels = append(labels, sanitizeText(strings.TrimSpace(attrStr(tab, "label"))))
+	}
+	return diffTabSections(actual, labels, tabPanelWords(shape))
+}
+
+var scriptDigits = map[rune]rune{
+	'⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+	'₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+}
+
+func equationRunes(s string) []string {
+	var out []string
+	for _, r := range strings.ToLower(s) {
+		if plain, ok := scriptDigits[r]; ok {
+			r = plain
+		}
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			out = append(out, string(r))
+		}
+	}
+	return out
+}
+
+func diffEquation(actual string, expected []string) []string {
+	return diffWordsFrom(equationRunes(actual), equationRunes(strings.Join(expected, " ")))
+}
+
 func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	if _, ok := reg.blocks[c.Type]; !ok {
 		return conformanceRow{Type: c.Type, Status: "missing"}
@@ -301,6 +404,15 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	}
 	if c.Type == "stat-grid" || c.Type == "stats" {
 		return conformanceVerdict(c.Type, diffFigureWords(columnMajorText(text), expected))
+	}
+	if c.Type == "columns" {
+		return conformanceVerdict(c.Type, diffWords(columnWiseText(text), expected))
+	}
+	if c.Type == "code-tabs" || c.Type == "tabs" {
+		return conformanceVerdict(c.Type, diffTabMajor(text, c.Shape, blocks[0].Attrs))
+	}
+	if c.Type == "equation" {
+		return conformanceVerdict(c.Type, diffEquation(text, expected))
 	}
 	if c.Type == "stat" {
 		return conformanceVerdict(c.Type, diffWordsSplitPunctuation(text, expected))
@@ -430,6 +542,13 @@ func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *
 	if diff := diffFigureWords(columnMajorText("5     3\ntarget today"), gridExpected); diff == nil {
 		t.Fatal("swapped grid labels must not pass by word presence alone")
 	}
+	columnsExpected := []string{"left", "first", "left", "second", "right", "only"}
+	if diff := diffWords(columnWiseText("left first     right only\nleft second"), columnsExpected); diff != nil {
+		t.Fatalf("visual columns should compare in authored column order: %v", diff)
+	}
+	if diff := diffWords(columnWiseText("right only     left first\n               left second"), columnsExpected); diff == nil {
+		t.Fatal("swapped visual columns must not pass by word presence alone")
+	}
 	duel := map[string]any{"rows": []any{
 		map[string]any{"label": "first", "valueA": "1", "valueB": "2"},
 		map[string]any{"label": "second", "valueA": "3", "valueB": "4"},
@@ -442,6 +561,20 @@ func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *
 	}
 	if diff := duelAssociationDiff("first  2 vs 1\nsecond  3 vs 4", duel); diff == nil {
 		t.Fatal("swapped duel arms must not pass by word presence alone")
+	}
+	tabLabels := []string{"JS", "Go"}
+	tabPanels := [][]string{{"console", "log", "1"}, {"fmt", "println", "1"}}
+	if diff := diffTabSections("JS console log 1\nGo fmt println 1", tabLabels, tabPanels); diff != nil {
+		t.Fatalf("stacked tab sections should preserve label/panel associations: %v", diff)
+	}
+	if diff := diffTabSections("JS fmt println 1\nGo console log 1", tabLabels, tabPanels); diff == nil {
+		t.Fatal("swapped tab panels must not pass by word presence alone")
+	}
+	if diff := diffEquation("E = mc²", []string{"E", "m", "c", "2"}); diff != nil {
+		t.Fatalf("unicode superscript should match MathML text runs: %v", diff)
+	}
+	if diff := diffEquation("E = cm²", []string{"E", "m", "c", "2"}); diff == nil {
+		t.Fatal("reordered equation symbols must not pass by character presence alone")
 	}
 }
 
