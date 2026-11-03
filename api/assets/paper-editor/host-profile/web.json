@@ -12,6 +12,9 @@
       "ancestor attribute": [
         "data-bp-theme",
         "data-theme"
+      ],
+      "host class": [
+        "bp-paper-surface"
       ]
     },
     "editor": {
@@ -38,14 +41,6 @@
         "target"
       ],
       "why": "links' own target=\"_blank\""
-    }
-  ],
-  "internals": [
-    {
-      "names": [
-        "bp-paper-surface"
-      ],
-      "why": "document-detail renders body_html into the same .bp-paper-surface column the reader uses"
     }
   ]
 }

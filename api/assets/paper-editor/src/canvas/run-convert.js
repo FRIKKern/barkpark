@@ -317,10 +317,11 @@ const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = {
 // picker aligned with field-node.js:(BP_NATIVE_FIELD_TYPES ∪ BP_PICKER_FIELD_TYPES) and
 // paper_canvas.ex:(@canvas_field_types ∪ @canvas_picker_field_types).
 //
-// STILL OUT (separate nested-structure increment): composite / object / arrayOf /
-// codelist / localizedText. Those are NOT in any canvas-field set and STILL split a
-// run. (`section` is NO LONGER here — it rides its own bpSection CONTAINER node; see
-// CANVAS_CONTAINER_TYPES below.)
+// STILL OUT of the editable field contract: composite / object / arrayOf / codelist /
+// localizedText. They retain their contextual server editors and split newly-created
+// runs. The bounded static-render compatibility path below recognizes four of them
+// if they occur in an already-mounted/nested canvas. (`section` is NO LONGER here —
+// it rides its own bpSection CONTAINER node; see CANVAS_CONTAINER_TYPES below.)
 const CANVAS_NATIVE_FIELD_TYPES = new Set([
   "field-string",
   "field-slug",
@@ -358,13 +359,16 @@ const CANVAS_FIELD_NODE_NAME = "bpField";
 // value ops, and it DOES participate in STRUCTURAL ops (insert/remove/move by bpId)
 // like any block — so it no longer SPLITS a run.
 //
-// EXPLICITLY OUT (still boundaries): composite / object / arrayOf / codelist /
-// localizedText (the nested-structure kinds). field-image / field-reference are
+// EXPLICITLY OUT of new runs (still contextual boundaries): composite / object /
+// arrayOf / codelist / localizedText (the nested-structure kinds). Four have a
+// static-render compatibility receiver below, but remain absent from this editable/
+// read-only-atom roster. field-image / field-reference are
 // NO LONGER out — they ride CANVAS_PICKER_FIELD_TYPES (∈ CANVAS_FIELD_TYPES), so
 // blockToNode dispatches them to the editable fieldBlockToNode and field-node.js
 // mounts bp-media-picker / bp-reference-picker as canvas-editable control-atoms.
-// After S3.6 sheet/embed are canvas-eligible too, so the ONLY remaining run
-// splitters are those nested-structure kinds. Keep aligned with
+// After S3.6 sheet/embed are canvas-eligible too, so those nested-structure kinds
+// remain the run splitters even though mounted compatibility projection is available.
+// Keep aligned with
 // embed-node.js:BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME and
 // paper_canvas.ex:@canvas_readonly_atom_types.
 const CANVAS_READONLY_ATOM_TYPES = new Set(["sheet", "embed"]);
@@ -418,6 +422,32 @@ const CANVAS_FLEET_TYPES = new Set([
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
 
+// Chat snapshots use the same reader paint channel without exposing chat actions.
+const CANVAS_CHAT_TYPES = new Set([
+  "chat-approval", "chat-plan", "chat-question",
+  "chat-thinking", "chat-todo", "chat-tool-diff",
+]);
+
+// R6 static reader compatibility: blocks that use the SAME bpFleet paint receiver
+// without becoming members of the component-fleet contract above. The four structured
+// field kinds and paper-links remain contextual run boundaries on new Studio mounts,
+// preserving their full server-side editors; recognizing them here keeps legacy/nested
+// mounted canvases reader-shaped instead of degrading to the generic opaque chip.
+// pre-gate-badge has no edit surface, so paper_canvas.ex also admits it into new runs.
+// All six carry their whole source block verbatim and paint only server-produced
+// reader HTML.
+//
+// Keep aligned with shared/paper.ex @canvas_static_render_types. Only
+// pre-gate-badge is aligned with paper_canvas.ex @canvas_static_render_types.
+const CANVAS_STATIC_RENDER_TYPES = new Set([
+  "arrayOf",
+  "codelist",
+  "composite",
+  "localizedText",
+  "paper-links",
+  "pre-gate-badge",
+]);
+
 // pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds (reader emitters in
 // render/data_viz.ex; `stat-grid` is the accepted alias of `stats`). They ride the
 // SAME bpFleet node + server-paint channel as CANVAS_FLEET_TYPES — the whole block
@@ -439,6 +469,22 @@ const CANVAS_DATAVIZ_TYPES = new Set([
   "chart",
   "duel",
   "lineage",
+]);
+
+// Reader-authored specialty blocks whose display contract is canonical server
+// HTML, with no canvas-local renderer. They use the same mounted bpFleet atom and
+// bp:block-html host paint as DataViz: the source block rides verbatim on bpBlock
+// and Render.render_block(:article) remains the sole HTML producer. Kept separate
+// from CANVAS_FLEET_TYPES so classic fleet preview/editor ownership is unchanged.
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_specialty_types and
+// shared/paper.ex @specialty_render_types.
+const CANVAS_SPECIALTY_TYPES = new Set([
+  "api-endpoint",
+  "bar-chart",
+  "code-tabs",
+  "criteria-progress",
+  "gauge-list",
+  "route",
 ]);
 
 // editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED
@@ -683,9 +729,15 @@ function isCanvasReadOnlyAtomNode(nodeType) {
 // read-only atoms carrying the whole block verbatim; they never emit a value/content
 // op — structurally they behave EXACTLY like a sheet/embed read-only atom.
 function isCanvasFleetType(type) {
-  // The DataViz kinds ride the same bpFleet node + server-paint channel
-  // (pd-ee-dataviz-editors) — a parallel set, same projection.
-  return CANVAS_FLEET_TYPES.has(type) || CANVAS_DATAVIZ_TYPES.has(type);
+  // DataViz, chat, static compatibility, and specialty kinds ride the same
+  // bpFleet node + server-paint channel as parallel sets with the same projection.
+  return (
+    CANVAS_FLEET_TYPES.has(type) ||
+    CANVAS_DATAVIZ_TYPES.has(type) ||
+    CANVAS_CHAT_TYPES.has(type) ||
+    CANVAS_STATIC_RENDER_TYPES.has(type) ||
+    CANVAS_SPECIALTY_TYPES.has(type)
+  );
 }
 
 // True when a TipTap NODE type is the canvas fleet node ("bpFleet"). runToOps reads
@@ -1078,7 +1130,12 @@ function sectionBlockToNode(block, bpId, bpType) {
         },
       };
     }
-    return blockToNode(child);
+    const node = blockToNode(child);
+    if (child?.id == null && (child?.span != null || child?.order != null)) {
+      const { span, order } = child;
+      node.attrs = { ...node.attrs, bpSectionCell: { span, order } };
+    }
+    return node;
   });
 
   const node = { type: CANVAS_CONTAINER_NODE_NAME, attrs };
@@ -1159,7 +1216,8 @@ function sectionNodeToBlock(node, id, taken) {
     const built = nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
     // Key by the child's OWN bpId (present-only). A canvas-new (null-bpId) child has
     // NO cell — correct, a freshly created child carries no span/order.
-    const cell = cells && childBpId != null ? cells[childBpId] : null;
+    const cell = cells && childBpId != null && Object.hasOwn(cells, childBpId)
+      ? cells[childBpId] : child.attrs?.bpSectionCell;
     if (cell && cell.span != null) built.span = cell.span;
     if (cell && cell.order != null) built.order = cell.order;
     return built;

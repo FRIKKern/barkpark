@@ -180,6 +180,7 @@ export const Terminal = Node.create({
       const dom = document.createElement("div");
       dom.className = "bp-term bp-canvas-term";
       dom.setAttribute("data-bp-type", "terminal");
+      dom.setAttribute("data-bp-conformance-root", "");
 
       // ── bar (chrome, contenteditable=false) ──
       const bar = document.createElement("div");
@@ -190,12 +191,26 @@ export const Terminal = Node.create({
       dots.className = "bp-term__dots";
       dots.innerHTML = "<i></i><i></i><i></i>";
 
-      // title affordance: an <input> styled to inherit the reader's mono/soft-ink so
-      // the canvas LOOKS like the reader span. Empty clears the attr to null.
+      // Keep the reader title as real text. The input remains a separate editor-only
+      // control so its value never stands in for the semantic title.
+      const titleText = document.createElement("span");
+      titleText.className = "bp-term__title";
+
+      const barControls = document.createElement("span");
+      barControls.className =
+        "bp-paper-contextual-controls bp-canvas-term__bar-controls";
+      barControls.contentEditable = "false";
+      barControls.style.cssText =
+        "position:static;opacity:1;pointer-events:auto;width:auto;max-width:none;color:inherit;font:inherit;z-index:auto;display:inline-flex;align-items:center;gap:.7rem";
+
       const titleInput = document.createElement("input");
-      titleInput.className = "bp-term__title bp-canvas-term__title-input";
+      titleInput.className = "bp-canvas-term__title-input";
       titleInput.setAttribute("type", "text");
       titleInput.setAttribute("placeholder", t("title"));
+      titleInput.style.fontFamily = "var(--paper-font-mono)";
+      titleInput.style.fontSize = "0.76rem";
+      titleInput.style.lineHeight = "1.6";
+      titleInput.style.color = "var(--paper-ink-soft)";
       titleInput.addEventListener("input", () => {
         const v = titleInput.value;
         setAttrs({ title: v === "" ? null : v });
@@ -224,32 +239,42 @@ export const Terminal = Node.create({
       });
 
       bar.appendChild(dots);
-      bar.appendChild(titleInput);
+      bar.appendChild(titleText);
       bar.appendChild(liveBadge);
-      bar.appendChild(liveToggle);
+      barControls.append(titleInput, liveToggle);
+      bar.appendChild(barControls);
 
       // ── body (THE contentDOM — the editable recursive region) ──
       const body = document.createElement("div");
       body.className = "bp-term__body";
 
       // ── foot (chrome, contenteditable=false) ──
-      // footWrap holds the reader-shaped foot + its edit input; when footer==null the
-      // "+ footer" affordance (addFootBtn) shows instead (both hover-revealed).
-      const footChrome = document.createElement("div");
-      footChrome.className = "bp-canvas-term__foot-chrome";
-      footChrome.contentEditable = "false";
+      // The reader footer is a direct child containing only its text node. Editing
+      // stays in a sibling contextual-controls island.
+      const foot = document.createElement("div");
+      foot.className = "bp-term__foot";
+      const footText = document.createTextNode("");
+      foot.appendChild(footText);
 
-      const footWrap = document.createElement("div");
-      footWrap.className = "bp-term__foot bp-canvas-term__foot";
+      const footChrome = document.createElement("div");
+      footChrome.className =
+        "bp-paper-contextual-controls bp-canvas-term__foot-chrome";
+      footChrome.contentEditable = "false";
+      footChrome.style.cssText =
+        "position:static;opacity:1;pointer-events:auto;width:100%;max-width:none;color:inherit;font:inherit;z-index:auto";
+
       const footInput = document.createElement("input");
       footInput.className = "bp-canvas-term__foot-input";
       footInput.setAttribute("type", "text");
       footInput.setAttribute("placeholder", t("footer"));
+      footInput.style.fontFamily = "var(--paper-font-mono)";
+      footInput.style.fontSize = "0.75rem";
+      footInput.style.lineHeight = "1.6";
+      footInput.style.color = "var(--paper-ink-soft)";
       footInput.addEventListener("input", () => {
         const v = footInput.value;
         setAttrs({ footer: v === "" ? null : v });
       });
-      footWrap.appendChild(footInput);
 
       const addFootBtn = document.createElement("button");
       addFootBtn.type = "button";
@@ -265,11 +290,12 @@ export const Terminal = Node.create({
         setTimeout(() => footInput.focus(), 0);
       });
 
-      footChrome.appendChild(footWrap);
+      footChrome.appendChild(footInput);
       footChrome.appendChild(addFootBtn);
 
       dom.appendChild(bar);
       dom.appendChild(body);
+      dom.appendChild(foot);
       dom.appendChild(footChrome);
 
       // Paint the chrome from the node's current attrs. Guard input.value writes so a
@@ -278,6 +304,7 @@ export const Terminal = Node.create({
       const paint = (n) => {
         const a = (n && n.attrs) || {};
         const title = a.title != null ? a.title : "";
+        titleText.textContent = title;
         if (titleInput.value !== title) titleInput.value = title;
 
         const isLive = a.live === true;
@@ -285,12 +312,16 @@ export const Terminal = Node.create({
         liveToggle.textContent = isLive ? "live ✓" : "live";
         liveToggle.classList.toggle("is-on", isLive);
 
-        const hasFooter = a.footer != null;
-        footWrap.style.display = hasFooter ? "" : "none";
-        addFootBtn.style.display = hasFooter ? "none" : "";
-        if (hasFooter) {
-          const f = a.footer;
-          if (footInput.value !== f) footInput.value = f;
+        const hasFooterControl = a.footer != null;
+        const footer = hasFooterControl ? String(a.footer) : "";
+        const hasFooter = footer !== "";
+        footText.nodeValue = footer;
+        if (hasFooter) dom.insertBefore(foot, footChrome);
+        else foot.remove();
+        addFootBtn.style.display = hasFooterControl ? "none" : "";
+        footInput.style.display = hasFooterControl ? "" : "none";
+        if (hasFooterControl) {
+          if (footInput.value !== footer) footInput.value = footer;
         }
       };
 

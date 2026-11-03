@@ -25,6 +25,7 @@ import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
+import { texToMathMlRow } from "./equation-mathml.js";
 
 // ── field codecs ──────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ export const ISLAND_SPECS = {
     preview(attrs, el) {
       const tex = (attrs.tex || "").trim();
       el.className = "bp-equation" + (tex ? "" : " bp-equation--empty") + " bp-canvas-island__preview";
+      el.setAttribute("data-bp-type", "equation");
+      el.setAttribute("data-bp-conformance-root", "");
       el.textContent = "";
       if (!tex) {
         // An empty block in the editor asks for its input, as the video block does; the
@@ -92,15 +95,16 @@ export const ISLAND_SPECS = {
         el.textContent = t("No equation yet — type TeX below");
         return;
       }
-      const code = document.createElement("code");
-      code.className = "bp-canvas-equation__tex";
-      code.textContent = tex;
-      el.appendChild(code);
+      const math = document.createElement("math");
+      if (attrs.display === true) math.setAttribute("display", "block");
+      math.innerHTML = texToMathMlRow(tex);
+      el.appendChild(math);
     },
   },
   footnote: {
     bpType: "footnote",
     nodeName: "bpFootnote",
+    semanticRoot: true,
     chip: "Footnotes",
     fields: [{ key: "notes", kind: "notes", label: "Notes, one per line", placeholder: "One footnote per line" }],
     preview(attrs, el) {
@@ -117,6 +121,7 @@ export const ISLAND_SPECS = {
       for (const n of notes) {
         const li = document.createElement("li");
         li.className = "bp-footnote__note";
+        if (n && typeof n === "object" && n.id) li.id = `fn-${n.id}`;
         li.textContent = n && typeof n === "object" ? String(n.text == null ? "" : n.text) : String(n);
         ol.appendChild(li);
       }
@@ -126,6 +131,7 @@ export const ISLAND_SPECS = {
   toc: {
     bpType: "toc",
     nodeName: "bpToc",
+    semanticRoot: true,
     chip: "Contents",
     fields: [
       { key: "items", kind: "outline", label: "Entries (indent two spaces per level; `text | anchor`)", placeholder: "Introduction | intro\n  Background" },
@@ -146,12 +152,19 @@ export const ISLAND_SPECS = {
       const list = document.createElement(numbered ? "ol" : "ul");
       list.className = "bp-toc__list" + (numbered ? "" : " bp-toc__list--bulleted");
       const minLevel = Math.min(...items.map((it) => Math.max(1, parseInt(it.level, 10) || 1)));
+      const counters = [];
       for (const it of items) {
         const li = document.createElement("li");
         li.className = "bp-toc__item";
         const rel = Math.max(1, (parseInt(it.level, 10) || 1) - minLevel + 1);
         li.setAttribute("data-level", String(rel));
-        li.textContent = String(it.text);
+        counters.length = rel;
+        counters[rel - 1] = (counters[rel - 1] || 0) + 1;
+        for (let i = 0; i < rel - 1; i++) counters[i] ||= 1;
+        const link = document.createElement("a");
+        link.href = `#${it.anchor || ""}`;
+        link.textContent = (numbered ? `${counters.join(".")}. ` : "") + String(it.text);
+        li.appendChild(link);
         list.appendChild(li);
       }
       nav.appendChild(list);
@@ -161,6 +174,7 @@ export const ISLAND_SPECS = {
   video: {
     bpType: "video",
     nodeName: "bpVideo",
+    semanticRoot: true,
     chip: "Video",
     fields: [
       { key: "src", kind: "text", label: "Video url", placeholder: "video url" },
@@ -177,14 +191,22 @@ export const ISLAND_SPECS = {
         return;
       }
       const fig = document.createElement("figure");
-      fig.className = "bp-canvas-video";
+      fig.setAttribute("style", "margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto");
       const video = document.createElement("video");
       video.controls = true;
       video.setAttribute("playsinline", "");
-      video.preload = "metadata";
+      video.setAttribute("style", "max-width:100%;border-radius:6px");
       video.src = safeUrl(src);
       if (attrs.poster) video.poster = safeUrl(attrs.poster);
       video.loop = attrs.loop === true;
+      for (const caption of attrs.bpRest?.captions || []) {
+        if (!caption || !caption.src) continue;
+        const track = document.createElement("track");
+        track.kind = "captions";
+        if (caption.lang) track.srclang = caption.lang;
+        track.src = safeUrl(caption.src);
+        video.appendChild(track);
+      }
       fig.appendChild(video);
       el.appendChild(fig);
     },
@@ -345,6 +367,8 @@ export function makeIslandNode(spec) {
         const paint = (n) => {
           const attrs = n.attrs || {};
           spec.preview(attrs, preview);
+          if (spec.semanticRoot && preview.firstElementChild)
+            preview.firstElementChild.setAttribute("data-bp-conformance-root", "");
           for (const { field, input } of Object.values(controls)) {
             writeControl(field, input, attrs[field.key]);
             if (field.kind === "bool") input.disabled = !editor.isEditable;

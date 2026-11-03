@@ -193,7 +193,7 @@ export const Code = Node.create({
   // ── the NodeView: a <pre> wrapping a NON-PM <textarea> island ────────────────
   //
   // Builds:
-  //   <pre class="bp-canvas-code" data-bp-type="code">     ← frame (monospace)
+  //   <pre class="bp-codeblock bp-canvas-code" data-bp-type="code"> ← reader frame
   //     <input class="bp-canvas-code-lang" />              ← optional language input
   //     <textarea class="bp-canvas-code-area">…value…</textarea>  ← the EDIT island
   //
@@ -208,14 +208,22 @@ export const Code = Node.create({
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("pre");
-      dom.className = "bp-canvas-code";
+      dom.className = "bp-codeblock bp-canvas-code";
       dom.setAttribute("data-bp-type", "code");
-      // S9 code-interior: font-family + white-space now live in the
-      // `.bp-canvas-code` CSS rule (both sinks), bound to --paper-font-mono — NOT
-      // stamped inline here. The old inline stack ("…SFMono-Regular…Consolas…")
-      // diverged from the reader's --paper-font-mono AND, being inline, out-ranked
-      // the token — the source of the code-block font drift. Removing it lets the
-      // shared token win, so the <pre> frame is theme-agnostic and reader-aligned.
+      dom.setAttribute("data-bp-conformance-root", "");
+      dom.setAttribute(
+        "style",
+        "border:0;border-radius:var(--bp-codeblock-radius, 0);" +
+          "padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);" +
+          "margin:var(--bp-codeblock-margin, 1.2rem 0);" +
+          "font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);" +
+          "font-size:var(--bp-codeblock-size, 0.9rem);" +
+          "line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre",
+      );
+      // The frame carries the reader emitter's canonical inline layout/type style
+      // verbatim. Its values still resolve the shared tokens, while colours remain
+      // class-driven. The editable textarea typography stays in the token-bound CSS
+      // rule below so its form-control defaults cannot drift from the reader frame.
 
       // The OPTIONAL language input — a small non-PM control. Editing it writes the
       // `lang` attr (debounced) exactly like the textarea writes `value`.
@@ -308,6 +316,9 @@ export const Code = Node.create({
         if (area.value !== value && !writeTimer) area.value = value;
         syncRows();
         if (langInput.value !== lang) langInput.value = lang;
+        const readerLang = lang.trim();
+        if (readerLang) dom.setAttribute("data-lang", readerLang);
+        else dom.removeAttribute("data-lang");
         paintHighlight();
         // Editability mirrors the editor's mode.
         const editable = editor.isEditable;

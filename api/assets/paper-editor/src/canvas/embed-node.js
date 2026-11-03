@@ -432,19 +432,49 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
     //   * ignoreMutation: () => true — PM never reads the chip's DOM mutations back
     //     into the document (there is no contentDOM on an atom).
     addNodeView() {
-      return ({ node, getPos, editor }) => {
+      return ({ node: initialNode, getPos, editor }) => {
+        let node = initialNode;
+        let destroyed = false;
         const block = (node.attrs && node.attrs.bpBlock) || {};
+        const bpId = (node.attrs && node.attrs.bpId) || "";
 
         const dom = document.createElement("div");
         dom.className = `bp-canvas-readonly ${className}`;
         dom.setAttribute("data-bp-type", bpType);
+        dom.setAttribute("data-bp-fleet-id", bpId);
         dom.setAttribute("contenteditable", "false");
         dom.setAttribute("data-test-id", `paper-readonly-${bpType}`);
 
         const chip = document.createElement("span");
         chip.className = "bp-canvas-readonly-chip";
         chip.textContent = chipLabel(block);
-        dom.appendChild(chip);
+
+        // Inert parity receipt, painted only by the server's canonical reader
+        // producer. A template keeps received custom elements, resources and ids
+        // out of the active document while retaining the exact reader bytes for
+        // conformance. The visible chip remains the sole mounted representation.
+        const preview = document.createElement("template");
+        preview.setAttribute("data-bp-fleet-body", "");
+        preview.setAttribute("data-bp-conformance-root", "");
+        preview.setAttribute("data-bp-type", bpType);
+        dom.append(chip, preview);
+
+        const onPaint = (event) => {
+          // Always cancel the hook's generic injection. Only an exact render of
+          // the block currently carried by this node may replace the receipt.
+          event.preventDefault();
+          const { html, sourceBlock } = event.detail || {};
+          if (!sourceBlock || sourceBlock.id !== node.attrs.bpId ||
+              !node.type.create({ ...node.attrs, bpBlock: sourceBlock }).eq(node)) return;
+          preview.innerHTML = typeof html === "string" ? html : "";
+        };
+        const signalReady = () => queueMicrotask(() => {
+          if (!destroyed && dom.isConnected) {
+            dom.dispatchEvent(new CustomEvent("bp-ready", { bubbles: true, composed: true }));
+          }
+        });
+        preview.addEventListener("bp-fleet-paint", onPaint);
+        signalReady();
 
         // pdd-t12c: keyboard + screen-reader parity — a tab stop with an accessible
         // name, a locked-state announcement, and Enter/Space → select (→ Backspace
@@ -474,6 +504,10 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
           update: (updated) => {
             if (updated.type.name !== name) return false;
             const b = (updated.attrs && updated.attrs.bpBlock) || {};
+            const changed = !updated.eq(node);
+            node = updated;
+            dom.setAttribute("data-bp-fleet-id", node.attrs.bpId || "");
+            if (changed) preview.innerHTML = "";
             chip.textContent = chipLabel(b);
             // Keep the accessible name + lock cue in lockstep with the re-rendered
             // chip (an echo/undo may change the block's locked state or content).
@@ -481,6 +515,7 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
             if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
             else dom.removeAttribute("data-bp-locked");
             if (retarget) retarget.paint(b);
+            if (changed) signalReady();
             return true;
           },
 
@@ -493,6 +528,8 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
           ignoreMutation: () => true,
 
           destroy: () => {
+            destroyed = true;
+            preview.removeEventListener("bp-fleet-paint", onPaint);
             if (retarget) retarget.destroy();
           },
         };
@@ -541,8 +578,12 @@ export const BP_FLEET_NODE_NAME = "bpFleet";
 // style is authored. Do not introduce an article styling island inside it.
 // Unmarked standalone embedders and Studio retain their existing default.
 export function readerPaintClass(editor) {
-  return editor.options.element.closest("[data-paper-palette]")?.getAttribute("data-paper-palette") === "legacy"
-    ? "" : "bp-paper-surface";
+  const element = editor.options.element;
+  if (element.closest('[data-paper-palette="legacy"]')) return "";
+  // A nested `.bp-paper-surface` would re-declare the standalone fallback
+  // palette and mask the host reader's authored theme tokens. The injected
+  // reader HTML already matches the canonical selectors through its ancestor.
+  return element.closest(".bp-paper-surface") ? "" : "bp-paper-surface";
 }
 
 // The human label for the loading chip, derived from the fleet block's kind. A
@@ -550,6 +591,20 @@ export function readerPaintClass(editor) {
 // reads as an intentional placeholder, not a broken block. Unknown kinds fall back
 // to the raw type so a never-seen fleet kind still shows SOMETHING legible.
 const FLEET_KIND_LABELS = {
+  // Static reader receivers used to mount as opaque carried blocks. Keep their
+  // established placeholder text while the server paint is loading.
+  arrayOf: "↪ arrayOf",
+  codelist: "↪ codelist",
+  composite: "↪ composite",
+  localizedText: "↪ localizedText",
+  "paper-links": "↪ paper-links",
+  "pre-gate-badge": "↪ pre-gate-badge",
+  "api-endpoint": "API endpoint",
+  "bar-chart": "Bar chart",
+  "code-tabs": "Code tabs",
+  "criteria-progress": "Criteria progress",
+  "gauge-list": "Gauge list",
+  route: "Route",
   tasks: "Task list",
   "task-list": "Task list",
   "task-detail": "Task detail",

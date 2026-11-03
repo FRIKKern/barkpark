@@ -30,6 +30,19 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 window.Range.prototype.getClientRects = () => [];
 window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0 });
 await import("../index.js");
+const { readerPaintClass } = await import("./embed-node.js");
+
+const articleSurface = document.createElement("main");
+articleSurface.className = "bp-paper-surface";
+const nestedCanvas = document.createElement("div");
+articleSurface.appendChild(nestedCanvas);
+assert.equal(readerPaintClass({ options: { element: nestedCanvas } }), "",
+  "host-painted rows inherit an existing canonical paper-surface palette");
+assert.equal(readerPaintClass({ options: { element: document.createElement("div") } }), "bp-paper-surface",
+  "a standalone Canvas paint hole remains a canonical paper-surface sink");
+articleSurface.setAttribute("data-paper-palette", "legacy");
+assert.equal(readerPaintClass({ options: { element: nestedCanvas } }), "",
+  "legacy reader paint continues to inherit browser-native styling");
 
 const first = '<div class="bp-card bp-card--info"><div class="bp-card__t">Title</div><div class="bp-card__d">Body</div></div>';
 const second = '<div class="bp-card"><div class="bp-card__t">Sibling</div><div class="bp-card__d">Untouched</div></div>';

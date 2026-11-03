@@ -165,6 +165,8 @@ export const Image = Node.create({
       frame.className = "bp-canvas-image-frame";
       const img = document.createElement("img");
       img.className = "bp-canvas-image-img";
+      img.setAttribute("data-bp-conformance-root", "");
+      img.setAttribute("data-bp-lightboxable", "true");
       img.loading = "lazy";
       img.draggable = false;
       const empty = document.createElement("div");
@@ -246,7 +248,13 @@ export const Image = Node.create({
           if (img.getAttribute("src") !== shown) img.setAttribute("src", shown);
           img.alt = alt;
           img.style.display = "";
-          img.style.width = a.width != null ? a.width + "px" : "";
+          img.style.removeProperty("width");
+          img.style.maxWidth = "100%";
+          img.style.height = "auto";
+          if (a.width != null) img.setAttribute("width", String(a.width));
+          else img.removeAttribute("width");
+          if (a.bpRest?.height != null) img.setAttribute("height", String(a.bpRest.height));
+          else img.removeAttribute("height");
           empty.style.display = "none";
         } else {
           img.removeAttribute("src");

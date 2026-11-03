@@ -47,6 +47,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { docToBlocks, runToTiptap } from "./canvas/run-convert.js";
 import {
   Section,
   BP_SECTION_CONTENT,
@@ -57,6 +58,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const readSrc = (rel) => readFileSync(join(__dirname, rel), "utf8");
 const SRC = readSrc("./canvas/section-node.js");
+const STYLES = readSrc("./styles.css");
 
 let failures = 0;
 function check(name, fn) {
@@ -204,45 +206,39 @@ check("(b) layout controls are edit-only — display:none when not editable (vie
     /dom\.setAttribute\("data-bp-type",\s*"section"\)/.test(SRC),
     "wrapper lost its data-bp-type round-trip stamp",
   );
+  assert.ok(
+    /dom\.setAttribute\("data-bp-conformance-root",\s*""\)/.test(SRC),
+    "wrapper lost its semantic-root marker for nested child normalization",
+  );
 });
 
 // ── 7. DIVERGENCE (c) — GRID CELLS: reader wraps each grid child in
-//        `<div class="bp-section__cell" style="grid-column:span N;order:K">` carrying
-//        `min-width:0` (paper-surface.css:691); the editor has NO wrapper.
-//        VERDICT: RECONCILE (min-width) + JUSTIFY (wrapper absence + first-child).
-//        The canvas CANNOT add the `.bp-section__cell` wrapper: a PM contentDOM child
-//        IS the block, and emitting the `bp-section__cell` class would be a second
-//        HTML producer (canvas_reader_parity_gate_test.exs §3 RED). So it mirrors the
-//        wrapper's RESOLVED geometry onto the wrapper-less grid item — grid-column /
-//        order keyed by data-bp-id (already shipped), AND, added in THIS slice, the
-//        cell's `min-width:0` so a wide child (<pre>, a long word) cannot blow out its
-//        `minmax(0,1fr)` track exactly as it can't in the reader. RESIDUAL (honest):
-//        the reader cell's `> :first-child { margin-top: 0 }` is NOT mirrored — on the
-//        wrapper-less item that would fight the block's own margin logic and the
-//        empty-cell placeholder outline; left as a documented residual, not a
-//        hand-mirror. §3 stays green because NONE of this introduces the class. ────
-check("(c) grid items mirror the reader cell's min-width:0 (reconciled this slice)", () => {
-  assert.ok(
-    /el\.style\.minWidth\s*=\s*grid\s*\?\s*"0"\s*:\s*""/.test(SRC),
-    "grid items no longer mirror the reader cell's min-width:0 — a wide child can blow out its 1fr track (reader can't)",
-  );
+// Grid cells use the shared reader wrapper, while ProseMirror still owns each child.
+check("(c) grid cells use the shared wrapper and carry child placement", () => {
+  assert.match(SRC, /Decoration\.node\(from, from \+ child\.nodeSize/);
+  assert.match(SRC, /nodeName: "div", class: "bp-section__cell"/);
+  assert.match(SRC, /Object\.hasOwn\(section\.attrs\.cells \|\| \{\}, id\)/);
+  assert.match(SRC, /child\.attrs\.bpSectionCell/);
+  const minWidth = /\.bp-paper-editor-body\s+\.bp-section__cell\s*\{[^}]*min-width:\s*0;/s;
+  assert.match(STYLES, minWidth,
+    "grid cells lost min-width:0 and may overflow their assigned track");
 });
 
-check("(c) placement keyed by data-bp-id — reorder-safe, same key as reader/run-convert", () => {
-  assert.ok(/gridColumn/.test(SRC), "per-child grid-column paint was removed");
-  assert.ok(/\.order\b/.test(SRC), "per-child order paint was removed");
-  assert.ok(
-    /getAttribute\("data-bp-id"\)/.test(SRC),
-    "child placement no longer keyed by data-bp-id — reorder-safety lost",
-  );
+check("section placement follows both identified and ID-less children on reorder", () => {
+  const doc = runToTiptap([{
+    id: "section", type: "section", layout: { mode: "grid" },
+    blocks: [
+      { id: "known", type: "paragraph", text: "First", order: -1 },
+      { type: "paragraph", text: "Second", span: 2 },
+    ],
+  }]);
+  doc.content[0].content.reverse();
+  const [section] = docToBlocks(doc);
+  assert.equal(section.blocks[0].span, 2);
+  assert.equal(section.blocks[1].order, -1);
+  assert.equal(section.blocks[1].id, "known");
 });
 
-// ── 8. §3 COROLLARY (no second producer): grid mode swaps the body to the SHARED
-//        reader class `bp-section__grid` (asserted in check 4) rather than
-//        hand-rolling `display:grid`. The canvas legitimately CANNOT reproduce the
-//        reader's per-cell wrapper (a PM child is the block), so it mirrors geometry
-//        onto the item — assert the paint does NOT hand-roll a grid via inline
-//        `display:grid` (which would fork the shared class). ─────────────────────
 check("grid layout rides the shared class, not a hand-rolled inline display:grid", () => {
   assert.ok(
     !/style\.display\s*=\s*"grid"/.test(SRC) && !/"display:\s*grid"/.test(SRC),

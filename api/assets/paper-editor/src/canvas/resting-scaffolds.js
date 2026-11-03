@@ -115,10 +115,8 @@ export function restingScaffolds(host) {
               }, { side: -1, key: `scaffold:${pos}:${node.type.name}:${count}`, stopEvent: () => true }));
               group = [];
             };
-            state.doc.forEach((node, pos, index) => {
+            const visit = (node, pos, divider) => {
               const empty = isEmptyProse(node);
-              const next = state.doc.maybeChild(index + 1);
-              const divider = root && node.type.name === "divider" && next?.type.name === "heading" && next.attrs.level === 2;
               // Late host hydration maps the initial empty document selection to
               // AllSelection. It is not an intent to edit every empty scaffold.
               // Studio can mount a run with a default NodeSelection on its
@@ -128,6 +126,17 @@ export function restingScaffolds(host) {
               if ((!empty && !divider) || selected) return flush();
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "bp-resting-scaffold" }));
               group.push({ node, pos, divider });
+            };
+            state.doc.forEach((node, pos, index) => {
+              const next = state.doc.maybeChild(index + 1);
+              const divider = root && node.type.name === "divider" && next?.type.name === "heading" && next.attrs.level === 2;
+              visit(node, pos, divider);
+              if (node.type.name !== "bpColumns") return;
+              node.forEach((column, offset) => {
+                if (column.childCount < 2) return;
+                column.forEach((child, childOffset) => visit(child, pos + offset + childOffset + 2, false));
+                flush();
+              });
             });
             flush();
             return DecorationSet.create(state.doc, decorations);

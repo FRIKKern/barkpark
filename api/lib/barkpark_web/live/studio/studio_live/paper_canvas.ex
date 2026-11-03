@@ -184,6 +184,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # canvas runs. paper_editor.ex owns their contextual boundary previews separately.
   @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast)
 
+  # R6 static reader compatibility: pre-gate-badge is display-only article chrome, so
+  # it can ride the server-painted bpFleet receiver without sacrificing an edit surface. The four
+  # structured field kinds and paper-links are deliberately NOT listed here: they keep
+  # their contextual boundary editors on new mounts, while the JS/shared-paint
+  # compatibility receiver handles an already-mounted/nested occurrence reader-shaped.
+  # Keep aligned with run-convert.js CANVAS_STATIC_RENDER_TYPES (its canvas-eligible
+  # subset is this one type) and shared/paper.ex @canvas_static_render_types.
+  @canvas_static_render_types ~w(pre-gate-badge)
+
   # Article-chrome ROLE prose (eyebrow / byline / ingress / pullquote) — chrome-free
   # STYLED prose the canvas handles as plain ProseMirror nodes (run-convert.js
   # CANVAS_ROLE_TYPES → same-named nodes; role-nodes.js). UNLIKE the callout content
@@ -264,6 +273,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # deliberately ABSENT from slash-insert.js CANVAS_SLASH_TYPES (data-bearing,
   # API-authored — an empty slash insert is meaningless).
   @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
+  @canvas_chat_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
+
+  # Reader-authored specialty blocks remain contextual run boundaries in top-level
+  # LiveView papers. Their established panels own structured editing. JS still
+  # recognizes them in run-convert.js CANVAS_SPECIALTY_TYPES for nested and
+  # non-LiveView canvases, and shared/paper.ex @specialty_render_types supplies the
+  # canonical host-paint bytes to those receivers.
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
@@ -278,8 +294,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # except that JS keeps receive-only legacy recognition for form/questionnaire/figure/
   # section/columns/table while this partition intentionally routes them to contextual
   # boundary editors. The
-  # remaining boundaries also include nested-structure fields (composite / object /
-  # arrayOf / codelist / localizedText).
+  # remaining boundaries also include specialty blocks with contextual editors and
+  # nested-structure fields (composite / object / arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -289,12 +305,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_action_types ++
                   @canvas_readonly_atom_types ++
                   @canvas_fleet_types ++
+                  @canvas_static_render_types ++
                   @canvas_role_types ++
                   @canvas_table_types ++
                   @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types ++
-                  @canvas_dataviz_types
+                  @canvas_dataviz_types ++
+                  @canvas_chat_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**

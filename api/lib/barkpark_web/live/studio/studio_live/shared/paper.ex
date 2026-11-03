@@ -1578,6 +1578,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # here: the widget only ADDS an editable query surface on top of the existing paint.
   @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
+  # R6 static reader compatibility: bounded reader-render receivers that paint through
+  # bpFleet but are not component-fleet members. Structured fields and paper-links remain contextual
+  # boundaries on new Studio mounts; this paint path serves compatibility/nested mounted
+  # canvases. pre-gate-badge is canvas-eligible and uses this same producer. Keep aligned
+  # with run-convert.js CANVAS_STATIC_RENDER_TYPES.
+  @canvas_static_render_types ~w(arrayOf codelist composite localizedText paper-links pre-gate-badge)
+
+  # Read-only reference atoms retain their visible summary chip and retarget
+  # control, but expose a hidden parity surface painted by this same canonical
+  # reader channel. This avoids a client-side sheet/embed HTML producer while
+  # allowing the mounted canvas to prove the server bytes it would read.
+  @readonly_atom_render_types ~w(sheet embed)
+
   # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet
   # block (keep it OUT of @fleet_render_types so it never drags through
   # task_previews/apply_preview OR renders the WHOLE figure). Instead the canvas
@@ -1619,6 +1632,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
   # paper_canvas.ex @canvas_dataviz_types.
   @dataviz_render_types ~w(stat stats stat-grid heatmap chart duel lineage)
+  @chat_render_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
+
+  # Canvas specialty renderers. These blocks share bpFleet's mounted host-paint
+  # contract, but stay outside the classic fleet enumeration because they do not
+  # inherit its contextual preview/editor behavior. The block rides verbatim and
+  # fleet_render/2 supplies the reader's own Render.render_block(:article) bytes.
+  # Keep aligned with run-convert.js CANVAS_SPECIALTY_TYPES and
+  # paper_canvas.ex @canvas_specialty_types.
+  @specialty_render_types ~w(api-endpoint bar-chart code-tabs criteria-progress gauge-list route)
 
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
@@ -1679,9 +1701,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc """
-  A block that paints through the fleet channel: a component-fleet kind OR a
-  data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same
-  bp:block-html push, same render_block(:article) producer).
+  A block that paints through the fleet channel: a component-fleet kind, a
+  data-viz kind, or a bounded static-render compatibility kind (same bpFleet
+  atom, same bp:block-html push, same render_block(:article) producer).
 
   Made public for `BarkparkWeb.PaperFleetBlocksController`
   (task-4feb8efa46a0ed33), which filters a paper's top-level blocks to this
@@ -1692,7 +1714,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def fleet_block?(block) when is_map(block),
     do:
       Map.get(block, "type") in @fleet_render_types or
-        Map.get(block, "type") in @dataviz_render_types
+        Map.get(block, "type") in @dataviz_render_types or
+        Map.get(block, "type") in @chat_render_types or
+        Map.get(block, "type") in @canvas_static_render_types or
+        Map.get(block, "type") in @readonly_atom_render_types or
+        Map.get(block, "type") in @specialty_render_types
 
   def fleet_block?(_), do: false
 
@@ -1751,9 +1777,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def fleet_render(block, previews) do
     render = %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
 
-    # Bind native Stats/Cards fields to the authored source of this exact paint,
-    # not a later local value or a display-only query result.
-    if block["type"] in ~w(stat stats stat-grid cards),
+    # Bind native Stats/Cards fields and inert sheet/embed receipts to the authored
+    # source of this exact paint, not a later local value or display-only result.
+    if block["type"] in ~w(stat stats stat-grid cards sheet embed),
       do: Map.put(render, "source_block", block),
       else: render
   end

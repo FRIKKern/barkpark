@@ -61,7 +61,8 @@
       ],
       "host class": [
         "bp-paper-edit-field",
-        "bp-paper-editor"
+        "bp-paper-editor",
+        "bp-paper-surface"
       ],
       "inbound event": [
         "bp-change",
@@ -392,7 +393,6 @@
         "bp-paper-format__sep",
         "bp-paper-notes-config",
         "bp-paper-stats-config",
-        "bp-paper-surface",
         "bp-resting-scaffold",
         "bp-scaffold-control",
         "bp-section__body",
@@ -410,17 +410,15 @@
         "bp-table__td--spark",
         "bp-table__th--num",
         "bp-table__th--spark",
-        "bp-tabs--editor",
         "data-bp-text-boundary"
       ],
       "why": "bp-paper-editor-shell.css is the editor half of Studio's shell: it restyles the canvas's node views, block handle and menu, slash menu, format bubble and pickers, held in lockstep with src/styles.css by view_edit_parity_test"
     },
     {
       "names": [
-        "bp-paper-lock-note",
-        "bp-paper-picker-current"
+        "bp-paper-lock-note"
       ],
-      "why": "the LiveView paints the lock note and the picker's current value with the canvas's own class names"
+      "why": "the LiveView paints the lock note with the canvas's own class name"
     },
     {
       "names": [

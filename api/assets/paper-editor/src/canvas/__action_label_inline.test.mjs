@@ -69,6 +69,8 @@ async function mount(blocks) {
     assert.equal(host.textContent, "Read the report");
     assert.equal(host.parentElement.contentEditable, "false", "a non-editable boundary isolates the host from the canvas");
     const anchor = frame.querySelector("a.bp-button");
+    assert.equal(anchor.hasAttribute("data-bp-conformance-root"), true,
+      "the reader anchor is the semantic conformance root inside the editor shell");
     assert.equal(anchor.style.display, "none", "the read-only anchor is not painted while editing");
     assert.equal(frame.querySelector("input.bp-canvas-action-label"), null, "no second label surface below the button");
     assert.ok(frame.querySelector(".bp-canvas-action-href"), "href stays a config control");

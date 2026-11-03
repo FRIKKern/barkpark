@@ -225,6 +225,65 @@ async function scene(name, fn) {
   }
 }
 
+await scene("section grid: live children keep their cell styles through reorder and undo", async () => {
+  const blocks = [{
+    id: "grid", type: "section", layout: { mode: "grid" },
+    blocks: [
+      { ...p("first", "First cell."), order: -1 },
+      { type: "paragraph", text: "Second cell.", span: 2 },
+    ],
+  }];
+  const canvas = await mount(blocks, () => {});
+  try {
+    const editor = canvas._editor;
+    const cells = () => [...canvas.querySelectorAll(".bp-section__grid > .bp-section__cell")];
+    assert.equal(cells()[0].style.order, "-1");
+    assert.equal(cells()[1].style.gridColumn, "span 2");
+    const section = editor.state.doc.firstChild;
+    editor.view.dispatch(editor.state.tr.replaceWith(1, section.nodeSize - 1, [section.lastChild, section.firstChild]));
+    assert.match(cells()[0].textContent, /Second cell/);
+    assert.equal(cells()[0].style.gridColumn, "span 2");
+    assert.equal(cells()[1].style.order, "-1");
+    caretAfter(editor, "Second cell.");
+    type(editor, "!");
+    assert.match(cells()[0].textContent, /Second cell\.!/);
+    editor.commands.undo();
+    assert.equal(cells()[0].textContent, "First cell.");
+    assert.equal(cells()[0].style.order, "-1");
+    assert.equal(cells()[1].textContent, "Second cell.");
+    assert.equal(cells()[1].style.gridColumn, "span 2");
+  } finally { canvas.remove(); }
+});
+
+await scene("tabs: keyboard and label edits preserve both live panels", async () => {
+  const blocks = SCENES.find(({ name }) => name === "tabs").blocks;
+  let server = clone(blocks);
+  const canvas = await mount(blocks, (el, { ops, seq }) => {
+    server = fold(server, ops);
+    el.acknowledgeOps(seq, true);
+  });
+  try {
+    const tabs = [...canvas.querySelectorAll(".bp-tabs__strip > button")];
+    const panels = [...canvas.querySelectorAll(".bp-tabs__panels > .bp-tabs__panel")];
+    assert.deepEqual(tabs.map(tab => tab.textContent), ["Monday", "Tuesday"]);
+    assert.deepEqual(panels.map(panel => panel.dataset.tabIndex), ["0", "1"]);
+    tabs[0].focus();
+    tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    assert.equal(document.activeElement, tabs[1]);
+    assert.equal(tabs[1].getAttribute("aria-selected"), "true");
+    tabs[1].click();
+    const label = panels[1].querySelector("input");
+    assert.equal(document.activeElement, label);
+    label.value = "Wednesday";
+    label.dispatchEvent(new Event("input", { bubbles: true }));
+    label.blur();
+    await saved(canvas);
+    assert.equal(tabs[1].textContent, "Wednesday");
+    assert.equal(server[0].tabs[1].label, "Wednesday");
+    assert.deepEqual(server[0].tabs.map(tab => tab.blocks), blocks[0].tabs.map(tab => tab.blocks));
+  } finally { canvas.remove(); }
+});
+
 for (const { name, blocks } of SCENES) {
   await scene(`${name}: Enter at the end, Enter on the empty line, Enter mid-text: every character saves once`, async () => {
     let server = clone(blocks);

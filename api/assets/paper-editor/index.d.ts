@@ -356,8 +356,8 @@ export type BpPaperPublicClass =
   | "bp-comment-range--active"
   | "bp-canvas-mount-failed";
 
-/** Host classes the canvas reads: a `.bp-paper-editor` root (resume focus, masters, `data-paper-doc-key`) and `.bp-paper-edit-field` (with `data-field-name`). */
-export type BpPaperHostClass = "bp-paper-editor" | "bp-paper-edit-field";
+/** Host classes the canvas reads: editor/field carriers and the canonical reader-style palette ancestor. */
+export type BpPaperHostClass = "bp-paper-editor" | "bp-paper-edit-field" | "bp-paper-surface";
 
 /** CSS custom properties a host sets to theme the editor's stylesheet. */
 export type BpPaperThemeToken =

@@ -35,8 +35,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       Either way the canvas holds NO competing HTML producer (§3), so the paint /
       the saved-block re-render matches the reader by construction.
 
-    * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP, not the
-      reader render, and carries the WHOLE block on `bpBlock`. The only
+    * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP and carries
+      the WHOLE block on `bpBlock`. An inert conformance template receives the reader's
+      own source-bound server HTML; it is never active DOM, a second visible paint,
+      or a client renderer. The only
       value/content op it can emit is a deliberate retarget: `mountAtomRetarget`
       (embed-node.js) commits the new target through `setNodeMarkup` and
       run-convert emits exactly one `patch-block` per retarget — `{ref,
@@ -85,6 +87,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
   alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Render.{Components, Compose, DataViz, Figures, Forms}
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @article %{style: :article}
 
@@ -401,11 +404,19 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
         "notes-inline.js" -> without_notes_reader_queries(source)
         "filetree-inline.js" -> without_filetree_reader_queries(source)
         "fleet-text-inline.js" -> without_fleet_text_reader_queries(source)
+        "stage-node.js" -> without_stage_reader_markup(source)
         "diff-inline.js" -> String.replace(source, ~s|querySelector(".bp-diff")|, "readerQuery()")
         _ -> source
       end
     end)
     |> Enum.join("\n")
+  end
+
+  # Stage is an editable structural widget, like terminal. Its dedicated NodeView
+  # is the sanctioned producer of one canonical `bp-pnode`; §7 separately pins
+  # the exact semantic cells and editor-control boundary.
+  defp without_stage_reader_markup(source) do
+    String.replace(source, "bp-pnode", "sanctioned-stage-pnode")
   end
 
   # Native Stats editing decorates SERVER-painted elements; these five exact
@@ -680,6 +691,18 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     end
   end
 
+  test "§4 chip-carry conformance holes use the canonical server paint channel" do
+    for {label, block, _sig} <- chip_carry() do
+      assert Paper.fleet_block?(block),
+             "#{label}: inert conformance receipt is no longer admitted to bp:block-html"
+
+      render = Paper.fleet_render(block, %{})
+
+      assert Map.get(render, "source_block") == block,
+             "#{label}: server paint is no longer bound to the exact carried source"
+    end
+  end
+
   # ── §5 INJECTED-DRIFT PROOF — the byte-compare has teeth ────────────────────
   #
   # Model the exact D8 violations this gate exists to catch and prove the
@@ -731,41 +754,17 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # view mode), the min-width:0 grid-cell mirror, and forbids a nested bpSection —
   # and carries a RECONCILE-or-JUSTIFY verdict for all three micro-divergences.
   #
-  # A pure-Node smoke harness cannot MOUNT the NodeView (paint calls `document`),
-  # so this Elixir §6 keeps ONE job: a style-write TRIPWIRE proving section-node.js
-  # still mirrors per-child grid placement onto the wrapper-less item via
-  # `el.style.gridColumn`/`order` keyed by `data-bp-id` (the SAME keys the reader
-  # compose.ex cell_layout_attr + run-convert use), PLUS the min-width:0 cell mirror
-  # this slice reconciled — a canvas that has no `.bp-section__cell` wrapper (that
-  # would red §3) must carry the wrapper's resolved geometry on the item. It also
-  # PINS the two-file wiring so the real gate cannot be silently unhooked.
-  test "§6 section-node.js mirrors per-child grid placement + min-width onto the wrapper-less item (style-write tripwire)" do
+  test "§6 section grid wraps native child nodes in the shared reader cell" do
     src =
       "../../../../assets/paper-editor/src/canvas/section-node.js"
       |> Path.expand(__DIR__)
       |> File.read!()
 
-    assert String.contains?(src, "gridColumn"),
-           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (real regression)"
-
-    assert String.contains?(src, ".order"),
-           "section-node.js no longer writes el.style.order — the per-child order paint moved"
-
-    assert String.contains?(src, "data-bp-id"),
-           "section-node.js paint no longer keys child placement by data-bp-id — reorder-safety lost"
-
-    assert String.contains?(src, "cells"),
-           "section-node.js paint no longer reads the cells map"
-
-    # The min-width:0 mirror of the reader's `.bp-section__cell { min-width: 0 }`
-    # (compose.ex grid cell), reconciled in this slice onto the wrapper-less item.
-    assert String.contains?(src, "minWidth"),
-           "section-node.js no longer mirrors the reader cell's min-width:0 onto the grid item — a wide child can blow out its 1fr track (the reader can't)"
-
-    # §3 corollary: grid mode must ride the SHARED `bp-section__grid` class (parity by
-    # construction), never a hand-rolled inline grid that would fork the reader CSS.
-    assert String.contains?(src, "bp-section__grid"),
-           "section-node.js no longer swaps the grid body to the shared bp-section__grid class — the shared reader CSS would stop applying (a second producer)"
+    assert String.contains?(src, ~s(nodeName: "div", class: "bp-section__cell"))
+    assert String.contains?(src, "Decoration.node(from, from + child.nodeSize")
+    assert String.contains?(src, "section.attrs.cells")
+    assert String.contains?(src, "child.attrs.bpSectionCell")
+    assert String.contains?(src, "bp-section__grid")
   end
 
   # ── §6b The REAL section parity gate is wired into the mjs suite ─────────────
@@ -786,7 +785,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     body = File.read!(test_path)
 
     # Non-vacuous: it must exercise the load-bearing bindings, not be an empty stub.
-    for marker <- ["bp-section__title", "bp-section__body", "BP_SECTION_CONTENT", "minWidth"] do
+    for marker <- ["bp-section__title", "bp-section__body", "BP_SECTION_CONTENT", "min-width"] do
       assert String.contains?(body, marker),
              "__section_parity.test.mjs no longer asserts #{marker} — the parity gate was gutted"
     end
@@ -806,12 +805,9 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   #
   # The `stage` widget is EDITABLE (a bpStage control-atom node, stage-node.js), NOT a
   # server-painted verbatim fleet block — so it is DELIBERATELY absent from
-  # painted_fleet (like `card`). It sidesteps the fleet gate by rendering into a
-  # `bp-canvas-stage` cell whose look is hand-mirrored by CSS, NOT by emitting the
-  # reader `bp-pnode` cell class. `bp-pnode` therefore STAYS in the §3 forbidden list
-  # (above) so the still-verbatim-carried legacy `pipeline` fleet keeps its gate
-  # protection. This test PINS that exemption: `stage` is not painted-fleet, and
-  # stage-node.js introduces NONE of the forbidden reader-cell literals.
+  # painted_fleet (like `card`). Its NodeView emits the reader's real `bp-pnode`
+  # cell while native inputs stay inside one removable editor-chrome boundary. The
+  # legacy `pipeline` remains server-painted and protected by the fleet gate.
 
   test "§7 stage is EXEMPT from painted_fleet (editable widget, not a server-painted mirror)" do
     labels = Enum.map(painted_fleet(), fn {l, _, _, _} -> l end)
@@ -823,7 +819,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert "pipeline" in labels, "legacy pipeline must remain a painted-fleet block"
   end
 
-  test "§7 stage-node.js does NOT emit the reader pipeline-cell class (bp-pnode stays gate-forbidden)" do
+  test "§7 stage-node.js emits canonical pnode DOM and isolates native controls" do
     src =
       "../../../../assets/paper-editor/src/canvas/stage-node.js"
       |> Path.expand(__DIR__)
@@ -832,10 +828,17 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert byte_size(src) > 0,
            "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
 
-    refute String.contains?(src, "bp-pnode"),
-           "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
+    for marker <- [
+          "bp-pnode",
+          "bp-pnode--src",
+          "bp-pnode__${key}",
+          "bp-paper-contextual-controls"
+        ] do
+      assert String.contains?(src, marker),
+             "stage-node.js no longer carries the canonical/editor boundary marker #{marker}"
+    end
 
     assert String.contains?(src, "bp-canvas-stage"),
-           "stage-node.js no longer uses the bp-canvas-stage chrome — the DESIGN-1 hook moved"
+           "stage-node.js no longer uses the bp-canvas-stage edit hook"
   end
 end

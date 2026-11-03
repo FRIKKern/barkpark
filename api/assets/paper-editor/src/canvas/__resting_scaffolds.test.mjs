@@ -31,16 +31,16 @@ const blocks = [
   { id: "heading", type: "heading", level: 2, content: [{ type: "text", value: "Section" }] },
   { id: "list", type: "list", items: [""] },
 ];
-function mount(kind, late = false) {
+function mount(kind, late = false, source = blocks) {
   const parent = document.createElement("div");
   parent.dataset.paperContainerKind = kind;
   const host = document.createElement("bp-paper-canvas");
-  if (!late) host.blocks = structuredClone(blocks);
+  if (!late) host.blocks = structuredClone(source);
   const ops = [];
   host.addEventListener("bp-canvas-ops", event => ops.push(...event.detail.ops));
   parent.appendChild(host);
   document.body.appendChild(parent);
-  if (late) host.blocks = structuredClone(blocks);
+  if (late) host.blocks = structuredClone(source);
   return { parent, host, ed: host._editor, ops };
 }
 try {
@@ -71,6 +71,24 @@ try {
   try {
     assert.equal(nested.host.querySelector('button[aria-label="Select hidden divider"]'), null, "nested dividers retain reader geometry");
   } finally { nested.parent.remove(); }
+  const columns = mount("document", false, [{
+    id: "columns", type: "columns", columns: [
+      [blocks[0], { type: "paragraph", content: [] }],
+      [],
+    ],
+  }]);
+  try {
+    const first = columns.host.querySelector(".bp-cols__c");
+    const original = columns.ed.getJSON();
+    assert.equal(first.querySelectorAll(".bp-resting-scaffold").length, 1);
+    assert.equal(first.nextElementSibling.querySelector(".bp-resting-scaffold"), null);
+    assert.equal(columns.host.flushPendingChanges(), false);
+    first.querySelector('button[aria-label="Edit empty paragraph"]').click();
+    columns.ed.commands.insertContent("Column edit");
+    assert.equal(columns.ed.state.doc.firstChild.firstChild.lastChild.textContent, "Column edit");
+    columns.ed.commands.undo();
+    assert.deepEqual(columns.ed.getJSON(), original);
+  } finally { columns.parent.remove(); }
   const late = mount("document", true);
   try {
     assert.equal(late.host.querySelectorAll(".bp-resting-scaffold").length, 2, "post-mount data assignment also collapses resting scaffolds");
