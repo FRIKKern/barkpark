@@ -91,14 +91,17 @@ function semanticClone(source, blockType) {
       }
     }
   } else if (type === "figure") {
-    if (root.getAttribute("role") === "group") root.removeAttribute("role");
-    root.style.overflowX = "auto";
-    const caption = root.querySelector("figcaption");
-    if (caption) {
-      const input = caption.querySelector("input");
-      caption.className = "bp-figcaption";
-      caption.textContent = input?.value || "";
-      caption.removeAttribute("style");
+    // The figure retains a real reader root/caption alongside its editor
+    // controls. Project the node-view's documented group role only from its
+    // exact mounted wrapper; never manufacture overflow, caption class or text.
+    if (root.matches("figure.bp-canvas-readonly.bp-canvas-figure[role='group']")) {
+      root.removeAttribute("role");
+      const caption = root.querySelector(":scope > figcaption.bp-figcaption");
+      if (caption) {
+        caption.querySelector(":scope > input.bp-canvas-figure-caption-input")?.remove();
+        const text = caption.querySelector(":scope > span[data-bp-figure-caption-text]");
+        if (text) text.replaceWith(...text.childNodes);
+      }
     }
   } else if (type === "steps") {
     for (const row of root.querySelectorAll(":scope > li")) {
@@ -341,6 +344,7 @@ const semanticMutationProbes = [
   ["terminal", '<div class="bp-term" data-bp-type="terminal" data-bp-conformance-root><div class="bp-term__bar"><input class="bp-term__title bp-canvas-term__title-input" value="tasks"></div><div class="bp-canvas-term__foot-chrome"><div class="bp-term__foot"><input class="bp-canvas-term__foot-input" value="quit"></div></div></div>', '<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__title">tasks</span></div><div class="bp-term__foot">quit</div></div>'],
   ["list", '<section class="definitely-not-the-pm-list-wrapper"><ul><li><p>First point</p></li></ul></section>', '<ul><li><span>First point</span></li></ul>'],
   ["paragraph", '<section class="definitely-not-the-pm-paragraph-wrapper"><p>A <strong>bold</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a>.</p></section>', '<p>A <span style="font-weight:bold">bold</span> <a href="https://example.com">link</a>.</p>'],
+  ["figure", '<figure class="definitely-not-the-reader-figure-class" role="group" data-bp-type="figure" data-bp-conformance-root><figcaption><input class="bp-canvas-figure-caption-input" value="Caption"></figcaption></figure>', '<figure style="overflow-x:auto"><figcaption class="bp-figcaption">Caption</figcaption></figure>'],
 ];
 for (const [type, html, expectedHtml] of semanticMutationProbes) {
   const probe = document.createElement("template");
