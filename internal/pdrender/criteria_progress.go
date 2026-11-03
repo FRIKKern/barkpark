@@ -65,15 +65,17 @@ func (criteriaProgressRenderer) Render(b Block, ctx RenderCtx) []string {
 			digitW = n
 		}
 	}
-	cap := w / 3
-	if cap < 6 {
-		cap = 6
+	// Keep every authored label. The old fixed 24-column ceiling silently
+	// changed "Survey every corpus chapter" into "Survey every corpus cha…"
+	// even when the surface had ample room. Reserve only the irreducible meter
+	// and digit width; genuinely narrow surfaces put an overlong label on its
+	// own wrapped line below.
+	maxInlineLabelW := w - (2 + 1 + digitW + 1)
+	if maxInlineLabelW < 1 {
+		maxInlineLabelW = 1
 	}
-	if cap > 24 {
-		cap = 24
-	}
-	if labelW > cap {
-		labelW = cap
+	if labelW > maxInlineLabelW {
+		labelW = maxInlineLabelW
 	}
 	if labelW < 1 {
 		labelW = 1
@@ -96,6 +98,15 @@ func (criteriaProgressRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 		if prop > 1 {
 			prop = 1
+		}
+		if runeWidth(r.label) > labelW {
+			out = append(out, wrapLines(ctx.Theme.Body.Render(r.label), w)...)
+			meterW := w - digitW - 1
+			if meterW < 1 {
+				meterW = 1
+			}
+			out = append(out, statBar(prop, meterW, ctx)+" "+ctx.Theme.Body.Render(digits[i]))
+			continue
 		}
 		label := ctx.Theme.Body.Render(padOrTruncate(r.label, labelW))
 		bar := statBar(prop, barW, ctx)

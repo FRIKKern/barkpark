@@ -107,8 +107,21 @@ func conformanceWords(s string) []string {
 	return out
 }
 
+func conformanceWordsSplitPunctuation(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+}
+
 func diffWords(actual string, expected []string) []string {
-	seen := conformanceWords(actual)
+	return diffWordsFrom(conformanceWords(actual), expected)
+}
+
+func diffWordsSplitPunctuation(actual string, expected []string) []string {
+	return diffWordsFrom(normalizeFigureWords(conformanceWordsSplitPunctuation(actual)), conformanceWordsSplitPunctuation(strings.Join(expected, " ")))
+}
+
+func diffWordsFrom(seen, expected []string) []string {
 	var out []string
 	at := 0
 	for i, word := range expected {
@@ -128,6 +141,54 @@ func diffWords(actual string, expected []string) []string {
 	return out
 }
 
+func diffWordsUnordered(actual string, expected []string) []string {
+	available := map[string]int{}
+	for _, word := range normalizeFigureWords(conformanceWords(actual)) {
+		available[word]++
+	}
+	var out []string
+	for i, word := range expected {
+		if available[word] == 0 {
+			out = append(out, fmt.Sprintf("word %d/%d %q not found", i+1, len(expected), word))
+			continue
+		}
+		available[word]--
+	}
+	return out
+}
+
+func normalizeFigureWords(words []string) []string {
+	out := append([]string(nil), words...)
+	for i, word := range out {
+		switch word {
+		case "kilde":
+			out[i] = "source"
+		case "kilder":
+			out[i] = "sources"
+		}
+	}
+	return out
+}
+
+func diffFigureWords(actual string, expected []string) []string {
+	return diffWordsFrom(normalizeFigureWords(conformanceWords(actual)), expected)
+}
+
+func diffTrackedEyebrow(actual string, expected []string) []string {
+	seen := conformanceWords(actual)
+	allSingle := len(seen) > 1
+	for _, word := range seen {
+		if len([]rune(word)) != 1 {
+			allSingle = false
+			break
+		}
+	}
+	if allSingle {
+		seen = []string{strings.Join(seen, "")}
+	}
+	return diffWordsFrom(seen, expected)
+}
+
 func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	if _, ok := reg.blocks[c.Type]; !ok {
 		return conformanceRow{Type: c.Type, Status: "missing"}
@@ -141,6 +202,22 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 		return conformanceRow{Type: c.Type, Status: "unchecked"}
 	}
 	text := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()}))
+	// Multi-column terminal layouts are read row-major in plain text while the
+	// canonical DOM is read cell-major. Duel likewise keeps values and the
+	// authored delta on separate visual rows. For those layouts, conformance is
+	// presence-with-multiplicity; order would report visible words as missing.
+	if c.Type == "duel" || c.Type == "stat-grid" || c.Type == "stats" {
+		return conformanceVerdict(c.Type, diffWordsUnordered(text, expected))
+	}
+	if c.Type == "stat" {
+		return conformanceVerdict(c.Type, diffWordsSplitPunctuation(text, expected))
+	}
+	if c.Type == "lineage" {
+		return conformanceVerdict(c.Type, diffFigureWords(text, expected))
+	}
+	if c.Type == "eyebrow" {
+		return conformanceVerdict(c.Type, diffTrackedEyebrow(text, expected))
+	}
 	return conformanceVerdict(c.Type, diffWords(text, expected))
 }
 
@@ -234,6 +311,24 @@ func TestConformanceVerdictCapsTheDiffAtTwelveLines(t *testing.T) {
 	}
 	if r := conformanceVerdict("t", nil); r.Status != "pass" {
 		t.Errorf("no diff: %+v", r)
+	}
+}
+
+func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *testing.T) {
+	if got := conformanceWordsSplitPunctuation("71/118 add-error-shape"); !reflect.DeepEqual(got, []string{"71", "118", "add", "error", "shape"}) {
+		t.Fatalf("punctuation tokenization: %v", got)
+	}
+	if diff := diffWordsUnordered("3 target 5 today", []string{"5", "today", "3", "target"}); diff != nil {
+		t.Fatalf("row-major grid text should satisfy cell-major golden words: %v", diff)
+	}
+	if diff := diffWordsUnordered("one", []string{"one", "one"}); len(diff) != 1 {
+		t.Fatalf("unordered comparison must preserve multiplicity: %v", diff)
+	}
+	if diff := diffTrackedEyebrow("D I S P A T C H E S", []string{"dispatches"}); diff != nil {
+		t.Fatalf("tracked eyebrow should remain one semantic word: %v", diff)
+	}
+	if diff := diffFigureWords("Kilder: task:one", []string{"sources", "task:one"}); diff != nil {
+		t.Fatalf("localized provenance label should match the canonical word: %v", diff)
 	}
 }
 

@@ -149,6 +149,8 @@ const words = (s) =>
     .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
     .filter(Boolean);
 
+const wordsSplitPunctuation = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/gu).filter(Boolean);
+
 export const htmlText = (html) => html.replace(/<[^>]*>/g, "").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
 
 export function goldenWords(shape) {
@@ -159,8 +161,15 @@ export function goldenWords(shape) {
 }
 
 export function diffWords(actualText, expected) {
+	return diffWordsFrom(words(actualText), expected);
+}
+
+export function diffWordsSplitPunctuation(actualText, expected) {
+	return diffWordsFrom(normalizeFigureWords(wordsSplitPunctuation(actualText)), wordsSplitPunctuation(expected.join(" ")));
+}
+
+function diffWordsFrom(seen, expected) {
   if (expected.length === 0) return UNCHECKED;
-  const seen = words(actualText);
   const out = [];
   let at = 0;
   expected.forEach((word, i) => {
@@ -169,6 +178,30 @@ export function diffWords(actualText, expected) {
     else at = found + 1;
   });
   return out;
+}
+
+export function diffWordsUnordered(actualText, expected) {
+	if (expected.length === 0) return UNCHECKED;
+	const available = new Map();
+	for (const word of normalizeFigureWords(words(actualText))) available.set(word, (available.get(word) || 0) + 1);
+	const out = [];
+	expected.forEach((word, i) => {
+		if (!available.get(word)) out.push(`word ${i + 1}/${expected.length} "${word}" not found`);
+		else available.set(word, available.get(word) - 1);
+	});
+	return out;
+}
+
+const normalizeFigureWords = (seen) => seen.map((word) => word === "kilde" ? "source" : word === "kilder" ? "sources" : word);
+
+export function diffFigureWords(actualText, expected) {
+	return diffWordsFrom(normalizeFigureWords(words(actualText)), expected);
+}
+
+export function diffTrackedEyebrow(actualText, expected) {
+	let seen = words(actualText);
+	if (seen.length > 1 && seen.every((word) => [...word].length === 1)) seen = [seen.join("")];
+	return diffWordsFrom(seen, expected);
 }
 
 function row(type, verdict) {
