@@ -136,10 +136,22 @@ function semanticClone(source, blockType) {
     }
     root.setAttribute("role", "presentation");
   } else if (type === "list") {
-    for (const paragraph of root.querySelectorAll("li > p")) {
-      const span = document.createElement("span");
-      span.append(...paragraph.childNodes);
-      paragraph.replaceWith(span);
+    // Portable lists intentionally retain ProseMirror's paragraph carrier for
+    // caret/selection behavior. Project that documented equivalent only from
+    // the exact mounted PM structure; malformed wrappers remain visible diffs.
+    const list = root.matches("div.ProseMirror") && root.childElementCount === 1
+      ? root.firstElementChild : null;
+    const items = list?.matches("ul, ol") ? [...list.children] : [];
+    const exactPmList = items.length > 0 && items.every((item) =>
+      item.matches("li") && item.childElementCount === 1 &&
+      item.firstElementChild?.matches("p:not([role])")
+    );
+    if (exactPmList) {
+      for (const paragraph of list.querySelectorAll(":scope > li > p")) {
+        const span = document.createElement("span");
+        span.append(...paragraph.childNodes);
+        paragraph.replaceWith(span);
+      }
     }
   } else if (type === "divider") {
     const divider = root.querySelector(".bp-section-divider");
@@ -147,15 +159,22 @@ function semanticClone(source, blockType) {
     divider?.setAttribute("style", "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid");
     mark?.setAttribute("style", "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem");
   } else if (type === "paragraph") {
-    for (const strong of root.querySelectorAll("strong")) {
-      const span = document.createElement("span");
-      span.style.fontWeight = "bold";
-      span.append(...strong.childNodes);
-      strong.replaceWith(span);
-    }
-    for (const link of root.querySelectorAll("a")) {
-      link.removeAttribute("target");
-      link.removeAttribute("rel");
+    // Native <strong> and safe-link attributes are useful PM semantics. Their
+    // reader-equivalent projection is allowed only for the exact one-paragraph
+    // mount, never as a generic repair of arbitrary host markup.
+    const paragraph = root.matches("div.ProseMirror") && root.childElementCount === 1
+      ? root.firstElementChild : null;
+    if (paragraph?.matches("p:not([role])")) {
+      for (const strong of paragraph.querySelectorAll("strong")) {
+        const span = document.createElement("span");
+        span.style.fontWeight = "bold";
+        span.append(...strong.childNodes);
+        strong.replaceWith(span);
+      }
+      for (const link of paragraph.querySelectorAll("a")) {
+        link.removeAttribute("target");
+        link.removeAttribute("rel");
+      }
     }
   } else if (type === "callout" && root.tagName === "DIV") {
     const title = root.querySelector(":scope > span > strong");
@@ -320,6 +339,8 @@ const semanticMutationProbes = [
   ["expandable", '<div class="bp-expandable" data-bp-type="expandable" data-bp-conformance-root><input class="bp-expandable__summary" value="Summary"><div class="bp-expandable__body"></div></div>', '<details class="bp-expandable"><summary>Summary</summary><div class="bp-expandable__body"></div></details>'],
   ["stage", '<div class="bp-canvas-stage" data-bp-type="stage" data-bp-conformance-root><input data-test-id="paper-stage-title" value="Review"></div>', '<div class="bp-pnode"><div class="bp-pnode__t">Review</div></div>'],
   ["terminal", '<div class="bp-term" data-bp-type="terminal" data-bp-conformance-root><div class="bp-term__bar"><input class="bp-term__title bp-canvas-term__title-input" value="tasks"></div><div class="bp-canvas-term__foot-chrome"><div class="bp-term__foot"><input class="bp-canvas-term__foot-input" value="quit"></div></div></div>', '<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__title">tasks</span></div><div class="bp-term__foot">quit</div></div>'],
+  ["list", '<section class="definitely-not-the-pm-list-wrapper"><ul><li><p>First point</p></li></ul></section>', '<ul><li><span>First point</span></li></ul>'],
+  ["paragraph", '<section class="definitely-not-the-pm-paragraph-wrapper"><p>A <strong>bold</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a>.</p></section>', '<p>A <span style="font-weight:bold">bold</span> <a href="https://example.com">link</a>.</p>'],
 ];
 for (const [type, html, expectedHtml] of semanticMutationProbes) {
   const probe = document.createElement("template");
