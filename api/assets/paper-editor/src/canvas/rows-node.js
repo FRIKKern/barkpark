@@ -8,10 +8,12 @@
 // for both). One factory makes the two node pairs: a CONTAINER node (bpSteps / bpTabs,
 // content: row+) and a ROW node (bpStep / bpTab, content: the section's child roster,
 // so a container child rides bpOpaque — V1 forbid-nesting). The row's title/label is
-// an <input> island (the expandable precedent: ProseMirror's focus handler pulls the
-// caret out of a contentEditable island; an input keeps its own), the body is the
-// contentDOM. Chrome: a "×" per row and an "add" button on the container, both plain
-// PM transactions.
+// a reader-shaped title plus an <input> island (the expandable precedent:
+// ProseMirror's focus handler pulls the caret out of a contentEditable island; an
+// input keeps its own), the body is the contentDOM. The steps title is the resting
+// surface; pointer/keyboard activation swaps it for the input without duplicating
+// visible authored text. Chrome: a "×" per row and an "add" button on the container,
+// both plain PM transactions.
 //
 // The canvas uses the reader tab strip and keeps all panels mounted and visible
 // so authors can move the caret across panels. Each panel has a label editor.
@@ -128,9 +130,18 @@ function makeRow(spec) {
         head.className = "bp-canvas-row__head";
         head.setAttribute("contenteditable", "false");
 
+        const readerTitle = spec.bpType === "steps" ? document.createElement("div") : null;
+        if (readerTitle) {
+          readerTitle.className = "bp-steps__title";
+          readerTitle.setAttribute("contenteditable", "false");
+          readerTitle.setAttribute("role", "button");
+          readerTitle.setAttribute("aria-label", `Edit ${spec.rowWord} title`);
+          head.classList.add("bp-canvas-row__head--semantic");
+        }
+
         const titleEl = document.createElement("input");
         titleEl.type = "text";
-        titleEl.className = spec.titleClass;
+        titleEl.className = readerTitle ? "bp-canvas-row__title bp-canvas-row__title-editor" : spec.titleClass;
         titleEl.placeholder = spec.titlePlaceholder;
         titleEl.spellcheck = false;
         titleEl.setAttribute("aria-label", `${spec.rowWord} title`);
@@ -148,13 +159,35 @@ function makeRow(spec) {
         const body = document.createElement("div");
         body.className = spec.bodyClass;
 
+        if (readerTitle) dom.append(readerTitle);
         dom.append(head, body);
 
         let syncing = false;
         let dirty = false;
+        let editingTitle = !readerTitle;
+        const showTitleEditor = () => {
+          if (!readerTitle || !editor.isEditable) return;
+          editingTitle = true;
+          readerTitle.hidden = true;
+          titleEl.hidden = false;
+          head.classList.add("bp-canvas-row__head--editing");
+          titleEl.focus({ preventScroll: true });
+          titleEl.select();
+        };
+        const showReaderTitle = () => {
+          if (!readerTitle) return;
+          editingTitle = false;
+          readerTitle.hidden = false;
+          titleEl.hidden = true;
+          head.classList.remove("bp-canvas-row__head--editing");
+        };
         const paint = (n) => {
           const t = n.attrs && n.attrs.title;
           const shown = t != null && t !== "" ? t : "";
+          if (readerTitle) {
+            readerTitle.textContent = shown;
+            readerTitle.tabIndex = editor.isEditable ? 0 : -1;
+          }
           if (titleEl.value !== shown) {
             syncing = true;
             titleEl.value = shown;
@@ -162,6 +195,7 @@ function makeRow(spec) {
           }
           titleEl.readOnly = !editor.isEditable;
           removeBtn.style.display = editor.isEditable ? "" : "none";
+          if (readerTitle && (!editor.isEditable || !editingTitle)) showReaderTitle();
         };
 
         const commitWrite = () => {
@@ -184,12 +218,21 @@ function makeRow(spec) {
         };
         const onInput = () => { if (!syncing && editor.isEditable) dirty = true; };
         const flushWrite = () => { if (dirty) commitWrite(); };
-        const onBlur = () => flushWrite();
+        const onBlur = () => {
+          flushWrite();
+          showReaderTitle();
+        };
         const onKeydown = (e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             titleEl.blur();
           }
+        };
+        const onReaderTitleClick = () => showTitleEditor();
+        const onReaderTitleKeydown = (e) => {
+          if (e.key !== "Enter" && e.key !== " " && e.key !== "F2") return;
+          e.preventDefault();
+          showTitleEditor();
         };
         const onRemove = () => {
           if (!editor.isEditable || typeof getPos !== "function") return;
@@ -208,6 +251,8 @@ function makeRow(spec) {
         titleEl.addEventListener("input", onInput);
         titleEl.addEventListener("blur", onBlur);
         titleEl.addEventListener("keydown", onKeydown);
+        readerTitle?.addEventListener("click", onReaderTitleClick);
+        readerTitle?.addEventListener("keydown", onReaderTitleKeydown);
         removeBtn.addEventListener("click", onRemove);
         dom.addEventListener("bp-flush-node", flushWrite);
 
@@ -236,6 +281,8 @@ function makeRow(spec) {
             titleEl.removeEventListener("input", onInput);
             titleEl.removeEventListener("blur", onBlur);
             titleEl.removeEventListener("keydown", onKeydown);
+            readerTitle?.removeEventListener("click", onReaderTitleClick);
+            readerTitle?.removeEventListener("keydown", onReaderTitleKeydown);
             removeBtn.removeEventListener("click", onRemove);
           },
         };

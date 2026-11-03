@@ -48,12 +48,13 @@
 // (horizontalRule:false) — NO StarterKit node is disabled; the tags are unclaimed.
 //
 // ── THE thead DROP ───────────────────────────────────────────────────────────
-// The reader splits header/body into <thead>/<tbody>; the edit table puts ALL rows
-// (header + body) in the SINGLE <tbody> contentDOM. This is invisible: NO CSS targets
-// thead/tbody (grep-verified) — all styling rides `.bp-table` / `.bp-table__th` /
-// `.bp-table__td`, which the cells carry regardless of the wrapper. The header row is
-// distinguished purely by its cells being bpTableHeaderCell (<th class="bp-table__th">).
-// Justified in the parity gate exactly as the callout-structure slice's delta.
+// The reader splits header/body into <thead>/<tbody>; the edit table must keep all
+// bpTableRow nodes in the SINGLE <tbody> contentDOM because ProseMirror exposes one
+// content hole. projectMountedTableForReader() is the only supported section
+// projection: it first proves the mounted DOM has the real presentation role, one
+// uniform optional header row, body rows with valid cell kinds, and one real inline
+// span per cell. Only then does it move the header row in a CLONE. It never repairs
+// malformed editor DOM.
 //
 // DOM-aware (the node-view builds real DOM) but the Node SCHEMA objects load in plain
 // Node — `document` is referenced ONLY inside the addNodeView factory, which never runs
@@ -64,6 +65,46 @@ import { TextSelection } from "@tiptap/pm/state";
 // Merged cells (plan #24): the grid <-> visible-rows model and its structural transforms.
 import { visibleToGrid, gridToVisible, gridTransforms, coverMap, normalizeSpans, width as gridWidth } from "./table-grid.js";
 import { t } from "../i18n.js";
+
+// Project the production ProseMirror table to the reader's sectioned DOM without
+// mutating the live editor. Returning false is deliberate: one malformed table must
+// fail its conformance row without aborting the rest of the matrix.
+export function projectMountedTableForReader(table) {
+  if (!table?.matches?.("table.bp-table[role='presentation']")) return false;
+  const children = Array.from(table.children);
+  if (children.length !== 2 || children[0].tagName !== "COLGROUP" ||
+      children[0].getAttribute("contenteditable") !== "false" || children[1].tagName !== "TBODY") return false;
+
+  const rows = Array.from(children[1].children);
+  if (!rows.length || rows.some((row) => row.tagName !== "TR")) return false;
+  let hasHeader = false;
+  for (const [rowIndex, row] of rows.entries()) {
+    const cells = Array.from(row.children);
+    if (!cells.length) return false;
+    const header = cells.every((cell) => cell.tagName === "TH" && cell.getAttribute("scope") !== "row");
+    const body = cells.every((cell) => cell.tagName === "TD" ||
+      (cell.tagName === "TH" && cell.getAttribute("scope") === "row"));
+    if (!header && !body) return false;
+    if (header) {
+      if (rowIndex !== 0 || hasHeader) return false;
+      hasHeader = true;
+    }
+    if (cells.some((cell) => cell.childNodes.length !== 1 ||
+      !cell.firstElementChild?.matches("span[data-bp-table-cell-content]"))) return false;
+  }
+
+  const projected = table.cloneNode(true);
+  for (const span of projected.querySelectorAll("span[data-bp-table-cell-content]")) {
+    span.removeAttribute("data-bp-table-cell-content");
+  }
+  if (hasHeader) {
+    const tbody = projected.querySelector(":scope > tbody");
+    const thead = projected.ownerDocument.createElement("thead");
+    thead.append(tbody.firstElementChild);
+    projected.insertBefore(thead, tbody);
+  }
+  return projected;
+}
 
 // Shared bpId/bpType attr skeleton (the role-nodes.js roleAttributes shape). Only the
 // bpTable carries identity — rows/cells are INTERNAL PM structure with NO bpId (one id
@@ -430,7 +471,7 @@ export const BpTable = Node.create({
   renderHTML({ HTMLAttributes }) {
     return [
       "table",
-      mergeAttributes(HTMLAttributes, { "data-bp-type": "table", class: "bp-table" }),
+      mergeAttributes(HTMLAttributes, { "data-bp-type": "table", role: "presentation", class: "bp-table" }),
       ["tbody", 0],
     ];
   },
@@ -469,6 +510,7 @@ export const BpTable = Node.create({
       const table = document.createElement("table");
       // The READER table element + class, byte-identical to walk.ex.
       table.className = "bp-table";
+      table.setAttribute("role", "presentation");
       table.setAttribute("data-bp-type", "table");
       table.setAttribute("data-bp-conformance-root", "");
       const tbody = document.createElement("tbody");
@@ -775,14 +817,16 @@ export const BpTableCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "td", preserveWhitespace: "full" }, { tag: "th[scope='row']", preserveWhitespace: "full" }];
+    const contentElement = (dom) => dom.querySelector(":scope > span[data-bp-table-cell-content]") || dom;
+    return [{ tag: "td", preserveWhitespace: "full", contentElement }, { tag: "th[scope='row']", preserveWhitespace: "full", contentElement }];
   },
   renderHTML({ node, HTMLAttributes }) {
     // A row header (the table's header column, plan #26) is a <th scope="row"> with the reader's
     // th class; every other body cell stays a <td>. Span and align attributes ride either way.
     const attrs = { ...HTMLAttributes };
-    if (node.attrs.head) return ["th", mergeAttributes(attrs, { scope: "row", class: "bp-table__th bp-table__th--col" }), 0];
-    return ["td", mergeAttributes(attrs, { class: "bp-table__td" }), 0];
+    const content = ["span", { "data-bp-table-cell-content": "" }, 0];
+    if (node.attrs.head) return ["th", mergeAttributes(attrs, { scope: "row", class: "bp-table__th bp-table__th--col" }), content];
+    return ["td", mergeAttributes(attrs, { class: "bp-table__td" }), content];
   },
 });
 
@@ -794,9 +838,9 @@ export const BpTableHeaderCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "th:not([scope='row'])", preserveWhitespace: "full" }];
+    return [{ tag: "th:not([scope='row'])", preserveWhitespace: "full", contentElement: (dom) => dom.querySelector(":scope > span[data-bp-table-cell-content]") || dom }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ["th", mergeAttributes(HTMLAttributes, { class: "bp-table__th" }), 0];
+    return ["th", mergeAttributes(HTMLAttributes, { class: "bp-table__th" }), ["span", { "data-bp-table-cell-content": "" }, 0]];
   },
 });

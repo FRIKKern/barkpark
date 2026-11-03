@@ -6,11 +6,10 @@
 // `.bp-table__td` CSS applies on both surfaces. The existing __table.test.mjs
 // proves only the block ⇄ ops ROUND-TRIP (it imports run-convert.js, never
 // table-node.js) — nothing asserts table-node.js still emits those classes, and
-// nothing JUSTIFIES its two documented deltas from the reader:
-//   (1) the thead-drop — the reader splits header/body into <thead>/<tbody>
-//       (walk.ex table/3:920-951); the edit table puts ALL rows in the SINGLE
-//       <tbody> contentDOM (table-node.js ~L50-55). Invisible: no CSS targets
-//       thead/tbody — styling rides the cell classes.
+// nothing JUSTIFIES its one necessary structural projection from the reader:
+//   (1) ProseMirror keeps header/body rows in one <tbody> contentDOM, then the
+//       strict reader projection validates the real role/cells/span wrappers
+//       before moving the leading header row into <thead> on a clone.
 //   (2) the .bp-canvas-table / .bp-canvas-table__cols edit chrome
 //       (table-node.js ~L269-277) — add/remove row/col + toggle-header rails
 //       that live OUTSIDE the contentDOM and never exist in the reader.
@@ -25,11 +24,6 @@
 //     <thead><tr><th class="bp-table__th">…</th></tr></thead>?   (head opt-in)
 //     <tbody><tr><td class="bp-table__td">…</td></tr></tbody>
 //   </table>
-//
-// KNOWN a11y-only delta (NOT this slice's scope, flagged for the lead): the
-// reader stamps role="presentation" on <table>; the edit table omits it. It
-// affects no CSS (styling rides the classes), so parity is intact; tracked
-// separately rather than asserted here.
 //
 // Run: node src/__table_parity.test.mjs   (or: npm test)
 
@@ -77,6 +71,7 @@ check("bpTable renderHTML emits <table class=\"bp-table\"> (reader walk.ex table
 check("bpTable schema fallback carries the bp-attrs stamp on the <table>", () => {
   assert.equal(tableSpec[1]["data-bp-type"], "table");
   assert.equal(tableSpec[1]["data-bp-id"], "t1");
+  assert.equal(tableSpec[1].role, "presentation");
 });
 
 // The LIVE editor overrides renderHTML with an addNodeView that builds the <table>
@@ -112,7 +107,8 @@ check("bpTableCell renderHTML emits <td class=\"bp-table__td\"> (reader shared c
     String(cellSpec[1].class).split(/\s+/).includes("bp-table__td"),
     "bpTableCell dropped .bp-table__td — the reader paints every body cell with it.",
   );
-  assert.equal(cellSpec[cellSpec.length - 1], 0, "bpTableCell lost its inline* content hole.");
+  assert.deepEqual(cellSpec[cellSpec.length - 1], ["span", { "data-bp-table-cell-content": "" }, 0],
+    "bpTableCell must expose the reader-normalized inline span as its real contentDOM.");
 });
 
 check("row headers retain scope, spans and alignment through HTML", () => {
@@ -133,7 +129,8 @@ check("bpTableHeaderCell renderHTML emits <th class=\"bp-table__th\"> (reader sh
     String(headSpec[1].class).split(/\s+/).includes("bp-table__th"),
     "bpTableHeaderCell dropped .bp-table__th — the reader paints every header cell with it.",
   );
-  assert.equal(headSpec[headSpec.length - 1], 0, "bpTableHeaderCell lost its inline* content hole.");
+  assert.deepEqual(headSpec[headSpec.length - 1], ["span", { "data-bp-table-cell-content": "" }, 0],
+    "bpTableHeaderCell must expose the reader-normalized inline span as its real contentDOM.");
 });
 
 check("bpTableRow renderHTML emits a bare <tr> with a content hole (no class chrome)", () => {
@@ -142,19 +139,16 @@ check("bpTableRow renderHTML emits a bare <tr> with a content hole (no class chr
   assert.equal(rowSpec[rowSpec.length - 1], 0);
 });
 
-// ── (b) JUSTIFY the thead-drop as an edit-only island (source-level) ─────────
+// ── (b) REQUIRE the strict tbody→reader projection (source-level) ──────────
 
-check("the thead-drop justification comment is present (walk.ex splits thead/tbody; edit keeps one tbody)", () => {
+check("the single contentDOM is paired with a strict, non-repairing reader projection", () => {
   assert.ok(
-    /thead DROP/i.test(src),
-    "table-node.js lost the documented \"thead DROP\" justification — the delta from " +
-      "the reader's <thead>/<tbody> split must stay explained where a future editor reads it.",
+    /projectMountedTableForReader/.test(src),
+    "table-node.js lost the strict reader projection for its single tbody contentDOM.",
   );
   assert.ok(
-    /NO CSS targets\s*\n?\s*\/\/?\s*thead\/tbody|NO CSS targets thead\/tbody/i.test(src) ||
-      /no CSS targets/i.test(src),
-    "table-node.js dropped the note that NO CSS targets thead/tbody — the thead-drop is " +
-      "only invisible BECAUSE styling rides the .bp-table* cell classes; that reasoning must stay.",
+    /Returning false is deliberate/.test(src) && /It never repairs/.test(src),
+    "the projection must stay fail-closed rather than repairing malformed producer DOM.",
   );
 });
 
