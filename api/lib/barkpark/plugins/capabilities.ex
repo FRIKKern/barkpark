@@ -1891,6 +1891,28 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # task-60a5883edeb49cbe. One request per 100 files instead of one per
+      # file; an id already gone counts as done, so a retried batch is a 200.
+      core_cmd(
+        "media.delete-many",
+        "media",
+        "delete-many",
+        "Delete up to 100 media assets in one request: --ids a,b,c. An id with no file in the dataset counts as done. Not atomic: a refused id leaves the others deleted.",
+        "POST",
+        "/v1/media/:dataset/delete-many",
+        "write",
+        flags: [
+          flag("ids", "string", "Comma-separated asset ids (1 to 100)."),
+          flag(
+            "force",
+            "bool",
+            "Delete assets even though documents still use them (their images break)."
+          )
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "media.relations",
         "media",

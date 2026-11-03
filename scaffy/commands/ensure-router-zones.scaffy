@@ -189,6 +189,7 @@ INSERT AFTER FIRST
     pipe_through(:scoped_media_mutate)
 
     post("/v1/media/:dataset/upload", V1.MediaController, :upload)
+    post("/v1/media/:dataset/delete-many", V1.MediaController, :delete_many)
     patch("/v1/media/:dataset/:id", V1.MediaController, :update)
     delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
   end

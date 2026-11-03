@@ -143,10 +143,13 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
 
   describe "SOURCE PIN: every production call site names its policy" do
     # `git grep`-free so it runs from any checkout: walk api/lib for the call.
-    test "all five lib call sites pass :where_used, and the split is 2 doors / 3 cascade" do
+    # task-60a5883edeb49cbe: the v1 door's bulk delete-many is a second :guard
+    # site in the same controller. It runs the single DELETE's census and passes
+    # the forced-delete witness as :override, as the single DELETE does.
+    test "all six lib call sites pass :where_used, and the split is 3 doors / 3 cascade" do
       sites = call_sites()
 
-      assert length(sites) == 5,
+      assert length(sites) == 6,
              "the media-delete call-site roster moved (found #{length(sites)}): " <>
                "#{inspect(Enum.map(sites, &elem(&1, 0)))}. Re-derive the policy for the " <>
                "new site and update this pin — a call site nobody re-read is exactly " <>
@@ -166,6 +169,7 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
 
       assert Enum.sort(by_policy[:guard]) == [
                "api/lib/barkpark_web/controllers/media_controller.ex",
+               "api/lib/barkpark_web/controllers/v1/media_controller.ex",
                "api/lib/barkpark_web/controllers/v1/media_controller.ex"
              ]
 
