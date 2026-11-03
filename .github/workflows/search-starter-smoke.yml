@@ -158,7 +158,8 @@ jobs:
     # none of them and in no required aggregator's `needs:`, so a red here reds
     # the PR page and blocks no merge.
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 has no Chromium build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
