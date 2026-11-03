@@ -2180,6 +2180,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # second backend; none of them stubs Postgrex.
 
   describe "the import's DDL passes refuse fast and by name under lock contention" do
+    test "releasing the planted holder does not mistake another backend's lock for its own" do
+      planted = hold_access_share_lock!("documents")
+      unrelated = hold_access_share_lock!("documents")
+
+      try do
+        release_access_share_lock!(planted)
+        assert access_share_lock_held?(unrelated)
+      after
+        release_access_share_lock!(unrelated)
+      end
+    end
+
     @tag timeout: 60_000
     test "a foreign session holding AccessShareLock on a member table turns the import's " <>
            "ALTER TABLE into a named ImportLockError instead of an unbounded wait" do
@@ -2199,7 +2211,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       # caught doing it in the wild): a SECOND, non-sandbox connection holding
       # AccessShareLock, which conflicts with the AccessExclusiveLock every
       # ALTER TABLE in the import's DDL passes needs.
-      conn = hold_access_share_lock!("documents")
+      holder = hold_access_share_lock!("documents")
 
       {elapsed_us, error} =
         try do
@@ -2214,7 +2226,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
           # however long shutdown takes, and this lock is on a table EVERY
           # bundle test's import must ALTER — an earlier draft of this test let
           # it leak and reddened an unrelated merge-import test at seed 741453.
-          release_access_share_lock!(conn)
+          release_access_share_lock!(holder)
         end
 
       assert error.phase == :drop_member_fks
@@ -2284,7 +2296,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       assert docs_before > 0
 
-      conn = hold_access_share_lock!("documents")
+      holder = hold_access_share_lock!("documents")
+      conn = holder.conn
       test_pid = self()
 
       # ── THE SEQUENCING, and why it is an ORDER rather than a duration ──────
@@ -2337,7 +2350,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
           # backend, and if the import raised the handler may never have run at
           # all. This lock sits on a table EVERY bundle test's import must
           # ALTER — leaking it reddens whichever unrelated test runs next.
-          release_access_share_lock!(conn)
+          release_access_share_lock!(holder)
         end
 
       # THE FIXTURE'S OWN INVARIANT, asserted rather than assumed: the release
@@ -2397,7 +2410,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       %{ws_a: ws_a} = seed_two_workspaces!()
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
 
-      conn = hold_access_share_lock!("documents")
+      holder = hold_access_share_lock!("documents")
 
       {elapsed_us, error} =
         try do
@@ -2407,7 +2420,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
             end
           end)
         after
-          release_access_share_lock!(conn)
+          release_access_share_lock!(holder)
         end
 
       assert error.attempts == 3
@@ -2462,48 +2475,57 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     {:ok, _} =
       Postgrex.query(conn, "LOCK TABLE public.#{quote_ident(table)} IN ACCESS SHARE MODE", [])
 
-    conn
+    {:ok, %Postgrex.Result{rows: [[pid, relation_oid]]}} =
+      Postgrex.query(
+        conn,
+        "SELECT pg_backend_pid(), to_regclass($1)::oid",
+        ["public.#{table}"]
+      )
+
+    %{conn: conn, pid: pid, relation_oid: relation_oid, table: table}
   end
 
   # ROLLBACK is what actually frees the lock, server-side and synchronously;
   # stopping the pool afterwards just reclaims the backend.
-  defp release_access_share_lock_raw!(conn) do
+  defp release_access_share_lock_raw!(%{conn: conn}) do
     _ = Postgrex.query(conn, "ROLLBACK", [])
     _ = GenServer.stop(conn, :normal, 5_000)
     :ok
   end
 
+  defp access_share_lock_held?(%{pid: pid, relation_oid: relation_oid}) do
+    scalar(
+      """
+      SELECT count(*)
+      FROM pg_locks l
+      WHERE l.locktype = 'relation'
+        AND l.granted
+        AND l.pid = $1
+        AND l.relation = $2
+        AND l.mode = 'AccessShareLock'
+      """,
+      [pid, relation_oid]
+    ) > 0
+  end
+
   # Both matter: this lock sits on a table EVERY bundle test's import must
   # ALTER, so leaving it to process teardown reddens whichever unrelated test
   # runs next (an earlier draft of this test did exactly that at seed 741453).
-  # Callable only from the sandbox-owning test process — await_no_foreign_lock!
-  # reads through the Repo.
-  defp release_access_share_lock!(conn) do
-    release_access_share_lock_raw!(conn)
-    await_no_foreign_lock!("documents", 5_000)
+  # Callable only from the sandbox-owning test process —
+  # await_planted_lock_release! reads through the Repo.
+  defp release_access_share_lock!(holder) do
+    release_access_share_lock_raw!(holder)
+    await_planted_lock_release!(holder, 5_000)
   end
 
   # PROVE the release rather than assume it. Stopping the pool does not by
   # itself guarantee the backend is gone, and a surviving AccessShareLock on a
   # table every bundle import must ALTER reappears as an ImportLockError in
   # whichever unrelated test runs next — a leak that reads as a defect in the
-  # fix under test. Read from the sandbox connection, which is a DIFFERENT
-  # backend, so `pid <> pg_backend_pid()` isolates the holder we planted.
-  defp await_no_foreign_lock!(table, budget_ms) do
-    held? = fn ->
-      scalar(
-        """
-        SELECT count(*)
-        FROM pg_locks l
-        JOIN pg_class c ON c.oid = l.relation
-        WHERE l.locktype = 'relation'
-          AND l.granted
-          AND l.pid <> pg_backend_pid()
-          AND c.relname = $1
-        """,
-        [table]
-      ) > 0
-    end
+  # fix under test. The holder records its backend PID and exact relation OID
+  # before release, so another reader's lock cannot satisfy this predicate.
+  defp await_planted_lock_release!(holder, budget_ms) do
+    held? = fn -> access_share_lock_held?(holder) end
 
     deadline = System.monotonic_time(:millisecond) + budget_ms
 
@@ -2518,8 +2540,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     |> Enum.find(&(&1 == :done))
 
     refute held?.(),
-           "the planted AccessShareLock on #{table} survived its release — the next test's " <>
-             "import would fail on it"
+           "the planted backend #{holder.pid}'s AccessShareLock on #{holder.table} survived " <>
+             "its release — the next test's import would fail on it"
 
     :ok
   end
