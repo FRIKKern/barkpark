@@ -428,13 +428,14 @@ const CANVAS_CHAT_TYPES = new Set([
   "chat-thinking", "chat-todo", "chat-tool-diff",
 ]);
 
-// R6 missing-five: reader-rendered blocks that use the SAME bpFleet paint receiver
+// R6 static reader compatibility: blocks that use the SAME bpFleet paint receiver
 // without becoming members of the component-fleet contract above. The four structured
-// field kinds remain contextual run boundaries on new Studio mounts, preserving their
-// full server-side editors; recognizing them here keeps legacy/nested mounted canvases
-// reader-shaped instead of degrading to the generic opaque chip. pre-gate-badge has no
-// edit surface, so paper_canvas.ex also admits it into new runs. All five carry their
-// whole source block verbatim and paint only server-produced reader HTML.
+// field kinds and paper-links remain contextual run boundaries on new Studio mounts,
+// preserving their full server-side editors; recognizing them here keeps legacy/nested
+// mounted canvases reader-shaped instead of degrading to the generic opaque chip.
+// pre-gate-badge has no edit surface, so paper_canvas.ex also admits it into new runs.
+// All six carry their whole source block verbatim and paint only server-produced
+// reader HTML.
 //
 // Keep aligned with shared/paper.ex @canvas_static_render_types. Only
 // pre-gate-badge is aligned with paper_canvas.ex @canvas_static_render_types.
@@ -443,6 +444,7 @@ const CANVAS_STATIC_RENDER_TYPES = new Set([
   "codelist",
   "composite",
   "localizedText",
+  "paper-links",
   "pre-gate-badge",
 ]);
 
