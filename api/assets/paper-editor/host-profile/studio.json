@@ -410,7 +410,6 @@
         "bp-table__td--spark",
         "bp-table__th--num",
         "bp-table__th--spark",
-        "bp-tabs--editor",
         "data-bp-text-boundary"
       ],
       "why": "bp-paper-editor-shell.css is the editor half of Studio's shell: it restyles the canvas's node views, block handle and menu, slash menu, format bubble and pickers, held in lockstep with src/styles.css by view_edit_parity_test"
