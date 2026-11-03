@@ -97,7 +97,24 @@ defmodule BarkparkWeb.OidcController do
 
   # nil: no Studio named, the callback lands in /studio. A map: where the
   # callback sends the ticket. :error: a Studio named but not allowed.
-  defp studio_return(%{"return_to" => to} = params) when is_binary(to) do
+  # %{"path" => path}: the /login page's buttons keep its same-origin
+  # `return_to` (task-9963609c3ef5276f), and the browser lands there signed in.
+  # Only a start with no Studio parameters gets this; a Studio-shaped start
+  # (state, code_challenge) that names a path is refused as before.
+  defp studio_return(%{"return_to" => "/" <> _ = to} = params)
+       when not is_map_key(params, "state") and not is_map_key(params, "code_challenge") do
+    case BarkparkWeb.ReturnTo.safe_path(to) do
+      nil -> studio_origin_return(to, params)
+      path -> %{"path" => path}
+    end
+  end
+
+  defp studio_return(%{"return_to" => to} = params) when is_binary(to),
+    do: studio_origin_return(to, params)
+
+  defp studio_return(_params), do: nil
+
+  defp studio_origin_return(to, params) do
     origin = origin(to)
 
     audience =
@@ -117,8 +134,6 @@ defmodule BarkparkWeb.OidcController do
       _ -> :error
     end
   end
-
-  defp studio_return(_params), do: nil
 
   # RFC 8252 section 7.3: a native app's loopback redirect, any port, on the IP
   # literal (never the name "localhost"), plain http, path exactly /callback,
@@ -222,8 +237,14 @@ defmodule BarkparkWeb.OidcController do
                   )
 
                 case flow.studio do
-                  %{} = studio -> to_studio(conn, studio, token, user)
-                  _ -> signed_in(conn, token, user)
+                  %{"path" => path} ->
+                    conn |> put_private(:sso_return_path, path) |> signed_in(token, user)
+
+                  %{} = studio ->
+                    to_studio(conn, studio, token, user)
+
+                  _ ->
+                    signed_in(conn, token, user)
                 end
             end
 
@@ -384,13 +405,15 @@ defmodule BarkparkWeb.OidcController do
   end
 
   defp signed_in(conn, token, user) do
+    path = conn.private[:sso_return_path]
     conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
 
     # studio-user-login: a browser completing the code flow
-    # (Accept: text/html) lands IN Studio on its new session cookie;
-    # non-HTML callers keep the JSON contract byte-identical.
+    # (Accept: text/html) lands IN Studio on its new session cookie, or on the
+    # same-origin path its start named; non-HTML callers keep the JSON
+    # contract byte-identical.
     if SignInFailure.browser?(conn) do
-      redirect(conn, to: "/studio")
+      redirect(conn, to: BarkparkWeb.ReturnTo.safe_path(path) || "/studio")
     else
       conn
       |> put_status(:created)

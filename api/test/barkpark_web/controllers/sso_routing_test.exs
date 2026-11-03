@@ -45,6 +45,19 @@ defmodule BarkparkWeb.SsoRoutingTest do
   describe "POST /v1/auth/sso/route" do
     test "a verified domain returns its org SSO start URL", %{conn: conn} do
       {:ok, o} = Tenancy.create_organization(%{slug: "acme", name: "Acme"})
+
+      # Only an org with an active connection routes (task-9963609c3ef5276f).
+      {:ok, _} =
+        Oidc.create_connection(%{
+          organization_id: o.id,
+          issuer: "https://idp.example.com",
+          client_id: "cid",
+          client_secret: "s",
+          authorization_endpoint: "https://idp.example.com/auth",
+          token_endpoint: "https://idp.example.com/token",
+          jwks_uri: "https://idp.example.com/jwks"
+        })
+
       {:ok, rec} = Domains.request_verification(o, "acme.com")
       Application.put_env(:barkpark, :dns_test, [rec.dns_token])
       {:ok, _} = Domains.verify("acme.com")
@@ -54,6 +67,8 @@ defmodule BarkparkWeb.SsoRoutingTest do
 
       assert body["sso"] == true
       assert body["start_url"] == "/v1/auth/oidc/acme/start"
+      assert body["protocol"] == "oidc"
+      assert body["sso_only"] == false
     end
 
     test "an unverified / unknown domain returns sso:false", %{conn: conn} do

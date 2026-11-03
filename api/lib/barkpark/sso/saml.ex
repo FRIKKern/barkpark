@@ -60,13 +60,22 @@ defmodule Barkpark.Sso.Saml do
   def entity_id(slug), do: BarkparkWeb.Endpoint.url() <> "/saml/#{slug}/metadata"
   def acs_uri(slug), do: BarkparkWeb.Endpoint.url() <> "/v1/auth/saml/#{slug}/acs"
 
-  @doc "The SP-initiated redirect URL to the IdP's SSO endpoint (contains the SAMLRequest)."
-  @spec authn_redirect_url(SamlConnection.t(), String.t()) :: String.t()
-  def authn_redirect_url(%SamlConnection{} = conn, slug) do
+  @doc """
+  The SP-initiated redirect URL to the IdP's SSO endpoint (contains the
+  SAMLRequest). `relay_state` is echoed back by the IdP to the ACS; the login
+  page uses it for its same-origin `return_to` path.
+  """
+  @spec authn_redirect_url(SamlConnection.t(), String.t(), String.t()) :: String.t()
+  def authn_redirect_url(%SamlConnection{} = conn, slug, relay_state \\ "") do
     sp = sp_for(conn, slug)
     req = :esaml_sp.generate_authn_request(to_charlist(conn.idp_sso_url), sp)
 
-    :esaml_binding.encode_http_redirect(to_charlist(conn.idp_sso_url), req, :undefined, <<>>)
+    :esaml_binding.encode_http_redirect(
+      to_charlist(conn.idp_sso_url),
+      req,
+      :undefined,
+      relay_state
+    )
     |> to_string()
   end
 

@@ -99,6 +99,38 @@ defmodule BarkparkWeb.OidcControllerTest do
     assert Accounts.verify_user_session_token(body["token"])
   end
 
+  describe "a same-origin return_to from the /login page (task-9963609c3ef5276f)" do
+    test "the browser lands on that path after the callback", %{conn: conn} do
+      started = get(conn, "/v1/auth/oidc/octrl/start?return_to=%2Fw%2Fpensum%2Fstudio")
+      location = redirected_to(started, 302)
+      assert location =~ @issuer <> "/authorize?"
+      query = location |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+
+      mock_op(%{
+        "iss" => @issuer,
+        "aud" => @client_id,
+        "exp" => System.system_time(:second) + 300,
+        "nonce" => query["nonce"],
+        "email" => "return@octrl.com"
+      })
+
+      landed =
+        started
+        |> recycle()
+        |> put_req_header("accept", "text/html")
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=" <> query["state"])
+
+      assert redirected_to(landed, 302) == "/w/pensum/studio"
+      assert get_session(landed, "user_session")
+    end
+
+    test "a protocol-relative return_to is still refused", %{conn: conn} do
+      assert conn
+             |> get("/v1/auth/oidc/octrl/start?return_to=%2F%2Fevil.example")
+             |> json_response(400)
+    end
+  end
+
   test "GET callback with a mismatched state is rejected", %{conn: conn} do
     conn =
       conn

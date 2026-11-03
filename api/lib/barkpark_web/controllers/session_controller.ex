@@ -17,6 +17,7 @@ defmodule BarkparkWeb.SessionController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Accounts.NotificationWithhold
+  alias Barkpark.Sso.LoginOptions
   alias BarkparkWeb.SessionIssuer
 
   @default_return_to "/studio"
@@ -89,13 +90,49 @@ defmodule BarkparkWeb.SessionController do
   # Every render of :new carries the same assign set — error re-renders must
   # not lose the cloud button or the host line.
   defp new_assigns(return_to) do
+    buttons = sso_buttons(return_to)
+
     [
       return_to: return_to,
       page_title: gettext("Sign in"),
       instance_host: instance_host(),
-      cloud_login_href: cloud_login_href()
+      cloud_login_href: cloud_login_href(),
+      sso_buttons: buttons,
+      sso_lead: Enum.any?(buttons, & &1.sso_only),
+      sso_routing: LoginOptions.routing?(),
+      passkey: LoginOptions.passkeys?()
     ]
   end
+
+  # task-9963609c3ef5276f: one button per active connection when exactly one
+  # org has SSO (Barkpark.Sso.LoginOptions decides). Each href keeps the
+  # page's return_to. An org with both an OIDC and a SAML connection gets the
+  # protocol in the SAML label so the two buttons differ.
+  defp sso_buttons(return_to) do
+    buttons = LoginOptions.buttons()
+    both? = buttons |> Enum.map(& &1.protocol) |> Enum.uniq() |> length() > 1
+
+    Enum.map(buttons, fn b ->
+      %{
+        href: sso_href(b.start_path, return_to),
+        label: sso_label(b.provider, both? and b.protocol == :saml),
+        protocol: b.protocol,
+        provider: b.provider,
+        sso_only: b.sso_only
+      }
+    end)
+  end
+
+  defp sso_label(:microsoft, false), do: gettext("Sign in with Microsoft")
+  defp sso_label(:microsoft, true), do: gettext("Sign in with Microsoft (SAML)")
+  defp sso_label(_generic, false), do: gettext("Sign in with single sign-on")
+  defp sso_label(_generic, true), do: gettext("Sign in with single sign-on (SAML)")
+
+  # /studio is where every SSO callback lands by default, so it needs no query.
+  defp sso_href(start_path, @default_return_to), do: start_path
+
+  defp sso_href(start_path, return_to),
+    do: start_path <> "?" <> URI.encode_query(%{"return_to" => return_to})
 
   defp instance_host, do: URI.parse(BarkparkWeb.Endpoint.url()).host
 
@@ -201,7 +238,8 @@ defmodule BarkparkWeb.SessionController do
   enrolment guidance (the browser has no enrolment UI yet — that is the
   documented follow-up).
   """
-  def account(conn, %{"email" => email, "password" => password} = params) do
+  def account(conn, %{"email" => email, "password" => password} = params)
+      when is_binary(email) and is_binary(password) and password != "" do
     return_to = sanitize_return_to(params["return_to"])
 
     case Barkpark.Accounts.get_user_by_email_and_password(email, password) do
@@ -215,10 +253,41 @@ defmodule BarkparkWeb.SessionController do
     end
   end
 
+  # Email with no password (task-9963609c3ef5276f): an address on a verified
+  # domain of an org with an active SSO connection goes to that org's IdP,
+  # keeping return_to. This is the submit the login page's email routing makes
+  # when it hides or empties the password field. Anything else still needs
+  # both fields.
+  def account(conn, %{"email" => email} = params) when is_binary(email) do
+    return_to = sanitize_return_to(params["return_to"])
+
+    case LoginOptions.route_for_email(email) do
+      %{start_path: start_path} ->
+        redirect(conn, to: sso_href(start_path, return_to))
+
+      nil ->
+        conn
+        |> put_flash(:error, gettext("Email and password are required."))
+        |> render(:new, new_assigns(return_to))
+    end
+  end
+
   def account(conn, params) do
     conn
     |> put_flash(:error, gettext("Email and password are required."))
     |> render(:new, new_assigns(sanitize_return_to(params["return_to"])))
+  end
+
+  @doc """
+  `GET /login/account` sends the browser to `/login`. The form posts to this
+  path, so after a failed sign-in the address bar shows it, and reloading the
+  page used to answer 404. `return_to` is kept.
+  """
+  def account_page(conn, params) do
+    case BarkparkWeb.ReturnTo.safe_path(params["return_to"]) do
+      nil -> redirect(conn, to: "/login")
+      path -> redirect(conn, to: "/login?" <> URI.encode_query(%{"return_to" => path}))
+    end
   end
 
   # The shared post-authentication decision, reused by password (`account/2`)
@@ -608,21 +677,6 @@ defmodule BarkparkWeb.SessionController do
     |> put_resp_header("referrer-policy", "no-referrer")
   end
 
-  defp sanitize_return_to(nil), do: @default_return_to
-  defp sanitize_return_to(""), do: @default_return_to
-
-  # Same-origin absolute paths only. Browsers treat `\` like `/` and drop
-  # tab/CR/LF inside a URL, so `/\evil.com` or `/<TAB>/evil.com` became the
-  # protocol-relative `//evil.com`: an open redirect after login
-  # (task-5ab7e3e4d678ec4c). Any backslash or control character is refused.
-  defp sanitize_return_to(path) when is_binary(path) do
-    if String.starts_with?(path, "/") and not String.starts_with?(path, "//") and
-         not String.contains?(path, "\\") and not String.match?(path, ~r/[\x00-\x1f\x7f]/) do
-      path
-    else
-      @default_return_to
-    end
-  end
-
-  defp sanitize_return_to(_), do: @default_return_to
+  # Same-origin absolute paths only (BarkparkWeb.ReturnTo), else /studio.
+  defp sanitize_return_to(path), do: BarkparkWeb.ReturnTo.safe_path(path) || @default_return_to
 end

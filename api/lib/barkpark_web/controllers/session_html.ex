@@ -264,6 +264,21 @@ defmodule BarkparkWeb.SessionHTML do
       }
       .bp-auth-btn-quiet:hover { background: var(--bg-accent); color: var(--fg); }
 
+      /* Sign-in buttons above the email form: Cloud and SSO (task-9963609c3ef5276f). */
+      .bp-auth-stack { display: flex; flex-direction: column; gap: 8px; }
+      .bp-auth-passkey { margin-top: 16px; }
+      .bp-auth-note { margin: 8px 0 0; font-size: 13px; color: var(--fg-muted); }
+      .bp-auth-link {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--primary);
+        font: inherit;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .bp-auth-link:hover { text-decoration: underline; }
+
       .bp-auth-divider {
         display: flex;
         align-items: center;
