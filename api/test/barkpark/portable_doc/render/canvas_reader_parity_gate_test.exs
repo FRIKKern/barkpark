@@ -401,11 +401,19 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
         "notes-inline.js" -> without_notes_reader_queries(source)
         "filetree-inline.js" -> without_filetree_reader_queries(source)
         "fleet-text-inline.js" -> without_fleet_text_reader_queries(source)
+        "stage-node.js" -> without_stage_reader_markup(source)
         "diff-inline.js" -> String.replace(source, ~s|querySelector(".bp-diff")|, "readerQuery()")
         _ -> source
       end
     end)
     |> Enum.join("\n")
+  end
+
+  # Stage is an editable structural widget, like terminal. Its dedicated NodeView
+  # is the sanctioned producer of one canonical `bp-pnode`; §7 separately pins
+  # the exact semantic cells and editor-control boundary.
+  defp without_stage_reader_markup(source) do
+    String.replace(source, "bp-pnode", "sanctioned-stage-pnode")
   end
 
   # Native Stats editing decorates SERVER-painted elements; these five exact
@@ -782,12 +790,9 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   #
   # The `stage` widget is EDITABLE (a bpStage control-atom node, stage-node.js), NOT a
   # server-painted verbatim fleet block — so it is DELIBERATELY absent from
-  # painted_fleet (like `card`). It sidesteps the fleet gate by rendering into a
-  # `bp-canvas-stage` cell whose look is hand-mirrored by CSS, NOT by emitting the
-  # reader `bp-pnode` cell class. `bp-pnode` therefore STAYS in the §3 forbidden list
-  # (above) so the still-verbatim-carried legacy `pipeline` fleet keeps its gate
-  # protection. This test PINS that exemption: `stage` is not painted-fleet, and
-  # stage-node.js introduces NONE of the forbidden reader-cell literals.
+  # painted_fleet (like `card`). Its NodeView emits the reader's real `bp-pnode`
+  # cell while native inputs stay inside one removable editor-chrome boundary. The
+  # legacy `pipeline` remains server-painted and protected by the fleet gate.
 
   test "§7 stage is EXEMPT from painted_fleet (editable widget, not a server-painted mirror)" do
     labels = Enum.map(painted_fleet(), fn {l, _, _, _} -> l end)
@@ -799,7 +804,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert "pipeline" in labels, "legacy pipeline must remain a painted-fleet block"
   end
 
-  test "§7 stage-node.js does NOT emit the reader pipeline-cell class (bp-pnode stays gate-forbidden)" do
+  test "§7 stage-node.js emits canonical pnode DOM and isolates native controls" do
     src =
       "../../../../assets/paper-editor/src/canvas/stage-node.js"
       |> Path.expand(__DIR__)
@@ -808,10 +813,17 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert byte_size(src) > 0,
            "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
 
-    refute String.contains?(src, "bp-pnode"),
-           "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
+    for marker <- [
+          "bp-pnode",
+          "bp-pnode--src",
+          "bp-pnode__${key}",
+          "bp-paper-contextual-controls"
+        ] do
+      assert String.contains?(src, marker),
+             "stage-node.js no longer carries the canonical/editor boundary marker #{marker}"
+    end
 
     assert String.contains?(src, "bp-canvas-stage"),
-           "stage-node.js no longer uses the bp-canvas-stage chrome — the DESIGN-1 hook moved"
+           "stage-node.js no longer uses the bp-canvas-stage edit hook"
   end
 end
