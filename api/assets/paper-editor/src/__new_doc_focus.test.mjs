@@ -87,5 +87,16 @@ editor.innerHTML = '<form><input id="doc-field-quiz-2-title"></form>';
 await tick(250);
 assert.equal(document.activeElement.id, "search", "a typing user is left alone");
 
-console.log("ok new doc focus: waits for the editor, first editable field, paper title, respects a typing user");
+// Paper with no title block: each surface is asked to focus its own selection
+// (focusSelection, contract 1.22.0); an element not yet upgraded is skipped, and
+// the answer is true only when a surface took focus.
+editor.innerHTML =
+  '<div id="paper-editor-paper-2"><bp-paper-canvas></bp-paper-canvas><bp-paper-editor></bp-paper-editor></div>';
+const body = editor.querySelector("bp-paper-editor");
+body.focusSelection = () => false;
+assert.equal(window.bpFocusNewDoc("paper-2"), false, "no surface took focus, so the listener keeps trying");
+body.focusSelection = () => true;
+assert.equal(window.bpFocusNewDoc("paper-2"), true, "the editor kept its selection and took focus");
+
+console.log("ok new doc focus: waits for the editor, first editable field, paper title, focusSelection, respects a typing user");
 window.close();

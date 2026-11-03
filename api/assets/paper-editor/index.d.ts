@@ -4,7 +4,7 @@
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
 // attributes, events, globals, public classes and theme tokens. EMBED-CONTRACT.md
-// (v1.21.0) is the normative spec for both elements; these types follow
+// (v1.22.0) is the normative spec for both elements; these types follow
 // src/index.js and src/canvas/index.js. src/__contract_truth.test.mjs fails when
 // this file, EMBED-CONTRACT.md's surface index and the element classes disagree.
 
@@ -121,6 +121,8 @@ export interface BpPaperEditorElement extends HTMLElement {
   flushPendingChanges(): boolean;
   /** A debounced op, or a table structure change that has not settled. */
   hasPendingChanges(): boolean;
+  /** 1.22.0. Focus the editing surface where its selection already is. True when it has focus; false unmounted. */
+  focusSelection(): boolean;
   /** The user's "use latest": drop the debounce and any draft, take `block`. False in table mode for another id. */
   resolveConflictWithServerBlock(block: PortableDocBlock): boolean;
   /** Table mode: the server's table projection, with the request it answers. */
@@ -636,6 +638,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   /** 1.12.0: select the top-level image or object block card `id`, as a click on it does. */
   selectBlock(id: string): boolean;
   focusFirstBodyBlock(): boolean;
+  /** 1.22.0. Focus the editing surface where its selection already is. True when it has focus; false unmounted. */
+  focusSelection(): boolean;
   /** 1.17.0. Ask wikilinkResolve again for every document link (after a rename or a delete). */
   refreshWikilinks(): void;
   toggleSourceMode(): void;

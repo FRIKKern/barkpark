@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.21.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.22.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,14 +6,14 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.21.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.22.0"` (also exported as `CONTRACT_VERSION`).
 Build identity, the Surface index of every name below, a dated census of what each
 host uses, and the reach-ins hosts still make are at the end.
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert. 1.21.0 adds the `CONTRACT_VERSION`, `EDITOR_VERSION` and `BUILD_SHA` statics on both elements (Build identity), and declares what hosts already used: the editor's modes and members, the canvas's host attributes, rebase and resume-focus methods, paint holes, the DOM a host reads, and the pieces a host supplies.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert. 1.21.0 adds the `CONTRACT_VERSION`, `EDITOR_VERSION` and `BUILD_SHA` statics on both elements (Build identity), and declares what hosts already used: the editor's modes and members, the canvas's host attributes, rebase and resume-focus methods, paint holes, the DOM a host reads, and the pieces a host supplies. 1.22.0 adds `focusSelection()` on both elements, so hosts stop focusing `[contenteditable]` or `.ProseMirror` inside them, and each host's use is checked against its profile (Host profiles).
 
 ## The element
 
@@ -50,6 +50,7 @@ empty paragraph and emits `bp-error` (below).
 | `wikilinkSource` / `tagSource` | the `[[` and `#` menus' sources, as on the canvas (Host callbacks) | — |
 | `flushPendingChanges()` | send the debounced op now | `true` when it sent one |
 | `hasPendingChanges()` | a debounced op, or a table structure change not yet settled | boolean |
+| `focusSelection()` | focus the editing surface where its selection already is (1.22.0) | `true` when it has focus; `false` unmounted |
 | `resolveConflictWithServerBlock(block)` | the user's "use latest": drop the debounce and any draft and take `block` | `false` in table mode for another block's id, else `true` |
 | `applyTableProjection(value, { requestId, rev }?)` | table mode: the server's projection; while a structure change is in flight, only the echo of its request | `true` when taken |
 | `trackTableMutation(op, requestId)` | table mode: bind the host's request id to the `patch-table-structure` op in flight | `true` when bound |
@@ -377,6 +378,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `selectBlock(id)` | select the top-level image or object block `id` as a click on its card does (1.12.0); text typed onto a selected card on a `block-cards` canvas is dropped, Backspace/Delete still remove it | `true` when selected |
 | `refreshWikilinks()` | ask `wikilinkResolve` again for every document link, after a rename or a delete (1.17.0) | nothing |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
+| `focusSelection()` | focus the editing surface where its selection already is, as focusing `.ProseMirror` did (1.22.0) | `true` when it has focus; `false` unmounted |
 | `captureResumeFocus()` | before the host makes the page inert or moves the canvas (a reconnect, a halt): remember that the author is typing here. Arms only in rich, editable mode with focus inside and a `.bp-paper-editor[data-paper-doc-key]` root; focus moving elsewhere cancels it | `true` when armed |
 | `restoreResumeFocus()` | after: put the caret back, only if armed, the same editor, root and document key, nothing inert, and focus on `<body>` | `true` when restored |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
@@ -689,7 +691,7 @@ Both element classes carry three statics:
 
 | Static | Value |
 |---|---|
-| `CONTRACT_VERSION` | this document's version, `"1.21.0"`. `<bp-paper-editor>` had it before 1.21.0 |
+| `CONTRACT_VERSION` | this document's version, `"1.22.0"`. `<bp-paper-editor>` had it before 1.21.0 |
 | `EDITOR_VERSION` | since 1.21.0: the npm package version, `package.json`'s `version` (today `"1.0.0"`). It is not bumped per contract release |
 | `BUILD_SHA` | since 1.21.0: 12 hex of the sha-256 over esbuild's version and every input file of the bundle. The same source builds the same bytes and sha; a change to a test leaves it alone. Build options are not hashed: `npm run build` and `npm run build:dev` give the same sha and different bytes. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
 
@@ -698,6 +700,26 @@ const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-p
 ```
 
 `src/contract.js` exports the same three.
+
+## Host profiles
+
+```
+host-profile/surface.json   what this build offers (declared) and keeps to itself (internal); npm run build writes it
+host-profile/check.mjs      node check.mjs <profile.json> [surface.json]; no dependencies
+host-profile/<host>.json    one per host: Barkpark's studio, reader and web live here, each app keeps its own
+```
+
+A profile names its host (`host`) and lists the files it embeds the editor from
+(`sources`, relative to `root`, which is relative to the profile's folder), the contract
+names they use (`uses`, keyed like the Surface index), contract names they use for
+something of their own (`notEditor`, such as `history.state`), the internal names
+they still touch, each with a reason (`internals`), whether the host paints fleet
+blocks (`fleet`) and the lowest contract it needs (`minContract`). `check.mjs` fails
+on an undeclared use, an undeclared reach-in, a listed name no source uses, or a
+missing key or source. An
+app copies `check.mjs` and `surface.json` from one Barkpark commit (`surface.json`'s
+`build` names the bundle) and runs the check in its own test. The checker moves
+home with the editor at R5.
 
 ## Surface index
 
@@ -747,14 +769,14 @@ element classes).
 | Kind | On | Names |
 |---|---|---|
 | static | both | `BUILD_SHA`, `CONTRACT_VERSION`, `EDITOR_VERSION` |
-| member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
+| member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `focusSelection`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
 | tag | canvas | `bp-paper-canvas` |
 | tag | editor | `bp-paper-editor` |
 | tag | picker | `bp-media-picker`, `bp-reference-picker` |
 | member | picker | `openBrowser`, `openFileDialog`, `value` |
 | attribute | picker | `chrome`, `data-strings`, `data-token`, `dataset`, `ref-type`, `scope-prefix`, `value` |
 | member | mermaid | `runMermaid` |
-| member | editor | `applyTableProjection`, `block`, `flushPendingChanges`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `tableMutationResult`, `tagSource`, `trackTableMutation`, `waitForTableSettlement`, `wikilinkSource` |
+| member | editor | `applyTableProjection`, `block`, `flushPendingChanges`, `focusSelection`, `hasPendingChanges`, `resolveConflictWithServerBlock`, `tableMutationResult`, `tagSource`, `trackTableMutation`, `waitForTableSettlement`, `wikilinkSource` |
 | attribute | canvas | `block-cards`, `data-constraints`, `data-dataset`, `data-field-caps`, `data-locked-tail`, `data-media-strings`, `data-picker-browse`, `data-reference-strings`, `data-scope-prefix`, `data-token`, `data-vocabulary`, `editable`, `format-bubble`, `mention-trigger` |
 | attribute | editor | `data-block`, `data-editor-mode`, `editable` |
 | ancestor attribute | canvas | `data-bp-theme`, `data-expected-fields`, `data-field-name`, `data-paper-container-kind`, `data-paper-doc-key`, `data-paper-masters`, `data-paper-palette`, `data-server-insert`, `data-strings`, `data-theme` |
@@ -783,18 +805,19 @@ section.
 | Barkever | canvas: `blocks`, `acknowledgedSaves`, `flushKeepsSource`, `wikilinkSource`, `linkPreviewSource`, `wikilinkResolve`, `refreshWikilinks`, `identifyOpsRequest`, `acknowledgeOps`, `applyServerBlocks`, `flushPendingChanges`; static `CONTRACT_VERSION` | `editable`, `mention-trigger`, `data-vocabulary`; ancestors `data-strings`, `data-theme`; reads `data-wikilink`, `docid`, `target`, `data-missing`, `data-bp-id` | `bp-canvas-ops`, `bp-canvas-open-link`, `bp-canvas-wikilink-click` | `BP_PAPER_EDITOR_NO_INJECT`; about 41 theme tokens, `--tok-reading-font` |
 | barkpark-studio | canvas: the sync set, `can`, `run`, `state`, `undo`, `redo`, find and replace, `setRemoteSelections`, `setCommentRanges`, `commentRanges`, `commentsInSelection`, `selectBlock`, `focusFirstBodyBlock`, `editBlockObject`, `mediaPicker`, `mediaUploader`, `linkPreviewSource`, `wikilinkSource`, `recoverySnapshot`, `resendPendingOps`, `applyServerBlocksIfIdle`, `discardInflightOps(seq, {reason})`; static `CONTRACT_VERSION` | `block-cards`, `format-bubble`, `data-field-caps`, `data-vocabulary`, `editable`; ancestors `data-strings`, `data-paper-masters`, `data-theme`; reads `data-bp-id`, `data-comment-id` | about 13, among them `bp-canvas-history`, `bp-canvas-link-request`, `bp-canvas-comment-click`, `bp-selection-change`, `bp-canvas-node-failed`, `bp-ready` and the master events; dispatches `bp-fleet-paint` | `.bp-paper-editor`; `--tok-reading-font` |
 
-## Known reach-ins, to remove in R2.3
+## Known reach-ins
 
-Hosts touch these today. They are not contract: they can change in any version,
-and none is made public here. Counts are from the census of each app's main branch
-on 2026-10-31.
+Hosts touched these on 2026-10-31. They are not contract: they can change in any
+version, and none is made public here. Each host's profile (Host profiles) lists
+the ones it still makes, with a reason; 1.22.0's `focusSelection()` replaces the
+focus reach-ins.
 
 | Reach-in | Who | Where |
 |---|---|---|
 | `canvas._editor` (the TipTap editor: `state.doc`, `state.selection`) | Barkdown | `app/renderer/src/tabs/paper.js:162,413`; 136 uses in `app/tests` |
 | `[contenteditable="true"].editor.view.domObserver` `forceFlush()` / `flush()` | Barkever | `app/src/lib/canvas-load.ts:26` (the flush, pending and apply methods read unread typing since 1.15.0) |
 | `.ProseMirror` (focus, presence, styling) | Barkdown, Barkever, barkpark-studio | Barkdown `paper.js:22,127,663`, `index.js:813`, `paper-notion.css`; Barkever `editor.css:38`; barkpark-studio `PortableDocEditor.tsx:429`, `styles.css`, 47 lines in `e2e/` |
-| `[contenteditable="true"]` inside an element, to focus it | Studio, Barkever | Studio `bp-paper-editor-hooks.js:409,415`, `root.html.heex:5638`; Barkever `app/src/ui/BodyCanvas.tsx:33` |
+| `[contenteditable="true"]` inside an element, to focus it | Barkever | `app/src/ui/BodyCanvas.tsx:33` (Studio's moved to `focusSelection()` in 1.22.0) |
 | `bp-flush-node` dispatched on every `[data-bp-type]` node | Barkdown | `paper.js:67` (`flushPendingChanges()` does this) |
 | `[data-bp-id] > li:nth-child(n)` (a list item's DOM) | Barkever | `app/src/ui/BodyCanvas.tsx:157` |
 | internal classes restyled by host CSS | Studio, Barkdown, barkpark-studio | Studio `bp-paper-editor-shell.css` (175 classes, the editor half of the shell); Barkdown `paper-notion.css` (32) and `vendor/bp-paper-popups.css` (31): slash menu, format bubble, link preview, command palette, block handle and menu, code and note nodes; barkpark-studio `styles.css` (29): block handle and menu, field chrome, image and object cards, inline object dialog, link pill, format bubble, slash menu |

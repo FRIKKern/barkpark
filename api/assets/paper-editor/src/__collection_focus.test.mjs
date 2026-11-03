@@ -411,6 +411,84 @@ async function columnTrackScenario({
   }
 }
 
+async function nestedAddScenario({ direct, canvas, expected }) {
+  const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
+    <button id="toggle" data-editing="true">View</button>
+    <div id="paper-editor" class="bp-paper-contextual-editor">
+      <bp-paper-canvas id="nested-canvas"><div id="canvas-body" tabindex="-1"></div></bp-paper-canvas>
+      <form id="nested" phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="section">
+        <input type="hidden" name="section-child-count" value="1">
+        <input type="hidden" name="section-new-child-id" value="child:new">
+        <input type="hidden" name="section-child-0-id" value="child:one">
+        <button id="nested-add" type="submit" name="section-action" value="add">Add child</button>
+      </form>
+    </div>
+  </main>`, { url: "http://localhost/" });
+  const { window } = dom;
+  const { document } = window;
+  vm.runInContext(source, vm.createContext({
+    window, document, CustomEvent: window.CustomEvent,
+    FormData: window.FormData, setTimeout, clearTimeout,
+  }));
+  let send;
+  let resolve;
+  const hook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: document.getElementById("toggle"),
+    pushEvent: (event, payload) => {
+      send = { event, payload };
+      return new Promise(done => { resolve = done; });
+    },
+  };
+  hook.mounted();
+  const asked = [];
+  const answer = (name, element, body, value) => {
+    if (value === undefined) return;
+    element.focusSelection = () => {
+      asked.push(name);
+      if (value) body.focus();
+      return value;
+    };
+  };
+  try {
+    const form = document.getElementById("nested");
+    const add = document.getElementById("nested-add");
+    add.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: add }));
+    await tick();
+    assert.equal(send.payload["section-action"], "add");
+
+    const id = document.createElement("input");
+    id.type = "hidden";
+    id.name = "section-child-1-id";
+    id.value = "child:new";
+    form.append(id);
+    form.elements.namedItem("section-child-count").value = "2";
+    const rendered = add.cloneNode(true);
+    rendered.id = "rendered-add";
+    add.replaceWith(rendered);
+    const nestedCanvas = document.getElementById("nested-canvas");
+    nestedCanvas.blocks = [{ id: "child:one" }, { id: "child:new" }];
+    answer("canvas", nestedCanvas, document.getElementById("canvas-body"), canvas);
+    if (direct !== null) {
+      const wrapper = document.createElement("div");
+      wrapper.id = "paper-ed-child:new";
+      wrapper.innerHTML = '<bp-paper-editor><div id="direct-body" tabindex="-1"></div></bp-paper-editor>';
+      document.getElementById("paper-editor").append(wrapper);
+      answer("direct", wrapper.querySelector("bp-paper-editor"), document.getElementById("direct-body"), direct);
+    }
+    resolve({ saved: true, request_id: send.payload.request_id, rev: 2 });
+    await tick();
+
+    assert.equal(document.activeElement.id, expected.focus, "a nested add focuses the new child's editor, else the add button");
+    assert.deepEqual(asked, expected.asked, "the child's own editor is asked before the canvas that holds it");
+  } finally {
+    hook.destroyed();
+    window.close();
+  }
+}
+
 await scenario({});
 await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
@@ -440,4 +518,9 @@ await columnTrackScenario({ action: "remove-column:2", removeSurvivingAdd: true 
 await columnTrackScenario({ saved: false });
 await columnTrackScenario({ moveFocus: true });
 await columnTrackScenario({ corruptSurvivor: true });
-console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");
+await nestedAddScenario({ direct: true, canvas: true, expected: { focus: "direct-body", asked: ["direct"] } });
+await nestedAddScenario({ direct: false, canvas: true, expected: { focus: "canvas-body", asked: ["direct", "canvas"] } });
+await nestedAddScenario({ direct: undefined, canvas: true, expected: { focus: "canvas-body", asked: ["canvas"] } });
+await nestedAddScenario({ direct: null, canvas: false, expected: { focus: "rendered-add", asked: ["canvas"] } });
+await nestedAddScenario({ direct: null, canvas: undefined, expected: { focus: "rendered-add", asked: [] } });
+console.log("PASS collection focus: reorder, add, remove, nested add, failure, and no focus stealing");

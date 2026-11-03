@@ -5635,10 +5635,7 @@
       if (canvas && typeof canvas.focusBlock === "function") {
         return canvas.focusBlock(title.dataset.bpId) === true;
       }
-      const editable = paper.querySelector('[contenteditable="true"]');
-      if (!editable) return false;
-      editable.focus();
-      return true;
+      return [...paper.querySelectorAll("bp-paper-canvas, bp-paper-editor")].some((surface) => surface.focusSelection?.() === true);
     };
     // After a document is deleted its editor is gone; focus the row that took
     // its place in the list, else the pane's New button (task-bad96a2a1c3da132).

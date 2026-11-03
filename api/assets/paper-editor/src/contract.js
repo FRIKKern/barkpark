@@ -4,7 +4,7 @@
 // pure-Node smoke harness can assert the embed contract without importing
 // index.js (which extends HTMLElement and crashes outside a browser). index.js
 // re-exports these; __smoke.mjs imports THIS module. See EMBED-CONTRACT.md.
-export const CONTRACT_VERSION = "1.21.0";
+export const CONTRACT_VERSION = "1.22.0";
 // EDITOR_VERSION is package.json's version. BUILD_SHA is the first 12 hex of the
 // sha-256 over esbuild's version and every input file of the bundle
 // (scripts/build-sha.mjs; build-bundle.mjs defines __BP_BUILD_SHA__); unbuilt, as in plain Node, it is null.

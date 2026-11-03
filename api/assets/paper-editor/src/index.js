@@ -442,6 +442,15 @@ class BpPaperEditor extends HTMLElement {
     return this._emitOp();
   }
 
+  // 1.22.0: focus the editing surface where its selection already is, so a host
+  // no longer focuses [contenteditable] inside the element.
+  focusSelection() {
+    const view = this._editor?.view;
+    if (!view) return false;
+    view.focus();
+    return view.hasFocus();
+  }
+
   // Synchronous host seam for navigation / beforeunload guards. The editor is
   // dirty as soon as its debounce exists, before bp-op has been dispatched.
   hasPendingChanges() {
