@@ -67,25 +67,29 @@ function semanticClone(source, blockType) {
   }
   const type = root.getAttribute?.("data-bp-type") || blockType;
   if (type === "code") {
-    const reader = document.createElement("pre");
-    reader.className = "bp-codeblock";
-    reader.setAttribute("data-bp-conformance-root", "");
-    reader.setAttribute("style", "border:0;border-radius:var(--bp-codeblock-radius, 0);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre");
-    reader.textContent = root.querySelector("textarea")?.value || "";
-    root = reader;
+    // The mounted node must already be the reader's semantic <pre>. The
+    // comparator may peel away its editing islands, but it must never repair a
+    // wrong tag/class/style into a passing reader node.
+    if (root.matches("pre.bp-codeblock")) {
+      const area = root.querySelector(":scope > textarea.bp-canvas-code-area");
+      if (area) root.replaceChildren(document.createTextNode(area.value || ""));
+    }
   } else if (type === "diagram") {
     root.classList.add("bp-diagram");
     root.style.removeProperty("background");
     root.style.border = "1px solid";
   } else if (type === "expandable") {
-    const details = document.createElement("details");
-    details.className = "bp-expandable";
-    details.setAttribute("data-bp-conformance-root", "");
-    const summary = document.createElement("summary");
-    summary.textContent = root.querySelector(".bp-expandable__summary")?.value || "";
-    const body = root.querySelector(".bp-expandable__body");
-    details.append(summary, body || document.createElement("div"));
-    root = details;
+    // Keep the real details/summary/body nodes. `open` is edit-canvas state;
+    // the summary input is the only editor island normalized to authored text.
+    if (root.matches("details.bp-expandable")) {
+      const summary = root.querySelector(":scope > summary");
+      const body = root.querySelector(":scope > .bp-expandable__body");
+      if (summary && body) {
+        const input = summary.querySelector(":scope > input.bp-expandable__summary");
+        if (input) summary.replaceChildren(document.createTextNode(input.value || ""));
+        root.removeAttribute("open");
+      }
+    }
   } else if (type === "figure") {
     if (root.getAttribute("role") === "group") root.removeAttribute("role");
     root.style.overflowX = "auto";
@@ -195,44 +199,26 @@ function semanticClone(source, blockType) {
     }
     actionIsland?.parentElement?.remove();
   } else if (type === "stage") {
-    const fields = [
-      ["paper-stage-kind", "bp-pnode__k"],
-      ["paper-stage-title", "bp-pnode__t"],
-      ["paper-stage-detail", "bp-pnode__d"],
-      ["paper-stage-files", "bp-pnode__f"],
-    ];
-    const cells = fields.flatMap(([testId, className]) => {
-      const value = root.querySelector(`[data-test-id='${testId}']`)?.value || "";
-      if (!value) return [];
-      const cell = document.createElement("div");
-      cell.className = className;
-      cell.textContent = value;
-      return [cell];
-    });
-    root.className = root.classList.contains("bp-canvas-stage--src")
-      ? "bp-pnode bp-pnode--src"
-      : "bp-pnode";
-    root.replaceChildren(...cells);
+    // Stage reader cells must be mounted and kept in sync by the node view.
+    // Remove only the edit controls; missing/wrong semantic cells remain a
+    // visible conformance diff instead of being synthesized from input values.
+    if (root.matches("div.bp-pnode")) {
+      root.querySelectorAll(":scope > input[class^='bp-canvas-stage__'], :scope > .bp-canvas-stage__src-toggle")
+        .forEach((el) => el.remove());
+    }
   } else if (type === "terminal") {
     const bar = root.querySelector(":scope > .bp-term__bar");
-    const titleInput = bar?.querySelector(":scope > .bp-term__title");
-    if (titleInput) {
-      const title = document.createElement("span");
-      title.className = "bp-term__title";
-      title.textContent = titleInput.value || "";
-      titleInput.replaceWith(title);
-    }
+    const title = bar?.querySelector(":scope > span.bp-term__title");
+    if (title) bar.querySelector(":scope > input.bp-canvas-term__title-input")?.remove();
     bar?.querySelector(":scope > .bp-canvas-term__live-toggle")?.remove();
 
     const footChrome = root.querySelector(":scope > .bp-canvas-term__foot-chrome");
-    const footInput = footChrome?.querySelector(".bp-canvas-term__foot-input");
-    if (footInput && footChrome) {
-      const foot = document.createElement("div");
-      foot.className = "bp-term__foot";
-      foot.textContent = footInput.value || "";
+    const foot = footChrome?.querySelector(":scope > .bp-term__foot");
+    if (footChrome && foot) {
+      foot.querySelector(":scope > .bp-canvas-term__foot-input")?.remove();
       footChrome.replaceWith(foot);
-    } else {
-      footChrome?.remove();
+    } else if (footChrome) {
+      footChrome.remove();
     }
   }
   return root;
@@ -324,6 +310,23 @@ const normalizedTitleOnlySection = semanticClone(titleOnlySectionProbe, "section
 strip(normalizedTitleOnlySection);
 if (normalizedTitleOnlySection.outerHTML !== '<div style="display: flex; flex-direction: column;"><div class="bp-section__cell"><div class="bp-card"><h2>Alpha cell</h2></div></div></div>') {
   throw new Error(`nested title-only card did not inherit card parity: ${normalizedTitleOnlySection.outerHTML}`);
+}
+
+// Planted mutations: a wrong mounted semantic structure must survive
+// normalization and therefore fail shape comparison. These are deliberately
+// the old blind-repair shapes for the four audited branches.
+const semanticMutationProbes = [
+  ["code", '<article class="definitely-not-the-reader-code-class" data-bp-type="code" data-bp-conformance-root><textarea class="bp-canvas-code-area">hello</textarea></article>', (root) => root.tagName === "ARTICLE" && !root.classList.contains("bp-codeblock")],
+  ["expandable", '<div class="bp-expandable" data-bp-type="expandable" data-bp-conformance-root><input class="bp-expandable__summary" value="Summary"><div class="bp-expandable__body"></div></div>', (root) => root.tagName === "DIV" && !root.querySelector(":scope > summary")],
+  ["stage", '<div class="bp-canvas-stage" data-bp-type="stage" data-bp-conformance-root><input data-test-id="paper-stage-title" value="Review"></div>', (root) => !root.classList.contains("bp-pnode") && !root.querySelector(":scope > .bp-pnode__t")],
+  ["terminal", '<div class="bp-term" data-bp-type="terminal" data-bp-conformance-root><div class="bp-term__bar"><input class="bp-term__title bp-canvas-term__title-input" value="tasks"></div><div class="bp-canvas-term__foot-chrome"><div class="bp-term__foot"><input class="bp-canvas-term__foot-input" value="quit"></div></div></div>', (root) => root.querySelector(":scope > .bp-term__bar > input.bp-term__title") && !root.querySelector(":scope > .bp-term__bar > span.bp-term__title")],
+];
+for (const [type, html, remainsInvalid] of semanticMutationProbes) {
+  const probe = document.createElement("template");
+  probe.innerHTML = html;
+  const normalized = semanticClone(probe.content.firstElementChild, type);
+  strip(normalized);
+  if (!remainsInvalid(normalized)) throw new Error(`${type} semantic mutation was repaired into a false pass: ${normalized.outerHTML}`);
 }
 
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
