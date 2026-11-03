@@ -1078,7 +1078,12 @@ function sectionBlockToNode(block, bpId, bpType) {
         },
       };
     }
-    return blockToNode(child);
+    const node = blockToNode(child);
+    if (child?.id == null && (child?.span != null || child?.order != null)) {
+      const { span, order } = child;
+      node.attrs = { ...node.attrs, bpSectionCell: { span, order } };
+    }
+    return node;
   });
 
   const node = { type: CANVAS_CONTAINER_NODE_NAME, attrs };
@@ -1159,7 +1164,8 @@ function sectionNodeToBlock(node, id, taken) {
     const built = nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
     // Key by the child's OWN bpId (present-only). A canvas-new (null-bpId) child has
     // NO cell — correct, a freshly created child carries no span/order.
-    const cell = cells && childBpId != null ? cells[childBpId] : null;
+    const cell = cells && childBpId != null && Object.hasOwn(cells, childBpId)
+      ? cells[childBpId] : child.attrs?.bpSectionCell;
     if (cell && cell.span != null) built.span = cell.span;
     if (cell && cell.order != null) built.order = cell.order;
     return built;
