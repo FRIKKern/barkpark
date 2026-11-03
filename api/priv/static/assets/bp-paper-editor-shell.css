@@ -1257,8 +1257,8 @@ bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-c
          reader counterpart — the analogous .bp-cols__c:empty hack above, RISK #2). An
          empty/placeholder grid cell gets a min-height + dashed outline so it stays a
          visible caret target. Keep BYTE-IDENTICAL with styles.css. */
-    .bp-canvas-section .bp-section__grid > :empty,
-    .bp-canvas-section .bp-section__grid > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
+    .bp-canvas-section .bp-section__cell > :empty,
+    .bp-canvas-section .bp-section__cell > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
     /* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
        counterpart — the reader `.bp-term*` paint ships in paper-surface.css and is
        inherited through the ancestor .bp-paper-surface cascade). The title/footer inputs

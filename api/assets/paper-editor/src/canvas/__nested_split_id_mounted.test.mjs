@@ -225,6 +225,36 @@ async function scene(name, fn) {
   }
 }
 
+await scene("section grid: live children keep their cell styles through reorder and undo", async () => {
+  const blocks = [{
+    id: "grid", type: "section", layout: { mode: "grid" },
+    blocks: [
+      { ...p("first", "First cell."), order: -1 },
+      { type: "paragraph", text: "Second cell.", span: 2 },
+    ],
+  }];
+  const canvas = await mount(blocks, () => {});
+  try {
+    const editor = canvas._editor;
+    const cells = () => [...canvas.querySelectorAll(".bp-section__grid > .bp-section__cell")];
+    assert.equal(cells()[0].style.order, "-1");
+    assert.equal(cells()[1].style.gridColumn, "span 2");
+    const section = editor.state.doc.firstChild;
+    editor.view.dispatch(editor.state.tr.replaceWith(1, section.nodeSize - 1, [section.lastChild, section.firstChild]));
+    assert.match(cells()[0].textContent, /Second cell/);
+    assert.equal(cells()[0].style.gridColumn, "span 2");
+    assert.equal(cells()[1].style.order, "-1");
+    caretAfter(editor, "Second cell.");
+    type(editor, "!");
+    assert.match(cells()[0].textContent, /Second cell\.!/);
+    editor.commands.undo();
+    assert.equal(cells()[0].textContent, "First cell.");
+    assert.equal(cells()[0].style.order, "-1");
+    assert.equal(cells()[1].textContent, "Second cell.");
+    assert.equal(cells()[1].style.gridColumn, "span 2");
+  } finally { canvas.remove(); }
+});
+
 await scene("tabs: keyboard and label edits preserve both live panels", async () => {
   const blocks = SCENES.find(({ name }) => name === "tabs").blocks;
   let server = clone(blocks);

@@ -1445,8 +1445,8 @@ input.bp-canvas-diagram-caption,
  * contentDOM lays children into grid tracks; an empty/placeholder cell (a lone
  * trailing-break) gets a min-height + dashed outline so it stays a visible caret
  * target. Keep BYTE-IDENTICAL with the root.html.heex copy. */
-.bp-canvas-section .bp-section__grid > :empty,
-.bp-canvas-section .bp-section__grid > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
+.bp-canvas-section .bp-section__cell > :empty,
+.bp-canvas-section .bp-section__cell > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
 
 /* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
  * counterpart, so they do NOT trip the view↔edit parity byte-compare — the reader
