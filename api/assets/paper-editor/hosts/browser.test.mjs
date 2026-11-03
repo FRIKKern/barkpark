@@ -15,10 +15,14 @@ test("browser path names the one pinned chrome-headless-shell build", () => {
   assert.throws(() => defaultChromePath({ platform: "win32", arch: "x64", home: "C:\\Users\\me" }), /no configured path/);
 });
 
-test("seven unique host pages are declared", () => {
+test("seven unique host pages declare their own CSS, globals and stubs", () => {
   assert.equal(profiles.length, 7);
   assert.equal(new Set(profiles.map(({ id }) => id)).size, 7);
-  for (const entry of profiles) assert.ok(entry.globals.length && entry.stubs.length);
+  assert.equal(new Set(profiles.map(({ css }) => css)).size, 7);
+  for (const entry of profiles) {
+    assert.ok(entry.css.length && entry.globals.length > 1 && entry.stubs.length > 3);
+    assert.match(entry.source, /:/);
+  }
 });
 
 test("E01 through E12 are declared once and unavailable journeys explain why", () => {
