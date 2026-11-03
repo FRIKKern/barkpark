@@ -25,16 +25,20 @@ test("seven unique host pages declare their own CSS, globals and stubs", () => {
   }
 });
 
-test("E01 through E12 are declared once and unavailable journeys explain why", () => {
+test("E01 through E12 are declared once and E09 stays an explicit diagnostic negative", () => {
   assert.deepEqual(journeys.map(({ id }) => id), Array.from({ length: 12 }, (_, index) => `E${String(index + 1).padStart(2, "0")}`));
   for (const journey of journeys) if (journey.state === "unavailable") assert.ok(journey.reason);
-  assert.match(journeys.find(({ id }) => id === "E09").reason, /task-53f2fc33b834114f/);
-  assert.deepEqual(journeys.filter(({ state }) => state === "available").map(({ id }) => id), ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E10", "E11"]);
+  assert.deepEqual(journeys.find(({ id }) => id === "E09"), {
+    id: "E09", title: "Read=Edit same doc looks same reader/editor", state: "available", kind: "diagnostic-negative", expected: "red",
+    dependency: "TG2 PR #25130 at 7b8ac416c8f9cde903537e130e429124777294da", artifact: "known-red screenshot",
+  });
+  assert.deepEqual(journeys.filter(({ state }) => state === "available").map(({ id }) => id), ["E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E09", "E10", "E11"]);
 });
 
 test("CLI is strict and --allow-unavailable is opt-in", () => {
   assert.equal(options([]).allowUnavailable, false);
   assert.equal(options(["--allow-unavailable", "--host=barkdown"]).host, "barkdown");
+  assert.match(options(["--baseline=../served", "--candidate=../build"]).baseline, /\/served$/);
   assert.match(options(["--candidate=../build"]).candidate, /\/build$/);
   assert.throws(() => options(["--allow-unavailable=true"]), /unknown or malformed/);
   assert.throws(() => options(["--host=nope"]), /unknown host/);
@@ -72,7 +76,7 @@ test("E12 refuses a candidate that is the baseline bundle under different metada
       return `${createHash("sha256").update(bytes).digest("hex")}  ${name}`;
     });
     writeFileSync(join(dir, "SHA256SUMS"), sums.join("\n") + "\n");
-    assert.throws(() => upgradeBuilds(dir), /byte-identical to baseline/);
+    assert.throws(() => upgradeBuilds(null, dir), /byte-identical to baseline/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

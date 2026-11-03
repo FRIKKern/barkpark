@@ -29,12 +29,24 @@ the replay, Chromium fetches and hashes each served bundle; the E12 report
 records those browser-observed identities and refuses a source or digest
 mismatch before comparing the two normalized save logs.
 
+For the preserved 1.21→1.22 retro pair, pass both verified directories:
+
+```sh
+npm run hosts -- --baseline=/path/to/served-1.21 --candidate=/path/to/staged-1.22 --output=/path/to/portable-doc/docs/images
+```
+
+The same full `source-commit` and checksum contract applies to an explicit
+baseline. This historical A/B replay is separate from a native host's
+same-backend upgrade or rollback evidence.
+
 Strict mode exits nonzero while any E01–E12 journey is unavailable. During
 incremental development, `--allow-unavailable` writes the partial artifacts and
 `hosts/manifest.json`; the manifest remains `incomplete`, so it cannot be
 mistaken for acceptance evidence. `--host=<id>` narrows a local run to one host.
 
-Current executable journeys are E01–E08 and E10–E12 (E11 is Studio-only and
-E12 requires a candidate). The manifest gives a concrete reason for
-every unavailable journey. E09 remains unavailable until TG2's sixth Read≠Edit
-light and known-red proof land under `task-53f2fc33b834114f`.
+All E01–E12 journeys are executable (E11 is Studio-only and E12 requires a
+candidate). E09 is intentionally a diagnostic negative: it passes only when
+TG2's Read/Edit light settles red on the frozen `sample:callout` mismatch and
+records that known-red screenshot. It is evidence that the detector works,
+not evidence that reader/editor parity is green. The manifest labels this
+distinction explicitly.

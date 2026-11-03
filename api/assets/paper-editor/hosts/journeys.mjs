@@ -7,7 +7,7 @@ export const journeys = [
   { id: "E06", title: "Slash menu inserts every block type", state: "available", artifact: "screenshot grid" },
   { id: "E07", title: "Remote edit arrives while I type; my keys win", state: "available", artifact: "gif" },
   { id: "E08", title: "Offline/reconnect pending edits flush", state: "available", artifact: "gif + op log" },
-  { id: "E09", title: "Read=Edit same doc looks same reader/editor", state: "unavailable", reason: "awaiting TG2 sixth Read≠Edit light and known-red proof (task-53f2fc33b834114f)" },
+  { id: "E09", title: "Read=Edit same doc looks same reader/editor", state: "available", kind: "diagnostic-negative", expected: "red", dependency: "TG2 PR #25130 at 7b8ac416c8f9cde903537e130e429124777294da", artifact: "known-red screenshot" },
   { id: "E10", title: "Phone width and dark mode", state: "available", artifact: "screenshots" },
   { id: "E11", title: "Pickers image/reference/card media", state: "available", appliesTo: "Studio hosts", artifact: "gif" },
   { id: "E12", title: "Upgrade no downtime; old clients still save", state: "conditional", reason: "requires --candidate=<verified staged editor directory>", artifact: "replay report" },

@@ -17,23 +17,23 @@ const BUNDLE = "bp-paper-editor.bundle.js";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function usage(why) {
-  throw new Error(`${why}\nusage: npm run hosts -- [--output=<directory>] [--candidate=<staged-build-directory>] [--allow-unavailable] [--host=<id>]`);
+  throw new Error(`${why}\nusage: npm run hosts -- [--output=<directory>] [--baseline=<staged-build-directory>] [--candidate=<staged-build-directory>] [--allow-unavailable] [--host=<id>]`);
 }
 
 export function options(args) {
-  const known = /^--(output=.+|candidate=.+|host=[a-z0-9-]+|allow-unavailable)$/;
+  const known = /^--(output=.+|baseline=.+|candidate=.+|host=[a-z0-9-]+|allow-unavailable)$/;
   const bad = args.find((arg) => !known.test(arg));
   if (bad) usage(`unknown or malformed option ${bad}`);
   const value = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const duplicates = ["output", "candidate", "host"].filter((name) => args.filter((arg) => arg.startsWith(`--${name}=`)).length > 1);
+  const duplicates = ["output", "baseline", "candidate", "host"].filter((name) => args.filter((arg) => arg.startsWith(`--${name}=`)).length > 1);
   if (args.filter((arg) => arg === "--allow-unavailable").length > 1) duplicates.push("allow-unavailable");
   if (duplicates.length) usage(`--${duplicates[0]} given twice`);
   const host = value("host");
   if (host && !profiles.some((entry) => entry.id === host)) usage(`unknown host ${host}`);
-  return { output: resolve(value("output") || DEFAULT_OUTPUT), candidate: value("candidate") && resolve(value("candidate")), host, allowUnavailable: args.includes("--allow-unavailable") };
+  return { output: resolve(value("output") || DEFAULT_OUTPUT), baseline: value("baseline") && resolve(value("baseline")), candidate: value("candidate") && resolve(value("candidate")), host, allowUnavailable: args.includes("--allow-unavailable") };
 }
 
-export function stagedBuild(dir) {
+export function stagedBuild(dir, label = "candidate") {
   const sha = readFileSync(join(dir, "source-commit"), "utf8").trim();
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`candidate source-commit is not a full Git SHA: ${JSON.stringify(sha)}`);
   const sums = readFileSync(join(dir, "SHA256SUMS"), "utf8").trim().split("\n").map((line) => {
@@ -48,7 +48,7 @@ export function stagedBuild(dir) {
   for (const name of ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"]) {
     if (!sums.some((entry) => entry.name === name)) throw new Error(`candidate SHA256SUMS does not cover ${name}`);
   }
-  return { label: "candidate", sha, dir, bundleSha256: sums.find(({ name }) => name === BUNDLE).expected };
+  return { label, sha, dir, bundleSha256: sums.find(({ name }) => name === BUNDLE).expected };
 }
 
 export function baselineBuild() {
@@ -61,8 +61,8 @@ export function distinctBuilds(baseline, candidate) {
   return true;
 }
 
-export function upgradeBuilds(candidateDir) {
-  const baseline = baselineBuild();
+export function upgradeBuilds(baselineDir, candidateDir) {
+  const baseline = baselineDir ? stagedBuild(baselineDir, "baseline") : baselineBuild();
   const candidate = candidateDir && stagedBuild(candidateDir);
   if (candidate) distinctBuilds(baseline, candidate);
   return { baseline, candidate };
@@ -376,6 +376,21 @@ async function e10(cdp, root, host, baseUrl) {
   return { id: "E10", state: "passed", artifacts };
 }
 
+async function e09(cdp, root, host, baseUrl) {
+  await viewport(cdp, 1280, 800);
+  await navigate(cdp, `${baseUrl}?doc=sample:callout`);
+  await waitFor(cdp, `(() => { const light = document.querySelector('[data-trap="read-edit"]'); return Boolean(light && light.dataset.ok !== 'null'); })()`);
+  const verdict = await evaluate(cdp, `(() => {
+    const light = document.querySelector('[data-trap="read-edit"]');
+    return { ok: light?.dataset.ok, words: light?.textContent.trim() };
+  })()`);
+  const expected = "Read ≠ Edit — red The reader and editor differ at block 1 (s-callout).";
+  if (verdict.ok !== "false" || verdict.words !== expected) throw new Error(`${host} E09: expected the frozen known-red diagnostic ${JSON.stringify(expected)}, got ${JSON.stringify(verdict)}`);
+  const artifact = join(root, "journeys", `${host}--E09--known-red.png`);
+  await screenshot(cdp, artifact);
+  return { id: "E09", state: "passed", kind: "diagnostic-negative", expected: "red", assertions: ["Read/Edit trap settled", "known callout mismatch was detected at s-callout"], artifacts: [artifact.slice(root.length + 1)] };
+}
+
 async function preparePickerCanvas(cdp) {
   await evaluate(cdp, `(() => {
     const canvas = window.testingGround.state.canvases[0];
@@ -496,7 +511,7 @@ export async function run(args = process.argv.slice(2)) {
     try { await cleanup(); } finally { process.exit(code); }
   }]));
   for (const [signal, handler] of handlers) process.once(signal, handler);
-  const { baseline, candidate } = upgradeBuilds(opts.candidate);
+  const { baseline, candidate } = upgradeBuilds(opts.baseline, opts.candidate);
   const runtimeJourneys = journeys.map((journey) => {
     if (journey.id !== "E12") return journey;
     const { reason, ...rest } = journey;
@@ -530,12 +545,13 @@ export async function run(args = process.argv.slice(2)) {
         await e06(browser.cdp, opts.output, host.id, url),
         await e07(browser.cdp, opts.output, host.id, url),
         await e08(browser.cdp, opts.output, host.id, url),
+        await e09(browser.cdp, opts.output, host.id, url),
         await e10(browser.cdp, opts.output, host.id, url),
         await e11(browser.cdp, opts.output, host.id, url, host.pickers),
         await e12(browser.cdp, opts.output, host.id, url, candidateServer && `${candidateServer.url}/hosts/${host.id}/`, baseline, candidate),
       ];
       manifest.hosts.push({ ...host, state: "passed", results });
-      console.log(`${host.id}: E01-E08, E10${host.pickers ? "-E11" : ""}${candidate ? ", E12" : ""} passed`);
+      console.log(`${host.id}: E01-E08, E09 known-red diagnostic, E10${host.pickers ? "-E11" : ""}${candidate ? ", E12" : ""} passed`);
     }
   } finally {
     for (const [signal, handler] of handlers) process.removeListener(signal, handler);
