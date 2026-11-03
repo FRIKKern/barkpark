@@ -1,5 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+
+const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+assert.match(
+  css,
+  /\.bp-canvas-term__title-input\s*\{[^}]*font-family:\s*var\(--paper-font-mono\);[^}]*font-size:\s*0\.76rem;[^}]*line-height:\s*1\.6;[^}]*color:\s*var\(--paper-ink-soft\);/s,
+  "terminal title input keeps the reader title typography outside its semantic span",
+);
+assert.match(
+  css,
+  /\.bp-canvas-term__foot-input\s*\{[^}]*font-family:\s*var\(--paper-font-mono\);[^}]*font-size:\s*0\.75rem;[^}]*line-height:\s*1\.6;[^}]*color:\s*var\(--paper-ink-soft\);/s,
+  "terminal footer input keeps the reader footer typography outside its semantic node",
+);
 
 const jsdom = new JSDOM("<!doctype html><body></body>", {
   pretendToBeVisual: true,
