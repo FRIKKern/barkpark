@@ -873,6 +873,7 @@ defmodule Barkpark.Media do
     else
       MediaFile
       |> where([m], m.id in ^Map.keys(by_uuid))
+      # global-read: the same scope as get_file/2, of which this is the batch form. An HTTP caller always passes the :shared_only sentinel or a real workspace (see get_file/2's doc); a nil workspace reaches only internal callers.
       |> Content.Scope.scope_to_workspace_or_global(
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)
