@@ -142,6 +142,17 @@ describe('defect 1 — height survives unmount/remount', () => {
 })
 
 describe('defect 2 — the island says it is working', () => {
+  it('keeps the authored source in the mounted accessibility transcript', () => {
+    const tree = mount()
+    try {
+      expect(textOf(tree)).toContain(SOURCE)
+      postHeight(300)
+      expect(textOf(tree)).toContain(SOURCE)
+    } finally {
+      act(() => tree.unmount())
+    }
+  })
+
   it('paints "Loading diagram…" until the first message, then drops it (mutant: delete-the-loading-label)', () => {
     const tree = mount()
     try {

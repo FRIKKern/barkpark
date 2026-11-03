@@ -134,6 +134,14 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
+describe('terminal chrome', () => {
+  it('renders the authored live state beside the title', () => {
+    expect(text({ type: 'terminal', title: 'bp tasks', live: true, children: [], footer: 'q to quit' }))
+      .toContain('●●●bp tasksliveq to quit')
+    expect(text({ type: 'terminal', title: 'bp tasks', live: false, children: [] })).not.toContain('live')
+  })
+})
+
 /** The goldens are typed as their literal shapes; the renderers take `unknown`. */
 function input(golden: { input: unknown }): unknown {
   return golden.input

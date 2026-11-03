@@ -109,7 +109,16 @@ function TabsBlock({ labels, theme, children }: TabsBlockProps): ReactNode {
           </Pressable>
         ))}
       </View>
-      {children[index]}
+      {children.map((child, i) => (
+        <View
+          key={i}
+          accessibilityElementsHidden={i !== index}
+          importantForAccessibility={i === index ? 'auto' : 'no-hide-descendants'}
+          style={{ display: i === index ? 'flex' : 'none' }}
+        >
+          {child}
+        </View>
+      ))}
     </View>
   )
 }
@@ -303,12 +312,30 @@ const apiEndpoint: Render = (b, ctx, key) => {
           </Text>
         )}
       </View>
+      {params.length > 0 && (
+        <View
+          style={{
+            flexDirection: 'row',
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderTopWidth: 1,
+            borderTopColor: ctx.theme.border,
+          }}
+        >
+          <Text style={{ ...scale.micro, fontWeight: '700', color: ctx.theme.textMuted, flex: 1 }}>
+            Name
+          </Text>
+          <Text style={{ ...scale.micro, fontWeight: '700', color: ctx.theme.textMuted, flex: 2, textAlign: 'right' }}>
+            In · Type · Required
+          </Text>
+        </View>
+      )}
       {/* The web's 4-column params table folds to ONE ROW PER PARAM on a phone
           (the columns/steps stacking precedent): the name leads, and in/type/
-          requiredness ride the meta run. `optional` is spelled out because the
-          table's "Required: No" is information, not chrome. */}
+          requiredness ride the meta run. Yes/No remains explicit because the
+          requiredness column is information, not chrome. */}
       {params.map((p, i) => {
-        const meta = [str(p.in), str(p.type), paramRequired(p.required) ? 'required' : 'optional']
+        const meta = [str(p.in), str(p.type), paramRequired(p.required) ? 'Yes' : 'No']
           .filter((part) => part !== '')
           .join(' · ')
         return (

@@ -36,6 +36,21 @@ function judge(golden: GoldenCase) {
 }
 
 describe('mobile renderer conformance against the golden pack', () => {
+  it('passes the six-row R6 renderer cluster', async () => {
+    const target = new Set([
+      'api-endpoint',
+      'chat-tool-diff',
+      'code-tabs',
+      'diagram',
+      'tabs',
+      'terminal',
+    ])
+    const report = await conform({ renderer: 'mobile', compare: 'text', judge })
+    expect(report.rows.filter((row) => target.has(row.type))).toEqual(
+      [...target].map((type) => ({ type, status: 'pass' })),
+    )
+  })
+
   it('matches the committed conformance/mobile.json', async () => {
     const report = await conform({ renderer: 'mobile', compare: 'text', judge })
     const problems = settle(report, modeFromEnv())

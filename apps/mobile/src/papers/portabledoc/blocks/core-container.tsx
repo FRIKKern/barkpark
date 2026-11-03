@@ -61,6 +61,9 @@ const terminal: Render = (b, ctx, key) => {
             the frame. Only the type moves onto tokens here. */}
         <Text style={{ ...scale.xs, color: '#55635e' }}>●●●</Text>
         {title !== '' && <Text style={{ ...scale.xs, color: '#93a198', fontFamily: MONO }}>{title}</Text>}
+        {b.live === true && (
+          <Text style={{ ...scale.micro, color: '#7fd9ad', fontFamily: MONO, marginLeft: 'auto' }}>live</Text>
+        )}
       </View>
       <View style={{ padding: 10 }}>
         {kids.map((child, i) =>

@@ -256,7 +256,7 @@ describe('chat-thinking (charter D30 — the Elixir/react form is golden)', () =
 /* ── 3. chat-tool-diff: the server's lines, the shared budget ────────────────── */
 
 describe('chat-tool-diff', () => {
-  it('TRUSTS the server lines — it never re-derives a diff from input', () => {
+  it('TRUSTS server lines when present instead of re-deriving from input', () => {
     // `input` says a→b; the SERVER's lines say something else entirely. A ported
     // DP-LCS would paint the input's derivation and lose the row Studio shows.
     const out = text({
@@ -274,6 +274,48 @@ describe('chat-tool-diff', () => {
     expect(out).toContain('SERVERSIDE_ADDED')
     expect(out).not.toContain('alpha')
     expect(out).not.toContain('omega')
+  })
+
+  it('derives the canonical bounded line diff when persisted content has input only', () => {
+    const out = text({
+      type: 'chat-tool-diff',
+      input: {
+        file_path: 'lib/foo.ex',
+        old_string: 'def hello do\n  :old\nend',
+        new_string: 'def hello do\n  :new\nend',
+      },
+    })
+    expect(out).toContain('+1')
+    expect(out).toContain('−1')
+    expect(out).toContain('  def hello do')
+    expect(out).toContain('+   :new')
+    expect(out).toContain('-   :old')
+    expect(out).toContain('  end')
+  })
+
+  it('does not classify old/new content without the canonical file_path', () => {
+    const out = text({
+      type: 'chat-tool-diff',
+      input: { old_string: 'MISSING_PATH_OLD', new_string: 'MISSING_PATH_NEW' },
+    })
+    expect(out).not.toContain('MISSING_PATH_OLD')
+    expect(out).not.toContain('MISSING_PATH_NEW')
+  })
+
+  it('prioritizes nonempty edits over old/new fields in the same canonical input', () => {
+    const out = text({
+      type: 'chat-tool-diff',
+      input: {
+        file_path: 'lib/foo.ex',
+        edits: [{ old_string: 'EDIT_OLD', new_string: 'EDIT_NEW' }],
+        old_string: 'TOP_LEVEL_OLD',
+        new_string: 'TOP_LEVEL_NEW',
+      },
+    })
+    expect(out).toContain('EDIT_OLD')
+    expect(out).toContain('EDIT_NEW')
+    expect(out).not.toContain('TOP_LEVEL_OLD')
+    expect(out).not.toContain('TOP_LEVEL_NEW')
   })
 
   it('folds at the SHARED 20-line budget with an honest overflow footnote', () => {

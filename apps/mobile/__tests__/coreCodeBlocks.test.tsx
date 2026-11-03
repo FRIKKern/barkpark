@@ -114,8 +114,27 @@ function mountedText(tree: ReactTestRenderer): string {
       return
     }
     if (node && typeof node === 'object' && 'children' in (node as object)) {
-      visit((node as { children: unknown }).children)
+      const host = node as { children: unknown; props?: { style?: unknown } }
+      const styles = Array.isArray(host.props?.style) ? host.props.style : [host.props?.style]
+      const hidden = styles.some(
+        (style) => !!style && typeof style === 'object' && (style as { display?: unknown }).display === 'none',
+      )
+      if (!hidden) visit(host.children)
     }
+  }
+  visit(tree.toJSON())
+  return seen.join(' ')
+}
+
+/** All mounted text, including inactive display:none panels. This is the RN
+ * twin of the web DOM's no-JS corpus: inactive panes remain present while the
+ * visible-text helper above observes the active pane only. */
+function structuralText(tree: ReactTestRenderer): string {
+  const seen: string[] = []
+  const visit = (node: unknown): void => {
+    if (typeof node === 'string') seen.push(node)
+    else if (Array.isArray(node)) node.forEach(visit)
+    else if (node && typeof node === 'object' && 'children' in node) visit((node as { children: unknown }).children)
   }
   visit(tree.toJSON())
   return seen.join(' ')
@@ -183,6 +202,18 @@ describe('tabs — a real switch, mounted', () => {
       expect(out).not.toContain('PANE_TWO_BODY')
       pressTab(tree, 0)
       expect(mountedText(tree)).toContain('PANE_ONE_BODY')
+    } finally {
+      act(() => tree.unmount())
+    }
+  })
+
+  it('keeps inactive panels mounted but hidden, matching the web no-JS corpus', () => {
+    const tree = mount(TABS)
+    try {
+      expect(structuralText(tree)).toContain('PANE_ONE_BODY')
+      expect(structuralText(tree)).toContain('PANE_TWO_BODY')
+      expect(structuralText(tree)).toContain('PANE_THREE_BODY')
+      expect(mountedText(tree)).not.toContain('PANE_TWO_BODY')
     } finally {
       act(() => tree.unmount())
     }
@@ -346,15 +377,16 @@ describe('api-endpoint — method + path + params', () => {
     const out = textOf(block)
     expect(out).toContain('POST')
     expect(out).toContain('/v1/data/mutate')
+    expect(out).toContain('Name')
+    expect(out).toContain('In · Type · Required')
     expect(out).toContain('dataset')
-    expect(out).toContain('path · string · required')
+    expect(out).toContain('path · string · Yes')
     expect(out).toContain('dryRun')
-    // "Required: No" is information, so the optional case is SPELLED OUT rather
-    // than being the absence of a word.
-    expect(out).toContain('query · boolean · optional')
+    // "Required: No" is information, so the optional case is SPELLED OUT.
+    expect(out).toContain('query · boolean · No')
     // The string "TRUE" is truthy for `required` on every other surface too.
     expect(out).toContain('strict')
-    expect(out.match(/required/g)).toHaveLength(2)
+    expect(out.match(/Yes/g)).toHaveLength(2)
   })
 
   it('tones the method badge by VERB, off the status palette', () => {
