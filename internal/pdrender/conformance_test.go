@@ -157,6 +157,87 @@ func diffWordsUnordered(actual string, expected []string) []string {
 	return out
 }
 
+func columnMajorText(actual string) string {
+	lines := strings.Split(actual, "\n")
+	var starts []int
+	for _, line := range lines {
+		runes := []rune(line)
+		for i := 0; i < len(runes); {
+			for i < len(runes) && unicode.IsSpace(runes[i]) {
+				i++
+			}
+			if i == len(runes) {
+				break
+			}
+			start := i
+			for i < len(runes) && !unicode.IsSpace(runes[i]) {
+				i++
+			}
+			if len(starts) == 0 || start-starts[len(starts)-1] >= 3 {
+				starts = append(starts, start)
+			}
+		}
+		break
+	}
+	if len(starts) < 2 {
+		return actual
+	}
+
+	var cells, footer []string
+	for col, start := range starts {
+		end := -1
+		if col+1 < len(starts) {
+			end = starts[col+1]
+		}
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "Kilde:") || strings.HasPrefix(trimmed, "Kilder:") ||
+				strings.HasPrefix(trimmed, "Source:") || strings.HasPrefix(trimmed, "Sources:") {
+				if col == 0 {
+					footer = append(footer, trimmed)
+				}
+				continue
+			}
+			runes := []rune(line)
+			if start >= len(runes) {
+				continue
+			}
+			to := len(runes)
+			if end >= 0 && end < to {
+				to = end
+			}
+			if part := strings.TrimSpace(string(runes[start:to])); part != "" {
+				cells = append(cells, part)
+			}
+		}
+	}
+	return strings.Join(append(cells, footer...), "\n")
+}
+
+func duelAssociationDiff(actual string, attrs map[string]any) []string {
+	lines := strings.Split(actual, "\n")
+	var out []string
+	for i, row := range itemMaps(attrs, "rows") {
+		label := sanitizeText(strings.TrimSpace(attrStr(row, "label")))
+		valueA := sanitizeText(strings.TrimSpace(attrStr(row, "valueA")))
+		valueB := sanitizeText(strings.TrimSpace(attrStr(row, "valueB")))
+		if label == "" {
+			continue
+		}
+		associated := false
+		for _, line := range lines {
+			if strings.Contains(line, label) && strings.Contains(line, valueA) && strings.Contains(line, valueB) {
+				associated = true
+				break
+			}
+		}
+		if !associated {
+			out = append(out, fmt.Sprintf("row %d %q is not associated with values %q and %q", i+1, label, valueA, valueB))
+		}
+	}
+	return out
+}
+
 func normalizeFigureWords(words []string) []string {
 	out := append([]string(nil), words...)
 	for i, word := range out {
@@ -206,8 +287,13 @@ func conformanceRowFor(reg *Registry, c goldenCase) conformanceRow {
 	// canonical DOM is read cell-major. Duel likewise keeps values and the
 	// authored delta on separate visual rows. For those layouts, conformance is
 	// presence-with-multiplicity; order would report visible words as missing.
-	if c.Type == "duel" || c.Type == "stat-grid" || c.Type == "stats" {
-		return conformanceVerdict(c.Type, diffWordsUnordered(text, expected))
+	if c.Type == "duel" {
+		diff := diffWordsUnordered(text, expected)
+		diff = append(diff, duelAssociationDiff(text, blocks[0].Attrs)...)
+		return conformanceVerdict(c.Type, diff)
+	}
+	if c.Type == "stat-grid" || c.Type == "stats" {
+		return conformanceVerdict(c.Type, diffFigureWords(columnMajorText(text), expected))
 	}
 	if c.Type == "stat" {
 		return conformanceVerdict(c.Type, diffWordsSplitPunctuation(text, expected))
@@ -329,6 +415,23 @@ func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *
 	}
 	if diff := diffFigureWords("Kilder: task:one", []string{"sources", "task:one"}); diff != nil {
 		t.Fatalf("localized provenance label should match the canonical word: %v", diff)
+	}
+	gridExpected := []string{"5", "today", "3", "target"}
+	if diff := diffFigureWords(columnMajorText("5     3\ntoday target"), gridExpected); diff != nil {
+		t.Fatalf("column-major grid should preserve each value/label pair: %v", diff)
+	}
+	if diff := diffFigureWords(columnMajorText("5     3\ntarget today"), gridExpected); diff == nil {
+		t.Fatal("swapped grid labels must not pass by word presence alone")
+	}
+	duel := map[string]any{"rows": []any{
+		map[string]any{"label": "first", "valueA": "1", "valueB": "2"},
+		map[string]any{"label": "second", "valueA": "3", "valueB": "4"},
+	}}
+	if diff := duelAssociationDiff("first  1 vs 2\nsecond  3 vs 4", duel); diff != nil {
+		t.Fatalf("duel associations: %v", diff)
+	}
+	if diff := duelAssociationDiff("first  3 vs 4\nsecond  1 vs 2", duel); diff == nil {
+		t.Fatal("swapped duel values must not pass by word presence alone")
 	}
 }
 
