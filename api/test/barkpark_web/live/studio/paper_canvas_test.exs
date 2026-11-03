@@ -474,6 +474,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
              ]
     end
 
+    test "specialty renderers: all six kinds ride one mounted host-painted run" do
+      for type <-
+            ~w(api-endpoint bar-chart code-tabs criteria-progress gauge-list route) do
+        block = fleet("specialty-#{type}", type)
+        blocks = [para("p1"), block, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}],
+               "expected #{type} to ride the canvas run"
+
+        assert PaperCanvas.canvas?(block), "expected canvas?(#{type}) to be true"
+      end
+    end
+
     # ── Contextual Columns/Section boundaries host nested canvas runs ──
 
     test "a columns block inside prose splits into its contextual editor" do
