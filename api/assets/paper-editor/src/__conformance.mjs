@@ -316,17 +316,18 @@ if (normalizedTitleOnlySection.outerHTML !== '<div style="display: flex; flex-di
 // normalization and therefore fail shape comparison. These are deliberately
 // the old blind-repair shapes for the four audited branches.
 const semanticMutationProbes = [
-  ["code", '<article class="definitely-not-the-reader-code-class" data-bp-type="code" data-bp-conformance-root><textarea class="bp-canvas-code-area">hello</textarea></article>', (root) => root.tagName === "ARTICLE" && !root.classList.contains("bp-codeblock")],
-  ["expandable", '<div class="bp-expandable" data-bp-type="expandable" data-bp-conformance-root><input class="bp-expandable__summary" value="Summary"><div class="bp-expandable__body"></div></div>', (root) => root.tagName === "DIV" && !root.querySelector(":scope > summary")],
-  ["stage", '<div class="bp-canvas-stage" data-bp-type="stage" data-bp-conformance-root><input data-test-id="paper-stage-title" value="Review"></div>', (root) => !root.classList.contains("bp-pnode") && !root.querySelector(":scope > .bp-pnode__t")],
-  ["terminal", '<div class="bp-term" data-bp-type="terminal" data-bp-conformance-root><div class="bp-term__bar"><input class="bp-term__title bp-canvas-term__title-input" value="tasks"></div><div class="bp-canvas-term__foot-chrome"><div class="bp-term__foot"><input class="bp-canvas-term__foot-input" value="quit"></div></div></div>', (root) => root.querySelector(":scope > .bp-term__bar > input.bp-term__title") && !root.querySelector(":scope > .bp-term__bar > span.bp-term__title")],
+  ["code", '<article class="definitely-not-the-reader-code-class" data-bp-type="code" data-bp-conformance-root><textarea class="bp-canvas-code-area">hello</textarea></article>', '<pre class="bp-codeblock">hello</pre>'],
+  ["expandable", '<div class="bp-expandable" data-bp-type="expandable" data-bp-conformance-root><input class="bp-expandable__summary" value="Summary"><div class="bp-expandable__body"></div></div>', '<details class="bp-expandable"><summary>Summary</summary><div class="bp-expandable__body"></div></details>'],
+  ["stage", '<div class="bp-canvas-stage" data-bp-type="stage" data-bp-conformance-root><input data-test-id="paper-stage-title" value="Review"></div>', '<div class="bp-pnode"><div class="bp-pnode__t">Review</div></div>'],
+  ["terminal", '<div class="bp-term" data-bp-type="terminal" data-bp-conformance-root><div class="bp-term__bar"><input class="bp-term__title bp-canvas-term__title-input" value="tasks"></div><div class="bp-canvas-term__foot-chrome"><div class="bp-term__foot"><input class="bp-canvas-term__foot-input" value="quit"></div></div></div>', '<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__title">tasks</span></div><div class="bp-term__foot">quit</div></div>'],
 ];
-for (const [type, html, remainsInvalid] of semanticMutationProbes) {
+for (const [type, html, expectedHtml] of semanticMutationProbes) {
   const probe = document.createElement("template");
   probe.innerHTML = html;
   const normalized = semanticClone(probe.content.firstElementChild, type);
   strip(normalized);
-  if (!remainsInvalid(normalized)) throw new Error(`${type} semantic mutation was repaired into a false pass: ${normalized.outerHTML}`);
+  const diff = diffShapes(shapeOf([normalized]), shapeOf(fragment(expectedHtml)));
+  if (diff.length === 0) throw new Error(`${type} semantic mutation was repaired into a false pass: ${normalized.outerHTML}`);
 }
 
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
