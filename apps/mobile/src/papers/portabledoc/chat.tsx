@@ -92,12 +92,43 @@ function diffWithin(a: string[], b: string[], left: number): [DiffLine[], number
     return [[...a.map((text) => ({ op: '-', text })), ...b.map((text) => ({ op: '+', text }))], left]
   }
 
-  const grid = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0))
+  // Encode equal lines once instead of comparing the same strings in every
+  // cell. The bounded grid tops out at 2000, so Uint16Array can represent
+  // every possible LCS length while avoiding four million boxed numbers.
+  const lineIds = new Map<string, number>()
+  let nextLineId = 1
+  const ids = (lines: string[]): Uint16Array => {
+    const encoded = new Uint16Array(lines.length)
+    lines.forEach((line, index) => {
+      let id = lineIds.get(line)
+      if (id === undefined) {
+        id = nextLineId++
+        lineIds.set(line, id)
+      }
+      encoded[index] = id
+    })
+    return encoded
+  }
+  const aIds = ids(a)
+  const bIds = ids(b)
+
+  // A disjoint pair has an empty LCS. The recurrence below would fill the
+  // entire grid with zeroes and backtrack to the same additions-then-removals
+  // sequence, so return that canonical result without allocating the grid.
+  const aIdSet = new Set(aIds)
+  if (!bIds.some((id) => aIdSet.has(id))) {
+    return [
+      [...b.map((text) => ({ op: '+', text })), ...a.map((text) => ({ op: '-', text }))],
+      left - m * n,
+    ]
+  }
+
+  const grid = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1))
   for (let i = 1; i <= m; i++) {
     const previous = grid[i - 1]!
     const current = grid[i]!
     for (let j = 1; j <= n; j++) {
-      current[j] = a[i - 1] === b[j - 1]
+      current[j] = aIds[i - 1] === bIds[j - 1]
         ? previous[j - 1]! + 1
         : Math.max(previous[j]!, current[j - 1]!)
     }
@@ -107,20 +138,21 @@ function diffWithin(a: string[], b: string[], left: number): [DiffLine[], number
   let i = m
   let j = n
   while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      rows.unshift({ op: '=', text: a[i - 1]! })
+    if (aIds[i - 1] === bIds[j - 1]) {
+      rows.push({ op: '=', text: a[i - 1]! })
       i--
       j--
     } else if (grid[i - 1]![j]! >= grid[i]![j - 1]!) {
-      rows.unshift({ op: '-', text: a[i - 1]! })
+      rows.push({ op: '-', text: a[i - 1]! })
       i--
     } else {
-      rows.unshift({ op: '+', text: b[j - 1]! })
+      rows.push({ op: '+', text: b[j - 1]! })
       j--
     }
   }
-  while (i > 0) rows.unshift({ op: '-', text: a[--i]! })
-  while (j > 0) rows.unshift({ op: '+', text: b[--j]! })
+  while (i > 0) rows.push({ op: '-', text: a[--i]! })
+  while (j > 0) rows.push({ op: '+', text: b[--j]! })
+  rows.reverse()
   return [rows, left - m * n]
 }
 
