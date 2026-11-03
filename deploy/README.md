@@ -681,12 +681,21 @@ Without a root shell, Cloud can do the same repair over HTTP:
 `POST /v1/admin/tokens/:id/seats/restore` with the admin token Cloud holds.
 The box route is on the instance-operator tier, so on a box with an armed
 operator allowlist the held token's id must be on `BARKPARK_OPERATOR_TOKEN_IDS`.
-The box restores a seat only when a revoked token that minted this one (its
-`token_minted` audit row) held it, never above that token's role
-(`api/lib/barkpark/auth/token_seat_restore.ex`). `--token-id` defaults to the
-token Cloud holds; no `--seat` means every seat a predecessor held. It is a
-dry run unless `--apply`. An apply writes a `token_seated` audit row per seat
-on the box and a `barkpark.token_seats_restored` row in Cloud.
+The box restores a seat only when a token this one replaced through rotation
+held it, never above that token's role
+(`api/lib/barkpark/auth/token_seat_restore.ex`). The box reads the rotation
+from its own audit rows. The predecessor minted this token (`token_minted`),
+then revoked itself (`token_revoked` with the predecessor as actor) within 10
+minutes, and minted no other token in between. That is the last step of
+`POST /v1/operator/barkparks/:id/admin-token/rotate`. A child of a live
+parent, of a parent another principal revoked, or of a parent that revoked
+itself later gets nothing, so a delegated token cannot take its parent's
+seats. The walk follows at most 8 rotations. A rotation on a box older than
+#24224 wrote a `system` revoke row and cannot be restored this way; use the
+root-shell recipe above. `--token-id` defaults to the token Cloud holds; no
+`--seat` means every seat a predecessor held. It is a dry run unless
+`--apply`. An apply writes a `token_seated` audit row per seat on the box and
+a `barkpark.token_seats_restored` row in Cloud.
 
 ## Staging channel — prove a Barkpark build before the fleet gets it
 

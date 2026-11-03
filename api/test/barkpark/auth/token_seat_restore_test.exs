@@ -1,8 +1,9 @@
 defmodule Barkpark.Auth.TokenSeatRestoreTest do
   @moduledoc """
-  `Barkpark.Auth.TokenSeatRestore` (task-c6185553d0bd7869): a token gets back
-  only the seats a revoked predecessor held, read from the box's own
-  `token_minted` audit rows.
+  `Barkpark.Auth.TokenSeatRestore` (task-c6185553d0bd7869,
+  task-6f3ccc7dc2be8168): a token gets back only the seats of a predecessor it
+  replaced through rotation, read from the box's own `token_minted` and
+  `token_revoked` audit rows.
   """
   use Barkpark.DataCase, async: true
 
@@ -134,6 +135,80 @@ defmodule Barkpark.Auth.TokenSeatRestoreTest do
     assert plan.predecessors == []
     assert plan.refused == [%{workspace: ctx.a.slug, reason: "not_held_before"}]
     assert {:error, {:refused, _}} = TokenSeatRestore.restore(child.id, [ctx.a.slug], apply: true)
+  end
+
+  # task-6f3ccc7dc2be8168: a revoked minter counts only when it was rotated out.
+
+  test "a child of a parent another principal revoked gets nothing", ctx do
+    {:ok, {_raw, child}} =
+      Auth.mint_delegated_token(ctx.old, ctx.home.id, label: "child", permissions: @admin)
+
+    {:ok, other} =
+      Auth.create_token(uniq("other"), "other admin", "production", @admin, ctx.home.id)
+
+    {:ok, _} = Auth.revoke_token(ctx.old, other)
+
+    assert {:ok, plan} = TokenSeatRestore.restore(child.id, [ctx.a.slug])
+    assert plan.predecessors == []
+    assert plan.refused == [%{workspace: ctx.a.slug, reason: "not_held_before"}]
+  end
+
+  test "a child of a parent a sweep revoked gets nothing", ctx do
+    {:ok, {_raw, child}} =
+      Auth.mint_delegated_token(ctx.old, ctx.home.id, label: "child", permissions: @admin)
+
+    {:ok, _} = Auth.revoke_token(ctx.old)
+
+    assert {:ok, %{predecessors: [], restore: []}} = TokenSeatRestore.restore(child.id, [])
+  end
+
+  # The gyl shape: the admin token minted the publisher's token, later rotated
+  # itself out. The successor restores; the older child does not.
+  test "an older child of a rotated-out parent gets nothing; the successor restores", ctx do
+    {:ok, {_raw, publisher}} =
+      Auth.mint_delegated_token(ctx.old, ctx.home.id, label: "publisher", permissions: ["read"])
+
+    new = rotate(ctx.old, ctx.home)
+
+    assert {:ok, %{predecessors: [], restore: []}} = TokenSeatRestore.restore(publisher.id, [])
+
+    assert {:ok, plan} = TokenSeatRestore.restore(new.id, [])
+    assert plan.predecessors == [ctx.old.id]
+
+    assert Enum.sort(Enum.map(plan.restore, & &1.workspace)) ==
+             Enum.sort([ctx.a.slug, ctx.b.slug])
+  end
+
+  test "a self-revoke long after the mint is not a rotation", ctx do
+    {:ok, child} = Auth.create_token(uniq("child"), "child", "production", @admin, ctx.home.id)
+
+    {:ok, _} =
+      Barkpark.Audit.emit(%{
+        category: "token",
+        action: "token_minted",
+        subject: child.id,
+        actor_type: "api_token",
+        actor_id: ctx.old.id,
+        workspace_id: ctx.home.id,
+        occurred_at: DateTime.add(DateTime.utc_now(), -11 * 60, :second),
+        metadata: %{"label" => "child"}
+      })
+
+    {:ok, _} = Auth.revoke_token(ctx.old, ctx.old)
+
+    assert {:ok, %{predecessors: [], restore: []}} = TokenSeatRestore.restore(child.id, [])
+  end
+
+  test "the walk stops after 8 hops", ctx do
+    chain = Enum.scan(1..10, ctx.old, fn _, prev -> rotate(prev, ctx.home) end)
+    newest = List.last(chain)
+    expected = ([ctx.old] ++ chain) |> Enum.reverse() |> Enum.drop(1) |> Enum.take(8)
+
+    assert TokenSeatRestore.predecessors(newest.id) == Enum.map(expected, & &1.id)
+    refute ctx.old.id in TokenSeatRestore.predecessors(newest.id)
+
+    assert {:ok, plan} = TokenSeatRestore.restore(newest.id, [ctx.a.slug])
+    assert plan.refused == [%{workspace: ctx.a.slug, reason: "not_held_before"}]
   end
 
   test "a token with no mint row has no predecessor", ctx do

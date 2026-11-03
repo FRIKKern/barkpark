@@ -1,8 +1,8 @@
 defmodule Barkpark.Auth.TokenSeatRestore do
   @moduledoc """
-  Give a live API token back the workspace seats its revoked predecessor held
-  (task-c6185553d0bd7869). It is the HTTP form of the gyl repair: Barkpark
-  Cloud's admin-token rotation before #24619 minted a successor seated in one
+  Give a live API token back the workspace seats its rotated-out predecessor
+  held (task-c6185553d0bd7869, rotation rule task-6f3ccc7dc2be8168). It is the
+  HTTP form of the gyl repair: Barkpark Cloud's admin-token rotation before #24619 minted a successor seated in one
   workspace and revoked the old token, so the successor lost the old token's
   other seats. `mix barkpark.token_seat` repairs that from a root shell. This
   module repairs it from `POST /v1/admin/tokens/:id/seats/restore`, which Cloud
@@ -10,16 +10,33 @@ defmodule Barkpark.Auth.TokenSeatRestore do
 
   ## What it may restore
 
-  A seat is restored only when a predecessor of the token held it. The
-  predecessors are found from the box's own records, never from the request:
+  A seat is restored only when a predecessor of the token held it. A
+  predecessor is a token this one replaced through a Cloud admin-token
+  rotation (`BarkparkCloud.Registry.AdminTokenRotation`). The box records that
+  rotation as two audit rows, and the walk reads only those, never the
+  request:
 
-    1. The token's `token/token_minted` audit row names the token that minted
+    1. The token's first `token/token_minted` row names the token that minted
        it (`actor_type: "api_token"`).
-    2. That minter counts as a predecessor only when it is revoked. A minter
-       that is still live is a parent that delegated a narrower token, not a
-       rotated-away token, and its seats are not the child's to take.
-    3. The walk repeats from the predecessor, at most 8 hops, so a token
-       rotated twice still reaches the seat its first ancestor held.
+    2. That minter's first `token/token_revoked` row names the minter itself
+       as the actor. The rotation's last step is the old token revoking itself
+       through `DELETE /v1/tokens/:id`.
+    3. The revoke row comes after the mint row in the audit chain, and the
+       minter minted no other token between the two. The rotation mints one
+       successor and then revokes, so an older child of the same minter does
+       not qualify.
+    4. The revoke is at most 10 minutes after the mint. The rotation is one
+       Cloud request of five HTTP calls, each bounded at 25 seconds.
+
+  A minter that is live, was revoked by another principal, or revoked itself
+  long after the mint is a parent that delegated a narrower token. Its seats
+  are not the child's to take. The walk repeats from each predecessor, at most
+  8 hops, so a token rotated twice still reaches the seat its first ancestor
+  held.
+
+  A revoke row names its actor only from #24224 on. A rotation on an older box
+  has a `system` revoke row and gets no predecessor; `mix barkpark.token_seat`
+  repairs that case from a root shell.
 
   Revoking a token keeps its `workspace_memberships` rows, so each
   predecessor's seats are still on the box. The restored role is the role the
@@ -45,6 +62,8 @@ defmodule Barkpark.Auth.TokenSeatRestore do
   alias Barkpark.Tenancy.Membership
 
   @max_hops 8
+  # The longest a rotation takes from mint to self-revoke.
+  @rotation_window_seconds 600
 
   @type seat :: %{workspace: String.t(), role: String.t(), from_token: binary()}
   @type refusal :: %{workspace: String.t(), reason: String.t()}
@@ -170,8 +189,9 @@ defmodule Barkpark.Auth.TokenSeatRestore do
   end
 
   @doc """
-  The revoked tokens `token_id` descends from, nearest first. Read from the
-  `token_minted` audit rows; a live minter ends the walk.
+  The tokens `token_id` replaced through rotation, nearest first. Read from
+  the `token_minted` and `token_revoked` audit rows; the first minter that was
+  not rotated out ends the walk.
   """
   @spec predecessors(binary()) :: [binary()]
   def predecessors(token_id), do: walk(token_id, [], @max_hops)
@@ -179,26 +199,62 @@ defmodule Barkpark.Auth.TokenSeatRestore do
   defp walk(_id, acc, 0), do: Enum.reverse(acc)
 
   defp walk(id, acc, hops) do
-    with minter when is_binary(minter) <- minter_of(id),
+    with %Event{actor_id: minter} = mint when is_binary(minter) <- mint_row(id),
          false <- minter in acc or minter == id,
          uuid when is_binary(uuid) <- Repo.uuid_or_nil(minter),
-         %ApiToken{revoked_at: %DateTime{}} = parent <- Repo.get(ApiToken, uuid) do
+         %ApiToken{revoked_at: %DateTime{}} = parent <- Repo.get(ApiToken, uuid),
+         true <- rotated_out?(parent.id, mint) do
       walk(parent.id, [parent.id | acc], hops - 1)
     else
       _ -> Enum.reverse(acc)
     end
   end
 
-  defp minter_of(id) do
+  # The audit chain orders by `id`; `occurred_at` is not an order.
+  defp mint_row(id) do
     from(e in Event,
       where:
         e.category == "token" and e.action == "token_minted" and e.subject == ^id and
           e.actor_type == "api_token",
-      order_by: [asc: e.occurred_at],
-      limit: 1,
-      select: e.actor_id
+      order_by: [asc: e.id],
+      limit: 1
     )
     |> Repo.one()
+  end
+
+  # `parent` revoked itself after minting the token `mint` records, minted
+  # nothing else in between, and did so within the rotation window.
+  defp rotated_out?(parent_id, %Event{} = mint) do
+    case revoke_row(parent_id) do
+      %Event{actor_type: "api_token", actor_id: ^parent_id} = revoke ->
+        elapsed = DateTime.diff(revoke.occurred_at, mint.occurred_at, :second)
+
+        revoke.id > mint.id and elapsed in 0..@rotation_window_seconds and
+          not minted_between?(parent_id, mint.id, revoke.id)
+
+      _ ->
+        false
+    end
+  end
+
+  # The first revoke row is the one that ended the token. A later row is an
+  # idempotent re-revoke and cannot be the token acting on itself.
+  defp revoke_row(token_id) do
+    from(e in Event,
+      where: e.category == "token" and e.action == "token_revoked" and e.subject == ^token_id,
+      order_by: [asc: e.id],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp minted_between?(minter, from_id, to_id) do
+    from(e in Event,
+      where:
+        e.category == "token" and e.action == "token_minted" and e.actor_type == "api_token" and
+          e.actor_id == ^minter and e.id > ^from_id and e.id < ^to_id
+    )
+    |> Repo.exists?()
   end
 
   # ── the write ─────────────────────────────────────────────────────────────

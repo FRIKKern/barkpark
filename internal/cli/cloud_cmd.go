@@ -555,10 +555,11 @@ ROTATE-ADMIN-TOKEN
 
 REPAIR-TOKEN-SEATS
   platform operators only. Gives a token on one box back the workspace seats
-  its revoked predecessor held, for a token an admin-token rotation left
-  short. Cloud asks the box with the admin token it holds, and the box
-  restores only seats a revoked token that minted it held, never above that
-  token's role. --token-id defaults to the token Cloud holds. --seat repeats
+  its predecessor held, for a token an admin-token rotation left short.
+  Cloud asks the box with the admin token it holds, and the box restores only
+  seats of a token this one replaced through rotation, never above that
+  token's role. The box reads the rotation from its audit rows: the
+  predecessor minted this token and revoked itself within 10 minutes. --token-id defaults to the token Cloud holds. --seat repeats
   or takes a comma list; without it the plan covers every seat a predecessor
   held. A dry run unless --apply. Exits 1 when a named workspace is refused.
   The flags are --seat and --token-id because --workspace and --token are
