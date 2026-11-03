@@ -550,6 +550,12 @@ export function readerPaintClass(editor) {
 // reads as an intentional placeholder, not a broken block. Unknown kinds fall back
 // to the raw type so a never-seen fleet kind still shows SOMETHING legible.
 const FLEET_KIND_LABELS = {
+  "api-endpoint": "API endpoint",
+  "bar-chart": "Bar chart",
+  "code-tabs": "Code tabs",
+  "criteria-progress": "Criteria progress",
+  "gauge-list": "Gauge list",
+  route: "Route",
   tasks: "Task list",
   "task-list": "Task list",
   "task-detail": "Task detail",
