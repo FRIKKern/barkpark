@@ -731,41 +731,17 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # view mode), the min-width:0 grid-cell mirror, and forbids a nested bpSection —
   # and carries a RECONCILE-or-JUSTIFY verdict for all three micro-divergences.
   #
-  # A pure-Node smoke harness cannot MOUNT the NodeView (paint calls `document`),
-  # so this Elixir §6 keeps ONE job: a style-write TRIPWIRE proving section-node.js
-  # still mirrors per-child grid placement onto the wrapper-less item via
-  # `el.style.gridColumn`/`order` keyed by `data-bp-id` (the SAME keys the reader
-  # compose.ex cell_layout_attr + run-convert use), PLUS the min-width:0 cell mirror
-  # this slice reconciled — a canvas that has no `.bp-section__cell` wrapper (that
-  # would red §3) must carry the wrapper's resolved geometry on the item. It also
-  # PINS the two-file wiring so the real gate cannot be silently unhooked.
-  test "§6 section-node.js mirrors per-child grid placement + min-width onto the wrapper-less item (style-write tripwire)" do
+  test "§6 section grid wraps native child nodes in the shared reader cell" do
     src =
       "../../../../assets/paper-editor/src/canvas/section-node.js"
       |> Path.expand(__DIR__)
       |> File.read!()
 
-    assert String.contains?(src, "gridColumn"),
-           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (real regression)"
-
-    assert String.contains?(src, ".order"),
-           "section-node.js no longer writes el.style.order — the per-child order paint moved"
-
-    assert String.contains?(src, "data-bp-id"),
-           "section-node.js paint no longer keys child placement by data-bp-id — reorder-safety lost"
-
-    assert String.contains?(src, "cells"),
-           "section-node.js paint no longer reads the cells map"
-
-    # The min-width:0 mirror of the reader's `.bp-section__cell { min-width: 0 }`
-    # (compose.ex grid cell), reconciled in this slice onto the wrapper-less item.
-    assert String.contains?(src, "minWidth"),
-           "section-node.js no longer mirrors the reader cell's min-width:0 onto the grid item — a wide child can blow out its 1fr track (the reader can't)"
-
-    # §3 corollary: grid mode must ride the SHARED `bp-section__grid` class (parity by
-    # construction), never a hand-rolled inline grid that would fork the reader CSS.
-    assert String.contains?(src, "bp-section__grid"),
-           "section-node.js no longer swaps the grid body to the shared bp-section__grid class — the shared reader CSS would stop applying (a second producer)"
+    assert String.contains?(src, ~s(nodeName: "div", class: "bp-section__cell"))
+    assert String.contains?(src, "Decoration.node(from, from + child.nodeSize")
+    assert String.contains?(src, "section.attrs.cells")
+    assert String.contains?(src, "child.attrs.bpSectionCell")
+    assert String.contains?(src, "bp-section__grid")
   end
 
   # ── §6b The REAL section parity gate is wired into the mjs suite ─────────────

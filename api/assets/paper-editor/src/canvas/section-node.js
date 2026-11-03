@@ -57,6 +57,8 @@
 // without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpSection` (avoids any StarterKit collision — StarterKit
@@ -122,11 +124,13 @@ const cellOrder = (v) => strictInt(v);
 // (src/smoke/sections.mjs). The group-based alternative (a shared `group:"block
 // bpSectionChild"` on every allowed node + content:"bpSectionChild+") is cleaner
 // long-term but touches every node file + StarterKit globals — rejected for v1.
-export const BP_SECTION_CONTENT =
-  "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | bpStage | " +
-  "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
-  "bpImage | bpEquation | bpFootnote | bpToc | bpVideo | " +
-  "eyebrow | byline | ingress | pullquote | bpOpaque)+";
+const SECTION_CHILD_TYPES = [
+  "paragraph", "heading", "bulletList", "orderedList", "divider", "callout",
+  "bpCard", "bpStage", "bpCode", "bpDiagram", "bpField", "bpSheet", "bpEmbed", "bpFleet",
+  "bpImage", "bpEquation", "bpFootnote", "bpToc", "bpVideo",
+  "eyebrow", "byline", "ingress", "pullquote", "bpOpaque",
+];
+export const BP_SECTION_CONTENT = `(${SECTION_CHILD_TYPES.join(" | ")})+`;
 
 export const Section = Node.create({
   name: BP_SECTION_NODE_NAME,
@@ -216,8 +220,8 @@ export const Section = Node.create({
       // unknown keys). run-convert hoists/splits it; persisted layout stays cells-free.
       // STEP-6 (RISK #1 FIXED): keyed by child bpId — a canvas reorder leaves
       // attrs.cells untouched, so bpId keying pulls each child's OWN cell regardless
-      // of position (a positional array misassigned on reorder). paint() reads this
-      // map and applies grid-column/order per child. null/absent round-trips ABSENT.
+      // of position (a positional array misassigned on reorder). Cell decorations read this map.
+      // null/absent round-trips ABSENT.
       cells: {
         default: null,
         parseHTML: (el) => {
@@ -273,6 +277,42 @@ export const Section = Node.create({
   // events/mutations are hidden from PM (stopEvent / ignoreMutation). Enter is
   // suppressed (a title is single-line). A cleared title writes null so it round-trips
   // ABSENT.
+  addGlobalAttributes() {
+    return [{
+      types: SECTION_CHILD_TYPES,
+      attributes: { bpSectionCell: { default: null, rendered: false } },
+    }];
+  },
+
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      props: {
+        decorations(state) {
+          const cells = [];
+          state.doc.descendants((section, pos) => {
+            if (section.type.name !== BP_SECTION_NODE_NAME) return;
+            if (!isGridLayout(section.attrs.layout)) return false;
+            section.forEach((child, offset) => {
+              const id = child.attrs.bpId;
+              const placement = id != null && Object.hasOwn(section.attrs.cells || {}, id)
+                ? section.attrs.cells[id] : child.attrs.bpSectionCell ?? child.attrs.bpBlock;
+              const span = cellSpan(placement?.span);
+              const order = cellOrder(placement?.order);
+              const style = [span == null ? "" : `grid-column:span ${span}`,
+                order == null ? "" : `order:${order}`].filter(Boolean).join(";");
+              const from = pos + offset + 1;
+              cells.push(Decoration.node(from, from + child.nodeSize, {
+                nodeName: "div", class: "bp-section__cell", ...(style ? { style } : {}),
+              }));
+            });
+            return false;
+          });
+          return DecorationSet.create(state.doc, cells);
+        },
+      },
+    })];
+  },
+
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
@@ -340,37 +380,6 @@ export const Section = Node.create({
       // Guards the paint→titleEl write from re-entering the input listener.
       let syncingTitle = false;
 
-      // STEP-6: write per-child grid-column/order onto the DIRECT grid items from the
-      // bpId-keyed cells map, and mirror the reader cell's `min-width:0`. Passing
-      // grid=false (the grid→stack strip) CLEARS all placement AND the min-width so
-      // the flex-column child DOM is restored byte-for-byte. These are `el.style.*`
-      // writes only — NO reader class literal (`bp-section__cell`) is introduced, so
-      // the canvas⇄reader parity gate §3 stays green.
-      //
-      // PARITY (divergence c): the reader wraps each grid child in a
-      // `<div class="bp-section__cell">` carrying `min-width:0` (paper-surface.css:691
-      // + root.html.heex) so a wide child (a <pre>, a long word) cannot blow out its
-      // `minmax(0,1fr)` track. The canvas CANNOT add that wrapper — a PM contentDOM
-      // child is the block itself, and emitting the `bp-section__cell` class would be
-      // a second HTML producer (§3 RED). So it mirrors the wrapper's RESOLVED geometry
-      // (grid-column/order) AND its `min-width:0` onto the wrapper-less grid item.
-      const applyCellPlacement = (cells, grid) => {
-        const map =
-          cells && typeof cells === "object" && !Array.isArray(cells) ? cells : null;
-        for (const el of Array.from(body.children)) {
-          if (!el || !el.style) continue;
-          // Mirror `.bp-section__cell { min-width: 0 }` onto the wrapper-less grid
-          // item; stack mode has no cell, so strip it (restores default min-width).
-          el.style.minWidth = grid ? "0" : "";
-          const id = el.getAttribute ? el.getAttribute("data-bp-id") : null;
-          const cell = map && id != null ? map[id] : null;
-          const span = cell ? cellSpan(cell.span) : null;
-          const order = cell ? cellOrder(cell.order) : null;
-          el.style.gridColumn = span != null ? `span ${span}` : "";
-          el.style.order = order != null ? String(order) : "";
-        }
-      };
-
       const paint = (n) => {
         // ── FRAMED-FINALE (charter D34): show the frame in the canvas. The reader's
         // `.bp-section--framed` class rides the canvas wrapper too (root.html.heex
@@ -407,13 +416,6 @@ export const Section = Node.create({
           tracksLabel.style.display = "";
           tracksDec.style.display = "";
           tracksInc.style.display = "";
-          // STEP-6: apply per-child grid-column/order from the bpId-keyed cells map
-          // onto the DIRECT grid items (body.children). Keyed by each child's own
-          // data-bp-id (the SAME key run-convert/reader use) → reorder-safe. The
-          // reader emits `grid-column:span N;order:K` on its .bp-section__cell wrapper;
-          // the canvas has no wrapper, so we mirror the placement onto the grid item
-          // itself — parity of the resolved geometry (RISK #5).
-          applyCellPlacement(n.attrs && n.attrs.cells, true);
         } else {
           body.className = "bp-section__body";
           body.style.removeProperty("--bp-tracks");
@@ -423,9 +425,6 @@ export const Section = Node.create({
           tracksLabel.style.display = "none";
           tracksDec.style.display = "none";
           tracksInc.style.display = "none";
-          // STEP-6: a grid→stack flip must STRIP any per-child placement left on the
-          // body children (else a stale grid-column/order survives into stack mode).
-          applyCellPlacement(null, false);
         }
         // Controls are edit-only: hidden entirely in view mode.
         controls.style.display = editor.isEditable ? "" : "none";
@@ -595,18 +594,6 @@ export const Section = Node.create({
           // bp-section__grid + --bp-tracks) — that is view-only chrome, NOT a content
           // edit, so PM must ignore attribute mutations on the body element itself.
           if (m.type === "attributes" && m.target === body) return true;
-          // STEP-6: applyCellPlacement writes `style` (grid-column/order) onto the
-          // body's DIRECT child elements — view-only placement chrome, NOT a content
-          // edit. Without this guard PM churns on every paint (the subtlest
-          // correctness point). Must sit BEFORE the final body.contains fall-through,
-          // which would otherwise let PM see the style mutation as a body edit.
-          if (
-            m.type === "attributes" &&
-            m.attributeName === "style" &&
-            m.target &&
-            m.target.parentElement === body
-          )
-            return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // layout controls are attr writes
           if (hrTop.contains(m.target) || hrBot.contains(m.target)) return true;
