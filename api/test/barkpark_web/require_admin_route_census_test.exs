@@ -329,6 +329,13 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
          "may do — a self-service loop around a TTL removes the limit rather than widening " <>
          "a permit. So there is deliberately NO tenant re-derivation to name here: " <>
          "confining it to the caller's own workspace would BE the defect. RULING row 1."},
+    {:post, "/v1/admin/tokens/:id/seats/restore"} =>
+      {:instance_global, @operator_guard,
+       "Operator: gives a token back the seats its revoked predecessor held " <>
+         "(task-c6185553d0bd7869). Barkpark Cloud calls it with its held admin token. " <>
+         "The caller holds no seat in the target workspace by construction, so there is " <>
+         "no tenant re-derivation; the predecessor lineage from the token_minted audit " <>
+         "rows bounds what it can write. RULING row 1."},
 
     # ── /v1/admin/orgs — SSO set-up without a shell (task-25386fa77a664587) ──
     # An organization spans workspaces and its identity connection decides who

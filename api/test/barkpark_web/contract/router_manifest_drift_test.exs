@@ -117,6 +117,12 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # human removes a member with `bp cloud members`, never against the box.
     {"POST", "/v1/auth/cloud-users/deprovision"} =>
       "Cloud's member-removal door (ruling #26) — the control plane calls it, not a CLI verb",
+    # ── Cloud seat restore (task-c6185553d0bd7869) ──────────────────────────
+    # The control plane calls this with the stored instance admin token. A
+    # human runs `bp barkparks repair-token-seats`, which goes through Cloud,
+    # never against the box.
+    {"POST", "/v1/admin/tokens/:*/seats/restore"} =>
+      "Cloud's token seat restore — the control plane calls it, not a CLI verb",
     # ── External Studio sign-in, server half ("Sign in with Barkpark Cloud") ──
     # A Studio's own server trades the single-use exchange ticket the browser
     # brought back from Cloud for a login session; it needs the PKCE verifier

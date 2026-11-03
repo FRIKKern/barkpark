@@ -264,6 +264,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "repo_full_name_required",
              "repo_not_in_installation",
              "repo_required",
+             "restore_refused",
              "resume_failed",
              "return_to_not_allowed",
              "revoke_refused",
@@ -275,6 +276,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              # an edge: there is no fleet-by-omission, so a bodyless or
              # disagreeing body lands here rather than mailing everybody.
              "scope_required",
+             "seat_not_held_before",
              "secret_unreadable",
              "send_failed",
              "server_error",
@@ -291,6 +293,8 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "team_mismatch",
              "teardown_failed",
              "ticket_mint_failed",
+             "token_not_found",
+             "token_not_live",
              "unauthorized",
              "unavailable",
              "unknown_kind",

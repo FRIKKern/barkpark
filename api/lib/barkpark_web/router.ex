@@ -3283,6 +3283,14 @@ defmodule BarkparkWeb.Router do
     # smallest permit that fixes the actual defect (a suspended workspace being
     # unrescuable inside its own grace window)."
     post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
+
+    # Give a live API token back the seats its revoked predecessor held
+    # (task-c6185553d0bd7869). Barkpark Cloud calls it with the admin token it
+    # holds, to repair a token an admin-token rotation left short, without a
+    # root shell on the box. The predecessor lineage comes from the box's own
+    # `token_minted` audit rows, never from the request; see
+    # `Barkpark.Auth.TokenSeatRestore`. Dry run unless the body says apply.
+    post("/tokens/:id/seats/restore", TokenSeatRestoreController, :create)
   end
 
   # Organizations and their OIDC sign-in, set up without a server shell
