@@ -37,6 +37,7 @@ import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
 
 import { scale } from '../../../ui/typography'
+import { chromeWord } from '../chrome'
 import { asList, isMap, str } from '../model'
 import { MONO, type BlockCtx, type Render } from '../register'
 import {
@@ -191,6 +192,15 @@ function workerChip(w: unknown, ctx: BlockCtx): ReactNode {
   )
 }
 
+export function draftChip(draft: unknown, ctx: BlockCtx): ReactNode {
+  if (draft !== true) return null
+  return (
+    <Text style={{ ...scale.micro, fontWeight: '700', color: ctx.theme.warn }}>
+      {chromeWord(ctx.locale, 'DRAFT')}{' '}
+    </Text>
+  )
+}
+
 /* ── task-board — stacked lanes ─────────────────────────────────────────────── */
 
 /** One board card: the row's OWN glyph, its title, and its meta line.
@@ -225,7 +235,7 @@ function boardCard(row: unknown, ctx: BlockCtx, key: number): ReactNode {
         {glyphOf(role)}
       </Text>
       <View style={{ flex: 1, gap: 4 }}>
-        <Text style={{ ...scale.sm, color: ctx.theme.text }}>{str(m.title)}</Text>
+        <Text style={{ ...scale.sm, color: ctx.theme.text }}>{draftChip(m.draft, ctx)}{str(m.title)}</Text>
         {/* react's bp-bcard__m carries priority + criteria only. The worker
             joins it here per this slice's brief: a stacked lane is full-width,
             so the row that had no space in a narrow web column has it now. */}
@@ -339,6 +349,12 @@ const taskList: Render = (b, ctx, key) => {
   const rows = asList(b.snapshot).filter(isMap)
   if (rows.length === 0) return emptyTasks(ctx, key)
   const title = str(b.title).trim()
+  const counts = { 'in flight': 0, ready: 0, done: 0 }
+  for (const row of rows) {
+    const role = roleOf(row.status)
+    if (role === 'progress') counts['in flight']++
+    if (role === 'ready' || role === 'done') counts[role]++
+  }
   return (
     <View
       key={key}
@@ -354,6 +370,16 @@ const taskList: Render = (b, ctx, key) => {
       {title !== '' && (
         <Text style={{ ...scale.base, fontWeight: '700', color: ctx.theme.text, marginBottom: 6 }}>{title}</Text>
       )}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+        {Object.entries(counts).map(([label, count]) => (
+          <Text key={label} style={{ ...scale.micro, color: ctx.theme.textMuted }}>
+            {count} {chromeWord(ctx.locale, label)}
+          </Text>
+        ))}
+        <Text style={{ ...scale.micro, color: ctx.theme.textMuted }}>
+          {Math.round((counts.done / rows.length) * 100)}%
+        </Text>
+      </View>
       {rows.map((r, i) => {
         // The list keeps its quieter two-tone rule — done reads as achieved,
         // everything else is muted chrome. Only the BOARD spends the full
@@ -364,7 +390,10 @@ const taskList: Render = (b, ctx, key) => {
             <Text style={{ ...scale.base, color: role === 'done' ? ctx.theme.success : ctx.theme.textMuted }}>
               {glyphOf(role)}
             </Text>
-            <Text style={{ flex: 1, ...scale.base, color: ctx.theme.text }}>{str(r.title)}</Text>
+            <Text style={{ flex: 1, ...scale.base, color: ctx.theme.text }}>
+              {draftChip(r.draft, ctx)}{str(r.title)}
+            </Text>
+            {priorityChip(r.priority, ctx)}
           </View>
         )
       })}

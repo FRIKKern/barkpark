@@ -15,6 +15,7 @@ import { renderInlineNodes } from '../inlines'
 import { asList, isMap, paragraphInline, str, type Block } from '../model'
 import { MONO, bodyText, spec, type BlockCtx, type Render } from '../register'
 import { renderBlockNative } from '../registry'
+import { draftChip } from './taskboard'
 
 /* ── the status ladder (D15) — mobile's copy of the white ladder ───────────────
  *
@@ -697,6 +698,7 @@ const taskDetail: Render = (b, ctx, key) => {
 
 interface Lane {
   title: string
+  draft: boolean
   role: string
   phase: boolean
   left: number
@@ -720,6 +722,7 @@ function roadmapLanes(raw: unknown): Lane[] {
     const left = clampPct(m.left)
     return {
       title: str(m.title),
+      draft: m.draft === true,
       role: roleOf(m.status),
       phase: truthy(m.phase_row),
       left,
@@ -789,7 +792,7 @@ function roadmapLane(lane: Lane, ctx: BlockCtx, today: number | undefined, key: 
             color: lane.phase ? ctx.theme.text : ctx.theme.textMuted,
           }}
         >
-          {lane.title}
+          {draftChip(lane.draft, ctx)}{lane.title}
         </Text>
       </View>
       {roadmapTrack(lane, ctx, today)}

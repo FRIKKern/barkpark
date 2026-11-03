@@ -520,7 +520,7 @@ const CENSUS: Record<string, Record<string, number>> = {
   },
   'papers/portabledoc/blocks/taskboard.tsx': {
     'scale.base': 3,
-    'scale.micro': 5,
+    'scale.micro': 8,
     'scale.sm': 4,
   },
   'papers/portabledoc/chat.tsx': {
