@@ -216,6 +216,7 @@ export const Action = Node.create({
       // classes so the editor CSS mirror paints it byte-identical to /papers.
       // Painted only while the editor is read-only.
       const preview = document.createElement("a");
+      preview.setAttribute("data-bp-conformance-root", "");
       preview.setAttribute("tabindex", "-1");
       // A click inside the stopEvent island must never navigate — guard explicitly.
       preview.addEventListener("click", (e) => e.preventDefault());
