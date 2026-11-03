@@ -39,20 +39,34 @@ function mount() {
   paint(host);
   return { host, block, batches };
 }
-function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("input", { bubbles: true })); }
+function input(el, text, prefix = "") {
+  assert.equal(el.childNodes.length, 1);
+  assert.equal(el.firstChild.nodeType, Node.TEXT_NODE);
+  el.firstChild.nodeValue = prefix + text;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function select(node, from, to = from) {
+  const range = document.createRange();
+  range.setStart(node, from);
+  range.setEnd(node, to);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return range;
+}
 const rows = host => [...host.querySelectorAll('[data-test-id^="paper-inline-diff-line"]')];
 
 try {
   const { host, block, batches } = mount();
   try {
     const hosts = rows(host);
-    assert.deepEqual(hosts.map(el => el.textContent), ["lib/a.ex", "@@ -1,2 +1,2 @@", "context", "old line", "new line"],
+    assert.deepEqual(hosts.map(el => el.textContent), ["lib/a.ex", "\u00a0\u00a0@@ -1,2 +1,2 @@", "\u00a0\u00a0context", "- old line", "+ new line"],
       "every painted row's text edits where it reads; header lines paint nothing");
-    assert.equal(hosts[4].parentElement.textContent, "+ new line", "decoration keeps the reader's row bytes");
-    assert.equal(hosts[4].previousSibling.nodeValue, "+ ", "the op marker stays outside the editable text");
+    assert.ok(hosts.every(el => el.childNodes.length === 1 && el.firstChild.nodeType === Node.TEXT_NODE),
+      "decoration preserves every reader row as one bare text node");
     assert.equal(hosts[4].contentEditable, "plaintext-only");
 
-    hosts[4].focus(); input(hosts[4], "newer line"); host.flushPendingChanges(); hosts[4].blur();
+    hosts[4].focus(); input(hosts[4], "newer line", "+ "); host.flushPendingChanges(); hosts[4].blur();
     const expected = DIFF.replace("+new line", "+newer line");
     assert.equal(host._editor.state.doc.firstChild.attrs.diff, expected, "only that stored line changes, its + kept");
     assert.deepEqual(batches.at(-1).ops.at(-1).patch, { diff: expected }, "no file/lang keys the author never set ride the patch");
@@ -62,10 +76,38 @@ try {
     assert.equal(block.diff, DIFF, "the source block is never mutated in place");
   } finally { host.remove(); }
 
+  const hostile = mount();
+  try {
+    const hosts = rows(hostile.host);
+    const plus = hosts[4];
+    const text = plus.firstChild;
+    plus.focus();
+    plus.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    select(text, 0);
+    const backspace = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+    plus.dispatchEvent(backspace);
+    assert.equal(backspace.defaultPrevented, true, "Home then Backspace cannot remove the generated + marker");
+    assert.equal(plus.textContent, "+ new line");
+
+    const selectAll = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true });
+    plus.dispatchEvent(selectAll);
+    const range = window.getSelection().getRangeAt(0);
+    assert.equal(range.startContainer, text);
+    assert.equal(range.startOffset, 2, "Mod+A starts after the generated marker");
+    assert.equal(range.endOffset, text.length);
+    input(plus, "+ literal", "+ ");
+    hostile.host.flushPendingChanges();
+    const stored = hostile.host._editor.state.doc.firstChild.attrs.diff;
+    assert.ok(stored.includes("\n++ literal"), "a payload beginning with + is stored after the original + prefix");
+    assert.ok(stored.includes("\n-old line\n++ literal"), "the neighboring line and original stored marker stay unchanged");
+    assert.ok(stored.startsWith("diff --git a/lib/a.ex b/lib/a.ex\nindex 1..2 100644\n--- a/lib/a.ex\n+++ b/lib/a.ex\n"),
+      "header and path bytes stay unchanged");
+  } finally { hostile.host.remove(); }
+
   const mismatch = mount();
   try {
     paint(mismatch.host, `<div class="bp-diff text-xs"><div class="text-dim">x</div>${r("+ ", "something else")}</div>`);
     assert.equal(rows(mismatch.host).length, 0, "a paint that does not match the stored lines never maps onto them");
   } finally { mismatch.host.remove(); }
-  console.log("diff inline: rows edit in place behind their marker, one stored line rewritten, no unset metadata written; mismatched paints refused");
+  console.log("diff inline: bare reader text nodes edit behind protected markers; hostile prefix replacement is lossless; mismatched paints refused");
 } finally { window.close(); }

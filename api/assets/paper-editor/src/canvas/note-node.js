@@ -1,101 +1,134 @@
-// note-node.js — the notes-grid split: the singular `note` WIDGET as a canvas node.
+// note-node.js — the singular note as a reader-shaped canvas content node.
 //
-// Brings the NEW `note` block INTO the continuous canvas as a ProseMirror CONTENT
-// node. A note is a callout SUPERSET: callout exposes ONE editable body; a note is
-// editable when all three source carriers are losslessly supported (unsupported
-// notes use the existing read-only opaque node):
-//   * body  → THE contentDOM (content:"inline*"), a real editable inline region that
-//             JOINS the run + FormatBubble (the callout body precedent; a PM NodeView
-//             has EXACTLY ONE contentDOM, so the body claims it). Its plain encoding is
-//             flat text for new notes; original carriers are retained for edits.
-//   * label → an attr-backed native text ISLAND writing node.attrs.label (the
-//             diagram/figure caption-island precedent: contentEditable=false chrome, a
-//             short single-line value maps naturally to an input, not a PM textblock).
-//   * lead  → an attr-backed native text ISLAND writing node.attrs.lead; cleared →
-//             null; persistence clears the active carrier without dropping metadata.
-// Every field edit emits a patch-block carrying ONLY the changed field (run-convert.js
-// noteNodeToPatch).
-//
-// ── VIEW⇄EDIT PARITY: the DELIBERATE non-class-share ──────────────────────────
-//
-// CHROME = `bp-canvas-note*` ONLY. UNLIKE callout/card (which carry the reader's own
-// bp-callout / bp-card classes to inherit the reader paint), the note canvas node does
-// NOT class-share with the reader: the parity-gate §3 forbids the legacy plural-grid
-// wrapper class and the `bp-note` inner-element family (the __k / __d children) anywhere
-// in the editor JS, and the WHOLE `bp-canvas-note` family dodges both by construction —
-// the canvas prefix `bp-canvas-` is followed by `canvas`, never `note`, and it lacks the
-// trailing `s` of the grid wrapper, so no forbidden substring is ever formed. The
-// consequence: reader parity is proven by the compose BYTE-IDENTITY test
-// (Components.note_item_html == a legacy grid row), NOT by shared classes; the
-// edit-chrome CSS that MIMICS the reader row visuals lives in the editor bundle
-// STYLESHEET (styles.css), never as a JS class literal here. The reader ground truth is
-// Components.note_item_html/1: a `bp-note` row = a label chip child + a description
-// child holding an optional bold lead run then the text.
-// The body FLATTENS to plain text server-side (Slots.note_body_text), so inline marks
-// are not authored here. Original source wrappers survive plain-text edits intact.
-//
-// DOM-aware (the NodeView builds real DOM) but the Node SCHEMA object loads in plain
-// Node (imports ONLY @tiptap/core; references `document` lazily inside addNodeView,
-// which never runs in the pure-Node smoke harness). run-convert.js references the note
-// TYPE only (a string), never this NodeView, so the smoke suite runs headless.
+// The host supplies the canonical row classes through `bp:block-html`. The
+// label is an attr-backed native island, the body remains the real ProseMirror
+// contentDOM, and the optional bold lead plus separator are zero-width
+// decorations. Thus the resting row has the reader's exact element/text shape
+// without wrapping the body or dropping continuous PM selection.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { Plugin, PluginKey, Selection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { readerPaintClass } from "./embed-node.js";
 
-// The TipTap node NAME is `note` (== its portable-doc bpType) — the callout convention
-// (node.type === bpType, no NODE_NAME indirection). No StarterKit `note` node collides.
 export const BP_NOTE_BP_TYPE = "note";
+const leadPluginKey = new PluginKey("bp-note-lead");
+const editorIds = new WeakMap();
+const leadCleanups = new Map();
+let editorSequence = 0;
+
+function editorId(editor) {
+  if (!editorIds.has(editor)) editorIds.set(editor, ++editorSequence);
+  return editorIds.get(editor);
+}
+
+function currentNote(editor, getWidgetPos) {
+  const at = typeof getWidgetPos === "function" ? getWidgetPos() : null;
+  return at == null ? null : { pos: at - 1, node: editor.state.doc.nodeAt(at - 1) };
+}
+
+function leadControl(editor, getWidgetPos, shown, key) {
+  const el = document.createElement("b");
+  el.textContent = shown;
+  el.contentEditable = editor.isEditable ? "plaintext-only" : "false";
+  el.tabIndex = editor.isEditable ? 0 : -1;
+  el.setAttribute("data-test-id", "paper-note-lead");
+  let composing = false;
+  let dirty = false;
+  const commit = () => {
+    if (!dirty || composing || !editor.isEditable) return;
+    const live = currentNote(editor, getWidgetPos);
+    if (!live?.node || live.node.type.name !== BP_NOTE_BP_TYPE) return;
+    const value = el.textContent || null;
+    dirty = false;
+    if ((live.node.attrs.lead || null) !== value)
+      editor.view.dispatch(editor.state.tr.setNodeAttribute(live.pos, "lead", value));
+  };
+  const onInput = () => { dirty = true; commit(); };
+  const onFocus = () => {
+    el.setAttribute("role", "textbox");
+    el.setAttribute("aria-label", "Note lead (optional)");
+    el.setAttribute("aria-multiline", "false");
+    const live = currentNote(editor, getWidgetPos);
+    const raw = live?.node?.attrs?.lead || "";
+    if (!dirty && !composing && el.textContent !== raw) el.textContent = raw;
+  };
+  const onBlur = () => {
+    composing = false;
+    commit();
+    el.removeAttribute("role");
+    el.removeAttribute("aria-label");
+    el.removeAttribute("aria-multiline");
+    const live = currentNote(editor, getWidgetPos);
+    const trimmed = String(live?.node?.attrs?.lead || "").trim();
+    if (!dirty && el.textContent !== trimmed) el.textContent = trimmed;
+  };
+  const onStart = () => { composing = true; };
+  const onEnd = () => { composing = false; commit(); };
+  const onBeforeInput = event => {
+    if (["insertParagraph", "insertLineBreak"].includes(event.inputType)) event.preventDefault();
+  };
+  const onKey = event => {
+    if (event.isComposing) return;
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      event.stopPropagation();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else if ((event.metaKey || event.ctrlKey) && !event.altKey && ["z", "y"].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      editor.commands[event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo"]();
+      const live = currentNote(editor, getWidgetPos);
+      el.textContent = live?.node?.attrs?.lead || "";
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      el.blur();
+    }
+  };
+  const listeners = {
+    input: onInput, focus: onFocus, blur: onBlur, compositionstart: onStart,
+    compositionend: onEnd, beforeinput: onBeforeInput, keydown: onKey,
+  };
+  for (const [type, listener] of Object.entries(listeners)) el.addEventListener(type, listener);
+  leadCleanups.set(key, () => {
+    for (const [type, listener] of Object.entries(listeners)) el.removeEventListener(type, listener);
+  });
+  return el;
+}
 
 export const Note = Node.create({
-  name: "note",
-
-  // A top-level block sibling inside the one canvas document. group:"block" lets it sit
-  // in the doc's `block+` content AND in a grid section's body.
+  name: BP_NOTE_BP_TYPE,
   group: "block",
-
-  // The body slot is a SINGLE editable inline region — a paragraph's content model
-  // (the callout body precedent). NOT block+.
   content: "inline*",
-  marks: "", // Reader text is plain; existing source wrappers stay in bpBlock.
-
+  marks: "",
   selectable: true,
-
-  // defining — PM won't merge the note into an adjacent textblock on backspace-at-edge
-  // (Backspace at the body start lifts out of the note rather than dissolving chrome).
   defining: true,
 
   addAttributes() {
     return {
-      // Authoritative source for lossless reconstruction; never serialized to HTML.
       bpBlock: { default: null, rendered: false },
-      // bpId — the portable-doc block id runToOps keys by.
       bpId: {
         default: null,
-        parseHTML: (el) => el.getAttribute("data-bp-id"),
-        renderHTML: (attrs) => (attrs.bpId ? { "data-bp-id": attrs.bpId } : {}),
+        parseHTML: el => el.getAttribute("data-bp-id"),
+        renderHTML: attrs => attrs.bpId ? { "data-bp-id": attrs.bpId } : {},
       },
-      // bpType — the original portable-doc block kind ("note").
       bpType: {
         default: BP_NOTE_BP_TYPE,
-        parseHTML: (el) => el.getAttribute("data-bp-type") || BP_NOTE_BP_TYPE,
-        renderHTML: (attrs) => ({ "data-bp-type": attrs.bpType || BP_NOTE_BP_TYPE }),
+        parseHTML: el => el.getAttribute("data-bp-type") || BP_NOTE_BP_TYPE,
+        renderHTML: attrs => ({ "data-bp-type": attrs.bpType || BP_NOTE_BP_TYPE }),
       },
-      // label — the label slot's plain text, PRESENT-ONLY. Empty/absent → no data-label
-      // (round-trips ABSENT; noteNodeToBlock omits it, the reader shows an empty chip).
       label: {
         default: null,
-        parseHTML: (el) =>
-          el.hasAttribute("data-label") ? el.getAttribute("data-label") : null,
-        renderHTML: (attrs) =>
-          attrs.label != null ? { "data-label": attrs.label } : {},
+        parseHTML: el => el.hasAttribute("data-label") ? el.getAttribute("data-label") : null,
+        renderHTML: attrs => attrs.label != null ? { "data-label": attrs.label } : {},
       },
-      // lead — the lead slot's plain text, PRESENT-ONLY. A null/absent lead round-trips
-      // ABSENT (never ""), byte-mirroring the callout title.
       lead: {
         default: null,
-        parseHTML: (el) =>
-          el.hasAttribute("data-lead") ? el.getAttribute("data-lead") : null,
-        renderHTML: (attrs) =>
-          attrs.lead != null ? { "data-lead": attrs.lead } : {},
+        parseHTML: el => el.hasAttribute("data-lead") ? el.getAttribute("data-lead") : null,
+        renderHTML: attrs => attrs.lead != null ? { "data-lead": attrs.lead } : {},
       },
     };
   },
@@ -104,91 +137,168 @@ export const Note = Node.create({
     return [{ tag: "div[data-bp-type='note']" }];
   },
 
-  // A schema-level fallback render (used when NO node-view is mounted — the pure-Node
-  // round-trip / a non-editable export). The node-view (below) OVERRIDES this. The `0`
-  // is the inline body content hole; chrome (label/lead) lives ONLY in the node-view,
-  // so parseHTML never mis-parses chrome as body.
   renderHTML({ HTMLAttributes }) {
     return [
       "div",
-      mergeAttributes(HTMLAttributes, { "data-bp-type": "note" }),
+      mergeAttributes(HTMLAttributes, { "data-bp-type": BP_NOTE_BP_TYPE }),
       ["div", { "data-note-body": "" }, 0],
     ];
   },
 
-  // Reader-shaped native text islands, matching the callout run-in title pattern.
-  // Plain inline elements can wrap with the body; input controls cannot.
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    const owner = editorId(editor);
+    return [new Plugin({
+      key: leadPluginKey,
+      props: {
+        handleKeyDown(view, event) {
+          if (event.defaultPrevented || event.isComposing || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return false;
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return false;
+          const { $from, empty } = view.state.selection;
+          if (!empty || $from.parent.type.name !== BP_NOTE_BP_TYPE) return false;
+          const leavingStart = event.key === "ArrowLeft" && $from.parentOffset === 0;
+          const leavingEnd = event.key === "ArrowRight" && $from.parentOffset === $from.parent.content.size;
+          if (!leavingStart && !leavingEnd) return false;
+          const boundary = leavingStart ? $from.before() : $from.after();
+          view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(boundary), leavingStart ? -1 : 1)));
+          view.focus();
+          return true;
+        },
+        decorations(state) {
+          const decorations = [];
+          state.doc.descendants((node, pos) => {
+            if (node.type.name !== BP_NOTE_BP_TYPE) return;
+            const lead = String(node.attrs.lead || "").trim();
+            if (!lead) return;
+            const stem = `bp-note:${owner}:${node.attrs.bpId || pos}`;
+            let getLeadPos = null;
+            const leadKey = `${stem}:lead`;
+            decorations.push(Decoration.widget(pos + 1, (view, getPos) => {
+              getLeadPos = getPos;
+              return leadControl(editor, getPos, lead, leadKey);
+            }, {
+              side: -2, key: leadKey, raw: true, stopEvent: () => true,
+              destroy: () => {
+                leadCleanups.get(leadKey)?.();
+                leadCleanups.delete(leadKey);
+                getLeadPos = null;
+              },
+            }));
+            decorations.push(Decoration.widget(pos + 1, () => {
+              const separator = document.createElement("span");
+              separator.textContent = " ";
+              separator.setAttribute("data-bp-note-separator", "");
+              separator.setAttribute("aria-hidden", "true");
+              return separator;
+            }, {
+              side: -1, key: `${stem}:space`,
+            }));
+          });
+          return DecorationSet.create(state.doc, decorations);
+        },
+      },
+    })];
+  },
+
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
       dom.className = "bp-canvas-note";
-      dom.setAttribute("data-bp-type", "note");
-      const labelHost = document.createElement("span");
-      labelHost.className = "bp-canvas-note__label-host";
-      labelHost.contentEditable = "false";
+      dom.setAttribute("data-bp-type", BP_NOTE_BP_TYPE);
+      dom.setAttribute("data-bp-fleet-id", node.attrs.bpId || "");
+      dom.setAttribute("data-test-id", "paper-canvas-note");
+
+      const body = document.createElement("div");
+      body.className = readerPaintClass(editor);
+      body.setAttribute("data-bp-fleet-body", "");
+      const row = document.createElement("div");
       const label = document.createElement("span");
-      label.className = "bp-canvas-note__k";
-      labelHost.appendChild(label);
+      label.setAttribute("data-test-id", "paper-note-label");
       const desc = document.createElement("div");
-      desc.className = "bp-canvas-note__d";
-      const leadHost = document.createElement("span");
-      leadHost.contentEditable = "false";
-      const lead = document.createElement("b");
-      lead.className = "bp-canvas-note__lead";
-      leadHost.appendChild(lead);
-      const space = document.createTextNode("");
-      const body = document.createElement("span");
-      body.className = "bp-canvas-note__body";
-      desc.append(leadHost, space, body);
-      dom.append(labelHost, desc);
+      desc.setAttribute("data-test-id", "paper-note-body");
+      row.append(label, desc);
+      body.appendChild(row);
+      dom.appendChild(body);
+
+      const fallbackLead = document.createElement("input");
+      fallbackLead.type = "text";
+      fallbackLead.className = "bp-canvas-note-field";
+      fallbackLead.setAttribute("data-test-id", "paper-note-lead");
+      fallbackLead.setAttribute("aria-label", "Note lead (optional)");
+      fallbackLead.setAttribute("role", "textbox");
+      fallbackLead.setAttribute("contenteditable", "false");
+      dom.appendChild(fallbackLead);
 
       let current = node;
-      const fields = new Map([[label, "label"], [lead, "lead"]]);
-      const dirty = new Set();
-      const composing = new Set();
-      const markPending = () => dom.toggleAttribute("data-note-pending", dirty.size > 0);
-      const paint = () => {
-        for (const [el, key] of fields) {
-          el.contentEditable = editor.isEditable ? "plaintext-only" : "false";
-          el.tabIndex = editor.isEditable ? 0 : -1;
-          const raw = current.attrs[key] || "";
-          const shown = key === "lead" && document.activeElement !== el ? raw.trim() : raw;
-          if (!dirty.has(el) && !composing.has(el) && el.textContent !== shown) el.textContent = shown;
-        }
-        space.textContent = (current.attrs.lead || "").trim() ? " " : "";
-      };
-      // No private timer: the canvas must see pending input before a foreign
-      // echo or an exit can replace the NodeView. IME drafts remain explicitly
-      // pending until composition ends (the same island pattern as callout).
-      const commit = el => {
-        if (!dirty.has(el) || composing.has(el) || !editor.isEditable || typeof getPos !== "function") return;
+      let labelDirty = false;
+      let labelComposing = false;
+      let fallbackComposing = false;
+      const liveNode = () => {
+        if (typeof getPos !== "function") return current;
         const pos = getPos();
-        if (pos == null) return;
-        const cur = editor.state.doc.nodeAt(pos);
-        if (!cur || cur.type.name !== "note") return;
-        const key = fields.get(el);
-        const value = el.textContent || null;
-        dirty.delete(el);
-        markPending();
-        if ((cur.attrs[key] || null) === value) return;
-        // AttrStep history restores only this field, never an older bpBlock
-        // after authoritative carrier metadata has refreshed outside history.
+        return pos == null ? current : editor.state.doc.nodeAt(pos) || current;
+      };
+      const setAttr = (key, value) => {
+        if (!editor.isEditable || typeof getPos !== "function") return;
+        const pos = getPos();
+        const live = pos == null ? null : editor.state.doc.nodeAt(pos);
+        if (!live || live.type.name !== BP_NOTE_BP_TYPE || (live.attrs[key] || null) === value) return;
         editor.view.dispatch(editor.state.tr.setNodeAttribute(pos, key, value));
       };
-      const onInput = event => { dirty.add(event.currentTarget); markPending(); commit(event.currentTarget); };
-      const onStart = event => composing.add(event.currentTarget);
-      const onEnd = event => { composing.delete(event.currentTarget); commit(event.currentTarget); };
-      const onFocus = () => paint();
-      const onBlur = event => { composing.delete(event.currentTarget); commit(event.currentTarget); paint(); };
-      const onBeforeInput = event => {
+      const markPending = value => dom.toggleAttribute("data-note-pending", value);
+      const commitLabel = () => {
+        if (!labelDirty || labelComposing) return;
+        labelDirty = false;
+        markPending(false);
+        setAttr("label", label.textContent || null);
+      };
+      const commitFallback = () => {
+        if (fallbackComposing) return;
+        markPending(false);
+        setAttr("lead", fallbackLead.value || null);
+      };
+      const sync = () => {
+        const live = liveNode();
+        const attrs = live.attrs || {};
+        label.contentEditable = editor.isEditable ? "plaintext-only" : "false";
+        label.tabIndex = editor.isEditable ? 0 : -1;
+        if (!labelDirty && !labelComposing && label.textContent !== (attrs.label || ""))
+          label.textContent = attrs.label || "";
+        const lead = desc.querySelector(":scope > b");
+        if (lead && document.activeElement !== lead && lead.textContent !== String(attrs.lead || "").trim())
+          lead.textContent = String(attrs.lead || "").trim();
+        fallbackLead.hidden = !!String(attrs.lead || "").trim();
+        fallbackLead.readOnly = !editor.isEditable;
+        if (document.activeElement !== fallbackLead && !fallbackComposing && fallbackLead.value !== (attrs.lead || ""))
+          fallbackLead.value = attrs.lead || "";
+      };
+
+      const onLabelInput = () => { labelDirty = true; markPending(true); commitLabel(); };
+      const onLabelStart = () => { labelComposing = true; markPending(true); };
+      const onLabelEnd = () => { labelComposing = false; commitLabel(); };
+      const onLabelFocus = () => {
+        label.setAttribute("role", "textbox");
+        label.setAttribute("aria-label", "Note label");
+        label.setAttribute("aria-multiline", "false");
+      };
+      const onLabelBlur = () => {
+        labelComposing = false;
+        commitLabel();
+        label.removeAttribute("role");
+        label.removeAttribute("aria-label");
+        label.removeAttribute("aria-multiline");
+        sync();
+      };
+      const onLabelBeforeInput = event => {
         if (["insertParagraph", "insertLineBreak"].includes(event.inputType)) event.preventDefault();
       };
-      const onKey = event => {
+      const onLabelKey = event => {
         if (event.isComposing) return;
         if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
           event.preventDefault();
+          event.stopPropagation();
           const range = document.createRange();
-          range.selectNodeContents(event.currentTarget);
+          range.selectNodeContents(label);
           const selection = window.getSelection();
           selection.removeAllRanges();
           selection.addRange(range);
@@ -197,56 +307,88 @@ export const Note = Node.create({
           editor.commands[event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo"]();
         } else if (event.key === "Enter") {
           event.preventDefault();
-          event.currentTarget.blur();
+          label.blur();
         }
       };
-      const listeners = { input: onInput, focus: onFocus, blur: onBlur,
-        compositionstart: onStart, compositionend: onEnd, beforeinput: onBeforeInput, keydown: onKey };
-      for (const [el, key] of fields) {
-        el.setAttribute("data-test-id", `paper-note-${key}`);
-        el.setAttribute("role", "textbox");
-        el.setAttribute("aria-label", key === "label" ? "Note label" : "Note lead (optional)");
-        el.setAttribute("aria-multiline", "false");
-        el.setAttribute("data-placeholder", key === "label" ? "Label" : "Lead (optional)");
-        for (const [event, listener] of Object.entries(listeners)) el.addEventListener(event, listener);
-      }
-      // The empty contentDOM has no hit area after a native lead island. A
-      // plain click on its visible remainder must not retain a run-wide selection.
-      const onEmptyBodyMouseDown = event => {
-        if (!editor.isEditable || event.button !== 0 || event.shiftKey || event.ctrlKey ||
-            event.metaKey || event.altKey || event.target !== desc || typeof getPos !== "function") return;
-        const pos = getPos();
-        if (pos == null) return;
-        const cur = editor.state.doc.nodeAt(pos);
-        // IME can render a lead before its pending draft reaches node attrs.
-        if (!cur || cur.type.name !== "note" || cur.content.size !== 0 || !(lead.textContent || "").trim()) return;
-        event.preventDefault();
-        editor.chain().setTextSelection(pos + 1).focus().run();
+      const onFallbackInput = () => { markPending(true); commitFallback(); };
+      const onFallbackStart = () => { fallbackComposing = true; markPending(true); };
+      const onFallbackEnd = () => { fallbackComposing = false; commitFallback(); };
+      const onFallbackKey = event => {
+        if (event.isComposing) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          fallbackLead.blur();
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey && ["z", "y"].includes(event.key.toLowerCase())) {
+          event.preventDefault();
+          editor.commands[event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo"]();
+        }
       };
-      desc.addEventListener("mousedown", onEmptyBodyMouseDown);
-      const flushPending = () => { for (const el of fields.keys()) commit(el); };
+      const onPaint = event => {
+        event.preventDefault();
+        const template = document.createElement("template");
+        template.innerHTML = typeof event.detail?.html === "string" ? event.detail.html : "";
+        const painted = template.content.firstElementChild;
+        const paintedLabel = painted?.children?.[0];
+        const paintedDesc = painted?.children?.[1];
+        if (painted && paintedLabel?.tagName === "SPAN" && paintedDesc?.tagName === "DIV") {
+          row.className = painted.className;
+          label.className = paintedLabel.className;
+          desc.className = paintedDesc.className;
+        }
+        sync();
+      };
+      const flushPending = () => {
+        commitLabel();
+        if (document.activeElement === fallbackLead) commitFallback();
+      };
+
+      label.addEventListener("input", onLabelInput);
+      label.addEventListener("focus", onLabelFocus);
+      label.addEventListener("compositionstart", onLabelStart);
+      label.addEventListener("compositionend", onLabelEnd);
+      label.addEventListener("blur", onLabelBlur);
+      label.addEventListener("beforeinput", onLabelBeforeInput);
+      label.addEventListener("keydown", onLabelKey);
+      fallbackLead.addEventListener("input", onFallbackInput);
+      fallbackLead.addEventListener("compositionstart", onFallbackStart);
+      fallbackLead.addEventListener("compositionend", onFallbackEnd);
+      fallbackLead.addEventListener("keydown", onFallbackKey);
+      body.addEventListener("bp-fleet-paint", onPaint);
       dom.addEventListener("bp-flush-node", flushPending);
-      paint();
+      sync();
+
       return {
         dom,
-        contentDOM: body,
+        contentDOM: desc,
         update: updated => {
-          if (updated.type.name !== "note") return false;
+          if (updated.type.name !== BP_NOTE_BP_TYPE) return false;
           current = updated;
-          paint();
+          dom.setAttribute("data-bp-fleet-id", updated.attrs.bpId || "");
+          sync();
+          queueMicrotask(sync);
           return true;
         },
-        stopEvent: event => labelHost.contains(event.target) || leadHost.contains(event.target),
+        stopEvent: event => label.contains(event.target) || fallbackLead.contains(event.target),
         ignoreMutation: mutation => {
-          if (mutation.type === "selection") return false;
-          return !body.contains(mutation.target);
+          if (mutation.type === "selection") return document.activeElement === label || document.activeElement === fallbackLead;
+          if (mutation.type === "attributes" && (mutation.target === row || mutation.target === desc)) return true;
+          if (label.contains(mutation.target) || fallbackLead.contains(mutation.target)) return true;
+          return !desc.contains(mutation.target);
         },
         destroy: () => {
-          for (const el of fields.keys()) {
-            for (const [event, listener] of Object.entries(listeners)) el.removeEventListener(event, listener);
-          }
+          label.removeEventListener("input", onLabelInput);
+          label.removeEventListener("focus", onLabelFocus);
+          label.removeEventListener("compositionstart", onLabelStart);
+          label.removeEventListener("compositionend", onLabelEnd);
+          label.removeEventListener("blur", onLabelBlur);
+          label.removeEventListener("beforeinput", onLabelBeforeInput);
+          label.removeEventListener("keydown", onLabelKey);
+          fallbackLead.removeEventListener("input", onFallbackInput);
+          fallbackLead.removeEventListener("compositionstart", onFallbackStart);
+          fallbackLead.removeEventListener("compositionend", onFallbackEnd);
+          fallbackLead.removeEventListener("keydown", onFallbackKey);
+          body.removeEventListener("bp-fleet-paint", onPaint);
           dom.removeEventListener("bp-flush-node", flushPending);
-          desc.removeEventListener("mousedown", onEmptyBodyMouseDown);
         },
       };
     };

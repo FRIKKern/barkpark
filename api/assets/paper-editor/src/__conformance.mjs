@@ -40,6 +40,11 @@ function unwrapFleet(root) {
 
 function strip(root) {
   root.querySelectorAll(CHROME).forEach((el) => el.remove());
+  // The optional note lead's reader separator is a ProseMirror widget so DOM
+  // parsing never mistakes it for authored body text. It is the one known host
+  // wrapper normalized back to the reader's bare text node for shape comparison.
+  for (const separator of root.querySelectorAll("span[data-bp-note-separator]"))
+    separator.replaceWith(document.createTextNode(separator.textContent));
   for (const el of root.querySelectorAll("*")) {
     PLUMBING_ATTRS.forEach((a) => el.removeAttribute(a));
     for (const c of [...el.classList]) if (c.startsWith("ProseMirror") || c.startsWith("bp-canvas-")) el.classList.remove(c);
@@ -77,9 +82,11 @@ async function judge(golden) {
 }
 
 const stripProbe = document.createElement("div");
-stripProbe.innerHTML = '<span class="x-bp-canvas-y xProseMirror bp-canvas-z ProseMirror-z"></span>';
+stripProbe.innerHTML = '<span class="x-bp-canvas-y xProseMirror bp-canvas-z ProseMirror-z"></span><span data-bp-note-separator> </span><span data-other> </span>';
 strip(stripProbe);
 if (stripProbe.firstChild.className !== "x-bp-canvas-y xProseMirror") throw new Error(`strip touched reader classes: ${stripProbe.firstChild.className}`);
+if (stripProbe.childNodes[1].nodeType !== Node.TEXT_NODE || stripProbe.childNodes[1].nodeValue !== " ") throw new Error("strip did not unwrap the exact note separator");
+if (stripProbe.lastChild.tagName !== "SPAN") throw new Error("strip unwrapped unrelated host markup");
 
 await cli({ renderer: "editor-canvas", compare: "dom", judge });
 window.close();

@@ -142,19 +142,7 @@
     },
     {
       "type": "diff",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-diff.text-xs[0] > div[1] > #text[0]: <span> != \"lib/render/compose.ex\"",
-        "root > div.bp-diff.text-xs[0] > div[2] > #text[0]: <span> != \"@@ -1,4 +1,5 @@\"",
-        "root > div.bp-diff.text-xs[0] > div[3] > #text[0]: <span> != \"defmodule Render.Compose do\"",
-        "root > div.bp-diff.text-xs[0] > div[4]: 2 children [#text,span] != 1 [#text]",
-        "root > div.bp-diff.text-xs[0] > div[4] > #text[0]: \"- \" != \"- def compose(block), do: starter(block)\"",
-        "root > div.bp-diff.text-xs[0] > div[5]: 2 children [#text,span] != 1 [#text]",
-        "root > div.bp-diff.text-xs[0] > div[5] > #text[0]: \"+ \" != \"+ def compose(block), do: grown(block)\"",
-        "root > div.bp-diff.text-xs[0] > div[6]: 2 children [#text,span] != 1 [#text]",
-        "root > div.bp-diff.text-xs[0] > div[6] > #text[0]: \"+ \" != \"+ defp grown(block), do: block\"",
-        "root > div.bp-diff.text-xs[0] > div[7] > #text[0]: <span> != \"end\""
-      ]
+      "status": "pass"
     },
     {
       "type": "divider",
@@ -378,16 +366,7 @@
     },
     {
       "type": "note",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-note[0]: class {} != {bp-note}",
-        "root > div.bp-note[0] > span.bp-note__k[0]: class {} != {bp-note__k}",
-        "root > div.bp-note[0] > span.bp-note__k[0] > #text[0]: <span> != \"Note\"",
-        "root > div.bp-note[0] > div.bp-note__d[1]: class {} != {bp-note__d}",
-        "root > div.bp-note[0] > div.bp-note__d[1]: 3 children [span,#text,span] != 2 [b,#text]",
-        "root > div.bp-note[0] > div.bp-note__d[1] > b[0]: <span> != <b>",
-        "root > div.bp-note[0] > div.bp-note__d[1] > #text[1]: \" \" != \" A single annotated row.\""
-      ]
+      "status": "pass"
     },
     {
       "type": "notes",

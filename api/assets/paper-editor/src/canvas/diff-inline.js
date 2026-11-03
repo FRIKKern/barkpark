@@ -8,8 +8,8 @@ import { splitLines, replaceLine } from "./filetree-inline.js";
 // This module only MAPS rows back to stored lines, with the reader's own line
 // classes (header lines paint nothing; "+++ b/<path>" paints a bold <path> row).
 // Every row must match its stored line 1:1 or nothing is decorated. A row's text
-// after its two-character marker is wrapped in a bare span so the marker stays
-// generated; a path row edits the path after its stored "+++ b/". Only the one
+// after its two-character marker is edited in the reader's original text node;
+// a path row edits the path after its stored "+++ b/". Only the one
 // read-only query below touches a reader class (the parity gate allows exactly
 // that).
 const HEADERS = ["--- ", "diff --git ", "index "];
@@ -46,13 +46,10 @@ export function wireDiffInline(body, options) {
       const el = painted[i];
       const node = el.firstChild;
       if (row.text === "" || el.childNodes.length !== 1 || node.nodeType !== 3) return [];
-      const span = document.createElement("span");
-      span.dataset.bpDiffText = "";
-      (row.shown ? node.splitText(row.shown.length) : node).replaceWith(span);
-      span.textContent = row.text;
       const stored = row.stored;
       return [{
-        el: span, item: block, index: null, key: "diff", label: `Diff line ${row.index + 1}`, verbatim: true,
+        el, textNode: node, domPrefix: row.shown,
+        item: block, index: null, key: "diff", label: `Diff line ${row.index + 1}`, verbatim: true,
         read: b => {
           const line = splitLines(b.diff)[row.index];
           return typeof line === "string" && line.startsWith(stored) ? line.slice(stored.length) : undefined;
