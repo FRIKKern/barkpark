@@ -184,6 +184,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # canvas runs. paper_editor.ex owns their contextual boundary previews separately.
   @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast)
 
+  # R6 missing-five: pre-gate-badge is display-only article chrome, so it can ride
+  # the server-painted bpFleet receiver without sacrificing an edit surface. The four
+  # structured field kinds are deliberately NOT listed here: they keep their contextual
+  # boundary editors on new mounts, while the JS/shared-paint compatibility receiver
+  # handles an already-mounted/nested occurrence reader-shaped.
+  # Keep aligned with run-convert.js CANVAS_STATIC_RENDER_TYPES (its canvas-eligible
+  # subset is this one type) and shared/paper.ex @canvas_static_render_types.
+  @canvas_static_render_types ~w(pre-gate-badge)
+
   # Article-chrome ROLE prose (eyebrow / byline / ingress / pullquote) — chrome-free
   # STYLED prose the canvas handles as plain ProseMirror nodes (run-convert.js
   # CANVAS_ROLE_TYPES → same-named nodes; role-nodes.js). UNLIKE the callout content
@@ -289,6 +298,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_action_types ++
                   @canvas_readonly_atom_types ++
                   @canvas_fleet_types ++
+                  @canvas_static_render_types ++
                   @canvas_role_types ++
                   @canvas_table_types ++
                   @canvas_task_list_types ++
