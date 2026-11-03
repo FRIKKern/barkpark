@@ -255,6 +255,17 @@ func TestAsciicastOSC8Gating(t *testing.T) {
 	}
 }
 
+func TestAsciicastRendersAuthoredCaption(t *testing.T) {
+	reg := testRegistry()
+	block := Block{Type: "asciicast", Attrs: map[string]any{
+		"src": "https://x.example/demo.cast", "caption": "A terminal walkthrough",
+	}}
+	got := ansi.Strip(strings.Join(reg.Render(block, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}), "\n"))
+	if !strings.Contains(got, "A terminal walkthrough") {
+		t.Fatalf("asciicast dropped its authored caption: %q", got)
+	}
+}
+
 // TestDiagramKindDetection asserts mermaidKind reads the kind keyword from the
 // first non-directive source line, skipping init directives / front-matter.
 func TestDiagramKindDetection(t *testing.T) {

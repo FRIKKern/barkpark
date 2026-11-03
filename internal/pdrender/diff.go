@@ -51,8 +51,16 @@ func (diffRenderer) Render(b Block, ctx RenderCtx) []string {
 	removed := countDiffOp(rows, "-")
 	tally := addStyle.Render("+"+itoa(added)) + " " + delStyle.Render("−"+itoa(removed))
 	var out []string
-	if file := sanitizeText(attrStr(b.Attrs, "file")); file != "" {
-		out = append(out, truncateANSI(pathStyle.Render(file)+"  "+tally, w))
+	file := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "file")))
+	lang := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "lang")))
+	if file != "" {
+		head := pathStyle.Render(file)
+		if lang != "" {
+			head += ctxStyle.Render(" · " + lang + " ·")
+		}
+		out = append(out, truncateANSI(head+"  "+tally, w))
+	} else if lang != "" {
+		out = append(out, truncateANSI(ctxStyle.Render(lang+" · ")+tally, w))
 	} else {
 		out = append(out, truncateANSI(tally, w))
 	}

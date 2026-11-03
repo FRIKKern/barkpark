@@ -39,13 +39,13 @@ The render pipeline as a flow.
 A sequence, for kind detection.                                                 
                                                                                 
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ▶ Asciicast · 0:42 · 80x24 · open in browser                                 │
+│ ▶ Asciicast · A recorded session. · 0:42 · 80x24 · open in browser           │
 │ (https://barkpark.cloud/casts/demo.cast)                                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
                                                                                 
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ▶ Asciicast · 2:05 · 120x30 · open in browser                                │
-│ (https://barkpark.cloud/casts/header.cast)                                   │
+│ ▶ Asciicast · A cast with a v2 header object. · 2:05 · 120x30 · open in      │
+│ browser (https://barkpark.cloud/casts/header.cast)                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
                                                                                 
 ╭──────────────────────────────────────────────────────────────────────────────╮

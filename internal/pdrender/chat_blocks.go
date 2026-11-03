@@ -12,8 +12,8 @@ import (
 // PortableDoc block TYPES, decoded from the SAME message JSON both surfaces
 // consume and rendered here through the ordinary Decode -> RenderDoc seam.
 //
-//   - chat-tool-diff — a file-mutation as a colored +/- line diff (the DP-LCS
-//     `TextDiff.diff_lines/2` output the server carries verbatim on the block).
+//   - chat-tool-diff — a file-mutation as a colored +/- line diff (preferring
+//     the server's derived rows, with a bounded fallback for canonical input).
 //   - chat-todo      — the living checklist card: ☒/◐/☐ glyphs + "N/M done".
 //   - chat-thinking  — a dim "✻ Thought for N tokens" provenance row.
 //
@@ -24,10 +24,11 @@ import (
 
 // ── chat-tool-diff ────────────────────────────────────────────────────────────
 // A file-mutation tool call rendered as a real colored line diff (charter D25,
-// Law 1). The server has already run the ONE diff engine (TextDiff.diff_lines/2)
-// and carries the flat `lines:[{op,text}]` list on the block, plus the file
-// `path` and the `added`/`removed` counts — pdrender never re-diffs. Op glyphs
-// mirror chat_tool_renderer.ex: "+ " added, "- " removed, "  " context.
+// Law 1). Live chat blocks carry a flat `lines:[{op,text}]` list plus the file
+// `path` and the `added`/`removed` counts. PortableDoc fixtures may instead
+// carry only the canonical nested input, so pdrender derives the same bounded
+// line diff when those flat rows are absent. Op glyphs mirror
+// chat_tool_renderer.ex: "+ " added, "- " removed, "  " context.
 //
 // Honest truncation is a render concern only (chat_tool_renderer's
 // @collapsed_budget): past chatDiffBudget lines the tail folds behind an honest
@@ -39,6 +40,11 @@ type chatToolDiffRenderer struct{}
 // chatDiffBudget caps the diff lines drawn inline before the tail folds — the
 // terminal shows a compact hunk, exactly like the Studio card's 20-line budget.
 const chatDiffBudget = 20
+
+const (
+	maxChatDiffLines = 2000
+	maxChatDiffCells = 4_000_000
+)
 
 func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 	w := clampWidth(ctx.Width)
@@ -54,7 +60,7 @@ func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 	// never blank.
 	added := attrInt(b.Attrs, "added", -1)
 	removed := attrInt(b.Attrs, "removed", -1)
-	lines := attrSlice(b.Attrs, "lines")
+	lines := chatDiffLines(b.Attrs)
 	if added < 0 {
 		added = countDiffOp(lines, "+")
 	}
@@ -97,6 +103,131 @@ func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, ctxStyle.Render("… +"+itoa(over)+" more lines"))
 	}
 	return out
+}
+
+// chatDiffLines prefers the server-derived flat rows and falls back to the
+// canonical nested tool input used by the golden pack and other readers. The
+// fallback is the same bounded DP-LCS derivation as Papers.TextDiff.diff_lines
+// and the React reader: oversized edits degrade to all removals then additions.
+func chatDiffLines(attrs map[string]any) []any {
+	if lines := attrSlice(attrs, "lines"); len(lines) > 0 {
+		return lines
+	}
+	input, ok := attrs["input"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	_, fileOK := input["file_path"].(string)
+	if edits, ok := input["edits"].([]any); ok && fileOK && len(edits) > 0 {
+		left := maxChatDiffCells
+		var out []any
+		for _, raw := range edits {
+			edit, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			oldText, _ := edit["old_string"].(string)
+			newText, _ := edit["new_string"].(string)
+			hunk, rest := diffTextLines(oldText, newText, left)
+			left = rest
+			if len(hunk) == 0 {
+				continue
+			}
+			if len(out) > 0 {
+				out = append(out, map[string]any{"op": "gap", "text": ""})
+			}
+			out = append(out, hunk...)
+		}
+		return out
+	}
+	if !fileOK {
+		return nil
+	}
+	if oldText, oldOK := input["old_string"].(string); oldOK {
+		if newText, newOK := input["new_string"].(string); newOK {
+			lines, _ := diffTextLines(oldText, newText, maxChatDiffCells)
+			return lines
+		}
+	}
+	if content, contentOK := input["content"].(string); contentOK {
+		lines, _ := diffTextLines("", content, maxChatDiffCells)
+		return lines
+	}
+	return nil
+}
+
+func splitChatDiffLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func diffTextLines(oldText, newText string, left int) ([]any, int) {
+	oldLines := splitChatDiffLines(oldText)
+	newLines := splitChatDiffLines(newText)
+	m, n := len(oldLines), len(newLines)
+	if m == 0 && n == 0 {
+		return nil, left
+	}
+	if m > maxChatDiffLines || n > maxChatDiffLines || m*n > left {
+		out := make([]any, 0, m+n)
+		for _, line := range oldLines {
+			out = append(out, map[string]any{"op": "-", "text": line})
+		}
+		for _, line := range newLines {
+			out = append(out, map[string]any{"op": "+", "text": line})
+		}
+		return out, left
+	}
+
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if oldLines[i-1] == newLines[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else {
+				dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+			}
+		}
+	}
+
+	reversed := make([]any, 0, m+n)
+	i, j := m, n
+	appendReverse := func(op, text string) { reversed = append(reversed, map[string]any{"op": op, "text": text}) }
+	for i > 0 && j > 0 {
+		switch {
+		case oldLines[i-1] == newLines[j-1]:
+			appendReverse("=", oldLines[i-1])
+			i--
+			j--
+		case dp[i-1][j] >= dp[i][j-1]:
+			appendReverse("-", oldLines[i-1])
+			i--
+		default:
+			appendReverse("+", newLines[j-1])
+			j--
+		}
+	}
+	for i > 0 {
+		appendReverse("-", oldLines[i-1])
+		i--
+	}
+	for j > 0 {
+		appendReverse("+", newLines[j-1])
+		j--
+	}
+	for lo, hi := 0, len(reversed)-1; lo < hi; lo, hi = lo+1, hi-1 {
+		reversed[lo], reversed[hi] = reversed[hi], reversed[lo]
+	}
+	return reversed, left - m*n
 }
 
 // chatDiffPath reads the mutated file path tolerantly. The Go golden fixture
