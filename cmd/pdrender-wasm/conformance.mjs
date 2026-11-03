@@ -21,7 +21,9 @@ function duelAssociationDiff(text, input) {
     const label = String(row.label || "").trim();
     const valueA = String(row.valueA || "").trim();
     const valueB = String(row.valueB || "").trim();
-    if (!label || lines.some((line) => line.includes(label) && line.includes(valueA) && line.includes(valueB))) return [];
+    const unit = String(row.unit || "").trim();
+    const expected = `${label} ${valueA}${unit ? ` ${unit}` : ""} vs ${valueB}${unit ? ` ${unit}` : ""}`.replace(/\s+/g, " ").trim();
+    if (!label || lines.some((line) => line.replace(/\s+/g, " ").trim() === expected)) return [];
     return [`row ${i + 1} "${label}" is not associated with values "${valueA}" and "${valueB}"`];
   });
 }

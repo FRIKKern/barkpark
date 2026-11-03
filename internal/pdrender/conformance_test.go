@@ -221,12 +221,19 @@ func duelAssociationDiff(actual string, attrs map[string]any) []string {
 		label := sanitizeText(strings.TrimSpace(attrStr(row, "label")))
 		valueA := sanitizeText(strings.TrimSpace(attrStr(row, "valueA")))
 		valueB := sanitizeText(strings.TrimSpace(attrStr(row, "valueB")))
+		unit := sanitizeText(strings.TrimSpace(attrStr(row, "unit")))
 		if label == "" {
 			continue
 		}
+		armA, armB := valueA, valueB
+		if unit != "" {
+			armA += " " + unit
+			armB += " " + unit
+		}
+		expected := strings.Join(strings.Fields(label+" "+armA+" vs "+armB), " ")
 		associated := false
 		for _, line := range lines {
-			if strings.Contains(line, label) && strings.Contains(line, valueA) && strings.Contains(line, valueB) {
+			if strings.Join(strings.Fields(line), " ") == expected {
 				associated = true
 				break
 			}
@@ -432,6 +439,9 @@ func TestConformanceWordsSplitPunctuationAndLayoutComparisonCountsDuplicates(t *
 	}
 	if diff := duelAssociationDiff("first  3 vs 4\nsecond  1 vs 2", duel); diff == nil {
 		t.Fatal("swapped duel values must not pass by word presence alone")
+	}
+	if diff := duelAssociationDiff("first  2 vs 1\nsecond  3 vs 4", duel); diff == nil {
+		t.Fatal("swapped duel arms must not pass by word presence alone")
 	}
 }
 
