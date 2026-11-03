@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "1.0.0",
-  "build": "ab41f79bac86",
+  "build": "40b54c69ac98",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -980,6 +980,7 @@
       "ProseMirror-trailingBreak",
       "ProseMirror-widget",
       "ProseMirrorClipboard",
+      "bp-activate-field-editor",
       "bp-block-drop",
       "bp-block-handle",
       "bp-block-handle--dragging",
@@ -1036,6 +1037,7 @@
       "bp-canvas-field-color",
       "bp-canvas-field-control",
       "bp-canvas-field-datetime",
+      "bp-canvas-field-editor",
       "bp-canvas-field-image-empty",
       "bp-canvas-field-image-empty-hint",
       "bp-canvas-field-image-empty-icon",
@@ -1172,6 +1174,7 @@
       "bp-conflict-title",
       "bp-expandable__summary",
       "bp-expandable__summary--empty",
+      "bp-field__fallback",
       "bp-find-match",
       "bp-find-match--active",
       "bp-fleet-datum",
@@ -1243,7 +1246,6 @@
       "bp-paper-format__sep",
       "bp-paper-lock-note",
       "bp-paper-notes-config",
-      "bp-paper-picker-current",
       "bp-paper-stats-config",
       "bp-paper-surface",
       "bp-paper-table-edit-status",
@@ -1265,7 +1267,6 @@
       "bp-table__td--spark",
       "bp-table__th--num",
       "bp-table__th--spark",
-      "bp-tabs--editor",
       "bp-wikilink-empty",
       "bp-wikilink-foot",
       "bp-wikilink-foot-sep",
@@ -1340,6 +1341,7 @@
       "data-bp-child-type",
       "data-bp-cite",
       "data-bp-config",
+      "data-bp-conformance-root",
       "data-bp-datum-field",
       "data-bp-datum-index",
       "data-bp-datum-scaffold",
@@ -1425,6 +1427,7 @@
       "data-width"
     ],
     "events": [
+      "bp-activate-field-editor",
       "bp-canvas-image-pick"
     ]
   }

@@ -2,22 +2,21 @@
   "renderer": "editor-canvas",
   "compare": "dom",
   "pack_stamp": "1ca9ca01d368484f4e7aa39003f9fb065595d29745f785d823154762b362be0b",
-  "ran_at_sha": "e060d2b989605e649a68b586b508288502835a1d",
+  "ran_at_sha": "cde4c3d993547eaea10c28b30aff37adfb991299",
   "rows": [
     {
       "type": "action",
-      "status": "fail",
-      "diff": [
-        "root > a.bp-button.bp-button--primary[0]: <div> != <a>"
-      ]
+      "status": "pass"
     },
     {
       "type": "api-endpoint",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "arrayOf",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "asciicast",
@@ -26,14 +25,12 @@
     },
     {
       "type": "bar-chart",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "blockquote",
-      "status": "fail",
-      "diff": [
-        "root > blockquote.bp-blockquote[0]: attr data-bp-cite=\"Alan Kay\" extra"
-      ]
+      "status": "pass"
     },
     {
       "type": "byline",
@@ -41,22 +38,11 @@
     },
     {
       "type": "callout",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-callout.bp-callout--info[0]: 2 children [span,div.bp-callout__body] != 3 [strong,#text,span]",
-        "root > div.bp-callout.bp-callout--info[0] > strong[0]: <span> != <strong>",
-        "root > div.bp-callout.bp-callout--info[0] > #text[1]: <div> != \" \""
-      ]
+      "status": "pass"
     },
     {
       "type": "card",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-card.bp-card--info[0]: 7 children [div,img,button,h2,p,a.bp-button,span] != 3 [h2,p,a.bp-button]",
-        "root > div.bp-card.bp-card--info[0] > h2[0]: <div> != <h2>",
-        "root > div.bp-card.bp-card--info[0] > p[1]: <img> != <p>",
-        "root > div.bp-card.bp-card--info[0] > a.bp-button[2]: <button> != <a>"
-      ]
+      "status": "pass"
     },
     {
       "type": "cards",
@@ -68,77 +54,65 @@
     },
     {
       "type": "chat-approval",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "chat-plan",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "chat-question",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "chat-thinking",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "chat-todo",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "chat-tool-diff",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "code-tabs",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "code",
-      "status": "fail",
-      "diff": [
-        "root > pre.bp-codeblock[0]: class {} != {bp-codeblock}",
-        "root > pre.bp-codeblock[0]: style border=\"0\" missing",
-        "root > pre.bp-codeblock[0]: style border-radius=\"var(--bp-codeblock-radius, 0)\" missing",
-        "root > pre.bp-codeblock[0]: style font-family=\"var(--paper-font-mono, ui-monospace,Menlo,monospace)\" missing",
-        "root > pre.bp-codeblock[0]: style font-size=\"var(--bp-codeblock-size, 0.9rem)\" missing",
-        "root > pre.bp-codeblock[0]: style line-height=\"var(--bp-codeblock-lh, 1.5)\" missing",
-        "root > pre.bp-codeblock[0]: style margin=\"var(--bp-codeblock-margin, 1.2rem 0)\" missing",
-        "root > pre.bp-codeblock[0]: style overflow-x=\"auto\" missing",
-        "root > pre.bp-codeblock[0]: style padding=\"var(--bp-codeblock-pad, 0.9rem 1.1rem)\" missing",
-        "root > pre.bp-codeblock[0]: style white-space=\"pre\" missing",
-        "root > pre.bp-codeblock[0]: 3 children [input,code,textarea] != 1 [#text]",
-        "root > pre.bp-codeblock[0] > #text[0]: <input> != \"def hello do\n  :world\nend\""
-      ]
+      "status": "pass"
     },
     {
       "type": "codelist",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "columns",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-cols[0]: attr data-cols=\"2\" extra",
-        "root > div.bp-cols[0] > div.bp-cols__c[0]: 3 children [p,p,p] != 2 [p,p]",
-        "root > div.bp-cols[0] > div.bp-cols__c[0] > p[1]: 0 children [] != 1 [#text]"
-      ]
+      "status": "pass"
     },
     {
       "type": "composite",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "criteria-progress",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "diagram",
-      "status": "fail",
-      "diff": [
-        "root > figure.bp-diagram[0]: <div> != <figure>"
-      ]
+      "status": "pass"
     },
     {
       "type": "diff",
@@ -146,18 +120,7 @@
     },
     {
       "type": "divider",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-section-divider[0]: style border-top=\"1px solid\" missing",
-        "root > div.bp-section-divider[0]: style margin=\"2.4rem 0\" missing",
-        "root > div.bp-section-divider[0]: style position=\"relative\" missing",
-        "root > div.bp-section-divider[0]: style text-align=\"center\" missing",
-        "root > div.bp-section-divider[0] > span.bp-section-divider__mark[0]: style display=\"inline-block\" missing",
-        "root > div.bp-section-divider[0] > span.bp-section-divider__mark[0]: style font-size=\"1.1rem\" missing",
-        "root > div.bp-section-divider[0] > span.bp-section-divider__mark[0]: style padding=\"0 0.8rem\" missing",
-        "root > div.bp-section-divider[0] > span.bp-section-divider__mark[0]: style position=\"relative\" missing",
-        "root > div.bp-section-divider[0] > span.bp-section-divider__mark[0]: style top=\"-0.7rem\" missing"
-      ]
+      "status": "pass"
     },
     {
       "type": "duel",
@@ -165,28 +128,15 @@
     },
     {
       "type": "embed",
-      "status": "fail",
-      "diff": [
-        "root > section.bp-embed.bp-embed--unresolved.paper-embed.paper-embed--unresolved[0]: <div> != <section>"
-      ]
+      "status": "pass"
     },
     {
       "type": "equation",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-equation[0]: class {} != {bp-equation}",
-        "root > div.bp-equation[0]: attr aria-label=\"Equation\" extra",
-        "root > div.bp-equation[0]: attr role=\"group\" extra",
-        "root > div.bp-equation[0]: 2 children [div.bp-equation,div] != 1 [math]",
-        "root > div.bp-equation[0] > math[0]: <div> != <math>"
-      ]
+      "status": "pass"
     },
     {
       "type": "expandable",
-      "status": "fail",
-      "diff": [
-        "root > details.bp-expandable[0]: <div> != <details>"
-      ]
+      "status": "pass"
     },
     {
       "type": "eyebrow",
@@ -194,121 +144,48 @@
     },
     {
       "type": "field-boolean",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-boolean\" extra",
-        "root > div.bp-field[0]: 3 children [label,input,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-color",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-color\" extra",
-        "root > div.bp-field[0]: 3 children [label,input,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-datetime",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-datetime\" extra",
-        "root > div.bp-field[0]: 3 children [label,input,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-image",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-image\" extra",
-        "root > div.bp-field[0]: 4 children [label,bp-media-picker,span,div] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <bp-media-picker> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-number",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-number\" extra",
-        "root > div.bp-field[0]: 4 children [label,span,span,details] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <span> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-reference",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-reference\" extra",
-        "root > div.bp-field[0]: 3 children [label,bp-reference-picker,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <bp-reference-picker> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-select",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-select\" extra",
-        "root > div.bp-field[0]: 4 children [label,select,span,details] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <select> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-slug",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-slug\" extra",
-        "root > div.bp-field[0]: 3 children [label,input,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-string",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-string\" extra",
-        "root > div.bp-field[0]: 3 children [label,input,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "field-text",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-field[0]: class {} != {bp-field}",
-        "root > div.bp-field[0]: attr data-field-type=\"field-text\" extra",
-        "root > div.bp-field[0]: 3 children [label,textarea,span] != 2 [span.bp-field__l,div.bp-field__v]",
-        "root > div.bp-field[0] > span.bp-field__l[0]: <label> != <span>",
-        "root > div.bp-field[0] > div.bp-field__v[1]: <textarea> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "figure",
       "via": "host-paint",
-      "status": "fail",
-      "diff": [
-        "root > figure[0]: <p> != <figure>"
-      ]
+      "status": "pass"
     },
     {
       "type": "filetree",
@@ -316,10 +193,7 @@
     },
     {
       "type": "footnote",
-      "status": "fail",
-      "diff": [
-        "root > ol.bp-footnote[0]: <div> != <ol>"
-      ]
+      "status": "pass"
     },
     {
       "type": "form",
@@ -327,7 +201,8 @@
     },
     {
       "type": "gauge-list",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "heading",
@@ -339,10 +214,7 @@
     },
     {
       "type": "image",
-      "status": "fail",
-      "diff": [
-        "root > img[0]: <figure> != <img>"
-      ]
+      "status": "pass"
     },
     {
       "type": "ingress",
@@ -354,15 +226,12 @@
     },
     {
       "type": "list",
-      "status": "fail",
-      "diff": [
-        "root > ul[0] > li[0] > span[0]: <p> != <span>",
-        "root > ul[0] > li[1] > span[0]: <p> != <span>"
-      ]
+      "status": "pass"
     },
     {
       "type": "localizedText",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "note",
@@ -374,18 +243,12 @@
     },
     {
       "type": "paper-links",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "paragraph",
-      "status": "fail",
-      "diff": [
-        "root > p[0] > span[1]: <strong> != <span>",
-        "root > p[0] > a[3]: attr rel=\"noopener noreferrer nofollow\" extra",
-        "root > p[0] > a[3]: attr target=\"_blank\" extra",
-        "root > p[0] > a[5]: attr rel=\"noopener noreferrer nofollow\" extra",
-        "root > p[0] > a[5]: attr target=\"_blank\" extra"
-      ]
+      "status": "pass"
     },
     {
       "type": "pipeline",
@@ -393,7 +256,8 @@
     },
     {
       "type": "pre-gate-badge",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "pullquote",
@@ -410,35 +274,20 @@
     },
     {
       "type": "route",
-      "status": "missing"
+      "via": "host-paint",
+      "status": "pass"
     },
     {
       "type": "section",
-      "status": "fail",
-      "diff": [
-        "root > div[0]: 5 children [div,hr.bp-hr,div.bp-section__title,div.bp-section__grid,hr.bp-hr] != 3 [hr.bp-hr,div.bp-section__grid,hr.bp-hr]",
-        "root > div[0] > hr.bp-hr[0]: <div> != <hr>",
-        "root > div[0] > div.bp-section__grid[1]: <hr> != <div>",
-        "root > div[0] > hr.bp-hr[2]: <div> != <hr>"
-      ]
+      "status": "pass"
     },
     {
       "type": "sheet",
-      "status": "fail",
-      "diff": [
-        "root > table.bp-table[0]: <div> != <table>"
-      ]
+      "status": "pass"
     },
     {
       "type": "stage",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-pnode.bp-pnode--src[0]: class {} != {bp-pnode bp-pnode--src}",
-        "root > div.bp-pnode.bp-pnode--src[0]: 5 children [input,input,input,input,label] != 3 [div.bp-pnode__k,div.bp-pnode__t,div.bp-pnode__d]",
-        "root > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__k[0]: <input> != <div>",
-        "root > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__t[1]: <input> != <div>",
-        "root > div.bp-pnode.bp-pnode--src[0] > div.bp-pnode__d[2]: <input> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "stat-grid",
@@ -459,31 +308,15 @@
     },
     {
       "type": "steps",
-      "status": "fail",
-      "diff": [
-        "root > ol.bp-steps[0]: <div> != <ol>"
-      ]
+      "status": "pass"
     },
     {
       "type": "table",
-      "status": "fail",
-      "diff": [
-        "root > table.bp-table[0]: <div> != <table>"
-      ]
+      "status": "pass"
     },
     {
       "type": "tabs",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-tabs[0]: class {} != {bp-tabs}",
-        "root > div.bp-tabs[0] > div.bp-tabs__strip[0]: class {bp-tabs bp-tabs--editor} != {bp-tabs__strip}",
-        "root > div.bp-tabs[0] > div.bp-tabs__strip[0]: attr role=\"tablist\" missing",
-        "root > div.bp-tabs[0] > div.bp-tabs__strip[0] > button.bp-tabs__tab.bp-tabs__tab--active[0]: <div> != <button>",
-        "root > div.bp-tabs[0] > div.bp-tabs__strip[0] > button.bp-tabs__tab[1]: <div> != <button>",
-        "root > div.bp-tabs[0] > div.bp-tabs__panels[1]: class {} != {bp-tabs__panels}",
-        "root > div.bp-tabs[0] > div.bp-tabs__panels[1]: 1 children [button] != 2 [div.bp-tabs__panel,div.bp-tabs__panel]",
-        "root > div.bp-tabs[0] > div.bp-tabs__panels[1] > div.bp-tabs__panel[0]: <button> != <div>"
-      ]
+      "status": "pass"
     },
     {
       "type": "task-board",
@@ -507,28 +340,15 @@
     },
     {
       "type": "terminal",
-      "status": "fail",
-      "diff": [
-        "root > div.bp-term[0] > div.bp-term__bar[0]: 4 children [span.bp-term__dots,input.bp-term__title,span.bp-term__live,button.is-on] != 3 [span.bp-term__dots,span.bp-term__title,span.bp-term__live]",
-        "root > div.bp-term[0] > div.bp-term__bar[0] > span.bp-term__title[1]: <input> != <span>",
-        "root > div.bp-term[0] > div.bp-term__foot[2]: class {} != {bp-term__foot}",
-        "root > div.bp-term[0] > div.bp-term__foot[2]: 2 children [div.bp-term__foot,button] != 1 [#text]",
-        "root > div.bp-term[0] > div.bp-term__foot[2] > #text[0]: <div> != \"q to quit\""
-      ]
+      "status": "pass"
     },
     {
       "type": "toc",
-      "status": "fail",
-      "diff": [
-        "root > nav.bp-toc[0]: <div> != <nav>"
-      ]
+      "status": "pass"
     },
     {
       "type": "video",
-      "status": "fail",
-      "diff": [
-        "root > figure[0]: <div> != <figure>"
-      ]
+      "status": "pass"
     }
   ]
 }
