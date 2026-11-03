@@ -104,22 +104,36 @@ function semanticClone(source, blockType) {
       }
     }
   } else if (type === "steps") {
-    for (const row of root.querySelectorAll(":scope > li")) {
+    const rows = root.matches("ol.bp-steps.bp-canvas-rows.bp-canvas-steps")
+      ? [...root.children] : [];
+    const exactSteps = rows.length > 0 && rows.every((row) => {
       const head = row.querySelector(":scope > .bp-canvas-row__head");
-      if (!head) continue;
-      const title = document.createElement("div");
-      title.className = "bp-steps__title";
-      title.textContent = head.querySelector("input")?.value || "";
-      head.replaceWith(title);
       const body = row.querySelector(":scope > .bp-steps__body");
-      if (body?.childNodes.length === 1 && body.firstElementChild?.tagName === "P" && !body.textContent) {
-        body.replaceChildren();
+      return row.matches("li.bp-steps__step.bp-canvas-row") && head && body &&
+        head.querySelector(":scope > input.bp-steps__title.bp-canvas-row__title") &&
+        head.querySelector(":scope > button.bp-canvas-row__remove");
+    });
+    if (exactSteps) {
+      for (const row of rows) {
+        const head = row.querySelector(":scope > .bp-canvas-row__head");
+        const title = document.createElement("div");
+        title.className = "bp-steps__title";
+        title.textContent = head.querySelector(":scope > input")?.value || "";
+        head.replaceWith(title);
+        const body = row.querySelector(":scope > .bp-steps__body");
+        if (body.childNodes.length === 1 && body.firstElementChild?.tagName === "P" && !body.textContent) {
+          body.replaceChildren();
+        }
       }
     }
   } else if (type === "table") {
-    root.querySelector(":scope > colgroup")?.remove();
+    const colgroup = root.querySelector(":scope > colgroup[contenteditable='false']");
     const tbody = root.querySelector(":scope > tbody");
-    if (tbody) {
+    const exactTable = root.matches("table.bp-table:not([role])") && colgroup && tbody &&
+      root.children.length === 2 && root.firstElementChild === colgroup &&
+      root.lastElementChild === tbody && !root.querySelector(":scope > thead");
+    if (exactTable) {
+      colgroup.remove();
       const headerRows = [];
       while (tbody.firstElementChild?.querySelector(":scope > th:not([scope='row'])")) {
         headerRows.push(tbody.removeChild(tbody.firstElementChild));
@@ -136,8 +150,8 @@ function semanticClone(source, blockType) {
           cell.appendChild(span);
         }
       }
+      root.setAttribute("role", "presentation");
     }
-    root.setAttribute("role", "presentation");
   } else if (type === "list") {
     // Portable lists intentionally retain ProseMirror's paragraph carrier for
     // caret/selection behavior. Project that documented equivalent only from
@@ -180,16 +194,23 @@ function semanticClone(source, blockType) {
       }
     }
   } else if (type === "callout" && root.tagName === "DIV") {
-    const title = root.querySelector(":scope > span > strong");
+    const titleHost = root.querySelector(":scope > span");
+    const title = titleHost?.querySelector(":scope > strong[role='textbox']");
     const body = root.querySelector(":scope > .bp-callout__body");
-    const inlineBody = document.createElement("span");
-    if (body) inlineBody.append(...body.childNodes);
-    title?.removeAttribute("style");
-    root.replaceChildren(
-      ...(title?.textContent ? [title, document.createTextNode(" ")] : []),
-      inlineBody,
-    );
+    const exactCallout = root.matches("div.bp-canvas-callout.bp-callout") &&
+      titleHost && title && body && titleHost.nextSibling?.nodeType === Node.TEXT_NODE &&
+      titleHost.nextSibling.nextSibling === body;
+    if (exactCallout) {
+      const inlineBody = document.createElement("span");
+      inlineBody.append(...body.childNodes);
+      title.removeAttribute("style");
+      root.replaceChildren(
+        ...(title.textContent ? [title, document.createTextNode(" ")] : []),
+        inlineBody,
+      );
+    }
   } else if (type === "card") {
+    if (!root.matches("div.bp-canvas-card.bp-card")) return root;
     root.querySelector(":scope > .bp-canvas-card__controls")?.remove();
     root.querySelector(":scope > .bp-canvas-card__media-paint")?.remove();
     root.querySelectorAll(":scope > bp-media-picker").forEach((el) => el.remove());
@@ -345,6 +366,10 @@ const semanticMutationProbes = [
   ["list", '<section class="definitely-not-the-pm-list-wrapper"><ul><li><p>First point</p></li></ul></section>', '<ul><li><span>First point</span></li></ul>'],
   ["paragraph", '<section class="definitely-not-the-pm-paragraph-wrapper"><p>A <strong>bold</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a>.</p></section>', '<p>A <span style="font-weight:bold">bold</span> <a href="https://example.com">link</a>.</p>'],
   ["figure", '<figure class="definitely-not-the-reader-figure-class" role="group" data-bp-type="figure" data-bp-conformance-root><figcaption><input class="bp-canvas-figure-caption-input" value="Caption"></figcaption></figure>', '<figure style="overflow-x:auto"><figcaption class="bp-figcaption">Caption</figcaption></figure>'],
+  ["steps", '<section class="definitely-not-the-reader-steps-class" data-bp-type="steps" data-bp-conformance-root><li><div class="bp-canvas-row__head"><input value="Claim"></div><div class="bp-steps__body"></div></li></section>', '<ol class="bp-steps"><li class="bp-steps__step"><div class="bp-steps__title">Claim</div><div class="bp-steps__body"></div></li></ol>'],
+  ["table", '<table class="bp-table" role="grid" data-bp-type="table" data-bp-conformance-root><tbody><tr><th>Surface</th></tr></tbody></table>', '<table class="bp-table" role="presentation"><thead><tr><th><span>Surface</span></th></tr></thead><tbody></tbody></table>'],
+  ["callout", '<div class="definitely-not-the-reader-callout-class" data-bp-type="callout" data-bp-conformance-root><span><strong role="textbox">Heads up</strong></span> <div class="bp-callout__body">Body</div></div>', '<div class="bp-callout"><strong>Heads up</strong> <span>Body</span></div>'],
+  ["card", '<article class="definitely-not-the-reader-card-class" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><h2><span>Title</span></h2></article>', '<div class="bp-card"><h2>Title</h2></div>'],
 ];
 for (const [type, html, expectedHtml] of semanticMutationProbes) {
   const probe = document.createElement("template");
