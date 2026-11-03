@@ -318,6 +318,7 @@ export const Section = Node.create({
       const dom = document.createElement("div");
       dom.className = "bp-canvas-section";
       dom.setAttribute("data-bp-type", "section");
+      dom.setAttribute("data-bp-conformance-root", "");
       // Match the reader's inline flex-column (route a — no reader change).
       dom.style.display = "flex";
       dom.style.flexDirection = "column";

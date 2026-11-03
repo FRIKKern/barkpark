@@ -180,7 +180,7 @@ function semanticClone(source, blockType) {
     }
 
     const body = root.querySelector(":scope > p");
-    if (body && !body.hasChildNodes()) body.remove();
+    if (body && !body.textContent && !body.querySelector(":scope > :not(.ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor)")) body.remove();
 
     const actionLink = root.querySelector(":scope > a.bp-button");
     const actionIsland = root.querySelector(":scope > span > [data-test-id='paper-card-action-label']");
@@ -248,7 +248,7 @@ function strip(root) {
   const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : root.querySelectorAll("*");
   for (const el of elements) {
     if (el.hasAttribute("data-bp-conformance-root")) {
-      el.style.removeProperty("display");
+      if (el.style.display === "none") el.style.removeProperty("display");
       if (el.getAttribute("style") === "") el.removeAttribute("style");
       el.removeAttribute("loading");
       el.removeAttribute("aria-hidden");
@@ -315,10 +315,11 @@ if (stripProbe.lastChild.tagName !== "A" || stripProbe.lastChild.hasAttribute("s
 const titleOnlySectionProbe = document.createElement("div");
 titleOnlySectionProbe.setAttribute("data-bp-type", "section");
 titleOnlySectionProbe.setAttribute("data-bp-conformance-root", "");
-titleOnlySectionProbe.innerHTML = '<div class="bp-section__cell"><div class="bp-canvas-card bp-card" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><img style="display:none"><button class="bp-canvas-card__media-paint"></button><h2><span data-test-id="paper-card-title">Alpha cell</span></h2><p></p><a class="bp-button" style="display:none"></a><span><span data-test-id="paper-card-action-label" style="display:none"></span></span></div></div>';
+titleOnlySectionProbe.style.cssText = "display:flex;flex-direction:column";
+titleOnlySectionProbe.innerHTML = '<div class="bp-section__cell"><div class="bp-canvas-card bp-card" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><img style="display:none"><button class="bp-canvas-card__media-paint"></button><h2><span data-test-id="paper-card-title">Alpha cell</span></h2><p><br class="ProseMirror-trailingBreak"></p><a class="bp-button" style="display:none"></a><span><span data-test-id="paper-card-action-label" style="display:none"></span></span></div></div>';
 const normalizedTitleOnlySection = semanticClone(titleOnlySectionProbe, "section");
 strip(normalizedTitleOnlySection);
-if (normalizedTitleOnlySection.outerHTML !== '<div><div class="bp-section__cell"><div class="bp-card"><h2>Alpha cell</h2></div></div></div>') {
+if (normalizedTitleOnlySection.outerHTML !== '<div style="display: flex; flex-direction: column;"><div class="bp-section__cell"><div class="bp-card"><h2>Alpha cell</h2></div></div></div>') {
   throw new Error(`nested title-only card did not inherit card parity: ${normalizedTitleOnlySection.outerHTML}`);
 }
 
