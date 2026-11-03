@@ -3,12 +3,12 @@
 //
 // It runs `prepack` (build, notices --check, stage) and then `npm pack`, so
 // it also proves a clean checkout can produce the package. The checks:
-//   1. the tarball holds the bundle, both stylesheets, the mermaid helper,
+//   1. the tarball holds the bundle, the stylesheets, the mermaid and code helpers,
 //      contract.js, the types, README.md, EMBED-CONTRACT.md, LICENSE and the
 //      third-party notices;
 //   2. every path named in package.json `exports`, `main` and `types` is in it;
 //   3. no source, test, script or node_modules file leaks in;
-//   4. the packed bundle and stylesheets are byte-identical to the files
+//   4. the packed browser assets are byte-identical to the files
 //      Phoenix serves from api/priv/static/assets;
 //   5. the version policy holds: package major equals the contract major, and
 //      `barkpark.contractVersion` equals CONTRACT_VERSION.
@@ -57,6 +57,8 @@ const REQUIRED = [
   "dist/bp-paper-editor.css",
   "dist/bp-paper-editor-shell.css",
   "dist/bp-paper-mermaid.js",
+  "dist/bp-paper-surface.css",
+  "dist/bp-paper-code.js",
   "dist/contract.js",
 ];
 for (const f of REQUIRED) if (!files.includes(f)) fail(`tarball is missing ${f}`);
@@ -75,7 +77,14 @@ for (const f of files) {
   }
 }
 
-for (const name of ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css", "bp-paper-mermaid.js"]) {
+for (const name of [
+  "bp-paper-editor.bundle.js",
+  "bp-paper-editor.css",
+  "bp-paper-editor-shell.css",
+  "bp-paper-mermaid.js",
+  "bp-paper-surface.css",
+  "bp-paper-code.js",
+]) {
   const a = fs.readFileSync(path.join(assets, name));
   const b = fs.existsSync(path.join(pkgDir, "dist", name)) ? fs.readFileSync(path.join(pkgDir, "dist", name)) : null;
   if (!b || !a.equals(b)) fail(`dist/${name} differs from api/priv/static/assets/${name}`);
