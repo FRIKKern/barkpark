@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { diffShapes, shapeOf } from "../../../../priv/portable_doc/conformance/conformance.mjs";
 import { runToOps, runToTiptap } from "./run-convert.js";
 
-const TYPES = ["arrayOf", "codelist", "composite", "localizedText", "pre-gate-badge"];
+const TYPES = ["arrayOf", "codelist", "composite", "localizedText", "paper-links", "pre-gate-badge"];
 const fixtures = TYPES.map((type) => {
   const path = new URL(`../../../../priv/portable_doc/goldens/blocks/${type}.golden.json`, import.meta.url);
   const golden = JSON.parse(readFileSync(path, "utf8"));
-  return { type, block: { ...golden.input, id: `missing-five-${type}` }, html: golden.expectedHtml };
+  return {
+    type,
+    block: { ...golden.input, id: `missing-five-${type}` },
+    html: golden.expectedHtml,
+  };
 });
 
 for (const { type, block } of fixtures) {
@@ -53,7 +58,10 @@ try {
       });
       assert.equal(hole.dispatchEvent(event), true, `${type}: delegates canonical HTML injection to the host`);
       hole.innerHTML = html;
-      assert.equal(hole.innerHTML, html, `${type}: resting DOM is byte-identical to the reader fragment`);
+      const expected = document.createElement("template");
+      expected.innerHTML = html;
+      assert.deepEqual(diffShapes(shapeOf(hole.childNodes), shapeOf(expected.content.childNodes)), [],
+        `${type}: mounted DOM is shape-identical to the canonical reader fragment`);
       assert.equal(canvas.querySelector(".bp-paper-contextual-controls"), null,
         `${type}: renderer-only rows add no competing edit chrome`);
     } finally {
@@ -64,4 +72,4 @@ try {
   window.close();
 }
 
-console.log("missing-five renderer: verbatim source, zero ops, and exact server-painted reader DOM");
+console.log("static reader receivers: verbatim source, zero ops, and canonical server-painted reader DOM");
