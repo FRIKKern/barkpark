@@ -8,11 +8,11 @@
 // the block round-trips byte-identically.
 //
 // The node is the section container's shape (section-node.js) with the toggle's chrome:
-// a contentEditable SUMMARY island writing node.attrs.summary, and the block+ body as the
-// contentDOM. In the canvas the details element is always open (an author edits what is
-// inside); `open` rides the attrs verbatim for the reader. The content expression is the
-// section's (V1 forbid-nesting: a container child rides bpOpaque, never a nested
-// container).
+// an input-backed SUMMARY island writing node.attrs.summary, and the block+ body as the
+// contentDOM. In the canvas the details element starts open (an author edits what is
+// inside); native local folding does not rewrite the persisted `open` attr. The content
+// expression is the section's (V1 forbid-nesting: a container child rides bpOpaque,
+// never a nested container).
 //
 // DOM-aware (the NodeView builds real DOM) but the Node SCHEMA object loads in plain Node
 // (`document` is touched only inside addNodeView).
@@ -87,15 +87,17 @@ export const Expandable = Node.create({
 
   addNodeView() {
     return ({ node, editor, getPos }) => {
-      // Not a <details>/<summary> pair in the canvas: a <summary> owns Space and Enter
-      // (they toggle it) and a toggle rebuilds the subtree under the caret, which is
-      // exactly what an editable summary cannot afford. The canvas wrapper is a div
-      // wearing the reader's classes, always "open", with a decorative marker; the
-      // reader still gets its native <details> (compose.ex) from the same block.
-      const dom = document.createElement("div");
+      // The production root is the reader's native details/summary shape. It starts
+      // open so the nested editor remains available; the summary input keeps its own
+      // selection and prevents ProseMirror from treating summary interaction as a
+      // document edit.
+      const dom = document.createElement("details");
       dom.className = "bp-expandable bp-canvas-expandable";
       dom.setAttribute("data-bp-type", BP_TYPE);
       dom.setAttribute("data-bp-conformance-root", "");
+      dom.open = true;
+
+      const summary = document.createElement("summary");
 
       // The summary island is an <input>, not a contentEditable: ProseMirror's focus
       // handler snaps the DOM selection back to its own selection ~20ms after anything
@@ -110,11 +112,20 @@ export const Expandable = Node.create({
       summaryEl.setAttribute("data-test-id", "paper-expandable-summary");
       summaryEl.setAttribute("aria-label", t("toggle summary"));
       summaryEl.setAttribute("contenteditable", "false");
+      // The former div-root stylesheet targeted this input as a direct child.
+      // Keep the same editor geometry now that the native summary is that child.
+      summaryEl.setAttribute(
+        "style",
+        "display:block;width:100%;box-sizing:border-box;padding:10px 15px 10px 34px;" +
+          "margin:0;border:0;background:transparent;font:inherit;font-weight:700;" +
+          "color:var(--paper-ink);cursor:text;outline:none",
+      );
+      summary.appendChild(summaryEl);
 
       const body = document.createElement("div");
       body.className = "bp-expandable__body";
 
-      dom.append(summaryEl, body);
+      dom.append(summary, body);
 
       let syncing = false;
       let focused = false;
@@ -198,7 +209,7 @@ export const Expandable = Node.create({
         },
         stopEvent: (e) => {
           const t = e && e.target;
-          return !!(t && summaryEl.contains(t));
+          return !!(t && summary.contains(t));
         },
         ignoreMutation: (m) => {
           if (m.type === "selection") return false;
