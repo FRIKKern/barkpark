@@ -231,6 +231,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"decodes a non-empty secretText, which it writes to the secret file.",
 	},
 	{
+		File: "internal/cli/media_copy.go", Func: "deleteTargetMedia", Sites: 1,
+		Endpoint: "DELETE /v1/media/:dataset/:id?force=true (bp import --media --replace-media)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through builtinWriteReceiptErr, and the file counts as deleted only when the receipt " +
+			"decodes result.deleted equal to the id sent, so an empty or HTML 200 stops the import before the " +
+			"upload and before any document is written.",
+	},
+	{
 		File: "internal/cli/media_copy.go", Func: "uploadOne", Sites: 1,
 		Endpoint: "POST /v1/media/:dataset/upload (one file of a bp import --media)", Class: machineRendered,
 		Disposition: dispScreened,
