@@ -62,6 +62,11 @@ defmodule BarkparkWeb.CapabilitiesController do
     # pre-views contract (maybe_gate_views strips the declared key).
     include_views = params["views"] in ["1", "true"]
 
+    # ?timeouts=1 opts in to the command-level "timeout_seconds" key
+    # (task-597c98acab512fbf): how long bp waits for one request of a slow
+    # command. Same opt-in discipline as ?views=1.
+    include_timeouts = params["timeouts"] in ["1", "true"]
+
     # ?chat=1 opts in to the root "chat" capability-discovery key (charter D27):
     # per-provider modes/models/efforts for the chat pickers. Same opt-in
     # discipline as ?build=1 — a stale bp strict-decodes the root, so the key is
@@ -94,6 +99,7 @@ defmodule BarkparkWeb.CapabilitiesController do
       Capabilities.manifest(caller_tier,
         include_build: include_build,
         include_views: include_views,
+        include_timeouts: include_timeouts,
         include_chat: include_chat,
         include_bpml: include_bpml,
         include_token: include_token,

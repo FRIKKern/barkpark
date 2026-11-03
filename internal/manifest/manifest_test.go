@@ -689,3 +689,22 @@ func TestFixtureParamNamesAreSafe(t *testing.T) {
 		}
 	}
 }
+
+// A command's timeout_seconds (task-597c98acab512fbf) is an additive key the
+// server sends only under ?timeouts=1. Strict decode must accept it, and a
+// command without it decodes with zero, the CLI default.
+func TestParseCommandTimeoutSeconds(t *testing.T) {
+	body := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"write","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[{"name":"media","summary":"m"}],"commands":[` +
+		`{"id":"media.delete-many","noun":"media","verb":"delete-many","summary":"s","http":{"method":"POST","path_template":"/v1/media/:dataset/delete-many"},"auth_tier":"write","args":[],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"json","timeout_seconds":300},` +
+		`{"id":"media.ls","noun":"media","verb":"ls","summary":"s","http":{"method":"GET","path_template":"/v1/media/:dataset"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	m, err := Parse(body)
+	if err != nil {
+		t.Fatalf("Parse rejected a command carrying timeout_seconds: %v", err)
+	}
+	if got := m.Commands[0].TimeoutSeconds; got != 300 {
+		t.Errorf("media.delete-many TimeoutSeconds = %d, want 300", got)
+	}
+	if got := m.Commands[1].TimeoutSeconds; got != 0 {
+		t.Errorf("media.ls TimeoutSeconds = %d, want 0", got)
+	}
+}

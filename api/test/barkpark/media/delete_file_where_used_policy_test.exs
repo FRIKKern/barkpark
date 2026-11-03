@@ -144,8 +144,9 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
   describe "SOURCE PIN: every production call site names its policy" do
     # `git grep`-free so it runs from any checkout: walk api/lib for the call.
     # task-60a5883edeb49cbe: the v1 door's bulk delete-many is a second :guard
-    # site in the same controller. It runs the single DELETE's census and passes
-    # the forced-delete witness as :override, as the single DELETE does.
+    # site in the same controller. task-597c98acab512fbf moved it to the batch
+    # verb `Media.delete_files/2`, which takes the same :where_used policy and
+    # re-checks every unforced file in one census; the pin counts both verbs.
     test "all six lib call sites pass :where_used, and the split is 3 doors / 3 cascade" do
       sites = call_sites()
 
@@ -196,13 +197,17 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
       |> File.read!()
       |> String.split("\n")
       |> Enum.filter(fn line ->
-        String.contains?(line, "Media.delete_file(") and
+        (String.contains?(line, "Media.delete_file(") or
+           String.contains?(line, "Media.delete_files(")) and
           not String.starts_with?(String.trim_leading(line), "#")
       end)
       |> Enum.map(&{rel, &1})
     end)
-    # `def delete_file(...)` in media.ex is the definition, not a call site.
-    |> Enum.reject(fn {_p, line} -> String.contains?(line, "def delete_file(") end)
+    # `def delete_file(...)` and `def delete_files(...)` in media.ex are the
+    # definitions, not call sites.
+    |> Enum.reject(fn {_p, line} ->
+      String.contains?(line, "def delete_file(") or String.contains?(line, "def delete_files(")
+    end)
   end
 
   defp media_file! do

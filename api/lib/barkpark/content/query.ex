@@ -878,104 +878,10 @@ defmodule Barkpark.Content.Query do
     # delete guard passes the blob's Sanity ids (task-bace4f482af160a9).
     patterns = Keyword.get(opts, :asset_ref_patterns, [])
 
-    opts
-    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
-    |> Enum.map(fn schema ->
-      {schema,
-       Enum.filter(
-         schema.fields || [],
-         &(is_binary(&1["name"]) and link_field?(&1) and
-             Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
-       )}
-    end)
-    # A type with no field that can hold a link would run a query whose
-    # predicate is `false`: skip it (one query per such type per backlinks read).
-    |> Enum.reject(fn {_schema, fields} -> fields == [] end)
+    dataset
+    |> link_fields_by_schema(ctx, opts)
     |> Enum.flat_map(fn {schema, fields} ->
-      {predicate, via_field} =
-        fields
-        |> Enum.reverse()
-        |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
-          name = field["name"]
-          # Match the two core reference shapes without treating ordinary text
-          # or hidden fields as links. Nested plugin links stay on the graph arm.
-          matches =
-            cond do
-              field["type"] == "reference" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "?->>? = ? OR ?->?->>'_ref' = ?",
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    d.content,
-                    ^name,
-                    ^pub_id
-                  )
-                )
-
-              # One arm for every array. A multi-type array can allow a
-              # reference AND an image member, so each member kind it allows
-              # adds its own match (task-e7a8f98e6924df10).
-              field["type"] == "arrayOf" ->
-                array_holder_match(name, array_member_types(field), pub_id, draft_id)
-                |> or_array_asset_patterns(name, array_member_types(field), patterns)
-
-              # An `image` field's stored shape is `{asset: {_ref}, hotspot:
-              # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
-              # deeper than a `reference` field's bare `{_ref}`, so it needs
-              # its own path rather than falling through to the `true` arm
-              # below (task-94891b81179a0855: an image field's asset ref was
-              # invisible to backlinks and media relations entirely).
-              # The `_ref` matches the asset's bare OR draft id: the upload
-              # receipt's `assetDocId` is `drafts.asset-…`, and a client that
-              # stores it verbatim holds the same asset (task-fe13ea62be4a69e6).
-              field["type"] == "image" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "?->?->'asset'->>'_ref' IN (?, ?)",
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    ^draft_id
-                  )
-                )
-                |> or_field_asset_patterns(name, patterns)
-
-              # A `file` field's stored shape is the SAME `{asset: {_ref}}`
-              # wrapper an `image` field uses, minus the image-only hotspot/
-              # crop subfields (`Validation.walk_field/4`'s own "same split as
-              # image... no image-only concept applies" comment) — so its
-              # backlinks arm is #22042's image arm, unchanged, matched on
-              # `"file"` instead (task-7150f77eb6fbc640: a post's `file` field
-              # asset ref was invisible to backlinks/media-delete-protection
-              # entirely, while the `image` arm already covered the same
-              # shape for an `image` field).
-              field["type"] == "file" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "?->?->'asset'->>'_ref' IN (?, ?)",
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    ^draft_id
-                  )
-                )
-                |> or_field_asset_patterns(name, patterns)
-
-              true ->
-                dynamic(false)
-            end
-
-          {dynamic([d], ^acc or ^matches),
-           dynamic(
-             [d],
-             fragment("CASE WHEN ? THEN ?::text ELSE ? END", ^matches, ^name, ^selected_field)
-           )}
-        end)
+      {predicate, via_field} = holder_match(fields, pub_id, draft_id, patterns)
 
       schema.name
       |> base_query(dataset, %{}, opts)
@@ -998,6 +904,290 @@ defmodule Barkpark.Content.Query do
       })
       |> select_merge(^%{via_field: via_field})
       |> Repo.all()
+    end)
+  end
+
+  @doc """
+  `list_reference_holders/3` for many targets in one pass:
+  `%{key => [holder]}` for `targets`, a list of `{key, target_id, patterns}`.
+
+  One query per schema type for the whole list instead of one per type per
+  target. The media delete-many guard asks this for up to 100 blobs at once;
+  asked one blob at a time it ran every type's query 100 times
+  (task-597c98acab512fbf). Each row names the targets it holds in `hits`, and a
+  target's own document never counts as its holder. Every key is present in the
+  result, with `[]` when nothing holds it. The rows carry the card fields of
+  `list_reference_holders/3` except `via_field`.
+  """
+  @spec list_reference_holders_many([{term(), String.t(), [String.t()]}], String.t(), keyword()) ::
+          %{term() => [map()]}
+  def list_reference_holders_many(targets, dataset, opts) do
+    ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+    empty = Map.new(targets, fn {key, _id, _patterns} -> {key, []} end)
+
+    indexed =
+      targets
+      |> Enum.with_index()
+      |> Enum.map(fn {{key, target_id, patterns}, i} ->
+        pub_id = Barkpark.Content.published_id(target_id)
+        {i, key, pub_id, Barkpark.Content.draft_id(pub_id), patterns}
+      end)
+
+    keys =
+      Map.new(indexed, fn {i, key, _pub, _draft, _patterns} -> {Integer.to_string(i), key} end)
+
+    pub_ids = Enum.map(indexed, &elem(&1, 2))
+    asset_ids = pub_ids ++ Enum.map(indexed, &elem(&1, 3))
+    all_patterns = indexed |> Enum.flat_map(&elem(&1, 4)) |> Enum.uniq()
+
+    if indexed == [] do
+      empty
+    else
+      dataset
+      |> link_fields_by_schema(ctx, opts)
+      |> Enum.flat_map(fn {schema, fields} ->
+        # PASS 1: the rows of this type that may hold ANY target. Each link
+        # field is read once per row and compared with every id at once. One
+        # exact match per target, OR-ed, read every field once per target per
+        # row, and 20 targets over 20,000 documents took 1.6 s (task-597c98acab512fbf).
+        # This pass may match more than the exact test; pass 2 decides.
+        candidates =
+          schema.name
+          |> base_query(dataset, %{}, opts)
+          |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+          |> restrict_to_visible_types(dataset, opts)
+          |> where(^holder_match_any(fields, pub_ids, asset_ids, all_patterns))
+          |> maybe_require_published(opts)
+          |> select([d], d.id)
+          |> Repo.all()
+
+        if candidates == [] do
+          []
+        else
+          exact_holders(schema, fields, candidates, indexed, dataset, opts)
+        end
+      end)
+      |> Enum.reduce(empty, fn row, acc ->
+        row.hits
+        |> String.split(",", trim: true)
+        |> Enum.reduce(acc, fn i, acc ->
+          key = Map.fetch!(keys, i)
+          Map.update!(acc, key, &[Map.delete(row, :hits) | &1])
+        end)
+      end)
+      |> Map.new(fn {key, rows} -> {key, Enum.reverse(rows)} end)
+    end
+  end
+
+  # PASS 2 of `list_reference_holders_many/3`: over the candidate rows only,
+  # the exact `holder_match/4` test per target, naming each target a row holds.
+  defp exact_holders(schema, fields, candidates, indexed, dataset, opts) do
+    {predicate, hits} =
+      Enum.reduce(indexed, {dynamic(false), dynamic(fragment("''"))}, fn
+        {i, _key, pub_id, draft_id, patterns}, {any, hits} ->
+          {match, _via} = holder_match(fields, pub_id, draft_id, patterns)
+          own = [pub_id, draft_id]
+          holds = dynamic([d], ^match and d.doc_id not in ^own)
+
+          {dynamic([d], ^any or ^holds),
+           dynamic(
+             [d],
+             fragment("? || CASE WHEN ? THEN ? ELSE '' END", ^hits, ^holds, ^",#{i}")
+           )}
+      end)
+
+    schema.name
+    |> base_query(dataset, %{}, opts)
+    |> where([d], d.id in ^candidates)
+    |> where(^predicate)
+    |> order_by([d], desc: fragment("? LIKE 'drafts.%'", d.doc_id), asc: d.doc_id)
+    |> select([d], %{
+      id: d.id,
+      doc_id: d.doc_id,
+      title: d.title,
+      type: d.type,
+      rev: d.rev,
+      updated_at: d.updated_at,
+      description: fragment("?->'description'", d.content),
+      event_type: fragment("?->'event_type'", d.content)
+    })
+    |> select_merge(^%{hits: hits})
+    |> Repo.all()
+  end
+
+  # A superset of `holder_match/4` for many targets: each field is read once
+  # and compared with every id or pattern. `pub_ids` are the targets'
+  # published ids, `asset_ids` adds their draft ids, as an image or file field
+  # matches either.
+  defp holder_match_any(fields, pub_ids, asset_ids, patterns) do
+    Enum.reduce(fields, dynamic(false), fn field, acc ->
+      name = field["name"]
+
+      matches =
+        case field["type"] do
+          "reference" ->
+            dynamic(
+              [d],
+              fragment(
+                "?->>? = ANY(?) OR ?->?->>'_ref' = ANY(?)",
+                d.content,
+                ^name,
+                type(^pub_ids, {:array, :string}),
+                d.content,
+                ^name,
+                type(^pub_ids, {:array, :string})
+              )
+            )
+
+          type when type in ["image", "file"] ->
+            dynamic(
+              [d],
+              fragment(
+                "?->?->'asset'->>'_ref' = ANY(?) OR ?->?->'asset'->>'_ref' LIKE ANY(?)",
+                d.content,
+                ^name,
+                type(^asset_ids, {:array, :string}),
+                d.content,
+                ^name,
+                type(^patterns, {:array, :string})
+              )
+            )
+
+          # Any member shape an array can hold: a bare id, `{_ref}`, or
+          # `{asset: {_ref}}` by id or Sanity pattern.
+          "arrayOf" ->
+            dynamic(
+              [d],
+              fragment(
+                """
+                jsonb_typeof(?->?) = 'array' AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(?->?) AS e
+                  WHERE e #>> '{}' = ANY(?) OR e->>'_ref' = ANY(?)
+                     OR e->'asset'->>'_ref' = ANY(?) OR e->'asset'->>'_ref' LIKE ANY(?))
+                """,
+                d.content,
+                ^name,
+                d.content,
+                ^name,
+                type(^pub_ids, {:array, :string}),
+                type(^pub_ids, {:array, :string}),
+                type(^asset_ids, {:array, :string}),
+                type(^patterns, {:array, :string})
+              )
+            )
+
+          _ ->
+            dynamic(false)
+        end
+
+      dynamic([d], ^acc or ^matches)
+    end)
+  end
+
+  # Each schema of `dataset` with the fields `ctx` may read that can hold a
+  # link. A type with no such field would run a query whose predicate is
+  # `false`, so it is left out (one query per such type per backlinks read).
+  defp link_fields_by_schema(dataset, ctx, opts) do
+    opts
+    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
+    |> Enum.map(fn schema ->
+      {schema,
+       Enum.filter(
+         schema.fields || [],
+         &(is_binary(&1["name"]) and link_field?(&1) and
+             Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
+       )}
+    end)
+    |> Enum.reject(fn {_schema, fields} -> fields == [] end)
+  end
+
+  # The match for one target over one schema's link fields: the `where`
+  # predicate and the `via_field` expression naming the first field that holds
+  # it. Shared by `list_reference_holders/3` and
+  # `list_reference_holders_many/3` so the two cannot drift.
+  defp holder_match(fields, pub_id, draft_id, patterns) do
+    fields
+    |> Enum.reverse()
+    |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
+      name = field["name"]
+      # Match the two core reference shapes without treating ordinary text
+      # or hidden fields as links. Nested plugin links stay on the graph arm.
+      matches =
+        cond do
+          field["type"] == "reference" ->
+            dynamic(
+              [d],
+              fragment(
+                "?->>? = ? OR ?->?->>'_ref' = ?",
+                d.content,
+                ^name,
+                ^pub_id,
+                d.content,
+                ^name,
+                ^pub_id
+              )
+            )
+
+          # One arm for every array. A multi-type array can allow a
+          # reference AND an image member, so each member kind it allows
+          # adds its own match (task-e7a8f98e6924df10).
+          field["type"] == "arrayOf" ->
+            array_holder_match(name, array_member_types(field), pub_id, draft_id)
+            |> or_array_asset_patterns(name, array_member_types(field), patterns)
+
+          # An `image` field's stored shape is `{asset: {_ref}, hotspot:
+          # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
+          # deeper than a `reference` field's bare `{_ref}`, so it needs
+          # its own path rather than falling through to the `true` arm
+          # below (task-94891b81179a0855: an image field's asset ref was
+          # invisible to backlinks and media relations entirely).
+          # The `_ref` matches the asset's bare OR draft id: the upload
+          # receipt's `assetDocId` is `drafts.asset-…`, and a client that
+          # stores it verbatim holds the same asset (task-fe13ea62be4a69e6).
+          field["type"] == "image" ->
+            dynamic(
+              [d],
+              fragment(
+                "?->?->'asset'->>'_ref' IN (?, ?)",
+                d.content,
+                ^name,
+                ^pub_id,
+                ^draft_id
+              )
+            )
+            |> or_field_asset_patterns(name, patterns)
+
+          # A `file` field's stored shape is the SAME `{asset: {_ref}}`
+          # wrapper an `image` field uses, minus the image-only hotspot/
+          # crop subfields (`Validation.walk_field/4`'s own "same split as
+          # image... no image-only concept applies" comment) — so its
+          # backlinks arm is #22042's image arm, unchanged, matched on
+          # `"file"` instead (task-7150f77eb6fbc640: a post's `file` field
+          # asset ref was invisible to backlinks/media-delete-protection
+          # entirely, while the `image` arm already covered the same
+          # shape for an `image` field).
+          field["type"] == "file" ->
+            dynamic(
+              [d],
+              fragment(
+                "?->?->'asset'->>'_ref' IN (?, ?)",
+                d.content,
+                ^name,
+                ^pub_id,
+                ^draft_id
+              )
+            )
+            |> or_field_asset_patterns(name, patterns)
+
+          true ->
+            dynamic(false)
+        end
+
+      {dynamic([d], ^acc or ^matches),
+       dynamic(
+         [d],
+         fragment("CASE WHEN ? THEN ?::text ELSE ? END", ^matches, ^name, ^selected_field)
+       )}
     end)
   end
 

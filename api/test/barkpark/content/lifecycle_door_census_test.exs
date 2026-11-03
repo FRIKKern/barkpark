@@ -109,6 +109,11 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
     "barkpark/media.ex delete_found_file/4 → delete_row_with_asset_doc" => :caller,
     "barkpark/media.ex delete_row_with_asset_doc/3 → delete_asset_doc" => :caller,
     "barkpark/media.ex delete_asset_doc/2 → delete_for_blob" => :caller,
+    # task-597c98acab512fbf: the delete-many batch. `seat` is the caller's
+    # :caller_context, threaded the same way as the one-file path above.
+    "barkpark/media.ex admitted_delete_files/2 → delete_files_batch" => :caller,
+    "barkpark/media.ex delete_files_batch/6 → delete_rows_with_asset_docs" => :caller,
+    "barkpark/media.ex delete_rows_with_asset_docs/3 → delete_asset_doc" => :caller,
     "barkpark/plugins/media.ex after_media_delete/1 → delete_for_blob" =>
       {:system,
        "a second, idempotent pass over the asset doc delete_asset_doc/2 already deleted " <>

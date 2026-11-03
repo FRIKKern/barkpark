@@ -70,6 +70,10 @@ defmodule BarkparkWeb.Integration.MediaDeleteManyTest do
     {result["id"], Content.published_id(result["assetDocId"])}
   end
 
+  # A statement that reads every document's content as text to find a delivery
+  # URL: the single-blob LIKE scan or the batched split.
+  defp textual_scan?(sql), do: sql =~ "::text LIKE" or sql =~ "string_to_array"
+
   defp delete_many(conn, ws, proj, body), do: post(conn, base(ws, proj) <> "/delete-many", body)
 
   test "deletes every file in one request; an id already gone counts as done, and a retry is a 200",
@@ -119,6 +123,142 @@ defmodule BarkparkWeb.Integration.MediaDeleteManyTest do
              json_response(delete_many(conn, ws, proj, %{"ids" => [used], "force" => true}), 200)
 
     refute Repo.get(MediaFile, used)
+  end
+
+  # task-597c98acab512fbf: on a 2 vCPU VM a 50-id request took 172.7 s because
+  # each id ran the where-used census twice, and each census scanned every
+  # document's content as text twice. The batch now takes one census for all
+  # its ids, and still refuses each referenced file on its own.
+  test "one textual where-used scan per request, and each referenced file is still refused",
+       %{conn: conn, ws: ws, proj: proj, scope: scope} do
+    {by_url, _} = upload!(conn, ws, proj)
+    {by_ref, by_ref_asset} = upload!(conn, ws, proj)
+    free = for _ <- 1..4, do: elem(upload!(conn, ws, proj), 0)
+
+    url_file = Repo.get!(MediaFile, by_url)
+
+    # A raw URL in block JSON, the shape only the textual scan sees.
+    Repo.insert!(%Barkpark.Content.Document{
+      doc_id: "embeds-#{System.unique_integer([:positive])}",
+      type: "paper",
+      dataset: @ds,
+      title: "Embeds a blob by URL",
+      status: "published",
+      rev: "rev-#{System.unique_integer([:positive])}",
+      content: %{"blocks" => [%{"_type" => "image", "src" => "/media/files/" <> url_file.path}]}
+    })
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"title" => "uses it", "mainImage" => %{"asset" => %{"_ref" => by_ref_asset}}},
+        @ds,
+        scope
+      )
+
+    ids = [by_url | free] ++ [by_ref]
+
+    {resp, sqls} =
+      Barkpark.QueryCounter.sql(fn -> delete_many(conn, ws, proj, %{"ids" => ids}) end)
+
+    body = json_response(resp, 409)
+    assert body["error"]["details"]["deleted"] == free
+    assert Enum.map(body["error"]["details"]["refused"], & &1["id"]) == [by_url, by_ref]
+    assert Enum.all?(body["error"]["details"]["refused"], &(&1["referencedByCount"] == 1))
+
+    textual_scans = Enum.count(sqls, &textual_scan?/1)
+
+    assert textual_scans == 1,
+           "expected one textual where-used scan for #{length(ids)} ids, saw #{textual_scans}"
+
+    for id <- free, do: refute(Repo.get(MediaFile, id))
+    assert Repo.get(MediaFile, by_url)
+    assert Repo.get(MediaFile, by_ref)
+  end
+
+  test "WhereUsed.referrers_many/1 answers what referrers/1 answers for each file",
+       %{conn: conn, ws: ws, proj: proj, scope: scope} do
+    {by_url, _} = upload!(conn, ws, proj)
+    {by_ref, by_ref_asset} = upload!(conn, ws, proj)
+    {by_sanity, _} = upload!(conn, ws, proj)
+    {unused, _} = upload!(conn, ws, proj)
+
+    url_file = Repo.get!(MediaFile, by_url)
+    sanity_file = Repo.get!(MediaFile, by_sanity)
+
+    for n <- 1..2 do
+      Repo.insert!(%Barkpark.Content.Document{
+        doc_id: "embeds-#{n}-#{System.unique_integer([:positive])}",
+        type: "paper",
+        dataset: @ds,
+        title: "Embeds a blob by URL",
+        status: if(n == 1, do: "published", else: "draft"),
+        rev: "rev-#{System.unique_integer([:positive])}",
+        content: %{"blocks" => [%{"src" => "/media/files/" <> url_file.path}]}
+      })
+    end
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"title" => "by ref", "mainImage" => %{"asset" => %{"_ref" => by_ref_asset}}},
+        @ds,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{
+          "title" => "by sanity id",
+          "mainImage" => %{"asset" => %{"_ref" => "image-#{sanity_file.sha1}-1x1-png"}}
+        },
+        @ds,
+        scope
+      )
+
+    files = Enum.map([by_url, by_ref, by_sanity, unused], &Repo.get!(MediaFile, &1))
+    many = Barkpark.Media.WhereUsed.referrers_many(files)
+
+    shape = fn %{count: count, sample: sample} ->
+      {count, sample |> Enum.map(& &1.doc_id) |> Enum.sort()}
+    end
+
+    for file <- files do
+      assert shape.(Map.fetch!(many, file.id)) ==
+               shape.(Barkpark.Media.WhereUsed.referrers(file))
+    end
+
+    assert {2, _} = shape.(many[by_url])
+    assert {1, _} = shape.(many[by_ref])
+    assert {1, _} = shape.(many[by_sanity])
+    assert {0, []} = shape.(many[unused])
+  end
+
+  test "a forced batch is witnessed from one census and deletes referenced files",
+       %{conn: conn, ws: ws, proj: proj, scope: scope} do
+    {used, used_ref} = upload!(conn, ws, proj)
+    {free, _} = upload!(conn, ws, proj)
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"title" => "uses it", "mainImage" => %{"asset" => %{"_ref" => used_ref}}},
+        @ds,
+        scope
+      )
+
+    {resp, sqls} =
+      Barkpark.QueryCounter.sql(fn ->
+        delete_many(conn, ws, proj, %{"ids" => [used, free], "force" => true})
+      end)
+
+    assert %{"result" => %{"deleted" => [^used, ^free], "refused" => []}} =
+             json_response(resp, 200)
+
+    assert Enum.count(sqls, &textual_scan?/1) == 1
+    refute Repo.get(MediaFile, used)
+    refute Repo.get(MediaFile, free)
   end
 
   test "a file of another dataset is not deleted through this one",

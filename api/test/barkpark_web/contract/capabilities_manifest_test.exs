@@ -1224,6 +1224,30 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  # task-597c98acab512fbf: a command that can take longer than bp's default
+  # 30 s declares how long to wait. Withheld unless ?timeouts=1, for the reason
+  # `views` is.
+  describe "command-level `timeout_seconds` (?timeouts=1 opt-in)" do
+    test "the default manifest declares no timeout_seconds on any command", %{conn: conn} do
+      leaked =
+        capabilities(conn)["commands"]
+        |> Enum.filter(&Map.has_key?(&1, "timeout_seconds"))
+        |> Enum.map(& &1["id"])
+
+      assert leaked == []
+    end
+
+    test "?timeouts=1 gives media.delete-many a 300 s wait", %{conn: conn} do
+      manifest = conn |> caps_conn("?timeouts=1") |> json_response(200)
+
+      assert find_cmd(manifest, "media.delete-many")["timeout_seconds"] == 300
+
+      for cmd <- manifest["commands"], Map.has_key?(cmd, "timeout_seconds") do
+        assert is_integer(cmd["timeout_seconds"]) and cmd["timeout_seconds"] > 0
+      end
+    end
+  end
+
   describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
     # The commands that support the brief/full projection.
     @views_commands ~w(task.ready task.prime search.query)
