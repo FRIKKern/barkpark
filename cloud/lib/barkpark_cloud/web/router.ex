@@ -113,6 +113,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
       POST    /v1/operator/barkparks/:id/enable-apply operator  re-run the enable-apply job on one ARMED box (re-arms + restores box-side go.mod/go.sum churn; consent-gated on autoupdate_enabled)
       POST    /v1/operator/barkparks/:id/admin-token/rotate operator  replace the admin token Cloud holds for one box: mint a successor, store it, check it, then revoke the old one (no secret returned)
+      POST    /v1/operator/barkparks/:id/token-seats/restore operator  give a token on one box back the workspace seats its revoked predecessor held (dry run unless apply)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
@@ -326,6 +327,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Accounts.{Authz, Erasure, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AdminTokenRotation
+  alias BarkparkCloud.Registry.TokenSeatRestore
   alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
@@ -5762,6 +5764,140 @@ defmodule BarkparkCloud.Web.Router do
         box_status: status,
         detail:
           "The box refused to revoke the old token. Cloud kept the old token and revoked the successor."
+      })
+
+  # POST /v1/operator/barkparks/:id/token-seats/restore → 200 {ok,
+  # barkpark_id, restore: {token_id, predecessors, restore, already, refused,
+  # applied}} — give a token on the box back the workspace seats its revoked
+  # predecessor held (task-c6185553d0bd7869). Body {token?, workspaces?,
+  # apply?}: `token` defaults to the admin token Cloud holds, `apply` to false,
+  # which is a dry run. `Registry.TokenSeatRestore` calls the box's
+  # `/v1/admin/tokens/:id/seats/restore` with the held token; the box decides
+  # from its own audit rows what may be restored. Operator only, like the
+  # rotate route above. An applied restore writes a
+  # `barkpark.token_seats_restored` audit row. Refusals: 404 not_found, 409
+  # not_live, 404 no_admin_token, 500 decrypt_failed, 422 invalid, 502
+  # box_unreachable, 502 not_box_admin, 409 box_too_old, 404 token_not_found,
+  # 409 token_not_live, 409 seat_not_held_before (with the plan), 502
+  # restore_refused. Nothing is written on the box for any refusal.
+  post "/v1/operator/barkparks/:id/token-seats/restore" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      true ->
+        params = conn.body_params
+        token = params["token"]
+        workspaces = params["workspaces"] || []
+        apply? = params["apply"] || false
+
+        cond do
+          not (is_nil(token) or is_binary(token)) or not is_list(workspaces) or
+            not Enum.all?(workspaces, &is_binary/1) or not is_boolean(apply?) ->
+            json(conn, 422, %{
+              error: "invalid",
+              detail: "token must be a string, workspaces a list of slugs, apply a boolean"
+            })
+
+          true ->
+            case Registry.get_barkpark(id) do
+              nil ->
+                json(conn, 404, %{error: "not_found"})
+
+              %Barkpark{} = bp ->
+                case TokenSeatRestore.restore(bp, token, workspaces, apply?) do
+                  {:ok, plan} ->
+                    if plan["applied"] == true and plan["restore"] != [] do
+                      record_seat_restore_audit(conn, bp, plan)
+                    end
+
+                    json(conn, 200, %{ok: true, barkpark_id: bp.id, restore: plan})
+
+                  {:error, refusal} ->
+                    seat_restore_refusal(conn, refusal)
+                end
+            end
+        end
+    end
+  end
+
+  defp record_seat_restore_audit(conn, bp, plan) do
+    case Accounts.record_audit(%{
+           team_id: bp.team_id,
+           actor_user_id: conn.assigns.current_user.id,
+           action: "barkpark.token_seats_restored",
+           target_type: "barkpark",
+           target_id: bp.id,
+           metadata: %{
+             token_id: plan["token_id"],
+             predecessors: plan["predecessors"],
+             restored: plan["restore"]
+           }
+         }) do
+      {:ok, _} ->
+        push_event(bp.team_id, "audit")
+
+      {:error, reason} ->
+        Logger.warning("token-seats restore: audit row for #{bp.id} failed: #{inspect(reason)}")
+    end
+  end
+
+  defp seat_restore_refusal(conn, :not_live), do: json(conn, 409, %{error: "not_live"})
+
+  defp seat_restore_refusal(conn, :no_admin_token),
+    do: json(conn, 404, %{error: "no_admin_token"})
+
+  defp seat_restore_refusal(conn, :decrypt_failed),
+    do: json(conn, 500, %{error: "decrypt_failed"})
+
+  defp seat_restore_refusal(conn, :unreachable),
+    do: json(conn, 502, %{error: "box_unreachable", detail: "Nothing changed."})
+
+  defp seat_restore_refusal(conn, {:held_token_refused, status}),
+    do:
+      json(conn, 502, %{
+        error: "not_box_admin",
+        box_status: status,
+        detail:
+          "The box refused the token Cloud holds: it lacks admin, or the box's operator " <>
+            "allowlist does not name it. Nothing changed."
+      })
+
+  defp seat_restore_refusal(conn, {:box_too_old, route}),
+    do: json(conn, 409, %{error: "box_too_old", missing: route, detail: "Update the box first."})
+
+  defp seat_restore_refusal(conn, :token_not_found),
+    do: json(conn, 404, %{error: "token_not_found", detail: "The box has no token with that id."})
+
+  defp seat_restore_refusal(conn, :token_not_live),
+    do:
+      json(conn, 409, %{
+        error: "token_not_live",
+        detail: "That token is revoked or expired on the box."
+      })
+
+  defp seat_restore_refusal(conn, {:not_held_before, plan}) do
+    refused =
+      for %{"workspace" => ws} <- List.wrap(plan["refused"]), is_binary(ws), do: ws
+
+    json(conn, 409, %{
+      error: "seat_not_held_before",
+      restore: plan,
+      detail:
+        "No revoked predecessor of the token held a seat in " <>
+          Enum.join(refused, ", ") <> ". Nothing changed."
+    })
+  end
+
+  defp seat_restore_refusal(conn, {:restore_refused, status, reason}),
+    do:
+      json(conn, 502, %{
+        error: "restore_refused",
+        box_status: status,
+        reason: reason,
+        detail: "The box refused the restore. Nothing changed."
       })
 
   post "/v1/operator/autoupdate/resume" do

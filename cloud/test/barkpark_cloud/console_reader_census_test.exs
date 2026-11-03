@@ -870,6 +870,43 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "Flip: the console gains an attach-existing-box control and needs a reader ruling."
     },
 
+    # ------------------------------------------------------------------ token-seat restore arm
+    # task-c6185553d0bd7869: POST /v1/operator/barkparks/:id/token-seats/restore
+    # is driven by `bp barkparks repair-token-seats` only. The console has no
+    # control for it, so every code here is CLI-only.
+    %{
+      code: "restore_refused",
+      site:
+        "router.ex POST /v1/operator/barkparks/:id/token-seats/restore (seat_restore_refusal/2)",
+      reason:
+        "CLI-only: the box refused the restore with a status Cloud has no other code for; the CLI prints box_status and reason. " <>
+          "Flip: the operator console gains a token-seat restore control and needs a reader ruling."
+    },
+    %{
+      code: "seat_not_held_before",
+      site:
+        "router.ex POST /v1/operator/barkparks/:id/token-seats/restore (seat_restore_refusal/2)",
+      reason:
+        "CLI-only: the box found no revoked predecessor that held a named workspace; the CLI prints the plan. " <>
+          "Flip: the operator console gains a token-seat restore control and needs a reader ruling."
+    },
+    %{
+      code: "token_not_found",
+      site:
+        "router.ex POST /v1/operator/barkparks/:id/token-seats/restore (seat_restore_refusal/2)",
+      reason:
+        "CLI-only: the box has no token with the id the operator named. " <>
+          "Flip: the operator console gains a token-seat restore control and needs a reader ruling."
+    },
+    %{
+      code: "token_not_live",
+      site:
+        "router.ex POST /v1/operator/barkparks/:id/token-seats/restore (seat_restore_refusal/2)",
+      reason:
+        "CLI-only: the token the operator named is revoked or expired on the box. " <>
+          "Flip: the operator console gains a token-seat restore control and needs a reader ruling."
+    },
+
     # ------------------------------------------------------------------ worker-agent mass
     # Machine tiers: require_worker matches the shared WORKER_TOKEN, require_agent
     # an agent credential, the builder token its own secret, and the webhook

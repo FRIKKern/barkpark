@@ -274,6 +274,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          ":instance_global for the identical reason. It touches ONLY the named workspaces row " <>
          "(Quota.reinstate/1 + set_expires_at/2) and no tenant CONTENT at all. Source carries " <>
          "no scope marker at all."},
+    # TokenSeatRestoreController.create
+    {"POST", "/v1/admin/tokens/:id/seats/restore"} =>
+      {:global,
+       "instance-operator primitive (task-c6185553d0bd7869): gives a token back the seats " <>
+         "its revoked predecessor held. The :id names the SUBJECT of the operator's action; " <>
+         "the permit is the [:api, :require_admin, :require_platform_operator] pipeline, and " <>
+         "what it may write is bounded by the predecessor lineage in the token_minted audit " <>
+         "rows. Touches workspace_memberships rows only, never tenant content. Source " <>
+         "carries no scope marker at all."},
     # OrgSsoController
     {"POST", "/v1/admin/orgs"} =>
       {:global,

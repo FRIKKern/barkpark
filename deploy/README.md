@@ -672,6 +672,22 @@ back from the box itself, as root, with the operator one-shot recipe in
 (dry run; `--apply` writes). It seats the token with the role its permissions
 give, and writes a `token_seated` audit row.
 
+Without a root shell, Cloud can do the same repair over HTTP:
+
+    bp barkparks repair-token-seats <instance> [--token-id <id>] [--seat <slug> ...] [--apply]
+
+`POST /v1/operator/barkparks/:id/token-seats/restore` (platform operator) —
+`cloud/lib/barkpark_cloud/registry/token_seat_restore.ex` — calls the box's
+`POST /v1/admin/tokens/:id/seats/restore` with the admin token Cloud holds.
+The box route is on the instance-operator tier, so on a box with an armed
+operator allowlist the held token's id must be on `BARKPARK_OPERATOR_TOKEN_IDS`.
+The box restores a seat only when a revoked token that minted this one (its
+`token_minted` audit row) held it, never above that token's role
+(`api/lib/barkpark/auth/token_seat_restore.ex`). `--token-id` defaults to the
+token Cloud holds; no `--seat` means every seat a predecessor held. It is a
+dry run unless `--apply`. An apply writes a `token_seated` audit row per seat
+on the box and a `barkpark.token_seats_restored` row in Cloud.
+
 ## Staging channel — prove a Barkpark build before the fleet gets it
 
 `staging.barkpark.cloud` is one disposable box that runs Barkpark **itself**, so a

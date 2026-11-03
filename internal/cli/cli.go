@@ -378,6 +378,12 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		barkparksArgs := append([]string(nil), rest[1:]...)
+		// --workspace and --token are global flags, so the global parser has
+		// already taken them. For repair-token-seats they would be read as the
+		// seat and the token to repair; refuse them instead of ignoring them.
+		if len(barkparksArgs) > 0 && barkparksArgs[0] == "repair-token-seats" && (g.workspace != "" || g.token != "") {
+			return useError(out, "usage", "repair-token-seats takes --seat <workspace> and --token-id <id>; --workspace and --token are global flags (usage: "+repairTokenSeatsUsage+")", exitUsage)
+		}
 		if g.all {
 			barkparksArgs = append(barkparksArgs, "--all")
 		}

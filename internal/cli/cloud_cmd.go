@@ -41,6 +41,9 @@ func runBarkparks(out *writer, args []string) int {
 	if len(args) > 0 && args[0] == "rotate-admin-token" {
 		return runBarkparksRotateAdminToken(out, args[1:])
 	}
+	if len(args) > 0 && args[0] == "repair-token-seats" {
+		return runBarkparksRepairTokenSeats(out, args[1:])
+	}
 	// "studio-origin" is the name the owner first asked for; both reach the same verb.
 	if len(args) > 0 && (args[0] == "studio-callback" || args[0] == "studio-origin") {
 		return runBarkparksStudioCallback(out, args[1:])
@@ -522,6 +525,7 @@ USAGE
                      [--slug <slug>] (--token-file <path> | --token-from-config)
   bp barkparks studio-callback ls|add|rm <instance> [<callback-url>]
   bp barkparks rotate-admin-token <instance>
+  bp barkparks repair-token-seats <instance> [--token-id <id>] [--seat <workspace> ...] [--apply]
 
 WHAT IT SHOWS
   with a saved Cloud session, bare bp barkparks queries the current team's
@@ -548,6 +552,17 @@ ROTATE-ADMIN-TOKEN
   that it reads as admin, and only then revokes the old token. If a step fails,
   Cloud keeps the old token. Prints token ids, never a secret. Exits 1 unless
   the old token now gets HTTP 401.
+
+REPAIR-TOKEN-SEATS
+  platform operators only. Gives a token on one box back the workspace seats
+  its revoked predecessor held, for a token an admin-token rotation left
+  short. Cloud asks the box with the admin token it holds, and the box
+  restores only seats a revoked token that minted it held, never above that
+  token's role. --token-id defaults to the token Cloud holds. --seat repeats
+  or takes a comma list; without it the plan covers every seat a predecessor
+  held. A dry run unless --apply. Exits 1 when a named workspace is refused.
+  The flags are --seat and --token-id because --workspace and --token are
+  global flags.
 
 STUDIO-CALLBACK
   the "Sign in with Barkpark Cloud" allowlist for a Studio deployed apart from

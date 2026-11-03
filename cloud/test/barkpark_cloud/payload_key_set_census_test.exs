@@ -2133,7 +2133,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `new_token_id`, `seats_not_carried`, `old_token_status`). `barkpark_id`,
   # `label` and `workspace` ride existing names and move the SITE register.
   # MEASURED by the PIN CO-EDIT arm.
-  @go_tag_pinned 422
+  # 422 -> 430 (task-c6185553d0bd7869, restore a box token's seats): the new
+  # internal/cloudclient/token_seat_restore.go decodes `TokenSeatRestore` and
+  # its plan. Eight new NAMES ride with it; `barkpark_id`, `reason`,
+  # `refused`, `role`, `token` and `workspace` ride existing names and move
+  # the SITE register, and `restore` is newly duplicated. MEASURED by the PIN
+  # CO-EDIT arm.
+  @go_tag_pinned 430
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2224,7 +2230,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # AdoptResult / AdoptStep, the POST /v1/barkparks/adopt envelope).
     # NEWLY DUPLICATED, 1 -> 2: `AdoptResult.Barkpark`, the adopted row.
     "barkpark" => 2,
-    "barkpark_id" => 5,
+    "barkpark_id" => 6,
     # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
     "basis" => 7,
     "became_live_at" => 2,
@@ -2486,8 +2492,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one reason site (10 -> 11). `SiteBuildLogRecord.Reason` — the CLOSED relay
     # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Reason` — the closed refusal vocabulary the bytes reader names instead of inspecting a term.
-    "reason" => 12,
-    "refused" => 4,
+    "reason" => 13,
+    "refused" => 5,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
     # dr-w15-s5: SiteDeployCapability.ReportedAt, the beat the capability was
@@ -2509,7 +2515,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # `@go_tag_pinned` structurally CANNOT see the second site, so this row is
     # the only guard that can notice it being deleted.
     "residual" => 2,
-    "role" => 4,
+    # task-c6185553d0bd7869: NEWLY DUPLICATED, 1 -> 2. `TokenSeatRestore.Plan`
+    # (the envelope key) and `TokenSeatRestorePlan.Restore` (the seat rows).
+    "restore" => 2,
+    "role" => 5,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.RuntimeTarget` — static/node,
     # as the record captured it.
     # dr-w11-payload-divergence-close: 4 -> 3. `SiteDeployment.RuntimeTarget`
@@ -2585,7 +2594,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). the mint envelope's own `token`
     # field (the plaintext, handed over once), 2 -> 3.
-    "token" => 3,
+    "token" => 4,
     # dr-bl-w7: `top` crossed INTO this register. It was declared ONCE
     # (MetricsSpaceSites.Top, the biggest site slugs) and is now declared on
     # MetricsSpaceConsumerRoot too, naming a root's biggest children — the thing
@@ -2616,7 +2625,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the number it denominates, so it is declared a third time.
     "window" => 3,
     # task-5283ad9f9238f7fe: 2 -> 3, `AdoptResult.Adopted.Workspace` (internal/cloudclient/adopt.go).
-    "workspace" => 4
+    # task-c6185553d0bd7869: 4 -> 6, the restored seat row and the refused row
+    # in internal/cloudclient/token_seat_restore.go.
+    "workspace" => 6
   }
 
   # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
@@ -2653,7 +2664,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go tokens.go)
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
