@@ -27,6 +27,8 @@ BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 - `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, as Pensum calls Barkpark from its server.
 - [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains the last three.
 - `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in while the org allows only SSO.
+- `BARKPARK_SIGNUP=off` makes `POST /v1/auth/register` answer 403 `signup_closed` and create no account. Set it after the break-glass account exists, since `bp auth register` creates that account.
+- `BARKPARK_MICROSOFT_TENANT=<tenant id>` limits Microsoft social login to that tenant. Without it, the `microsoft` social provider accepts any Microsoft account. Entra sign-in through `bp org oidc-create` does not use this setting.
 - Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
 
 **Mail.** Without `SMTP_HOST`, no sign-in links, password resets or invitations go out. SSO with a break-glass account needs no mail.

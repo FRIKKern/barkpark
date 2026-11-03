@@ -1005,6 +1005,28 @@ if System.get_env("BARKPARK_CLOUD_HANDOFF") in ~w(0 false no off) do
   config :barkpark, :cloud_handoff, false
 end
 
+# An instance where accounts come only from SSO sets BARKPARK_SIGNUP=off:
+# POST /v1/auth/register answers 403 signup_closed and creates no account
+# (`BarkparkWeb.AuthController.register/2`). On unless set to a false value.
+if System.get_env("BARKPARK_SIGNUP") in ~w(0 false no off) do
+  config :barkpark, :signup, false
+end
+
+# Microsoft social login (`Barkpark.Sso.Social.endpoints/1`) uses the `common`
+# tenant, which admits any Microsoft account. BARKPARK_MICROSOFT_TENANT names a
+# tenant id or domain to admit only that tenant's accounts. Unset = common.
+case System.get_env("BARKPARK_MICROSOFT_TENANT", "") |> String.trim() do
+  "" ->
+    :ok
+
+  tenant ->
+    unless Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9.-]*\z/, tenant) do
+      raise "BARKPARK_MICROSOFT_TENANT must be a tenant id or domain, got: #{inspect(tenant)}"
+    end
+
+    config :barkpark, :microsoft_tenant, tenant
+end
+
 # Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
 # (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
 # and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false

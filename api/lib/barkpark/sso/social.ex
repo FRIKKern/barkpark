@@ -16,7 +16,8 @@ defmodule Barkpark.Sso.Social do
        `:email_unverified`.
 
   App-level client credentials live in `social_providers` (`client_secret`
-  encrypted). The endpoints are well-known per provider. Outbound calls go
+  encrypted). The endpoints are well-known per provider. Microsoft's use the
+  `common` tenant unless BARKPARK_MICROSOFT_TENANT names one. Outbound calls go
   through `Barkpark.Sso.Social.HTTP` so tests run against a mock provider.
   """
   import Ecto.Query, warn: false
@@ -52,6 +53,7 @@ defmodule Barkpark.Sso.Social do
       emails: "https://api.github.com/user/emails"
     },
     "microsoft" => %{
+      # `endpoints/1` replaces "common" with BARKPARK_MICROSOFT_TENANT when set.
       authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
       token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
       userinfo: "https://graph.microsoft.com/oidc/userinfo",
@@ -65,6 +67,30 @@ defmodule Barkpark.Sso.Social do
       verified_key: nil
     }
   }
+
+  @doc """
+  The endpoints for `provider`. With `:microsoft_tenant` set
+  (BARKPARK_MICROSOFT_TENANT), Microsoft's authorize and token URLs use that
+  tenant instead of `common`, so only accounts in that tenant can sign in.
+  """
+  @spec endpoints(String.t()) :: map() | nil
+  def endpoints("microsoft") do
+    cfg = @endpoints["microsoft"]
+
+    case Application.get_env(:barkpark, :microsoft_tenant) do
+      tenant when is_binary(tenant) and tenant != "" ->
+        %{
+          cfg
+          | authorize: String.replace(cfg.authorize, "/common/", "/#{tenant}/"),
+            token: String.replace(cfg.token, "/common/", "/#{tenant}/")
+        }
+
+      _ ->
+        cfg
+    end
+  end
+
+  def endpoints(provider), do: @endpoints[provider]
 
   @doc "Enable (upsert) a provider's app-level OAuth credentials."
   @spec enable_provider(String.t(), String.t(), String.t()) ::
@@ -94,7 +120,7 @@ defmodule Barkpark.Sso.Social do
   @doc "Build the provider authorization redirect URL."
   @spec authorize_url(SocialProvider.t(), String.t(), String.t()) :: String.t()
   def authorize_url(%SocialProvider{provider: name, client_id: client_id}, state, redirect_uri) do
-    cfg = @endpoints[name]
+    cfg = endpoints(name)
 
     query =
       URI.encode_query(%{
@@ -116,7 +142,7 @@ defmodule Barkpark.Sso.Social do
           {:ok, User.t()} | {:error, term()}
   def handle_callback(%SocialProvider{provider: name} = p, code, redirect_uri)
       when is_binary(code) do
-    cfg = @endpoints[name]
+    cfg = endpoints(name)
 
     with {:ok, %{"access_token" => token}} <- exchange(cfg, p, code, redirect_uri),
          {:ok, info} <- HTTP.get_bearer(cfg.userinfo, token),

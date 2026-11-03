@@ -167,6 +167,48 @@ defmodule BarkparkWeb.OrgAllowedAuthMethodsTest do
     end
   end
 
+  describe "the email doors (request-reset, request-magic-link)" do
+    for {path, method} <- [
+          {"/v1/auth/request-reset", "password"},
+          {"/v1/auth/request-magic-link", "magic_link"}
+        ] do
+      test "#{path}: an SSO-only member gets no mail and the unknown-address answer", %{
+        conn: conn
+      } do
+        email = unique("ssomail") <> "@example.com"
+        user = register!(email)
+        govern!(user, ["sso"])
+
+        known = post_json(conn, unquote(path), %{email: email})
+        refute_receive {:email, _}, 200
+
+        unknown =
+          post_json(scoped_conn(), unquote(path), %{email: unique("ghost") <> "@example.com"})
+
+        assert known.status == 200
+        assert known.status == unknown.status
+        assert known.resp_body == unknown.resp_body
+
+        assert Barkpark.Repo.exists?(
+                 from e in Barkpark.Audit.Event,
+                   where:
+                     e.category == "auth" and e.action == "auth_method_not_allowed" and
+                       e.subject == ^user.id and
+                       fragment("?->>'method'", e.metadata) == ^unquote(method)
+               )
+      end
+
+      test "#{path}: a member of an org with no policy still gets the mail", %{conn: conn} do
+        email = unique("mailok") <> "@example.com"
+        user = register!(email)
+        govern!(user, nil)
+
+        assert conn |> post_json(unquote(path), %{email: email}) |> json_response(200)
+        assert_receive {:email, %{to: [{_, ^email}]}}, 1_000
+      end
+    end
+  end
+
   describe "the browser doors (/login/account, /auth/magic/:token)" do
     test "password sign-in into an SSO-only org re-renders the form with the policy reason", %{
       conn: conn

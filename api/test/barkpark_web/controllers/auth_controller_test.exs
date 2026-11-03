@@ -77,6 +77,17 @@ defmodule BarkparkWeb.AuthControllerTest do
       assert Accounts.get_user_by_email("new@example.com")
     end
 
+    test "BARKPARK_SIGNUP=off: 403 signup_closed, no user and no mail", %{conn: conn} do
+      Application.put_env(:barkpark, :signup, false)
+      on_exit(fn -> Application.delete_env(:barkpark, :signup) end)
+
+      resp = register!(conn, "closed@example.com")
+
+      assert json_response(resp, 403)["error"]["code"] == "signup_closed"
+      refute Accounts.get_user_by_email("closed@example.com")
+      refute_receive {:email, _}, 200
+    end
+
     test "422 on a weak password", %{conn: conn} do
       assert register!(conn, "weak@example.com")
       resp = post_json(conn, "/v1/auth/register", %{email: "x@y.com", password: "short"})
