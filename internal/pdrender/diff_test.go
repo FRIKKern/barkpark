@@ -72,6 +72,17 @@ func TestDiffRendererFileAttrHeader(t *testing.T) {
 	}
 }
 
+func TestDiffRendererLanguageMetadata(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "diff", Attrs: map[string]any{
+		"file": "lib/example.ex", "lang": "elixir", "diff": "@@ -1 +1 @@\n-old\n+new",
+	}}
+	head := ansi.Strip(reg.Render(b, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor})[0])
+	if !strings.Contains(head, "lib/example.ex · elixir ·") || !strings.Contains(head, "+1 −1") {
+		t.Fatalf("diff language metadata missing from header, got %q", head)
+	}
+}
+
 // TestDiffRendererBudgetFold pins the shared 20-line budget: a diff body past
 // chatDiffBudget rows folds behind the honest "… +N more lines" footnote and
 // draws exactly chatDiffBudget body rows.

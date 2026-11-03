@@ -206,8 +206,12 @@ func (asciicastRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	src := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "src")))
+	caption := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "caption")))
 
 	head := "▶ Asciicast"
+	if caption != "" {
+		head += " · " + caption
+	}
 	if meta := asciicastMeta(b.Attrs); meta != "" {
 		head += " · " + meta
 	}

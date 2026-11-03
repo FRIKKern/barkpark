@@ -226,6 +226,89 @@ func TestChatToolDiffPathFromInput(t *testing.T) {
 	}
 }
 
+func TestChatToolDiffDerivesRowsFromCanonicalInput(t *testing.T) {
+	reg := DefaultRegistry(DarkTheme())
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+	raw := []byte(`[{"type":"chat-tool-diff","input":{"file_path":"lib/foo.ex","old_string":"def hello do\n  :old\nend","new_string":"def hello do\n  :new\nend"}}]`)
+	blocks, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
+	for _, want := range []string{"lib/foo.ex  +1 −1", "  def hello do", "-   :old", "+   :new", "  end"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("canonical nested diff missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestChatToolDiffPrefersDerivedRows(t *testing.T) {
+	attrs := map[string]any{
+		"lines": []any{map[string]any{"op": "+", "text": "server row"}},
+		"input": map[string]any{
+			"file_path":  "lib/foo.ex",
+			"old_string": "old input",
+			"new_string": "new input",
+		},
+	}
+	lines := chatDiffLines(attrs)
+	if len(lines) != 1 || attrStr(lines[0].(map[string]any), "text") != "server row" {
+		t.Fatalf("derived rows must win over fallback input: %#v", lines)
+	}
+}
+
+func TestChatToolDiffFallbackUsesCanonicalStringShapes(t *testing.T) {
+	attrs := map[string]any{"input": map[string]any{
+		"file_path": "",
+		"edits": []any{
+			map[string]any{"old_string": "before", "new_string": "after"},
+			map[string]any{"old_string": 7, "new_string": true},
+			map[string]any{"old_string": "removed", "new_string": true},
+			map[string]any{"old_string": 7, "new_string": "added"},
+			map[string]any{"old_string": "second", "new_string": "replacement"},
+		},
+	}}
+	lines := chatDiffLines(attrs)
+	if got, want := countDiffOp(lines, "gap"), 3; got != want {
+		t.Fatalf("four non-empty hunks need three separators: got %d, want %d (%#v)", got, want, lines)
+	}
+	if got, want := countDiffOp(lines, "-"), 3; got != want {
+		t.Fatalf("a non-string new side must degrade to an empty side/removal: got %d, want %d (%#v)", got, want, lines)
+	}
+	if got, want := countDiffOp(lines, "+"), 3; got != want {
+		t.Fatalf("a non-string old side must degrade to an empty side/addition: got %d, want %d (%#v)", got, want, lines)
+	}
+	for _, line := range lines {
+		if text := attrStr(line.(map[string]any), "text"); text == "7" || text == "true" {
+			t.Fatalf("non-string edit fields must not be coerced into diff rows: %#v", lines)
+		}
+	}
+
+	for _, input := range []map[string]any{
+		{"file_path": 7, "old_string": "before", "new_string": "after"},
+		{"file_path": true, "content": "body"},
+		{"file_path": "x", "old_string": 7, "new_string": true},
+	} {
+		if got := chatDiffLines(map[string]any{"input": input}); len(got) != 0 {
+			t.Fatalf("non-string canonical fields must not classify as a diff: input=%#v lines=%#v", input, got)
+		}
+	}
+}
+
+func TestChatToolDiffOversizedInputUsesBoundedFallback(t *testing.T) {
+	oldText := strings.Repeat("old\n", maxChatDiffLines+1)
+	lines, left := diffTextLines(oldText, "new", maxChatDiffCells)
+	if left != maxChatDiffCells {
+		t.Fatalf("coarse fallback must not spend the DP cell budget: got %d", left)
+	}
+	if got, want := len(lines), maxChatDiffLines+2; got != want {
+		t.Fatalf("coarse fallback row count = %d, want %d", got, want)
+	}
+	if attrStr(lines[0].(map[string]any), "op") != "-" || attrStr(lines[len(lines)-1].(map[string]any), "op") != "+" {
+		t.Fatalf("coarse fallback must emit removals then additions: %#v", lines)
+	}
+}
+
 // TestChatToolDiffGapAfterBudget pins the D40 third clause on the terminal
 // surface: a gap hunk separator never SPENDS budget (it draws free between
 // drawn hunks) and never DRAWS once the budget is spent — the rule of a fully
