@@ -34,7 +34,7 @@ jobs:
           npm run pack:check -- "$RUNNER_TEMP/editor-release"
           cd "$RUNNER_TEMP/editor-release"
           sha256sum portable-doc-editor-*.tgz > SHA256SUMS
-          npm publish portable-doc-editor-*.tgz --access public --dry-run
+          npm publish portable-doc-editor-*.tgz --access public --tag alpha --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: portable-doc-editor
@@ -66,4 +66,4 @@ jobs:
           test "$PUBLISH_ENABLED" = true
           sha256sum --check SHA256SUMS
           test "$(cut -d ' ' -f 1 SHA256SUMS)" = "$APPROVED_SHA256"
-          npm publish portable-doc-editor-*.tgz --access public --provenance
+          npm publish portable-doc-editor-*.tgz --access public --tag alpha --provenance
