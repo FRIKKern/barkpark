@@ -193,9 +193,11 @@ The canvas also reads these on an ancestor, or on a carrier element in its page:
 | `data-bp-theme` | an ancestor | `"iris"`, `"fjord"`, `"evergreen"`, `"ember"` or `"charple"`: the accent family the stylesheet paints with |
 | `data-paper-palette` | an ancestor | `"legacy"`: the public reader keeps its legacy palette, so embeds and the stylesheet paint no `.bp-paper-surface` island; `"article"` or absent: they do |
 
-Two host classes carry these: `.bp-paper-editor`, the root a host renders around the
-canvas (resume focus, masters, `data-paper-doc-key`), and `.bp-paper-edit-field`, a
-bound field's wrapper (`data-field-name`).
+Three host classes carry these: `.bp-paper-editor`, the root a host renders around the
+canvas (resume focus, masters, `data-paper-doc-key`); `.bp-paper-edit-field`, a
+bound field's wrapper (`data-field-name`); and `.bp-paper-surface`, the canonical
+reader-style ancestor whose palette server-painted Canvas rows inherit without
+starting a nested fallback-token island.
 
 ### Host callbacks
 
@@ -786,7 +788,7 @@ element classes).
 | inbound event | canvas | `bp-change`, `bp-fleet-paint` |
 | global | window | `BarkparkPaperMermaid`, `BP_PAPER_EDITOR_NO_INJECT` |
 | class | canvas | `bp-canvas-mount-failed`, `bp-comment-range`, `bp-comment-range--active`, `bp-remote-caret`, `bp-remote-caret__label`, `bp-remote-selection` |
-| host class | canvas | `bp-paper-edit-field`, `bp-paper-editor` |
+| host class | canvas | `bp-paper-edit-field`, `bp-paper-editor`, `bp-paper-surface` |
 
 ## Host census (2026-10-31)
 

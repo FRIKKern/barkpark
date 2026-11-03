@@ -578,8 +578,12 @@ export const BP_FLEET_NODE_NAME = "bpFleet";
 // style is authored. Do not introduce an article styling island inside it.
 // Unmarked standalone embedders and Studio retain their existing default.
 export function readerPaintClass(editor) {
-  return editor.options.element.closest("[data-paper-palette]")?.getAttribute("data-paper-palette") === "legacy"
-    ? "" : "bp-paper-surface";
+  const element = editor.options.element;
+  if (element.closest('[data-paper-palette="legacy"]')) return "";
+  // A nested `.bp-paper-surface` would re-declare the standalone fallback
+  // palette and mask the host reader's authored theme tokens. The injected
+  // reader HTML already matches the canonical selectors through its ancestor.
+  return element.closest(".bp-paper-surface") ? "" : "bp-paper-surface";
 }
 
 // The human label for the loading chip, derived from the fleet block's kind. A
