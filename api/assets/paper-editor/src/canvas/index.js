@@ -5138,7 +5138,14 @@ class BpPaperCanvas extends HTMLElement {
     // divider — falls through to the caret as before.
     const node = state.doc.nodeAt(pos);
     if (node && node.isAtom && !node.isTextblock) {
-      const control = focusableControlIn(view.nodeDOM(pos));
+      const nodeDom = view.nodeDOM(pos);
+      // Reader-shaped fields keep their controls mounted but hidden at rest.
+      // Wake that field synchronously before resolving its focus target so the
+      // public focusBlock contract still lands in the native control/picker.
+      if (nodeDom && nodeDom.matches && nodeDom.matches("[data-field-type]")) {
+        nodeDom.dispatchEvent(new CustomEvent("bp-activate-field-editor"));
+      }
+      const control = focusableControlIn(nodeDom);
       if (control) {
         control.focus();
         return true;
