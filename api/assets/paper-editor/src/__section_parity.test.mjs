@@ -205,6 +205,10 @@ check("(b) layout controls are edit-only — display:none when not editable (vie
     /dom\.setAttribute\("data-bp-type",\s*"section"\)/.test(SRC),
     "wrapper lost its data-bp-type round-trip stamp",
   );
+  assert.ok(
+    /dom\.setAttribute\("data-bp-conformance-root",\s*""\)/.test(SRC),
+    "wrapper lost its semantic-root marker for nested child normalization",
+  );
 });
 
 // ── 7. DIVERGENCE (c) — GRID CELLS: reader wraps each grid child in
