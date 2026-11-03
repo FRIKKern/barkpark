@@ -45,8 +45,22 @@ function mount(type, attrs = {}, acknowledged = false) {
   paint(host, html);
   return { host, block, ops, batches, html };
 }
-function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("input", { bubbles: true })); }
-function key(el, name, extra = {}) { el.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...extra })); }
+function input(el, text) {
+  const ownText = [...el.childNodes].find(node => node.nodeType === 3);
+  if (el.children.length && ownText) ownText.nodeValue = text;
+  else el.textContent = text;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function key(el, name, extra = {}) {
+  const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...extra });
+  el.dispatchEvent(event);
+  return event;
+}
+function caret(node, offset) {
+  const range = document.createRange();
+  range.setStart(node, offset); range.collapse(true);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+}
 
 try {
   for (const type of ["stat", "stats", "stat-grid"]) {
@@ -57,10 +71,17 @@ try {
       assert.ok(label, `${type}: visible label is an inline textbox`);
       assert.ok(label.closest(".bp-canvas-stats-inline"), "Stats has its scoped reader-token boundary");
       assert.ok(value, `${type}: visible value is an inline textbox`);
+      assert.equal(value, host.querySelector(".bp-stat__v"), `${type}: value edits on the reader parent without a wrapper`);
+      assert.deepEqual([...value.childNodes].map(node => node.nodeType), [3, 1, 1],
+        `${type}: value keeps reader bare text, denominator and unit siblings`);
       assert.equal(label.contentEditable, "plaintext-only");
-      assert.equal(value.parentElement.querySelector('.bp-stat__denom').textContent, "/20");
+      assert.equal(value.querySelector('.bp-stat__denom').textContent, "/20");
       assert.equal(host.querySelector(".bp-paper-stats-config").open, false, "JSON is a closed fallback");
-      value.focus(); value.blur(); host.flushPendingChanges();
+      value.focus(); caret(value.firstChild, value.firstChild.length);
+      assert.equal(key(value, "Delete").defaultPrevented, true,
+        `${type}: Delete at the value boundary cannot remove denominator or unit paint`);
+      assert.equal(value.querySelector('.bp-stat__denom').textContent, "/20");
+      value.blur(); host.flushPendingChanges();
       assert.deepEqual(ops, [], "focus/blur retains numeric carriers without an authored change");
       label.focus(); input(label, "Edited directly");
       key(label, "a", { metaKey: true });

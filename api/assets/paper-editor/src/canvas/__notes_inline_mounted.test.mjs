@@ -48,7 +48,18 @@ function mount(attrs = {}) {
   paint(host);
   return { host, block, batches };
 }
-function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("input", { bubbles: true })); }
+function input(el, text) {
+  const ownText = [...el.childNodes].find(node => node.nodeType === 3 && node.nodeValue.trim() !== "");
+  if (el.children.length && ownText) ownText.nodeValue = (ownText.nodeValue.match(/^\s*/)?.[0] || "") + text;
+  else el.textContent = text;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+const bodyText = el => [...el.childNodes].find(node => node.nodeType === 3)?.nodeValue.trimStart() || "";
+function caret(node, offset) {
+  const range = document.createRange();
+  range.setStart(node, offset); range.collapse(true);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+}
 
 try {
   const { host, block, batches } = mount();
@@ -59,13 +70,22 @@ try {
     assert.equal(labels.length, 2, "every row's label edits where it reads");
     assert.equal(leads.length, 1, "a lead edits where it reads; a row without one paints none");
     assert.equal(bodies.length, 2, "every row's body edits where it reads");
-    assert.equal(bodies[0].textContent, "New widgets are compositions.");
-    assert.equal(bodies[0].previousSibling.nodeValue, " ", "the reader's single space after the lead stays outside the body");
+    assert.equal(bodies[0], host.querySelector(".bp-note__d"), "body edits on the reader description without a wrapper");
+    assert.deepEqual([...bodies[0].childNodes].map(node => node.nodeType), [1, 3],
+      "lead and body retain the reader's element-plus-bare-text shape");
+    assert.equal(bodyText(bodies[0]), "New widgets are compositions.");
+    assert.ok(bodies[0].lastChild.nodeValue.startsWith(" "), "the reader's single space after the lead stays in its text run");
     assert.equal(host.querySelector(".bp-note__d").textContent, "One vocabulary. New widgets are compositions.",
       "decoration keeps the reader's painted text byte-for-byte");
-    assert.equal(bodies[1].textContent, "No lead here.");
+    assert.equal(bodyText(bodies[1]), "No lead here.");
     assert.equal(labels[0].contentEditable, "plaintext-only");
     assert.equal(host.querySelector(".bp-paper-notes-config").open, false);
+    bodies[0].focus(); caret(bodies[0].lastChild, 1);
+    const backspace = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+    bodies[0].dispatchEvent(backspace);
+    assert.equal(backspace.defaultPrevented, true, "Backspace at the body boundary cannot remove the lead");
+    assert.equal(bodies[0].querySelector("b").textContent, "One vocabulary.");
+    bodies[0].blur();
 
     labels[0].focus(); labels[0].blur(); host.flushPendingChanges();
     assert.deepEqual(batches, [], "focus/blur is not an authored change");

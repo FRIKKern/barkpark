@@ -19,13 +19,11 @@ export function wireStatsInline(body, options) {
         let el = cell.querySelector(key === "value" ? ".bp-stat__v" : ".bp-stat__l");
         if (!el) return [];
         if (key === "value") {
-          // Denominator and unit remain separate, untouched reader spans.
-          const text = el.firstChild;
-          if (!text || text.nodeType !== 3) return [];
-          const span = document.createElement("span");
-          text.replaceWith(span);
-          span.appendChild(text);
-          el = span;
+          // Target the reader's bare value text in place. Denominator and unit
+          // remain separate, protected reader spans.
+          const textNode = el.firstChild;
+          if (!textNode || textNode.nodeType !== 3) return [];
+          return [{ el, textNode, item, index, key, label: "Stat value" }];
         }
         return [{ el, item, index, key, label: key === "value" ? "Stat value" : "Stat label" }];
       });

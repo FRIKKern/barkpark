@@ -5,8 +5,8 @@ import { wirePaintedTextInline } from "./painted-text-inline.js";
 // (components.ex note_item_html/1): a label span, then a description div holding
 // an optional <b>lead</b>, one space, and the body text. Only the four read-only
 // queries below touch reader classes (the parity gate allows exactly those).
-// The body is a bare text node after the lead; it is wrapped in a span so it
-// becomes its own native host. Only flat items are decorated: an item carrying
+// The body remains the reader's bare text node after the lead; the description
+// parent hosts that field while the lead stays an independent field. Only flat items are decorated: an item carrying
 // slots or a `content` inline array paints from those, so a flat-key write
 // would not reach the reader and the row stays panel-edited.
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -31,14 +31,7 @@ export function wireNotesInline(body, options) {
       const text = d.lastChild;
       if (text && text.nodeType === 3 && text.nodeValue !== "" && text !== lead) {
         const leading = lead ? text.nodeValue.match(/^ /)?.[0] || "" : "";
-        // A bare span (no reader class): the canvas never produces reader markup.
-        const span = document.createElement("span");
-        span.dataset.bpNoteBody = "";
-        if (leading) text.nodeValue = text.nodeValue.slice(leading.length);
-        text.replaceWith(span);
-        if (leading) span.before(document.createTextNode(leading));
-        span.appendChild(text);
-        out.push({ el: span, item, index, key: "text", label: "Note body" });
+        out.push({ el: d, textNode: text, domPrefix: leading, item, index, key: "text", label: "Note body" });
       }
       return out;
     });
