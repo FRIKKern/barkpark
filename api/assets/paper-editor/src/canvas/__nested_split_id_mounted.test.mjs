@@ -225,6 +225,35 @@ async function scene(name, fn) {
   }
 }
 
+await scene("tabs: keyboard and label edits preserve both live panels", async () => {
+  const blocks = SCENES.find(({ name }) => name === "tabs").blocks;
+  let server = clone(blocks);
+  const canvas = await mount(blocks, (el, { ops, seq }) => {
+    server = fold(server, ops);
+    el.acknowledgeOps(seq, true);
+  });
+  try {
+    const tabs = [...canvas.querySelectorAll(".bp-tabs__strip > button")];
+    const panels = [...canvas.querySelectorAll(".bp-tabs__panels > .bp-tabs__panel")];
+    assert.deepEqual(tabs.map(tab => tab.textContent), ["Monday", "Tuesday"]);
+    assert.deepEqual(panels.map(panel => panel.dataset.tabIndex), ["0", "1"]);
+    tabs[0].focus();
+    tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    assert.equal(document.activeElement, tabs[1]);
+    assert.equal(tabs[1].getAttribute("aria-selected"), "true");
+    tabs[1].click();
+    const label = panels[1].querySelector("input");
+    assert.equal(document.activeElement, label);
+    label.value = "Wednesday";
+    label.dispatchEvent(new Event("input", { bubbles: true }));
+    label.blur();
+    await saved(canvas);
+    assert.equal(tabs[1].textContent, "Wednesday");
+    assert.equal(server[0].tabs[1].label, "Wednesday");
+    assert.deepEqual(server[0].tabs.map(tab => tab.blocks), blocks[0].tabs.map(tab => tab.blocks));
+  } finally { canvas.remove(); }
+});
+
 for (const { name, blocks } of SCENES) {
   await scene(`${name}: Enter at the end, Enter on the empty line, Enter mid-text: every character saves once`, async () => {
     let server = clone(blocks);
