@@ -275,6 +275,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
   @canvas_chat_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
 
+  # Reader-authored specialty blocks that mount as server-painted bpFleet atoms.
+  # They have no canvas-local HTML renderer: the mounted atom is a real host paint
+  # target and shared/paper.ex supplies canonical Render.render_block(:article)
+  # bytes. Kept separate from @canvas_fleet_types so classic fleet preview/editor
+  # ownership is unchanged.
+  #
+  # KEEP LOCKSTEP with run-convert.js CANVAS_SPECIALTY_TYPES and
+  # shared/paper.ex @specialty_render_types.
+  @canvas_specialty_types ~w(api-endpoint bar-chart code-tabs criteria-progress gauge-list route)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
@@ -306,7 +316,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_container_types ++
                   @canvas_widget_types ++
                   @canvas_dataviz_types ++
-                  @canvas_chat_types
+                  @canvas_chat_types ++
+                  @canvas_specialty_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**

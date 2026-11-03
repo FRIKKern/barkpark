@@ -471,6 +471,22 @@ const CANVAS_DATAVIZ_TYPES = new Set([
   "lineage",
 ]);
 
+// Reader-authored specialty blocks whose display contract is canonical server
+// HTML, with no canvas-local renderer. They use the same mounted bpFleet atom and
+// bp:block-html host paint as DataViz: the source block rides verbatim on bpBlock
+// and Render.render_block(:article) remains the sole HTML producer. Kept separate
+// from CANVAS_FLEET_TYPES so classic fleet preview/editor ownership is unchanged.
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_specialty_types and
+// shared/paper.ex @specialty_render_types.
+const CANVAS_SPECIALTY_TYPES = new Set([
+  "api-endpoint",
+  "bar-chart",
+  "code-tabs",
+  "criteria-progress",
+  "gauge-list",
+  "route",
+]);
+
 // editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED
 // read-only-CHILD + editable-CAPTION ATOM (`bpFigure`; figure-node.js). A figure
 // wraps ONE child block + a caption. Structurally it is a HYBRID of the fleet atom
@@ -713,13 +729,15 @@ function isCanvasReadOnlyAtomNode(nodeType) {
 // read-only atoms carrying the whole block verbatim; they never emit a value/content
 // op — structurally they behave EXACTLY like a sheet/embed read-only atom.
 function isCanvasFleetType(type) {
-  // The DataViz kinds ride the same bpFleet node + server-paint channel
-  // (pd-ee-dataviz-editors), as do chat snapshots and the bounded static
-  // reader-render receivers.
-  return CANVAS_FLEET_TYPES.has(type) ||
+  // DataViz, chat, static compatibility, and specialty kinds ride the same
+  // bpFleet node + server-paint channel as parallel sets with the same projection.
+  return (
+    CANVAS_FLEET_TYPES.has(type) ||
     CANVAS_DATAVIZ_TYPES.has(type) ||
     CANVAS_CHAT_TYPES.has(type) ||
-    CANVAS_STATIC_RENDER_TYPES.has(type);
+    CANVAS_STATIC_RENDER_TYPES.has(type) ||
+    CANVAS_SPECIALTY_TYPES.has(type)
+  );
 }
 
 // True when a TipTap NODE type is the canvas fleet node ("bpFleet"). runToOps reads
