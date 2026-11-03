@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MISSING, PACK, cli, diffShapes, shapeOf } from "../../../priv/portable_doc/conformance/conformance.mjs";
 import { runToTiptap } from "./canvas/run-convert.js";
+import { projectMountedTableForReader } from "./canvas/table-node.js";
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 window.Range.prototype.getClientRects = () => [];
@@ -107,19 +108,19 @@ function semanticClone(source, blockType) {
     const rows = root.matches("ol.bp-steps.bp-canvas-rows.bp-canvas-steps")
       ? [...root.children] : [];
     const exactSteps = rows.length > 0 && rows.every((row) => {
+      const title = row.querySelector(":scope > .bp-steps__title[role='button']");
       const head = row.querySelector(":scope > .bp-canvas-row__head");
       const body = row.querySelector(":scope > .bp-steps__body");
-      return row.matches("li.bp-steps__step.bp-canvas-row") && head && body &&
-        head.querySelector(":scope > input.bp-steps__title.bp-canvas-row__title") &&
+      return row.matches("li.bp-steps__step.bp-canvas-row") && title && head && body &&
+        head.querySelector(":scope > input.bp-canvas-row__title.bp-canvas-row__title-editor") &&
         head.querySelector(":scope > button.bp-canvas-row__remove");
     });
     if (exactSteps) {
       for (const row of rows) {
+        const title = row.querySelector(":scope > .bp-steps__title");
         const head = row.querySelector(":scope > .bp-canvas-row__head");
-        const title = document.createElement("div");
-        title.className = "bp-steps__title";
-        title.textContent = head.querySelector(":scope > input")?.value || "";
-        head.replaceWith(title);
+        title.removeAttribute("role");
+        head.remove();
         const body = row.querySelector(":scope > .bp-steps__body");
         if (body.childNodes.length === 1 && body.firstElementChild?.tagName === "P" && !body.textContent) {
           body.replaceChildren();
@@ -127,30 +128,10 @@ function semanticClone(source, blockType) {
       }
     }
   } else if (type === "table") {
-    const colgroup = root.querySelector(":scope > colgroup[contenteditable='false']");
-    const tbody = root.querySelector(":scope > tbody");
-    const exactTable = root.matches("table.bp-table:not([role])") && colgroup && tbody &&
-      root.children.length === 2 && root.firstElementChild === colgroup &&
-      root.lastElementChild === tbody && !root.querySelector(":scope > thead");
-    if (exactTable) {
-      colgroup.remove();
-      const headerRows = [];
-      while (tbody.firstElementChild?.querySelector(":scope > th:not([scope='row'])")) {
-        headerRows.push(tbody.removeChild(tbody.firstElementChild));
-      }
-      if (headerRows.length) {
-        const thead = document.createElement("thead");
-        thead.append(...headerRows);
-        root.insertBefore(thead, tbody);
-      }
-      for (const cell of root.querySelectorAll("th, td")) {
-        if (cell.childNodes.length === 1 && cell.firstChild.nodeType === Node.TEXT_NODE) {
-          const span = document.createElement("span");
-          span.append(...cell.childNodes);
-          cell.appendChild(span);
-        }
-      }
-      root.setAttribute("role", "presentation");
+    const projected = projectMountedTableForReader(root);
+    if (projected) {
+      projected.querySelector(":scope > colgroup")?.remove();
+      root = projected;
     }
   } else if (type === "list") {
     // Portable lists intentionally retain ProseMirror's paragraph carrier for
