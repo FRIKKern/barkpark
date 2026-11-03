@@ -31,10 +31,11 @@ jobs:
       - name: Verify the exact release tarball and dry-run publish
         run: |
           test "$(node -p 'require("./package.json").name')" = '@portable-doc/editor'
+          test "$(node -p 'require("./package.json").version')" = '0.1.0-alpha.1'
           npm run pack:check -- "$RUNNER_TEMP/editor-release"
           cd "$RUNNER_TEMP/editor-release"
-          sha256sum portable-doc-editor-*.tgz > SHA256SUMS
-          npm publish portable-doc-editor-*.tgz --access public --tag alpha --dry-run
+          sha256sum portable-doc-editor-0.1.0-alpha.1.tgz > SHA256SUMS
+          npm publish portable-doc-editor-0.1.0-alpha.1.tgz --access public --tag alpha --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: portable-doc-editor
@@ -65,5 +66,5 @@ jobs:
         run: |
           test "$PUBLISH_ENABLED" = true
           sha256sum --check SHA256SUMS
-          test "$(cut -d ' ' -f 1 SHA256SUMS)" = "$APPROVED_SHA256"
-          npm publish portable-doc-editor-*.tgz --access public --tag alpha --provenance
+          printf '%s  %s\n' "$APPROVED_SHA256" portable-doc-editor-0.1.0-alpha.1.tgz | sha256sum --check --strict
+          npm publish portable-doc-editor-0.1.0-alpha.1.tgz --access public --tag alpha --provenance
