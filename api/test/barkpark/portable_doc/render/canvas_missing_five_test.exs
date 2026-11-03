@@ -22,6 +22,20 @@ defmodule Barkpark.PortableDoc.Render.CanvasMissingFiveTest do
       "value" => %{"nob" => "Hei", "eng" => "Hello"}
     },
     %{
+      "id" => "links",
+      "type" => "paper-links",
+      "title" => "Continue reading",
+      "description" => "Papers with useful context for this change.",
+      "refs" => [
+        %{
+          "slug" => "example-authoring-guide",
+          "title" => "Example authoring guide",
+          "description" => "A practical guide to publishing clear, useful Papers.",
+          "reason" => "See the principles behind this example."
+        }
+      ]
+    },
+    %{
       "id" => "pre-gate-badge",
       "type" => "pre-gate-badge",
       "anchor" => "byline",
@@ -31,7 +45,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasMissingFiveTest do
     }
   ]
 
-  test "all five use the canonical reader producer on the canvas paint channel" do
+  test "all six use the canonical reader producer on the canvas paint channel" do
     for block <- @blocks do
       render = Paper.fleet_render(block, %{})
 
@@ -41,14 +55,15 @@ defmodule Barkpark.PortableDoc.Render.CanvasMissingFiveTest do
     end
   end
 
-  test "pre-gate chrome joins a run while structured fields retain their contextual editors" do
-    [array, codelist, composite, localized, badge] = @blocks
+  test "pre-gate joins a run while structured fields and paper-links retain contextual editors" do
+    [array, codelist, composite, localized, paper_links, badge] = @blocks
 
     assert PaperCanvas.canvas?(badge)
     refute PaperCanvas.canvas?(array)
     refute PaperCanvas.canvas?(codelist)
     refute PaperCanvas.canvas?(composite)
     refute PaperCanvas.canvas?(localized)
+    refute PaperCanvas.canvas?(paper_links)
 
     assert Enum.all?(@blocks, &Paper.fleet_block?/1)
   end
