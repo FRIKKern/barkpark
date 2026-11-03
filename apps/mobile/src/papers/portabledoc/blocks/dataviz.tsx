@@ -870,6 +870,18 @@ function heatGrid(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx, k
   const cols = Math.max(...grid.map((r) => r.length), 0)
   const widths = heatWidths(grid, cols)
   const row = { flexDirection: 'row', alignItems: 'center', gap: GRID_GAP } as const
+  // Ragged padding can repeat the same zero-valued cell thousands of times.
+  // The colour is a pure function of the normalized mix, so cache the exact
+  // result instead of reparsing and interpolating both theme hexes per cell.
+  const fillCache = new Map<number, string>()
+  const fillFor = (value: number): string => {
+    const mix = clamp(value / maxVal, 0, 1) * 0.88
+    const cached = fillCache.get(mix)
+    if (cached !== undefined) return cached
+    const fill = lerpHex(ctx.theme.border, ctx.theme.accent, mix)
+    fillCache.set(mix, fill)
+    return fill
+  }
   return card(
     ctx,
     key,
@@ -885,13 +897,7 @@ function heatGrid(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx, k
           <View key={i} style={row}>
             {rowLabels.length > 0 && rowLabel(rowLabels[i] ?? '', ctx)}
             {Array.from({ length: widths[i]! }, (_, j) =>
-              heatCell(
-                j,
-                GRID_CELL,
-                lerpHex(ctx.theme.border, ctx.theme.accent, clamp((cells[j] ?? 0) / maxVal, 0, 1) * 0.88),
-                ctx,
-                null,
-              ),
+              heatCell(j, GRID_CELL, fillFor(cells[j] ?? 0), ctx, null),
             )}
             {heatGap(cols - widths[i]!, GRID_CELL, GRID_GAP)}
           </View>
