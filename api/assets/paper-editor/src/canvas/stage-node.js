@@ -157,6 +157,7 @@ export const Stage = Node.create({
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
       dom.setAttribute("data-bp-type", "stage");
+      dom.setAttribute("data-bp-conformance-root", "");
       dom.setAttribute("contenteditable", "false");
       dom.setAttribute("data-test-id", "paper-stage");
 
