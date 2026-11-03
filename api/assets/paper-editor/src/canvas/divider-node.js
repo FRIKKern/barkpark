@@ -35,6 +35,9 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 
+const DIVIDER_STYLE = "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid";
+const DIVIDER_MARK_STYLE = "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem";
+
 export const Divider = Node.create({
   name: "divider",
 
@@ -98,12 +101,36 @@ export const Divider = Node.create({
       "div",
       mergeAttributes(HTMLAttributes, {
         class: "bp-section-divider",
-        style: "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid",
+        "data-bp-conformance-root": "",
+        style: DIVIDER_STYLE,
       }),
       ["span", {
         class: "bp-section-divider__mark",
-        style: "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem",
+        style: DIVIDER_MARK_STYLE,
       }, "§"],
     ];
+  },
+
+  // ProseMirror applies DOMOutputSpec styles through CSSOM, which rewrites the
+  // reader's authored zero values (`0` -> `0px`). Mount the semantic atom
+  // directly so the real canvas DOM retains the reader's byte-level contract;
+  // with no contentDOM it remains the same selectable leaf atom.
+  addNodeView() {
+    return ({ node }) => {
+      const dom = document.createElement("div");
+      dom.className = "bp-section-divider";
+      dom.setAttribute("data-bp-conformance-root", "");
+      dom.setAttribute("data-bp-type", node.attrs.bpType || "divider");
+      if (node.attrs.bpId) dom.setAttribute("data-bp-id", node.attrs.bpId);
+      dom.setAttribute("style", DIVIDER_STYLE);
+
+      const mark = document.createElement("span");
+      mark.className = "bp-section-divider__mark";
+      mark.setAttribute("style", DIVIDER_MARK_STYLE);
+      mark.textContent = "§";
+      dom.appendChild(mark);
+
+      return { dom };
+    };
   },
 });

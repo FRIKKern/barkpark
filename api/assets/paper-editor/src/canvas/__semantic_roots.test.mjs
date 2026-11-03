@@ -13,6 +13,7 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, value: wind
 
 const { Footnote, Toc, Video } = await import("./island-node.js");
 const { embedConformanceRoot, sheetConformanceRoot } = await import("./embed-node.js");
+const { Divider } = await import("./divider-node.js");
 
 function mount(extension, attrs) {
   const current = { type: { name: extension.name }, attrs };
@@ -61,6 +62,13 @@ assert.equal(videoRoot.querySelector("track").getAttribute("src"), "https://ex.c
 assert.ok(video.dom.querySelector("input[aria-label='Video url']"),
   "video edit controls remain mounted beside the semantic preview");
 
+const divider = mount(Divider, { bpId: "divider-1", bpType: "divider" });
+assert.equal(
+  divider.dom.outerHTML,
+  '<div class="bp-section-divider" data-bp-conformance-root="" data-bp-type="divider" data-bp-id="divider-1" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid"><span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem">§</span></div>',
+  "divider mounts the reader DOM directly without CSSOM rewriting its inline contract",
+);
+
 const embed = embedConformanceRoot(document, { target: "Field notes" });
 assert.equal(embed.outerHTML,
   '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes" data-bp-conformance-root="">↪ Field notes</section>');
@@ -75,8 +83,8 @@ const sheet = sheetConformanceRoot(document, {
 assert.equal(sheet.outerHTML,
   '<table class="bp-table" role="presentation" data-bp-conformance-root=""><thead><tr><th class="bp-sheet__th" style="width: 12px;">Item</th><th class="bp-sheet__th" style="width: 8px;">Cost</th></tr></thead><tbody><tr><td class="bp-sheet__td" style="width: 12px;">Hosting</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">42</td></tr><tr><td class="bp-sheet__td" style="width: 12px;">Domains</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">18</td></tr></tbody></table>');
 
-for (const view of [footnote, toc, video]) {
-  view.destroy();
+for (const view of [footnote, toc, video, divider]) {
+  view.destroy?.();
   view.dom.remove();
 }
 window.close();
