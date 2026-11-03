@@ -9,7 +9,7 @@ interface Projection {
   text: string
   styles: Record<string, unknown>[]
   images: { uri?: string; accessibilityLabel?: string }[]
-  presses: number
+  presses: (() => void)[]
 }
 
 export interface NativeStructureVerdict {
@@ -58,12 +58,12 @@ function walk(node: ReactNode, projection: Projection): void {
       accessibilityLabel: typeof props.accessibilityLabel === 'string' ? props.accessibilityLabel : undefined,
     })
   }
-  if (typeof props.onPress === 'function') projection.presses += 1
+  if (typeof props.onPress === 'function') projection.presses.push(props.onPress as () => void)
   walk(props.children as ReactNode, projection)
 }
 
 function project(node: ReactNode): Projection {
-  const projection: Projection = { text: '', styles: [], images: [], presses: 0 }
+  const projection: Projection = { text: '', styles: [], images: [], presses: [] }
   walk(node, projection)
   return projection
 }
@@ -77,7 +77,11 @@ function expectEqual(diff: string[], name: string, actual: unknown, expected: un
  * contain no author words. This is deliberately separate from the mobile
  * report's text comparator until its report update is coordinated.
  */
-export function mobileStructuralVerdict(golden: Golden, output: ReactNode): NativeStructureVerdict | undefined {
+export function mobileStructuralVerdict(
+  golden: Golden,
+  output: ReactNode,
+  observePressTarget?: (press: () => void) => string | undefined,
+): NativeStructureVerdict | undefined {
   if (!['divider', 'image', 'video'].includes(golden.type)) return undefined
 
   const actual = project(output)
@@ -112,7 +116,12 @@ export function mobileStructuralVerdict(golden: Golden, output: ReactNode): Nati
     if (!actual.text.includes('open in browser')) diff.push('video: missing handoff label')
     expectEqual(diff, 'video poster count', actual.images.length, 1)
     expectEqual(diff, 'video poster', actual.images[0]?.uri, golden.input.poster)
-    expectEqual(diff, 'video handoff count', actual.presses, 1)
+    expectEqual(diff, 'video handoff count', actual.presses.length, 1)
+    const press = actual.presses[0]
+    if (press !== undefined) {
+      const target = observePressTarget?.(press)
+      expectEqual(diff, 'video handoff target', target, golden.input.src)
+    }
   }
 
   return { diff, via: 'native-structure' }

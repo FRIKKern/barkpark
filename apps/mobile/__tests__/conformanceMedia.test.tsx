@@ -25,6 +25,16 @@ function render(golden: Golden) {
   return renderBlockNative(golden.input, { theme: light }, 0)
 }
 
+function observePressTarget(press: () => void): string | undefined {
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true)
+  try {
+    press()
+    return open.mock.calls[0]?.[0]
+  } finally {
+    open.mockRestore()
+  }
+}
+
 describe('mobile source coverage for text-uncheckable conformance goldens', () => {
   it('owns exactly the canonical divider, image, and video inputs', () => {
     expect(goldens.map(({ type }) => type)).toEqual(['divider', 'image', 'video'])
@@ -32,7 +42,10 @@ describe('mobile source coverage for text-uncheckable conformance goldens', () =
   })
 
   it.each(goldens)('passes $type through its native structural arm', (golden) => {
-    expect(mobileStructuralVerdict(golden, render(golden))).toEqual({ diff: [], via: 'native-structure' })
+    expect(mobileStructuralVerdict(golden, render(golden), observePressTarget)).toEqual({
+      diff: [],
+      via: 'native-structure',
+    })
   })
 
   it('produces explicit native-structure pass rows without relabeling the text comparator', async () => {
@@ -41,7 +54,7 @@ describe('mobile source coverage for text-uncheckable conformance goldens', () =
       compare: 'text',
       judge(golden) {
         if (!(golden.type in BLOCK_RENDERERS)) return MISSING
-        return mobileStructuralVerdict(golden, render(golden)) ?? MISSING
+        return mobileStructuralVerdict(golden, render(golden), observePressTarget) ?? MISSING
       },
     })
     expect(report.rows.filter(({ type }) => ['divider', 'image', 'video'].includes(type))).toEqual([
@@ -49,17 +62,6 @@ describe('mobile source coverage for text-uncheckable conformance goldens', () =
       { type: 'image', via: 'native-structure', status: 'pass' },
       { type: 'video', via: 'native-structure', status: 'pass' },
     ])
-  })
-
-  it('the video handoff opens the canonical source URL', () => {
-    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true)
-    try {
-      const output = render(goldens[2]!) as { props: { children: { props: { onPress: () => void } }[] } }
-      output.props.children[0]!.props.onPress()
-      expect(open).toHaveBeenCalledWith('https://ex.com/demo.mp4')
-    } finally {
-      open.mockRestore()
-    }
   })
 
   it('reds a divider mutant that keeps the mark but drops the rule', () => {
@@ -99,7 +101,22 @@ describe('mobile source coverage for text-uncheckable conformance goldens', () =
         <Image source={{ uri: 'https://ex.com/demo-poster.jpg' }} />
         <Text>▶ Video · open in browser</Text>
       </Pressable>,
+      observePressTarget,
     )
     expect(verdict?.diff).toContain('video: missing 1 caption track')
+  })
+
+  it('reds a video mutant whose handoff targets a different URL', () => {
+    const verdict = mobileStructuralVerdict(
+      goldens[2]!,
+      <Pressable onPress={() => Linking.openURL('https://ex.com/wrong.mp4')}>
+        <Image source={{ uri: 'https://ex.com/demo-poster.jpg' }} />
+        <Text>▶ Video · 1 caption track · open in browser</Text>
+      </Pressable>,
+      observePressTarget,
+    )
+    expect(verdict?.diff).toContain(
+      'video handoff target: "https://ex.com/wrong.mp4" != "https://ex.com/demo.mp4"',
+    )
   })
 })
