@@ -159,7 +159,8 @@ export const Figure = Node.create({
   //     <div class="bp-paper-surface" data-bp-fleet-body>       ← CHILD paint hole
   //       <div class="bp-canvas-readonly-chip">Figure</div>     ← honest loading chip
   //     </div>
-  //     <figcaption class="bp-canvas-figure-caption">
+  //     <figcaption class="bp-figcaption bp-canvas-figure-caption">
+  //       <span data-bp-figure-caption-text>…</span>
   //       <input class="bp-canvas-figure-caption-input" …/>     ← the ONLY edit surface
   //     </figcaption>
   //   </figure>
@@ -185,6 +186,7 @@ export const Figure = Node.create({
       dom.style.marginInline = "var(--bp-evidence-pull, 0px)";
       dom.style.width = "var(--bp-evidence-width, 100%)";
       dom.style.boxSizing = "border-box";
+      dom.style.overflowX = "auto";
 
       // The CHILD paint hole: a `.bp-paper-surface` sink (the injected reader HTML is
       // styled by the ONE canonical stylesheet exactly as /papers renders it — D8),
@@ -199,9 +201,12 @@ export const Figure = Node.create({
       body.appendChild(chip);
       dom.appendChild(body);
 
-      // The editable caption: a <figcaption> reader tag wrapping the edit <input>.
+      // The reader caption and its editable control share the same figcaption.
       const figcaption = document.createElement("figcaption");
-      figcaption.className = "bp-canvas-figure-caption";
+      figcaption.className = "bp-figcaption bp-canvas-figure-caption";
+      const captionText = document.createElement("span");
+      captionText.setAttribute("data-bp-figure-caption-text", "");
+      figcaption.appendChild(captionText);
       const captionInput = document.createElement("input");
       captionInput.type = "text";
       captionInput.className = "bp-canvas-figure-caption-input";
@@ -216,7 +221,6 @@ export const Figure = Node.create({
       // --paper-ink-soft. An <input> inherits none of that, so the values are copied
       // here + an input reset. The stylesheet carries the same values via
       // .bp-canvas-figure-caption-input; the inline copy holds before CSS loads.
-      captionInput.style.display = "block";
       captionInput.style.width = "100%";
       captionInput.style.boxSizing = "border-box";
       captionInput.style.border = "none";
@@ -244,6 +248,10 @@ export const Figure = Node.create({
           hovered: hovered && editor.isEditable,
           focused: focused && editor.isEditable,
         });
+        const editing = editor.isEditable && (hovered || focused);
+        captionText.textContent = captionInput.value;
+        captionText.hidden = editing;
+        captionInput.style.display = editing ? "block" : "none";
         figcaption.style.display = hide ? "none" : "";
       };
 
