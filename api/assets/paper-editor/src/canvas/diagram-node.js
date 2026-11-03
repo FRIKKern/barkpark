@@ -226,6 +226,8 @@ export const Diagram = Node.create({
 
       const figure = document.createElement("figure");
       figure.className = "bp-canvas-diagram-figure";
+      figure.setAttribute("data-bp-type", "diagram");
+      figure.setAttribute("data-bp-conformance-root", "");
       figure.setAttribute(
         "style",
         "margin:var(--bp-air-figure, 1.6rem) 0 0;" +

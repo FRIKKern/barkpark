@@ -12,6 +12,7 @@ globalThis.window = window;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: window.navigator });
 
 const { Footnote, Toc, Video } = await import("./island-node.js");
+const { embedConformanceRoot, sheetConformanceRoot } = await import("./embed-node.js");
 
 function mount(extension, attrs) {
   const current = { type: { name: extension.name }, attrs };
@@ -59,6 +60,20 @@ assert.equal(videoRoot.querySelector("video").getAttribute("src"), "https://ex.c
 assert.equal(videoRoot.querySelector("track").getAttribute("src"), "https://ex.com/en.vtt");
 assert.ok(video.dom.querySelector("input[aria-label='Video url']"),
   "video edit controls remain mounted beside the semantic preview");
+
+const embed = embedConformanceRoot(document, { target: "Field notes" });
+assert.equal(embed.outerHTML,
+  '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes" data-bp-conformance-root="">↪ Field notes</section>');
+
+const sheet = sheetConformanceRoot(document, {
+  snapshot: {
+    col_widths: [12, 8],
+    head: ["Item", "Cost"],
+    rows: [["Hosting", "42"], ["Domains", "18"]],
+  },
+});
+assert.equal(sheet.outerHTML,
+  '<table class="bp-table" role="presentation" data-bp-conformance-root=""><thead><tr><th class="bp-sheet__th" style="width: 12px;">Item</th><th class="bp-sheet__th" style="width: 8px;">Cost</th></tr></thead><tbody><tr><td class="bp-sheet__td" style="width: 12px;">Hosting</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">42</td></tr><tr><td class="bp-sheet__td" style="width: 12px;">Domains</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">18</td></tr></tbody></table>');
 
 for (const view of [footnote, toc, video]) {
   view.destroy();
