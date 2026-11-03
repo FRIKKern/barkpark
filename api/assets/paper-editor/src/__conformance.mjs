@@ -75,10 +75,6 @@ function semanticClone(source, blockType) {
       const area = root.querySelector(":scope > textarea.bp-canvas-code-area");
       if (area) root.replaceChildren(document.createTextNode(area.value || ""));
     }
-  } else if (type === "diagram") {
-    root.classList.add("bp-diagram");
-    root.style.removeProperty("background");
-    root.style.border = "1px solid";
   } else if (type === "expandable") {
     // Keep the real details/summary/body nodes. `open` is edit-canvas state;
     // the summary input is the only editor island normalized to authored text.
@@ -151,11 +147,6 @@ function semanticClone(source, blockType) {
         paragraph.replaceWith(span);
       }
     }
-  } else if (type === "divider") {
-    const divider = root.querySelector(".bp-section-divider");
-    const mark = divider?.querySelector(".bp-section-divider__mark");
-    divider?.setAttribute("style", "position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid");
-    mark?.setAttribute("style", "position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem");
   } else if (type === "paragraph") {
     // Native <strong> and safe-link attributes are useful PM semantics. Their
     // reader-equivalent projection is allowed only for the exact one-paragraph
@@ -351,6 +342,8 @@ const semanticMutationProbes = [
   ["table", '<table class="bp-table" role="grid" data-bp-type="table" data-bp-conformance-root><tbody><tr><th>Surface</th></tr></tbody></table>', '<table class="bp-table" role="presentation"><thead><tr><th><span>Surface</span></th></tr></thead><tbody></tbody></table>'],
   ["callout", '<div class="definitely-not-the-reader-callout-class" data-bp-type="callout" data-bp-conformance-root><span><strong role="textbox">Heads up</strong></span> <div class="bp-callout__body">Body</div></div>', '<div class="bp-callout"><strong>Heads up</strong> <span>Body</span></div>'],
   ["card", '<article class="definitely-not-the-reader-card-class" data-bp-type="card" data-bp-conformance-root><div class="bp-canvas-card__controls"></div><h2><span>Title</span></h2></article>', '<div class="bp-card"><h2>Title</h2></div>'],
+  ["diagram", '<figure class="definitely-not-the-reader-diagram-class" data-bp-type="diagram" data-bp-conformance-root style="background:red"><pre class="mermaid">graph TD; A-->B</pre></figure>', '<figure class="bp-diagram" style="border:1px solid"><pre class="mermaid">graph TD; A-->B</pre></figure>'],
+  ["divider", '<div class="bp-section-divider" data-bp-type="divider" data-bp-conformance-root><span class="bp-section-divider__mark">§</span></div>', '<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid"><span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;font-size:1.1rem">§</span></div>'],
 ];
 for (const [type, html, expectedHtml] of semanticMutationProbes) {
   const probe = document.createElement("template");
