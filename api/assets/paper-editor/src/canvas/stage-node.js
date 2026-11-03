@@ -214,7 +214,7 @@ export const Stage = Node.create({
 
         const semanticValues = {
           k: stageStr(a.kind),
-          t: stageStr(a.title),
+          "t": stageStr(a.title),
           d: stageStr(a.detail),
           f: stageStr(a.files),
           src: typeof a.source === "string" ? a.source : "",

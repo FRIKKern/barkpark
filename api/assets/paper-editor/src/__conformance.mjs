@@ -87,6 +87,15 @@ function semanticClone(source, blockType) {
         root.removeAttribute("open");
       }
     }
+  } else if (type === "sheet" || type === "embed") {
+    // These read-only atoms keep their visible summary chip, while this exact
+    // inert template receives canonical reader HTML over bp:block-html. Unwrap
+    // only a single server-painted semantic root; malformed/unpainted receipts remain
+    // visible to the shape diff instead of being repaired into a pass.
+    if (root.matches("template[data-bp-fleet-body][data-bp-conformance-root]") &&
+        root.content.childElementCount === 1 && root.content.childNodes.length === 1) {
+      root = root.content.firstElementChild;
+    }
   } else if (type === "figure") {
     // The figure retains a real reader root/caption alongside its editor
     // controls. Project the node-view's documented group role only from its

@@ -1585,6 +1585,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # with run-convert.js CANVAS_STATIC_RENDER_TYPES.
   @canvas_static_render_types ~w(arrayOf codelist composite localizedText paper-links pre-gate-badge)
 
+  # Read-only reference atoms retain their visible summary chip and retarget
+  # control, but expose a hidden parity surface painted by this same canonical
+  # reader channel. This avoids a client-side sheet/embed HTML producer while
+  # allowing the mounted canvas to prove the server bytes it would read.
+  @readonly_atom_render_types ~w(sheet embed)
+
   # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet
   # block (keep it OUT of @fleet_render_types so it never drags through
   # task_previews/apply_preview OR renders the WHOLE figure). Instead the canvas
@@ -1711,6 +1717,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         Map.get(block, "type") in @dataviz_render_types or
         Map.get(block, "type") in @chat_render_types or
         Map.get(block, "type") in @canvas_static_render_types or
+        Map.get(block, "type") in @readonly_atom_render_types or
         Map.get(block, "type") in @specialty_render_types
 
   def fleet_block?(_), do: false
@@ -1770,9 +1777,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def fleet_render(block, previews) do
     render = %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
 
-    # Bind native Stats/Cards fields to the authored source of this exact paint,
-    # not a later local value or a display-only query result.
-    if block["type"] in ~w(stat stats stat-grid cards),
+    # Bind native Stats/Cards fields and inert sheet/embed receipts to the authored
+    # source of this exact paint, not a later local value or display-only result.
+    if block["type"] in ~w(stat stats stat-grid cards sheet embed),
       do: Map.put(render, "source_block", block),
       else: render
   end

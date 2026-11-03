@@ -35,8 +35,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       Either way the canvas holds NO competing HTML producer (§3), so the paint /
       the saved-block re-render matches the reader by construction.
 
-    * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP, not the
-      reader render, and carries the WHOLE block on `bpBlock`. The only
+    * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP and carries
+      the WHOLE block on `bpBlock`. An inert conformance template receives the reader's
+      own source-bound server HTML; it is never active DOM, a second visible paint,
+      or a client renderer. The only
       value/content op it can emit is a deliberate retarget: `mountAtomRetarget`
       (embed-node.js) commits the new target through `setNodeMarkup` and
       run-convert emits exactly one `patch-block` per retarget — `{ref,
@@ -85,6 +87,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
   alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Render.{Components, Compose, DataViz, Figures, Forms}
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @article %{style: :article}
 
@@ -688,6 +691,18 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     end
   end
 
+  test "§4 chip-carry conformance holes use the canonical server paint channel" do
+    for {label, block, _sig} <- chip_carry() do
+      assert Paper.fleet_block?(block),
+             "#{label}: inert conformance receipt is no longer admitted to bp:block-html"
+
+      render = Paper.fleet_render(block, %{})
+
+      assert Map.get(render, "source_block") == block,
+             "#{label}: server paint is no longer bound to the exact carried source"
+    end
+  end
+
   # ── §5 INJECTED-DRIFT PROOF — the byte-compare has teeth ────────────────────
   #
   # Model the exact D8 violations this gate exists to catch and prove the
@@ -770,7 +785,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     body = File.read!(test_path)
 
     # Non-vacuous: it must exercise the load-bearing bindings, not be an empty stub.
-    for marker <- ["bp-section__title", "bp-section__body", "BP_SECTION_CONTENT", "minWidth"] do
+    for marker <- ["bp-section__title", "bp-section__body", "BP_SECTION_CONTENT", "min-width"] do
       assert String.contains?(body, marker),
              "__section_parity.test.mjs no longer asserts #{marker} — the parity gate was gutted"
     end

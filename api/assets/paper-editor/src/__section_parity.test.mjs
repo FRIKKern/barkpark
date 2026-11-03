@@ -58,6 +58,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const readSrc = (rel) => readFileSync(join(__dirname, rel), "utf8");
 const SRC = readSrc("./canvas/section-node.js");
+const STYLES = readSrc("./styles.css");
 
 let failures = 0;
 function check(name, fn) {
@@ -218,6 +219,9 @@ check("(c) grid cells use the shared wrapper and carry child placement", () => {
   assert.match(SRC, /nodeName: "div", class: "bp-section__cell"/);
   assert.match(SRC, /Object\.hasOwn\(section\.attrs\.cells \|\| \{\}, id\)/);
   assert.match(SRC, /child\.attrs\.bpSectionCell/);
+  const minWidth = /\.bp-paper-editor-body\s+\.bp-section__cell\s*\{[^}]*min-width:\s*0;/s;
+  assert.match(STYLES, minWidth,
+    "grid cells lost min-width:0 and may overflow their assigned track");
 });
 
 check("section placement follows both identified and ID-less children on reorder", () => {

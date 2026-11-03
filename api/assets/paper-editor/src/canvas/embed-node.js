@@ -149,59 +149,6 @@ export function embedChipLabel(block) {
   return target ? `↪ ${target}` : "↪ (untitled)";
 }
 
-function sheetCell(document, tag, value, width, numeric) {
-  const cell = document.createElement(tag);
-  cell.className = tag === "th" ? "bp-sheet__th" : "bp-sheet__td";
-  if (numeric && tag === "td") cell.classList.add("sheet-al-right");
-  if (Number.isFinite(width)) cell.style.width = `${width}px`;
-  cell.textContent = value == null ? "" : String(value);
-  return cell;
-}
-
-// A hidden semantic comparison root leaves the established summary chip and
-// retarget control untouched. It is deliberately a sibling of both, so editor
-// chrome cannot leak into the reader-shape comparison.
-export function sheetConformanceRoot(document, block) {
-  const snapshot = block && block.snapshot && typeof block.snapshot === "object"
-    ? block.snapshot : {};
-  const widths = Array.isArray(snapshot.col_widths) ? snapshot.col_widths : [];
-  const head = Array.isArray(snapshot.head) ? snapshot.head : [];
-  const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
-  const table = document.createElement("table");
-  table.className = "bp-table";
-  table.setAttribute("role", "presentation");
-  table.setAttribute("data-bp-conformance-root", "");
-  if (head.length) {
-    const thead = document.createElement("thead");
-    const tr = document.createElement("tr");
-    head.forEach((value, column) => tr.appendChild(
-      sheetCell(document, "th", value, widths[column], false),
-    ));
-    thead.appendChild(tr);
-    table.appendChild(thead);
-  }
-  const tbody = document.createElement("tbody");
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    (Array.isArray(row) ? row : []).forEach((value, column) => tr.appendChild(
-      sheetCell(document, "td", value, widths[column], /^\s*-?(?:\d+(?:\.\d+)?|\.\d+)\s*$/.test(String(value ?? ""))),
-    ));
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  return table;
-}
-
-export function embedConformanceRoot(document, block) {
-  const target = block && block.target ? String(block.target) : "";
-  const section = document.createElement("section");
-  section.className = "paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved";
-  section.setAttribute("data-embed", target);
-  section.setAttribute("data-bp-conformance-root", "");
-  section.textContent = target ? `↪ ${target}` : "↪ (untitled)";
-  return section;
-}
-
 // ── pd-ee-sheet-embed-retarget: the REFERENCE retarget affordance ─────────────
 //
 // A read-only atom has exactly ONE thing about it an author authors: the REFERENCE.
@@ -420,7 +367,7 @@ function mountAtomRetarget({ dom, node, editor, getPos, bpType }) {
 // (an atom carrying the whole block verbatim, a read-only chip node-view) and differ
 // ONLY in the node name + the chip label function + a CSS class — so they are one
 // factory, two registrations.
-function readOnlyAtomNode({ name, bpType, chipLabel, className, conformanceRoot }) {
+function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
   return Node.create({
     name,
 
@@ -485,22 +432,49 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className, conformanceRoot 
     //   * ignoreMutation: () => true — PM never reads the chip's DOM mutations back
     //     into the document (there is no contentDOM on an atom).
     addNodeView() {
-      return ({ node, getPos, editor }) => {
+      return ({ node: initialNode, getPos, editor }) => {
+        let node = initialNode;
+        let destroyed = false;
         const block = (node.attrs && node.attrs.bpBlock) || {};
+        const bpId = (node.attrs && node.attrs.bpId) || "";
 
         const dom = document.createElement("div");
         dom.className = `bp-canvas-readonly ${className}`;
         dom.setAttribute("data-bp-type", bpType);
+        dom.setAttribute("data-bp-fleet-id", bpId);
         dom.setAttribute("contenteditable", "false");
         dom.setAttribute("data-test-id", `paper-readonly-${bpType}`);
 
         const chip = document.createElement("span");
         chip.className = "bp-canvas-readonly-chip";
         chip.textContent = chipLabel(block);
-        let preview = conformanceRoot(document, block);
-        preview.style.display = "none";
-        preview.setAttribute("aria-hidden", "true");
+
+        // Inert parity receipt, painted only by the server's canonical reader
+        // producer. A template keeps received custom elements, resources and ids
+        // out of the active document while retaining the exact reader bytes for
+        // conformance. The visible chip remains the sole mounted representation.
+        const preview = document.createElement("template");
+        preview.setAttribute("data-bp-fleet-body", "");
+        preview.setAttribute("data-bp-conformance-root", "");
+        preview.setAttribute("data-bp-type", bpType);
         dom.append(chip, preview);
+
+        const onPaint = (event) => {
+          // Always cancel the hook's generic injection. Only an exact render of
+          // the block currently carried by this node may replace the receipt.
+          event.preventDefault();
+          const { html, sourceBlock } = event.detail || {};
+          if (!sourceBlock || sourceBlock.id !== node.attrs.bpId ||
+              !node.type.create({ ...node.attrs, bpBlock: sourceBlock }).eq(node)) return;
+          preview.innerHTML = typeof html === "string" ? html : "";
+        };
+        const signalReady = () => queueMicrotask(() => {
+          if (!destroyed && dom.isConnected) {
+            dom.dispatchEvent(new CustomEvent("bp-ready", { bubbles: true, composed: true }));
+          }
+        });
+        preview.addEventListener("bp-fleet-paint", onPaint);
+        signalReady();
 
         // pdd-t12c: keyboard + screen-reader parity — a tab stop with an accessible
         // name, a locked-state announcement, and Enter/Space → select (→ Backspace
@@ -530,18 +504,18 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className, conformanceRoot 
           update: (updated) => {
             if (updated.type.name !== name) return false;
             const b = (updated.attrs && updated.attrs.bpBlock) || {};
+            const changed = !updated.eq(node);
+            node = updated;
+            dom.setAttribute("data-bp-fleet-id", node.attrs.bpId || "");
+            if (changed) preview.innerHTML = "";
             chip.textContent = chipLabel(b);
-            const nextPreview = conformanceRoot(document, b);
-            nextPreview.style.display = "none";
-            nextPreview.setAttribute("aria-hidden", "true");
-            preview.replaceWith(nextPreview);
-            preview = nextPreview;
             // Keep the accessible name + lock cue in lockstep with the re-rendered
             // chip (an echo/undo may change the block's locked state or content).
             dom.setAttribute("aria-label", atomAriaLabel(chipLabel(b), b));
             if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
             else dom.removeAttribute("data-bp-locked");
             if (retarget) retarget.paint(b);
+            if (changed) signalReady();
             return true;
           },
 
@@ -554,6 +528,8 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className, conformanceRoot 
           ignoreMutation: () => true,
 
           destroy: () => {
+            destroyed = true;
+            preview.removeEventListener("bp-fleet-paint", onPaint);
             if (retarget) retarget.destroy();
           },
         };
@@ -570,7 +546,6 @@ export const Sheet = readOnlyAtomNode({
   bpType: "sheet",
   chipLabel: sheetChipLabel,
   className: "bp-canvas-sheet",
-  conformanceRoot: sheetConformanceRoot,
 });
 
 export const Embed = readOnlyAtomNode({
@@ -578,7 +553,6 @@ export const Embed = readOnlyAtomNode({
   bpType: "embed",
   chipLabel: embedChipLabel,
   className: "bp-canvas-embed",
-  conformanceRoot: embedConformanceRoot,
 });
 
 // ── pdd-t8: the fleet SERVER-PAINTED read-only atom (`bpFleet`) ────────────────

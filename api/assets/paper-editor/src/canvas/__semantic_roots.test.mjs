@@ -12,17 +12,34 @@ globalThis.window = window;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: window.navigator });
 
 const { Footnote, Toc, Video } = await import("./island-node.js");
-const { embedConformanceRoot, sheetConformanceRoot } = await import("./embed-node.js");
+const { Embed, Sheet } = await import("./embed-node.js");
 const { Divider } = await import("./divider-node.js");
 
+function mockNode(extension, attrs, type = null) {
+  const nodeType = type || {
+    name: extension.name,
+    create(nextAttrs) { return mockNode(extension, nextAttrs, this); },
+  };
+  return {
+    type: nodeType,
+    attrs,
+    eq(other) {
+      return other?.type?.name === nodeType.name &&
+        JSON.stringify(other.attrs) === JSON.stringify(attrs);
+    },
+  };
+}
+
 function mount(extension, attrs) {
-  const current = { type: { name: extension.name }, attrs };
+  const current = mockNode(extension, attrs);
   const editor = {
     isEditable: true,
+    options: { element: document.body },
     state: { doc: { nodeAt: () => current } },
     chain: () => ({ command() { return this; }, run: () => true }),
   };
   const view = extension.config.addNodeView()({ node: current, editor, getPos: () => 0 });
+  view.makeNode = (nextAttrs) => mockNode(extension, nextAttrs, current.type);
   document.body.appendChild(view.dom);
   return view;
 }
@@ -69,21 +86,71 @@ assert.equal(
   "divider mounts the reader DOM directly without CSSOM rewriting its inline contract",
 );
 
-const embed = embedConformanceRoot(document, { target: "Field notes" });
-assert.equal(embed.outerHTML,
-  '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes" data-bp-conformance-root="">↪ Field notes</section>');
+const atomViews = [];
+for (const [extension, type, block, html] of [
+  [Embed, "embed", { id: "embed-1", type: "embed", target: "Field notes" }, '<article class="paper-embed">Field notes</article>'],
+  [Sheet, "sheet", { id: "sheet-1", type: "sheet", ref: "budget", snapshot: { rows: [["42"]] } }, '<div class="bp-sheet"><span>42</span></div>'],
+]) {
+  const view = mount(extension, { bpId: block.id, bpType: type, bpBlock: block });
+  const root = view.dom.querySelector(":scope > [data-bp-conformance-root]");
+  assert.equal(view.dom.getAttribute("data-bp-fleet-id"), block.id);
+  assert.equal(root.tagName, "TEMPLATE", `${type} parity receipt is inert`);
+  assert.equal(root.getAttribute("data-bp-fleet-body"), "",
+    `${type} parity root is a server-paint hole`);
+  assert.equal(root.getAttribute("data-bp-type"), type);
+  assert.equal(root.content.childNodes.length, 0,
+    `${type} has no client-side reader markup before host paint`);
 
-const sheet = sheetConformanceRoot(document, {
-  snapshot: {
-    col_widths: [12, 8],
-    head: ["Item", "Cost"],
-    rows: [["Hosting", "42"], ["Domains", "18"]],
-  },
-});
-assert.equal(sheet.outerHTML,
-  '<table class="bp-table" role="presentation" data-bp-conformance-root=""><thead><tr><th class="bp-sheet__th" style="width: 12px;">Item</th><th class="bp-sheet__th" style="width: 8px;">Cost</th></tr></thead><tbody><tr><td class="bp-sheet__td" style="width: 12px;">Hosting</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">42</td></tr><tr><td class="bp-sheet__td" style="width: 12px;">Domains</td><td class="bp-sheet__td sheet-al-right" style="width: 8px;">18</td></tr></tbody></table>');
+  const matching = new CustomEvent("bp-fleet-paint", {
+    detail: { html, sourceBlock: block }, cancelable: true,
+  });
+  assert.equal(root.dispatchEvent(matching), false, `${type} consumes its matching server paint`);
+  assert.equal(matching.defaultPrevented, true);
+  assert.equal(root.content.childElementCount, 1);
 
-for (const view of [footnote, toc, video, divider]) {
+  const updatedBlock = type === "embed"
+    ? { ...block, target: "Retargeted notes" }
+    : { ...block, ref: "forecast", snapshot: { rows: [["84"]] } };
+  assert.equal(view.update(view.makeNode({ bpId: block.id, bpType: type, bpBlock: updatedBlock })), true);
+  assert.equal(root.content.childNodes.length, 0, `${type} clears old reader bytes after retarget`);
+
+  const stale = new CustomEvent("bp-fleet-paint", {
+    detail: { html: "<p>stale</p>", sourceBlock: block }, cancelable: true,
+  });
+  assert.equal(root.dispatchEvent(stale), false, `${type} cancels generic stale injection`);
+  assert.equal(root.content.childNodes.length, 0, `${type} rejects old-source paint`);
+
+  const freshHtml = `<section data-fresh="${type}">${type}</section>`;
+  root.dispatchEvent(new CustomEvent("bp-fleet-paint", {
+    detail: { html: freshHtml, sourceBlock: updatedBlock }, cancelable: true,
+  }));
+  assert.equal(root.innerHTML, freshHtml, `${type} accepts the current source paint`);
+
+  // A hook may replay its id-keyed cache after a LiveView/PM remount. The new
+  // receipt must reject bytes paired with the old carried source before it
+  // accepts the current pair.
+  view.destroy?.();
+  view.dom.remove();
+  const remount = mount(extension, { bpId: block.id, bpType: type, bpBlock: updatedBlock });
+  const remountRoot = remount.dom.querySelector(":scope > template[data-bp-conformance-root]");
+  remountRoot.dispatchEvent(new CustomEvent("bp-fleet-paint", {
+    detail: { html: "<p>cached stale</p>", sourceBlock: block }, cancelable: true,
+  }));
+  assert.equal(remountRoot.content.childNodes.length, 0,
+    `${type} remount rejects cached bytes for the old source`);
+  remountRoot.dispatchEvent(new CustomEvent("bp-fleet-paint", {
+    detail: { html: freshHtml, sourceBlock: updatedBlock }, cancelable: true,
+  }));
+  assert.equal(remountRoot.innerHTML, freshHtml,
+    `${type} remount accepts cached bytes paired with its current source`);
+  atomViews.push(remount);
+}
+
+assert.equal(atomViews[0].dom.querySelector("template").innerHTML.includes("data-fresh=\"embed\""), true);
+assert.equal(atomViews[1].dom.querySelector("template").innerHTML.includes("data-fresh=\"sheet\""), true,
+  "id-scoped paints remain isolated across mixed atom consumers");
+
+for (const view of [footnote, toc, video, divider, ...atomViews]) {
   view.destroy?.();
   view.dom.remove();
 }
