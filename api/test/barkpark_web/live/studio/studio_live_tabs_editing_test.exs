@@ -124,7 +124,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTabsEditingTest do
     [saved_parent] = saved.content["blocks"]
     [saved_row] = saved_parent["tabs"]
     [saved_body] = saved_row["blocks"]
-    assert saved_row["id"] == row["id"]
+    refute Map.has_key?(saved_row, "id")
     assert saved_body["id"] == body["id"]
     assert saved_body["content"] == [%{"type" => "text", "value" => "After"}]
     assert saved_body["child-unknown"] == [1, 2]

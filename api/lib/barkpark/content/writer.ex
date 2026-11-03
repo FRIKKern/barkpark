@@ -1238,7 +1238,7 @@ defmodule Barkpark.Content.Writer do
 
     blocks =
       given
-      |> BlockOps.ensure_block_ids()
+      |> BlockOps.ensure_persisted_block_ids()
       |> BlockOps.normalize_render_shapes()
 
     content =
@@ -1267,7 +1267,7 @@ defmodule Barkpark.Content.Writer do
     blocks =
       layout
       |> Synthesis.scaffold(values, prefill, schema.fields || [])
-      |> BlockOps.ensure_block_ids()
+      |> BlockOps.ensure_persisted_block_ids()
       # Canonicalize any flat-string list item the scaffold body carried (the
       # obsidian list-item-crash fix) — additive + idempotent + render-preserving,
       # so a scaffold with no list (or only canonical lists) is byte-identical.
@@ -2012,12 +2012,13 @@ defmodule Barkpark.Content.Writer do
 
   # R2 chokepoint (id-less backfill). When a document write carries a
   # `content["blocks"]` LIST, route it through the canonical
-  # `BlockOps.ensure_block_ids/1` so every block has a stable, unique id before
-  # storage — the exact contract the paper upsert path already enforces. A write
+  # `BlockOps.ensure_persisted_block_ids/1` so every addressable block has a
+  # stable, unique id before storage while an optional absent tabs-row id stays
+  # absent — the exact contract the paper upsert path already enforces. A write
   # whose content has no "blocks" key (a legacy flat field-map save) is returned
   # untouched. Additive (a present non-blank id is preserved byte-identical) and
   # idempotent (re-running over an id-bearing list writes nothing new), so this
-  # never changes content beyond filling absent/blank ids on id-less blocks.
+  # never changes content beyond filling absent/blank ids on addressable blocks.
   defp maybe_ensure_block_ids(attrs, opts) do
     content = Map.get(attrs, "content")
 
@@ -2032,13 +2033,17 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  # Two normalizers at the SAME chokepoint: `ensure_block_ids` fills id-less
+  # Two normalizers at the SAME chokepoint: persisted-id normalization fills id-less
   # blocks; `normalize_list_items` coerces legacy flat-STRING list items to
   # the canonical inline-array shape (the obsidian list-item-crash fix). Both
   # additive + idempotent + render-preserving, so a write of a clean
   # (id-bearing, canonical-item) block list passes through byte-identical.
   defp ensure_block_ids(attrs, content, blocks) do
-    new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes()
+    new_blocks =
+      blocks
+      |> BlockOps.ensure_persisted_block_ids()
+      |> BlockOps.normalize_render_shapes()
+
     Map.put(attrs, "content", Map.put(content, "blocks", new_blocks))
   end
 

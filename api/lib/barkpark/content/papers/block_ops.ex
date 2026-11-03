@@ -393,7 +393,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # into sections; both are render-preserving.
           list
           |> maybe_seed_template(type, existing, attrs)
-          |> ensure_block_ids()
+          |> ensure_persisted_block_ids()
           |> normalize_render_shapes()
           |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
 
@@ -1012,9 +1012,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
-         blocks = get_in(doc.content || %{}, ["blocks"]) || [],
-         :ok <- preflight_table_editor_ops(blocks, [op]),
-         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         authored_blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         :ok <- preflight_table_editor_ops(authored_blocks, [op]),
+         {:ok, blocks} <- project_revision_fenced_ids(authored_blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
@@ -1044,7 +1044,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         normalized = patched |> ensure_block_ids() |> normalize_render_shapes(),
+         normalized =
+           patched
+           |> restore_optional_tab_id_omissions(authored_blocks)
+           |> normalize_render_shapes(),
          # PortableDoc RATCHET (R4.5): the op may not ADD a validation error;
          # report-only until :portable_doc_refuse_new_errors is on (NewErrors).
          # Only the blocks the op touched are validated, and before sheet
@@ -1602,9 +1605,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
-         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         :ok <- preflight_table_editor_ops(blocks, ops),
-         blocks = project_batch_ids(blocks, if_rev),
+         {:ok, authored_blocks} <- resolve_batch_paper_blocks(doc, if_rev),
+         :ok <- preflight_table_editor_ops(authored_blocks, ops),
+         blocks = project_batch_ids(authored_blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          no_op? =
            ops == [] or
@@ -1619,7 +1622,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
              block_ids,
              dataset,
              opts,
-             no_op?
+             no_op?,
+             false,
+             authored_blocks
            ) do
       receipt = %{
         slug: slug,
@@ -1628,7 +1633,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
         block_ids: if(no_op?, do: [], else: block_ids)
       }
 
-      {:ok, maybe_capture_contextual_history(receipt, blocks, new_blocks, ops, opts), effects}
+      history_before = restore_optional_tab_id_omissions(blocks, authored_blocks)
+
+      {:ok, maybe_capture_contextual_history(receipt, history_before, new_blocks, ops, opts),
+       effects}
     else
       {:error, _reason} = err -> err
     end
@@ -1675,7 +1683,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          dataset,
          opts,
          no_op?,
-         strict_result? \\ false
+         strict_result?,
+         authored_blocks \\ nil
        ) do
     # Same quality-gate RATCHET as the single-op path, applied to the atomic
     # batch RESULT: the whole batch is refused (paper unchanged) when it would
@@ -1689,7 +1698,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
-         normalized = folded |> ensure_block_ids() |> normalize_render_shapes(),
+         normalized =
+           folded
+           |> maybe_restore_optional_tab_id_omissions(authored_blocks)
+           |> normalize_render_shapes(),
          # Same PortableDoc RATCHET as the single-op path, on the batch RESULT.
          :ok <- NewErrors.check_touched(blocks, normalized),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
@@ -1702,7 +1714,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # Trusted block forms and private Table intents still pass through
         # revision/context/Patch fences before sharing the empty-batch receipt:
         # current rev, no write or broadcast. Canonical ops keep their semantics.
-        {:ok, blocks, paper_current_rev(doc), nil}
+        {:ok, normalized, paper_current_rev(doc), nil}
       else
         new_blocks = hydrate_changed_sheet_blocks(new_blocks, blocks, doc, dataset, slug)
         rev = paper_next_rev(doc)
@@ -1760,6 +1772,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} = err -> err
     end
   end
+
+  defp maybe_restore_optional_tab_id_omissions(blocks, authored) when is_list(authored),
+    do: restore_optional_tab_id_omissions(blocks, authored)
+
+  defp maybe_restore_optional_tab_id_omissions(blocks, _authored),
+    do: ensure_persisted_block_ids(blocks)
 
   defp require_exact_contextual_history_result(blocks, blocks, true), do: :ok
 
@@ -2194,12 +2212,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # it renders. Resolve those IDs only after the stored revision has passed its
   # fence. Projection is pure; refusal and empty batches still write nothing.
   defp project_revision_fenced_ids(blocks, if_rev) when not is_nil(if_rev),
-    do: project_block_ids_safely(blocks)
+    do: project_block_ids_for_edit_safely(blocks)
 
   defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
 
   defp project_batch_ids(blocks, nil), do: blocks
-  defp project_batch_ids(blocks, _if_rev), do: ensure_block_ids(blocks)
+
+  defp project_batch_ids(blocks, _if_rev), do: project_block_ids_for_edit(blocks)
 
   defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
@@ -2724,9 +2743,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_document_if_rev(doc, if_rev),
-         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
-         :ok <- preflight_table_editor_ops(blocks, [op]),
-         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
+         {:ok, authored_blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(authored_blocks, [op]),
+         {:ok, blocks} <- project_document_op_ids(authored_blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          {:ok, patched} <- Patch.apply_patch(blocks, applied_op),
          # HOIST (PDS, document surface): mint ids BEFORE `locate_paper_affected`,
@@ -2741,7 +2760,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # `patched` (pre-mint) so a revision-fenced op over a list that was
          # ALREADY id-less on disk keeps reporting `no_op` instead of being
          # promoted to a write by the minting alone.
-         new_blocks = ensure_block_ids(patched),
+         new_blocks = restore_optional_tab_id_omissions(patched, authored_blocks),
          {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
       if not is_nil(if_rev) and patched == blocks do
         {:ok, document_no_op_receipt(doc, op, affected)}
@@ -2874,11 +2893,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_document_if_rev(doc, if_rev),
-         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
-         :ok <- preflight_table_editor_ops(blocks, ops),
-         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
-         {:ok, new_blocks, results} <- fold_document_ops(blocks, ops) do
-      if not is_nil(if_rev) and new_blocks == blocks do
+         {:ok, authored_blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(authored_blocks, ops),
+         {:ok, blocks} <- project_document_op_ids(authored_blocks, if_rev),
+         {:ok, folded, results} <- fold_document_ops(blocks, ops),
+         no_op? = folded == blocks,
+         new_blocks = restore_optional_tab_id_omissions(folded, authored_blocks) do
+      if not is_nil(if_rev) and no_op? do
         {:ok,
          %{
            results: results,
@@ -2939,7 +2960,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp project_document_op_ids(blocks, nil), do: {:ok, blocks}
-  defp project_document_op_ids(blocks, _if_rev), do: project_block_ids_safely(blocks)
+  defp project_document_op_ids(blocks, _if_rev), do: project_block_ids_for_edit_safely(blocks)
 
   @doc """
   Apply one request-identified Beta document block operation exactly once.
@@ -4258,9 +4279,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @spec ensure_block_ids(list()) :: list()
   defdelegate ensure_block_ids(blocks), to: Barkpark.PortableDoc.BlockIds
 
+  @spec ensure_persisted_block_ids(list()) :: list()
+  defdelegate ensure_persisted_block_ids(blocks), to: Barkpark.PortableDoc.BlockIds
+
+  @spec restore_optional_tab_id_omissions(list(), list()) :: list()
+  defdelegate restore_optional_tab_id_omissions(blocks, authored),
+    to: Barkpark.PortableDoc.BlockIds
+
   @doc "Project stable ids only when authored identities are unambiguous."
   @spec project_block_ids_safely(list()) :: {:ok, list()} | {:error, {:duplicate_id, String.t()}}
   defdelegate project_block_ids_safely(blocks), to: Barkpark.PortableDoc.BlockIds
+
+  @doc false
+  @spec project_block_ids_for_edit_safely(list()) ::
+          {:ok, list()} | {:error, {:duplicate_id, String.t()}}
+  defdelegate project_block_ids_for_edit_safely(blocks), to: Barkpark.PortableDoc.BlockIds
+
+  @doc false
+  @spec project_block_ids_for_edit(list()) :: list()
+  defdelegate project_block_ids_for_edit(blocks), to: Barkpark.PortableDoc.BlockIds
 
   defp visible_body_key(container) do
     case Map.get(container, "children") do

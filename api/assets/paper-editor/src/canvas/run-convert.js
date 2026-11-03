@@ -1260,7 +1260,11 @@ function rowsBlockToNode(block, bpId, bpType) {
   const spec = CANVAS_ROWS[bpType];
   const rows = (block && Array.isArray(block[spec.rowsKey]) ? block[spec.rowsKey] : []).filter((r) => r && typeof r === "object");
   const content = rows.map((row) => {
-    const attrs = { bpId: row.id != null ? row.id : null, bpType: spec.rowName };
+    const attrs = {
+      bpId: row.id != null ? row.id : null,
+      bpType: spec.rowName,
+      bpSourceIdMissing: bpType === "tabs" && !Object.hasOwn(row, "id"),
+    };
     const t = row[spec.titleKey];
     if (t != null) attrs.title = String(t);
     const { key, children } = rowsBody(row);
@@ -1286,7 +1290,9 @@ function rowsNodeToRows(node, bpType, taken) {
   const seen = taken || new Set();
   return ((node && node.content) || []).map((rowNode) => {
     const a = (rowNode && rowNode.attrs) || {};
-    const row = { id: a.bpId != null ? a.bpId : mintId(seen) };
+    const row = {};
+    if (a.bpId != null) row.id = a.bpId;
+    else if (bpType !== "tabs" || a.bpSourceIdMissing !== true) row.id = mintId(seen);
     if (a.title != null && a.title !== "") row[spec.titleKey] = a.title;
     const key = a.bodyKey === "children" ? "children" : "blocks";
     const only = (rowNode && rowNode.content) || [];
