@@ -1628,6 +1628,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @dataviz_render_types ~w(stat stats stat-grid heatmap chart duel lineage)
   @chat_render_types ~w(chat-approval chat-plan chat-question chat-thinking chat-todo chat-tool-diff)
 
+  # Canvas specialty renderers. These blocks share bpFleet's mounted host-paint
+  # contract, but stay outside the classic fleet enumeration because they do not
+  # inherit its contextual preview/editor behavior. The block rides verbatim and
+  # fleet_render/2 supplies the reader's own Render.render_block(:article) bytes.
+  # Keep aligned with run-convert.js CANVAS_SPECIALTY_TYPES and
+  # paper_canvas.ex @canvas_specialty_types.
+  @specialty_render_types ~w(api-endpoint bar-chart code-tabs criteria-progress gauge-list route)
+
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
   # block, render the reader's OWN HTML (`Render.render_block(block, %{style:
@@ -1702,7 +1710,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       Map.get(block, "type") in @fleet_render_types or
         Map.get(block, "type") in @dataviz_render_types or
         Map.get(block, "type") in @chat_render_types or
-        Map.get(block, "type") in @canvas_static_render_types
+        Map.get(block, "type") in @canvas_static_render_types or
+        Map.get(block, "type") in @specialty_render_types
 
   def fleet_block?(_), do: false
 
