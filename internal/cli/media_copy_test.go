@@ -391,3 +391,51 @@ func TestImportReplaceMediaNeedsMedia(t *testing.T) {
 		t.Errorf("exit = %d stderr = %s, want a usage error", code, stderr)
 	}
 }
+
+// SIZE-ONLY EXPORT (task-bd147cfe26a6f1f0). A source whose media list answers
+// sha1 null, as for rows born before the column, is checked by size. The
+// report says how many files that covers, and a second run reads nothing
+// because each file on disk has the listed size.
+func TestExportMediaReportsSizeOnlyFiles(t *testing.T) {
+	src := newMediaFakeServer(t, "d/source")
+	src.store("d4444444-4444-4444-4444-444444444444", "d.png", []byte("png bytes d"))
+	src.store("e5555555-5555-5555-5555-555555555555", "e.png", []byte("png bytes e"))
+	src.noSHA1 = true
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup.ndjson")
+	mediaDir := filepath.Join(dir, "media")
+	for run, want := range []string{"(2 read now, 0 already there)", "(0 read now, 2 already there)"} {
+		var so, se strings.Builder
+		if code := runExport(newWriter(&so, &se), globals{}, src.ctx(), []string{"--out", backup, "--media", mediaDir}); code != exitOK {
+			t.Fatalf("export run %d exit = %d; stderr=%s", run+1, code, se.String())
+		}
+		for _, w := range []string{want, "2 of 2 media file(s) have no SHA-1 on the source and were checked by size only"} {
+			if !strings.Contains(se.String(), w) {
+				t.Errorf("export run %d stderr lacks %q: %s", run+1, w, se.String())
+			}
+		}
+	}
+
+	// A file on disk with the wrong size is read again.
+	if err := os.WriteFile(filepath.Join(mediaDir, "files", "d4444444-4444-4444-4444-444444444444"), []byte("short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var so, se strings.Builder
+	if code := runExport(newWriter(&so, &se), globals{}, src.ctx(), []string{"--out", backup, "--media", mediaDir}); code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	if !strings.Contains(se.String(), "(1 read now, 1 already there)") {
+		t.Errorf("stderr = %s, want the short file read again", se.String())
+	}
+
+	// An export whose source lists every SHA-1 says nothing about size.
+	src.noSHA1 = false
+	so.Reset()
+	se.Reset()
+	if code := runExport(newWriter(&so, &se), globals{}, src.ctx(), []string{"--out", backup, "--media", mediaDir}); code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	if strings.Contains(se.String(), "size only") {
+		t.Errorf("stderr reports size-only files for a source with SHA-1: %s", se.String())
+	}
+}
