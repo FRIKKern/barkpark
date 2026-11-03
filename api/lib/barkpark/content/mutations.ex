@@ -179,6 +179,11 @@ defmodule Barkpark.Content.Mutations do
       {:batch_transaction, module, message} when is_atom(module) and is_binary(message) ->
         raise module, message
 
+      # The RETURNED form (task-61dbf8a21cd155d1): the batch rolls back with the
+      # exception struct as its reason, so the controller gets it as a value.
+      {:batch_rollback, %DBConnection.ConnectionError{} = e} ->
+        Repo.rollback(e)
+
       _ ->
         :ok
     end

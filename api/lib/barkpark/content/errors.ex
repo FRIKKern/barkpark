@@ -1578,6 +1578,36 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :unknown}),
     do: %{code: "internal_error", message: "unknown error", status: 500}
 
+  # A POOL OR QUEUE TIMEOUT RETURNED AS A VALUE (task-61dbf8a21cd155d1).
+  #
+  # On a 2 vCPU test instance on 2026-11-03 a `bp import` batch got 500
+  # `internal_error` after 15 s, and the server logged "no build/1 clause
+  # matched" for a `DBConnection.ConnectionError`. The raised form of that fault
+  # is typed already: the mutate batch rescue, the Writer rescue and
+  # `BarkparkWeb.ErrorJSON` answer 503. The RETURNED form, an
+  # `{:error, %DBConnection.ConnectionError{}}` or a tagged tuple carrying one,
+  # fell through to the catch-all below. The import client shrinks and resends a
+  # batch only on 503 `storage_unavailable`, so a 500 stopped the import.
+  #
+  # Only the two timeouts the pool itself raises are typed here. A queue drop
+  # (`reason: :queue_timeout`, `DBConnection.ConnectionPool.drop/2`) handed over
+  # no connection. A checkout deadline ("timed out because it queued and checked
+  # out the connection for longer than Nms") disconnected the connection inside
+  # the caller's transaction, which then rolled back. Both are transient and a
+  # resend is the right move. Every other connection fault, such as a socket
+  # closed mid-statement, keeps the catch-all's 500, the same split
+  # `BarkparkWeb.PoolOverload.status/1` makes for the raised form.
+  #
+  # The answer is the `connection_unavailable` write arm above: 503
+  # `storage_unavailable`, its hint says to check whether the write landed. The
+  # message is fixed and never carries the exception text, which names a pid
+  # and a stack location.
+  defp build({:error, %DBConnection.ConnectionError{} = e} = term),
+    do: pool_timeout_or_unmatched(e, term)
+
+  defp build({:error, {tag, %DBConnection.ConnectionError{} = e}} = term) when is_atom(tag),
+    do: pool_timeout_or_unmatched(e, term)
+
   # ── CATCH-ALL: an unanticipated reason term. NEVER BARE, NEVER SILENT ───────
   #
   # This clause used to render `message: "unknown error"` and log nothing, so an
@@ -1612,7 +1642,9 @@ defmodule Barkpark.Content.Errors do
   # The `code` stays byte-identical "internal_error":
   # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` grants its retry grace by
   # matching the CODE, and moving it turns that grace terminal (error_json.ex).
-  defp build(other) do
+  defp build(other), do: unmatched(other)
+
+  defp unmatched(other) do
     descriptor = reason_descriptor(other)
 
     Logger.error(
@@ -1623,6 +1655,39 @@ defmodule Barkpark.Content.Errors do
 
     %{code: "internal_error", message: "unknown error (#{descriptor})", status: 500}
   end
+
+  defp pool_timeout_or_unmatched(%DBConnection.ConnectionError{} = e, term) do
+    if pool_timeout?(e) do
+      Logger.error(
+        "Barkpark.Content.Errors: a database pool timeout came back as a returned " <>
+          "error term — answering 503 storage_unavailable/connection_unavailable " <>
+          "(#{reason_descriptor(term)})"
+      )
+
+      build(
+        {:error,
+         {:connection_unavailable,
+          "the database connection pool timed out before this request finished. " <>
+            "Nothing was refused on its merits and this is transient. A write batch " <>
+            "is one transaction, so a timed-out batch applied nothing unless the " <>
+            "connection was lost at commit. Re-read the ids you sent before " <>
+            "resending the identical request."}}
+      )
+    else
+      unmatched(term)
+    end
+  end
+
+  @doc false
+  # Public for the test that pins which connection faults count as a pool
+  # timeout. A queue drop carries `reason: :queue_timeout`. The checkout
+  # deadline is a plain `:error` struct, so its message is what names it.
+  def pool_timeout?(%DBConnection.ConnectionError{reason: :queue_timeout}), do: true
+
+  def pool_timeout?(%DBConnection.ConnectionError{message: message}) when is_binary(message),
+    do: String.contains?(message, "checked out the connection for longer than")
+
+  def pool_timeout?(_), do: false
 
   # `Validation.finding()` (`%{path:, message:, code:, params:}`) onto the
   # wire: `code` is an atom internally (pinned to `Validation.known_codes/0`)
