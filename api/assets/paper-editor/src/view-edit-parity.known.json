@@ -1,33 +1,4 @@
 {
  "_comment": "Known View/Edit computed-style divergences measured by src/__view_edit_parity_matrix.mjs. Each entry is tolerated at every scenario; the matrix fails on any divergence NOT listed here and on any entry that no longer fires (delete it). Adding an entry needs a reason a reviewer can check.",
- "entries": [
-  {
-   "surface": "canvas",
-   "fixture": "field-boolean",
-   "text": "Yes",
-   "axis": "text-owner-missing-in-edit",
-   "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "field-select",
-   "text": "Hardcover",
-   "axis": "text-owner-missing-in-edit",
-   "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-boolean",
-   "text": "Yes",
-   "axis": "text-owner-missing-in-edit",
-   "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-select",
-   "text": "Hardcover",
-   "axis": "text-owner-missing-in-edit",
-   "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  }
- ]
+ "entries": []
 }

@@ -19,8 +19,8 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 await import("./index.js");
 
 const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"));
-const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-test-id", "data-bp-conformance-root", "data-bp-fleet-id"];
-const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls";
+const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-field-type", "data-test-id", "data-bp-conformance-root", "data-bp-fleet-id"];
+const CHROME = ".ProseMirror-trailingBreak, .ProseMirror-separator, .ProseMirror-gapcursor, .bp-paper-contextual-controls, .bp-canvas-field-editor";
 
 function paint(canvas, block) {
   let hostPainted = false;

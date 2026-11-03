@@ -417,10 +417,9 @@
     },
     {
       "names": [
-        "bp-paper-lock-note",
-        "bp-paper-picker-current"
+        "bp-paper-lock-note"
       ],
-      "why": "the LiveView paints the lock note and the picker's current value with the canvas's own class names"
+      "why": "the LiveView paints the lock note with the canvas's own class name"
     },
     {
       "names": [

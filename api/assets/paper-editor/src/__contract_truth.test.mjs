@@ -68,7 +68,7 @@ const source = `${js}\n${css}`;
 const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const appears = (name, text = source) => new RegExp(`(?<![\\w-])${escape(name)}(?![\\w-])`).test(text);
 
-const EDITOR_INTERNAL = new Set(["bp-canvas-image-pick", "data-action", "data-bp-opaque", "data-bp-text-boundary", "data-test-id", "data-bp-paste-notice", "bp-canvas-image-chrome"]);
+const EDITOR_INTERNAL = new Set(["bp-canvas-image-pick", "bp-activate-field-editor", "data-action", "data-bp-opaque", "data-bp-text-boundary", "data-test-id", "data-bp-paste-notice", "bp-canvas-image-chrome"]);
 const reachIns = new Set([...reachInsInContract(md)].map((k) => k.split("|")[1]));
 const NO_ON_PROPERTY = new Set(["DOMCharacterDataModified", "DOMContentLoaded", "compositionend", "compositionstart", "compositionupdate", "focusin", "focusout", "gotpointercapture", "lostpointercapture", "pointercancel", "pointerdown", "pointerenter", "pointerleave", "pointermove", "pointerout", "pointerover", "pointerup", "selectionchange", "animationend", "animationstart", "transitionend"]);
 const UNREFLECTED_GLOBAL_ATTRIBUTES = new Set(["inert"]);
