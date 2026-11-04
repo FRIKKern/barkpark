@@ -4,4 +4,4 @@ const requireFromPaperEditor = createRequire(
   new URL("../paper-editor/package.json", import.meta.url),
 );
 
-export const { JSDOM } = requireFromPaperEditor("jsdom");
+export const { JSDOM, VirtualConsole } = requireFromPaperEditor("jsdom");
