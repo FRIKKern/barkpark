@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
@@ -309,6 +312,149 @@ for (const [name, [kind, length]] of focused) {
     assert.equal(descriptor.set, undefined, `${name} stays readonly`);
   }
 }
+
+const here = dirname(fileURLToPath(import.meta.url));
+const canvasSource = readFileSync(join(here, "index.js"), "utf8");
+const sourceModeSource = readFileSync(join(here, "source-mode.js"), "utf8");
+const figureSource = readFileSync(join(here, "figure-context.js"), "utf8");
+const wrappers = [
+  ["toggleSourceMode", "sourceModeToggle", ""],
+  ["_enterSourceMode", "sourceModeEnter", ""],
+  ["_exitSourceMode", "sourceModeExit", ""],
+  ["_commitSource", "sourceModeCommit", "md"],
+  ["_syncSourceText", "sourceModeSyncText", ""],
+  ["sourceMode", "sourceModeActive", "getter"],
+  ["_sizeSourceTextarea", "sourceModeSizeTextarea", ""],
+  ["_teardownSourceEl", "sourceModeTeardown", ""],
+];
+for (const [member, implementation, argument] of wrappers) {
+  const expected = argument === "getter"
+    ? `get ${member}() { return ${implementation}.call(this); }`
+    : `${member}(${argument}) { return ${implementation}.call(this${argument ? `, ${argument}` : ""}); }`;
+  assert.equal(canvasSource.split(expected).length - 1, 1, `${member} has one exact synchronous facade`);
+  assert.equal(sourceModeSource.split(`export function ${implementation}(`).length - 1, 1,
+    `${implementation} has one named implementation`);
+}
+
+const sentinel = new Error("synchronous source-mode sentinel");
+const receiver = {
+  _editor: {},
+  _editable: true,
+  _blocks: [],
+  _mode: "rich",
+  closest: () => null,
+  _enterSourceMode() { throw sentinel; },
+};
+assert.throws(
+  () => BpPaperCanvas.prototype.toggleSourceMode.call(receiver),
+  (error) => error === sentinel,
+  "the facade keeps the receiver and throws synchronously without a fallback",
+);
+assert.equal(
+  Object.getOwnPropertyDescriptor(BpPaperCanvas.prototype, "sourceMode").get.call({ _mode: "source" }),
+  true,
+  "the getter returns the child implementation result for the same receiver",
+);
+
+const importSources = (source) => [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]);
+assert.deepEqual(importSources(sourceModeSource).sort(), [
+  "../i18n.js",
+  "../markdown.js",
+  "./figure-context.js",
+  "./run-convert.js",
+  "./source-realign.js",
+]);
+assert.deepEqual(importSources(figureSource), [], "the Figure predicate stays dependency-free");
+for (const [name, source] of [["source-mode.js", sourceModeSource], ["figure-context.js", figureSource]]) {
+  assert.ok(source.split("\n").length < 800, `${name} stays below 800 lines`);
+  assert.doesNotMatch(source, /\b(?:from\s+|import\s*)["']\.\/index\.js["']/,
+    `${name} never imports the facade`);
+  assert.doesNotMatch(source, /customElements\s*\.\s*define/, `${name} has no registration side effect`);
+}
+assert.equal(canvasSource.split('from "./source-mode.js"').length - 1, 1);
+assert.equal(canvasSource.split('from "./figure-context.js"').length - 1, 1);
+assert.equal(sourceModeSource.split('from "./figure-context.js"').length - 1, 1);
+
+const productionFiles = [];
+const walk = (directory) => {
+  for (const name of readdirSync(directory)) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) walk(path);
+    else if (name.endsWith(".js")) productionFiles.push(path);
+  }
+};
+walk(join(here, ".."));
+const figureDefinitions = productionFiles.flatMap((path) => {
+  const source = readFileSync(path, "utf8");
+  return [...source.matchAll(/\bfunction\s+isFigureSingletonCanvas\s*\(/g)].map(() => path);
+});
+assert.deepEqual(figureDefinitions, [join(here, "figure-context.js")],
+  "the Figure predicate has one production definition");
+assert.match(canvasSource, /isFigureSingletonCanvas\(this\)/, "the facade veto and paste paths use the predicate");
+assert.match(sourceModeSource, /isFigureSingletonCanvas\(this\)/, "source mode uses the shared predicate");
+
+const lifecycle = document.createElement("bp-paper-canvas");
+lifecycle.acknowledgedSaves = true;
+lifecycle.flushKeepsSource = true;
+lifecycle.blocks = [{
+  id: "source-boundary",
+  type: "paragraph",
+  content: [{ type: "text", value: "Boundary" }],
+}];
+lifecycle.addEventListener("bp-canvas-ops", (event) => lifecycle.acknowledgeOps(event.detail.seq, true));
+document.body.appendChild(lifecycle);
+await new Promise((resolve) => setTimeout(resolve, 350));
+lifecycle._editor.commands.setTextSelection(2);
+const noEditDoc = lifecycle._editor.state.doc;
+const noEditSelection = lifecycle._editor.state.selection.toJSON();
+lifecycle.toggleSourceMode();
+lifecycle.toggleSourceMode();
+assert.equal(lifecycle._editor.state.doc, noEditDoc, "an unchanged source toggle keeps the exact rich document");
+assert.deepEqual(lifecycle._editor.state.selection.toJSON(), noEditSelection,
+  "an unchanged source toggle keeps the rich selection");
+lifecycle.toggleSourceMode();
+const sourceTextarea = lifecycle._sourceEl;
+const valueDescriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sourceTextarea), "value");
+let sourceValueWrites = 0;
+Object.defineProperty(sourceTextarea, "value", {
+  configurable: true,
+  get() { return valueDescriptor.get.call(this); },
+  set(value) { sourceValueWrites++; valueDescriptor.set.call(this, value); },
+});
+lifecycle.liveRemote = true;
+const liveRemote = [{
+  id: "source-boundary",
+  type: "paragraph",
+  content: [{ type: "text", value: "Live remote boundary" }],
+}];
+lifecycle.applyServerBlocks(liveRemote);
+assert.equal(lifecycle._sourceEl, sourceTextarea, "a live remote sync keeps the same textarea node");
+assert.equal(sourceValueWrites, 0, "a live remote sync uses a range edit, preserving native textarea undo");
+assert.equal(sourceTextarea.value, "Live remote boundary");
+lifecycle.liveRemote = false;
+let pendingFlushCalls = 0;
+const flushPendingServerBlocks = lifecycle._flushPendingServerBlocks;
+lifecycle._flushPendingServerBlocks = function () {
+  pendingFlushCalls++;
+  return flushPendingServerBlocks.call(this);
+};
+lifecycle.toggleSourceMode();
+assert.equal(pendingFlushCalls, 1, "leaving source mode always releases queued server authority last");
+lifecycle.toggleSourceMode();
+const detachedTextarea = lifecycle._sourceEl;
+assert.ok(detachedTextarea, "the lifecycle probe entered source mode");
+lifecycle.remove();
+await Promise.resolve();
+let detachedToggles = 0;
+lifecycle.toggleSourceMode = () => detachedToggles++;
+detachedTextarea.dispatchEvent(new window.KeyboardEvent("keydown", {
+  key: "m",
+  ctrlKey: true,
+  shiftKey: true,
+  bubbles: true,
+  cancelable: true,
+}));
+assert.equal(detachedToggles, 0, "disconnect removes the exact source keydown listener");
 
 console.log("source mode boundary: baseline public surface passed");
 window.close();
