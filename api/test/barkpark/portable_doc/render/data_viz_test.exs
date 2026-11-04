@@ -337,6 +337,18 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
       assert html =~ ">#{label}</text>"
     end
 
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="630" cy="144.8" r="3.5"/><text class="bp-chart__ann" x="630" y="136.8" text-anchor="end">default first</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="46" cy="68.8" r="3.5"/><text class="bp-chart__ann" x="46" y="60.8" text-anchor="middle">last selected</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="630" cy="84" r="3.5"/><text class="bp-chart__ann" x="630" y="76" text-anchor="end">third selected</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="46" cy="160" r="3.5"/><text class="bp-chart__ann" x="46" y="152" text-anchor="start">invalid defaults first</text>)
+
     for label <- ["capped fifth", "too negative", "negative point", "invalid point"] do
       refute html =~ label
     end
