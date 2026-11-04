@@ -5,10 +5,11 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
+import { canvasMethodLeafNames, elementClassBody, sourceMembers } from "../../scripts/surface.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sha = (text) => createHash("sha256").update(text).digest("hex");
@@ -280,6 +281,19 @@ for (const expected of IMPORTS) {
 }
 const rootImports = parseImports(source).filter((record) => record.namespace);
 assert.deepEqual(rootImports.filter((record) => ROOT_NAMESPACES.some((expected) => expected.source === record.source)), ROOT_NAMESPACES);
+const methodLeafNames = canvasMethodLeafNames(readdirSync(here));
+assert.deepEqual(methodLeafNames, Object.values(leafFile).sort(), "every scanner-matching method leaf is owned");
+for (const name of methodLeafNames) {
+  const sourceName = `./${name}`;
+  assert.equal(rootImports.filter((record) => record.source === sourceName).length, 1, `${name} is imported exactly once by the facade`);
+  assert.equal(parseImports(texts.get(name)).some((record) => record.source === "./index.js"), false, `${name} has no facade backedge`);
+}
+const memberNames = [...new Set(sourceMembers([
+  elementClassBody(source),
+  ...methodLeafNames.map((name) => texts.get(name)),
+].join("\n")))].sort();
+assert.equal(memberNames.length, 206, "interaction source-member census");
+assert.equal(sha(`${memberNames.join("\n")}\n`), "805f20b09124db41e8cc38c3920042ee6247548ca827b353a23989794996b764", "interaction source-member census hash");
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 const { window } = dom;
