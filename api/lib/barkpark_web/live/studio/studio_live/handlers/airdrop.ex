@@ -163,6 +163,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
             {:error, :forbidden} ->
               {:noreply, assign(socket, airdrop_error: "You can only share access you hold.")}
 
+            {:error, :dataset_binding} ->
+              {:noreply,
+               assign(socket,
+                 airdrop_error: "This token is bound to one dataset and can only share that one."
+               )}
+
             {:error, _changeset} ->
               {:noreply,
                assign(socket,

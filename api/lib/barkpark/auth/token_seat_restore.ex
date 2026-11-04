@@ -45,7 +45,11 @@ defmodule Barkpark.Auth.TokenSeatRestore do
   rule the rotation's mint uses (`Auth.mint_delegated_token/3` with
   `:also_seat`), so a restore never seats the token above its predecessor.
 
-  A workspace no predecessor held is refused with `not_held_before`. An apply
+  A workspace no predecessor held is refused with `not_held_before`. A seat
+  whose predecessor was bound to a dataset is refused with `dataset_binding`
+  unless the token is bound to the same dataset, and a caller bound to a
+  dataset may restore seats only on a token bound to that dataset
+  (`Barkpark.Auth.within_dataset_binding?/2`). An apply
   writes nothing unless every requested workspace is restorable or already
   seated. Each new seat and a `token/token_seated` audit row naming the caller
   and the predecessor commit in one transaction.
@@ -90,7 +94,8 @@ defmodule Barkpark.Auth.TokenSeatRestore do
   def restore(token_id, slugs, opts \\ []) when is_binary(token_id) and is_list(slugs) do
     apply? = Keyword.get(opts, :apply, false) == true
 
-    with {:ok, token} <- live_token(token_id) do
+    with {:ok, token} <- live_token(token_id),
+         :ok <- caller_within_binding(token, Keyword.get(opts, :actor)) do
       plan = plan(token, slugs)
 
       cond do
@@ -100,6 +105,13 @@ defmodule Barkpark.Auth.TokenSeatRestore do
         true -> write(token, plan, Keyword.get(opts, :actor))
       end
     end
+  end
+
+  # A dataset-bound caller repairs only tokens bound to the same dataset.
+  defp caller_within_binding(token, actor) do
+    if Barkpark.Auth.within_dataset_binding?(token, actor),
+      do: :ok,
+      else: {:error, :dataset_binding}
   end
 
   defp live_token(token_id) do
@@ -149,6 +161,9 @@ defmodule Barkpark.Auth.TokenSeatRestore do
             TenancyAuth.membership_role(token.id, ws.id) != nil ->
               %{acc | already: acc.already ++ [ws.slug]}
 
+            (from = held_by(held, ws.id)) && not within_predecessor_binding?(token, from) ->
+              %{acc | refused: acc.refused ++ [%{workspace: ws.slug, reason: "dataset_binding"}]}
+
             from = held_by(held, ws.id) ->
               seat_role = if TenancyAuth.workspace_admin?(from, ws.id), do: role, else: "member"
               seat = %{workspace: ws.slug, workspace_id: ws.id, role: seat_role, from_token: from}
@@ -167,6 +182,12 @@ defmodule Barkpark.Auth.TokenSeatRestore do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
+  end
+
+  # A seat held by a dataset-bound predecessor goes only to a token bound to
+  # the same dataset.
+  defp within_predecessor_binding?(token, from_id) do
+    Barkpark.Auth.within_dataset_binding?(token, Repo.get(ApiToken, from_id))
   end
 
   # The nearest predecessor that held the workspace.

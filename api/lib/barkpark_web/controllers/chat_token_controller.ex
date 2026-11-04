@@ -71,16 +71,19 @@ defmodule BarkparkWeb.ChatTokenController do
       # DELEGATE (D48). The raw token is generated INSIDE the context fn — the
       # controller never chooses the permissions and never chooses the entropy.
       case Auth.create_chat_token(label, dataset, ws_id, conn.assigns[:api_token]) do
-        {:ok, raw, _token} ->
+        {:ok, raw, token} ->
           conn
           |> put_status(:created)
           |> json(%{
             token: raw,
             label: label,
             permissions: Auth.chat_permissions(),
-            dataset: dataset,
+            dataset: token.dataset,
             workspace: ws_slug
           })
+
+        {:error, :dataset_binding} ->
+          ErrorResponse.emit(conn, {:error, :dataset_binding})
 
         {:error, _reason} ->
           unprocessable(conn, "could not mint token")

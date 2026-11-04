@@ -195,6 +195,9 @@ defmodule BarkparkWeb.AccessController do
       {:error, :forbidden} ->
         forbidden(conn, "you cannot mint a grant conferring capabilities you do not hold")
 
+      {:error, :dataset_binding} ->
+        ErrorResponse.emit(conn, {:error, :dataset_binding})
+
       {:error, %Ecto.Changeset{} = changeset} ->
         unprocessable(conn, changeset_message(changeset))
     end

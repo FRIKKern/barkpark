@@ -84,10 +84,13 @@ defmodule BarkparkWeb.TokenController do
             inserted_at: token.inserted_at,
             label: label,
             permissions: perms,
-            dataset: dataset,
+            dataset: token.dataset,
             workspace: ws_slug,
             expires_at: token.expires_at
           })
+
+        {:error, :dataset_binding} ->
+          ErrorResponse.emit(conn, {:error, :dataset_binding})
 
         {:error, :no_expiry_requires_admin} ->
           ErrorResponse.emit(

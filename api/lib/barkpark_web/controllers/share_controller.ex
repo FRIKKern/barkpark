@@ -415,7 +415,17 @@ defmodule BarkparkWeb.ShareController do
     end
   end
 
+  # A dataset-bound caller mints share-edit tokens only for the dataset it is
+  # bound to (`Barkpark.Auth.inherit_dataset_binding/3`). The scope names the
+  # dataset, so another dataset is refused.
   defp do_mint(conn, ws, proj, dataset, surfaces, params) do
+    case Barkpark.Auth.inherit_dataset_binding(conn.assigns[:api_token], dataset, true) do
+      {:ok, _binding} -> do_mint_within_binding(conn, ws, proj, dataset, surfaces, params)
+      {:error, :dataset_binding} -> ErrorResponse.emit(conn, {:error, :dataset_binding})
+    end
+  end
+
+  defp do_mint_within_binding(conn, ws, proj, dataset, surfaces, params) do
     surface_list =
       surfaces |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
 

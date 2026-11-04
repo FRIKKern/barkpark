@@ -60,6 +60,9 @@ defmodule Barkpark.Access do
 
     * `{:error, :not_a_member}` — the grantor has no membership in the grant's
       workspace, whatever capabilities it holds elsewhere.
+    * `{:error, :dataset_binding}` — the grantor is a token bound to a dataset
+      and the grant names another one. A grant from a bound token that names
+      no dataset is narrowed to the bound dataset.
     * `{:error, :forbidden}` — the grantor IS a member but lacks a requested
       capability, or the capability is unknown, or the principal is
       unrecognised, or the workspace is missing. `:forbidden` keeps its old
@@ -70,17 +73,19 @@ defmodule Barkpark.Access do
   """
   @spec mint(principal(), map()) ::
           {:ok, %{grant: Grant.t(), token: String.t()}}
-          | {:error, :forbidden | :not_a_member | Ecto.Changeset.t()}
+          | {:error, :forbidden | :not_a_member | :dataset_binding | Ecto.Changeset.t()}
   def mint(principal, attrs) when is_map(attrs) do
     with {:ok, grantor_id} <- principal_id(principal),
          workspace_id when is_binary(workspace_id) <- fetch(attrs, :workspace_id),
          caps = fetch(attrs, :capabilities) || [],
-         :ok <- authorize_capabilities(principal, workspace_id, caps) do
+         :ok <- authorize_capabilities(principal, workspace_id, caps),
+         {:ok, dataset} <- grant_dataset(principal, fetch(attrs, :dataset)) do
       raw = generate_token()
 
       insert_attrs =
         attrs
         |> stringify_keys()
+        |> maybe_put_dataset(dataset)
         |> Map.put("grantor_id", grantor_id)
         |> Map.put("link_token_hash", hash_token(raw))
 
@@ -108,9 +113,28 @@ defmodule Barkpark.Access do
       end
     else
       {:error, :not_a_member} -> {:error, :not_a_member}
+      {:error, :dataset_binding} -> {:error, :dataset_binding}
       _ -> {:error, :forbidden}
     end
   end
+
+  # A grant minted by a dataset-bound token covers that dataset only
+  # (`Barkpark.Auth.inherit_dataset_binding/3`). A grant naming no dataset
+  # would reach every dataset in the workspace, so it is narrowed to the bound
+  # one, and a grant naming another dataset is refused.
+  defp grant_dataset(principal, dataset) do
+    named? = if is_binary(dataset) and dataset != "", do: true
+
+    case Barkpark.Auth.inherit_dataset_binding(principal, dataset, named?) do
+      {:ok, {dataset, _bound}} -> {:ok, dataset}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_put_dataset(attrs, dataset) when is_binary(dataset) and dataset != "",
+    do: Map.put(attrs, "dataset", dataset)
+
+  defp maybe_put_dataset(attrs, _dataset), do: attrs
 
   # ---------------------------------------------------------------------------
   # lookup / get / list
