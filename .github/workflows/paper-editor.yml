@@ -40,7 +40,7 @@ on:
       - "api/assets/paper-editor/**"
       - "api/assets/paper-editor-host-tests/**"
       # Every file a step of this workflow reads from outside the folder above.
-      # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
+      # DERIVED, not hand-kept: paper-editor-host-tests/path-filter-workflow.test.mjs
       # walks every entry point this workflow runs, collects each path literal
       # they read, and reds when one is not matched here, or when an entry
       # here matches nothing they read. Both arms must stay identical.
@@ -75,7 +75,7 @@ on:
       - "api/assets/paper-editor/**"
       - "api/assets/paper-editor-host-tests/**"
       # Every file a step of this workflow reads from outside the folder above.
-      # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
+      # DERIVED, not hand-kept: paper-editor-host-tests/path-filter-workflow.test.mjs
       # walks every entry point this workflow runs, collects each path literal
       # they read, and reds when one is not matched here, or when an entry
       # here matches nothing they read. Both arms must stay identical.
@@ -135,7 +135,9 @@ jobs:
         run: npm test
 
       - name: Barkpark host-only editor assertions
-        run: node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
+        run: |
+          node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
+          node ../paper-editor-host-tests/path-filter-workflow.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs

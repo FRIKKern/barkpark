@@ -1,5 +1,5 @@
-// __path_filter.test.mjs — the paper-editor workflow's path filter covers every
-// file its own steps read from outside api/assets/paper-editor.
+// Scanner used by the Barkpark-owned workflow path-filter integration test and
+// the package-owned synthetic scanner test.
 //
 // The filter was hand-kept, and it went blind more than once: a suite added a
 // read of bp-modal-focus.js, bp-tab-keys.js, nav.ex or the pd-parity corpus, and
@@ -16,28 +16,9 @@
 //      root, first hit wins. Inside the package it is followed, outside it is a
 //      sink. A folder, or the fixed prefix before a template hole, is a folder
 //      sink: a new file in it must trigger too.
-// Every sink must match a pattern in BOTH arms, and both arms must be equal.
-//
-// Run: node src/__path_filter.test.mjs   (or: npm test)
-
-import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-import { chain } from "../scripts/test-chain.mjs";
-
-const SELF = fileURLToPath(import.meta.url);
-const PKG = resolve(dirname(SELF), "..");
-const REPO = resolve(PKG, "../../..");
-const WORKFLOW = new URL("../../../../.github/workflows/paper-editor.yml", import.meta.url);
 const SCANNED = new Set([".js", ".mjs", ".cjs", ".css", ".html", ".json"]);
-// Literals that name a repo path as DATA (a hostile wrap token, a file-tree
-// fixture), not a file the step reads. Each entry names the one file it is in
-// (and this file, which names them here).
-const NOT_READ = new Map([
-  ["api/lib/barkpark/portable_doc/bpml/parser.ex", "src/__narrow_render.mjs"],
-  ["internal/", "src/canvas/__filetree_inline_mounted.test.mjs"],
-]);
 
 export function filterArms(yml) {
   const arms = {};
@@ -210,23 +191,3 @@ export const covers = (patterns, sink) => {
   const probe = sink.endsWith("/") ? `${sink}a-new-file` : sink;
   return patterns.some((p) => globToRegExp(p).test(probe));
 };
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const yml = readFileSync(WORKFLOW, "utf8");
-  const scripts = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")).scripts;
-  const arms = filterArms(yml);
-  assert.deepEqual(Object.keys(arms).sort(), ["pull_request", "push"], "the workflow has a push and a pull_request path filter");
-
-  const runs = new Map([[join(PKG, "scripts/test-chain.mjs"), chain(PKG).map((file) => join(PKG, file))]]);
-  const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF, runs }).reads(yml, scripts);
-  assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
-  assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
-
-  const ownedPrefixes = ["api/assets/paper-editor/", "api/assets/paper-editor-host-tests/"];
-  const { unequal, missing, unused } = verdict(arms, sinks, ownedPrefixes);
-  assert.equal(unequal, false, "push and pull_request list the same paths");
-  assert.deepEqual(missing, [], "files a paper-editor step reads that its path filter does not list: add each to BOTH arms of .github/workflows/paper-editor.yml");
-  assert.deepEqual(unused, [], "path filter entries no paper-editor step reads: remove them, or the derivation missed a read");
-
-  console.log(`ok path filter: ${sinks.size} outside reads from ${visited.size} files, all in both arms`);
-}

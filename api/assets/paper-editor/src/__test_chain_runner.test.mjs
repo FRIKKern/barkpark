@@ -16,7 +16,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { FIRST } from "../scripts/test-chain.mjs";
+import { FIRST, isTest } from "../scripts/test-chain.mjs";
 
 const RUNNER = fileURLToPath(new URL("../scripts/test-chain.mjs", import.meta.url));
 const CENSUS = fileURLToPath(new URL("./__test_chain_census.mjs", import.meta.url));
@@ -63,7 +63,7 @@ scene("all pass: every test file runs once, FIRST then the rest by path, from th
 });
 
 for (const [file, plant, code, what] of [
-  ["src/__path_filter.test.mjs", "process.exit(3)", 3, "exits 3"],
+  ["src/__path_filter_scan.test.mjs", "process.exit(3)", 3, "exits 3"],
   ["src/__m.test.mjs", "process.exit(4)", 4, "exits 4"],
   ["src/canvas/__b.test.mjs", "throw new Error('boom')", 1, "throws"],
   ["src/deep/x/__q.test.mjs", "process.exit(5)", 5, "exits 5"],
@@ -157,7 +157,8 @@ for (const [what, scripts, gone, says] of [
       const r = run(join(pkg, "src/__test_chain_census.mjs"), root);
       if (!says) {
         assert.equal(r.status, 0, r.stderr);
-        assert.equal(r.stdout.trim(), `test-chain census: ${REST.length + 3} test files on disk, ${ORDER.length} files in the chain — reconciled, 0 drift`);
+        const testFiles = REST.length + FIRST.filter(isTest).length;
+        assert.equal(r.stdout.trim(), `test-chain census: ${testFiles} test files on disk, ${ORDER.length} files in the chain — reconciled, 0 drift`);
       } else {
         assert.equal(r.status, 1);
         assert.ok(r.stderr.includes(`  - ${says}`), r.stderr);

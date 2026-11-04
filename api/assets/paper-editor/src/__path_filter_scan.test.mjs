@@ -1,5 +1,5 @@
-// __path_filter_scan.test.mjs — the scanner behind __path_filter.test.mjs, on a
-// synthetic tree. The real tree only exercises the read shapes it happens to
+// __path_filter_scan.test.mjs — the package-owned path-filter scanner, on a
+// synthetic tree. The Barkpark host test only exercises the read shapes it happens to
 // use today; every shape the scanner claims is pinned here, so dropping an arm
 // reds even when no real file uses that shape yet.
 //
@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { covers, filterArms, scanner, verdict } from "./__path_filter.test.mjs";
+import { covers, filterArms, scanner, verdict } from "../scripts/path-filter.mjs";
 
 const repo = realpathSync(mkdtempSync(join(tmpdir(), "bp-path-filter-")));
 const pkg = join(repo, "fx/assets/ed");
