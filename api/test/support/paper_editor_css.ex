@@ -4,7 +4,7 @@ defmodule Barkpark.Test.PaperEditorCSS do
   @source_root Path.expand("../../assets/paper-editor/src", __DIR__)
   @entry Path.join(@source_root, "styles.css")
   @authored_root Path.join(@source_root, "styles")
-  @shared Path.expand("../../assets/paper-surface/code-tokens.css", __DIR__)
+  @shared Path.join(@source_root, "code-tokens.css")
   @import ~r/@import\s+["']([^"']+)["']\s*;/
 
   def authored_css! do
