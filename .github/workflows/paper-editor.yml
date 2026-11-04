@@ -154,6 +154,12 @@ jobs:
           node ../paper-editor-host-tests/callout-parity.test.mjs
           node ../paper-editor-host-tests/contract-truth.test.mjs
           node ../paper-editor-host-tests/contextual-controls.test.mjs
+          node ../paper-editor-host-tests/__canvas_media_uploader.test.mjs
+          node ../paper-editor-host-tests/__card_media_bridge.test.mjs
+          node ../paper-editor-host-tests/__card_title_contextual_inline.test.mjs
+          node ../paper-editor-host-tests/__collection_focus.test.mjs
+          node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
+          node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
