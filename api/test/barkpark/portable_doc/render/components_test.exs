@@ -78,6 +78,29 @@ defmodule Barkpark.PortableDoc.Render.ComponentsTest do
       assert html =~ ~s(<span class="bp-phase__n">0/1</span>)
     end
 
+    test "keeps first-seen phase order and row order, including the unlabelled phase" do
+      html =
+        Components.tasks_html(%{
+          "snapshot" => [
+            %{"title" => "w2-first", "status" => "open", "phase" => " W2 "},
+            %{"title" => "flat-first", "status" => "open", "phase" => "   "},
+            %{"title" => "w1-only", "status" => "open", "phase" => "W1"},
+            %{"title" => "w2-second", "status" => "open", "phase" => "W2"},
+            %{"title" => "flat-second", "status" => "open"}
+          ]
+        })
+
+      assert_ordered(html, [
+        "W2",
+        "w2-first",
+        "w2-second",
+        "flat-first",
+        "flat-second",
+        "W1",
+        "w1-only"
+      ])
+    end
+
     test "momentum header reads in-flight / ready / done / percent" do
       html =
         Components.tasks_html(%{
@@ -178,6 +201,15 @@ defmodule Barkpark.PortableDoc.Render.ComponentsTest do
       # priority is reduced to its digits — no CSS breakout survives
       assert html =~ ~s(data-p="9">P9)
     end
+  end
+
+  defp assert_ordered(text, parts) do
+    {_position, _length} =
+      Enum.reduce(parts, {-1, 0}, fn part, {previous, _} ->
+        {position, length} = :binary.match(text, part)
+        assert position > previous, "expected #{inspect(part)} after the preceding item"
+        {position, length}
+      end)
   end
 end
 

@@ -1799,11 +1799,16 @@ defmodule Barkpark.PortableDoc.Render.Components do
     {order, acc} =
       Enum.reduce(rows, {[], %{}}, fn r, {order, acc} ->
         key = r |> get("phase") |> stringish() |> String.trim() |> nil_if_empty()
-        order = if Map.has_key?(acc, key), do: order, else: order ++ [key]
-        {order, Map.update(acc, key, [r], fn xs -> xs ++ [r] end)}
+
+        case Map.fetch(acc, key) do
+          {:ok, grouped} -> {order, Map.put(acc, key, [r | grouped])}
+          :error -> {[key | order], Map.put(acc, key, [r])}
+        end
       end)
 
-    Enum.map(order, fn k -> {k, Map.fetch!(acc, k)} end)
+    order
+    |> Enum.reverse()
+    |> Enum.map(fn key -> {key, acc |> Map.fetch!(key) |> Enum.reverse()} end)
   end
 
   defp phase_html(nil, rows), do: rows |> Enum.map(&row_html/1) |> Enum.join("")
