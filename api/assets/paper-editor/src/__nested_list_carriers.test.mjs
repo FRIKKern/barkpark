@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { blockToTiptap, tiptapToBlock } from "./convert.js";
 
-const fixture = JSON.parse(readFileSync(new URL("../../../test/support/fixtures/nested-list-carriers.json", import.meta.url)));
+const fixture = JSON.parse(readFileSync(new URL("../test-inputs/nested-list-carriers.json", import.meta.url)));
 const block = fixture.blocks[0];
 const clone = value => structuredClone(value);
 const originalBlock = clone(block);

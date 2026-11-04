@@ -56,7 +56,7 @@ const { TextSelection } = await import("@tiptap/pm/state");
 const { Fragment, Slice } = await import("@tiptap/pm/model");
 const { holdsNodeIds } = await import("./run-convert.js");
 
-const FIXTURE = new URL("../../../../test/support/fixtures/paper-editor/nested_split.json", import.meta.url);
+const FIXTURE = new URL("../../test-inputs/paper-editor/nested_split.json", import.meta.url);
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const p = (id, value) => ({ id, type: "paragraph", content: value ? [{ type: "text", value }] : [] });

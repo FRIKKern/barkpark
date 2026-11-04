@@ -138,6 +138,7 @@ jobs:
         run: |
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
+          node ../paper-editor-host-tests/local-fixtures.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
