@@ -30,17 +30,17 @@
 // cannot move a layout. Every element's rendered geometry across all 63
 // pd-golden block fixtures is byte-identical at 1280px before and after.
 //
-// Run: node src/__narrow_title_guards.test.mjs   (or: npm test)
+// Run: node ../paper-editor-host-tests/__narrow_title_guards.test.mjs
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { exitRig, tally } from "./__rig.mjs";
+import { exitRig, tally } from "../paper-editor/src/__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const surface = readFileSync(
-  join(__dirname, "../../../..", "api/assets/paper-surface/paper-surface.css"),
+  join(__dirname, "../../..", "api/assets/paper-surface/paper-surface.css"),
   "utf8",
 );
 

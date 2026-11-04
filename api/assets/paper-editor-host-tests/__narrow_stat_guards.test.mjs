@@ -93,17 +93,17 @@
 // is redundant; removing either re-opens the defect, at 390px and at 320px.
 // With both, `npm run narrow:render` at `BP_NARROW_WIDTHS=390,320` is ALL PASS.
 //
-// Run: node src/__narrow_stat_guards.test.mjs   (or: npm test)
+// Run: node ../paper-editor-host-tests/__narrow_stat_guards.test.mjs
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { exitRig, tally } from "./__rig.mjs";
+import { exitRig, tally } from "../paper-editor/src/__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const surface = readFileSync(
-  join(__dirname, "../../../..", "api/assets/paper-surface/paper-surface.css"),
+  join(__dirname, "../../..", "api/assets/paper-surface/paper-surface.css"),
   "utf8",
 );
 

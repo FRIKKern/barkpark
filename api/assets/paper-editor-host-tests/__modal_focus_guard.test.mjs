@@ -4,11 +4,11 @@
 // private copy. LiveView dialogs are held by modal_focus_guard_test.exs.
 // A predicate over the files, not a list: a new script that declares
 // aria-modal and does not call trap() reds here.
-// Run: node src/__modal_focus_guard.test.mjs
+// Run: node ../paper-editor-host-tests/__modal_focus_guard.test.mjs
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 
-const dir = new URL("../../../priv/static/assets/", import.meta.url);
+const dir = new URL("../../priv/static/assets/", import.meta.url);
 const scripts = readdirSync(dir)
   .filter((f) => f.endsWith(".js") && !f.endsWith(".min.js") && !f.includes("bundle") && f !== "bp-modal-focus.js")
   .map((f) => ({ f, src: readFileSync(new URL(f, dir), "utf8") }));
