@@ -251,6 +251,8 @@ jobs:
           node ../paper-editor-host-tests/field-label-inline.test.mjs
           node ../paper-editor-host-tests/field-reference-mount.test.mjs
           node ../paper-editor-host-tests/fleet-hover-island.test.mjs
+          node ../paper-editor-host-tests/surface.test.mjs
+          node ../paper-editor-host-tests/table-contextual.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
