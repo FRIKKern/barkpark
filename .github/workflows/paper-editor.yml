@@ -153,6 +153,17 @@ jobs:
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_filmstrip_names.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_folder_dialog.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_keyboard.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_locale.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_strings.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_upload_session.test.mjs
+          node ../paper-editor-host-tests/__boundary_focus.test.mjs
+          node ../paper-editor-host-tests/__paper_link_ref_copy_controls.test.mjs
+          node ../paper-editor-host-tests/__paper_links_header_inline.test.mjs
+          node ../paper-editor-host-tests/__reference_picker_blur.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
