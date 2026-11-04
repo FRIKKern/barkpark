@@ -7,7 +7,7 @@ defmodule Barkpark.PortableDoc.PatchTest do
 
   # The golden pack's op fixtures (`api/priv/portable_doc/goldens/ops/`) ARE the
   # cross-surface op contract: one per edit verb, read here and by the editor's
-  # `src/__op_fixtures.test.mjs`. An intent verb is lowered first, as every
+  # `api/assets/paper-editor-host-tests/__op_fixtures.test.mjs`. An intent verb is lowered first, as every
   # block-op write lowers it (`BlockOps.lower_editor_op/2`).
   @fixtures_dir Path.join(Pack.dir(), "ops")
 

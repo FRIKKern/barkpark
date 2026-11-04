@@ -52,7 +52,7 @@ on:
       - "api/priv/portable_doc/goldens/ops/**"
       - "api/lib/barkpark/portable_doc/render/**"
       # Host profiles (host-profile/*.json): each folder a Barkpark host embeds the
-      # editor from, so a new use there runs __host_profiles.test.mjs.
+      # editor from, so a new use there runs host-profiles.test.mjs.
       - "api/lib/barkpark_web/components/**"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -87,7 +87,7 @@ on:
       - "api/priv/portable_doc/goldens/ops/**"
       - "api/lib/barkpark/portable_doc/render/**"
       # Host profiles (host-profile/*.json): each folder a Barkpark host embeds the
-      # editor from, so a new use there runs __host_profiles.test.mjs.
+      # editor from, so a new use there runs host-profiles.test.mjs.
       - "api/lib/barkpark_web/components/**"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -220,6 +220,44 @@ jobs:
           node ../paper-editor-host-tests/__paper_link_ref_copy_controls.test.mjs
           node ../paper-editor-host-tests/__paper_links_header_inline.test.mjs
           node ../paper-editor-host-tests/__reference_picker_blur.test.mjs
+          node ../paper-editor-host-tests/code-overlay-cascade.test.mjs
+          node ../paper-editor-host-tests/host-profiles.test.mjs
+          node ../paper-editor-host-tests/__modal_focus_guard.test.mjs
+          node ../paper-editor-host-tests/__narrow_heading_guards.test.mjs
+          node ../paper-editor-host-tests/__narrow_overflow_guards.test.mjs
+          node ../paper-editor-host-tests/__narrow_stat_guards.test.mjs
+          node ../paper-editor-host-tests/__narrow_title_guards.test.mjs
+          node ../paper-editor-host-tests/__no_raw_nul.test.mjs
+          node ../paper-editor-host-tests/role-parity.test.mjs
+          node ../paper-editor-host-tests/action-label-inline.test.mjs
+          node ../paper-editor-host-tests/__rte_link_fields.test.mjs
+          node ../paper-editor-host-tests/__surface_peer_rev_advance.test.mjs
+          node ../paper-editor-host-tests/__table_shell_chrome.test.mjs
+          node ../paper-editor-host-tests/__terminal_external_echo.test.mjs
+          node ../paper-editor-host-tests/__canvas_noop_settlement.test.mjs
+          node ../paper-editor-host-tests/__media_picker_mounted.test.mjs
+          node ../paper-editor-host-tests/__paper_focused_typing_peer_saves_mounted.test.mjs
+          node ../paper-editor-host-tests/__reference_picker_cancel.test.mjs
+          node ../paper-editor-host-tests/__reference_picker_keyboard.test.mjs
+          node ../paper-editor-host-tests/__reference_picker_mounted.test.mjs
+          node ../paper-editor-host-tests/__canvas_picker_strings.test.mjs
+          node ../paper-editor-host-tests/note.test.mjs
+          node ../paper-editor-host-tests/__paper_wikilink_open_hook.test.mjs
+          node ../paper-editor-host-tests/__picker_strings.test.mjs
+          node ../paper-editor-host-tests/__section_title_inline.test.mjs
+          node ../paper-editor-host-tests/paper-concurrent-rebase.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_hit_type_apart.test.mjs
+          node ../paper-editor-host-tests/field-control-name.test.mjs
+          node ../paper-editor-host-tests/field-label-inline.test.mjs
+          node ../paper-editor-host-tests/field-reference-mount.test.mjs
+          node ../paper-editor-host-tests/fleet-hover-island.test.mjs
+          node ../paper-editor-host-tests/surface.test.mjs
+          node ../paper-editor-host-tests/table-contextual.test.mjs
+          node ../paper-editor-host-tests/__op_fixtures.test.mjs
+          node ../paper-editor-host-tests/__data_loss_key_matrix_mounted.test.mjs
+          node ../paper-editor-host-tests/__inventory_untouched.test.mjs
+          node ../paper-editor-host-tests/__missing_five_renderer.test.mjs
+          node ../paper-editor-host-tests/__move_matrix_mounted.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
@@ -256,7 +294,7 @@ jobs:
 
   # ── the RENDERED half of the narrow-viewport sweep ──────────────────────────
   #
-  # `npm test` above runs four `__narrow_*_guards.test.mjs` suites, and all four
+  # The host-only step above runs four `__narrow_*_guards.test.mjs` suites; all four
   # are SOURCE guards: they read api/assets/paper-surface/paper-surface.css and
   # regex-match declarations out of it. That catches a deleted declaration. It
   # cannot tell you whether the page actually scrolls sideways on a phone, and

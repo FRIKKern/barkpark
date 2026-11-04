@@ -28,7 +28,6 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 const fetchMock = async () => ({ ok: true, json: async () => ({ documents: [] }) });
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
-await import("../../../../priv/static/assets/bp-reference-picker.js");
 const { BpPaperCanvas } = await import("./index.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
@@ -64,7 +63,6 @@ try {
     { id: "fd", type: "field-datetime", label: "Goes live", value: "" },
     { id: "fc", type: "field-color", label: "Accent", value: "#000000" },
     { id: "fnum", type: "field-number", label: "Pages", value: 312, unit: "pp" },
-    { id: "fr", type: "field-reference", label: "Companion paper", value: "" },
   ]) {
     const { canvas, pm } = mount([paragraph("lead", "Lead."), block, paragraph("end", "End.")]);
     const control = controlOf(pm, block.type);
