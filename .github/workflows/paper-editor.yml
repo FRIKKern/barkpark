@@ -261,6 +261,10 @@ jobs:
           node ../paper-editor-host-tests/specialty-renderers.test.mjs
           node ../paper-editor-host-tests/emit-fast-path.test.mjs
           node ../paper-editor-host-tests/field-reader-rest.test.mjs
+          node ../paper-editor-host-tests/block-handle-gutter.test.mjs
+          node ../paper-editor-host-tests/resting-scaffolds.test.mjs
+          node ../paper-editor-host-tests/save-ack-mounted.test.mjs
+          node ../paper-editor-host-tests/sheet-embed-retarget-audit.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
