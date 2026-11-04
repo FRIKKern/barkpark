@@ -46,7 +46,6 @@ defmodule BarkparkCloud.Registry.AdminTokenRotation do
   alias BarkparkCloud.Repo
 
   @project "default"
-  @dataset "production"
 
   @typedoc "Why a rotation stopped. The old token is stored and live on every one."
   @type refusal ::
@@ -143,12 +142,13 @@ defmodule BarkparkCloud.Registry.AdminTokenRotation do
   # ── 2. mint the successor with the held token ─────────────────────────────
 
   # `workspaces` asks the box to seat the successor in the old token's other
-  # workspaces too. The box checks the old token administers each one.
+  # workspaces too. The box checks the old token administers each one. The
+  # body names no `dataset`, as in `Registry.Adoption`: naming one makes the
+  # box bind the successor to that dataset (`dataset_bound`).
   defp mint(base, held, token) do
     body = %{
       label: Adoption.cloud_label(),
       permissions: ["read", "write", "admin"],
-      dataset: @dataset,
       no_expiry: true,
       workspaces: held.seats -- [held.workspace]
     }
