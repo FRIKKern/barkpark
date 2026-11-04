@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { BUNDLE_PATH } from "../../../../design/paper-editor-mirror.mjs";
-import { CSS_AUTHORED_DIR, CSS_ROOT, CSS_SHARED_INPUT, readCssSourceGraph } from "./__css_source_graph.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { CSS_AUTHORED_DIR, CSS_ROOT, CSS_SHARED_INPUT, readAuthoredCss, readCssSourceGraph } from "./__css_source_graph.mjs";
+import { CODE_TOKENS_PROVENANCE } from "./code-tokens.provenance.mjs";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const SOURCE = dirname(fileURLToPath(import.meta.url));
+const PKG = resolve(SOURCE, "..");
+const sha256 = value => createHash("sha256").update(value).digest("hex");
 const graph = readCssSourceGraph();
-const relativeAuthored = graph.authoredFiles.map(path => relative(REPO, path).split(sep).join("/"));
 const productionCss = readdirSync(CSS_AUTHORED_DIR, { recursive: true, withFileTypes: true })
   .filter(entry => entry.isFile() && entry.name.endsWith(".css"))
   .map(entry => realpathSync(join(entry.parentPath, entry.name)))
@@ -20,19 +22,19 @@ assert.deepEqual([...graph.authoredFiles].sort(), productionCss, "every authored
 assert.ok(graph.authoredFiles.length > 0, "the authored graph is non-vacuous");
 for (const file of graph.authoredFiles) {
   const lines = readFileSync(file, "utf8").split("\n").length - 1;
-  assert.ok(lines <= 800, `${relative(REPO, file)} has ${lines} physical lines (max 800)`);
+  assert.ok(lines <= 800, `${relative(PKG, file)} has ${lines} physical lines (max 800)`);
 }
 assert.equal(graph.authoredCss, graph.authoredFiles.map(path => readFileSync(path, "utf8")).join(""),
   "the authored view is the ordered byte concatenation of every authored leaf");
 assert.equal(graph.buildCss, graph.sharedCss + graph.authoredCss, "the full view is shared first, then authored bytes");
-
-const markerStart = "/* BEGIN GENERATED: paper-surface";
-const markerEnd = "/* END GENERATED: paper-surface */";
-assert.equal(graph.authoredCss.split(markerStart).length - 1, 1, "one generated mirror start marker");
-assert.equal(graph.authoredCss.split(markerEnd).length - 1, 1, "one generated mirror end marker");
-assert.equal(relativeAuthored.filter(path => path === BUNDLE_PATH).length, 1, "BUNDLE_PATH is one reachable authored leaf");
-const markerFile = graph.authoredFiles.find(path => readFileSync(path, "utf8").includes(markerStart));
-assert.equal(relative(REPO, markerFile).split(sep).join("/"), BUNDLE_PATH, "BUNDLE_PATH owns the generated marker");
+assert.deepEqual(Object.keys(CODE_TOKENS_PROVENANCE).sort(), ["consumer", "schemaVersion", "sha256", "source"]);
+assert.equal(Object.isFrozen(CODE_TOKENS_PROVENANCE), true);
+assert.equal(CODE_TOKENS_PROVENANCE.schemaVersion, 1);
+assert.equal(CODE_TOKENS_PROVENANCE.consumer, "code-tokens.css");
+assert.equal(CODE_TOKENS_PROVENANCE.source, "api/assets/paper-surface/code-tokens.css");
+assert.match(CODE_TOKENS_PROVENANCE.sha256, /^[0-9a-f]{64}$/);
+assert.equal(sha256(readFileSync(CSS_SHARED_INPUT)), CODE_TOKENS_PROVENANCE.sha256);
+assert.equal(readAuthoredCss(), graph.authoredCss, "the default authored reader uses the production graph");
 
 const fixture = mkdtempSync(join(tmpdir(), "pd-css-source-graph-"));
 try {
@@ -83,5 +85,47 @@ try {
 } finally {
   rmSync(fixture, { recursive: true, force: true });
 }
+
+async function productionRejects(name, expected, mutate, invoke = module => module.readCssSourceGraph()) {
+  const scratch = mkdtempSync(join(tmpdir(), `pd-css-production-${name}-`));
+  try {
+    const source = join(scratch, "api/assets/paper-editor/src");
+    const canonical = join(scratch, "api/assets/paper-surface/code-tokens.css");
+    mkdirSync(source, { recursive: true });
+    mkdirSync(dirname(canonical), { recursive: true });
+    for (const file of ["__css_source_graph.mjs", "code-tokens.provenance.mjs", "styles.css", "code-tokens.css"])
+      cpSync(join(SOURCE, file), join(source, file));
+    cpSync(join(SOURCE, "styles"), join(source, "styles"), { recursive: true });
+    cpSync(join(SOURCE, "code-tokens.css"), canonical);
+    const paths = { scratch, source, canonical, root: join(source, "styles.css"), shared: join(source, "code-tokens.css") };
+    await mutate(paths);
+    const module = await import(`${pathToFileURL(join(source, "__css_source_graph.mjs"))}?case=${name}`);
+    await assert.rejects(async () => invoke(module, paths), expected);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+await productionRejects("capsule-digest", /digest/, ({ shared }) => writeFileSync(shared, `${readFileSync(shared, "utf8")} `));
+await productionRejects("provenance-digest", /digest/, ({ source }) => {
+  const file = join(source, "code-tokens.provenance.mjs");
+  writeFileSync(file, readFileSync(file, "utf8").replace(CODE_TOKENS_PROVENANCE.sha256, "0".repeat(64)));
+});
+await productionRejects("external-root-import", /first root import/, ({ root }) => {
+  writeFileSync(root, readFileSync(root, "utf8").replace('@import "./code-tokens.css";', '@import "../../paper-surface/code-tokens.css";'));
+});
+await productionRejects("shared-symlink", /regular physical file|symlink/, ({ shared, canonical }) => {
+  rmSync(shared); symlinkSync(canonical, shared);
+});
+await productionRejects("root-symlink", /regular physical file|symlink/, ({ root }) => {
+  const target = `${root}.physical`; cpSync(root, target); rmSync(root); symlinkSync(target, root);
+});
+await productionRejects("partial-override", /all three/, () => {}, module => module.readCssSourceGraph({ sharedPath: module.CSS_SHARED_INPUT }));
+await productionRejects("mixed-production", /outside production|production path/, () => {}, (module, paths) => module.readCssSourceGraph({
+  rootPath: module.CSS_ROOT, authoredDir: join(paths.source, "styles"), sharedPath: paths.canonical,
+}));
+await productionRejects("explicit-production", /outside production|production path/, () => {}, module => module.readCssSourceGraph({
+  rootPath: module.CSS_ROOT, authoredDir: module.CSS_AUTHORED_DIR, sharedPath: module.CSS_SHARED_INPUT,
+}));
 
 console.log(`styles source graph: ${graph.authoredFiles.length} authored file(s), ${Buffer.byteLength(graph.authoredCss)} authored bytes, shared first`);

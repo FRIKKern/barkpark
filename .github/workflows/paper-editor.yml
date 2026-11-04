@@ -46,6 +46,7 @@ on:
       # here matches nothing they read. Both arms must stay identical.
       # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
+      - "design/paper-editor-mirror.mjs"
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
@@ -81,6 +82,7 @@ on:
       # here matches nothing they read. Both arms must stay identical.
       # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
+      - "design/paper-editor-mirror.mjs"
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
@@ -152,6 +154,7 @@ jobs:
           node ../paper-editor-host-tests/__tab_keys.test.mjs
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/callout-parity.test.mjs
+          node ../paper-editor-host-tests/css-source-ownership.test.mjs
           node ../paper-editor-host-tests/contract-truth.test.mjs
           node ../paper-editor-host-tests/contextual-controls.test.mjs
           node ../paper-editor-host-tests/card-action-label-inline.test.mjs
