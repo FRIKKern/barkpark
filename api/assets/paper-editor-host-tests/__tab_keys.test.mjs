@@ -3,9 +3,9 @@
 // api/priv/static/assets/bp-tab-keys.js under jsdom on a bar shaped like editor.ex's,
 // with a click handler standing in for select-group's round-trip.
 //
-// Run: node src/__tab_keys.test.mjs
+// Run: node ../paper-editor-host-tests/__tab_keys.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -13,7 +13,7 @@ for (const name of ["document", "Element", "Event", "KeyboardEvent", "HTMLElemen
   globalThis[name] = window[name];
 }
 globalThis.window = window;
-await import("../../../priv/static/assets/bp-tab-keys.js");
+await import("../../priv/static/assets/bp-tab-keys.js");
 assert.equal(typeof window.BarkparkTabKeys, "object", "bp-tab-keys.js loaded");
 
 let failures = 0;

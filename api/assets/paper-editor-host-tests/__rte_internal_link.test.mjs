@@ -7,9 +7,9 @@
 // own events stay inside the editor.
 //
 // Runs the TRACKED static assets under jsdom.
-// Run: node src/__rte_internal_link.test.mjs
+// Run: node ../paper-editor-host-tests/__rte_internal_link.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -46,8 +46,8 @@ globalThis.fetch = window.fetch = async (url) => {
   };
 };
 
-await import("../../../priv/static/assets/bp-reference-picker.js");
-await import("../../../priv/static/assets/bp-rich-text-editor.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-rich-text-editor.js");
 
 let failures = 0;
 async function check(name, fn) {

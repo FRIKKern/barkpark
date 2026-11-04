@@ -6,9 +6,9 @@
 //
 // Runs the TRACKED static assets under jsdom.
 //
-// Run: node src/__rte_preview_strings.test.mjs
+// Run: node ../paper-editor-host-tests/__rte_preview_strings.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -17,8 +17,8 @@ for (const name of ["customElements", "CustomEvent", "document", "Element", "Eve
 }
 globalThis.window = window;
 window.document.execCommand = () => true;
-await import("../../../priv/static/assets/bp-rich-text-editor.js");
-await import("../../../priv/static/assets/bp-document-preview.js");
+await import("../../priv/static/assets/bp-rich-text-editor.js");
+await import("../../priv/static/assets/bp-document-preview.js");
 
 function toolbar(strings) {
   const el = document.createElement("bp-rich-text-editor");

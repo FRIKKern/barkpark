@@ -7,9 +7,9 @@
 // jsdom (its document-level listener), on a fieldset shaped like ArrayField's
 // render, and replays what the LiveView patch does to the rows.
 //
-// Run: node src/__array_focus.test.mjs
+// Run: node ../paper-editor-host-tests/__array_focus.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -17,7 +17,7 @@ for (const name of ["document", "Element", "Event", "MouseEvent", "HTMLElement",
   globalThis[name] = window[name];
 }
 globalThis.window = window;
-await import("../../../priv/static/assets/bp-array-focus.js");
+await import("../../priv/static/assets/bp-array-focus.js");
 assert.equal(typeof window.BarkparkArrayRowFocusTarget, "function", "bp-array-focus.js loaded");
 
 const row = (i, value, count) =>

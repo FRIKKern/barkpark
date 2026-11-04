@@ -2,7 +2,7 @@
 // accessible name — its first option is a visual placeholder, not a label.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   runScripts: "outside-only",
@@ -16,7 +16,7 @@ window.fetch = async () => ({
   json: async () => ({ result: { assets: [], collections: [{ id: "col-1", title: "Covers" }] } }),
 });
 for (const file of ["bp-search-intel.js", "bp-asset-explorer.js"]) {
-  window.eval(readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"));
+  window.eval(readFileSync(new URL(`../../priv/static/assets/${file}`, import.meta.url), "utf8"));
 }
 
 const el = window.document.createElement("bp-asset-explorer");

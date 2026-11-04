@@ -2,7 +2,7 @@ defmodule BarkparkWeb.Components.ArrayFieldFocusHookTest do
   @moduledoc """
   task-278c7992ed05a30b: an array field's row buttons are server round-trips,
   and focus was left on Add, dropped to <body> or left on the neighbour after
-  a move. bp-array-focus.js (behaviour: `__array_focus.test.mjs`) finds the
+  a move. bp-array-focus.js (behaviour: `paper-editor-host-tests/__array_focus.test.mjs`) finds the
   fieldset again by a stable id after the patch; array fields still carry no
   phx-hook (Decision 13), and the Studio layout loads the script.
   """

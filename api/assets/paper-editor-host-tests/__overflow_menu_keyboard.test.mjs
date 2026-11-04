@@ -6,11 +6,11 @@
 // by the patch before ModalFocus mounted, and detached when it closed.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const menuSrc = read("../../../priv/static/assets/bp-overflow-menu.js");
-const focusSrc = read("../../../priv/static/assets/bp-modal-focus.js");
+const menuSrc = read("../../priv/static/assets/bp-overflow-menu.js");
+const focusSrc = read("../../priv/static/assets/bp-modal-focus.js");
 
 const dom = new JSDOM(`<main><button id="before">Before</button><div id="slot"></div><button id="after">After</button></main>`, {
   runScripts: "outside-only",

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const layout = readFileSync(
-  new URL("../../../lib/barkpark_web/layouts/bulldocs.html.heex", import.meta.url),
+  new URL("../../lib/barkpark_web/layouts/bulldocs.html.heex", import.meta.url),
   "utf8",
 );
 const match = layout.match(

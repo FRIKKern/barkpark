@@ -13,14 +13,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const layout = readFileSync(
-  new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+  new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
   "utf8",
 );
 const panes = readFileSync(
-  new URL("../../../lib/barkpark_web/components/studio_components/panes.ex", import.meta.url),
+  new URL("../../lib/barkpark_web/components/studio_components/panes.ex", import.meta.url),
   "utf8",
 );
 

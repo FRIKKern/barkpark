@@ -17,16 +17,16 @@
 // A last case covers the static render: the script fills a picker before any
 // hook mounts.
 //
-// Run: node src/__datetime_hook_late_script.test.mjs
+// Run: node ../paper-editor-host-tests/__datetime_hook_late_script.test.mjs
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, "../../../lib/barkpark_web/layouts/root.html.heex");
-const IMPL = path.join(__dirname, "../../../priv/static/assets/bp-datetime-field.js");
+const ROOT = path.join(__dirname, "../../lib/barkpark_web/layouts/root.html.heex");
+const IMPL = path.join(__dirname, "../../priv/static/assets/bp-datetime-field.js");
 
 const layout = fs.readFileSync(ROOT, "utf8");
 const m = layout.match(/\/\/ bp-deferred-hook:start\n([\s\S]*?)\/\/ bp-deferred-hook:end/);

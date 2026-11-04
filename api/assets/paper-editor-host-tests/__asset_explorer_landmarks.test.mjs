@@ -3,10 +3,10 @@
 // carried no accessible name, so a screen reader's landmark list could not tell
 // them apart. Each now takes the name its visible title gives it, in the Studio
 // language (the same data-strings map as the rest of bp-asset-explorer).
-// Run: node src/__asset_explorer_landmarks.test.mjs
+// Run: node ../paper-editor-host-tests/__asset_explorer_landmarks.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   runScripts: "outside-only",
@@ -22,7 +22,7 @@ window.fetch = async (url) => ({
 });
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 for (const file of ["bp-search-intel.js", "bp-asset-explorer.js"]) {
-  window.eval(readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"));
+  window.eval(readFileSync(new URL(`../../priv/static/assets/${file}`, import.meta.url), "utf8"));
 }
 
 async function mount(strings) {
@@ -71,7 +71,7 @@ check("the names follow the Studio language and fall back to English", () => {
 // The inspector's title (an asset's, a collection's) sat at h3 under the page's
 // h1 with nothing between (axe heading-order on the media library).
 check("the inspector titles are h2 under the library's h1", () => {
-  const src = readFileSync(new URL("../../../priv/static/assets/bp-asset-explorer.js", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../priv/static/assets/bp-asset-explorer.js", import.meta.url), "utf8");
   assert.equal((src.match(/<h2 class="bp-ae-inspector-title">/g) || []).length, 2);
   assert.equal((src.match(/<h3 class="bp-ae-inspector-title">/g) || []).length, 0);
 });

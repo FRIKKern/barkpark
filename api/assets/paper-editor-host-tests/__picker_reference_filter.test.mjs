@@ -8,9 +8,9 @@
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom.
 //
-// Run: node src/__picker_reference_filter.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_reference_filter.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -40,7 +40,7 @@ globalThis.fetch = window.fetch = async (url) => {
   };
 };
 
-await import("../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 
 function mount(attrs, params) {
   document.body.innerHTML = "";

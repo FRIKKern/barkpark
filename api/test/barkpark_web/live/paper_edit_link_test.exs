@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
 
   # The shared loader is inert until the server-authorized Edit toggle mounts.
   # No reader eagerly loads editor resources. Browser execution of the loader
-  # is covered by __public_layout_bootstrap.test.mjs; here the mounted share
+  # is covered by paper-editor-host-tests/__public_layout_bootstrap.test.mjs; here the mounted share
   # page proves which viewer receives the activation hook.
   @editor_assets [
     "/assets/bp-paper-editor-shell.css",

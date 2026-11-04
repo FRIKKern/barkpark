@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const layout = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+const layout = readFileSync(new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
 
 function method(name, args) {
   const m = layout.match(new RegExp("\\n      " + name + "\\(" + args.replace(/[()]/g, "\\$&") + "\\) \\{([\\s\\S]*?)\\n      \\},"));
@@ -61,7 +61,7 @@ test("a bar without the words (or an English Studio) keeps the English sentence"
 });
 
 test("every English sentence the hook speaks has a key the server provides", () => {
-  const nav = readFileSync(new URL("../../../lib/barkpark_web/components/studio_components/nav.ex", import.meta.url), "utf8");
+  const nav = readFileSync(new URL("../../lib/barkpark_web/components/studio_components/nav.ex", import.meta.url), "utf8");
   const spoken = [...layout.matchAll(/this\._paT\("([^"]+)"/g)].map((m) => m[1]);
   assert.ok(spoken.length >= 7, `the hook speaks through _paT (found ${spoken.length})`);
   for (const key of new Set(spoken)) assert.ok(nav.includes(`"${key}" =>`), `nav.ex press_answer_strings/0 lacks ${JSON.stringify(key)}`);
