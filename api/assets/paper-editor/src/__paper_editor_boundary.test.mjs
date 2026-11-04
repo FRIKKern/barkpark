@@ -286,8 +286,17 @@ async function proveAsyncGuard(family) {
 }
 
 try {
-  await proveAsyncGuard("wikilink");
-  await proveAsyncGuard("tag");
+  const failures = [];
+  for (const family of ["wikilink", "tag"]) {
+    try {
+      await proveAsyncGuard(family);
+      console.log(`PASS  ${family} out-of-order and post-close async guard`);
+    } catch (error) {
+      failures.push(`${family}: ${error.message}`);
+      console.log(`FAIL  ${family} out-of-order and post-close async guard\n      ${error.message}`);
+    }
+  }
+  assert.deepEqual(failures, []);
   console.log("paper editor facade and mounted async boundaries passed");
 } finally {
   window.close();
