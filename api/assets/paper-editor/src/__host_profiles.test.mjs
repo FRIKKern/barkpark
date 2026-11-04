@@ -1,10 +1,9 @@
-// __host_profiles.test.mjs — Barkpark's own hosts match their profiles, and the
-// checker every host copies (host-profile/check.mjs) fails on what it claims to.
-//
-// Part 1 checks studio.json, reader.json and web.json against the committed
-// surface.json. Part 2 runs check() on a synthetic host in a temp folder against a
-// synthetic surface, one claimed failure per case, each naming the name and the
-// file:line; the temp folder is removed after every case.
+// __host_profiles.test.mjs — the checker every host copies
+// (host-profile/check.mjs) fails on what it claims to. These package-owned tests
+// run check() on a synthetic host in a temp folder against a synthetic surface,
+// one claimed failure per case, each naming the name and the file:line; the temp
+// folder is removed after every case. Barkpark's real profiles are checked by the
+// host companion.
 //
 // Run: node src/__host_profiles.test.mjs   (or: npm test)
 
@@ -30,14 +29,6 @@ const test = (name, fn) => {
     console.log(`FAIL  ${name}\n      ${error.message.split("\n").join("\n      ")}`);
   }
 };
-
-for (const file of ["../host-profile/studio.json", "../host-profile/reader.json", "../host-profile/web.json"]) {
-  test(`${path.basename(file)}: that Barkpark host uses only what its profile lists`, () => {
-    const profile = JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
-    const surface = JSON.parse(readFileSync(path.join(profiles, "surface.json"), "utf8"));
-    assert.deepEqual(check(profile, surface, profiles), []);
-  });
-}
 
 const surface = {
   contract: "1.22.0",
