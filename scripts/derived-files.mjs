@@ -164,6 +164,8 @@ export const STEPS = [
       ...READER_PAGE,
       ...GETTEXT,
       "api/assets/paper-surface/**",
+      // The raw surface's source: an edit here moves that sink through the sync.
+      "api/assets/paper-editor/src/paper-surface/**",
       "api/lib/barkpark/plugins/bulldocs/**",
       "api/lib/barkpark/content/papers/block_ops.ex",
       "api/lib/barkpark/portable_doc/patch.ex",

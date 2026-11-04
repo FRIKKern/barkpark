@@ -55,8 +55,12 @@ test("an editor edit is checked and written through the one outward sync", () =>
   const scripts = JSON.parse(readFileSync(join(root, "api/assets/paper-editor/package.json"), "utf8")).scripts;
   assert.equal(scripts["sync:barkpark:check"], "node scripts/sync-barkpark.mjs --check");
   assert.equal(scripts["sync:barkpark:write"], "node scripts/sync-barkpark.mjs --write");
-  assert.deepEqual(names(["api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css"]), names(["api/assets/paper-editor/src/canvas/caret-before-keys.js"]));
-  assert.ok(names(["api/assets/paper-surface/paper-surface.css"]).includes("paper-editor"), "the raw sink still reaches the sync");
+  const sink = names(["api/assets/paper-surface/paper-surface.css"]);
+  assert.ok(sink.includes("paper-editor") && sink.includes("golden-pack"), "the raw sink still reaches the sync and the pack");
+  for (const fragment of ["00-foundation-type", "01-components-generated-theme", "02-chat-code-story-layout", "03-data-viz-forms-media"]) {
+    const hit = names([`api/assets/paper-editor/src/paper-surface/${fragment}.css`]);
+    assert.deepEqual(sink.filter((n) => !hit.includes(n)), [], `${fragment} reaches everything its sink reaches`);
+  }
 });
 
 test("a render edit reaches the pack, every report, surface.json and the HTML goldens", () => {
