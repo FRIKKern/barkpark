@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.PaperBoundaryInsertFocusTest do
   BODY. The canvas now routes the pick through `paper-slash-insert` (its half is
   pinned by `canvas/__server_insert_widgets.test.mjs`), and the server names
   the new block on `bp:focus-boundary` (the hook half:
-  `src/__boundary_focus.test.mjs`).
+  `paper-editor-host-tests/__boundary_focus.test.mjs`).
   """
   use BarkparkWeb.ConnCase, async: false
 

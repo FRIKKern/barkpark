@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM, VirtualConsole } from "jsdom";
+import { JSDOM, VirtualConsole } from "./jsdom.mjs";
 
 function shippedMorphdom(window) {
   window.eval(readFileSync(new URL(
-    "../../../priv/static/assets/phoenix.js",
+    "../../priv/static/assets/phoenix.js",
     import.meta.url,
   ), "utf8"));
   const source = readFileSync(new URL(
-    "../../../priv/static/assets/phoenix_live_view.js",
+    "../../priv/static/assets/phoenix_live_view.js",
     import.meta.url,
   ), "utf8");
   const instrumented = source.replace(
@@ -23,7 +23,7 @@ function shippedMorphdom(window) {
   return window.__bpPaperLinkRefMorphdom;
 }
 
-const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 
 assert.match(shell, /\[data-paper-link-card-editable\]\s*\{[^}]*position:\s*relative[^}]*isolation:\s*isolate/s,
   "local copy and navigation share the existing card footprint");
@@ -144,7 +144,7 @@ let serial = 0;
 Object.defineProperty(win, "crypto", { configurable: true, value: {
   randomUUID: () => `00000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`,
 } });
-vm.runInContext(readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"), vm.createContext({
+vm.runInContext(readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"), vm.createContext({
   window: win, document: win.document, CustomEvent: win.CustomEvent,
   FormData: win.FormData, Date, setTimeout, clearTimeout,
   customElements: { whenDefined: () => Promise.resolve() },
@@ -492,7 +492,7 @@ async function attemptedDetachedRecovery(
   attemptedWindow.URL.revokeObjectURL = () => {};
   attemptedWindow.HTMLAnchorElement.prototype.click = () => {};
   vm.runInContext(readFileSync(new URL(
-    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+    "../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
   ), "utf8"), vm.createContext({
     window: attemptedWindow, document: attemptedWindow.document,
     CustomEvent: attemptedWindow.CustomEvent, FormData: attemptedWindow.FormData,
@@ -713,7 +713,7 @@ async function detachedRecoveryNegative({
     randomUUID: () => `00000000-0000-4000-8003-${String(++negativeSerial).padStart(12, "0")}`,
   } });
   vm.runInContext(readFileSync(new URL(
-    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+    "../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
   ), "utf8"), vm.createContext({
     window: negativeWindow, document: negativeWindow.document,
     CustomEvent: negativeWindow.CustomEvent, FormData: negativeWindow.FormData,
@@ -802,7 +802,7 @@ console.log("related-card recovery ignores connected, malformed, and cross-scope
     randomUUID: () => `00000000-0000-4000-8004-${String(++fenceSerial).padStart(12, "0")}`,
   } });
   vm.runInContext(readFileSync(new URL(
-    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+    "../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
   ), "utf8"), vm.createContext({
     window: fenceWindow, document: fenceWindow.document,
     CustomEvent: fenceWindow.CustomEvent, FormData: fenceWindow.FormData,
@@ -929,7 +929,7 @@ async function focusedSiblingRevision({
     randomUUID: () => `00000000-0000-4000-8001-${String(++scenarioSerial).padStart(12, "0")}`,
   } });
   vm.runInContext(readFileSync(new URL(
-    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+    "../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
   ), "utf8"), vm.createContext({
     window: scenarioWindow, document: scenarioWindow.document,
     CustomEvent: scenarioWindow.CustomEvent, FormData: scenarioWindow.FormData,

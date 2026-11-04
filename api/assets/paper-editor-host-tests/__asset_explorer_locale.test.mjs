@@ -6,10 +6,10 @@
 process.env.TZ = "Europe/Oslo";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const SOURCE = ["bp-search-intel.js", "bp-asset-explorer.js"].map((file) =>
-  readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"),
+  readFileSync(new URL(`../../priv/static/assets/${file}`, import.meta.url), "utf8"),
 );
 const UPDATED = "2026-10-06T03:59:23Z";
 const DATE_SHAPE = {

@@ -2,12 +2,12 @@
 // image or equation from a canvas pick it pushes `bp:focus-boundary` {id}; the
 // BarkparkPaperCanvas hook hands it to window.BarkparkFocusBoundary, which puts
 // the caret in that block's boundary editor once it is in the DOM.
-// Run: node src/__boundary_focus.test.mjs
+// Run: node ../paper-editor-host-tests/__boundary_focus.test.mjs
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM(
   '<main><div id="paper-canvas-run-0" phx-hook="BarkparkPaperCanvas"><bp-paper-canvas></bp-paper-canvas></div><div id="slot"></div></main>',
@@ -25,7 +25,7 @@ const context = vm.createContext({
   customElements: { whenDefined: () => new Promise(() => {}) },
 });
 vm.runInContext(
-  readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 
