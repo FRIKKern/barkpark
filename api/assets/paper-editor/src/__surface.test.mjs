@@ -177,7 +177,7 @@ const syntheticContract = `
 ## Known reach-ins
 | Kind | Names | Why |
 |---|---|---|
-| member | \`_reach\` | test |
+| member | \`_reach\` | test
 ## Next
 `;
 const syntheticBundle = `
