@@ -7,9 +7,9 @@
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom and drives the two render methods directly.
 //
-// Run: node src/__picker_reference_strings.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_reference_strings.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -18,7 +18,7 @@ for (const name of ["customElements", "CustomEvent", "document", "Element", "Eve
 }
 globalThis.window = window;
 globalThis.fetch = window.fetch = async () => ({ ok: false, json: async () => ({}) });
-await import("../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 const Picker = customElements.get("bp-reference-picker");
 assert.ok(Picker, "bp-reference-picker is defined");
 

@@ -3,9 +3,9 @@
 // focuses the scope trigger once the navigation lands.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const root = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+const root = readFileSync(new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
 const start = root.indexOf("const BP_SCOPE_FOCUS_KEY");
 assert.ok(start > 0, "root.html.heex carries the scope-switch focus block");
 const source = root.slice(start, root.indexOf("    let Hooks = {};", start));

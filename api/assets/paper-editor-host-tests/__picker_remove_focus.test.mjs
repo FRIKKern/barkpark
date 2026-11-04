@@ -7,9 +7,9 @@
 // Mounts the TRACKED static asset api/priv/static/assets/bp-media-picker.js in
 // jsdom with an image set, focuses Remove and clicks it.
 //
-// Run: node src/__picker_remove_focus.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_remove_focus.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   pretendToBeVisual: true,
@@ -22,7 +22,7 @@ for (const name of ["customElements", "CustomEvent", "document", "Event", "HTMLE
 globalThis.window = window;
 globalThis.fetch = window.fetch = async () => ({ ok: false, json: async () => ({}) });
 
-await import("../../../priv/static/assets/bp-media-picker.js");
+await import("../../priv/static/assets/bp-media-picker.js");
 
 try {
   const picker = document.createElement("bp-media-picker");

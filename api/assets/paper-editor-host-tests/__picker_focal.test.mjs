@@ -11,7 +11,7 @@
 //     wrote keeps round-tripping byte-identically
 //   * focalFromClick: the click's fraction inside the image box, clamped
 //
-// Run: node src/__picker_focal.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_focal.test.mjs
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(__dirname, "../../../priv/static/assets/bp-media-picker.js");
+const SRC = path.join(__dirname, "../../priv/static/assets/bp-media-picker.js");
 
 let failures = 0;
 function check(name, fn) {

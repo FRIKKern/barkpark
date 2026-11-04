@@ -7,9 +7,9 @@
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom.
 //
-// Run: node src/__picker_reference_hit_type_icon.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_reference_hit_type_icon.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const icons = { widget: '<svg data-desk-icon="basket"></svg>', "*": '<svg data-desk-icon="document"></svg>' };
 const dom = new JSDOM(
@@ -34,7 +34,7 @@ globalThis.fetch = window.fetch = async () => ({
   }),
 });
 
-await import("../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 
 try {
   const picker = document.createElement("bp-reference-picker");

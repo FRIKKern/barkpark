@@ -3,10 +3,10 @@
 // root.html.heex) waits for that id's editor and focuses its first field.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const root = readFileSync(
-  new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+  new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
   "utf8",
 );
 const start = root.indexOf("window.bpFocusNewDoc = function");

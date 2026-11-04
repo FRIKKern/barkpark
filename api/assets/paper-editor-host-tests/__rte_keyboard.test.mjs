@@ -6,9 +6,9 @@
 // the body is a named multiline textbox.
 //
 // Runs the TRACKED static asset under jsdom.
-// Run: node src/__rte_keyboard.test.mjs
+// Run: node ../paper-editor-host-tests/__rte_keyboard.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -23,7 +23,7 @@ window.document.execCommand = (cmd, _ui, arg) => {
   withArgs.push([cmd, arg]);
   return true;
 };
-await import("../../../priv/static/assets/bp-rich-text-editor.js");
+await import("../../priv/static/assets/bp-rich-text-editor.js");
 
 function mount(attrs = {}) {
   const el = document.createElement("bp-rich-text-editor");

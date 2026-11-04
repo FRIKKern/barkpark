@@ -10,9 +10,9 @@
 // jsdom with an image already set, then presses Enter and Space on Upload and
 // counts clicks on the file input.
 //
-// Run: node src/__picker_upload_keyboard.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_upload_keyboard.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   pretendToBeVisual: true,
@@ -34,7 +34,7 @@ for (const name of [
 globalThis.window = window;
 globalThis.fetch = window.fetch = async () => ({ ok: false, json: async () => ({}) });
 
-await import("../../../priv/static/assets/bp-media-picker.js");
+await import("../../priv/static/assets/bp-media-picker.js");
 
 const picker = document.createElement("bp-media-picker");
 picker.setAttribute("value", JSON.stringify({ url: "/media/cover.png", assetId: "a1" }));

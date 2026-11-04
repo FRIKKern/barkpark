@@ -6,9 +6,9 @@
 // toolbar it always had. The schemas and text are made up.
 //
 // Runs the TRACKED static asset under jsdom.
-// Run: node src/__rte_vocabulary.test.mjs
+// Run: node ../paper-editor-host-tests/__rte_vocabulary.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -18,7 +18,7 @@ for (const name of ["customElements", "CustomEvent", "document", "Element", "Eve
 if (!globalThis.CSS) globalThis.CSS = { escape: (s) => String(s).replace(/["\\]/g, "\\$&") };
 globalThis.window = window;
 window.document.execCommand = () => true;
-await import("../../../priv/static/assets/bp-rich-text-editor.js");
+await import("../../priv/static/assets/bp-rich-text-editor.js");
 
 const simple = { styles: ["normal"], lists: ["bullet", "number"], decorators: ["strong", "em", "underline"], annotations: [], inline: [] };
 const doc = {

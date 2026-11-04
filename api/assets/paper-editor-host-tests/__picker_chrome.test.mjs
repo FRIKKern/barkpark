@@ -11,7 +11,7 @@
 //
 // The DOM-driven bits (the actual menu element, the reveal swap, bp-change wiring)
 // are browser-only and exercised in the live editor; what's pinned here is the pure
-// decision logic that governs them. Run: node src/__picker_chrome.test.mjs
+// decision logic that governs them. Run: node ../paper-editor-host-tests/__picker_chrome.test.mjs
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(
   __dirname,
-  "../../../priv/static/assets/bp-media-picker.js"
+  "../../priv/static/assets/bp-media-picker.js"
 );
 
 let failures = 0;

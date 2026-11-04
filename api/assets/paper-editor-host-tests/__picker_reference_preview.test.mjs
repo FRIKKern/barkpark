@@ -15,7 +15,7 @@
 // answers the way the server does: 404 unless the request names the drafts
 // perspective and the `asset-` id.
 //
-// Run: node src/__picker_reference_preview.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_reference_preview.test.mjs
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
@@ -23,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(__dirname, "../../../priv/static/assets/bp-media-picker.js");
+const SRC = path.join(__dirname, "../../priv/static/assets/bp-media-picker.js");
 
 let failures = 0;
 async function check(name, fn) {
