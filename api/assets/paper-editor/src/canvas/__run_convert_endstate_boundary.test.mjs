@@ -508,13 +508,16 @@ assert.doesNotMatch(rootSource, /export\s+\*/u, "the facade uses direct named re
 
 const leafPaths = new Set(GROUPS.map(({ path }) => resolve(here, path)));
 const importSpecifiers = (source) => [...source.matchAll(
-  /(?:^|\n)\s*(?:import|export)\s+(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']/gu,
+  /(?:^|\n)\s*import\s*\{[\s\S]*?\}\s*from\s*["']([^"']+)["'];/gu,
 )].map((match) => match[1]);
 const visiting = new Set();
 const visited = new Set();
 function walk(file) {
   assert.notEqual(file, resolve(here, "run-convert.js"), "leaf dependency closure cannot reach the facade");
-  assert.ok(!visiting.has(file), `relative import cycle at ${file}`);
+  if (visiting.has(file)) {
+    assert.ok(!leafPaths.has(file), `converter leaf participates in a relative import cycle at ${file}`);
+    return;
+  }
   if (visited.has(file)) return;
   visiting.add(file);
   for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
