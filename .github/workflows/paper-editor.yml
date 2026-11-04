@@ -258,6 +258,9 @@ jobs:
           node ../paper-editor-host-tests/__inventory_untouched.test.mjs
           node ../paper-editor-host-tests/__missing_five_renderer.test.mjs
           node ../paper-editor-host-tests/__move_matrix_mounted.test.mjs
+          node ../paper-editor-host-tests/specialty-renderers.test.mjs
+          node ../paper-editor-host-tests/emit-fast-path.test.mjs
+          node ../paper-editor-host-tests/field-reader-rest.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
