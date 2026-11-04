@@ -47,6 +47,7 @@
 // must already exist (mirrors the status-tones precedent). Go surfaces are whole
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
 // and the §6 cross-surface parity assertion.
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -858,7 +859,7 @@ function styleguideSwatches() {
   }).join("\n");
 }
 
-// ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
+// ── surface: paper-surface (the generated fragment of the package's raw surface) ──
 // Reading font + reading type scale + status tones, plus the lifecycle
 // glyph-tone classes (.bp-lg--<state>) that give the CSS/GUI half of the §6
 // cross-surface parity assertion its hues. Additive (.bp-lg-- is a fresh, un-
@@ -3242,7 +3243,7 @@ export const ARTIFACTS = [
     markerBegin: BP_THEMES_MARKER_BEGIN, markerEnd: BP_THEMES_MARKER_END, build: bpThemesList },
   { name: "cloud SPA audit action labels", path: "cloud/priv/static/app.js", kind: "css",
     markerBegin: ACTION_LABELS_MARKER_BEGIN, markerEnd: ACTION_LABELS_MARKER_END, build: auditActionLabels },
-  { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
+  { name: "paper-surface", path: "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
   { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
@@ -3448,8 +3449,9 @@ function run(mode, { force = false } = {}) {
   const results = evaluateAll();
   const regions = readManifest() ?? {};
   let changed = 0, errored = 0;
+  let surfaceWritten = false;
 
-  // The mirror is a SECOND generation hop off the just-emitted paper-surface.css,
+  // The mirror is a SECOND generation hop off the just-emitted surface fragment,
   // so its write must run after the artifact loop. Its attribution, however, is a
   // property of the bundle on disk (a different file the loop never touches), so
   // it is safe — and necessary — to pre-flight it here with everything else.
@@ -3550,7 +3552,10 @@ function run(mode, { force = false } = {}) {
   for (const r of results) {
     if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
     if (mode === "write") {
-      if (r.drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
+      if (r.drift) {
+        writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++;
+        if (r.name === "paper-surface") surfaceWritten = true;
+      }
       else { console.log(`  ok    ${r.name} (already current)`); }
       nextRegions[regionKey(r)] = regionDigest(r.expectedRegion);
     } else {
@@ -3560,8 +3565,8 @@ function run(mode, { force = false } = {}) {
     }
   }
   // Post-step: the paper-editor token mirror. It is DERIVED from the just-emitted
-  // paper-surface.css (a second generation hop), so it runs AFTER the artifact
-  // loop has written paper-surface.css to disk. One shared transform with
+  // surface fragment (a second generation hop), so it runs AFTER the artifact
+  // loop has written that fragment to disk. One shared transform with
   // design/check.mjs + scripts/paper-editor-mirror-check.sh — they can't disagree.
   // Re-evaluated here (not reusing the pre-flight copy) because the surface it
   // derives from may have just changed on disk.
@@ -3572,7 +3577,7 @@ function run(mode, { force = false } = {}) {
     const post = evaluateMirror(repoRoot);
     const drift = post.current !== post.expected;
     if (mode === "write") {
-      if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; }
+      if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; surfaceWritten = true; }
       else { console.log(`  ok    ${post.name} (already current)`); }
       nextRegions[regionKey(post)] = regionDigest(post.generatedBlock);
     } else {
@@ -3584,6 +3589,12 @@ function run(mode, { force = false } = {}) {
 
   if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
   if (mode === "write") writeManifest(nextRegions);
+  // The package owns the surface; the raw host sink and the profile follow it through
+  // the one outward path. --surface-only leaves the six browser assets to a full sync.
+  if (surfaceWritten) {
+    const synced = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: "inherit" });
+    if (synced.status !== 0) { console.error(`emit --write: sync-barkpark --surface-only exited ${synced.status}`); process.exit(1); }
+  }
   if (mode !== "write" && changed) {
     console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json or are UNATTRIBUTED. Fix: node design/emit.mjs --write`);
     process.exit(1);

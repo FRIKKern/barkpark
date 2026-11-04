@@ -20,6 +20,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readAuthoredCss } from "../api/assets/paper-editor/src/__css_source_graph.mjs";
+import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 
 // ── --selftest: this tripwire's negative half ────────────────────────────────
 // This gate ran for its whole life with nothing exercising it, and produced two
@@ -198,7 +199,7 @@ for (const r of evaluateAll()) {
   else if (mr.current == null) fail(`  FAIL ${mr.name}: committed file ${mr.path} is missing`);
   else if (manifestErr || attribute(mu, manifestRegions) !== "attributed") reportUnattributed(mu);
   else if (mr.current !== mr.expected) {
-    fail(`  DRIFT ${mr.name} (${mr.path}) — the paper-editor mirror is STALE vs api/assets/paper-surface/paper-surface.css`);
+    fail(`  DRIFT ${mr.name} (${mr.path}) — the paper-editor mirror is STALE vs the assembled package surface`);
     console.error(firstDiff(mr.current, mr.expected));
   } else {
     console.log(`  ok   ${mr.name} (${mr.path})`);
@@ -246,7 +247,7 @@ const goFramesM = goText.match(/GenBrailleFrames = \[10\]string\{([^}]*)\}/);
 const goFrames = goFramesM ? [...goFramesM[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]) : [];
 
 // Parse the EMITTED paper-surface glyph tones (.bp-lg--<state> { color: #hex; }).
-const cssText = ARTIFACTS.find((a) => a.path.endsWith("paper-surface.css")).build();
+const cssText = ARTIFACTS.find((a) => a.name === "paper-surface").build();
 const cssLife = {}; // state -> [lightHex, darkHex] (first occurrence = light block, second = dark media)
 for (const m of cssText.matchAll(/\.bp-lg--(\w+) \{ color: (#[0-9a-fA-F]{6}); \}/g)) {
   (cssLife[m[1]] ||= []).push(m[2]);
@@ -576,9 +577,15 @@ const failedBeforeE = failed;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_CSS_PATH = "api/assets/paper-editor/src/styles.css";
+// The raw surface is read from the package's assembled fragments, its source. The
+// sink path stays the name these Parts report and design/exemptions.json keys on,
+// because the sink holds these same bytes (sync-barkpark --check).
+const RAW_SURFACE_PATH = "api/assets/paper-surface/paper-surface.css";
 const readDesignSource = (path) => path === PACKAGE_CSS_PATH
   ? readAuthoredCss()
-  : readFileSync(join(repoRoot, path), "utf8");
+  : path === RAW_SURFACE_PATH
+    ? assembledText("paper-surface", { root: join(repoRoot, "api/assets/paper-editor") })
+    : readFileSync(join(repoRoot, path), "utf8");
 // Any generator-owned block — `/* BEGIN GENERATED: <name> … END GENERATED: <name> */`
 // — is emitter output, not a hand-stamp. Today three generators write such blocks:
 // `tokens` (the theme compiler, design/emit.mjs), `paper-surface` (the reader→editor
@@ -1230,7 +1237,7 @@ if (failed === failedBeforeH)
 // tokens consumed rather than merely declared: the named test that fails if the
 // consumption goes away is `node design/check.mjs` Part H, this arm.
 {
-  const surfaceCssH = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  const surfaceCssH = readDesignSource(RAW_SURFACE_PATH);
   // Same shape as ruleColor(), pointed at the paper-surface sheet.
   const surfaceRuleColor = (sel) => {
     const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1884,7 +1891,7 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
 console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
 {
   const failedBeforeJ = failed;
-  const surfaceCss = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  const surfaceCss = readDesignSource(RAW_SURFACE_PATH);
   // Consumers may live in the stylesheet OR inline on renderer output. Both are
   // legitimate: a figure's beat has to survive a stylesheet-less sink, so it
   // rides `var(--bp-air-figure, <fallback>)` in the emitting Elixir source.
@@ -1892,7 +1899,7 @@ console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
     "api/assets/paper-surface/paper-surface.css",
     "api/lib/barkpark/portable_doc/render/figures.ex",
     "api/lib/barkpark/portable_doc/render/compose.ex",
-  ].map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), "utf8") }));
+  ].map((p) => ({ path: p, text: readDesignSource(p) }));
 
   for (const step of AIR_STEPS) {
     const ratio = tokens.space.air[step];
@@ -1960,8 +1967,8 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
   let kFailed = false;
   const kFail = (msg) => { kFailed = true; fail(msg); };
   const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
-  const surfacePath = "api/assets/paper-surface/paper-surface.css";
-  const surfaceCss = readFileSync(join(repoRoot, surfacePath), "utf8");
+  const surfacePath = RAW_SURFACE_PATH;
+  const surfaceCss = readDesignSource(surfacePath);
   // Consumers may live in the stylesheet OR inline on renderer output — a figure
   // has to survive a stylesheet-less sink, so its width and pull ride inline
   // `var(--bp-evidence-*, <fallback>)` in the emitting Elixir source, exactly as
@@ -1971,7 +1978,7 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
     "api/lib/barkpark/portable_doc/render/figures.ex",
     "api/lib/barkpark/portable_doc/render/compose.ex",
     "api/lib/barkpark/portable_doc/render/components.ex",
-  ].map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), "utf8") }));
+  ].map((p) => ({ path: p, text: readDesignSource(p) }));
 
   const readsOf = (name) =>
     consumerSources.flatMap(({ path, text }) =>
@@ -2176,7 +2183,7 @@ console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
   //    block as a class-less `<div id data-block-id>`, so `#paper-body > h2`
   //    alone matches only the legacy whole-body path and the render rig — the
   //    live reader would show no section heads and nothing here would notice.
-  const surfaceCss = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  const surfaceCss = readDesignSource(RAW_SURFACE_PATH);
   if (!surfaceCss.includes(".bp-paper-surface > #paper-body > div:not([class]) > h2"))
     lFail(
       `  Part L FAIL: paper-surface.css has no keyed-stream leg for the section head.\n` +

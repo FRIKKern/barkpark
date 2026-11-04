@@ -67,7 +67,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$(dirname "$0")/.."
 
 MANIFEST="design/status-manifest.json"
-CSS="api/assets/paper-surface/paper-surface.css"
+CSS="api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css"
 GO="internal/pdrender/gridblocks.go"
 # apps/mobile: the surface that READS the generated vocabulary. It was absent
 # from this gate entirely until mob-bl-status-manifest-mobile-gate, then a hand
@@ -108,7 +108,8 @@ fi
 ST_PLANT_PY='
 import json, re, sys
 root, kind = sys.argv[1], sys.argv[2]
-CSS  = root + "/api/assets/paper-surface/paper-surface.css"
+CSS  = root + "/api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css"
+GLYPHS = root + "/api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css"
 GO   = root + "/internal/pdrender/gridblocks.go"
 MOB  = root + "/apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
 MOBG = root + "/apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
@@ -144,11 +145,11 @@ if kind == "tone":
     out, note = txt[:mk.start(2)] + newblk + txt[mk.end(2):], "hand-drifted the %svalue in the generated tone block to #010203" % tm.group(1)
     path = CSS
 elif kind == "orphan-glyph":
-    txt = rd(CSS); out = txt + "\n.bp-g--zzdrift::before { content: \"?\"; }\n"
-    note = "hand-added an orphan glyph class .bp-g--zzdrift (no such manifest role)"; path = CSS
+    txt = rd(GLYPHS); out = txt + "\n.bp-g--zzdrift::before { content: \"?\"; }\n"
+    note = "hand-added an orphan glyph class .bp-g--zzdrift (no such manifest role)"; path = GLYPHS
 elif kind == "missing-glyph":
-    txt = rd(CSS); out = txt.replace(".bp-g--" + first_role, ".bp-hidden-g--" + first_role)
-    note = "renamed the .bp-g--%s rule out of existence (manifest role loses its glyph class)" % first_role; path = CSS
+    txt = rd(GLYPHS); out = txt.replace(".bp-g--" + first_role, ".bp-hidden-g--" + first_role)
+    note = "renamed the .bp-g--%s rule out of existence (manifest role loses its glyph class)" % first_role; path = GLYPHS
 elif kind == "go-glyph":
     txt = rd(GO); out, note = go_first_value(txt, "roleGlyph", "¤"); path = GO
 elif kind == "go-label":
@@ -199,7 +200,10 @@ st_selftest() {
 
   local -a INPUTS=(
     "design/status-manifest.json"
-    "api/assets/paper-surface/paper-surface.css"
+    "api/assets/paper-editor/src/paper-surface/00-foundation-type.css"
+    "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css"
+    "api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css"
+    "api/assets/paper-editor/src/paper-surface/03-data-viz-forms-media.css"
     "internal/pdrender/gridblocks.go"
     "apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
     "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
@@ -304,8 +308,9 @@ if [ "$MODE" = "selftest" ]; then
   exit $?
 fi
 
+CSS_BEFORE="$(cksum < "$CSS")"
 python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$MOBILE_TSX" "$MOBILE_GEN_TS" <<'PY'
-import json, re, sys
+import glob, json, os, re, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 mobile_path = sys.argv[5]
@@ -358,7 +363,9 @@ else:
 
 # ── Part 2: glyph-class coverage (roles ↔ .bp-g--<role>) ────────────────────
 roles = {r["role"] for r in m["roles"]}
-in_css = set(re.findall(r"\.bp-g--([a-z]+)\b", css))
+# The glyph rules live in another fragment of the same surface: read all of them.
+surface = "".join(open(p).read() for p in sorted(glob.glob(os.path.join(os.path.dirname(css_path), "*.css"))))
+in_css = set(re.findall(r"\.bp-g--([a-z]+)\b", surface))
 missing = roles - in_css
 orphan = in_css - roles
 if missing or orphan:
@@ -767,3 +774,9 @@ print(f"status-manifest-check part 5b: PASS — apps/mobile reads the GENERATED 
       f"BOARD_ROLES from ROLE_LABEL with {MOBILE_TERMINAL_ROLES} last; "
       f"{len(overrides)} recorded platform override(s) held honest.")
 PY
+
+# A --write that changed the package fragment carries it out through the one outward
+# path. --surface-only leaves the six browser assets to a full sync.
+if [ "$MODE" = "--write" ] && [ "$(cksum < "$CSS")" != "$CSS_BEFORE" ]; then
+  node api/assets/paper-editor/scripts/sync-barkpark.mjs --write --surface-only
+fi

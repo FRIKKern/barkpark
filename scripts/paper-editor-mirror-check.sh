@@ -26,7 +26,7 @@
 #
 #   Part 3 — generated paper-surface token layer. The `--paper-*` theme tokens +
 #   `--bp-*` typography tokens in the embedder bundle (styles.css) are GENERATED
-#   from the ONE canonical source (api/assets/paper-surface/paper-surface.css)
+#   from the ONE canonical source (the package's assembled src/paper-surface)
 #   via a deterministic de-scoping transform, and live between exact BEGIN/END
 #   GENERATED markers. Default mode byte-compares against the marked section
 #   (fails with a --write hint on drift); `--write` rewrites it in place. This
@@ -188,15 +188,29 @@ selftest() {
 if [[ "$MODE" == "selftest" ]]; then selftest; exit $?; fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HEEX="${PAPER_EDITOR_MIRROR_HEEX:-$ROOT/api/priv/static/assets/bp-paper-editor-shell.css}"
+HEEX="${PAPER_EDITOR_MIRROR_HEEX:-}"
 BUNDLE="${PAPER_EDITOR_MIRROR_BUNDLE:-$ROOT/api/assets/paper-editor/src/styles/theme.css}"
-SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 AUTHORED_TMP=""
+SHELL_TMP=""
+trap 'rm -f "$AUTHORED_TMP" "$SHELL_TMP"' EXIT
+# The shell side is the package's assembled source. The served copy of it is held
+# byte-equal by sync-barkpark --check.
+if [ -z "$HEEX" ]; then
+  SHELL_TMP="$(mktemp)"
+  node --input-type=module - "$ROOT" "$SHELL_TMP" <<'NODE'
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+const [, , root, output] = process.argv;
+const assets = await import(pathToFileURL(join(root, "api/assets/paper-editor/scripts/source-assets.mjs")));
+writeFileSync(output, assets.assembleAsset("editor-shell", { root: join(root, "api/assets/paper-editor") }));
+NODE
+  HEEX="$SHELL_TMP"
+fi
 if [ -n "${PAPER_EDITOR_MIRROR_BUNDLE:-}" ]; then
   PACKAGE_AUTHORED="$BUNDLE"
 else
   AUTHORED_TMP="$(mktemp)"
-  trap 'rm -f "$AUTHORED_TMP"' EXIT
   node --input-type=module - "$ROOT" "$AUTHORED_TMP" <<'NODE'
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
