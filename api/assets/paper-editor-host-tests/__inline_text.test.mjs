@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const source = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const dom = new JSDOM(`<main data-paper-doc-key="production:paper:stage" data-paper-rev="7">
   <button id="view" data-editing="true">View</button>
   <form id="stage" class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="500">

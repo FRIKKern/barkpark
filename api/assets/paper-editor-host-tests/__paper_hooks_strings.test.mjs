@@ -9,13 +9,13 @@
 // Norwegian "✓ Lagret automatisk" must still count as transient — otherwise the
 // footer sticks on a stale saved claim.
 //
-// Run: node src/__paper_hooks_strings.test.mjs
+// Run: node ../paper-editor-host-tests/__paper_hooks_strings.test.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { JSDOM } from 'jsdom';
+import { JSDOM } from './jsdom.mjs';
 
-const HOOKS = readFileSync(new URL('../../../priv/static/assets/bp-paper-editor-hooks.js', import.meta.url), 'utf8');
+const HOOKS = readFileSync(new URL('../../priv/static/assets/bp-paper-editor-hooks.js', import.meta.url), 'utf8');
 
 const NB = {
   'Auto-saved': 'Lagret automatisk',

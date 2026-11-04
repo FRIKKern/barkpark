@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const hooksSource = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
+const hooksSource = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const dom = new JSDOM(`<!doctype html><body><main data-paper-doc-key="production:beta:fields" data-document-rev="opaque-1">
   <form id="form" phx-change="inner-change" phx-target="17" phx-hook="BarkparkFieldBridge" data-paper-field-flush>
     <input id="native" name="title" value="Before">

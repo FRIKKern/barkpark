@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM, VirtualConsole } from "jsdom";
+import { JSDOM, VirtualConsole } from "./jsdom.mjs";
 
 const virtualConsole = new VirtualConsole();
 let reloads = 0;
@@ -34,7 +34,7 @@ const context = vm.createContext({
   customElements: { whenDefined: () => Promise.resolve() },
 });
 vm.runInContext(
-  readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 

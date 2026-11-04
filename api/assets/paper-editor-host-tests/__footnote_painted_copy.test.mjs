@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 // task-bbfdcf4c80b8300d long tail: a footnote's painted notes edit where they
 // read. The server paints the reader's <ol class="bp-footnote"> unchanged inside
 // the contextual preview; BarkparkPaperPaintedCopy turns each painted row into a
 // native host that writes its panel field, so the form's autosave runs.
-const hooksSource = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
+const hooksSource = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 
 const readerRows = (a, c) => `<ol class="bp-footnote"><li id="fn-a" class="bp-footnote__note">${a}</li><li id="fn-c" class="bp-footnote__note">${c}</li></ol>`;
 const dom = new JSDOM(`<!doctype html><body>

@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const hooksSource = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
+const hooksSource = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const dom = new JSDOM(`<!doctype html><body><main data-paper-doc-key="production:paper:fields" data-paper-rev="1">
   <div class="bp-paper-editor">
     <div id="canvas" data-canvas-source></div>

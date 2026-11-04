@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const hookSource = readFileSync(
-  new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url),
+  new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url),
   "utf8",
 );
 

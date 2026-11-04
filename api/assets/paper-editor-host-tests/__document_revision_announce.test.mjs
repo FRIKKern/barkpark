@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const KEY = "production:publication:pub-1";
 const dom = new JSDOM(`
@@ -32,7 +32,7 @@ const context = vm.createContext({
   customElements: { whenDefined: () => Promise.resolve() },
 });
 vm.runInContext(
-  readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 

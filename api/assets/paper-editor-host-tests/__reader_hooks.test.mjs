@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { JSDOM } from 'jsdom';
+import { JSDOM } from './jsdom.mjs';
 
 const dom = new JSDOM('<main data-paper-doc-key="production:paper:probe" data-paper-rev="7"><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false" data-canvas-media-strings="{&quot;replace&quot;:&quot;Bytt bilde&quot;}" data-canvas-reference-strings="{&quot;remove&quot;:&quot;Fjern&quot;}"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
 const { window } = dom;
@@ -15,7 +15,7 @@ let upgrade;
 const context = vm.createContext({window, document: window.document, CustomEvent: window.CustomEvent,
   FormData: window.FormData, Date: TestDate, setTimeout, clearTimeout,
   customElements: { whenDefined: () => new Promise(resolve => { upgrade = resolve; }) }});
-vm.runInContext(readFileSync(new URL('../../../priv/static/assets/bp-paper-editor-hooks.js', import.meta.url), 'utf8'), context);
+vm.runInContext(readFileSync(new URL('../../priv/static/assets/bp-paper-editor-hooks.js', import.meta.url), 'utf8'), context);
 const hooks = window.BarkparkPaperEditorHooks;
 const wrapper = window.document.querySelector('[phx-hook]');
 const canvas = wrapper.querySelector('bp-paper-canvas');
