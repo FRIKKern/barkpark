@@ -218,8 +218,31 @@ assert.equal(sha(source), "05faa449079ebac3164254368d70dc368b43987f256d2551012f3
 assert.equal(DEFINITIONS.length, 202, "all monolith definitions are specified");
 assert.equal(DEFINITIONS.filter((row) => row.exportSymbol).length, 77, "all future moved definitions are body-locked before extraction");
 assert.equal(DEFINITIONS.filter((row) => row.bodySha256).length, 199, "every non-field body is locked");
-assert.deepEqual({ count: 1171, multisetSha256: "45d7399273427002f3e736807183441cf5b051e84d9787ef59f6c957ff4ff448" },
-  { count: 1171, multisetSha256: "45d7399273427002f3e736807183441cf5b051e84d9787ef59f6c957ff4ff448" });
+const commentTokens = (text) => {
+  const out = [];
+  for (let at = 0; at < text.length;) {
+    const char = text[at];
+    if (char === "\"" || char === "'") {
+      const quote = char; at++;
+      while (at < text.length) { if (text[at] === "\\") at += 2; else if (text[at++] === quote) break; }
+    } else if (char === "\u0060") {
+      at++;
+      while (at < text.length) { if (text[at] === "\\") at += 2; else if (text[at++] === "\u0060") break; }
+    } else if (char === "/" && text[at + 1] === "/") {
+      const start = at + 2; at = text.indexOf("\n", start); if (at === -1) at = text.length;
+      out.push({ type: "Line", value: text.slice(start, at) });
+    } else if (char === "/" && text[at + 1] === "*") {
+      const start = at + 2; at = text.indexOf("*/", start); assert.notEqual(at, -1, "closed block comment");
+      out.push({ type: "Block", value: text.slice(start, at) }); at += 2;
+    } else at++;
+  }
+  return out;
+};
+const comments = commentTokens(source);
+const commentCounts = new Map();
+for (const comment of comments) { const key = comment.type + "\0" + comment.value; commentCounts.set(key, (commentCounts.get(key) || 0) + 1); }
+assert.equal(comments.length, 1171, "actual lexical comment census");
+assert.equal(sha(JSON.stringify([...commentCounts].sort())), "45d7399273427002f3e736807183441cf5b051e84d9787ef59f6c957ff4ff448", "actual lexical comment multiset");
 
 const lineStarts = [0];
 for (let at = 0; at < source.length; at++) if (source[at] === "\n") lineStarts.push(at + 1);
