@@ -5,9 +5,9 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { start, startLine } from "./server.mjs";
+import { start, startLine } from "../paper-editor/src/testing-ground/server.mjs";
 
-const SERVER = fileURLToPath(new URL("./server.mjs", import.meta.url));
+const SERVER = fileURLToPath(new URL("../paper-editor/src/testing-ground/server.mjs", import.meta.url));
 const standIn = async () => "export const render = () => 'stand-in';";
 
 function getAsIs(url, path) {
@@ -44,7 +44,7 @@ try {
   await plain.close();
 }
 
-const MAIN_ASSETS = join(fileURLToPath(new URL("../../../../priv/static/assets", import.meta.url)));
+const MAIN_ASSETS = join(fileURLToPath(new URL("../../priv/static/assets", import.meta.url)));
 const one = await start({ standIn, builds: [{ label: "main", sha: "aaaaaaaaaa", dir: MAIN_ASSETS }] });
 try {
   assert.match((await get(one.url)).body, /<title>Editor testing ground<\/title>[\s\S]*class="tg-stamp"/, "one build: / is the editor, with its stamp");

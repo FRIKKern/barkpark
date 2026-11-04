@@ -4,9 +4,9 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { besideMain, buildEnv, makeBuild, pickBuild } from "./builds.mjs";
+import { besideMain, buildEnv, makeBuild, pickBuild } from "../paper-editor/src/testing-ground/builds.mjs";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
 const noGit = () => assert.fail("this build needs no git");
 const leftovers = () => readdirSync(tmpdir()).filter((name) => name.startsWith("tg-build-")).length;
@@ -75,7 +75,7 @@ try {
 }
 assert.equal(leftovers(), before, "a failed build leaves no tree behind");
 
-const holder = `const { makeBuild } = await import(${JSON.stringify(new URL("./builds.mjs", import.meta.url).href)});
+const holder = `const { makeBuild } = await import(${JSON.stringify(new URL("../paper-editor/src/testing-ground/builds.mjs", import.meta.url).href)});
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit({ SIGINT: 130, SIGTERM: 143 }[signal]));
 makeBuild({ label: "HEAD", sha: ${JSON.stringify(head)} }, { repo: ${JSON.stringify(REPO)} });
 console.log("built");
