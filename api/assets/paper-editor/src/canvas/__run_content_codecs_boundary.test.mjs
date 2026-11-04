@@ -137,18 +137,37 @@ const rootPath = resolve(here, "run-convert.js");
 const leafPath = resolve(here, "run-content-codecs.js");
 const rootSource = readFileSync(rootPath, "utf8");
 const leafSource = readFileSync(leafPath, "utf8");
+assert.ok(rootSource.split("\n").length - 1 < 800, "endstate run-convert facade stays below 800 physical lines");
+
+const endstatePaths = [
+  "run-project.js",
+  "run-node-core.js",
+  "run-container-codecs.js",
+  "run-diff-utils.js",
+  "run-reverse-echo.js",
+  "run-ops.js",
+];
+const endstateSources = Object.fromEntries(endstatePaths.map((path) => [path, readFileSync(resolve(here, path), "utf8")]));
 for (const name of DECLARATIONS) {
   const pattern = new RegExp(`\\bfunction\\s+${name}\\s*\\(`, "g");
   assert.equal([...leafSource.matchAll(pattern)].length, 1, `${name} is defined exactly once in the leaf`);
-  assert.equal([...rootSource.matchAll(pattern)].length, 0, `${name} is absent from the root`);
+  for (const [owner, source] of [["run-convert.js", rootSource], ...Object.entries(endstateSources)]) {
+    assert.equal([...source.matchAll(pattern)].length, 0, `${name} is absent from ${owner}`);
+  }
 }
 
 const importSpecifiers = source => [...source.matchAll(
   /(?:^|\n)\s*(?:import|export)\s+(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']/g,
 )].map(match => match[1]);
 assert.deepEqual(importSpecifiers(leafSource), ["../convert.js", "./projection-json.js", "./run-kinds.js"]);
-assert.equal((rootSource.match(/from "\.\/run-content-codecs\.js"/g) || []).length, 1,
-  "root imports the codec leaf exactly once");
+const contentConsumers = new Set([
+  "run-project.js", "run-container-codecs.js", "run-reverse-echo.js", "run-ops.js",
+]);
+for (const [owner, source] of [["run-convert.js", rootSource], ...Object.entries(endstateSources)]) {
+  const count = (source.match(/from "\.\/run-content-codecs\.js"/g) || []).length;
+  assert.equal(count, contentConsumers.has(owner) ? 1 : 0,
+    `${owner} has its exact canonical content-codec import ownership`);
+}
 assert.doesNotMatch(leafSource, /from ["']\.\/run-convert\.js["']/,
   "codec leaf never imports the root");
 
@@ -168,7 +187,6 @@ function walk(file) {
 }
 walk(leafPath);
 
-assert.ok(rootSource.split("\n").length - 1 > 800, "residual run-convert remains an explicit size gap");
 assert.ok(leafSource.split("\n").length - 1 < 800, "codec leaf stays below 800 physical lines");
 assert.ok(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").length - 1 < 800,
   "boundary test stays below 800 physical lines");

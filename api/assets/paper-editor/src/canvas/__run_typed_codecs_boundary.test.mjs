@@ -208,6 +208,17 @@ const paths = {
   structured: resolve(here, "run-structured-codecs.js"),
 };
 const sources = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(path, "utf8")]));
+assert.ok(sources.root.split("\n").length - 1 < 800, "endstate run-convert facade stays below 800 physical lines");
+
+const endstatePaths = [
+  "run-project.js",
+  "run-node-core.js",
+  "run-container-codecs.js",
+  "run-diff-utils.js",
+  "run-reverse-echo.js",
+  "run-ops.js",
+];
+const endstateSources = Object.fromEntries(endstatePaths.map((path) => [path, readFileSync(resolve(here, path), "utf8")]));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const regions = {
   template: {
@@ -236,8 +247,27 @@ for (const [group, spec] of Object.entries(regions)) {
     const declarationPattern = new RegExp(`\\b(?:function|const)\\s+${entry.declaration}\\b`, "g");
     assert.equal([...sources[group].matchAll(declarationPattern)].length, 1,
       `${entry.declaration} is defined exactly once in its leaf`);
-    assert.equal([...sources.root.matchAll(declarationPattern)].length, 0,
-      `${entry.declaration} is absent from the root`);
+    for (const [owner, source] of [["run-convert.js", sources.root], ...Object.entries(endstateSources)]) {
+      assert.equal([...source.matchAll(declarationPattern)].length, 0,
+        `${entry.declaration} is absent from ${owner}`);
+    }
+  }
+}
+
+const typedConsumers = {
+  "./run-template-attrs.js": new Set(["run-project.js", "run-reverse-echo.js"]),
+  "./run-scalar-codecs.js": new Set([
+    "run-project.js", "run-container-codecs.js", "run-reverse-echo.js", "run-ops.js",
+  ]),
+  "./run-structured-codecs.js": new Set([
+    "run-project.js", "run-container-codecs.js", "run-reverse-echo.js", "run-ops.js",
+  ]),
+};
+for (const [specifier, consumers] of Object.entries(typedConsumers)) {
+  for (const [owner, source] of [["run-convert.js", sources.root], ...Object.entries(endstateSources)]) {
+    const count = source.split(`from "${specifier}"`).length - 1;
+    assert.equal(count, consumers.has(owner) ? 1 : 0,
+      `${owner} has its exact canonical ${specifier} import ownership`);
   }
 }
 
@@ -266,7 +296,6 @@ function walk(file) {
 }
 for (const key of ["template", "scalar", "structured"]) walk(paths[key]);
 
-assert.ok(sources.root.split("\n").length - 1 > 800, "residual run-convert remains an explicit size gap");
 for (const key of ["template", "scalar", "structured"]) {
   assert.ok(sources[key].split("\n").length - 1 < 800, `${key} leaf stays below 800 physical lines`);
 }
