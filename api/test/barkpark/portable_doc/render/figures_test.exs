@@ -72,6 +72,38 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       assert html =~ "&lt;script&gt;"
       refute html =~ "<script>"
     end
+
+    test "indexed emphasis matches the first authored range for direct integer calls" do
+      cases = [
+        {"zero <&>\none\ntwo\nthree\n", [{2, 4, "fixed"}, {1, 5, "comment"}]},
+        {"zero\none\ntwo", [{-20, 2, "comment"}, {2, 99, "offending"}]},
+        {"zero\none\ntwo", [{99, 120, "comment"}, {3, 3, "fixed"}]},
+        {"zero\n\nthree", [{4, 2, "comment"}, {2, 3, "offending"}]},
+        {"zero\none\ntwo\nthree\n", [{5, 5, ~s|fixed"><b>|}]},
+        {"", [{1, 1, "comment"}]}
+      ]
+
+      for {source, ranges} <- cases do
+        assert Figures.code_block_html(source, ranges) =~ naive_emphasis_body(source, ranges)
+      end
+    end
+
+    test "a direct non-integer or malformed range retains lazy legacy scan behavior" do
+      cases = [
+        [{0, :last, "comment"}],
+        [{0.5, 2.5, "comment"}],
+        [{0, 2.5, "comment"}],
+        [{0, :last, "comment"}, {:malformed}]
+      ]
+
+      for ranges <- cases do
+        html = Figures.code_block_html("one\ntwo", ranges)
+
+        assert html =~
+                 ~s|<span class="bp-code-em bp-code-em--comment">one</span>\n| <>
+                   ~s|<span class="bp-code-em bp-code-em--comment">two</span>|
+      end
+    end
   end
 
   describe "section_divider_html/0" do
@@ -117,6 +149,23 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
 
       refute css =~ ~r/\.bp-section-divider__mark \{[^}]*--paper-bg-deep/
     end
+  end
+
+  defp naive_emphasis_body(source, ranges) do
+    source
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, line_number} ->
+      case Enum.find(ranges, fn {from, to, _tone} ->
+             line_number >= from and line_number <= to
+           end) do
+        nil ->
+          Barkpark.PortableDoc.Render.Util.escape_html(line)
+
+        {_from, _to, tone} ->
+          ~s|<span class="bp-code-em bp-code-em--#{Barkpark.PortableDoc.Render.Util.escape_attr(tone)}">#{Barkpark.PortableDoc.Render.Util.escape_html(line)}</span>|
+      end
+    end)
   end
 
   describe "diagram_html/3" do

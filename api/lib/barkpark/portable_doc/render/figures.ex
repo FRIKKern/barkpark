@@ -75,12 +75,84 @@ defmodule Barkpark.PortableDoc.Render.Figures do
 
   defp code_lang_attr(_), do: ""
 
-  # Split/join on "\n" round-trips the source exactly (including a trailing
-  # newline, which yields a final empty segment that simply never matches a
-  # range), so an emphasized block differs from the legacy one ONLY by the spans.
+  # Split/join on "\n" round-trips the source exactly, including a trailing
+  # newline and its final empty segment, so an emphasized block differs from
+  # the legacy one ONLY by the spans.
   defp code_body_html(value, []), do: escape_html(value)
 
   defp code_body_html(value, ranges) do
+    if Enum.all?(ranges, fn
+         {from, to, _tone} -> is_integer(from) and is_integer(to)
+         _other -> false
+       end) do
+      indexed_code_body_html(value, ranges)
+    else
+      scanned_code_body_html(value, ranges)
+    end
+  end
+
+  defp indexed_code_body_html(value, ranges) do
+    lines = String.split(value, "\n")
+    line_count = length(lines)
+    winners = :atomics.new(line_count, signed: false)
+    successors = :atomics.new(line_count + 1, signed: false)
+
+    Enum.each(1..(line_count + 1), &:atomics.put(successors, &1, &1))
+
+    ranges
+    |> Enum.with_index(1)
+    |> Enum.each(fn {{from, to, _tone}, range_index} ->
+      first = max(from, 1)
+      last = min(to, line_count)
+
+      if first <= last do
+        assign_range_winners(winners, successors, first, last, range_index)
+      end
+    end)
+
+    range_tuple = List.to_tuple(ranges)
+
+    lines
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, line_number} ->
+      case :atomics.get(winners, line_number) do
+        0 ->
+          escape_html(line)
+
+        range_index ->
+          {_from, _to, tone} = elem(range_tuple, range_index - 1)
+          emphasized_code_line(line, tone)
+      end
+    end)
+  end
+
+  defp assign_range_winners(winners, successors, first, last, range_index) do
+    line = successor(successors, first)
+
+    if line <= last do
+      :atomics.put(winners, line, range_index)
+      next = successor(successors, line + 1)
+      :atomics.put(successors, line, next)
+      assign_range_winners(winners, successors, next, last, range_index)
+    end
+  end
+
+  defp successor(successors, line), do: successor_root(successors, line, [])
+
+  defp successor_root(successors, line, path) do
+    case :atomics.get(successors, line) do
+      ^line ->
+        Enum.each(path, &:atomics.put(successors, &1, line))
+        line
+
+      parent ->
+        successor_root(successors, parent, [line | path])
+    end
+  end
+
+  # Preserve the public direct-call behavior for endpoints outside the
+  # normalized integer contract. Compose never reaches this path.
+  defp scanned_code_body_html(value, ranges) do
     value
     |> String.split("\n")
     |> Enum.with_index(1)
@@ -90,16 +162,16 @@ defmodule Barkpark.PortableDoc.Render.Figures do
           escape_html(line)
 
         {_from, _to, tone} ->
-          # `tone` is already narrowed to the closed vocabulary by
-          # `Compose.code_emphasis/1`, so no author string can reach here — but
-          # the attr-escape guard (attr_escape_guard_test.exs) proves safety by
-          # SCANNING the interpolation site, and a reader of this line should
-          # not have to chase a caller two modules away to know the attribute is
-          # closed. escape_attr/1 is the identity on all three tones; it costs
-          # nothing and makes the site self-evidently safe.
-          ~s|<span class="bp-code-em bp-code-em--#{escape_attr(tone)}">#{escape_html(line)}</span>|
+          emphasized_code_line(line, tone)
       end
     end)
+  end
+
+  # `tone` is already narrowed to the closed vocabulary by
+  # `Compose.code_emphasis/1`, so no author string can reach here. The public
+  # direct-call surface still escapes the value at the interpolation site.
+  defp emphasized_code_line(line, tone) do
+    ~s|<span class="bp-code-em bp-code-em--#{escape_attr(tone)}">#{escape_html(line)}</span>|
   end
 
   # The `.bp-section-divider` look: a centered "§" glyph straddling a hairline

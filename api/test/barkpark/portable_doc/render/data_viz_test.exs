@@ -179,6 +179,49 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert DataViz.heatmap_html(%{"type" => "heatmap", "cells" => []}) =~ "bp-dataviz--empty"
   end
 
+  test "heatmap label slots keep coercion, escaping, and missing-label behavior across emitters" do
+    block = %{
+      "type" => "heatmap",
+      "cells" => [[1, 2], [3]],
+      "rowLabels" => ["<row>"],
+      "colLabels" => ["A&B"]
+    }
+
+    legacy = DataViz.heatmap_html(block)
+    calendar = DataViz.heatmap_html(Map.put(block, "mode", "calendar"))
+    matrix = DataViz.heatmap_html(Map.put(block, "marginals", true))
+    email = DataViz.heatmap_email_html(block)
+
+    assert legacy =~ ~s|<span class="bp-heat__cl">A&amp;B</span><span class="bp-heat__cl"></span>|
+    assert legacy =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert legacy =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert calendar =~
+             ~s|<span class="bp-heat__ml">A&amp;B</span><span class="bp-heat__ml"></span>|
+
+    assert calendar =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert calendar =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert matrix =~
+             ~s|<span class="bp-heat__cl">A&amp;B</span><span class="bp-heat__cl"></span>|
+
+    assert matrix =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert matrix =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert email =~ ">A&amp;B</td>"
+    assert email =~ ~s|text-align:center"></td>|
+    assert email =~ ">&lt;row&gt;</td>"
+    assert email =~ ~s|text-align:right"></td>|
+
+    without_labels = Map.drop(block, ["rowLabels", "colLabels"])
+    non_list_labels = Map.merge(block, %{"rowLabels" => %{}, "colLabels" => "A&B"})
+
+    assert DataViz.heatmap_html(non_list_labels) == DataViz.heatmap_html(without_labels)
+
+    assert DataViz.heatmap_email_html(non_list_labels) ==
+             DataViz.heatmap_email_html(without_labels)
+  end
+
   # ── chart ────────────────────────────────────────────────────────────────────
 
   test "chart renders one polyline per series plus ticks, x labels and a legend" do
@@ -256,6 +299,65 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert html =~ ">the peak</text>"
     # datum at max with min pinned 0 → the marker sits at the TOP pad (y=8)
     assert html =~ ~s(cy="8")
+  end
+
+  test "chart point annotations preserve selected-series and index semantics" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [
+          %{"label" => "one", "points" => [0, 10]},
+          %{"label" => "two", "points" => [20, 30]},
+          %{"label" => "three", "points" => [40, 50]},
+          %{"label" => "four", "points" => [60, 70]},
+          %{"label" => "dropped", "points" => [80, 90]}
+        ],
+        "axes" => %{"min" => 0, "max" => 100},
+        "annotations" => %{
+          "points" => [
+            %{"index" => 1.9, "label" => "default first"},
+            %{"series" => -1, "index" => 0, "label" => "last selected"},
+            %{"series" => "-2", "index" => 1, "label" => "third selected"},
+            %{"series" => "junk", "index" => 0, "label" => "invalid defaults first"},
+            %{"series" => 4, "index" => 0, "label" => "capped fifth"},
+            %{"series" => -5, "index" => 0, "label" => "too negative"},
+            %{"series" => 0, "index" => -1, "label" => "negative point"},
+            %{"series" => 0, "index" => "junk", "label" => "invalid point"},
+            %{"series" => 0, "index" => 0}
+          ]
+        }
+      })
+
+    for label <- [
+          "default first",
+          "last selected",
+          "third selected",
+          "invalid defaults first"
+        ] do
+      assert html =~ ">#{label}</text>"
+    end
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="630" cy="144.8" r="3.5"/><text class="bp-chart__ann" x="630" y="136.8" text-anchor="end">default first</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="46" cy="68.8" r="3.5"/><text class="bp-chart__ann" x="46" y="60.8" text-anchor="middle">last selected</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="630" cy="84" r="3.5"/><text class="bp-chart__ann" x="630" y="76" text-anchor="end">third selected</text>)
+
+    assert html =~
+             ~s(<circle class="bp-chart__pt" cx="46" cy="160" r="3.5"/><text class="bp-chart__ann" x="46" y="152" text-anchor="start">invalid defaults first</text>)
+
+    for label <- ["capped fifth", "too negative", "negative point", "invalid point"] do
+      refute html =~ label
+    end
+
+    assert :binary.match(html, "default first") < :binary.match(html, "last selected")
+    assert :binary.match(html, "last selected") < :binary.match(html, "third selected")
+
+    assert :binary.match(html, "third selected") <
+             :binary.match(html, "invalid defaults first")
   end
 
   test "chart annotations are fail-soft and escaped: junk coordinates drop, labels never inject" do
