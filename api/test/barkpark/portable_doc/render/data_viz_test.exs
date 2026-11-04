@@ -301,6 +301,53 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert html =~ ~s(cy="8")
   end
 
+  test "chart point annotations preserve selected-series and index semantics" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [
+          %{"label" => "one", "points" => [0, 10]},
+          %{"label" => "two", "points" => [20, 30]},
+          %{"label" => "three", "points" => [40, 50]},
+          %{"label" => "four", "points" => [60, 70]},
+          %{"label" => "dropped", "points" => [80, 90]}
+        ],
+        "axes" => %{"min" => 0, "max" => 100},
+        "annotations" => %{
+          "points" => [
+            %{"index" => 1.9, "label" => "default first"},
+            %{"series" => -1, "index" => 0, "label" => "last selected"},
+            %{"series" => "-2", "index" => 1, "label" => "third selected"},
+            %{"series" => "junk", "index" => 0, "label" => "invalid defaults first"},
+            %{"series" => 4, "index" => 0, "label" => "capped fifth"},
+            %{"series" => -5, "index" => 0, "label" => "too negative"},
+            %{"series" => 0, "index" => -1, "label" => "negative point"},
+            %{"series" => 0, "index" => "junk", "label" => "invalid point"},
+            %{"series" => 0, "index" => 0}
+          ]
+        }
+      })
+
+    for label <- [
+          "default first",
+          "last selected",
+          "third selected",
+          "invalid defaults first"
+        ] do
+      assert html =~ ">#{label}</text>"
+    end
+
+    for label <- ["capped fifth", "too negative", "negative point", "invalid point"] do
+      refute html =~ label
+    end
+
+    assert :binary.match(html, "default first") < :binary.match(html, "last selected")
+    assert :binary.match(html, "last selected") < :binary.match(html, "third selected")
+
+    assert :binary.match(html, "third selected") <
+             :binary.match(html, "invalid defaults first")
+  end
+
   test "chart annotations are fail-soft and escaped: junk coordinates drop, labels never inject" do
     html =
       DataViz.chart_html(%{

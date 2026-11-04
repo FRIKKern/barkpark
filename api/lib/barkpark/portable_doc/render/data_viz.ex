@@ -940,12 +940,21 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         end
       end)
 
+    point_values =
+      if points == [] do
+        {}
+      else
+        series
+        |> Enum.map(fn %{points: values} -> List.to_tuple(values) end)
+        |> List.to_tuple()
+      end
+
     marks =
       Enum.map_join(points, "", fn p ->
         idx = numeric(get(p, "index"))
         si = trunc(numeric(get(p, "series")) || 0.0)
         label = p |> get("label") |> display_string()
-        value = point_value(series, si, idx)
+        value = point_value(point_values, si, idx)
 
         if is_number(idx) and is_number(value) and label != "" do
           i = idx |> clamp(0.0, max(n - 1, 0) * 1.0) |> trunc()
@@ -984,12 +993,16 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     end
   end
 
-  # The called-out datum: series si (author order, clamped in-range), point at
-  # trunc(index). Out-of-range series/index → nil → the entry is dropped.
+  # The called-out datum: series si (author order, including Enum.at's negative
+  # offsets), point at trunc(index). Out-of-range series/index → nil → dropped.
   defp point_value(series, si, idx) when is_number(idx) and idx >= 0 do
-    with %{points: pts} <- Enum.at(series, si),
-         v when is_number(v) <- Enum.at(pts, trunc(idx)),
-         do: v,
+    series_index = if si < 0, do: tuple_size(series) + si, else: si
+    point_index = trunc(idx)
+
+    with true <- series_index >= 0 and series_index < tuple_size(series),
+         points = elem(series, series_index),
+         true <- point_index < tuple_size(points),
+         do: elem(points, point_index),
          else: (_ -> nil)
   end
 
