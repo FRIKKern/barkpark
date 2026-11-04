@@ -441,4 +441,3 @@ export const paperEditorRuntimeMethods = Object.freeze({
     return true;
   },
 });
-

@@ -449,4 +449,3 @@ export const paperEditorAutocompleteMethods = Object.freeze({
     this._editor.commands.focus();
   },
 });
-
