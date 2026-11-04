@@ -8,10 +8,10 @@
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom, and reads the row's CSS from the root layout.
 //
-// Run: node src/__picker_reference_hit_type_apart.test.mjs
+// Run: node ../paper-editor-host-tests/__picker_reference_hit_type_apart.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -31,7 +31,7 @@ globalThis.fetch = window.fetch = async () => ({
   }),
 });
 
-await import("../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 
 try {
   const shell = document.createElement("div");
@@ -67,7 +67,7 @@ try {
   assert.equal(draft.textContent, "Nordlag Ekstern organisasjon draft");
 
   // The row lays its children out side by side with a gap, for every hit.
-  const css = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
   const rule = css.match(/bp-reference-picker \.bp-ref-dropdown-item \{([^}]*)\}/);
   assert.ok(rule, "the root layout styles .bp-ref-dropdown-item");
   assert.match(rule[1], /display:\s*flex/, "every hit row is a flex row");

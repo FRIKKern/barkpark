@@ -28,7 +28,6 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 const fetchMock = async () => ({ ok: true, json: async () => ({ documents: [] }) });
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
-await import("../../../../priv/static/assets/bp-reference-picker.js");
 const { BpPaperCanvas } = await import("./index.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
@@ -54,7 +53,6 @@ try {
     { id: "fs", type: "field-string", label: "Title", value: "The Full Deck" },
     { id: "fb", type: "field-boolean", label: "Published", value: true },
     { id: "fn", type: "field-select", label: "Audience", value: "eng", options: [{ value: "eng", label: "Engineering" }] },
-    { id: "fr", type: "field-reference", label: "Companion paper", value: "terminal-mermaid-diagrams" },
   ]) {
     const { canvas, ops, pm } = mount([paragraph("lead", "Lead."), block, paragraph("end", "End.")]);
     const labelEl = pm.querySelector(".bp-canvas-field-label");

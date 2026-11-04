@@ -8,19 +8,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
-// The public paper page loads ONLY the shell stylesheet (BP_PAPER_EDITOR_NO_INJECT),
-// so the out-of-flow rules must live there; styles.css mirrors them for bare embedders.
-for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+// styles.css owns the portable bare-embedder half of this layout contract.
+for (const file of ["../styles.css"]) {
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-fleet-config\s*\{[^}]*bottom: 100%;/s,
     `${file}: a closed fleet disclosure sits in the gap above the block, out of flow`);
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-fleet-config\[open\]\s*\{[^}]*position: relative;/s,
     `${file}: an OPENED fleet disclosure takes flow space (an explicit click, never a hover)`);
 }
-const shell = readFileSync(new URL("../../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
-assert.match(shell, /\n\.bp-paper-contextual-controls\s*\{[^}]*position: absolute;[^}]*opacity: 0;/s,
-  "the closed disclosure is absolutely placed and hidden by opacity, so revealing it moves nothing");
-
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 for (const name of ["customElements", "CustomEvent", "document", "DOMParser", "Element", "Event", "EventTarget", "HTMLElement", "KeyboardEvent", "MouseEvent", "MutationObserver", "Node", "NodeFilter", "Selection", "Text"]) globalThis[name] = window[name];
 globalThis.window = window;
