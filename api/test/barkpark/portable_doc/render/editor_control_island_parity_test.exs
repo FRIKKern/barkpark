@@ -121,7 +121,8 @@ defmodule Barkpark.PortableDoc.Render.EditorControlIslandParityTest do
     for {name, css, selector} <- [
           {"bp-paper-editor-shell.css", strip_comments(File.read!(@shell_css)),
            ".bp-paper-surface .ProseMirror"},
-          {"paper-editor/src/styles.css", strip_comments(File.read!(@bundle_css)), ".ProseMirror"}
+          {"paper-editor/src/styles.css", strip_comments(File.read!(@bundle_css)),
+           ".bp-paper-editor-body > .ProseMirror"}
         ] do
       decls = declarations(css, selector)
 

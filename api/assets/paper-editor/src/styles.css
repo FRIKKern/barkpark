@@ -890,11 +890,13 @@
 .ProseMirror:focus,
 .ProseMirror-focused { outline: none; }
 
-/* ── Old-style hanging figures — DE-SCOPED from `.bp-paper-surface
- * .ProseMirror`. Wins back ligatures + onum that ProseMirror base CSS kills.
- * The surface's own feature list, and NO font-variant-numeric: the reader has
- * none (editor_control_island_parity_test). */
-.ProseMirror {
+/* ── Old-style hanging figures — scoped to the shared TipTap mount root, not
+ * `.bp-paper-surface` (standalone hosts have no such ancestor). The extra root
+ * class out-ranks TipTap's later-injected bare `.ProseMirror` reset and wins
+ * back ligatures + onum without disabling its runtime CSS. The surface's own
+ * feature list, and NO font-variant-numeric: the reader has none
+ * (editor_control_island_parity_test). */
+.bp-paper-editor-body > .ProseMirror {
   font-variant-ligatures: normal;
   -webkit-font-variant-ligatures: normal;
   font-feature-settings: "kern", "liga", "onum";
