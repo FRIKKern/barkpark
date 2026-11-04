@@ -30,7 +30,7 @@
 // The shipped <bp-paper-editor> behavior is byte-unchanged.
 
 import { Editor } from "@tiptap/core";
-import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
+import { stripPastedImages } from "./clipboard-paste-policy.js";
 import { cleanPastedHTML } from "./paste-html.js";
 import { safeUrl } from "../safe-url.js";
 import StarterKit from "@tiptap/starter-kit";
@@ -57,10 +57,8 @@ import TaskItem from "@tiptap/extension-task-item";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin, Selection } from "@tiptap/pm/state";
-import { undoDepth, redoDepth, isHistoryTransaction } from "@tiptap/pm/history";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
-import { prepareHTMLTablePaste } from "./html-table-paste.js";
+import { Fragment, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { normalizeWordListHTML } from "./word-paste.js";
 import { Extension } from "@tiptap/core";
 
@@ -90,9 +88,9 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
-import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
-import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
-import { exactClipboardSerializer, exactSliceFromClipboard, sliceWithFreshIds } from "./clipboard-slice.js";
+import { inlineObjects, InlineObjectDialog, HostObjectDialog, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, refusalField } from "./inline-object.js";
+import { BlockBoundary } from "./block-boundary.js";
+import { exactClipboardSerializer, sliceWithFreshIds } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
 import { CaretBeforeKeys } from "./caret-before-keys.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
@@ -174,16 +172,14 @@ import { Expandable } from "./expandable-node.js";
 import { Steps, Step, Tabs, Tab } from "./rows-node.js";
 // The "data + island" atoms: equation, footnotes, contents, video.
 import { Equation, Footnote, Toc, Video } from "./island-node.js";
-// The `:` emoji picker: a local shortcode table, plain text on pick (no server change).
-import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
-import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } from "./remote-selections.js";
-import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsInSelection as crInSelection } from "./comment-ranges.js";
+import { remoteSelections, setRemoteSelections as rsSet } from "./remote-selections.js";
+import { commentRanges, setCommentRanges as crSet } from "./comment-ranges.js";
 // A document link's words painted live from the host's wikilinkResolve; see ./wikilink-titles.js.
-import { wikilinkTitles, refreshWikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
+import { wikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
 // A typed or pasted [[Title]] that names a known document becomes a link; see ./wikilink-input.js.
-import { markdownWikilinksAsBrackets, wikilinkInput } from "./wikilink-input.js";
-import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
+import { wikilinkInput } from "./wikilink-input.js";
+import { findReplace } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
 import { CardKeys } from "./card-menu.js";
@@ -233,34 +229,9 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
-// Toolbar commands for a host's own field chrome (EMBED-CONTRACT "Toolbar commands").
-import {
-  canSetBlockStyle,
-  canToggleList,
-  canToggleMark,
-  emptyToolbarState,
-  setBlockStyle as hcSetBlockStyle,
-  toggleList as hcToggleList,
-  toggleMark as hcToggleMark,
-  toolbarState,
-} from "./host-commands.js";
-import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
-// P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
-// for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
-// replace-range mappers. All shipped + browser-verified in the per-block editor;
-// the canvas REUSES them verbatim — only the WC-side wiring is ported below.
-import { WikilinkMenu } from "../wikilink-menu.js";
+import { BlockHandle } from "./block-handle.js";
 // The hover card on a link / wikilink: address, resolved title + first line, Open, Edit (plan #23).
 import { LinkPreview } from "./link-preview.js";
-import {
-  parseOpenWikilink,
-  splitAlias,
-  wikilinkReplaceRange,
-  parseOpenTag,
-  tagReplaceRange,
-  parseOpenEmoji,
-  emojiReplaceRange,
-} from "../wikilink-trigger.js";
 // P4 S-slash: the SAME caret-anchored "/" insert popup the per-block editor uses
 // (slash-menu.js), REUSED verbatim — only the WC-side wiring differs. SLASH_ITEMS
 // is the per-block menu's item list, imported INTACT (never edited): the canvas
@@ -270,29 +241,15 @@ import {
 // default_block/2 to build), the canvas inserts the default NODE DIRECTLY into the
 // ProseMirror doc — so runToOps emits an insert-after carrying the reconstructed
 // block and the S4a echo stamps the server id. See _maybeSlash / _chooseSlash below.
-import { SlashMenu, SLASH_ITEMS, readExpectedItems, readMasterItems } from "../slash-menu.js";
 import { t, loadStringsFrom } from "../i18n.js";
 // The DOM-free tone normalizer (note→info, warn→warning, error→danger, …) shared
 // with the per-block `> [!type]` callout shorthand. Reused VERBATIM so the canvas
 // shorthand maps tones identically. See _maybeCalloutShorthand below.
-import { normalizeTone } from "../tone.js";
 // The PURE, DOM-free slash-insert core (split out so it unit-tests in plain Node —
 // canvas/index.js itself can't, being a custom element). CANVAS_SLASH_TYPES is the
 // insertable-type allowlist; canvasDefaultBlock mirrors default_block/2; slashTypeToNode
 // builds the per-type default NODE via runToTiptap (so it round-trips byte-identically);
 // CANVAS_SLASH_TEXTABLE_NODES marks which inserted nodes take an into-body caret.
-import { CANVAS_SECTION_PRESETS } from "./section-presets.js";
-import {
-  CANVAS_SLASH_TYPES,
-  canvasDefaultBlock,
-  slashTypeToNode,
-  CANVAS_SLASH_TEXTABLE_NODES,
-  slashTriggerAllowsParent,
-  CANVAS_COMPOUND_INSERTS,
-  CANVAS_SERVER_INSERT_TYPES,
-  serverBuildsInsert,
-  masterInsertAnchor,
-} from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
 // launcher over editor COMMANDS (NOT a typed "/" trigger). CommandPalette is a THIN
 // subclass of SlashMenu (reuses its render/keyboard/positioning DOM + CSS, only re-
@@ -302,27 +259,13 @@ import {
 // Format commands toggle the canvas StarterKit marks, Turn-into commands set the block.
 // Canvas-only; <bp-paper-editor> (src/index.js) is byte-unchanged. See _onKeyDown
 // (Mod-p trigger + mutual exclusion) and _openPalette / _choosePaletteCommand below.
-import {
-  CommandPalette,
-  buildCommandRegistry,
-  insertSlashTypeAtSelection,
-  insertCompoundAtSelection,
-  insertSectionPresetAtSelection,
-} from "./command-palette.js";
-// Recovery and paste paths still parse Markdown here; source-mode.js owns the
-// source textarea's serialize/parse cycle.
-import { markdownToBlocks } from "../markdown.js";
 // The PURE id-realigner + deep-cloner for the exit-source diff (split into its own
 // module so it unit-tests in plain Node — canvas/index.js itself calls
 // customElements.define at load and can't be imported DOM-free). On EXIT we parse the
 // edited markdown (markdownToBlocks → fresh minted ids), then realign those ids onto
 // the source baseline so a surviving block keeps its id and runToOps emits a PATCH
 // (not remove+insert) for an in-place edit. See ./source-realign.js.
-import {
-  realignAcrossCommits,
-  clampLockedPrefix,
-  deepCloneBlocks,
-} from "./source-realign.js";
+import { deepCloneBlocks } from "./source-realign.js";
 import {
   sourceModeToggle,
   sourceModeEnter,
@@ -349,14 +292,8 @@ import { transactionVetoesLock, isLockedTitle } from "./locks.js";
 import { transactionVetoesConstraints, parseConstraints } from "./constraints.js";
 import {
   parseVocabulary,
-  quoteTypeFor,
   transactionVetoesVocabulary,
-  slashItemsForVocabulary,
-  markAllowed,
 } from "./vocabulary.js";
-// A paste is fitted to the field's vocabulary node by node, never dropped whole
-// (task-76c5440175affe20).
-import { fitBlocksToVocabulary, blocksNeedFitting, droppedNotice } from "./paste-vocabulary.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -364,6 +301,11 @@ import { fitBlocksToVocabulary, blocksNeedFitting, droppedNotice } from "./paste
 // a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "../marks.js";
 import { BUILD_SHA, CONTRACT_VERSION, DEBOUNCE_MS, EDITOR_VERSION, PLACEHOLDER } from "../contract.js";
+import * as hostApiMethods from "./canvas-methods-host-api.js";
+import * as keyboardMethods from "./canvas-methods-keyboard.js";
+import * as pasteMediaMethods from "./canvas-methods-paste-media.js";
+import * as pickerMethods from "./canvas-methods-pickers.js";
+import * as slashPaletteMethods from "./canvas-methods-slash-palette.js";
 // How long after compositionend ProseMirror has read the committed text (it ends the
 // composition 20 ms after the event).
 const COMPOSE_SETTLE_MS = 50;
@@ -372,8 +314,6 @@ import { OpaqueMark } from "../opaque-mark.js";
 // How long a focusBlock(id) for a block that has not arrived yet stays armed.
 const PENDING_FOCUS_MS = 5000;
 
-// The key that makes a drag copy instead of move, as prosemirror-view reads it.
-const DRAG_COPY_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "altKey" : "ctrlKey";
 
 // Left is the model's "no alignment" (convert.js stores only center/right; run-convert
 // treats left and absent as one), so Edit paints it as NO alignment too. Stock TextAlign
@@ -538,33 +478,6 @@ function transactionVetoesFigureSingleton(tr, state, host) {
   return replacesChild;
 }
 
-// Unwrap the marks `keep` refuses, everywhere under `fragment`; text stays.
-function stripMarks(fragment, keep) {
-  const nodes = [];
-  fragment.forEach((node) => {
-    if (node.isText) nodes.push(node.mark(node.marks.filter((m) => keep(m.type.name))));
-    else nodes.push(node.copy(stripMarks(node.content, keep)));
-  });
-  return Fragment.fromArray(nodes);
-}
-
-function figurePastePlan(slice) {
-  const direct = [];
-  slice.content.forEach((node) => direct.push(node));
-  if (direct.length > 0 && direct.every((node) => node.isText)) {
-    return { native: true };
-  }
-  if (slice.content.childCount !== 1) return { blocked: true };
-  const paragraph = slice.content.firstChild;
-  if (paragraph.type.name !== "paragraph") return { blocked: true };
-
-  let compatible = true;
-  paragraph.content.forEach((node) => {
-    if (!node.isText) compatible = false;
-  });
-  if (!compatible) return { blocked: true };
-  return { inline: new Slice(Fragment.from(paragraph.content), 0, 0) };
-}
 
 // Which copy of a bpId keeps it (task-42d085f7431b8417). ProseMirror's splitBlock
 // copies the source node's attrs, bpId included, so an Enter leaves two nodes with
@@ -675,77 +588,6 @@ function hasOnlyBpKeys(attrs) {
   );
 }
 
-// The canvas slash menu's item list = SLASH_ITEMS narrowed to the insertable set.
-// Computed ONCE at module load (SLASH_ITEMS is a static array; CANVAS_SLASH_TYPES is
-// the allowlist from ./slash-insert.js). SlashMenu reads EXPECTED-group items fresh
-// from the DOM on every open() on top of this base, so a bound-field pick still works
-// — and an EXPECTED item whose type is NOT canvas-insertable (field-image /
-// field-reference / composite) is filtered the same way at _chooseSlash (a defensive
-// guard: such a pick is a no-op rather than a bad insert). Filtering via this
-// allowlist (NOT by editing SLASH_ITEMS) keeps the per-block menu's items byte-intact.
-// …plus the CANVAS-ONLY compound starters (CANVAS_COMPOUND_INSERTS): each becomes a
-// "Starters" row carrying a `compound` marker _chooseSlash branches on. They are NOT
-// added to SLASH_ITEMS itself — the per-block menu dispatches bp-slash-insert to the
-// SERVER (default_block/2), which has no compound path; the canvas inserts the whole
-// pre-composed subtree client-side (insertCompoundAtSelection). `type` mirrors the
-// kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
-// and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
-// Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
-// whose server default_block/2 has no sheet clause. It rides WITH the other Visual
-// rows: appended after the field rows it opened a second "Visual" heading
-// (task-347897df84f96882).
-const SHEET_SLASH_ITEM = { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" };
-
-function withSheetAfterVisual(items) {
-  let last = -1;
-  items.forEach((it, i) => { if (it.group === "Visual") last = i; });
-  if (last < 0) return [...items, SHEET_SLASH_ITEM];
-  return [...items.slice(0, last + 1), SHEET_SLASH_ITEM, ...items.slice(last + 1)];
-}
-
-// The chords _onKeyDown answers, named on the slash rows they match (task-2a659a853f02c2cc).
-const CANVAS_SLASH_CHORDS = { list: "Mod-Shift-8", checklist: "Mod-Shift-4", code: "Mod-Alt-c" };
-
-const CANVAS_SLASH_ITEMS = [
-  ...withSheetAfterVisual(SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
-    if (it.type === "list") return [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }];
-    // One row per heading level, H1–H6 (owner ruling 2026-10-03 #63). Canvas-only:
-    // the per-block menu's server default_block/2 inserts one default heading.
-    if (it.type === "heading") {
-      return [1, 2, 3, 4, 5, 6].map((level) => ({
-        ...it,
-        level,
-        label: `Heading ${level}`,
-        hint: `H${level}`,
-        desc: level === 1 ? "page title size" : `level ${level} heading`,
-      }));
-    }
-    return [it];
-  })),
-  ...CANVAS_COMPOUND_INSERTS.map((c) => ({
-    group: "Starters",
-    type: c.kind,
-    compound: c.kind,
-    label: c.label,
-    hint: c.hint,
-    desc: c.desc,
-  })),
-  // …and the CANVAS-ONLY section presets (CANVAS_SECTION_PRESETS): each becomes a
-  // "Presets" row carrying a `preset` marker _chooseSlash branches on, the exact
-  // Starters precedent one shape up — a preset inserts N TOP-LEVEL blocks, so it is
-  // likewise absent from SLASH_ITEMS (the per-block menu dispatches bp-slash-insert to
-  // default_block/2, which has no multi-block path) and lands client-side via
-  // insertSectionPresetAtSelection. `type` mirrors the kind for the row's dataset /
-  // filter haystack only — it is NOT a portable-doc type.
-  ...CANVAS_SECTION_PRESETS.map((p) => ({
-    group: "Presets",
-    type: p.kind,
-    preset: p.kind,
-    label: p.label,
-    hint: p.hint,
-    desc: p.desc,
-  })),
-];
 
 // The first control a person can type into or press inside a node view, or null.
 function focusableControlIn(dom) {
@@ -764,12 +606,7 @@ function focusableControlIn(dom) {
 
 // A textblock's text with one char per inline leaf, so offsets are positions: a
 // hard break reads as a newline (it ends a trigger), any other atom as U+FFFC.
-const triggerText = (block) =>
-  block.textBetween(0, block.content.size, undefined, (leaf) =>
-    leaf.type.name === "hardBreak" ? "\n" : "\ufffc");
 
-// Only a bare Enter closes an empty picker; Shift/Mod/Alt+Enter stay with it.
-const hasModifier = (event) => event.shiftKey || event.metaKey || event.ctrlKey || event.altKey;
 
 class BpPaperCanvas extends HTMLElement {
   static CONTRACT_VERSION = CONTRACT_VERSION;
@@ -1867,385 +1704,156 @@ class BpPaperCanvas extends HTMLElement {
     return this._emitOps();
   }
 
-  // Synchronous host seam for navigation / beforeunload guards. A debounced
-  // transaction is unsaved before bp-canvas-ops exists; source-mode text and
-  // edits queued behind an acknowledgement must also survive an attempted exit.
-  // ── shared carets (see canvas/remote-selections.js) ──
-  // Replace the host's remote selections: [{ id, name, color, anchor, head }],
-  // each end a Point. Decorations only — no ops, no history entry, the local
-  // caret untouched. [] clears. Before mount the list waits for the editor.
   setRemoteSelections(list) {
-    this._remoteSelections = Array.isArray(list) ? list : [];
-    if (this._editor && !this._editor.isDestroyed) rsSet(this._editor, this._remoteSelections);
+    return hostApiMethods.setRemoteSelections.call(this, list);
   }
 
-  // ── comment ranges (see canvas/comment-ranges.js) ──
-  // Replace the host's comment ranges: [{ id, anchor, head, active? }], each end a
-  // Point. Decorations only. [] clears. Before mount the list waits for the editor.
   setCommentRanges(list) {
-    this._commentRanges = Array.isArray(list) ? list : [];
-    if (this._editor && !this._editor.isDestroyed) crSet(this._editor, this._commentRanges);
+    return hostApiMethods.setCommentRanges.call(this, list);
   }
 
-  // The live ranges as mapped through edits: [{ id, anchor, head, text }], in
-  // document order. A range whose text is gone is absent.
   commentRanges() {
-    const editor = this._editor;
-    return editor && !editor.isDestroyed ? commentRangesState(editor) : [];
+    return hostApiMethods.commentRanges.call(this);
   }
 
-  // The ids of the comment ranges the selection overlaps.
   commentsInSelection() {
-    const editor = this._editor;
-    return editor && !editor.isDestroyed ? crInSelection(editor) : [];
+    return hostApiMethods.commentsInSelection.call(this);
   }
 
-  // bp-canvas-comment-ranges: an edit moved or dropped a range. One per frame.
   _scheduleCommentRangesEmit() {
-    if (this._commentRangesFrame != null) return;
-    this._commentRangesFrame = requestAnimationFrame(() => {
-      this._commentRangesFrame = null;
-      const editor = this._editor;
-      if (!editor || editor.isDestroyed) return;
-      this.dispatchEvent(new CustomEvent("bp-canvas-comment-ranges", { bubbles: true, composed: true, detail: commentRangesState(editor) }));
-    });
+    return hostApiMethods._scheduleCommentRangesEmit.call(this);
   }
 
-  // bp-canvas-selection: the local selection as { anchor, head } Points, or null
-  // when the editor is blurred or has none. One per animation frame, and only
-  // when it changed.
   _scheduleSelectionEmit() {
-    if (this._selectionFrame != null) return;
-    this._selectionFrame = requestAnimationFrame(() => {
-      this._selectionFrame = null;
-      const editor = this._editor;
-      if (!editor || editor.isDestroyed) return;
-      const detail = editor.isFocused ? pointsFromSelection(editor.state) : null;
-      const key = JSON.stringify(detail);
-      if (key === this._lastSelectionDetail) return;
-      this._lastSelectionDetail = key;
-      this.dispatchEvent(new CustomEvent("bp-canvas-selection", { bubbles: true, composed: true, detail }));
-    });
+    return hostApiMethods._scheduleSelectionEmit.call(this);
   }
 
   _wantsBubble() {
-    return this.getAttribute("format-bubble") !== "off";
+    return hostApiMethods._wantsBubble.call(this);
   }
 
-  // With the bubble off, the host opens its own link input: a cancelable
-  // bp-canvas-link-request carrying the selection's current href (or null).
   _requestHostLink() {
-    const editor = this._editor;
-    if (!editor || editor.isDestroyed) return false;
-    const href = editor.isActive("link") ? editor.getAttributes("link").href || null : null;
-    return this.dispatchEvent(new CustomEvent("bp-canvas-link-request", { detail: { href }, bubbles: true, composed: true, cancelable: true }));
+    return hostApiMethods._requestHostLink.call(this);
   }
 
-  // ── toolbar commands (EMBED-CONTRACT "Toolbar commands"; canvas/host-commands.js) ──
-  //
-  // Each runs the transaction the canvas's own surfaces run, on the current
-  // selection, and answers whether it applied. Unmounted or read-only: false.
-
-  // Typing and a focus change in one task leave the DOM change unread: ProseMirror's
-  // blur queues it and reads it 20 ms later, and a flush or a server apply in that
-  // gap would miss it (task-8c2aa053f0259a05). Read it now. Never mid-composition.
   _readDomTyping() {
-    const view = this._editor && !this._editor.isDestroyed ? this._editor.view : null;
-    const observer = view && view.domObserver;
-    if (!observer || view.composing) return;
-    try {
-      observer.forceFlush();
-      observer.flush();
-    } catch (_e) {
-      // A view mid-teardown has nothing left to read.
-    }
+    return hostApiMethods._readDomTyping.call(this);
   }
 
-  // ProseMirror's keydown prevents the default of every Escape, so a host's own
-  // Escape (leave the editor, close a pane) never saw a free key
-  // (task-4517b978de20b741). True skips ProseMirror's keydown for a bare Escape;
-  // with a canvas menu open, the key goes to _onKeyDown as before.
   _escapeForHost(view, event) {
-    if (event.key !== "Escape" && event.key !== "Esc") return false;
-    if (event.defaultPrevented || event.isComposing || view.composing) return false;
-    const menuOpen = [this._palette, this._wikilink, this._emoji, this._tag, this._slash]
-      .some((menu) => menu && menu.isOpen());
-    return !menuOpen;
+    return hostApiMethods._escapeForHost.call(this, view, event);
   }
 
-  // Mod+Enter (1.17.0) is the host's, free: ProseMirror never sees it, so no hard break
-  // lands, and a host that leaves it alone gets no browser newline either.
   _modEnterForHost(view, event) {
-    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return false;
-    if (event.defaultPrevented || event.isComposing || view.composing) return false;
-    this._modEnterPending = true;
-    setTimeout(() => { this._modEnterPending = false; });
-    return true;
+    return hostApiMethods._modEnterForHost.call(this, view, event);
   }
 
   _swallowModEnter(event) {
-    if (!this._modEnterPending || !/^insert(Paragraph|LineBreak)$/.test(event.inputType)) return false;
-    this._modEnterPending = false;
-    event.preventDefault();
-    return true;
+    return hostApiMethods._swallowModEnter.call(this, event);
   }
 
-  // A click on a document link: bp-canvas-wikilink-click (1.15.0), cancelable, so
-  // a host follows it without reading the canvas's DOM (task-bd03e32b9851d047).
   _wikilinkClicked(event) {
-    if (event.button !== 0) return;
-    const info = LinkPreview.describe(event.target);
-    if (!info || info.kind !== "wikilink" || !this.contains(info.el)) return;
-    const detail = {
-      docId: info.docId,
-      target: info.target || null,
-      alias: info.alias,
-      metaKey: event.metaKey,
-      ctrlKey: event.ctrlKey,
-      shiftKey: event.shiftKey,
-      altKey: event.altKey,
-    };
-    const open = this.dispatchEvent(new CustomEvent("bp-canvas-wikilink-click", { detail, bubbles: true, composed: true, cancelable: true }));
-    if (!open) event.preventDefault();
+    return hostApiMethods._wikilinkClicked.call(this, event);
   }
 
-  // ProseMirror takes a keyboard (or script) selection change on the browser's
-  // selectionchange, a task later: a toolbar press in between would act on the old
-  // selection. Read the DOM's pending selection first, so a command acts on what the
-  // author sees (task-ee29b37ca1c6139d).
   _flushDomSelection() {
-    const view = this._editor && !this._editor.isDestroyed ? this._editor.view : null;
-    try {
-      if (view && view.domObserver && typeof view.domObserver.flush === "function") view.domObserver.flush();
-    } catch (_e) {
-      // A view mid-teardown: the command reads the state it has.
-    }
+    return hostApiMethods._flushDomSelection.call(this);
   }
 
   run(command, args = {}) {
-    if (!this.can(command, args)) return false;
-    const editor = this._editor;
-    const a = args && typeof args === "object" ? args : {};
-    switch (command) {
-      case "toggleMark": return hcToggleMark(editor, a.mark, a.href, a.docId, a.target) === true;
-      case "setBlockStyle": return hcSetBlockStyle(editor, a.style, this._toolbarVocabulary()) === true;
-      case "toggleList": return hcToggleList(editor, a.kind) === true;
-      case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
-      case "insertInline": return this._insertToolbarInline(a.type) === true;
-      case "undo": return editor.commands.undo() === true;
-      case "redo": return editor.commands.redo() === true;
-      default: return false;
-    }
+    return hostApiMethods.run.call(this, command, args);
   }
 
-  toggleMark(mark, attrs) { return this.run("toggleMark", { mark, href: attrs && attrs.href, docId: attrs && attrs.docId, target: attrs && attrs.target }); }
-  setBlockStyle(style) { return this.run("setBlockStyle", { style }); }
-  toggleList(kind) { return this.run("toggleList", { kind }); }
-  insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
-  insertInline(type) { return this.run("insertInline", { type }); }
-  // 1.10.0: the canvas's own history, for a host that keeps one undo across its form
-  // and this canvas (Sanity's document undo). One step, as Mod+Z / Shift+Mod+Z here.
-  undo() { return this.run("undo"); }
-  redo() { return this.run("redo"); }
+  toggleMark(mark, attrs) {
+    return hostApiMethods.toggleMark.call(this, mark, attrs);
+  }
+  setBlockStyle(style) {
+    return hostApiMethods.setBlockStyle.call(this, style);
+  }
+  toggleList(kind) {
+    return hostApiMethods.toggleList.call(this, kind);
+  }
+  insertBlock(type, attrs) {
+    return hostApiMethods.insertBlock.call(this, type, attrs);
+  }
+  insertInline(type) {
+    return hostApiMethods.insertInline.call(this, type);
+  }
+  undo() {
+    return hostApiMethods.undo.call(this);
+  }
+  redo() {
+    return hostApiMethods.redo.call(this);
+  }
 
   can(command, args = {}) {
-    const editor = this._editor;
-    if (!editor || editor.isDestroyed || !this._editable) return false;
-    this._flushDomSelection();
-    const a = args && typeof args === "object" ? args : {};
-    const vocab = this._toolbarVocabulary();
-    switch (command) {
-      case "toggleMark": return canToggleMark(editor, a.mark, a.href, vocab, a.docId);
-      case "setBlockStyle": return canSetBlockStyle(editor, a.style, vocab);
-      case "toggleList": return canToggleList(editor, a.kind, vocab);
-      case "insertBlock": return !!this._toolbarInsertItem(a.type);
-      case "insertInline": return this._canInsertInline(a.type, vocab);
-      case "undo": return undoDepth(editor.state) > 0;
-      case "redo": return redoDepth(editor.state) > 0;
-      default: return false;
-    }
+    return hostApiMethods.can.call(this, command, args);
   }
 
   state() {
-    this._flushDomSelection();
-    const editor = this._editor;
-    return editor && !editor.isDestroyed ? toolbarState(editor) : emptyToolbarState();
+    return hostApiMethods.state.call(this);
   }
 
   _toolbarVocabulary() {
-    return parseVocabulary(this.getAttribute("data-vocabulary"));
+    return hostApiMethods._toolbarVocabulary.call(this);
   }
 
-  // The block types a toolbar may insert: the slash menu's own rows for this
-  // canvas (narrowed to the field's vocabulary), one per type.
   _toolbarInsertItem(type) {
-    if (typeof type !== "string" || type === "") return null;
-    const items = slashItemsForVocabulary(CANVAS_SLASH_ITEMS, this._toolbarVocabulary());
-    return items.find((item) => item.type === type && !item.compound && !item.preset && !item.inline && !item.master) || null;
+    return hostApiMethods._toolbarInsertItem.call(this, type);
   }
 
-  // A declared inline object (the field's blocks.inline) may go at the caret: inside
-  // text the field writes in, never in a code block.
   _canInsertInline(type, vocab) {
-    if (typeof type !== "string" || type === "") return false;
-    if (!((vocab && vocab.inlineObjects) || []).some((o) => o.name === type)) return false;
-    const { $from } = this._editor.state.selection;
-    return $from.parent.inlineContent && !$from.parent.type.spec.code;
+    return hostApiMethods._canInsertInline.call(this, type, vocab);
   }
 
-  // At the caret, exactly as the slash and palette picks do: the field editor (the
-  // popover, or the host's editBlockObject) first; its answer puts the atom in.
   _insertToolbarInline(type) {
-    this._editor.commands.focus();
-    if (!insertInlineObject(this, this._editor, type)) return false;
-    // TipTap's focus() takes the caret back on the next frame, after the popover
-    // focused its first field: give it back (as _insertDeclaredObject does).
-    const dialog = this._inlineObjectDialog();
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
-    }
-    return true;
+    return hostApiMethods._insertToolbarInline.call(this, type);
   }
 
-  // Insert after the caret's block, exactly as the palette's Insert command does
-  // (a declared object block opens its fields first; a server-built type goes to
-  // the server; the rest through the slash seam).
   _insertToolbarBlock(type, attrs) {
-    const item = this._toolbarInsertItem(type);
-    if (!item) return false;
-    this._editor.commands.focus();
-    if (item.object || this._objectOverrides().has(type)) return this._insertDeclaredObject(type);
-    if (serverBuildsInsert(type, this._hostBuildsInserts())) return this._insertViaServer(type, { replaceSlashLine: false });
-    const level = attrs && Number.isInteger(attrs.level) ? attrs.level : item.level;
-    const done = insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
-    if (done && type === "image") this._pickInsertedImage();
-    return done;
+    return hostApiMethods._insertToolbarBlock.call(this, type, attrs);
   }
 
-  // 1.10.0: bp-canvas-history, at once (not per frame) whenever the history's depths
-  // change, saying how: a new undo step ("step", which also ends what could be redone),
-  // an "undo" or "redo" here, or the history "clear"ed. Depths alone can't tell a redo from
-  // a step typed right after an undo; the history's own transaction does. A host that keeps
-  // one undo for its document follows these to keep the canvas's steps in order.
   _emitHistory(transaction) {
-    const editor = this._editor;
-    if (!editor || editor.isDestroyed) return;
-    const last = this._lastHistory || { undo: 0, redo: 0 };
-    const undo = undoDepth(editor.state);
-    const redo = redoDepth(editor.state);
-    if (last.undo === undo && last.redo === redo) return;
-    const history = !!transaction && isHistoryTransaction(transaction);
-    const kind = history ? (undo < last.undo ? "undo" : "redo") : undo > last.undo ? "step" : "clear";
-    this._lastHistory = { undo, redo };
-    const count = Math.abs(undo - last.undo) || 1;
-    this.dispatchEvent(new CustomEvent("bp-canvas-history", { bubbles: true, composed: true, detail: { kind, count, undo, redo } }));
+    return hostApiMethods._emitHistory.call(this, transaction);
   }
 
   _scheduleToolbarState() {
-    if (this._toolbarFrame != null) return;
-    this._toolbarFrame = requestAnimationFrame(() => {
-      this._toolbarFrame = null;
-      const editor = this._editor;
-      if (!editor || editor.isDestroyed) return;
-      const detail = toolbarState(editor);
-      const key = JSON.stringify(detail);
-      if (key === this._lastToolbarState) return;
-      this._lastToolbarState = key;
-      this.dispatchEvent(new CustomEvent("bp-selection-change", { bubbles: true, composed: true, detail }));
-    });
+    return hostApiMethods._scheduleToolbarState.call(this);
   }
 
-  // ── find and replace (the host draws the bar; see canvas/find-replace.js) ──
-  findSet(query, opts) { return this._editor ? frSet(this._editor, query, opts) : { query: "", count: 0, index: -1 }; }
-  findNext() { return this._editor ? frStep(this._editor, 1) : { count: 0, index: -1 }; }
-  findPrev() { return this._editor ? frStep(this._editor, -1) : { count: 0, index: -1 }; }
-  findClear() { if (this._editor) frClear(this._editor); }
-  findState() { return this._editor ? frState(this._editor) : { query: "", count: 0, index: -1 }; }
-  replaceCurrent(text) { return this._editor && this._editable ? frReplaceCurrent(this._editor, text) : this.findState(); }
-  replaceAll(text) { return this._editor && this._editable ? frReplaceAll(this._editor, text) : { replaced: 0, ...this.findState() }; }
+  findSet(query, opts) {
+    return hostApiMethods.findSet.call(this, query, opts);
+  }
+  findNext() {
+    return hostApiMethods.findNext.call(this);
+  }
+  findPrev() {
+    return hostApiMethods.findPrev.call(this);
+  }
+  findClear() {
+    return hostApiMethods.findClear.call(this);
+  }
+  findState() {
+    return hostApiMethods.findState.call(this);
+  }
+  replaceCurrent(text) {
+    return hostApiMethods.replaceCurrent.call(this, text);
+  }
+  replaceAll(text) {
+    return hostApiMethods.replaceAll.call(this, text);
+  }
 
   hasPendingChanges() {
-    this._readDomTyping();
-    const sourceChanged =
-      this._mode === "source" && this._sourceEl &&
-      this._sourceEl.value !== this._sourceOriginalMd;
-    return Boolean(
-      sourceChanged || this.querySelector(".bp-canvas-note[data-note-pending]") ||
-      this._debounceTimer || this._inflightOps ||
-      this._dirtyWhileInflight || this._compEndTimer ||
-      // An open composition is text the writer sees and Barkpark does not have yet.
-      (this._compStart != null && !!this._editor?.view?.composing)
-    );
+    return hostApiMethods.hasPendingChanges.call(this);
   }
 
-  // Read-only recovery seam for a reconnect halt. This projects the live editor
-  // instead of the acknowledged `blocks` baseline, so debounced prose is not
-  // omitted. Source mode always includes the textarea verbatim; if its markdown
-  // cannot be projected, the raw text and an explicit error remain exportable.
   recoverySnapshot() {
-    if (this._mode === "source" && this._sourceEl) {
-      const rawSource = this._sourceEl.value;
-      try {
-        const baseline = this._sourceBaselineBlocks || [];
-        const blocks = clampLockedPrefix(
-          baseline,
-          realignAcrossCommits(baseline, this._sourceCommitBlocks, markdownToBlocks(rawSource)),
-        );
-        return {
-          mode: "markdown",
-          raw_source: rawSource,
-          blocks: deepCloneBlocks(blocks),
-        };
-      } catch (_error) {
-        return {
-          mode: "markdown",
-          raw_source: rawSource,
-          serialization_error: "The Markdown draft could not be projected to PortableDoc blocks.",
-        };
-      }
-    }
-
-    let rawEditorDocument = null;
-    try {
-      rawEditorDocument = this._editor?.getJSON?.() || null;
-      if (!rawEditorDocument) {
-        return {
-          mode: "rich",
-          serialization_error: "The live rich-text document was unavailable.",
-        };
-      }
-      return {
-        mode: "rich",
-        blocks: deepCloneBlocks(docToBlocks(this._normalizedDoc(rawEditorDocument))),
-      };
-    } catch (_error) {
-      return {
-        mode: "rich",
-        ...(rawEditorDocument ? { raw_editor_document: rawEditorDocument } : {}),
-        serialization_error: "The rich-text draft could not be projected to PortableDoc blocks.",
-      };
-    }
+    return hostApiMethods.recoverySnapshot.call(this);
   }
 
-  // Explicit conflict resolution seam. Normal echoes never erase newer local
-  // edits; this path is reserved for the user's deliberate "Use latest" action.
   resolveConflictWithServerBlocks(blocks) {
-    if (this._debounceTimer) clearTimeout(this._debounceTimer);
-    this._debounceTimer = null;
-    this._debounceBaselineBlocks = null;
-    this._inflightOps = null;
-    this._dirtyWhileInflight = false;
-    this._awaitingOwnEchoes = [];
-    this._clearPendingServerBlocks();
-    const next = Array.isArray(blocks) ? blocks : [];
-    this._blocks = deepCloneBlocks(next);
-    if (!this._editor) return;
-    this._programmaticApply = true;
-    try {
-      this._applyExternalContent(next);
-    } finally {
-      this._programmaticApply = false;
-    }
+    return hostApiMethods.resolveConflictWithServerBlocks.call(this, blocks);
   }
 
   _scheduleEmit() {
@@ -2732,353 +2340,12 @@ class BpPaperCanvas extends HTMLElement {
     return this._emitOps() === true;
   }
 
-  // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
-  //
-  // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
-  // popup is open; otherwise returns false so TipTap handles the key (so Enter
-  // still splits a block, ArrowUp still moves the caret, etc.). The three popups
-  // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
-  // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
-    // Mod-Alt-c makes a code block (Tiptap's chord for it; StarterKit's codeBlock node is
-    // off, so the canvas's own code node answers). event.code, because Alt+C types "ç" on a Mac.
-    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey &&
-        event.code === "KeyC" && !this._slash?.isOpen?.()) {
-      event.preventDefault();
-      // A top-level paragraph or heading is REPLACED by the code block, so its text moves
-      // in; anywhere else the block lands after and the text stays where it was.
-      const { $from } = this._editor.state.selection;
-      const value = slashTriggerAllowsParent($from.depth, $from.parent.type.name)
-        ? $from.parent.textBetween(0, $from.parent.content.size, "\n", "\n")
-        : undefined;
-      insertSlashTypeAtSelection(this._editor, "code", undefined, { value });
-      return true;
-    }
-    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && !event.altKey) {
-      const key = event.key;
-      if (event.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
-        const index = topLevelIndexAtSelection(this._editor);
-        event.preventDefault();
-        moveTopLevel(this._editor, index, key === "ArrowUp" ? index - 1 : index + 1);
-        return true;
-      }
-      if (!event.shiftKey && (key === "d" || key === "D")) {
-        event.preventDefault();
-        duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
-        return true;
-      }
-      // (Backspace handling sits below, outside the modifier branch.)
-      // Turn-into chords: Mod-Shift-0 text, 1..3 headings, 4 checklist, 5 and 8 bulleted
-      // (Notion's 5; Google Docs' and Tiptap's 8), 6 numbered. 7 is left to Tiptap's
-      // ordered-list keymap. Code is Mod-Alt-c, above. event.code keeps them working on
-      // layouts where Shift+digit yields a symbol.
-      // Mod-Shift-4..6 are taken, so H1–H6 are ALSO on Mod-Alt-1..6 (StarterKit's heading
-      // keymap for the six configured levels; Alt chords skip this branch).
-      const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
-      if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
-        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered", 8: "bullet" }[digit];
-        if (kind) {
-          event.preventDefault();
-          turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
-          return true;
-        }
-      }
-      if (!event.shiftKey && (key === "k" || key === "K") && this._bubble && !this._editor.state.selection.empty) {
-        event.preventDefault();
-        this._bubble.update();
-        this._bubble.openLink();
-        return true;
-      }
-      // No bubble: the host's toolbar edits the link (bp-canvas-link-request).
-      if (!event.shiftKey && (key === "k" || key === "K") && !this._bubble && this._editable && !this._editor.state.selection.empty) {
-        event.preventDefault();
-        this._requestHostLink();
-        return true;
-      }
-    }
-    // Backspace at the very start of a block: a list item lifts out one level (a top-level item
-    // becomes a paragraph) and a quote turns back into a paragraph, instead of merging into the
-    // block above. Notion and Tiptap 3's list keymap behave this way.
-    if (event.key === "Backspace" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && this._editable && this._editor) {
-      const { $from, empty } = this._editor.state.selection;
-      if (empty && $from.parentOffset === 0) {
-        // Only the FIRST item of a list lifts; a later item keeps ProseMirror's join into the
-        // item above, which is how an Enter-split is undone without losing nested children.
-        const itemType = $from.depth >= 3 ? $from.node(-1).type.name : null;
-        if ((itemType === "listItem" || itemType === "taskItem") && $from.index(-1) === 0 && $from.index(-2) === 0) {
-          if (this._editor.commands.liftListItem(itemType)) { event.preventDefault(); return true; }
-        }
-        if ($from.depth === 1 && $from.parent.type.name === "pullquote") {
-          event.preventDefault();
-          this._editor.commands.setNode("paragraph");
-          return true;
-        }
-        // A plain quote turns back into text the same way, keeping its id
-        // (owner ruling 2026-10-03 #62), instead of joining the block above.
-        if ($from.depth === 1 && $from.parent.type.name === "blockquote") {
-          event.preventDefault();
-          turnTopLevelInto(this._editor, $from.index(0), "paragraph");
-          return true;
-        }
-      }
-    }
-    // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
-    // elsewhere) ENTERS source mode from the rich editor. Detected FIRST, before the
-    // palette/popup branches: it is a deliberately FREE combo (Mod-p = palette, Mod-b
-    // = bold, Mod-i = italic, Mod-Shift-m collides with nothing in StarterKit or the
-    // canvas). Only when editable. preventDefault + return true so ProseMirror does
-    // not also act on the key. The toggle-BACK (source → rich) is handled by the
-    // textarea's own keydown listener (_onSourceKeyDown), since while in source mode
-    // ProseMirror's handleKeyDown never fires (the textarea owns input).
-    if (
-      this._editable &&
-      (event.metaKey || event.ctrlKey) &&
-      event.shiftKey &&
-      !event.altKey &&
-      (event.key === "m" || event.key === "M")
-    ) {
-      event.preventDefault();
-      this.toggleSourceMode();
-      return true;
-    }
-
-    // P5 command palette — Mod-p (Cmd-P on mac / Ctrl-P elsewhere) OPENS the palette.
-    // Detected here, BEFORE the popup-routing branches, so the mutual-exclusion guard
-    // can see whether any text-triggered popup is open. NOT shift (Cmd-Shift-P stays
-    // free). Only when editable, and only when NO other popup ([[ / # / slash) is open
-    // — if one is, Mod-p no-ops (mutual exclusion). On open we preventDefault (so the
-    // browser's own Ctrl-P print / Cmd-P does not fire) and return true (ProseMirror
-    // does not also act on the key).
-    if (
-      this._editable &&
-      (event.metaKey || event.ctrlKey) &&
-      !event.shiftKey &&
-      !event.altKey &&
-      (event.key === "p" || event.key === "P")
-    ) {
-      const anyPopupOpen =
-        (this._wikilink && this._wikilink.isOpen()) ||
-        (this._tag && this._tag.isOpen()) ||
-        (this._emoji && this._emoji.isOpen()) ||
-        (this._slash && this._slash.isOpen());
-      // If the palette is ALREADY open, Mod-p closes it (toggle); else open it — but
-      // never co-open alongside a text-triggered popup.
-      if (this._palette && this._palette.isOpen()) {
-        event.preventDefault();
-        this._dismissPalette();
-        return true;
-      }
-      if (!anyPopupOpen) {
-        event.preventDefault();
-        this._openPalette();
-        return true;
-      }
-      // A text-triggered popup owns the moment — no-op (do NOT co-open). Still
-      // preventDefault + return true so the browser's Ctrl-P print never fires and
-      // ProseMirror does not act on the key; the open popup keeps its keystroke.
-      event.preventDefault();
-      return true;
-    }
-
-    // While the palette is open it OWNS the nav keys (↑/↓/Enter/Tab/Esc) — same
-    // contract as the three text-triggered popups. Checked first among the routing
-    // branches; it is mutually exclusive with them (only one popup ever open).
-    if (this._palette && this._palette.isOpen()) {
-      switch (event.key) {
-        case "ArrowDown":
-          this._palette.move(1);
-          return true;
-        case "ArrowUp":
-          this._palette.move(-1);
-          return true;
-        case "Enter":
-        case "Tab":
-          this._palette.choose();
-          return true;
-        case "Escape":
-          this._dismissPalette();
-          return true;
-        default:
-          return false;
-      }
-    }
-
-    if (this._wikilink && this._wikilink.isOpen()) {
-      switch (event.key) {
-        case "ArrowDown":
-          this._wikilink.move(1);
-          return true;
-        case "ArrowUp":
-          this._wikilink.move(-1);
-          return true;
-        case "Enter":
-          if (this._wikilink.isEmpty() && !hasModifier(event)) {
-            this._closeWikilink();
-            return false;
-          }
-          this._wikilink.choose();
-          return true;
-        case "Tab":
-          this._wikilink.choose();
-          return true;
-        case "Escape":
-          this._dismissWikilink();
-          return true;
-        default:
-          return false;
-      }
-    }
-
-    // `:` emoji picker owns the nav keys while open — the same contract.
-    if (this._emoji && this._emoji.isOpen()) {
-      switch (event.key) {
-        case "ArrowDown":
-          this._emoji.move(1);
-          return true;
-        case "ArrowUp":
-          this._emoji.move(-1);
-          return true;
-        case "Enter":
-        case "Tab":
-          this._emoji.choose();
-          return true;
-        case "Escape":
-          this._dismissEmoji();
-          return true;
-        default:
-          return false;
-      }
-    }
-
-    // `#` tag menu owns the nav keys while open — same contract as the wikilink
-    // branch above. The two are mutually exclusive (only one ever open), so the
-    // order here is immaterial, but tag follows wikilink for symmetry.
-    if (this._tag && this._tag.isOpen()) {
-      switch (event.key) {
-        case "ArrowDown":
-          this._tag.move(1);
-          return true;
-        case "ArrowUp":
-          this._tag.move(-1);
-          return true;
-        case "Enter":
-          if (this._tag.isEmpty() && !hasModifier(event)) {
-            this._closeTag();
-            return false;
-          }
-          this._tag.choose();
-          return true;
-        case "Tab":
-          this._tag.choose();
-          return true;
-        case "Escape":
-          this._dismissTag();
-          return true;
-        default:
-          return false;
-      }
-    }
-
-    // `/` slash menu owns the nav keys while open — same contract. Mutually
-    // exclusive with the two autocompletes (only one ever open), so order is
-    // immaterial; slash follows tag for symmetry with onUpdate's chain. Enter must
-    // pick the active item (NOT split the doc) while the menu is open.
-    if (this._slash && this._slash.isOpen()) {
-      switch (event.key) {
-        case "ArrowDown":
-          this._slash.move(1);
-          return true;
-        case "ArrowUp":
-          this._slash.move(-1);
-          return true;
-        case "Enter":
-        case "Tab":
-          this._slash.choose();
-          return true;
-        case "Escape":
-          this._dismissSlash();
-          return true;
-        default:
-          return false;
-      }
-    }
-
-    // Enter in the locked title (owner ruling 2026-10-03 #54, charter D6 amended):
-    // still no split, no new block and no op — the caret moves to the first body
-    // block, so the author keeps writing in the body instead of the title.
-    if (
-      this._editable &&
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      !event.isComposing &&
-      this._enterFromLockedTitle()
-    ) {
-      event.preventDefault();
-      return true;
-    }
-
-    if (
-      this._editable &&
-      isFigureSingletonCanvas(this) &&
-      event.key === "Enter" &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      this._editor.state.selection.$from.depth === 1 &&
-      ["paragraph", "heading"].includes(
-        this._editor.state.selection.$from.parent.type.name,
-      )
-    ) {
-      event.preventDefault();
-      this._showFigureConstraint();
-      return true;
-    }
-
-    return false;
+    return keyboardMethods._onKeyDown.call(this, event);
   }
 
   _onPaste(view, _event, slice) {
-    const policy = this._editable ? clipboardPastePolicy(view, _event, slice) : null;
-    if (this._editable) {
-      if (policy?.blocked) {
-        this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
-        return true;
-      }
-      // A paste over a selected non-text block lands in a new paragraph after it
-      // and never replaces the block (block-boundary.js).
-      const opened = paragraphAfterSelectedBlock(view.state);
-      if (opened) view.dispatch(opened);
-      // Paste as plain text keeps Sanity's line rule too (see _pastePlainText).
-      if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
-      // The canvas's own clipboard: rebuild exactly what was copied, fitted to
-      // this canvas's vocabulary like any paste (clipboard-slice.js).
-      const exact = !isFigureSingletonCanvas(this) && exactSliceFromClipboard(view.state.schema, _event, view.state.doc);
-      if (exact) {
-        const fitted = this._fitPastedSlice(exact);
-        const single = fitted.openStart === 0 && fitted.openEnd === 0 && fitted.content.childCount === 1 ? fitted.content.firstChild : null;
-        const tr = single ? view.state.tr.replaceSelectionWith(single) : view.state.tr.replaceSelection(fitted);
-        view.dispatch(tr.scrollIntoView().setMeta("paste", true).setMeta("uiEvent", "paste"));
-        return true;
-      }
-    }
-    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
-    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
-    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
-    if (this._editable && !isFigureSingletonCanvas(this) && this._pastePlainText(view, _event)) return true;
-    if (!this._editable || !isFigureSingletonCanvas(this)) return false;
-    const plan = figurePastePlan(slice);
-    if (plan.native) return false;
-    if (plan.blocked) {
-      this._showFigureConstraint(
-        "A Figure keeps one content block. Paste one paragraph at a time; lists and blocks stay on the clipboard.",
-      );
-      return true;
-    }
-    view.dispatch(view.state.tr.replaceSelection(plan.inline).scrollIntoView());
-    return true;
+    return pasteMediaMethods._onPaste.call(this, view, _event, slice);
   }
 
   // Plain-text paste that carries markdown block syntax (headings, lists, quotes, fences, rules)
@@ -3113,63 +2380,19 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _insertImageFiles(view, files, atPos, imageAlt = null) {
-    const { state } = view;
-    const imageType = state.schema.nodes.bpImage;
-    if (!imageType) return;
-    const $pos = atPos != null ? state.doc.resolve(atPos) : state.selection.$from;
-    // Insert after the block the position sits in (top-level), never inside it.
-    let insertAt = $pos.depth >= 1 ? $pos.after(1) : $pos.pos;
-    const tr = state.tr;
-    const nodes = files.map((file) => {
-      const key = "up-" + (++this._uploadSeq) + "-" + Date.now().toString(36);
-      const alt = imageAlt ?? String(file.name || "image").replace(/\.[a-z0-9]+$/i, "");
-      let previewUrl = null;
-      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
-      return { key, file, node: imageType.create({ bpId: null, bpType: "image", src: null, alt, uploading: true, previewUrl, uploadKey: key }) };
-    });
-    for (const n of nodes) { tr.insert(insertAt, n.node); insertAt += n.node.nodeSize; }
-    view.dispatch(tr.scrollIntoView());
-    for (const n of nodes) this._uploadImage(n.key, n.file, n.node.attrs.previewUrl);
+    return pasteMediaMethods._insertImageFiles.call(this, view, files, atPos, imageAlt);
   }
 
   _findUploadNode(key) {
-    if (!this._editor || this._editor.isDestroyed) return null;
-    let found = null;
-    this._editor.state.doc.descendants((node, pos) => {
-      if (found) return false;
-      if (node.type.name === "bpImage" && node.attrs.uploadKey === key) { found = { node, pos }; return false; }
-      return true;
-    });
-    return found;
+    return pasteMediaMethods._findUploadNode.call(this, key);
   }
 
   _patchUploadNode(key, receipt) {
-    const editor = this._editor;
-    if (!editor || editor.isDestroyed || receipt.editor !== editor) return;
-    let hit = this._findUploadNode(key);
-    if (!hit) return;
-    // Flush the image island before its async repaint can replace draft inputs.
-    editor.view.nodeDOM(hit.pos)?.dispatchEvent(new CustomEvent("bp-flush-node"));
-    hit = this._findUploadNode(key);
-    if (!hit) return;
-    const patch = { ...receipt.patch };
-    // A person may edit the URL or alt while the request is in flight.
-    // Completion owns the pending upload, not those subsequent edits.
-    if (hit.node.attrs.src || hit.node.attrs.uploadSrcEdited) delete patch.src;
-    if (hit.node.attrs.uploadAltEdited || hit.node.attrs.alt !== receipt.initialAlt) delete patch.alt;
-    editor.view.dispatch(editor.state.tr
-      .setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch })
-      .setMeta("addToHistory", false));
+    return pasteMediaMethods._patchUploadNode.call(this, key, receipt);
   }
 
   _restoreUploadResults() {
-    const editor = this._editor;
-    if (!editor || editor.isDestroyed || !this._uploadResults.size) return;
-    const keys = [];
-    editor.state.doc.descendants(node => {
-      if (node.type.name === "bpImage" && node.attrs.uploadKey && this._uploadResults.has(node.attrs.uploadKey)) keys.push(node.attrs.uploadKey);
-    });
-    for (const key of keys) this._patchUploadNode(key, this._uploadResults.get(key));
+    return pasteMediaMethods._restoreUploadResults.call(this);
   }
 
   async _uploadImage(key, file, previewUrl) {
@@ -3204,18 +2427,15 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   set mediaUploader(fn) {
-    this._mediaUploader = fn;
+    return pasteMediaMethods.setMediaUploader.call(this, fn);
   }
 
-  // The host's image picker. Set: an Image insert opens it for the new block, and each
-  // image offers Select (CSS shows it on [data-media-picker]). Unset: today's image block.
   set mediaPicker(fn) {
-    this._mediaPicker = typeof fn === "function" ? fn : null;
-    this.toggleAttribute("data-media-picker", !!this._mediaPicker);
+    return pasteMediaMethods.setMediaPicker.call(this, fn);
   }
 
   get mediaPicker() {
-    return this._mediaPicker;
+    return pasteMediaMethods.getMediaPicker.call(this);
   }
 
   // Run the host's picker for the image at `pos`; its answer becomes the image's src
@@ -3255,1187 +2475,240 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
-  // After an Image insert: open the picker for the empty image the insert left at the caret.
   _pickInsertedImage() {
-    const editor = this._editor;
-    if (!this._mediaPicker || !editor) return;
-    const { from } = editor.state.selection;
-    let best = null;
-    editor.state.doc.descendants((n, p) => {
-      if (n.type.name === "bpImage" && !n.attrs.src && !n.attrs.uploadKey && (best == null || Math.abs(p - from) < Math.abs(best - from))) best = p;
-      return true;
-    });
-    if (best != null) void this._pickImageAt(best);
+    return pasteMediaMethods._pickInsertedImage.call(this);
   }
 
   get mediaUploader() {
-    return this._mediaUploader;
+    return pasteMediaMethods.getMediaUploader.call(this);
   }
 
   _pasteHTMLTables(view, event) {
-    // Shift-paste deliberately chooses the native plain-text path.
-    if ((view.input?.shiftKey && view.input.lastKeyCode !== 45) || view.state.selection.$from.parent.type.spec.code) return false;
-    const raw = event?.clipboardData?.getData("text/html");
-    const { html, count: imagesLeftOut } = stripPastedImages(cleanPastedHTML(raw));
-    const plan = prepareHTMLTablePaste(html);
-    if (!plan) return false;
-    const insideTable = [...Array(view.state.selection.$from.depth).keys()]
-      .some((depth) => view.state.selection.$from.node(depth + 1).type.name === "bpTable");
-    if (plan.blocked || insideTable) {
-      this._showHTMLPasteNotice(`${plan.blocked || "A table cannot be nested inside another table."} Nothing was pasted. Paste as plain text with Ctrl+Shift+V, or copy the cell text instead.`);
-      return true;
-    }
-    const parsed = PMDOMParser.fromSchema(view.state.schema).parse(plan.dom);
-    const fitted = this._fitPastedNodes(parsed.content, imagesLeftOut);
-    view.dispatch(view.state.tr.replaceSelection(fitted ? fitted.slice : new Slice(parsed.content, 0, 0)).scrollIntoView());
-    if (fitted) this._noticeLeftOut(fitted.dropped);
-    return true;
+    return pasteMediaMethods._pasteHTMLTables.call(this, view, event);
   }
 
   _pasteMarkdown(view, event) {
-    const data = event && event.clipboardData;
-    if (!data) return false;
-    const html = data.getData("text/html");
-    const text = data.getData("text/plain");
-    if (html || !text) return false;
-    const lines = text.split(/\r?\n/);
-    const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
-    // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
-    const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-    const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
-    // An inline markdown link ([text](url)) is markdown too, even on one line: it
-    // becomes a link over its text, not literal brackets (task-68314b1d334213e8).
-    const inlineLink = /\[[^\]\n]+\]\((?:https?:\/\/|mailto:|\/|#)[^)\s]*\)/.test(text);
-    if (!lines.some((line) => blockish.test(line)) && !pipeTable && !inlineLink) return false;
-    let nodes;
-    let dropped = [];
-    try {
-      let blocks = markdownToBlocks(text);
-      if (!blocks.length) return false;
-      if (typeof this._wikilinkSource === "function") blocks = markdownWikilinksAsBrackets(blocks);
-      // A field admits only its vocabulary: a `> quote` becomes the field's quote
-      // block (or a paragraph) instead of vetoing the whole paste.
-      const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
-      if (vocab) ({ blocks, dropped } = fitBlocksToVocabulary(blocks, vocab));
-      nodes = this._rt(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
-    } catch (_e) {
-      return false;
-    }
-    if (!nodes.length) return false;
-    // One paragraph flows into the line the caret is on, like typed text; blocks
-    // land as blocks.
-    const single = nodes.length === 1 && nodes[0].type.name === "paragraph";
-    const slice = single ? Slice.maxOpen(Fragment.from(nodes)) : new Slice(Fragment.from(nodes), 0, 0);
-    const tr = view.state.tr.replaceSelection(slice).scrollIntoView();
-    view.dispatch(tr);
-    this._noticeLeftOut(dropped);
-    return true;
+    return pasteMediaMethods._pasteMarkdown.call(this, view, event);
   }
 
-  // Plain text, Sanity's rule (task-68314b1d334213e8): a blank line starts a new
-  // block, a single newline is a soft break inside the block. ProseMirror's own
-  // plain-text paste made every line its own paragraph. `force` is Paste as plain
-  // text (Shift), which takes this path even when the clipboard also holds HTML.
   _pastePlainText(view, event, force = false) {
-    const data = event && event.clipboardData;
-    if (!data) return false;
-    const text = data.getData("text/plain");
-    if (!text || (!force && data.getData("text/html")) || !/\r?\n/.test(text)) return false;
-    if (view.state.selection.$from.parent.type.spec.code) return false;
-    const { schema } = view.state;
-    const breakType = schema.nodes.hardBreak;
-    const paragraph = schema.nodes.paragraph;
-    if (!breakType || !paragraph) return false;
-    // A soft break needs a block that may hold one (portable-text-boundary.js:
-    // paragraphs and headings). Pasted into a quote or another role block, every
-    // line becomes its own block instead, as before.
-    const breakable = ["paragraph", "heading"].includes(view.state.selection.$from.parent.type.name);
-    const normalized = text.replace(/\r\n?/g, "\n");
-    const blocks = breakable ? normalized.split(/\n[ \t]*\n+/) : normalized.split(/\n+/);
-    const nodes = [];
-    for (const block of blocks) {
-      const lines = block.split("\n");
-      const inline = [];
-      lines.forEach((line, i) => {
-        if (i > 0) inline.push(breakType.create());
-        if (line) inline.push(schema.text(line));
-      });
-      while (inline.length && inline[inline.length - 1].type === breakType) inline.pop();
-      if (inline.length) nodes.push(paragraph.create(null, inline));
-    }
-    if (!nodes.length) return false;
-    view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(Fragment.from(nodes))).scrollIntoView());
-    return true;
+    return pasteMediaMethods._pastePlainText.call(this, view, event, force);
   }
 
-  // ── paste ⇄ field vocabulary (task-76c5440175affe20) ─────────────────────────
-  //
-  // The vocabulary veto drops a whole transaction that introduces anything the
-  // field cannot hold, so a paste carrying ONE such node (a table, a quote, a
-  // <pre>) used to vanish without a word. Every paste path fits its content first:
-  // each block becomes the nearest shape the field admits (paste-vocabulary.js),
-  // marks the field lacks are unwrapped, and whatever had nothing to keep (an
-  // image) is named in a notice that stays until the person moves on.
-  // Whether this drop moves blocks within this canvas, decided the way
-  // ProseMirror's own drop does (the copy modifier), so a moved block keeps its id
-  // and a copy-drop's copy reads as new. ProseMirror reads the slice right after
-  // this handler, in the same event.
   _noteDropMoves(view, event) {
-    this._dropMoves = !!view.dragging && !event[DRAG_COPY_KEY];
-    queueMicrotask(() => { this._dropMoves = false; });
-    return false;
+    return pasteMediaMethods._noteDropMoves.call(this, view, event);
   }
 
   _fitPastedSlice(slice) {
-    const imagesLeftOut = this._pasteImagesLeftOut || 0;
-    this._pasteImagesLeftOut = 0;
-    if (!this._editable) return slice;
-    const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
-    let out = slice;
-    let dropped = Array(imagesLeftOut).fill("an image");
-    if (vocab && slice.content.childCount) {
-      if (slice.content.firstChild.isBlock) {
-        const fitted = this._fitPastedNodes(slice.content, 0);
-        if (fitted) ({ slice: out } = fitted), (dropped = dropped.concat(fitted.dropped));
-      } else {
-        out = new Slice(stripMarks(slice.content, (name) => markAllowed(name, vocab)), slice.openStart, slice.openEnd);
-      }
-    }
-    this._noticeLeftOut(dropped);
-    return out;
+    return pasteMediaMethods._fitPastedSlice.call(this, slice);
   }
 
-  // Fit a fragment of top-level pasted nodes to the field's vocabulary. Answers
-  // null when nothing needed fitting (so the native slice keeps its open ends),
-  // else the fitted slice and what was left out.
   _fitPastedNodes(fragment, imagesLeftOut = 0) {
-    const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
-    const leftOut = Array(imagesLeftOut).fill("an image");
-    if (!vocab) return leftOut.length ? { slice: new Slice(fragment, 0, 0), dropped: leftOut } : null;
-    const blocks = docToBlocks({ type: "doc", content: fragment.toJSON() || [] });
-    if (!blocksNeedFitting(blocks, vocab)) return leftOut.length ? { slice: new Slice(fragment, 0, 0), dropped: leftOut } : null;
-    const fit = fitBlocksToVocabulary(blocks, vocab);
-    const schema = this._editor.schema;
-    // Fresh nodes: an id the paste carried (copied from this or another paper)
-    // must not collide with a block the doc already holds.
-    const nodes = this._rt(fit.blocks).content.map((json) =>
-      schema.nodeFromJSON({ ...json, attrs: { ...(json.attrs || {}), bpId: null } }));
-    return { slice: Slice.maxOpen(Fragment.from(nodes)), dropped: leftOut.concat(fit.dropped) };
+    return pasteMediaMethods._fitPastedNodes.call(this, fragment, imagesLeftOut);
   }
 
   _noticeLeftOut(dropped) {
-    const message = droppedNotice(dropped);
-    if (message) this._showHTMLPasteNotice(message);
+    return pasteMediaMethods._noticeLeftOut.call(this, dropped);
   }
 
   _showHTMLPasteNotice(message) {
-    this._clearHTMLPasteNotice();
-    const notice = this.ownerDocument.createElement("div");
-    notice.dataset.bpPasteNotice = "";
-    notice.setAttribute("role", "status");
-    notice.textContent = message;
-    this.appendChild(notice);
-    const viewport = this.ownerDocument.defaultView;
-    const bounds = this.getBoundingClientRect();
-    const availableWidth = Math.max(1, Math.min(bounds.right, viewport.innerWidth) - Math.max(0, bounds.left) - 16);
-    const width = Math.min(420, availableWidth, Math.max(1, viewport.innerWidth - 16));
-    notice.style.width = `${width}px`;
-    notice.style.maxHeight = `${Math.max(1, viewport.innerHeight - 16)}px`;
-    notice.style.left = `${Math.max(8, Math.min(bounds.left + 8, viewport.innerWidth - width - 8))}px`;
-    notice.tabIndex = 0;
-    const caret = this._caretRect();
-    const height = notice.getBoundingClientRect().height;
-    const below = caret.bottom + 8;
-    const preferred = below + height <= viewport.innerHeight - 8 ? below : caret.top - height - 8;
-    notice.style.top = `${Math.max(8, Math.min(preferred, viewport.innerHeight - height - 8))}px`;
-    // A fixed notice does not push the document. Dismiss when its anchor moves
-    // or the person resumes work; no timeout can hide the recovery guidance.
-    this._pasteNoticeDismiss = (event) => {
-      if (["pointerdown", "scroll"].includes(event.type) && notice.contains(event.target)) return;
-      if (event.type === "keydown" && event.key !== "Escape") return;
-      const restoreFocus = event.type === "keydown" && event.key === "Escape" && notice.contains(this.ownerDocument.activeElement);
-      this._clearHTMLPasteNotice();
-      if (restoreFocus) this._editor?.commands.focus();
-    };
-    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.addEventListener(name, this._pasteNoticeDismiss, true);
-    viewport.addEventListener("resize", this._pasteNoticeDismiss);
+    return pasteMediaMethods._showHTMLPasteNotice.call(this, message);
   }
 
   _clearHTMLPasteNotice() {
-    this.querySelector("[data-bp-paste-notice]")?.remove();
-    if (!this._pasteNoticeDismiss) return;
-    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.removeEventListener(name, this._pasteNoticeDismiss, true);
-    this.ownerDocument.defaultView?.removeEventListener("resize", this._pasteNoticeDismiss);
-    this._pasteNoticeDismiss = null;
+    return pasteMediaMethods._clearHTMLPasteNotice.call(this);
   }
 
   _showFigureConstraint(message = "A Figure keeps one content block. Enter cannot split or remove it.") {
-    let notice = this.querySelector("[data-bp-figure-constraint]");
-    if (!notice) {
-      notice = document.createElement("div");
-      notice.dataset.bpFigureConstraint = "";
-      notice.className = "bp-canvas-constraint-notice";
-      notice.setAttribute("role", "status");
-      this.appendChild(notice);
-    }
-    notice.textContent = message;
+    return pasteMediaMethods._showFigureConstraint.call(this, message);
   }
 
   _clearFigureConstraint(transaction = null) {
-    // A programmatic write (an id write-back after a save, a server echo) is not
-    // the person resuming work: it leaves a paste notice up, so "Left out: an
-    // image" outlasts the save it rode in on (task-76c5440175affe20).
-    // The paste's own transaction does not clear the notice that paste raised.
-    if (!transaction || (transaction.getMeta("addToHistory") !== false && transaction.getMeta("uiEvent") !== "paste")) {
-      this._clearHTMLPasteNotice();
-    }
-    this.querySelector("[data-bp-figure-constraint]")?.remove();
+    return pasteMediaMethods._clearFigureConstraint.call(this, transaction);
   }
 
-  // The DOMRect of the current caret, used to position the popup at the cursor.
-  // Ported from ../index.js:_caretRect (the canvas had no such helper — added
-  // here for the popups). Falls back to the mount rect if coordsAtPos throws.
   _caretRect() {
-    try {
-      const { from } = this._editor.state.selection;
-      const coords = this._editor.view.coordsAtPos(from);
-      return {
-        left: coords.left,
-        top: coords.top,
-        bottom: coords.bottom,
-      };
-    } catch (_e) {
-      const r = this._mount.getBoundingClientRect();
-      return { left: r.left, top: r.top, bottom: r.bottom };
-    }
+    return pickerMethods._caretRect.call(this);
   }
 
-  // ── P4 `[[` wikilink autocomplete ──────────────────────────────────────────
-  //
-  // Obsidian-parity inline page-link picker, ported VERBATIM from ../index.js.
-  // Studio-only by construction: gated on `this._editable` (read-mode never runs
-  // onUpdate) AND on an injected `this._wikilinkSource` (unset → never opens). On
-  // each onUpdate we re-run the PURE parseOpenWikilink seam against the BLOCK-LOCAL
-  // text + caret offset of the current run block; an open trigger opens/refreshes
-  // the menu at the caret and fires the async source. On a pick we replace the
-  // typed "[[query" span with the chosen title carrying a `wikilink` mark — which,
-  // in the canvas, makes runToOps emit a patch-block for THAT block (the existing
-  // prose patch path). Returns true iff the menu is (now) open, so onUpdate can
-  // force the tag popup shut (mutual exclusion).
   _maybeWikilink() {
-    if (!this._editable || !this._wikilinkSource) return false;
-    if (!this._editor) return false;
-
-    // Block-LOCAL text + offset must share one coordinate frame. In the canvas
-    // doc `$from.parent` is the CURRENT run block's textblock (a paragraph —
-    // including the one nested inside a list item), so its triggerText (one char per
-    // inline leaf, a hard break as "\n") pairs exactly with `parentOffset`;
-    // textContent drops leaves and drifts after a break. Using getText() here would join EVERY block in
-    // the run with "\n\n" and desync from the block-local offset — so a `[[` typed
-    // in the 2nd-or-later block would never open. parseOpenWikilink's contract is
-    // block-local text. This is what makes the trigger frame-correct in the
-    // multi-block canvas exactly as it is in the per-block editor.
-    const $from = this._editor.state.selection.$from;
-    const blockLocalText = triggerText($from.parent);
-    const caretOffset = $from.parentOffset;
-    const hit = parseOpenWikilink(blockLocalText, caretOffset, {
-      mention: this.getAttribute("mention-trigger") !== "off",
-    });
-    if (!hit) {
-      this._closeWikilink();
-      return false;
-    }
-
-    // Open (or refresh, as the query grows) the popup at the live caret rect, and
-    // remember the PM range to replace on pick — anchored to the DOCUMENT position
-    // (selection.from), not the block-local offset hit carries.
-    const { query, alias } = hit.trigger === "[[" ? splitAlias(hit.query) : { query: hit.query, alias: null };
-    this._openWikilink(this._caretRect(), query);
-    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query, hit.trigger);
-    this._wlAlias = alias || null;
-
-    // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
-    // resolved batch is dropped unless it is still the latest request AND the menu
-    // is still open — so an out-of-order or post-close response is ignored.
-    // A source that throws or rejects reads as no match (contract 1.16.0).
-    const seq = ++this._wlSeq;
-    const current = () => seq === this._wlSeq && this._wikilink && this._wikilink.isOpen();
-    if (!query && alias != null) {
-      this._wikilink.setResults([]);
-      return true;
-    }
-    new Promise((resolve) => resolve(this._wikilinkSource(query)))
-      .catch(() => [])
-      .then((list) => {
-        if (current()) this._wikilink.setResults(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {});
-    return true;
+    return pickerMethods._maybeWikilink.call(this);
   }
 
   _openWikilink(rect, query = "") {
-    if (!this._wikilink) {
-      this._wikilink = new WikilinkMenu({
-        onChoose: (c) => this._chooseWikilink(c),
-        onDismiss: () => this._dismissWikilink(),
-      });
-    }
-    this._wikilink.open(rect, query);
+    return pickerMethods._openWikilink.call(this, rect, query);
   }
 
   _closeWikilink() {
-    if (this._wikilink && this._wikilink.isOpen()) this._wikilink.close();
+    return pickerMethods._closeWikilink.call(this);
   }
 
-  // User picked a candidate: replace the typed "[[query" span with the chosen
-  // title carrying a `wikilink` mark { target: title, docId: id }, plus a trailing
-  // UNMARKED space so typing continues OUTSIDE the link (the mark is
-  // inclusive:false, but the space guarantees it across browsers). The pinned
-  // `docId` is the picked paper's EXACT id. The marked-text insertion mutates the
-  // run block → runToOps emits a patch-block for that block. _wlRange was captured
-  // in _maybeWikilink at the moment the menu opened/refreshed.
   _chooseWikilink(candidate) {
-    const range = this._wlRange;
-    if (!range) {
-      this._closeWikilink();
-      return;
-    }
-    this._editor
-      .chain()
-      .focus()
-      .insertContentAt({ from: range.from, to: range.to }, [
-        {
-          type: "text",
-          text: this._wlAlias || candidate.title,
-          marks: [{ type: "wikilink", attrs: { target: candidate.title, docId: candidate.id, alias: this._wlAlias } }],
-        },
-        { type: "text", text: " " },
-      ])
-      .run();
-    this._closeWikilink();
+    return pickerMethods._chooseWikilink.call(this, candidate);
   }
 
-  // Esc / outside-click: close the menu but LEAVE the typed "[[query" in place —
-  // the user may want to keep editing it. Mirrors ../index.js:_dismissWikilink.
   _dismissWikilink() {
-    this._closeWikilink();
-    this._editor.commands.focus();
+    return pickerMethods._dismissWikilink.call(this);
   }
 
-  // Writable property so the Studio LiveView hook can inject the async page
-  // search: `el.wikilinkSource = (query) => Promise<[{ title, id, type }]>`. Unset
-  // → _maybeWikilink early-returns, so the popup NEVER opens (graceful no-op for
-  // the harness without a source and the read-mode web embed). Mirrors ../index.js.
   set wikilinkSource(fn) {
-    this._wikilinkSource = fn;
+    return pickerMethods.setWikilinkSource.call(this, fn);
   }
 
   get wikilinkSource() {
-    return this._wikilinkSource;
+    return pickerMethods.getWikilinkSource.call(this);
   }
 
-  // ── link hover card: what the host knows about a target ────────────────────
-  // async ({ kind: "link" | "wikilink", href, target, docId }) => { title, excerpt, href } | null.
-  // Unset → the card shows the address only.
   set linkPreviewSource(fn) {
-    this._linkPreviewSource = fn;
+    return pickerMethods.setLinkPreviewSource.call(this, fn);
   }
 
   get linkPreviewSource() {
-    return this._linkPreviewSource;
+    return pickerMethods.getLinkPreviewSource.call(this);
   }
 
-  // ── live document-link titles (1.17.0): (docId) => { title?, missing? } | null ──
-  // Asked once per document id; refreshWikilinks() (a rename, a delete) asks every link again.
   set wikilinkResolve(fn) {
-    this._wikilinkResolve = typeof fn === "function" ? fn : null;
-    refreshWikilinkTitles(this._editor, !this._wikilinkResolve);
+    return pickerMethods.setWikilinkResolve.call(this, fn);
   }
 
   get wikilinkResolve() {
-    return this._wikilinkResolve;
+    return pickerMethods.getWikilinkResolve.call(this);
   }
 
   refreshWikilinks() {
-    refreshWikilinkTitles(this._editor, false);
+    return pickerMethods.refreshWikilinks.call(this);
   }
 
-  // ── P4 `#` tag autocomplete ────────────────────────────────────────────────
-  //
-  // Obsidian-parity inline tag picker — the `#` analogue of the `[[` wikilink
-  // popup, sharing the WikilinkMenu DOM via a thin adapter. Ported VERBATIM from
-  // ../index.js. Studio-only by construction: gated on `this._editable` AND on an
-  // injected `this._tagSource` (unset → never opens). On each onUpdate we re-run
-  // the PURE parseOpenTag seam (block-local text + caret offset); an open trigger
-  // opens/refreshes the menu at the caret and fires the async source. The string[]
-  // of tag names is mapped to WikilinkMenu's { title, id, type } row shape —
-  // "#"+name as the visible title, the bare name as the id we map back on pick. On
-  // a pick we replace the typed "#query" span with "#"+name carrying a `tag` mark
-  // { name } → runToOps emits a patch-block for that block. Returns true iff the
-  // menu is (now) open.
   _maybeTag() {
-    if (!this._editable || !this._tagSource) return false;
-    if (!this._editor) return false;
-
-    // Block-LOCAL text + offset must share one coordinate frame — identical
-    // rationale to _maybeWikilink: triggerText($from.parent) pairs exactly with
-    // `parentOffset`, so a `#` typed in the 2nd-or-later run block still opens.
-    const $from = this._editor.state.selection.$from;
-    const blockLocalText = triggerText($from.parent);
-    const caretOffset = $from.parentOffset;
-    const hit = parseOpenTag(blockLocalText, caretOffset);
-    if (!hit) {
-      this._closeTag();
-      return false;
-    }
-
-    // Open (or refresh as the query grows) the popup at the live caret rect, and
-    // remember the PM range to replace on pick — anchored to the DOCUMENT position
-    // (selection.from), not the block-local offset hit carries.
-    this._openTag(this._caretRect(), hit.query);
-    this._tagRange = tagReplaceRange(this._editor.state.selection.from, hit.query);
-
-    // Async source with a STALE GUARD (own _tagSeq, independent of _wlSeq): each
-    // open/keystroke bumps the counter; a resolved batch is dropped unless it is
-    // still the latest request AND the menu is still open. The source returns a
-    // string[] of tag NAMES; adapt each to WikilinkMenu's row shape here.
-    const seq = ++this._tagSeq;
-    new Promise((resolve) => resolve(this._tagSource(hit.query)))
-      .catch(() => [])
-      .then((list) => {
-        if (seq !== this._tagSeq || !this._tag || !this._tag.isOpen()) {
-          return;
-        }
-        const rows = (Array.isArray(list) ? list : []).map((name) => ({
-          title: "#" + name,
-          id: name,
-          type: "tag",
-        }));
-        this._tag.setResults(rows);
-      })
-      .catch(() => {});
-    return true;
+    return pickerMethods._maybeTag.call(this);
   }
 
-  // ── `:` emoji picker ───────────────────────────────────────────────────────
-  //
-  // GitHub's shorthand: `:` + two letters opens a picker over a local shortcode
-  // table (emoji.js); the pick inserts the character as plain text and a space, so
-  // the server sees ordinary text. Same popup class as [[ and #, eyebrow "Emoji".
   _maybeEmoji() {
-    if (!this._editable || !this._editor) return false;
-    const $from = this._editor.state.selection.$from;
-    const hit = parseOpenEmoji($from.parent.textContent, $from.parentOffset);
-    if (!hit) {
-      this._closeEmoji();
-      return false;
-    }
-    const rows = searchEmoji(hit.query).map(({ name, char }) => ({ title: char + "  " + name, id: char, type: "emoji" }));
-    if (!rows.length) {
-      this._closeEmoji();
-      return false;
-    }
-    this._openEmoji(this._caretRect(), hit.query);
-    this._emojiRange = emojiReplaceRange(this._editor.state.selection.from, hit.query);
-    this._emoji.setResults(rows);
-    return true;
+    return pickerMethods._maybeEmoji.call(this);
   }
 
   _openEmoji(rect, query = "") {
-    if (!this._emoji) {
-      this._emoji = new WikilinkMenu({
-        onChoose: (c) => this._chooseEmoji(c),
-        onDismiss: () => this._dismissEmoji(),
-        eyebrow: "Emoji",
-        kind: "emoji",
-      });
-    }
-    this._emoji.open(rect, query);
+    return pickerMethods._openEmoji.call(this, rect, query);
   }
 
   _closeEmoji() {
-    if (this._emoji && this._emoji.isOpen()) this._emoji.close();
+    return pickerMethods._closeEmoji.call(this);
   }
 
   _chooseEmoji(candidate) {
-    const range = this._emojiRange;
-    if (!range || !candidate || !candidate.id) {
-      this._closeEmoji();
-      return;
-    }
-    this._editor
-      .chain()
-      .focus()
-      .insertContentAt({ from: range.from, to: range.to }, [
-        { type: "text", text: String(candidate.id) },
-        { type: "text", text: " " },
-      ])
-      .run();
-    this._closeEmoji();
+    return pickerMethods._chooseEmoji.call(this, candidate);
   }
 
   _dismissEmoji() {
-    this._closeEmoji();
-    this._editor.commands.focus();
+    return pickerMethods._dismissEmoji.call(this);
   }
 
   _openTag(rect, query = "") {
-    if (!this._tag) {
-      this._tag = new WikilinkMenu({
-        onChoose: (c) => this._chooseTag(c),
-        onDismiss: () => this._dismissTag(),
-      });
-    }
-    this._tag.open(rect, query);
+    return pickerMethods._openTag.call(this, rect, query);
   }
 
   _closeTag() {
-    if (this._tag && this._tag.isOpen()) this._tag.close();
+    return pickerMethods._closeTag.call(this);
   }
 
-  // User picked a tag: replace the typed "#query" span with "#"+name carrying a
-  // `tag` mark { name }, plus a trailing UNMARKED space so typing continues
-  // OUTSIDE the tag (mark is inclusive:false; the space guarantees it across
-  // browsers). The candidate is a WikilinkMenu row whose `id` is the bare tag
-  // name; map it back here. The marked-text insertion mutates the run block →
-  // runToOps emits a patch-block for that block. _tagRange was captured in
-  // _maybeTag when the menu opened/refreshed. Mirrors _chooseWikilink.
   _chooseTag(candidate) {
-    const range = this._tagRange;
-    if (!range) {
-      this._closeTag();
-      return;
-    }
-    const name = candidate && candidate.id != null ? candidate.id : "";
-    this._editor
-      .chain()
-      .focus()
-      .insertContentAt({ from: range.from, to: range.to }, [
-        {
-          type: "text",
-          text: "#" + name,
-          marks: [{ type: "tag", attrs: { name } }],
-        },
-        { type: "text", text: " " },
-      ])
-      .run();
-    this._closeTag();
+    return pickerMethods._chooseTag.call(this, candidate);
   }
 
-  // Esc / outside-click: close the menu but LEAVE the typed "#query" in place —
-  // the user may want to keep editing it. Mirrors _dismissWikilink.
   _dismissTag() {
-    this._closeTag();
-    this._editor.commands.focus();
+    return pickerMethods._dismissTag.call(this);
   }
 
-  // Writable property so the Studio LiveView hook can inject the async tag search:
-  // `el.tagSource = (query) => Promise<string[]>`. Unset → _maybeTag early-returns,
-  // so the popup NEVER opens (graceful no-op for the harness without a source and
-  // the read-mode web embed). Mirrors wikilinkSource exactly.
   set tagSource(fn) {
-    this._tagSource = fn;
+    return pickerMethods.setTagSource.call(this, fn);
   }
 
   get tagSource() {
-    return this._tagSource;
+    return pickerMethods.getTagSource.call(this);
   }
 
-  // ── P4 `/` slash menu (canvas DIRECT-INSERT variant) ───────────────────────
-  //
-  // The per-block editor's _maybeSlash (../index.js ~327), adapted for the canvas.
-  // SAME trigger rule — the menu opens when the CURRENT run block's text STARTS
-  // with "/" and the caret sits at the end of it (the user typed "/" at the start
-  // of an otherwise-empty line and may keep typing a query like "/head"). The
-  // substring after "/" is the live filter query.
-  //
-  // KEY DIFFERENCE from the per-block editor: the trigger is BLOCK-LOCAL, not
-  // whole-editor. The per-block editor hosts ONE block so getText() == that block's
-  // text; the canvas hosts MANY, so getText() would join every run block with
-  // "\n\n" and a "/" typed in the 2nd-or-later block would never open the menu.
-  // We read `$from.parent.textContent` + `parentOffset` (the same block-local frame
-  // _maybeWikilink / _maybeTag use), so a "/" opens the menu against THAT block.
-  //
-  // On a pick the canvas inserts the default NODE directly (see _chooseSlash) — it
-  // does NOT dispatch bp-slash-insert (that is the per-block path, where the SERVER
-  // builds the block). Text that does NOT start with "/" (a slash mid-prose), a
-  // multi-block selection, or a non-collapsed selection all keep the menu closed.
   _maybeSlash() {
-    if (!this._editable) return; // read mode: no slash menu
-    if (!this._editor) return;
-
-    const { selection } = this._editor.state;
-
-    // Caret only — never on a range selection.
-    if (!selection.empty) {
-      this._closeSlash();
-      return;
-    }
-
-    // Block-LOCAL text + offset (multi-block-doc-correct — see header). The block
-    // is the current run block's textblock; a "/" only triggers when it is the
-    // ENTIRE block text (text[0] === "/") and the caret is at its end.
-    const $from = selection.$from;
-    // TOP-LEVEL-PROSE-only guard: the caret must sit in a paragraph/heading that is a
-    // DIRECT child of the doc — the only place a slash insert can replace the block
-    // with a top-level node. depth === 1 alone is NOT enough: a CALLOUT BODY
-    // (callout-node.js group:"block", content:"inline*") is ALSO a depth-1 top-level
-    // node, so a "/head"+Enter typed INSIDE a callout body would pass a depth-only
-    // guard and _chooseSlash's start=$pos.before(depth)/end=$pos.after(depth) would
-    // span the WHOLE callout → replaceWith destroys the enclosing callout (chrome +
-    // body). Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
-    // body (and any future inline-content node-view), and also keeps rejecting a
-    // paragraph nested in a list item (depth 3). See slashTriggerAllowsParent.
-    // Notion parity: "/" also works inside an otherwise-empty list item; the item is lifted
-    // out of the list when a block is chosen (see _chooseSlash).
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name) && !this._slashInListItem($from)) {
-      this._closeSlash();
-      return;
-    }
-    const blockText = $from.parent.textContent;
-    const startsSlash = blockText.length > 0 && blockText[0] === "/";
-    const atEnd = $from.parentOffset === blockText.length;
-    const triggered = startsSlash && atEnd && !blockText.includes("\n");
-
-    if (triggered) {
-      this._openSlash(blockText.slice(1)); // query = everything after the leading "/"
-    } else {
-      this._closeSlash();
-    }
+    return slashPaletteMethods._maybeSlash.call(this);
   }
 
-  // ── callout authoring shorthand (`> [!type]`) ──────────────────────────────
-  //
-  // Ported from ../index.js:_maybeCalloutShorthand (~358). Obsidian-style gesture:
-  // when the user types `> [!note] `, `> [!warn]- `, or `> [!info]+ ` at the start
-  // of an otherwise-empty run block, REPLACE that paragraph with a bpCallout node of
-  // the matched tone (collapsed when the modifier is "-"). UNLIKE the per-block
-  // editor (which wipes the origin block + dispatches bp-slash-insert for the SERVER
-  // to build the callout), the canvas REPLACES the paragraph node in place with the
-  // callout node — so runToOps emits ONE insert-after (the new callout) + the remove
-  // of the origin para, and the S4a echo stamps the server id.
-  //
-  // Mutually exclusive with _maybeSlash by leading token ('>' vs '/') AND by the
-  // explicit `consumed` gate in onUpdate. Returns true iff it consumed the update.
-  //
-  // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
-  // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
-  // mid-prose or across blocks. The trailing space in the regex commits the gesture.
-  // Replace the caret's top-level block with an empty quote of `type` (blockquote, or
-  // pullquote in a field that admits only that), keeping its id so the save is a
-  // same-id replace-block, not remove + insert. The caret lands inside the quote.
   _replaceTopBlockWithQuote(type) {
-    const { state, view } = this._editor;
-    const $from = state.selection.$from;
-    if ($from.depth < 1) return false;
-    const start = $from.before(1);
-    const end = $from.after(1);
-    const nodeType = state.schema.nodes[type];
-    if (!nodeType) return false;
-    const quoteNode = nodeType.create({ bpId: $from.node(1).attrs.bpId || null, bpType: type });
-    let tr = state.tr.replaceWith(start, end, quoteNode);
-    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
-    view.dispatch(tr);
-    this._editor.commands.focus();
-    return true;
+    return slashPaletteMethods._replaceTopBlockWithQuote.call(this, type);
   }
 
   _maybeBlockShorthand() {
-    if (!this._editable || !this._editor) return false;
-    const { selection } = this._editor.state;
-    if (!selection.empty) return false;
-    const $from = selection.$from;
-    if ($from.parent.type.name !== "paragraph" || $from.depth !== 1) return false;
-    const blockText = $from.parent.textContent;
-    if ($from.parentOffset !== blockText.length) return false;
-    // Typography turns the first two dashes into an en/em dash before the third arrives; accept both spellings.
-    const divider = /^(---|—-|–-)$/.test(blockText);
-    const code = /^```$/.test(blockText);
-    const quote = /^>\s$/.test(blockText);
-    if (quote) {
-      // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
-      // quote; the pullquote stays article chrome, reached from the slash menu). The callout
-      // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
-      // In a field whose vocabulary has the blockquote STYLE that block is a pullquote.
-      return this._replaceTopBlockWithQuote(quoteTypeFor(parseVocabulary(this.getAttribute("data-vocabulary"))));
-    }
-    if (!divider && !code) return false;
-    if (code) {
-      // Clear the fence text, then reuse the slash-insert seam so the code atom takes the
-      // caret exactly as it does from the menu (its own editing surface, not a PM text hole).
-      const { state, view } = this._editor;
-      view.dispatch(state.tr.delete($from.start(1), $from.end(1)));
-      insertSlashTypeAtSelection(this._editor, "code");
-      // The code atom edits in its own textarea island; hand it the caret at once so the very
-      // next keystroke lands inside the block (a deferred focus would swallow fast typing).
-      const focusArea = () => {
-        if (!this._editor || this._editor.isDestroyed) return false;
-        const dom = this._editor.view.nodeDOM(this._editor.state.selection.from);
-        const area = dom && dom.querySelector ? dom.querySelector(".bp-canvas-code-area") : null;
-        if (!area) return false;
-        area.focus();
-        return true;
-      };
-      if (!focusArea()) requestAnimationFrame(focusArea);
-      return true;
-    }
-    const block = canvasDefaultBlock("divider");
-    const node = this._rt([block]).content[0];
-    const { state, view } = this._editor;
-    const start = $from.before(1);
-    const end = $from.after(1);
-    const pmNode = state.schema.nodeFromJSON(node);
-    let tr = state.tr.replaceWith(start, end, pmNode);
-    const after = start + pmNode.nodeSize;
-    tr = tr.insert(after, state.schema.nodes.paragraph.create());
-    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1))); } catch (_e) {}
-    view.dispatch(tr);
-    this._editor.commands.focus();
-    return true;
+    return slashPaletteMethods._maybeBlockShorthand.call(this);
   }
 
   _maybeCalloutShorthand() {
-    if (!this._editable) return false; // read mode: no shorthand
-    if (!this._editor) return false;
-
-    const { selection } = this._editor.state;
-
-    // Caret only — never on a range selection.
-    if (!selection.empty) return false;
-
-    // Block-LOCAL text + offset (multi-block-doc-correct). The gesture only fires
-    // when `> [!type] ` is the ENTIRE block text and the caret is at its end.
-    const $from = selection.$from;
-    // TOP-LEVEL-PROSE-only guard (same rationale as _maybeSlash): the `> [!type]`
-    // gesture REPLACES the whole enclosing textblock (start=$pos.before(depth)/
-    // end=$pos.after(depth)) with a top-level callout node, so it must only fire in a
-    // paragraph/heading that is a DIRECT child of the doc. depth === 1 alone is NOT
-    // enough — a CALLOUT BODY is also a depth-1 top-level node, so a `> [!warning] `
-    // typed INSIDE a callout body would otherwise span + destroy the enclosing
-    // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
-    // body, and still rejects a paragraph nested in a list item. See
-    // slashTriggerAllowsParent.
-    // `> ` has already become a quote block (the plain blockquote now; a pullquote when one
-    // was authored from the menu), so the `[!note] ` that follows arrives inside it.
-    const inQuote = $from.depth === 1 && ($from.parent.type.name === "blockquote" || $from.parent.type.name === "pullquote");
-    if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
-    const blockText = $from.parent.textContent;
-    const atEnd = $from.parentOffset === blockText.length;
-    if (!atEnd || blockText.includes("\n")) return false;
-
-    // ^>\s*\[!(\w+)\]([+-]?)\s$ — identical to the per-block editor. The trailing \s
-    // (the committing space) + the no-newline guard above mean \s only matches that
-    // space here. Inside a quote block (`> ` already consumed) the leading `>` is absent.
-    const m = (inQuote ? /^\[!(\w+)\]([+-]?)\s$/ : /^>\s*\[!(\w+)\]([+-]?)\s$/).exec(blockText);
-    if (!m) return false;
-
-    const tone = normalizeTone(m[1]);
-    const collapsed = m[2] === "-";
-
-    // Build the default callout BLOCK (default_block("callout") shape) + the matched
-    // tone, then carry collapsible/collapsed so the foldable gesture round-trips.
-    // (calloutBlockToNode threads collapsible/collapsed only when === true, mirroring
-    // the per-block bp-slash-insert which sends collapsible:true + collapsed.)
-    const block = canvasDefaultBlock("callout");
-    block.tone = tone;
-    block.collapsible = true;
-    block.collapsed = collapsed;
-    const node = this._rt([block]).content[0];
-
-    // REPLACE the whole current block (the just-typed `> [!type] ` paragraph) with
-    // the callout node. selectParentNode targets the textblock; replaceSelectionWith
-    // swaps the node. The new callout carries bpId:null → runToOps mints an id and
-    // emits the structural ops; the origin para is gone (no stray trigger text).
-    const { state, view } = this._editor;
-    const $pos = state.selection.$from;
-    const start = $pos.before($pos.depth);
-    const end = $pos.after($pos.depth);
-    const calloutNode = state.schema.nodeFromJSON(node);
-    let tr = state.tr.replaceWith(start, end, calloutNode);
-    // Place the caret INTO the new callout body (it is a textable content node),
-    // mirroring the slash path so the user keeps typing the callout text — not left
-    // stranded before the swapped node. Best-effort: the swap already landed.
-    try {
-      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
-    } catch (_e) {
-      // Selection placement is best-effort; the replace itself already landed.
-    }
-    view.dispatch(tr);
-    this._editor.commands.focus();
-    return true;
+    return slashPaletteMethods._maybeCalloutShorthand.call(this);
   }
 
   _openSlash(query = "") {
-    if (!this._slash) {
-      this._slash = new SlashMenu({
-        // CANVAS_SLASH_ITEMS = SLASH_ITEMS filtered to the insertable set (the
-        // per-block menu's SLASH_ITEMS is imported INTACT; the allowlist narrows
-        // here, never edits it). SlashMenu still prepends EXPECTED-group items it
-        // reads fresh from the DOM on each open.
-        // Gyldendal parity E1: a FIELD canvas offers only its declared
-        // vocabulary (data-vocabulary); a paper canvas (no attribute) keeps the
-        // full insertable set.
-        items: slashItemsForVocabulary(
-          CANVAS_SLASH_ITEMS.map((it) => (CANVAS_SLASH_CHORDS[it.type] ? { ...it, keys: CANVAS_SLASH_CHORDS[it.type] } : it)),
-          parseVocabulary(this.getAttribute("data-vocabulary")),
-        ),
-        onChoose: (item) => this._chooseSlash(item),
-        onDismiss: () => this._dismissSlash(),
-        // EXPECTED fields (the default extra group) plus the paper's MASTERS,
-        // read fresh on every open from this editor's own carrier.
-        readExtraItems: () => {
-          const root = this._mastersRoot();
-          return [...readExpectedItems(), ...(root ? readMasterItems(root) : [])];
-        },
-      });
-    }
-    // Anchor the popup to the live caret rectangle. open() handles both the first
-    // open and a re-open with a new filter query (as the user types).
-    this._slash.open(this._caretRect(), query);
+    return slashPaletteMethods._openSlash.call(this, query);
   }
 
   _closeSlash() {
-    if (this._slash && this._slash.isOpen()) this._slash.close();
+    return slashPaletteMethods._closeSlash.call(this);
   }
 
-  // User picked an item: REPLACE the just-typed "/query" block with the default
-  // NODE for the picked type, inserted DIRECTLY into the doc (the canvas direct-
-  // insert path — it does NOT dispatch bp-slash-insert). The replaced block was an
-  // empty "/query" paragraph; we swap it for slashTypeToNode(item.type), which
-  // carries bpId:null so runToOps mints a fresh id and emits ONE insert-after (the
-  // new block) + the remove of the origin para. The S4a echo then stamps the server
-  // id back. After the swap the caret lands inside the new block's body (prose /
-  // callout) or selects the atom (divider/code/diagram/field), mirroring a natural
-  // authoring flow.
-  //
-  // DEFENSIVE: an EXPECTED-group pick (or any item) whose type is NOT canvas-
-  // insertable is a no-op — CANVAS_SLASH_TYPES is the same allowlist that built the
-  // base menu, so a non-insertable EXPECTED field never produces a bad insert.
-  // True when the caret sits in a list item's only paragraph and that paragraph holds nothing but the slash query.
   _slashInListItem($from) {
-    if ($from.parent.type.name !== "paragraph" || $from.depth < 2) return false;
-    const item = $from.node($from.depth - 1);
-    if (!item || (item.type.name !== "listItem" && item.type.name !== "taskItem") || item.childCount !== 1) return false;
-    return /^\/[^\s]*$/.test($from.parent.textContent) || $from.parent.textContent === "";
+    return slashPaletteMethods._slashInListItem.call(this, $from);
   }
 
   _chooseSlash(item) {
-    this._closeSlash();
-    // An INLINE row (a declared blocks.inline kind): the object goes inside this
-    // paragraph, in place of the "/query" text, once its dialog is saved.
-    if (item && item.inline) {
-      const { $from } = this._editor.state.selection;
-      insertInlineObject(this, this._editor, item.inline, { replaceRange: { from: $from.start(), to: $from.end() } });
-      return;
-    }
-    // A slash pick inside a list item first lifts the item out of the list, so the chosen block
-    // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
-    let guard = 0;
-    while (this._editor.state.selection.$from.depth > 1 && guard++ < 6) {
-      if (!this._editor.commands.liftListItem("listItem")) break;
-    }
-    // A COMPOUND starter row (the Starters group): insert the whole pre-composed
-    // subtree through the shared landing seam — same guard, same caret rules as a
-    // single-node pick, but the carried node is a container + seeded children.
-    if (item && item.compound) {
-      insertCompoundAtSelection(this._editor, item.compound, { replaceText: true });
-      return;
-    }
-    // A MASTER row (the Masters group): the SERVER inserts the detached copy.
-    // A linked row (`item.linked`) asks for a LINKED instance instead.
-    if (item && item.master) {
-      this._insertMaster(item.master, item.linked === true ? "linked" : null);
-      return;
-    }
-    // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
-    // top-level blocks through the same landing seam — same guard, same degrade, and
-    // the preset's declared placeholder is selected so the next keystroke overtypes it.
-    if (item && item.preset) {
-      insertSectionPresetAtSelection(this._editor, item.preset, { replaceText: true });
-      return;
-    }
-    // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
-    // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
-    if (item && item.object) {
-      // A declared object block with fields asks for them first (inline-object.js);
-      // one with none inserts at once.
-      if (!openObjectBlockInsert(this, this._editor, item.type, (values) => this._insertObjectBlock(item.type, values))) {
-        this._insertObjectBlock(item.type);
-      }
-      return;
-    }
-    // A field's Quote row makes the block the field admits (vocabulary.js quoteTypeFor).
-    if (item && item.quoteAs === "pullquote") {
-      this._replaceTopBlockWithQuote("pullquote");
-      return;
-    }
-    if (item && !item.fieldName && serverBuildsInsert(item.type, this._hostBuildsInserts())) {
-      this._insertViaServer(item.type, { replaceSlashLine: true });
-      return;
-    }
-    if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
-      // Non-insertable (e.g. an EXPECTED field-image/field-reference): leave the
-      // "/query" text in place and refocus, exactly like a dismiss.
-      this._editor.commands.focus();
-      return;
-    }
-
-    // REPLACE the just-typed "/query" block with the default node for the picked
-    // type, via the SHARED slash-insert seam (insertSlashTypeAtSelection in command-
-    // palette.js) — the SAME code path the P5 command palette's Insert commands use,
-    // so a slash pick and an Insert command produce byte-identical blocks. By
-    // construction the caret here ALWAYS sits in a top-level-prose block (_maybeSlash
-    // gates open on slashTriggerAllowsParent), so the seam's replace branch fires —
-    // identical behavior to the pre-refactor in-place replaceWith. EXPECTED-group
-    // items carry a `fieldName` binding (threaded through so a bound-field insert
-    // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
-    // `replaceText`: the block's text is the slash's own "/query", so it is replaced.
-    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level, replaceText: true });
-    if (item.type === "image") this._pickInsertedImage();
+    return slashPaletteMethods._chooseSlash.call(this, item);
   }
 
-  // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
-  // line with a verbatim bpOpaque carry of `{type}`. runToOps inserts it as a new
-  // block (the opaque insert path), the server checks its declared fields.
-  // `opts.keepLine`: insert AFTER the caret's block instead of replacing it (the
-  // command palette's insert, where the caret's block holds real content); an
-  // empty paragraph is still replaced, as the slash pick replaces its "/query".
   _insertObjectBlock(type, bpBlock, opts = {}) {
-    const editor = this._editor;
-    if (!editor || !this._editable || typeof type !== "string" || type === "") return false;
-    const { state } = editor;
-    const nodeType = state.schema.nodes.bpOpaque;
-    if (!nodeType) return false;
-    const index = topLevelIndexAtSelection(editor);
-    let offset = 0;
-    for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
-    const line = state.doc.child(index);
-    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: bpBlock || { type } });
-    const keep = opts.keepLine && !(line.type.name === "paragraph" && line.content.size === 0);
-    editor.view.dispatch(
-      keep
-        ? state.tr.insert(offset + line.nodeSize, node)
-        : state.tr.replaceWith(offset, offset + line.nodeSize, node),
-    );
-    return true;
+    return slashPaletteMethods._insertObjectBlock.call(this, type, bpBlock, opts);
   }
 
-  // The palette's Insert command for a type the field DECLARES as an object
-  // block (task-441e0c1cc08acc5e): the same declared insert the slash pick
-  // makes (field dialog first), never the canvas built-in of that name.
   _insertDeclaredObject(type) {
-    const insert = (values) => this._insertObjectBlock(type, values, { keepLine: true });
-    if (!openObjectBlockInsert(this, this._editor, type, insert)) {
-      insert(undefined);
-      return true;
-    }
-    // The palette refocused the editor before running this command, and TipTap's
-    // focus() takes the caret back on the next animation frame — after the dialog
-    // focused its first field. Take it back to the dialog (task-040407b85629d22b).
-    const dialog = this._inlineObjectDialog();
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
-    }
-    return true;
+    return slashPaletteMethods._insertDeclaredObject.call(this, type);
   }
 
-  // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
-  //
-  // The masters affordances exist only inside a Studio paper editor that rendered
-  // the `[data-paper-masters]` carrier (the pane may write). A field canvas
-  // (data-vocabulary) and the public reader never get them.
   _mastersRoot() {
-    if (this.hasAttribute("data-vocabulary")) return null;
-    const editor = this.closest(".bp-paper-editor");
-    return editor && editor.querySelector("[data-paper-masters]") ? editor : null;
+    return slashPaletteMethods._mastersRoot.call(this);
   }
 
   _canSaveMaster(node) {
-    if (!this._editable || !node || !this._mastersRoot()) return false;
-    const id = node.attrs && node.attrs.bpId;
-    if (typeof id !== "string" || id === "" || node.attrs.locked === true) return false;
-    return (this._blocks || []).some((block) => block && block.id === id);
+    return slashPaletteMethods._canSaveMaster.call(this, node);
   }
 
-  // Ask the host to save a confirmed block as a master (the hook forwards it as
-  // `paper-save-master`); the server re-validates masterability.
   _saveMaster(node) {
-    if (!this._canSaveMaster(node)) return false;
-    this.dispatchEvent(
-      new CustomEvent("bp-save-master", {
-        detail: { block_id: node.attrs.bpId },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-    return true;
+    return slashPaletteMethods._saveMaster.call(this, node);
   }
 
-  // A Masters pick: remove the "/query" paragraph, flush that removal so it is
-  // queued BEFORE the insert, then ask the host to insert the detached copy after
-  // a block the server already holds (masterInsertAnchor). The editor is blurred
-  // so the server echo carrying the copy renders as soon as it lands instead of
-  // waiting for the author to leave the editor.
-  // `mode` "linked" (task-59be65118320fa0e) asks for a `master-ref` instance;
-  // null keeps the detached copy (no mode on the wire).
   _insertMaster(masterId, mode = null) {
-    const editor = this._editor;
-    if (!editor || typeof masterId !== "string" || masterId === "") return false;
-    const slashIndex = topLevelIndexAtSelection(editor);
-    const liveIds = [];
-    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
-    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
-    const afterId = masterInsertAnchor(liveIds, slashIndex, confirmed);
-
-    // Drop the "/query" block (an only child is replaced by an empty paragraph).
-    const { state } = editor;
-    let offset = 0;
-    for (let i = 0; i < slashIndex; i++) offset += state.doc.child(i).nodeSize;
-    const slashNode = state.doc.child(slashIndex);
-    let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
-    if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
-    editor.view.dispatch(tr);
-    this.flushPendingChanges();
-    editor.commands.blur();
-
-    this.dispatchEvent(
-      new CustomEvent("bp-master-insert", {
-        detail: mode === "linked"
-          ? { master_id: masterId, after_id: afterId, mode: "linked" }
-          : { master_id: masterId, after_id: afterId },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-    return true;
+    return slashPaletteMethods._insertMaster.call(this, masterId, mode);
   }
 
-  // Terminal / Stage (CANVAS_SERVER_INSERT_TYPES, owner ruling 2026-10-03 #56): ask
-  // the host to insert the block through the server (`paper-slash-insert`, the same
-  // default_block/2 + insert-after "+ Add block" uses) instead of inserting a node the
-  // server's canvas fence refuses. The anchor is a block the server already holds
-  // (masterInsertAnchor). A slash pick removes its "/query" line first and flushes
-  // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
-  // caret's block and anchors on it when it is confirmed. The editor is blurred so
-  // the server echo carrying the new block renders at once.
-  // Does the host build blocks on the server? Barkpark's LiveView hook marks the editor
-  // (or an ancestor) `data-server-insert`; a plain embedder does not (see slash-insert.js).
   _hostBuildsInserts() {
-    return Boolean(this.closest && this.closest("[data-server-insert]"));
+    return slashPaletteMethods._hostBuildsInserts.call(this);
   }
 
   _insertViaServer(type, { replaceSlashLine = false } = {}) {
-    const editor = this._editor;
-    if (!editor || !this._editable || !serverBuildsInsert(type, this._hostBuildsInserts())) return false;
-    const index = topLevelIndexAtSelection(editor);
-    const liveIds = [];
-    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
-    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
-    // A palette pick may anchor ON the caret's block (search from index + 1 down);
-    // a slash pick never anchors on the line it removes.
-    const afterId = masterInsertAnchor(liveIds, replaceSlashLine ? index : index + 1, confirmed);
-
-    if (replaceSlashLine) {
-      const { state } = editor;
-      let offset = 0;
-      for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
-      const slashNode = state.doc.child(index);
-      let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
-      if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
-      editor.view.dispatch(tr);
-    }
-    this.flushPendingChanges();
-    editor.commands.blur();
-
-    this.dispatchEvent(
-      new CustomEvent("bp-server-insert", {
-        detail: { type, after_id: afterId },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-    return true;
+    return slashPaletteMethods._insertViaServer.call(this, type, replaceSlashLine);
   }
 
-  // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
-  // may want to keep typing a real slash. Mirrors ../index.js:_dismissSlash.
   _dismissSlash() {
-    this._closeSlash();
-    this._editor.commands.focus();
+    return slashPaletteMethods._dismissSlash.call(this);
   }
 
-  // ── P5 command palette (Cmd-P) ─────────────────────────────────────────────
-  //
-  // The Obsidian Cmd-P analog. Opened on Mod-p (see _onKeyDown), it floats a
-  // centered modal over the editor listing the WHOLE command registry, fuzzy-
-  // filtered by what the user types into its query input. UNLIKE the slash/[[ /#
-  // popups it consumes NO doc text — it is keyboard-triggered. On a pick it runs the
-  // command's run(editor), closes, and refocuses; the command then emits the normal
-  // bp-canvas-ops via the onUpdate path (insert → insert-after; format → patch-block).
   _openPalette() {
-    if (!this._editable || !this._editor) return;
-    // The View-group "Toggle Markdown source" command calls back into the WC's
-    // toggle (the canvas owns the rich⇄source swap, not the editor) — the SAME method
-    // Mod-Shift-m calls, so both triggers are identical.
-    const registryOpts = {
-      onToggleSource: () => this.toggleSourceMode(),
-      // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
-      onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
-      serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
-      // Declared inline objects: inserted at the caret, anywhere in prose.
-      inlineObjects: this._inlineObjectVocabulary()?.inlineObjects || [],
-      onInlineInsert: (name) => insertInlineObject(this, this._editor, name),
-      // A declared object block wins over the same-named built-in insert
-      // (task-441e0c1cc08acc5e, the palette twin of the slash rule).
-      declaredObjects: this._objectOverrides(),
-      onObjectInsert: (type) => this._insertDeclaredObject(type),
-      // Insert Image opens the host's picker for the new block (mediaPicker).
-      onImageInserted: () => this._pickInsertedImage(),
-    };
-    if (!this._palette) {
-      this._palette = new CommandPalette({
-        commands: buildCommandRegistry(this._editor, registryOpts),
-        onChoose: (cmd) => this._choosePaletteCommand(cmd),
-        onDismiss: () => this._dismissPalette(),
-      });
-    } else {
-      // Rebuild the registry against the LIVE editor on each open so command
-      // availability (e.g. underline only if registered) reflects the current state.
-      this._palette.setCommands(buildCommandRegistry(this._editor, registryOpts));
-    }
-    // The rect is ignored by CommandPalette._position (centered modal); pass the
-    // caret rect anyway for API symmetry with the slash popup. Empty initial query.
-    this._palette.open(this._caretRect(), "");
+    return slashPaletteMethods._openPalette.call(this);
   }
 
   _closePalette() {
-    if (this._palette && this._palette.isOpen()) this._palette.close();
+    return slashPaletteMethods._closePalette.call(this);
   }
 
-  // User picked a command: close the palette, refocus the editor, then run the
-  // command. run() acts on the current selection/block via the editor chain (format/
-  // turn-into) or inserts a default node (Insert, via the shared slash seam), each of
-  // which mutates the doc → onUpdate → debounced bp-canvas-ops. Refocus BEFORE run so
-  // chain().focus() lands on the editor selection the user left (the palette input
-  // never held a ProseMirror selection).
   _choosePaletteCommand(cmd) {
-    this._closePalette();
-    this._editor.commands.focus();
-    if (cmd && typeof cmd.run === "function") {
-      try {
-        cmd.run(this._editor);
-      } catch (_e) {
-        // A command failure must not wedge the palette/editor — it is already closed
-        // and refocused; swallow so a bad command is a no-op, not a crash.
-      }
-    }
+    return slashPaletteMethods._choosePaletteCommand.call(this, cmd);
   }
 
-  // Esc / outside-click / Mod-p-toggle: close the palette and refocus the editor. No
-  // doc text to preserve (the palette consumed none).
   _dismissPalette() {
-    this._closePalette();
-    this._editor.commands.focus();
+    return slashPaletteMethods._dismissPalette.call(this);
   }
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──

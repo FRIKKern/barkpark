@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
@@ -139,12 +139,12 @@ const IMPORTS = [
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"../markdown.js","specifiers":[{"imported":"markdownToBlocks","local":"markdownToBlocks"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./canvas-menu-catalog.js","specifiers":[{"imported":"CANVAS_SLASH_ITEMS","local":"CANVAS_SLASH_ITEMS"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./command-palette.js","specifiers":[{"imported":"insertSlashTypeAtSelection","local":"insertSlashTypeAtSelection"}]},
-  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./comment-ranges.js","specifiers":[{"imported":"commentRangesState","local":"commentRangesState"},{"imported":"crInSelection","local":"crInSelection"},{"imported":"crSet","local":"crSet"}]},
-  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./find-replace.js","specifiers":[{"imported":"frClear","local":"frClear"},{"imported":"frReplaceAll","local":"frReplaceAll"},{"imported":"frReplaceCurrent","local":"frReplaceCurrent"},{"imported":"frSet","local":"frSet"},{"imported":"frState","local":"frState"},{"imported":"frStep","local":"frStep"}]},
+  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./comment-ranges.js","specifiers":[{"imported":"commentRangesState","local":"commentRangesState"},{"imported":"commentsInSelection","local":"crInSelection"},{"imported":"setCommentRanges","local":"crSet"}]},
+  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./find-replace.js","specifiers":[{"imported":"findClear","local":"frClear"},{"imported":"replaceAll","local":"frReplaceAll"},{"imported":"replaceCurrent","local":"frReplaceCurrent"},{"imported":"findSet","local":"frSet"},{"imported":"findState","local":"frState"},{"imported":"findStep","local":"frStep"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./host-commands.js","specifiers":[{"imported":"canSetBlockStyle","local":"canSetBlockStyle"},{"imported":"canToggleList","local":"canToggleList"},{"imported":"canToggleMark","local":"canToggleMark"},{"imported":"emptyToolbarState","local":"emptyToolbarState"},{"imported":"setBlockStyle","local":"hcSetBlockStyle"},{"imported":"toggleList","local":"hcToggleList"},{"imported":"toggleMark","local":"hcToggleMark"},{"imported":"toolbarState","local":"toolbarState"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./inline-object.js","specifiers":[{"imported":"insertInlineObject","local":"insertInlineObject"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./link-preview.js","specifiers":[{"imported":"LinkPreview","local":"LinkPreview"}]},
-  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./remote-selections.js","specifiers":[{"imported":"pointsFromSelection","local":"pointsFromSelection"},{"imported":"rsSet","local":"rsSet"}]},
+  {"owner":"src/canvas/canvas-methods-host-api.js","source":"./remote-selections.js","specifiers":[{"imported":"pointsFromSelection","local":"pointsFromSelection"},{"imported":"setRemoteSelections","local":"rsSet"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./run-convert.js","specifiers":[{"imported":"docToBlocks","local":"docToBlocks"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./slash-insert.js","specifiers":[{"imported":"serverBuildsInsert","local":"serverBuildsInsert"}]},
   {"owner":"src/canvas/canvas-methods-host-api.js","source":"./source-realign.js","specifiers":[{"imported":"clampLockedPrefix","local":"clampLockedPrefix"},{"imported":"deepCloneBlocks","local":"deepCloneBlocks"},{"imported":"realignAcrossCommits","local":"realignAcrossCommits"}]},
@@ -199,22 +199,87 @@ assert.equal(EXPORTS.reduce((n, x) => n + x.exports.length, 0), 111);
 assert.equal(ROOT_NAMESPACES.length, 5);
 assert.equal(CATALOG_CONSUMERS.length, 2);
 
-const sourceLines = lines(source);
-const commentSliceMatches = (row) => {
-  const before = sourceLines.slice(Math.max(0, row.l[0] - 41), row.l[0] - 1).join("");
+const leafFile = {
+  hostApiMethods: "canvas-methods-host-api.js",
+  keyboardMethods: "canvas-methods-keyboard.js",
+  pasteMediaMethods: "canvas-methods-paste-media.js",
+  pickerMethods: "canvas-methods-pickers.js",
+  slashPaletteMethods: "canvas-methods-slash-palette.js",
+};
+const texts = new Map([["index.js", source], ...Object.values(leafFile).map((name) => [name, readFileSync(join(here, name), "utf8")])]);
+texts.set("canvas-menu-catalog.js", readFileSync(join(here, "canvas-menu-catalog.js"), "utf8"));
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const methodStart = (text, row, leaf = false) => {
+  const prefix = leaf ? `export function ${escapeRegExp(row.u)}\\s*\\(` : `${row.s ? "static\\s+" : ""}${row.a ? "async\\s+" : ""}${row.y === "method" ? "" : row.y + "\\s+"}${escapeRegExp(row.n)}\\s*\\(`;
+  const match = new RegExp(`^${leaf ? "[ \\t]*" : "  "}${prefix}`, "m").exec(text);
+  assert.ok(match, `${leaf ? "leaf" : "wrapper"} header: ${row.k}`);
+  return match.index + (leaf ? match[0].indexOf("export") : 2);
+};
+const headerAt = (text, start, expected) => {
+  for (let at = text.indexOf("{", start); at !== -1 && at < start + 500; at = text.indexOf("{", at + 1))
+    if (sha(text.slice(start, at)) === expected) return { header: text.slice(start, at), bodyStart: at };
+  assert.fail(`header hash ${expected}`);
+};
+const bodyAt = (text, start, expected, label) => {
+  for (let at = text.indexOf("}", start); at !== -1; at = text.indexOf("}", at + 1)) {
+    const candidate = text.slice(start, at + 1);
+    if (sha(candidate) === expected) return candidate;
+  }
+  assert.fail("unclosed body: " + label);
+};
+const commentPrefix = (text, headerStart, expected) => {
+  if (!expected) return "";
+  const before = text.slice(Math.max(0, headerStart - 5000), headerStart);
   const starts = [...before.matchAll(/\/\/|\/\*/g)].map((match) => match.index);
   const ends = [...before.matchAll(/(?=\n|$)/g)].map((match) => match.index);
-  return starts.some((start) => ends.some((end) => end > start && sha(before.slice(start, end)) === row.q));
+  for (const start of starts) for (const end of ends)
+    if (end > start && sha(before.slice(start, end)) === expected) return before.slice(start);
+  assert.fail(`comment hash ${expected}`);
 };
 for (const row of METHODS) {
-  const segment = sourceLines.slice(row.l[0] - 1, row.l[1]).join("");
-  const [start, bodyStart, bodyEnd] = row.o;
-  assert.equal(sha(segment.slice(start, bodyStart)), row.h, "header: " + row.k);
-  assert.equal(sha(segment.slice(bodyStart, bodyEnd)), row.b, "body: " + row.k);
-  if (row.co) assert.equal(commentSliceMatches(row), true, "comments: " + row.k);
+  const rootStart = methodStart(source, row);
+  const root = headerAt(source, rootStart, row.h);
+  if (row.d === "RETAIN") {
+    const body = bodyAt(source, root.bodyStart, row.b, row.k);
+    assert.equal(sha(body), row.b, "retained body: " + row.k);
+    const comment = commentPrefix(source, rootStart, row.q);
+    assert.equal(sha(comment + root.header + body), row.z, "retained segment: " + row.k);
+  } else {
+    const leaf = texts.get(leafFile[row.c === "host-api" ? "hostApiMethods" : row.c === "keyboard" ? "keyboardMethods" : row.c === "paste-media" ? "pasteMediaMethods" : row.c === "pickers" ? "pickerMethods" : "slashPaletteMethods"]);
+    const leafStart = methodStart(leaf, row, true);
+    const found = headerAt(leaf, leafStart, row.p);
+    const body = bodyAt(leaf, found.bodyStart, row.b, row.k);
+    assert.equal(sha(body), row.b, "moved body: " + row.k);
+    const comment = commentPrefix(leaf, leafStart, row.q);
+    assert.equal(sha(comment + root.header + body), row.z, "moved segment: " + row.k);
+  }
 }
-for (const helper of HELPERS)
-  assert.equal(sha(sourceLines.slice(helper.startLine - 1, helper.endLine).join("")), helper.sha256, helper.name);
+const helperOwner = { DRAG_COPY_KEY: "canvas-methods-paste-media.js", "stripMarks+figurePastePlan": "canvas-methods-paste-media.js", "canvas-menu-catalog": "canvas-menu-catalog.js", triggerText: "canvas-methods-pickers.js", hasModifier: "canvas-methods-keyboard.js" };
+for (const helper of HELPERS) {
+  const text = texts.get(helperOwner[helper.name]).replaceAll("export const CANVAS_SLASH_", "const CANVAS_SLASH_");
+  const sourceLines = lines(text);
+  let found = 0;
+  for (let start = 0; start < sourceLines.length; start++) for (let count = 1; count <= 80 && start + count <= sourceLines.length; count++)
+    if (sha(sourceLines.slice(start, start + count).join("")) === helper.sha256) found++;
+  assert.equal(found, 1, "single helper owner: " + helper.name);
+}
+const parseImports = (text) => {
+  const records = [];
+  for (const match of text.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["'];/g)) records.push({ source: match[2], namespace: match[1] });
+  for (const match of text.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/g)) {
+    const specifiers = match[1].split(",").map((part) => part.trim()).filter(Boolean).map((part) => { const [imported, local = imported] = part.split(/\s+as\s+/); return { imported, local }; });
+    records.push({ source: match[2], specifiers });
+  }
+  return records;
+};
+for (const expected of IMPORTS) {
+  const name = expected.owner.split("/").at(-1), actual = parseImports(texts.get(name)).find((record) => record.source === expected.source);
+  assert.deepEqual(actual?.specifiers, expected.specifiers, `imports: ${expected.owner}:${expected.source}`);
+  if (expected.source.startsWith(".")) assert.equal(existsSync(join(dirname(join(here, name)), expected.source)), true, `resolves: ${expected.owner}:${expected.source}`);
+  assert.notEqual(expected.source, "./index.js", "no leaf backedge");
+}
+const rootImports = parseImports(source).filter((record) => record.namespace);
+assert.deepEqual(rootImports.filter((record) => ROOT_NAMESPACES.some((expected) => expected.source === record.source)), ROOT_NAMESPACES);
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 const { window } = dom;
@@ -229,6 +294,10 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 const { BpPaperCanvas } = await import("./index.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
+for (const expected of EXPORTS) {
+  const namespace = await import(`./${expected.owner.split("/").at(-1)}`);
+  assert.deepEqual(Object.keys(namespace).sort(), [...expected.exports].sort(), "exports: " + expected.owner);
+}
 for (const row of METHODS) {
   const owner = row.s ? BpPaperCanvas : BpPaperCanvas.prototype;
   const descriptor = Object.getOwnPropertyDescriptor(owner, row.n);
