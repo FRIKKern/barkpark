@@ -152,6 +152,8 @@ jobs:
           node ../paper-editor-host-tests/__tab_keys.test.mjs
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/callout-parity.test.mjs
+          node ../paper-editor-host-tests/contract-truth.test.mjs
+          node ../paper-editor-host-tests/contextual-controls.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
