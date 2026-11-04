@@ -1,4 +1,4 @@
-@import "../../paper-surface/code-tokens.css";
+@import "./code-tokens.css";
 @import "./styles/theme.css";
 @import "./styles/content.css";
 @import "./styles/canvas.css";

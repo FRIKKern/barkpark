@@ -1,11 +1,13 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CODE_TOKENS_PROVENANCE } from "./code-tokens.provenance.mjs";
 
 const SOURCE_ROOT = dirname(fileURLToPath(import.meta.url));
 export const CSS_ROOT = resolve(SOURCE_ROOT, "styles.css");
 export const CSS_AUTHORED_DIR = resolve(SOURCE_ROOT, "styles");
-export const CSS_SHARED_INPUT = resolve(SOURCE_ROOT, "../../paper-surface/code-tokens.css");
+export const CSS_SHARED_INPUT = resolve(SOURCE_ROOT, CODE_TOKENS_PROVENANCE.consumer);
 
 const IMPORT = /@import\s+(["'])([^"']+)\1([^;]*);/g;
 
@@ -14,6 +16,50 @@ const stripComments = value => value.replace(/\/\*[\s\S]*?\*\//g, "");
 const inside = (path, directory) => {
   const rel = relative(directory, path);
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+};
+
+const inOrEqual = (path, directory) => path === directory || inside(path, directory);
+
+const provenance = () => {
+  const keys = Object.keys(CODE_TOKENS_PROVENANCE).sort();
+  if (!Object.isFrozen(CODE_TOKENS_PROVENANCE) ||
+      JSON.stringify(keys) !== JSON.stringify(["consumer", "schemaVersion", "sha256", "source"]) ||
+      CODE_TOKENS_PROVENANCE.schemaVersion !== 1 ||
+      CODE_TOKENS_PROVENANCE.consumer !== "code-tokens.css" ||
+      CODE_TOKENS_PROVENANCE.source !== "api/assets/paper-surface/code-tokens.css" ||
+      !/^[0-9a-f]{64}$/.test(CODE_TOKENS_PROVENANCE.sha256))
+    throw new Error("css source graph: invalid code-token provenance record");
+  const digest = createHash("sha256").update(readFileSync(CSS_SHARED_INPUT)).digest("hex");
+  if (digest !== CODE_TOKENS_PROVENANCE.sha256)
+    throw new Error(`css source graph: shared stylesheet digest ${digest} does not match provenance`);
+};
+
+const physical = (path, label, directory = false) => {
+  const direct = resolve(path);
+  const stat = lstatSync(direct);
+  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
+    throw new Error(`css source graph: ${label} must be a regular physical ${directory ? "directory" : "file"}: ${path}`);
+  if (realpathSync(direct) !== direct)
+    throw new Error(`css source graph: ${label} must resolve to its direct package-local path: ${path}`);
+};
+
+const selectedPaths = options => {
+  if (options === undefined) return { production: true, rootPath: CSS_ROOT, authoredDir: CSS_AUTHORED_DIR, sharedPath: CSS_SHARED_INPUT };
+  if (options === null || typeof options !== "object" || Array.isArray(options))
+    throw new Error("css source graph: options must be an object");
+  const keys = Object.keys(options);
+  const allowed = ["authoredDir", "rootPath", "sharedPath"];
+  const unknown = keys.filter(key => !allowed.includes(key));
+  if (unknown.length) throw new Error(`css source graph: unknown option ${unknown.join(", ")}`);
+  if (keys.length === 0) return { production: true, rootPath: CSS_ROOT, authoredDir: CSS_AUTHORED_DIR, sharedPath: CSS_SHARED_INPUT };
+  if (allowed.some(key => !Object.hasOwn(options, key)) || keys.length !== allowed.length)
+    throw new Error("css source graph: synthetic mode requires all three path options");
+  if (allowed.some(key => typeof options[key] !== "string"))
+    throw new Error("css source graph: synthetic paths must be strings");
+  const selected = Object.fromEntries(allowed.map(key => [key, resolve(options[key])]));
+  if (Object.values(selected).some(path => inOrEqual(path, SOURCE_ROOT)))
+    throw new Error("css source graph: synthetic paths must be outside production source root");
+  return { production: false, ...selected };
 };
 
 const canonical = (path, label) => {
@@ -46,16 +92,21 @@ function parseImports(path, source) {
   return { imports, body };
 }
 
-export function readCssSourceGraph({
-  rootPath = CSS_ROOT,
-  authoredDir = CSS_AUTHORED_DIR,
-  sharedPath = CSS_SHARED_INPUT,
-} = {}) {
+export function readCssSourceGraph(options) {
+  const { production, rootPath, authoredDir, sharedPath } = selectedPaths(options);
+  if (production) {
+    physical(CSS_ROOT, "root stylesheet");
+    physical(CSS_AUTHORED_DIR, "authored directory", true);
+    physical(CSS_SHARED_INPUT, "shared stylesheet");
+    provenance();
+  }
   const root = canonical(rootPath, "root stylesheet");
   const authored = realpathSync(authoredDir);
   if (!statSync(authored).isDirectory())
     throw new Error(`css source graph: authored directory is not a directory: ${authoredDir}`);
   const shared = canonical(sharedPath, "shared stylesheet");
+  if (!production && [root, authored, shared].some(path => inOrEqual(path, SOURCE_ROOT)))
+    throw new Error("css source graph: synthetic canonical paths must be outside production source root");
   const seen = new Map();
   const active = new Set();
   const authoredFiles = [];
