@@ -97,7 +97,11 @@ export async function surface() {
   const canvas = await mountedMembers(dom.window, "bp-paper-canvas");
   const editorEl = await mountedMembers(dom.window, "bp-paper-editor");
   const canvasSource = elementClassBody(readFileSync(path.join(root, "src/canvas/index.js"), "utf8"));
-  const editorSource = elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8"));
+  const editorSource = [
+    elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8")),
+    readFileSync(path.join(root, "src/paper-editor-runtime.js"), "utf8"),
+    readFileSync(path.join(root, "src/paper-editor-autocomplete.js"), "utf8"),
+  ].join("\n");
   const editor = dom.window.customElements.get("bp-paper-editor");
   const page = { classes: outside(readerClasses(reader)), attributes: outside(readerAttributes(reader)) };
   const notClass = new Set([...notClasses(js), ...page.classes]);

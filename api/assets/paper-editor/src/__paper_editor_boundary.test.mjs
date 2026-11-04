@@ -3,7 +3,13 @@
 // this first stage must pass against the untouched monolith.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -37,6 +43,10 @@ customElements.define = (name, constructor, options) => {
 
 const editorModule = await import("./index.js");
 const { BpPaperEditor, CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } = editorModule;
+const runtimeModule = await import("./paper-editor-runtime.js");
+const autocompleteModule = await import("./paper-editor-autocomplete.js");
+const { paperEditorRuntimeMethods } = runtimeModule;
+const { paperEditorAutocompleteMethods } = autocompleteModule;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const runtimeMethods = Object.freeze({
@@ -129,6 +139,77 @@ assert.equal(definitions.filter(({ name }) => name === "bp-paper-canvas").length
 assert.equal(definitions.filter(({ name }) => name === "bp-paper-editor").length, 1);
 assert.equal(customElements.get("bp-paper-canvas"), definitions[0].constructor);
 assert.equal(customElements.get("bp-paper-editor"), BpPaperEditor);
+
+assert.deepEqual(Object.keys(runtimeModule), ["paperEditorRuntimeMethods"]);
+assert.deepEqual(Object.keys(autocompleteModule), ["paperEditorAutocompleteMethods"]);
+assert.equal(Object.isFrozen(paperEditorRuntimeMethods), true);
+assert.equal(Object.isFrozen(paperEditorAutocompleteMethods), true);
+assert.deepEqual(Object.keys(paperEditorRuntimeMethods), Object.keys(runtimeMethods));
+assert.deepEqual(Object.keys(paperEditorAutocompleteMethods), Object.keys(autocompleteMethods));
+for (const [table, manifest] of [
+  [paperEditorRuntimeMethods, runtimeMethods],
+  [paperEditorAutocompleteMethods, autocompleteMethods],
+]) {
+  for (const [name, length] of Object.entries(manifest)) {
+    const descriptor = Object.getOwnPropertyDescriptor(table, name);
+    assert.deepEqual(
+      { name: descriptor.value.name, length: descriptor.value.length, writable: descriptor.writable,
+        enumerable: descriptor.enumerable, configurable: descriptor.configurable },
+      { name, length, writable: false, enumerable: true, configurable: false },
+      `${name} child-table descriptor`,
+    );
+  }
+}
+
+const sources = Object.fromEntries([
+  "index.js", "paper-editor-runtime.js", "paper-editor-autocomplete.js",
+].map((name) => [name, readFileSync(path.join(root, "src", name), "utf8")]));
+for (const [name, source] of Object.entries(sources)) {
+  assert.ok(source.replace(/\n$/, "").split("\n").length <= 800, `${name} stays at or below 800 lines`);
+}
+assert.equal((sources["index.js"].match(/from "\.\/paper-editor-runtime\.js"/g) || []).length, 1);
+assert.equal((sources["index.js"].match(/from "\.\/paper-editor-autocomplete\.js"/g) || []).length, 1);
+assert.doesNotMatch(sources["paper-editor-runtime.js"], /from "\.\/index\.js"/);
+assert.doesNotMatch(sources["paper-editor-autocomplete.js"], /from "\.\/index\.js"/);
+for (const [name, tableName] of [
+  ...Object.keys(runtimeMethods).map((name) => [name, "paperEditorRuntimeMethods"]),
+  ...Object.keys(autocompleteMethods).map((name) => [name, "paperEditorAutocompleteMethods"]),
+]) {
+  assert.equal((sources["index.js"].match(new RegExp(`^  ${name.replace("$", "\\$")}\\(`, "gm")) || []).length, 1,
+    `${name}: one facade method`);
+  assert.match(sources["index.js"], new RegExp(`return ${tableName}\\.${name.replace("$", "\\$")}\\.call\\(this`),
+    `${name}: synchronous this-bound return wrapper`);
+}
+
+const childImport = spawnSync(process.execPath, ["--input-type=module", "-e", `
+  let timers = 0;
+  const nativeTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (...args) => { timers += 1; return nativeTimeout(...args); };
+  const definitions = [];
+  globalThis.customElements = { define: (...args) => definitions.push(args), get: () => undefined };
+  globalThis.document = new Proxy({}, { get() { throw new Error("child import touched DOM"); } });
+  const runtime = await import(${JSON.stringify(new URL("./paper-editor-runtime.js?child-only", import.meta.url).href)});
+  const autocomplete = await import(${JSON.stringify(new URL("./paper-editor-autocomplete.js?child-only", import.meta.url).href)});
+  if (definitions.length !== 0 || timers !== 0) throw new Error("child import has top-level side effects");
+  if (Object.keys(runtime).join() !== "paperEditorRuntimeMethods") throw new Error("runtime namespace drift");
+  if (Object.keys(autocomplete).join() !== "paperEditorAutocompleteMethods") throw new Error("autocomplete namespace drift");
+`], { encoding: "utf8" });
+assert.equal(childImport.status, 0, childImport.stderr || childImport.stdout);
+
+assert.equal(BpPaperEditor.prototype.flushPendingChanges.call({ _editor: null }),
+  paperEditorRuntimeMethods.flushPendingChanges.call({ _editor: null }));
+assert.equal(BpPaperEditor.prototype.hasPendingChanges.call({ _debounceTimer: null, _tableSettlement: null }),
+  paperEditorRuntimeMethods.hasPendingChanges.call({ _debounceTimer: null, _tableSettlement: null }));
+assert.equal(BpPaperEditor.prototype._maybeSlash.call({ _editable: false }),
+  paperEditorAutocompleteMethods._maybeSlash.call({ _editable: false }));
+assert.equal(BpPaperEditor.prototype._maybeWikilink.call({ _editable: false }),
+  paperEditorAutocompleteMethods._maybeWikilink.call({ _editable: false }));
+
+const { surface } = await import("../scripts/surface.mjs");
+const baselineSurface = JSON.parse(readFileSync(path.join(root, "host-profile/surface.json"), "utf8"));
+const currentSurface = await surface();
+assert.deepEqual(currentSurface.internal.members.editor, baselineSurface.internal.members.editor,
+  "surface reader retains the exact editor private-member inventory");
 
 const deferred = () => {
   let resolve;
