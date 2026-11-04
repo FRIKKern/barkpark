@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
-import { canvasMethodLeafNames, elementClassBody, sourceMembers } from "../../scripts/surface.mjs";
+import { canvasMethodLeafNames, canvasSourceLeafNames, elementClassBody, sourceMembers } from "../../scripts/surface.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sha = (text) => createHash("sha256").update(text).digest("hex");
@@ -288,9 +288,22 @@ for (const name of methodLeafNames) {
   assert.equal(rootImports.filter((record) => record.source === sourceName).length, 1, `${name} is imported exactly once by the facade`);
   assert.equal(parseImports(texts.get(name)).some((record) => record.source === "./index.js"), false, `${name} has no facade backedge`);
 }
+const sourceLeafNames = canvasSourceLeafNames(readdirSync(here));
+const addedLeafNames = ["canvas-document.js", "canvas-editor-schema.js", "canvas-focus.js", "canvas-lifecycle.js", "canvas-mount.js", "canvas-ops.js", "canvas-server.js"];
+assert.deepEqual(sourceLeafNames, [...methodLeafNames, ...addedLeafNames].sort(), "every source-bearing canvas leaf is owned");
+for (const name of addedLeafNames) {
+  const text = readFileSync(join(here, name), "utf8");
+  texts.set(name, text);
+  assert.equal(parseImports(text).some((record) => record.source === "./index.js"), false, `${name} has no facade backedge`);
+}
+for (const name of addedLeafNames) {
+  const owner = name === "canvas-editor-schema.js" ? "canvas-mount.js" : "index.js";
+  assert.equal(parseImports(texts.get(owner)).filter((record) => record.source === `./${name}`).length, 1,
+    `${name} is reached exactly once by ${owner}`);
+}
 const memberNames = [...new Set(sourceMembers([
   elementClassBody(source),
-  ...methodLeafNames.map((name) => texts.get(name)),
+  ...sourceLeafNames.map((name) => texts.get(name)),
 ].join("\n")))].sort();
 assert.equal(memberNames.length, 206, "interaction source-member census");
 assert.equal(sha(`${memberNames.join("\n")}\n`), "805f20b09124db41e8cc38c3920042ee6247548ca827b353a23989794996b764", "interaction source-member census hash");
