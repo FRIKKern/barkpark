@@ -78,6 +78,8 @@ function makeTree() {
   const files = new Set([
     ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
     SHELL, HEEX, SHELL_CSS, CSS_ENTRY, CSS_GRAPH, CSS_SHARED,
+    "api/assets/paper-editor/src/code-tokens.css",
+    "api/assets/paper-editor/src/code-tokens.provenance.mjs",
   ]);
   for (const rel of files) {
     const dst = join(root, rel);
