@@ -200,7 +200,7 @@ await check("the input census refuses a parent traversal and anything outside sr
 
 const buildDir = path.join(inScratch("build"), "dist");
 const built = await buildLocal({ outDir: buildDir, logLevel: "warning" });
-const builtBytes = Object.fromEntries(LOCAL_OUTPUTS.map((name) => [name, readFileSync(path.join(buildDir, name))]));
+const builtBytes = Object.fromEntries(readdirSync(buildDir).map((name) => [name, readFileSync(path.join(buildDir, name))]));
 
 await check("a build writes exactly the seven outputs and takes only package inputs", () => {
   assert.equal(LOCAL_OUTPUTS.length, 7);

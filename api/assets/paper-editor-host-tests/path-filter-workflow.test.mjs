@@ -21,6 +21,7 @@ assert.deepEqual(Object.keys(arms).sort(), ["pull_request", "push"], "the workfl
 
 const runs = new Map([[join(PKG, "scripts/test-chain.mjs"), chain(PKG).map((file) => join(PKG, file))]]);
 const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF, runs }).reads(yml, scripts);
+assert.match(yml, /^ +run: npm run sync:barkpark:check$/m, "the workflow must run the outward sync check: the test chain also reaches that script, so the census alone cannot see the step go");
 assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
 assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
 
