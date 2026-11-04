@@ -232,6 +232,45 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
              }
     end
 
+    test "expires_at is the session's absolute end, capped by the org policy", ctx do
+      token = member!(ctx)
+
+      expires = fn ->
+        json_response(json_conn(token) |> get("/v1/auth/token"), 200)["expires_at"]
+      end
+
+      session =
+        Barkpark.Repo.get_by!(Accounts.UserSession,
+          token_hash: Accounts.UserSession.hash_token(token)
+        )
+
+      {:ok, row_end, _} = DateTime.from_iso8601(expires.())
+      assert DateTime.compare(row_end, session.expires_at) == :eq
+
+      # The policy changes after sign-in: the next read answers the new end.
+      {:ok, org} =
+        Barkpark.Tenancy.create_organization(%{
+          slug: "a89-org-#{System.unique_integer([:positive])}",
+          name: "org"
+        })
+
+      {:ok, _} = Barkpark.Tenancy.assign_workspace_to_organization(ctx.ws, org.id)
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_organization_session_policy(org.id, %{
+          absolute_lifetime_seconds: 3600
+        })
+
+      {:ok, capped, _} = DateTime.from_iso8601(expires.())
+      assert DateTime.compare(capped, DateTime.add(session.inserted_at, 3600, :second)) == :eq
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_organization_session_policy(org.id, %{absolute_lifetime_seconds: nil})
+
+      {:ok, back, _} = DateTime.from_iso8601(expires.())
+      assert DateTime.compare(back, session.expires_at) == :eq
+    end
+
     test "never leaks the session token or its hash", ctx do
       token = member!(ctx)
       resp = json_conn(token) |> get("/v1/auth/token")
