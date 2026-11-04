@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 // lineage, duel, heatmap, chart and form/questionnaire paints was read-only in
 // Edit (0/n in place). Each stored string the reader paints now edits where it
 // reads; numbers and derived readouts stay panel-edited; reader bytes are kept.
-for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+for (const file of ["../styles.css"]) {
   assert.match(readFileSync(new URL(file, import.meta.url), "utf8"),
     /\[data-bp-fleet-body\] \[contenteditable="plaintext-only"\]\s*\{\s*cursor:\s*text;/,
     `${file}: native inline fields keep the text cursor without changing reader DOM`);

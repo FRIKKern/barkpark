@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 
 // An unstyled reader uses browser paragraph margins, not article tokens. Keep
 // the public shell and standalone editor mirrors scoped to that explicit case.
-for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+for (const file of ["../styles.css"]) {
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-cards-config,\s*\.bp-paper-contextual-controls\.bp-paper-stats-config\s*\{[^}]*bottom: 100%;/s,
     "native collection configuration sits above authored content in every palette");

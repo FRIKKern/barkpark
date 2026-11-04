@@ -8,7 +8,9 @@
 // longer calls it. This census walks src/ on its own and checks, in both directions:
 //   1. every file under src/ named __*.test.mjs is in the chain;
 //   2. every path in the chain exists, and none is there twice;
-//   3. package.json's test script is the runner, and no npm hook runs a chain of its own.
+//   3. package.json's test script is the runner, and no npm hook runs a chain of its own;
+//   4. every smoke case module that directly imports check from the shared harness is
+//      imported exactly once by the aggregate smoke index.
 // An empty disk set or an empty chain also exits 1: a census that found nothing is
 // broken, not clean.
 
@@ -19,6 +21,8 @@ import { chain } from '../scripts/test-chain.mjs';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = path.join(pkgRoot, 'src');
+const smokeRoot = path.join(srcRoot, 'smoke');
+const smokeIndex = path.join(srcRoot, '__smoke.mjs');
 const RUNNER = 'node scripts/test-chain.mjs';
 
 const isTestFile = (name) => name.startsWith('__') && name.endsWith('.test.mjs');
@@ -45,6 +49,32 @@ const named = chain(pkgRoot);
 const inChain = new Set(named);
 
 const problems = [];
+
+const directCheckImport = /^import\s*\{[^}]*\bcheck\b[^}]*\}\s*from\s*["']\.\/harness\.mjs["'];\s*$/m;
+const directSmokeImport = /^import\s+["']\.\/smoke\/([^"']+\.mjs)["'];\s*$/gm;
+const hasSmokeRoot = existsSync(smokeRoot) && statSync(smokeRoot).isDirectory();
+const hasSmokeIndex = existsSync(smokeIndex) && statSync(smokeIndex).isFile();
+if (hasSmokeRoot && !hasSmokeIndex) {
+  problems.push('src/smoke exists but src/__smoke.mjs does not');
+}
+if (hasSmokeRoot && hasSmokeIndex) {
+  const smokeCases = readdirSync(smokeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.mjs'))
+    .filter((entry) => directCheckImport.test(readFileSync(path.join(smokeRoot, entry.name), 'utf8')))
+    .map((entry) => entry.name)
+    .sort();
+  const smokeImports = [...readFileSync(smokeIndex, 'utf8').matchAll(directSmokeImport)]
+    .map((match) => match[1]);
+  const smokeImportCounts = new Map();
+  for (const name of smokeImports) smokeImportCounts.set(name, (smokeImportCounts.get(name) ?? 0) + 1);
+
+  if (smokeCases.length === 0) problems.push('no smoke case module directly imports check from ./harness.mjs');
+  for (const name of smokeCases) {
+    const count = smokeImportCounts.get(name) ?? 0;
+    if (count === 0) problems.push(`src/smoke/${name} imports check but src/__smoke.mjs does not import it`);
+    if (count > 1) problems.push(`src/__smoke.mjs imports smoke case src/smoke/${name} ${count} times`);
+  }
+}
 
 if (onDisk.length === 0) problems.push('no files matching src/**/__*.test.mjs exist — the suite cannot be empty');
 if (named.length === 0) problems.push('scripts/test-chain.mjs names no files');

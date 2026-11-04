@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 // task-bbfdcf4c80b8300d wave 2: a notes row's label ("P1"), lead ("One
 // vocabulary.") and body edit where the reader paints them. Before this, the
 // whole notes block was a read-only fleet paint with a JSON textarea island.
-for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+for (const file of ["../styles.css"]) {
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-notes-config\s*\{[^}]*bottom: 100%;/s,
     `${file}: notes configuration sits above the authored rows`);

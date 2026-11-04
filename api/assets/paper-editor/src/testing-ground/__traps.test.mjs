@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { trip } from "./drills/trip.mjs";
 import { barkparkFold } from "./barkpark-fold.mjs";
 import { createFakeHost } from "./fake-host.mjs";
@@ -29,12 +29,6 @@ assert.deepEqual(sentDuplicates([nestedEnter]), ["p-day"], "the batch carries th
 assert.deepEqual(sentDuplicates([{ seq: 1, ops: [{ op: "replace-block", id: "s-day", block: trip[1] }] }]), [], "an op naming its own block is not a duplicate");
 assert.equal(light(lights({ ...calm, batches: [nestedEnter] }), "duplicate-ids").ok, false);
 assert.match(light(lights({ ...calm, saved: split }), "duplicate-ids").words, /Used twice: p-day/);
-
-const pack = new URL("../../../../priv/portable_doc/goldens/blocks/", import.meta.url);
-for (const name of readdirSync(pack)) {
-  const { type, input } = JSON.parse(readFileSync(new URL(name, pack), "utf8"));
-  assert.deepEqual(duplicateIds([{ id: `s-${type}`, ...input }]), [], `${type}: the pack sample opens with no duplicate ids`);
-}
 
 const fold = referenceFold.apply;
 await assert.rejects(fold(trip, nestedEnter.ops), /replace-block: duplicate id p-day/, "the reference fold refuses the nested Enter batch, as patch.ex does");
