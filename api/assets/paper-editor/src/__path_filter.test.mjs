@@ -198,11 +198,11 @@ export function scanner({ repo, pkg, notRead = new Map(), self = null, runs = ne
   return { candidates, sinkOf, reads };
 }
 
-export function verdict(arms, sinks, pkgPrefix) {
+export function verdict(arms, sinks, ownedPrefixes) {
   return {
     unequal: JSON.stringify(arms.push) !== JSON.stringify(arms.pull_request),
     missing: [...sinks].filter(([sink]) => !covers(arms.push, sink)).map(([sink, by]) => `${sink}  (read by ${by})`),
-    unused: arms.push.filter((p) => !p.startsWith(pkgPrefix) && ![...sinks.keys()].some((s) => covers([p], s))),
+    unused: arms.push.filter((p) => !ownedPrefixes.some((prefix) => p.startsWith(prefix)) && ![...sinks.keys()].some((s) => covers([p], s))),
   };
 }
 
@@ -222,7 +222,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
   assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
 
-  const { unequal, missing, unused } = verdict(arms, sinks, "api/assets/paper-editor/");
+  const ownedPrefixes = ["api/assets/paper-editor/", "api/assets/paper-editor-host-tests/"];
+  const { unequal, missing, unused } = verdict(arms, sinks, ownedPrefixes);
   assert.equal(unequal, false, "push and pull_request list the same paths");
   assert.deepEqual(missing, [], "files a paper-editor step reads that its path filter does not list: add each to BOTH arms of .github/workflows/paper-editor.yml");
   assert.deepEqual(unused, [], "path filter entries no paper-editor step reads: remove them, or the derivation missed a read");

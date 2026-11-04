@@ -87,11 +87,21 @@ try {
   const walked = scanner({ repo, pkg }).reads(yml, scripts);
   assert.equal(walked.entries, 2, "npm test runs pretest and test, not pack");
   assert.deepEqual([...walked.sinks.keys()].sort(), ["fx/lib/a.ex", "fx/lib/b.ex", "fx/lib/c.ex"], "reads through hooks and imports");
-  assert.deepEqual(verdict(arms, walked.sinks, "fx/assets/ed/"), {
+  assert.deepEqual(verdict(arms, walked.sinks, ["fx/assets/ed/"]), {
     unequal: true,
     missing: ["fx/lib/c.ex  (read by fx/assets/ed/src/pre.mjs)"],
     unused: ["fx/lib/stale.ex"],
   });
+
+  const ownedRoots = {
+    push: ["fx/assets/ed/**", "fx/assets/host-tests/**"],
+    pull_request: ["fx/assets/ed/**", "fx/assets/host-tests/**"],
+  };
+  assert.deepEqual(verdict(ownedRoots, new Map(), ["fx/assets/ed/", "fx/assets/host-tests/"]), {
+    unequal: false,
+    missing: [],
+    unused: [],
+  }, "each workflow-owned source root is a used trigger without pretending it is an outside read");
 
   put("fx/assets/ed/src/runner.mjs", 'execFileSync("npm", ["run", "x"]);');
   put("fx/assets/ed/src/x.mjs", 'readFileSync(new URL("../../../lib/c.ex", import.meta.url));');
@@ -109,7 +119,7 @@ try {
   assert.equal(covers(["fx/lib/*"], "fx/lib/x/y.ex"), false);
   assert.equal(covers(["fx/lib/a.ex"], "fx/lib/b.ex"), false);
 
-  console.log(`ok path filter scanner: ${shapes.length + 7} read shapes, a walk through hooks and imports, and the verdict on a synthetic tree`);
+  console.log(`ok path filter scanner: ${shapes.length + 8} read shapes, a walk through hooks and imports, and the verdict on a synthetic tree`);
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
