@@ -237,3 +237,65 @@ func TestNextWalkPageSize(t *testing.T) {
 		t.Errorf("shrinkWalkPageSize(2) = %d, want 1", got)
 	}
 }
+
+// The server can fail a heavy page outright before it reaches the client's
+// cap. The walk retries that offset with fewer rows and still prints every row
+// once and in order.
+func TestQueryAllShrinksPagesTheServerFailsWith503(t *testing.T) {
+	lowerResponseCap(t, 64<<10)
+	const total = 300
+	inner := &bigRowServer{ids: makeIDs(total), rowBytes: 100}
+	var failed []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit > 100 {
+			failed = append(failed, limit)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"the database connection dropped mid-read"}}`))
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	ids, stderr, code := walkQueryAll(t, srv, false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; output=%q", code, exitOK, stderr)
+	}
+	if len(failed) == 0 {
+		t.Fatal("the server never failed a page, so the test proves nothing")
+	}
+	want := makeIDs(total)
+	if len(ids) != total {
+		t.Fatalf("walked %d rows, want %d", len(ids), total)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("row %d = %s, want %s", i, ids[i], want[i])
+		}
+	}
+}
+
+// A server that fails every page is still reported once the window is one
+// row, with the server's own error.
+func TestQueryAllReportsAServerThatFailsEveryPage(t *testing.T) {
+	var limits []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		limits = append(limits, limit)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"the database is down"}}`))
+	}))
+	defer srv.Close()
+
+	_, output, code := walkQueryAll(t, srv, false)
+	if code == exitOK {
+		t.Fatal("walk succeeded against a failing server")
+	}
+	if !strings.Contains(output, "storage_unavailable") {
+		t.Fatalf("output does not carry the server's error; output=%q", output)
+	}
+	if last := limits[len(limits)-1]; last != 2 {
+		t.Fatalf("last request asked for %d rows, want 2", last)
+	}
+}
