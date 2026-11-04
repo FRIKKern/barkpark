@@ -14,7 +14,9 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
   `trigger = "content-auto"` and a FORCE-fresh build_id distinct from a manual
   deploy of the same content.
   """
-  use BarkparkCloud.DataCase, async: true
+  # AUTODEPLOY_DEBOUNCE_S is VM-global. Serialize this module so its override
+  # cases cannot change another async test's deploy window mid-assertion.
+  use BarkparkCloud.DataCase, async: false
   use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Registry}
@@ -1060,7 +1062,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
     # be made to fire: under `Oban testing: :manual` an insert ALWAYS succeeds,
     # so `AutoDeployWorker.enqueue/2` could not be induced to fail from a test at
     # all. `Process.put(:auto_deploy_enqueue, fun/2)` is that induction, and it
-    # is the CALLING process's dictionary, so `async: true` stays sound.
+    # stays isolated because the seam lives in the CALLING process's dictionary.
     #
     # The stub MESSAGES ITSELF rather than only returning: a seam that is never
     # reached would leave both tests green off a `Deploy.run/1` that failed for
