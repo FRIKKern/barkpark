@@ -44,6 +44,9 @@ func runBarkparks(out *writer, args []string) int {
 	if len(args) > 0 && args[0] == "repair-token-seats" {
 		return runBarkparksRepairTokenSeats(out, args[1:])
 	}
+	if len(args) > 0 && args[0] == "backfill-media-sha1" {
+		return runBarkparksBackfillMediaSha1(out, args[1:])
+	}
 	// "studio-origin" is the name the owner first asked for; both reach the same verb.
 	if len(args) > 0 && (args[0] == "studio-callback" || args[0] == "studio-origin") {
 		return runBarkparksStudioCallback(out, args[1:])
@@ -526,6 +529,7 @@ USAGE
   bp barkparks studio-callback ls|add|rm <instance> [<callback-url>]
   bp barkparks rotate-admin-token <instance>
   bp barkparks repair-token-seats <instance> [--token-id <id>] [--seat <workspace> ...] [--apply]
+  bp barkparks backfill-media-sha1 <instance> [--apply] [--page-size <n>]
 
 WHAT IT SHOWS
   with a saved Cloud session, bare bp barkparks queries the current team's
@@ -564,6 +568,17 @@ REPAIR-TOKEN-SEATS
   held. A dry run unless --apply. Exits 1 when a named workspace is refused.
   The flags are --seat and --token-id because --workspace and --token are
   global flags.
+
+BACKFILL-MEDIA-SHA1
+  platform operators only. Hashes the media files on one box that were born
+  before media_files.sha1, so upload dedupe and bp export --media can match
+  them by bytes. Cloud asks the box with the admin token it holds; it is the
+  shell-free form of Barkpark.Release.backfill_media_sha1/1. A dry run unless
+  --apply: it prints the count of files with no SHA-1 per workspace and
+  dataset. --apply hashes one page per request and follows the box's cursor
+  to the end. --page-size caps a page (1 to 500, the box's default is 200);
+  the box also ends a page after about 8 s. Files the box cannot read keep no
+  SHA-1 and are listed with the reason; the command then exits 1.
 
 STUDIO-CALLBACK
   the "Sign in with Barkpark Cloud" allowlist for a Studio deployed apart from

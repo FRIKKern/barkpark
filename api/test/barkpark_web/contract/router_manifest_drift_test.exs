@@ -123,6 +123,9 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # never against the box.
     {"POST", "/v1/admin/tokens/:*/seats/restore"} =>
       "Cloud's token seat restore — the control plane calls it, not a CLI verb",
+    # A human runs `bp barkparks backfill-media-sha1`, which goes through Cloud.
+    {"POST", "/v1/admin/media/sha1-backfill"} =>
+      "Cloud's media SHA-1 backfill — the control plane calls it, not a CLI verb",
     # ── External Studio sign-in, server half ("Sign in with Barkpark Cloud") ──
     # A Studio's own server trades the single-use exchange ticket the browser
     # brought back from Cloud for a login session; it needs the PKCE verifier

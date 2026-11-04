@@ -336,6 +336,12 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
          "The caller holds no seat in the target workspace by construction, so there is " <>
          "no tenant re-derivation; the predecessor lineage from the token_minted audit " <>
          "rows bounds what it can write. RULING row 1."},
+    {:post, "/v1/admin/media/sha1-backfill"} =>
+      {:instance_global, @operator_guard,
+       "Operator: hashes every media file born before media_files.sha1, box-wide, the " <>
+         "shell-free twin of Barkpark.Release.backfill_media_sha1/1. Barkpark Cloud calls " <>
+         "it with its held admin token. The write is the hash of bytes the box already " <>
+         "stores, so there is no tenant to re-derive. RULING row 1."},
 
     # ── /v1/admin/orgs — SSO set-up without a shell (task-25386fa77a664587) ──
     # An organization spans workspaces and its identity connection decides who

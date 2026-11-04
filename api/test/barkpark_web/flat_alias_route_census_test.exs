@@ -283,6 +283,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "what it may write is bounded by the predecessor lineage in the token_minted audit " <>
          "rows. Touches workspace_memberships rows only, never tenant content. Source " <>
          "carries no scope marker at all."},
+    # MediaSha1BackfillController.create
+    {"POST", "/v1/admin/media/sha1-backfill"} =>
+      {:global,
+       "instance-operator primitive: hashes the media_files rows born before the sha1 " <>
+         "column, box-wide, the same write Barkpark.Release.backfill_media_sha1/1 makes " <>
+         "from a shell. The permit is the [:api, :require_admin, :require_platform_operator] " <>
+         "pipeline. It writes only media_files.sha1, computed from the stored bytes, and " <>
+         "returns ids, dataset names and counts. Source carries no scope marker at all."},
     # OrgSsoController
     {"POST", "/v1/admin/orgs"} =>
       {:global,

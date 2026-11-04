@@ -118,7 +118,7 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 	}
 	out.errf("exported %d media file(s) to %s (%d read now, %d already there)", len(assets), dir, fetched, len(assets)-fetched)
 	if sizeOnly > 0 {
-		out.errf("export: %d of %d media file(s) have no SHA-1 on the source and were checked by size only. The source can hash them with Barkpark.Release.backfill_media_sha1/1", sizeOnly, len(assets))
+		out.errf("export: %d of %d media file(s) have no SHA-1 on the source and were checked by size only. The source can hash them with bp barkparks backfill-media-sha1 <instance> --apply", sizeOnly, len(assets))
 	}
 	return exitOK
 }

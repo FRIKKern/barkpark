@@ -710,6 +710,21 @@ root-shell recipe above. `--token-id` defaults to the token Cloud holds; no
 `--apply`. An apply writes a `token_seated` audit row per seat on the box and
 a `barkpark.token_seats_restored` row in Cloud.
 
+### Media SHA-1 backfill without a shell
+
+Media files born before `media_files.sha1` have no hash until
+`Barkpark.Release.backfill_media_sha1/1` runs. Without a shell, Cloud runs it:
+
+    bp barkparks backfill-media-sha1 <instance>            # dry run: count per dataset
+    bp barkparks backfill-media-sha1 <instance> --apply    # hash, page by page
+
+`POST /v1/operator/barkparks/:id/media-sha1-backfill` (platform operator)
+calls the box's `POST /v1/admin/media/sha1-backfill` with the admin token
+Cloud holds. An apply hashes one page of up to 200 files or about 8 s and
+answers a cursor; bp follows it to the end. The box writes only `sha1`. A
+file whose blob it cannot read keeps no hash and is listed with the reason.
+An applied page writes a `barkpark.media_sha1_backfilled` row in Cloud.
+
 ## Staging channel — prove a Barkpark build before the fleet gets it
 
 `staging.barkpark.cloud` is one disposable box that runs Barkpark **itself**, so a
