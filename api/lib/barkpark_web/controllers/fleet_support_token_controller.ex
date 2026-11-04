@@ -105,9 +105,13 @@ defmodule BarkparkWeb.FleetSupportTokenController do
         label = @support_label_prefix <> name
         workspace_id = conn.assigns[:current_workspace] && conn.assigns[:current_workspace].id
 
-        case Auth.create_token(raw, label, "production", @support_permissions, workspace_id) do
+        actor = conn.assigns[:api_token]
+
+        case Auth.create_token(raw, label, "production", @support_permissions, workspace_id,
+               actor: actor
+             ) do
           {:ok, token} ->
-            Auth.audit_token_minted(token, conn.assigns[:api_token])
+            Auth.audit_token_minted(token, actor)
 
             conn
             |> put_status(:created)

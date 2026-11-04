@@ -112,6 +112,9 @@ defmodule BarkparkWeb.ElevatedTokenController do
             "#{inspect(Auth.delegable_permissions())}; refused #{inspect(bad)}"
         )
 
+      {:error, :dataset_binding} ->
+        ErrorResponse.emit(conn, {:error, :dataset_binding})
+
       {:error, :missing_label} ->
         unprocessable(conn, "label is required and must be a non-empty string")
 

@@ -589,6 +589,18 @@ defmodule Barkpark.Content.Errors do
         "The token was minted with an explicit `dataset` and only works on that dataset. `GET /v1/auth/token` shows it (`dataset`, `dataset_bound`). Call the bound dataset, or mint a token for this one."
     }
 
+  # A mint by a dataset-bound token that names another dataset. The minted
+  # token inherits the minter's binding, so only the bound dataset can be named.
+  defp build({:error, :dataset_binding}),
+    do: %{
+      code: "forbidden",
+      message: "a token bound to a dataset can only mint tokens bound to that dataset",
+      status: 403,
+      reason: "dataset_binding",
+      hint:
+        "Name the dataset this token is bound to, or leave `dataset` out and the new token inherits the binding. `GET /v1/auth/token` shows the binding."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on

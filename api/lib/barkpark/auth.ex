@@ -1085,9 +1085,24 @@ defmodule Barkpark.Auth do
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    if perms_ok? and Enum.all?(workspaces, &TenancyAuth.workspace_admin?(actor, &1)),
-      do: :ok,
-      else: {:error, :forbidden}
+    if perms_ok? and within_dataset_binding?(old, actor) and
+         Enum.all?(workspaces, &TenancyAuth.workspace_admin?(actor, &1)),
+       do: :ok,
+       else: {:error, :forbidden}
+  end
+
+  @doc """
+  True when `token` reaches no further than `actor` in datasets: `actor` is
+  not bound to a dataset, or `token` is bound to the same one. Rotation uses
+  it, because the successor's secret goes to the actor. Seat restore uses it
+  for the caller and for each predecessor a seat comes from.
+  """
+  @spec within_dataset_binding?(ApiToken.t(), term()) :: boolean()
+  def within_dataset_binding?(%ApiToken{} = token, actor) do
+    case inherit_dataset_binding(actor, token.dataset, token.dataset_bound) do
+      {:ok, {dataset, bound}} -> dataset == token.dataset and bound == token.dataset_bound
+      {:error, _} -> false
+    end
   end
 
   @doc """
@@ -1609,13 +1624,15 @@ defmodule Barkpark.Auth do
     request = Keyword.get(opts, :expires_at)
     actor = Keyword.get(opts, :actor)
 
-    with {:ok, expires_at} <-
+    with {:ok, {dataset, dataset_bound}} <-
+           inherit_dataset_binding(actor, dataset, Keyword.get(opts, :dataset_bound)),
+         {:ok, expires_at} <-
            TokenExpiry.resolve(class, request, admin?: no_expiry_admin?(actor)) do
       token_attrs = %{
         token_hash: ApiToken.hash_token(raw_token),
         label: label,
         dataset: dataset,
-        dataset_bound: Keyword.get(opts, :dataset_bound),
+        dataset_bound: dataset_bound,
         permissions: permissions,
         workspace_id: ws_id,
         expires_at: expires_at,
@@ -1642,6 +1659,31 @@ defmodule Barkpark.Auth do
         else: insert.()
     end
   end
+
+  @doc """
+  The dataset and binding of a token minted by `actor`. A minted token never
+  reaches further than the token that minted it.
+
+  When `actor` is an `%ApiToken{}` bound to a dataset, the new token is bound
+  to that dataset. A request that names the same dataset, or names none, gets
+  `{:ok, {bound, true}}`. A request that names another dataset (`named?` is
+  true) gets `{:error, :dataset_binding}`. Any other actor keeps the request
+  as it is: `{:ok, {dataset, named?}}`.
+
+  `create_token/6` applies this to its `:actor`. The mints that write their
+  own rows (`create_claude_session_token/3`, `Barkpark.Access.mint/2`, the
+  share-edit mint) call it directly.
+  """
+  @spec inherit_dataset_binding(term(), binary() | nil, boolean() | nil) ::
+          {:ok, {binary() | nil, boolean() | nil}} | {:error, :dataset_binding}
+  def inherit_dataset_binding(%ApiToken{dataset_bound: true, dataset: bound}, dataset, named?)
+      when is_binary(bound) do
+    if named? == true and dataset != bound,
+      do: {:error, :dataset_binding},
+      else: {:ok, {bound, true}}
+  end
+
+  def inherit_dataset_binding(_actor, dataset, named?), do: {:ok, {dataset, named?}}
 
   # The opt-out is the INSTANCE admin bit — the flat permission
   # `BarkparkWeb.Plugs.RequireAdmin` reads — not a workspace role: a
@@ -1715,7 +1757,9 @@ defmodule Barkpark.Auth do
   Errors: `:admin_required` (no flat admin), `:not_workspace_admin`,
   `{:not_workspace_admin, workspace_id}` (an `:also_seat` workspace),
   `{:invalid_permissions, bad}`, `{:escalation, perms}` (requested permissions
-  the actor lacks), `:missing_label`, the `TokenExpiry` reasons, or a changeset.
+  the actor lacks), `:dataset_binding` (the actor is bound to a dataset and the
+  request names another, see `inherit_dataset_binding/3`), `:missing_label`,
+  the `TokenExpiry` reasons, or a changeset.
   """
   @spec mint_delegated_token(ApiToken.t(), binary(), keyword()) ::
           {:ok, {binary(), ApiToken.t()}} | {:error, term()}
@@ -1889,7 +1933,7 @@ defmodule Barkpark.Auth do
              workspace_id != "" do
     raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
-    case create_token(raw, label, dataset, @chat_permissions, workspace_id) do
+    case create_token(raw, label, dataset, @chat_permissions, workspace_id, actor: actor) do
       {:ok, %ApiToken{} = token} ->
         audit_token_minted(token, actor)
         {:ok, raw, token}
@@ -2440,7 +2484,13 @@ defmodule Barkpark.Auth do
         concrete_workspace_id(minter_workspace_id(minter))
 
     with ws_id when is_binary(ws_id) <- ws_id || {:error, :no_workspace},
-         :ok <- TenancyAuth.authorize(minter, ws_id, :write) do
+         :ok <- TenancyAuth.authorize(minter, ws_id, :write),
+         {:ok, {dataset, dataset_bound}} <-
+           inherit_dataset_binding(
+             minter,
+             Keyword.get(opts, :dataset, "production"),
+             if(Keyword.has_key?(opts, :dataset), do: true)
+           ) do
       raw =
         @claude_session_token_prefix <>
           Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
@@ -2450,7 +2500,8 @@ defmodule Barkpark.Auth do
       attrs = %{
         token_hash: ApiToken.hash_token(raw),
         label: "claude-session #{session_id}",
-        dataset: Keyword.get(opts, :dataset, "production"),
+        dataset: dataset,
+        dataset_bound: dataset_bound,
         # NON-OVERRIDABLE curated permissions — a caller can never inject
         # "admin" (or anything else) here.
         permissions: @claude_session_permissions,

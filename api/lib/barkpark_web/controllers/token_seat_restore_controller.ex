@@ -22,7 +22,10 @@ defmodule BarkparkWeb.TokenSeatRestoreController do
   without this route answers 404 with no reason), 409 `conflict` reason
   `token_not_live`, 409 `conflict` reason `not_held_before` (an apply named a
   workspace no predecessor held; nothing was written, the plan rides
-  `details`), 422 `unprocessable` (bad body).
+  `details`), 409 `conflict` reason `dataset_binding` (the first refused seat
+  came from a predecessor bound to a dataset this token is not bound to), 403
+  `forbidden` reason `dataset_binding` (the caller is bound to a dataset and
+  the token is not bound to the same one), 422 `unprocessable` (bad body).
   """
   use BarkparkWeb, :controller
 
@@ -51,11 +54,25 @@ defmodule BarkparkWeb.TokenSeatRestoreController do
           message: "no API token has that id"
         })
 
+      {:error, :dataset_binding} ->
+        ErrorResponse.emit(conn, {:error, :dataset_binding})
+
       {:error, :token_not_live} ->
         ErrorResponse.emit_fields(conn, :conflict, %{
           code: "conflict",
           reason: "token_not_live",
           message: "that token is revoked, expired or not an API token"
+        })
+
+      {:error, {:refused, %{refused: [%{reason: "dataset_binding"} | _]} = plan}} ->
+        ErrorResponse.emit_fields(conn, :conflict, %{
+          code: "conflict",
+          reason: "dataset_binding",
+          message:
+            "a predecessor that held a seat in " <>
+              Enum.map_join(plan.refused, ", ", & &1.workspace) <>
+              " was bound to a dataset this token is not bound to; nothing was written",
+          details: TokenSeatRestore.to_json(plan)
         })
 
       {:error, {:refused, plan}} ->

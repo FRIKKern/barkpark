@@ -143,20 +143,21 @@ defmodule BarkparkWeb.PlaygroundController do
          {:ok, workspace} <- Quota.set_quota(workspace, @playground_quota),
          {:ok, _paper} <- seed_showcase_paper(workspace, project),
          raw_token = mint_raw_token(),
-         {:ok, _token} <-
+         {:ok, token} <-
            Auth.create_token(
              raw_token,
              "playground:#{workspace.slug}",
              @production_dataset,
              ["read", "write"],
-             workspace.id
+             workspace.id,
+             actor: admin_token
            ) do
       conn
       |> put_status(:created)
       |> json(%{
         workspace_slug: workspace.slug,
         project_slug: project.slug,
-        dataset: @production_dataset,
+        dataset: token.dataset,
         token: raw_token,
         tier: workspace.tier,
         expires_at: workspace.expires_at

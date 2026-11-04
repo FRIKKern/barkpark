@@ -470,7 +470,13 @@ defmodule BarkparkWeb.AppTokenController do
          :ok <- may_mint_for(conn.assigns.api_token, email),
          {:ok, permissions} <- fetch_permissions(params),
          {:ok, workspace} <- resolve_workspace(params),
-         :ok <- may_mint_into(conn.assigns.api_token, workspace) do
+         :ok <- may_mint_into(conn.assigns.api_token, workspace),
+         {:ok, _binding} <-
+           Auth.inherit_dataset_binding(
+             conn.assigns.api_token,
+             fetch_dataset(params),
+             dataset_named?(params)
+           ) do
       # JIT MEMBER (charter D5): the identity first, then its member seat.
       # `create_membership` is idempotent-by-constraint — an existing seat hits
       # the unique index and is left as-is (the `Sso.jit_provision/3` pattern).
@@ -490,7 +496,8 @@ defmodule BarkparkWeb.AppTokenController do
       case Auth.create_token(raw, label, dataset, permissions, workspace.id,
              class: :app,
              owner_user_id: user.id,
-             dataset_bound: dataset_named?(params)
+             dataset_bound: dataset_named?(params),
+             actor: conn.assigns.api_token
            ) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
@@ -537,6 +544,9 @@ defmodule BarkparkWeb.AppTokenController do
 
       {:error, :workspace_not_found} ->
         unprocessable(conn, "workspace could not be resolved")
+
+      {:error, :dataset_binding} ->
+        ErrorResponse.emit(conn, {:error, :dataset_binding})
 
       {:error, :label_mismatch} ->
         unprocessable(

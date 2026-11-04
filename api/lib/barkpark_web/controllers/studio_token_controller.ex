@@ -129,10 +129,13 @@ defmodule BarkparkWeb.StudioTokenController do
           id: token.id,
           label: token.label,
           permissions: token.permissions,
-          dataset: dataset,
+          dataset: token.dataset,
           workspace: workspace.slug,
           expires_at: token.expires_at
         })
+
+      {:error, :dataset_binding} ->
+        ErrorResponse.emit(conn, {:error, :dataset_binding})
 
       {:error, _reason} ->
         ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
