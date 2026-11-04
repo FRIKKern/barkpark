@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
-import { canvasMethodLeafNames, canvasSourceLeafNames, elementClassBody, sourceMembers } from "../../scripts/surface.mjs";
+import { canvasMethodLeafNames, canvasSourceLeafNames, elementClassBody, sourceMembers } from "../../scripts/surface-package.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sha = (text) => createHash("sha256").update(text).digest("hex");

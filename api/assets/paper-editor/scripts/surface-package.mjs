@@ -34,6 +34,24 @@ export const notClasses = (js) => [
 
 export const sourceMembers = (text) => [...text.matchAll(/\bthis\.(_[A-Za-z]\w*)/g)].map((m) => m[1]);
 
+export const canvasMethodLeafNames = (names) => names
+  .filter((name) => /^canvas-methods-[a-z0-9-]+\.js$/.test(name))
+  .sort();
+
+const CANVAS_SOURCE_LEAVES = new Set([
+  "canvas-document.js",
+  "canvas-editor-schema.js",
+  "canvas-focus.js",
+  "canvas-lifecycle.js",
+  "canvas-mount.js",
+  "canvas-ops.js",
+  "canvas-server.js",
+]);
+
+export const canvasSourceLeafNames = (names) => [...new Set(names)]
+  .filter((name) => CANVAS_SOURCE_LEAVES.has(name) || /^canvas-methods-[a-z0-9-]+\.js$/.test(name))
+  .sort();
+
 export async function mountedMembers(window, tag) {
   const element = window.customElements.get(tag);
   if (!element) throw new Error(`package surface: bundle does not define ${tag}`);

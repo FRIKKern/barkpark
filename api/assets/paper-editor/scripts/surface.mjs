@@ -26,11 +26,13 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { elementClassBody, extractPackageSurfaceEvidence } from "./surface-package.mjs";
+import { canvasSourceLeafNames, elementClassBody, extractPackageSurfaceEvidence } from "./surface-package.mjs";
 import { readerAttributes, readerClasses } from "./writes.mjs";
 
 export {
   bundleEvents,
+  canvasMethodLeafNames,
+  canvasSourceLeafNames,
   elementClassBody,
   mountedMembers,
   notClasses,
@@ -47,13 +49,17 @@ const sorted = (list) => [...new Set(list)].sort();
 const leaves = (value) => Array.isArray(value) ? value : Object.values(value).flatMap(leaves);
 
 export async function packageSurface() {
+  const canvasDir = path.join(root, "src/canvas");
   return extractPackageSurfaceEvidence({
     bundleSource: readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8"),
     editorCssSource: readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8"),
     typesSource: readFileSync(path.join(root, "index.d.ts"), "utf8"),
     contractSource: readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"),
     elementSources: {
-      canvas: [elementClassBody(readFileSync(path.join(root, "src/canvas/index.js"), "utf8"))],
+      canvas: [
+        elementClassBody(readFileSync(path.join(canvasDir, "index.js"), "utf8")),
+        ...canvasSourceLeafNames(readdirSync(canvasDir)).map((name) => readFileSync(path.join(canvasDir, name), "utf8")),
+      ],
       editor: [
         elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8")),
         readFileSync(path.join(root, "src/paper-editor-runtime.js"), "utf8"),

@@ -579,7 +579,7 @@ for (const name of ["__interaction_plane_boundary.test.mjs", "__source_mode_boun
 await import("./canvas-editor-policy.js");
 
 const texts = new Map(Object.entries(FILES).map(([name]) => [name, readFileSync(join(here, name), "utf8")]));
-const { canvasSourceLeafNames, elementClassBody, sourceMembers } = await import("../../scripts/surface.mjs");
+const { canvasSourceLeafNames, elementClassBody, sourceMembers } = await import("../../scripts/surface-package.mjs");
 const commentTokens = (text) => {
   const out = [];
   for (let at = 0; at < text.length;) {

@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import {
   bundleEvents,
+  canvasMethodLeafNames,
+  canvasSourceLeafNames,
   elementClassBody,
   extractPackageSurfaceEvidence,
   mountedMembers,
@@ -104,6 +106,36 @@ await check("each reader finds every form on a fixture", async () => {
   assert.deepEqual(readerClasses(`~s(<p class="plain">)`), ["plain"]);
 
   assert.deepEqual(sourceMembers(`this._set = 1; this._called(); other._not;`), ["_set", "_called"]);
+  assert.deepEqual(canvasMethodLeafNames(["canvas-methods-z-1.js", "canvas-methods-a.js", "canvas-methods-A.js", "canvas-methods-a.mjs", "other-canvas-methods-a.js"]), ["canvas-methods-a.js", "canvas-methods-z-1.js"]);
+  const legacyCanvasLeaves = [
+    "canvas-methods-host-api.js",
+    "canvas-methods-keyboard.js",
+    "canvas-methods-paste-media.js",
+    "canvas-methods-pickers.js",
+    "canvas-methods-slash-palette.js",
+  ];
+  const endstateCanvasLeaves = [
+    "canvas-document.js",
+    "canvas-editor-schema.js",
+    "canvas-focus.js",
+    "canvas-lifecycle.js",
+    "canvas-mount.js",
+    "canvas-ops.js",
+    "canvas-server.js",
+  ];
+  assert.deepEqual(canvasMethodLeafNames([...legacyCanvasLeaves, ...endstateCanvasLeaves]), legacyCanvasLeaves.sort());
+  assert.deepEqual(canvasSourceLeafNames([
+    ...legacyCanvasLeaves,
+    ...endstateCanvasLeaves,
+    ...legacyCanvasLeaves,
+    "canvas-editor-policy.js",
+    "canvas-mount.mjs",
+    "canvas-methods-A.js",
+    "canvas-methods-keyboard.js.bak",
+    "prefix-canvas-methods-keyboard.js",
+    "canvas-random.js",
+  ]), [...legacyCanvasLeaves, ...endstateCanvasLeaves].sort());
+  assert.deepEqual(sourceMembers(["class BpPaperCanvas extends HTMLElement { _early() {} }", "export function leaf() { this._late(); }"].join("\n")), ["_late"]);
   assert.equal(elementClassBody("class Helper { m() { this._a = 1; } }\nclass El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}\nfunction after() { this._c = 1; }\n"), "class El extends HTMLElement {\n  m() { if (x) { this._b = 1; } }\n}");
   assert.throws(() => elementClassBody("class Helper {}"), /no custom element class/);
   const dom = new JSDOM("<!doctype html><body></body>", { runScripts: "outside-only" });
