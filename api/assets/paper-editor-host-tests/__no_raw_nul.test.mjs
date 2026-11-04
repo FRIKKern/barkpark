@@ -1,7 +1,7 @@
 // A raw 0x00 byte in a tracked TEXT file makes that file invisible to plain
 // grep — and not just at the NUL: BSD grep classifies the whole file as binary
 // and reports NOTHING, including for matches that sit BEFORE the NUL. So a
-// correctly scoped, self-tested census over this tree silently returns zero.
+// correctly scoped, self-tested census over these trees silently returns zero.
 //
 // That is not hypothetical here. markdown.js carried six raw NULs for months.
 // Its own comment described them as "the 6-char escape", because the author
@@ -11,12 +11,13 @@
 // arm while process.exit(6) sat in the file, unreadable.
 //
 // THIS IS A PREDICATE, NOT A LIST. It enumerates the tracked files under
-// api/assets/paper-editor/ fresh on every run and fails on ANY of them, plus
-// the two committed bundles. A file added tomorrow is covered the day it is
-// added; there is no allowlist to forget to update. Every tracked path under
-// this tree is text (mjs/js/json/html/md/css), so no binary carve-out is
-// needed — and if a genuinely binary asset is ever added here, this test
-// SHOULD red and force a deliberate decision rather than silently widening.
+// api/assets/paper-editor/ and api/assets/paper-editor-host-tests/ fresh on
+// every run and fails on ANY of them, plus the two committed bundles. A file
+// added tomorrow is covered the day it is added; there is no allowlist to
+// forget to update. Every tracked path under these trees is text
+// (mjs/js/json/html/md/css), so no binary carve-out is needed — and if a
+// genuinely binary asset is ever added here, this test SHOULD red and force a
+// deliberate decision rather than silently widening.
 //
 // The guard token in markdown.js is still a NUL at RUNTIME. Only the source
 // SPELLING changed — the escape and the raw byte denote the same code point,
@@ -26,22 +27,24 @@
 // pasted raw NUL in the comment above, and stayed invisible until `git add`
 // made it tracked. That is the failure mode, reproduced by accident.
 //
-// Run: node src/__no_raw_nul.test.mjs
+// Run: node ../paper-editor-host-tests/__no_raw_nul.test.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const NUL = 0x00;
 
-// Tracked paths this guard covers: the whole editor source tree, plus the two
-// committed artifacts built from it (a raw NUL in the source reaches the
-// bundle through a regex literal, which esbuild copies verbatim).
+// Tracked paths this guard covers: the whole editor source and host-test trees,
+// plus the two committed artifacts built from the source (a raw NUL in the
+// source reaches the bundle through a regex literal, which esbuild copies
+// verbatim).
 const SCOPES = [
   "api/assets/paper-editor",
   "api/priv/static/assets/bp-paper-editor.bundle.js",
   "web/public/bp-paper-editor.bundle.js",
+  "api/assets/paper-editor-host-tests",
 ];
 
 function trackedFiles() {
