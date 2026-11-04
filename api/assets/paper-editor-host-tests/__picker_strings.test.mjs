@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(__dirname, "../../../priv/static/assets/bp-media-picker.js");
+const SRC = path.join(__dirname, "../../priv/static/assets/bp-media-picker.js");
 
 let failures = 0;
 function check(name, fn) {
@@ -129,7 +129,7 @@ check("the empty drop target carries its labels in the viewer's language", () =>
 });
 
 check("the paper-editor shell shows the stamped labels, not English literals", () => {
-  const shell = fs.readFileSync(path.join(__dirname, "../../../priv/static/assets/bp-paper-editor-shell.css"), "utf8");
+  const shell = fs.readFileSync(path.join(__dirname, "../../priv/static/assets/bp-paper-editor-shell.css"), "utf8");
   for (const attr of ["data-label-short", "data-label-add", "data-label-featured", "data-label-hint"]) {
     assert.ok(shell.includes(`content: attr(${attr})`), `shell CSS does not show ${attr}`);
   }

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM(`
   <main data-paper-doc-key="production:paper:wiki" data-paper-rev="1">
@@ -22,7 +22,7 @@ const context = vm.createContext({
   Date, setTimeout, clearTimeout, customElements: { whenDefined: () => Promise.resolve() },
 });
 vm.runInContext(
-  readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 
@@ -86,7 +86,7 @@ await check("a plain link is left to the canvas", () => {
 // Studio does not load the bundle's bp-paper-editor.css (BP_PAPER_EDITOR_NO_INJECT);
 // it links the shell sheet, so the wikilink paint must live there too.
 await check("the Studio shell sheet paints a wikilink as a link", () => {
-  const css = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
   const rule = css.match(/\.bp-paper-editor span\[data-wikilink\]\s*\{([^}]*)\}/);
   assert.ok(rule, "no span[data-wikilink] rule in bp-paper-editor-shell.css");
   assert.match(rule[1], /color:\s*var\(--paper-accent\)/);
