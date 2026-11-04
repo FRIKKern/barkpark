@@ -121,6 +121,40 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
     assert @blocked == "#d97706"
   end
 
+  test "task list preserves first-seen phases and row order byte for byte" do
+    block = %{
+      "type" => "tasks",
+      "title" => "Grouping lock",
+      "snapshot" => [
+        %{"status" => "open", "title" => "unphased-first"},
+        %{"status" => "ready", "title" => "beta-first", "phase" => "  Beta  "},
+        %{"status" => "done", "title" => "alpha-only", "phase" => "Alpha"},
+        %{"status" => "blocked", "title" => "beta-second", "phase" => "Beta"},
+        %{"status" => "done", "title" => "unphased-second", "phase" => "   "}
+      ]
+    }
+
+    for theme <- [:evergreen, :ember] do
+      html = FleetEmail.tasks_email_html(block, theme)
+
+      assert :crypto.hash(:sha256, html) |> Base.encode16(case: :lower) ==
+               grouping_digest(theme)
+
+      assert ordered?(html, [
+               "unphased-first",
+               "unphased-second",
+               "Beta",
+               "beta-first",
+               "beta-second",
+               "Alpha",
+               "alpha-only"
+             ])
+    end
+
+    assert Compose.compose_block(block, :email) ==
+             Compose.compose_block(Map.put(block, "type", "task-list"), :email)
+  end
+
   test "task board stripes the worked/done columns with their tone" do
     html = FleetEmail.task_board_email_html(board_block())
 
@@ -364,5 +398,17 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
     refute html =~ "<script>"
     refute html =~ "<b>x</b>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
+  end
+
+  defp grouping_digest(:evergreen),
+    do: "964ea6b986fd897c8954792d3df5c0533598029e1b965f5e7f5542949fcb9a62"
+
+  defp grouping_digest(:ember),
+    do: "9ebef2f6263e1bdcb83ea3bc7564ba4c1d91af97fcdf39f40e036395b3f3bd3a"
+
+  defp ordered?(html, needles) do
+    needles
+    |> Enum.map(fn needle -> :binary.match(html, needle) |> elem(0) end)
+    |> then(&(&1 == Enum.sort(&1)))
   end
 end
