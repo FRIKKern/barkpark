@@ -5,18 +5,21 @@
 // Run: node ../paper-editor-host-tests/surface.test.mjs
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "./jsdom.mjs";
-import { render, stylesheetClasses, surface, surfacePath } from "../paper-editor/scripts/surface.mjs";
+import { composeBarkparkSurface, packageSurface, render, stylesheetClasses, surface, surfacePath } from "../paper-editor/scripts/surface.mjs";
 import { schemaAttributes } from "../paper-editor/scripts/writes.mjs";
 import { declaredInTypes, reachInsInContract } from "../paper-editor/src/contract-surface.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../paper-editor");
 const assets = path.join(root, "../../priv/static/assets");
+const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const fresh = await surface();
+const packageEvidence = await packageSurface();
+const readerSource = readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
 
 let failures = 0;
 const check = async (name, fn) => {
@@ -43,6 +46,30 @@ await check("surface.json names this package's versions and the bundle's BUILD_S
   assert.equal(fresh.contract, pkg.barkpark.contractVersion);
   assert.equal(fresh.editor, pkg.version);
   assert.match(fresh.build, /^[0-9a-f]{12}$/);
+});
+
+await check("package evidence is nonvacuous and composition alone applies Barkpark reader ownership", async () => {
+  assert.ok(packageEvidence.candidates.members.canvas.length > 0);
+  assert.ok(packageEvidence.candidates.members.editor.length > 0);
+  assert.ok(packageEvidence.candidates.classes.includes("bp-callout"));
+  assert.equal("reader" in packageEvidence, false);
+  assert.equal("internal" in packageEvidence, false);
+  const composed = composeBarkparkSurface(packageEvidence, readerSource);
+  assert.deepEqual(composed, fresh);
+  assert.equal(render(composed), readFileSync(surfacePath, "utf8"));
+  assert.ok(composed.reader.classes.includes("bp-callout"));
+  assert.equal(composed.internal.classes.includes("bp-callout"), false);
+});
+
+await check("reader composition fails closed and package extraction remains independent", async () => {
+  assert.throws(() => composeBarkparkSurface(packageEvidence, ""), /reader/i);
+  assert.throws(() => composeBarkparkSurface(packageEvidence, '~s(<div class="bp-only">)'), /attribute/i);
+  assert.ok((await packageSurface()).candidates.classes.includes("bp-callout"));
+});
+
+await check("package surface includes both editor child modules' unique member evidence", () => {
+  const expected = ["_caretRect", "_chooseSlash", "_chooseTag", "_chooseWikilink", "_closeWikilink", "_dismissSlash", "_dismissTag", "_dismissWikilink", "_emitSlashInsert", "_openSlash", "_openTag", "_openWikilink", "_wlAlias"];
+  assert.deepEqual(lacks(packageEvidence.candidates.members.editor, expected), []);
 });
 
 await check("declared and host together are every name index.d.ts declares; host holds picker and mermaid only", () => {
