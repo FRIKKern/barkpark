@@ -4,10 +4,10 @@
 // (WidthBucket, inline in root.html.heex) gives focus back after the patch.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const root = readFileSync(
-  new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+  new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
   "utf8",
 );
 const start = root.indexOf("Hooks.WidthBucket = {");

@@ -3,12 +3,12 @@
 // request id, and let the server's answer settle it. It sent {field, ops} only,
 // so FieldBlocks.field_block_ops refused every batch from a browser session while
 // the canvas counted it saved.
-// Run: node src/__field_canvas_hook.test.mjs
+// Run: node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
-const root = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+const root = readFileSync(new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
 const start = root.indexOf("    Hooks.BarkparkFieldCanvas = {");
 assert.ok(start > 0, "root.html.heex defines Hooks.BarkparkFieldCanvas");
 const end = root.indexOf("\n    };\n", start) + "\n    };\n".length;
