@@ -96,7 +96,9 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   # route's `barkpark.admin_token_rotated` row, case-gated like the rest.
   # task-c6185553d0bd7869 raised it 19 -> 20: the operator token-seats
   # restore route's `barkpark.token_seats_restored` row, case-gated like the rest.
-  @router_call_sites 20
+  # The media SHA-1 backfill route raised it 20 -> 21: its
+  # `barkpark.media_sha1_backfilled` row, case-gated like the rest.
+  @router_call_sites 21
 
   defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
 

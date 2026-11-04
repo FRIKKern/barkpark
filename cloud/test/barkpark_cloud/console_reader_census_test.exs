@@ -907,6 +907,18 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "Flip: the operator console gains a token-seat restore control and needs a reader ruling."
     },
 
+    # ------------------------------------------------------------------ media sha1 backfill arm
+    # POST /v1/operator/barkparks/:id/media-sha1-backfill is driven by
+    # `bp barkparks backfill-media-sha1` only. The console has no control for it.
+    %{
+      code: "backfill_refused",
+      site:
+        "router.ex POST /v1/operator/barkparks/:id/media-sha1-backfill (sha1_backfill_refusal/2)",
+      reason:
+        "CLI-only: the box refused the backfill with a status Cloud has no other code for; the CLI prints box_status and reason. " <>
+          "Flip: the operator console gains a media backfill control and needs a reader ruling."
+    },
+
     # ------------------------------------------------------------------ worker-agent mass
     # Machine tiers: require_worker matches the shared WORKER_TOKEN, require_agent
     # an agent credential, the builder token its own secret, and the webhook

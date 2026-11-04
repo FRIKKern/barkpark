@@ -114,6 +114,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/barkparks/:id/enable-apply operator  re-run the enable-apply job on one ARMED box (re-arms + restores box-side go.mod/go.sum churn; consent-gated on autoupdate_enabled)
       POST    /v1/operator/barkparks/:id/admin-token/rotate operator  replace the admin token Cloud holds for one box: mint a successor, store it, check it, then revoke the old one (no secret returned)
       POST    /v1/operator/barkparks/:id/token-seats/restore operator  give a token on one box back the workspace seats its revoked predecessor held (dry run unless apply)
+      POST    /v1/operator/barkparks/:id/media-sha1-backfill operator  hash one box's media files that have no SHA-1 (dry run unless apply; an apply hashes one page and answers the next cursor)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
@@ -328,6 +329,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AdminTokenRotation
   alias BarkparkCloud.Registry.TokenSeatRestore
+  alias BarkparkCloud.Registry.MediaSha1Backfill
   alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
@@ -5843,6 +5845,95 @@ defmodule BarkparkCloud.Web.Router do
         Logger.warning("token-seats restore: audit row for #{bp.id} failed: #{inspect(reason)}")
     end
   end
+
+  # POST /v1/operator/barkparks/:id/media-sha1-backfill → 200 {ok,
+  # barkpark_id, backfill} — hash the media files on one box that were born
+  # before `media_files.sha1`, for a box nobody has a shell on. Body {apply?,
+  # after?, limit?}: `apply` defaults to false, a dry run that answers the
+  # box's count of files with no hash. An apply hashes one page and the reply
+  # carries `next_after`; the caller sends it back as `after` until it is
+  # null. `Registry.MediaSha1Backfill` calls the box's
+  # `/v1/admin/media/sha1-backfill` with the held token. Operator only. An
+  # applied page that hashed or failed a file writes a
+  # `barkpark.media_sha1_backfilled` audit row. Refusals: 404 not_found, 409
+  # not_live, 404 no_admin_token, 500 decrypt_failed, 422 invalid, 502
+  # box_unreachable, 502 not_box_admin, 409 box_too_old, 502
+  # backfill_refused.
+  post "/v1/operator/barkparks/:id/media-sha1-backfill" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      true ->
+        params = conn.body_params
+        apply? = params["apply"] || false
+        after_id = params["after"]
+        limit = params["limit"]
+
+        cond do
+          not is_boolean(apply?) or not (is_nil(after_id) or is_binary(after_id)) or
+              not (is_nil(limit) or (is_integer(limit) and limit >= 1 and limit <= 500)) ->
+            json(conn, 422, %{
+              error: "invalid",
+              detail: "apply must be a boolean, after a media file id, limit 1 to 500"
+            })
+
+          true ->
+            case Registry.get_barkpark(id) do
+              nil ->
+                json(conn, 404, %{error: "not_found"})
+
+              %Barkpark{} = bp ->
+                case MediaSha1Backfill.run(bp, apply?, after_id, limit) do
+                  {:ok, reply} ->
+                    if reply["applied"] == true and
+                         (reply["hashed"] not in [nil, 0] or reply["failed"] not in [nil, []]) do
+                      record_sha1_backfill_audit(conn, bp, reply)
+                    end
+
+                    json(conn, 200, %{ok: true, barkpark_id: bp.id, backfill: reply})
+
+                  {:error, refusal} ->
+                    sha1_backfill_refusal(conn, refusal)
+                end
+            end
+        end
+    end
+  end
+
+  defp record_sha1_backfill_audit(conn, bp, reply) do
+    case Accounts.record_audit(%{
+           team_id: bp.team_id,
+           actor_user_id: conn.assigns.current_user.id,
+           action: "barkpark.media_sha1_backfilled",
+           target_type: "barkpark",
+           target_id: bp.id,
+           metadata: %{
+             hashed: reply["hashed"],
+             failed: length(List.wrap(reply["failed"])),
+             unhashed: reply["unhashed"]
+           }
+         }) do
+      {:ok, _} ->
+        push_event(bp.team_id, "audit")
+
+      {:error, reason} ->
+        Logger.warning("media sha1 backfill: audit row for #{bp.id} failed: #{inspect(reason)}")
+    end
+  end
+
+  defp sha1_backfill_refusal(conn, {:backfill_refused, status, reason}),
+    do:
+      json(conn, 502, %{
+        error: "backfill_refused",
+        box_status: status,
+        reason: reason,
+        detail: "The box refused the backfill. Nothing changed."
+      })
+
+  defp sha1_backfill_refusal(conn, refusal), do: seat_restore_refusal(conn, refusal)
 
   defp seat_restore_refusal(conn, :not_live), do: json(conn, 409, %{error: "not_live"})
 

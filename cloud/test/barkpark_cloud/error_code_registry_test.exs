@@ -98,6 +98,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "artifact_digest_mismatch",
              "artifact_quota_exceeded",
              "artifact_too_large",
+             "backfill_refused",
              "bad_action",
              "bad_signature",
              "barkpark_not_found",

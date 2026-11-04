@@ -23718,7 +23718,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 65 declared verbs have no entry here: they render
+    // 2 of the 66 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23772,6 +23772,7 @@
     "barkpark.adopted": "attached an existing Barkpark",
     "barkpark.admin_token_rotated": "rotated the admin token Cloud holds",
     "barkpark.token_seats_restored": "restored a box token's workspace seats",
+    "barkpark.media_sha1_backfilled": "hashed a box's media files that had no SHA-1",
     "barkpark.push_relay_provisioned": "provisioned a git push relay",
     // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
     // instance write because the box answered our stored admin credential 401.
