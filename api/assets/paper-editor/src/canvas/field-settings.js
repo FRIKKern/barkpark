@@ -10,7 +10,7 @@
 // range strands, an empty or repeated option value) stays in its input, marked
 // aria-invalid, and is not sent — the same rule the value input follows.
 
-import { toFieldNumber } from "./field-node.js";
+import { toFieldNumber } from "./field-values.js";
 import { t } from "../i18n.js";
 
 export const FIELD_SETTINGS_TYPES = new Set(["field-select", "field-number"]);

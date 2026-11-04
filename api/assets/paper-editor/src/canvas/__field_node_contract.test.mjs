@@ -62,6 +62,8 @@ await import("./index.js");
 
 const canvas = document.createElement("bp-paper-canvas");
 canvas.setAttribute("data-picker-browse", "true");
+const batches = [];
+canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
 canvas.blocks = [
   { id: "native", type: "field-string", label: "Title", value: "Draft" },
   { id: "picker", type: "field-reference", label: "Paper", value: "paper-1" },
@@ -79,6 +81,14 @@ try {
     assert.equal(spec.ignoreMutation({ type: "attributes", target: field }), true,
       `${label} field ignores PM DOM mutations`);
   }
+  const native = canvas.querySelector('[data-test-id="paper-field-field-string"]');
+  native.value = "Flushed";
+  native.dispatchEvent(new window.Event("input", { bubbles: true }));
+  assert.deepEqual(batches, [], "debounced native input stays local before flush");
+  assert.equal(canvas.flushPendingChanges(), true, "flush commits pending native input");
+  assert.deepEqual(batches.flat(), [
+    { op: "patch-block", id: "native", patch: { value: "Flushed" } },
+  ]);
   console.log("field node contract: plain facade and native/picker islands passed");
 } finally {
   canvas.remove();
