@@ -20,6 +20,14 @@ defmodule BarkparkWeb.TokenSelfController do
   its own answer (capped at `["read"]` by `Auth.max_pat_permissions_for_role/1`,
   a MINTING policy).
 
+  `expires_at` is the instant the session stops working
+  (task-4c981126f9255b29): the earlier of the session row's own `expires_at`
+  and its birth plus the strictest `absolute_lifetime_seconds` of the
+  organizations governing the user. The verify path refuses the session at
+  that instant, so a client such as Studio can end its own session at the
+  same moment. It is computed on each read, so a changed policy shows here
+  on the next call.
+
   `publish` follows the seat's write, except on a draft-only seat: a
   `contributor` writes drafts but cannot publish, unpublish or delete a
   published document, and `seat_capabilities/3` reports that as
@@ -44,10 +52,31 @@ defmodule BarkparkWeb.TokenSelfController do
     json(conn, %{
       kind: "session",
       user: %{id: user.id, email: user.email},
-      expires_at: session && session.expires_at,
+      expires_at: session_end(session, user),
       seats: Enum.flat_map(TenancyAuth.list_workspaces_for(user), &session_seat(user, &1))
     })
   end
+
+  # The session's absolute end: its row expiry, or sooner when an org policy
+  # caps its age from birth (`UserSession.absolute_expired_for_window?/3`).
+  defp session_end(nil, _user), do: nil
+
+  defp session_end(session, user) do
+    case Tenancy.org_session_policy_for_user(user.id) do
+      %{absolute_lifetime_seconds: max} when is_integer(max) and max > 0 ->
+        earliest(
+          session.expires_at,
+          session.inserted_at && DateTime.add(session.inserted_at, max, :second)
+        )
+
+      _ ->
+        session.expires_at
+    end
+  end
+
+  defp earliest(nil, b), do: b
+  defp earliest(a, nil), do: a
+  defp earliest(a, b), do: if(DateTime.compare(a, b) == :gt, do: b, else: a)
 
   # One seat per workspace the inverse index returns, each read off the row the
   # point lookup just loaded. A seat removed between the two reads is dropped.
