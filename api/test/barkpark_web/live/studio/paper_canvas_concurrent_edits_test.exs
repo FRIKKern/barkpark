@@ -11,7 +11,9 @@ defmodule BarkparkWeb.Studio.PaperCanvasConcurrentEditsTest do
   B's id-keyed batch, resent unchanged on that revision, saves, and both
   edits persist. Each tab ends up holding the other's edit. The client side
   (no banner, automatic resend, same-paragraph conflicts still held) is pinned
-  in `__paper_concurrent_rebase.test.mjs` and `__paper_rebase_canvas_mounted`.
+  in `api/assets/paper-editor-host-tests/paper-concurrent-rebase.test.mjs` and
+  `__paper_rebase_canvas_mounted`. The pure operation checks remain in the
+  package's `__paper_concurrent_rebase.test.mjs`.
   """
   use BarkparkWeb.ConnCase, async: false
 
