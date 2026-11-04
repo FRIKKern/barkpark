@@ -25,7 +25,7 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 
-const { BpPaperEditor } = await import("../paper-editor/src/index.js");
+await import("../paper-editor/src/index.js");
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const projection = {
@@ -81,19 +81,6 @@ const metadataProjection = {
     [{ type: "strong", children: [{ type: "text", value: "Canonical" }] }],
   ]],
 };
-
-function mounted(value = projection) {
-  const editor = document.createElement("bp-paper-editor");
-  assert.ok(editor instanceof BpPaperEditor);
-  editor.setAttribute("data-editor-mode", "table");
-  editor.block = clone(value);
-  const ops = [];
-  const errors = [];
-  editor.addEventListener("bp-op", (event) => ops.push(clone(event.detail)));
-  editor.addEventListener("bp-error", (event) => errors.push(clone(event.detail)));
-  document.body.appendChild(editor);
-  return { editor, ops, errors };
-}
 
 function editCell(editor, area, row, column, text) {
   const doc = clone(editor._editor.getJSON());
