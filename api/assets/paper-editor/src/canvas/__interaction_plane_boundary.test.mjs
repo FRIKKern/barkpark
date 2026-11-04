@@ -336,4 +336,3 @@ assert.deepEqual(BpPaperCanvas._imageFiles([new File(["x"], "x.png", { type: "im
 
 dom.window.close();
 console.log("interaction plane boundary: 114 source elements, frozen imports/exports, descriptors and baseline accessors passed");
-
