@@ -154,6 +154,8 @@ jobs:
           node ../paper-editor-host-tests/callout-parity.test.mjs
           node ../paper-editor-host-tests/contract-truth.test.mjs
           node ../paper-editor-host-tests/contextual-controls.test.mjs
+          node ../paper-editor-host-tests/card-action-label-inline.test.mjs
+          node ../paper-editor-host-tests/card-noop-settlement.test.mjs
           node ../paper-editor-host-tests/__canvas_media_uploader.test.mjs
           node ../paper-editor-host-tests/__card_media_bridge.test.mjs
           node ../paper-editor-host-tests/__card_title_contextual_inline.test.mjs
