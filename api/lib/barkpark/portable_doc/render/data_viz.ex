@@ -473,30 +473,32 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         _ -> grid |> List.flatten() |> Enum.max(fn -> 1.0 end) |> max(1.0e-9)
       end
 
-    row_labels = block |> get("rowLabels") |> string_list()
-    col_labels = block |> get("colLabels") |> string_list()
+    row_labels = block |> get("rowLabels") |> string_list() |> List.to_tuple()
+    col_labels = block |> get("colLabels") |> string_list() |> List.to_tuple()
     cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
     head =
-      if col_labels == [] do
+      if tuple_size(col_labels) == 0 do
         ""
       else
         cells =
           Enum.map_join(0..(cols - 1), "", fn j ->
-            ~s|<span class="bp-heat__cl">#{escape_html(Enum.at(col_labels, j) || "")}</span>|
+            ~s|<span class="bp-heat__cl">#{escape_html(heat_label(col_labels, j))}</span>|
           end)
 
-        corner = if row_labels == [], do: "", else: ~s|<span class="bp-heat__rl"></span>|
+        corner =
+          if tuple_size(row_labels) == 0, do: "", else: ~s|<span class="bp-heat__rl"></span>|
+
         corner <> cells
       end
 
     body =
       heat_rows(grid, fn row, i, left ->
         label =
-          if row_labels == [] do
+          if tuple_size(row_labels) == 0 do
             ""
           else
-            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+            ~s|<span class="bp-heat__rl">#{escape_html(heat_label(row_labels, i))}</span>|
           end
 
         {cells, left} =
@@ -515,7 +517,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         {label <> cells, left}
       end)
 
-    track = if row_labels == [], do: "", else: "auto "
+    track = if tuple_size(row_labels) == 0, do: "", else: "auto "
 
     ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,44px))">| <>
       head <>
@@ -537,19 +539,20 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # in the gutter.
   defp heat_calendar_html(grid, block) do
     bins = quantile_bins(grid)
-    row_labels = block |> get("rowLabels") |> string_list()
-    col_labels = block |> get("colLabels") |> string_list()
+    row_labels = block |> get("rowLabels") |> string_list() |> List.to_tuple()
+    col_labels = block |> get("colLabels") |> string_list() |> List.to_tuple()
     weeks = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
     head =
-      if col_labels == [] do
+      if tuple_size(col_labels) == 0 do
         ""
       else
-        corner = if row_labels == [], do: "", else: ~s|<span class="bp-heat__rl"></span>|
+        corner =
+          if tuple_size(row_labels) == 0, do: "", else: ~s|<span class="bp-heat__rl"></span>|
 
         corner <>
           Enum.map_join(0..(weeks - 1), "", fn w ->
-            ~s|<span class="bp-heat__ml">#{escape_html(Enum.at(col_labels, w) || "")}</span>|
+            ~s|<span class="bp-heat__ml">#{escape_html(heat_label(col_labels, w))}</span>|
           end)
       end
 
@@ -558,10 +561,10 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       |> Enum.zip_with(bins, &Enum.zip/2)
       |> heat_rows(fn row, i, left ->
         label =
-          if row_labels == [] do
+          if tuple_size(row_labels) == 0 do
             ""
           else
-            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+            ~s|<span class="bp-heat__rl">#{escape_html(heat_label(row_labels, i))}</span>|
           end
 
         # Ragged rows: a missing week reads as a zero cell (bin -1), so the
@@ -581,7 +584,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         {label <> cells, left}
       end)
 
-    track = if row_labels == [], do: "", else: "auto "
+    track = if tuple_size(row_labels) == 0, do: "", else: "auto "
 
     ~s|<div class="bp-heat bp-heat--cal"><div class="bp-heat__scroll"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{weeks},12px)">| <>
       head <> body <> "</div></div>" <> dual_legend() <> "</div>"
@@ -598,8 +601,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     bins = quantile_bins(grid)
     show_vals = get(block, "values") == true
     show_marg = get(block, "marginals") == true
-    row_labels = block |> get("rowLabels") |> string_list()
-    col_labels = block |> get("colLabels") |> string_list()
+    row_labels = block |> get("rowLabels") |> string_list() |> List.to_tuple()
+    col_labels = block |> get("colLabels") |> string_list() |> List.to_tuple()
     cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
     # Row / column sums for the marginals; ragged rows contribute 0 (gap rule).
@@ -611,17 +614,17 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     # The label gutter exists when there are row labels, or when marginals need
     # the Σ footer label (mirrors heatmap.go's labelW floor under showMarg).
-    gutter = row_labels != [] or show_marg
+    gutter = tuple_size(row_labels) > 0 or show_marg
 
     head =
-      if col_labels == [] and not show_marg do
+      if tuple_size(col_labels) == 0 and not show_marg do
         ""
       else
         corner = if gutter, do: ~s|<span class="bp-heat__rl"></span>|, else: ""
 
         labels =
           Enum.map_join(0..(cols - 1), "", fn j ->
-            ~s|<span class="bp-heat__cl">#{escape_html(Enum.at(col_labels, j) || "")}</span>|
+            ~s|<span class="bp-heat__cl">#{escape_html(heat_label(col_labels, j))}</span>|
           end)
 
         sum_head =
@@ -636,7 +639,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       |> heat_rows(fn row, i, left ->
         label =
           if gutter do
-            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+            ~s|<span class="bp-heat__rl">#{escape_html(heat_label(row_labels, i))}</span>|
           else
             ""
           end
@@ -679,6 +682,11 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     ~s|<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},#{cell_track})#{sum_track}">| <>
       head <> body <> foot <> "</div>" <> dual_legend() <> "</div>"
   end
+
+  defp heat_label(labels, index) when index >= 0 and index < tuple_size(labels),
+    do: elem(labels, index)
+
+  defp heat_label(_labels, _index), do: ""
 
   # One matrix cell. With values the exact right-aligned number IS the second
   # channel (the bin class keys the color); without, the bin-keyed marker class
@@ -1750,32 +1758,32 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           _ -> grid |> List.flatten() |> Enum.max(fn -> 1.0 end) |> max(1.0e-9)
         end
 
-      row_labels = block |> get("rowLabels") |> string_list()
-      col_labels = block |> get("colLabels") |> string_list()
+      row_labels = block |> get("rowLabels") |> string_list() |> List.to_tuple()
+      col_labels = block |> get("colLabels") |> string_list() |> List.to_tuple()
       cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
       label_td =
         ~s|style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 8px 2px 0;text-align:right"|
 
       head =
-        if col_labels == [] do
+        if tuple_size(col_labels) == 0 do
           ""
         else
-          corner = if row_labels == [], do: "", else: "<td></td>"
+          corner = if tuple_size(row_labels) == 0, do: "", else: "<td></td>"
 
           "<tr>" <>
             corner <>
             Enum.map_join(0..(cols - 1), "", fn j ->
-              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 3px;text-align:center">#{escape_html(Enum.at(col_labels, j) || "")}</td>|
+              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 3px;text-align:center">#{escape_html(heat_label(col_labels, j))}</td>|
             end) <> "</tr>"
         end
 
       body =
         heat_rows(grid, fn row, i, left ->
           label =
-            if row_labels == [],
+            if tuple_size(row_labels) == 0,
               do: "",
-              else: ~s|<td #{label_td}>#{escape_html(Enum.at(row_labels, i) || "")}</td>|
+              else: ~s|<td #{label_td}>#{escape_html(heat_label(row_labels, i))}</td>|
 
           {cells, left} =
             heat_cells(

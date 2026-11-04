@@ -179,6 +179,49 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert DataViz.heatmap_html(%{"type" => "heatmap", "cells" => []}) =~ "bp-dataviz--empty"
   end
 
+  test "heatmap label slots keep coercion, escaping, and missing-label behavior across emitters" do
+    block = %{
+      "type" => "heatmap",
+      "cells" => [[1, 2], [3]],
+      "rowLabels" => ["<row>"],
+      "colLabels" => ["A&B"]
+    }
+
+    legacy = DataViz.heatmap_html(block)
+    calendar = DataViz.heatmap_html(Map.put(block, "mode", "calendar"))
+    matrix = DataViz.heatmap_html(Map.put(block, "marginals", true))
+    email = DataViz.heatmap_email_html(block)
+
+    assert legacy =~ ~s|<span class="bp-heat__cl">A&amp;B</span><span class="bp-heat__cl"></span>|
+    assert legacy =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert legacy =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert calendar =~
+             ~s|<span class="bp-heat__ml">A&amp;B</span><span class="bp-heat__ml"></span>|
+
+    assert calendar =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert calendar =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert matrix =~
+             ~s|<span class="bp-heat__cl">A&amp;B</span><span class="bp-heat__cl"></span>|
+
+    assert matrix =~ ~s|<span class="bp-heat__rl">&lt;row&gt;</span>|
+    assert matrix =~ ~s|<span class="bp-heat__rl"></span>|
+
+    assert email =~ ">A&amp;B</td>"
+    assert email =~ ~s|text-align:center"></td>|
+    assert email =~ ">&lt;row&gt;</td>"
+    assert email =~ ~s|text-align:right"></td>|
+
+    without_labels = Map.drop(block, ["rowLabels", "colLabels"])
+    non_list_labels = Map.merge(block, %{"rowLabels" => %{}, "colLabels" => "A&B"})
+
+    assert DataViz.heatmap_html(non_list_labels) == DataViz.heatmap_html(without_labels)
+
+    assert DataViz.heatmap_email_html(non_list_labels) ==
+             DataViz.heatmap_email_html(without_labels)
+  end
+
   # ── chart ────────────────────────────────────────────────────────────────────
 
   test "chart renders one polyline per series plus ticks, x labels and a legend" do
