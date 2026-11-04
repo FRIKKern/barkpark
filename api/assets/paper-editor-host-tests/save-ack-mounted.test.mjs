@@ -1,10 +1,10 @@
 // Mounted acknowledgement, navigation protection, stable identity and draft recovery regressions.
 
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { closeHistory, undoDepth } from "@tiptap/pm/history";
+import { closeHistory, undoDepth } from "../paper-editor/node_modules/@tiptap/pm/dist/history/index.js";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -54,13 +54,13 @@ Object.defineProperty(window, "navigation", {
   },
 });
 
-const { BpPaperCanvas } = await import("./index.js");
-const { DEBOUNCE_MS } = await import("../contract.js");
-const { slashTypeToNode } = await import("./slash-insert.js");
+const { BpPaperCanvas } = await import("../paper-editor/src/canvas/index.js");
+const { DEBOUNCE_MS } = await import("../paper-editor/src/contract.js");
+const { slashTypeToNode } = await import("../paper-editor/src/canvas/slash-insert.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
 const hooksSource = readFileSync(
-  new URL("../../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url),
+  new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url),
   "utf8",
 );
 const seededDom = new JSDOM("<!doctype html>", { url:"http://localhost/studio/papers/seed-41" });
@@ -1686,7 +1686,7 @@ try {
   slashSection.canvas._editor.commands.setTextSelection(
     slashSection.canvas._editor.state.doc.content.size - 1,
   );
-  const { insertSlashTypeAtSelection } = await import("./command-palette.js");
+  const { insertSlashTypeAtSelection } = await import("../paper-editor/src/canvas/command-palette.js");
   // The block stands in for a slash line, so the pick replaces it.
   const SLASH_PICK = { replaceText: true };
   assert.equal(insertSlashTypeAtSelection(slashSection.canvas._editor, "section", undefined, SLASH_PICK), true);

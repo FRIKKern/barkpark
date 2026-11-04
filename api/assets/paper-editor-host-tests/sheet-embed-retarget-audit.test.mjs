@@ -1,4 +1,4 @@
-// __sheet_embed_retarget_audit.test.mjs — pd-ee-sheet-embed-audit: the MOUNTED
+// sheet-embed-retarget-audit.test.mjs — pd-ee-sheet-embed-audit: the MOUNTED
 // record of what a sheet ref and an embed target can and cannot do in the canvas.
 //
 // WHY THIS FILE EXISTS. Three suites already touch these two blocks, and none of
@@ -77,10 +77,10 @@
 //     under a read-only editor, and on a template-locked block, asserted on the
 //     exported predicate and mounted once to prove the predicate is what decides.
 //
-// Run: node src/canvas/__sheet_embed_retarget_audit.test.mjs   (or: npm test)
+// Run: node ../paper-editor-host-tests/sheet-embed-retarget-audit.test.mjs
 
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -152,13 +152,13 @@ const fetchMock = async (url, options = {}) => {
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
-await import("../../../../priv/static/assets/bp-search-intel.js");
+await import("../../priv/static/assets/bp-search-intel.js");
 globalThis.BpSearchIntel = window.BpSearchIntel;
-await import("../../../../priv/static/assets/bp-reference-picker.js");
-await import("./index.js");
-const { atomRetargetAllowed } = await import("./embed-node.js");
-const { NodeSelection } = await import("@tiptap/pm/state");
-const { closeHistory } = await import("@tiptap/pm/history");
+await import("../../priv/static/assets/bp-reference-picker.js");
+await import("../paper-editor/src/canvas/index.js");
+const { atomRetargetAllowed } = await import("../paper-editor/src/canvas/embed-node.js");
+const { NodeSelection } = await import("../paper-editor/node_modules/@tiptap/pm/dist/state/index.js");
+const { closeHistory } = await import("../paper-editor/node_modules/@tiptap/pm/dist/history/index.js");
 
 let failures = 0;
 function check(name, fn) {
