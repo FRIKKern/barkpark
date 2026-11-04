@@ -40,10 +40,9 @@ function parseImports(path, source) {
     imports.push({ specifier, start: match.index, end: match.index + match[0].length });
     cursor = match.index + match[0].length;
   }
-  const firstAtImport = source.indexOf("@import");
-  if (firstAtImport !== -1 && imports.length === 0)
-    throw new Error(`css source graph: unsupported @import syntax in ${path}`);
   const body = imports.reduceRight((text, item) => text.slice(0, item.start) + text.slice(item.end), source);
+  if (/@import\b/i.test(stripComments(body)))
+    throw new Error(`css source graph: unsupported @import syntax in ${path}`);
   return { imports, body };
 }
 

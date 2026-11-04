@@ -59,6 +59,10 @@ try {
   rejects(/duplicate canonical target/, () => writeFileSync(root, rootText(['@import "../shared.css";', '@import "./styles/a.css";', '@import "./styles/\.\/a.css";'])));
   rejects(/qualified @import/, () => writeFileSync(root, rootText(['@import "../shared.css";', '@import "./styles/a.css" screen;'])));
   rejects(/unsupported @import syntax|root stylesheet must contain imports and comments only/, () => writeFileSync(root, rootText(['@import "../shared.css";', '@import url("./styles/a.css");'])));
+  rejects(/unsupported @import syntax/, () => {
+    writeFileSync(root, rootText(['@import "../shared.css";', '@import "./styles/a.css";']));
+    writeFileSync(join(styles, "a.css"), '@import "./b.css";\n@import url("https://example.invalid/remote.css");\n.a{}\n');
+  });
   rejects(/non-local @import/, () => writeFileSync(root, rootText(['@import "../shared.css";', '@import "https://example.invalid/a.css";'])));
   rejects(/root stylesheet must contain imports and comments only/, () => writeFileSync(root, `${rootText()}body { color: red; }\n`));
   rejects(/first root import must be the shared stylesheet/, () => writeFileSync(root, rootText(['@import "./styles/a.css";', '@import "../shared.css";'])));
