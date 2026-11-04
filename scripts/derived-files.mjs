@@ -95,10 +95,12 @@ export const STEPS = [
       ...RENDER,
     ],
     after: ["design-emit"],
+    check:
+      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run sync:barkpark:check",
     write:
-      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run build:web",
+      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run sync:barkpark:write",
     gates: [
-      ".github/workflows/paper-editor.yml: Assert committed bundle and stylesheet are fresh",
+      ".github/workflows/paper-editor.yml: Assert every Barkpark sink matches a fresh build",
       "api/assets/paper-editor/src/__surface.test.mjs",
       "api/test/barkpark/paper_editor_vendor_drift_test.exs",
     ],
