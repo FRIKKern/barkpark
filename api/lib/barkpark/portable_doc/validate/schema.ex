@@ -19,15 +19,66 @@ defmodule Barkpark.PortableDoc.Validate.Schema do
                required properties items allOf anyOf not if then $ref)
   @types ~w(object array string boolean number integer null)
 
-  defstruct [:root, :refs, :type_at]
+  defstruct [:root, :refs, :type_at, :type_dispatch]
 
-  @type t :: %__MODULE__{root: map(), refs: %{[String.t()] => map()}, type_at: [String.t()]}
+  @type t :: %__MODULE__{
+          root: map(),
+          refs: %{[String.t()] => map()},
+          type_at: [String.t()],
+          type_dispatch: %{optional(String.t()) => [map()]} | nil
+        }
 
   @spec compile(map()) :: t()
   def compile(root) do
     unless object?(root), do: raise(ArgumentError, "schema at # is not an object")
     refs = resolve(root, %{}, [[]])
-    %__MODULE__{root: Map.fetch!(refs, []), refs: refs, type_at: ["properties", "type"]}
+    compiled_root = Map.fetch!(refs, [])
+
+    %__MODULE__{
+      root: compiled_root,
+      refs: refs,
+      type_at: ["properties", "type"],
+      type_dispatch: type_dispatch(root, Map.get(compiled_root, :all_of, []))
+    }
+  end
+
+  defp type_dispatch(raw, compiled) do
+    branches = get(raw, "allOf")
+
+    if is_list(branches) and length(branches) == length(compiled) do
+      branches
+      |> Enum.zip(compiled)
+      |> Enum.reduce_while(%{}, fn {raw_branch, compiled_branch}, dispatch ->
+        case dispatch_type(raw_branch) do
+          {:ok, type} ->
+            {:cont, Map.update(dispatch, type, [compiled_branch], &(&1 ++ [compiled_branch]))}
+
+          :error ->
+            {:halt, nil}
+        end
+      end)
+    end
+  end
+
+  defp dispatch_type(raw) do
+    with true <- exact_keys?(raw, ~w(if then)),
+         {:ok, condition} <- fetch(raw, "if"),
+         true <- exact_keys?(condition, ~w(properties required)),
+         ["type"] <- get(condition, "required"),
+         properties when not is_nil(properties) <- get(condition, "properties"),
+         true <- exact_keys?(properties, ["type"]),
+         type_schema when not is_nil(type_schema) <- get(properties, "type"),
+         true <- exact_keys?(type_schema, ["const"]),
+         type when is_binary(type) <- get(type_schema, "const") do
+      {:ok, type}
+    else
+      _ -> :error
+    end
+  end
+
+  defp exact_keys?(value, keys) do
+    object?(value) and
+      value |> entries() |> Enum.map(&elem(&1, 0)) |> MapSet.new() == MapSet.new(keys)
   end
 
   defp resolve(_root, refs, []), do: refs

@@ -437,6 +437,117 @@ defmodule Barkpark.PortableDoc.ValidateTest do
       assert codes.([%{"text" => "x"}]) == ["missing_required_field /blocks/0/type"]
     end
 
+    test "dispatches only exact root type branches and preserves custom allOf semantics" do
+      exact =
+        Schema.compile(%{
+          "type" => "object",
+          "required" => ["type"],
+          "properties" => %{"type" => %{"enum" => ["note"]}},
+          "allOf" => [
+            %{
+              "if" => %{"properties" => %{"type" => %{"const" => "note"}}, "required" => ["type"]},
+              "then" => %{"required" => ["a"]}
+            },
+            %{
+              "if" => %{"properties" => %{"type" => %{"const" => "note"}}, "required" => ["type"]},
+              "then" => %{"required" => ["b"]}
+            }
+          ]
+        })
+
+      codes = fn block ->
+        %{"blocks" => [block]}
+        |> Validate.validate(exact)
+        |> pairs()
+        |> Enum.map(fn {code, path} -> "#{code} #{path}" end)
+      end
+
+      assert codes.(%{"type" => "note"}) == [
+               "missing_required_field /blocks/0/a",
+               "missing_required_field /blocks/0/b"
+             ]
+
+      assert codes.(%{"type" => "unknown"}) == ["unknown_block_type /blocks/0/type"]
+      assert codes.(%{}) == ["missing_required_field /blocks/0/type"]
+
+      custom =
+        Schema.compile(%{
+          "type" => "object",
+          "properties" => %{"type" => %{"enum" => ["note"]}},
+          "allOf" => [
+            %{
+              "if" => %{
+                "properties" => %{"type" => %{"const" => "note"}},
+                "required" => ["type", "gate"]
+              },
+              "then" => %{"required" => ["conditional"]}
+            },
+            %{"required" => ["always"]}
+          ]
+        })
+
+      custom_codes = fn block ->
+        %{"blocks" => [block]}
+        |> Validate.validate(custom)
+        |> pairs()
+        |> Enum.map(fn {code, path} -> "#{code} #{path}" end)
+      end
+
+      assert custom_codes.(%{"type" => "note"}) == [
+               "missing_required_field /blocks/0/always"
+             ]
+
+      assert custom_codes.(%{"type" => "note", "gate" => true}) == [
+               "missing_required_field /blocks/0/conditional",
+               "missing_required_field /blocks/0/always"
+             ]
+
+      malformed =
+        Schema.compile(%{
+          "type" => "object",
+          "allOf" => [
+            %{
+              "if" => %{
+                "properties" => %{"type" => %{"const" => "note"}},
+                "required" => nil
+              },
+              "then" => %{"required" => ["conditional"]}
+            }
+          ]
+        })
+
+      assert %{"blocks" => [%{"type" => "note"}]}
+             |> Validate.validate(malformed)
+             |> pairs() == [{"missing_required_field", "/blocks/0/conditional"}]
+    end
+
+    test "a root $ref compiles without a dispatch index and keeps its old walk" do
+      schema =
+        Schema.compile(%{
+          "$ref" => "#/definitions/root",
+          "definitions" => %{
+            "root" => %{
+              "type" => "object",
+              "required" => ["name"],
+              "properties" => %{"name" => %{"type" => "string"}}
+            }
+          }
+        })
+
+      assert schema.type_dispatch == nil
+      assert Validate.validate([%{"name" => "ok"}], schema) == :ok
+
+      assert Validate.validate([%{}], schema) ==
+               {:error, [%{code: :missing_required_field, path: "/0/name"}]}
+    end
+
+    test "struct block values keep the old validation result instead of invoking Access" do
+      block = %Jason.OrderedObject{values: [{"type", "paragraph"}]}
+
+      assert Validate.validate([block]) ==
+               {:error, [%{code: :missing_required_field, path: "/0/type"}]}
+    end
+
     test "ids count only where a block was accepted, and pointers escape ~ and /" do
       schema =
         Schema.compile(%{
