@@ -14373,6 +14373,10 @@ defmodule BarkparkCloud.Web.Router do
       mode: bp.mode,
       health_status: bp.health_status,
       suspended: bp.suspended,
+      # deploy.yml's guerrilla push deploy reads this over the WORKER_TOKEN seam
+      # it already uses for deliveries, and skips the deploy while it is true.
+      # The same flag `bp cloud autoupdate pause` sets and the rollout honours.
+      autoupdate_paused: bp.autoupdate_paused,
       team_id: bp.team_id,
       inserted_at: bp.inserted_at
     }

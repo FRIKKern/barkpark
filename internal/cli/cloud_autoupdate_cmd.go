@@ -416,7 +416,8 @@ WHAT IT DOES
                     roll back: it stops the box moving PAST the pin, it never moves
                     it earlier (the updater only fast-forwards).
     unpin           clear the pin — the box rides blessed releases again.
-    pause           temporary hold — no update until resumed.
+    pause           temporary hold — no update until resumed. Pausing guerrilla
+                    also skips its push deploy in .github/workflows/deploy.yml.
     resume          release a pause.
 
   See the resulting policy at a glance in 'bp cloud status' (the POLICY column:

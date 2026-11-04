@@ -78,6 +78,25 @@ defmodule BarkparkCloud.Web.RouterInternalFleetTest do
       assert alpha["deprovision_status"] == "pending"
     end
 
+    test "each row carries autoupdate_paused, which deploy.yml reads before the guerrilla deploy" do
+      team = team_fixture()
+
+      paused =
+        barkpark_fixture(team, %{slug: "paused-box", url: "https://paused-box.barkpark.cloud"})
+
+      {:ok, _} = Registry.pause_autoupdate(paused)
+
+      _running =
+        barkpark_fixture(team, %{slug: "running-box", url: "https://running-box.barkpark.cloud"})
+
+      conn = call(:get, "/v1/internal/barkparks", nil, @worker_token)
+      assert conn.status == 200
+
+      rows = json_body(conn)["barkparks"]
+      assert Enum.find(rows, &(&1["slug"] == "paused-box"))["autoupdate_paused"] == true
+      assert Enum.find(rows, &(&1["slug"] == "running-box"))["autoupdate_paused"] == false
+    end
+
     test "a user session token does NOT open the fleet view" do
       {:ok, user} =
         Accounts.register_user(%{
