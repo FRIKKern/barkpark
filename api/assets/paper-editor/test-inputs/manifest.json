@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "upstream_repo": "https://github.com/FRIKKern/barkpark",
+  "files": [
+    {
+      "local": "test-inputs/nested-list-carriers.json",
+      "upstream": "api/test/support/fixtures/nested-list-carriers.json",
+      "commit": "a2e6bb1838286f6cd07129f254a0a471927f0d0b",
+      "sha256": "3047c92e72d1722cb65cae040672349b86e0cb933279bc120608b4dea65383f3",
+      "package": false,
+      "consumers": [
+        { "path": "src/__nested_list_carriers.test.mjs", "literal": "../test-inputs/nested-list-carriers.json" },
+        { "path": "src/canvas/__nested_list_authoring.test.mjs", "literal": "../../test-inputs/nested-list-carriers.json" }
+      ]
+    },
+    {
+      "local": "test-inputs/paper-editor/nested_split.json",
+      "upstream": "api/test/support/fixtures/paper-editor/nested_split.json",
+      "commit": "7db898545d26613c81bee8cf5aa94918ac363caa",
+      "sha256": "67848249beedcb4de01be7f0965784224235fce4f20a6687ade6287b1f5d8630",
+      "package": false,
+      "consumers": [
+        { "path": "src/canvas/__nested_split_id_mounted.test.mjs", "literal": "../../test-inputs/paper-editor/nested_split.json" }
+      ]
+    },
+    {
+      "local": "test-inputs/paper-editor/paste-redo-ops.json",
+      "upstream": "api/test/support/fixtures/paper-editor/paste-redo-ops.json",
+      "commit": "b9927b7caba8db9fdd4553d2e6ba3d8e3ac3c636",
+      "sha256": "1db9911e8e52bcd4363a127033054555f393ee4becec21543d50f1d85f56daee",
+      "package": false,
+      "consumers": [
+        { "path": "src/canvas/__paste_undo_redo.test.mjs", "literal": "../../test-inputs/paper-editor/paste-redo-ops.json" }
+      ]
+    }
+  ]
+}

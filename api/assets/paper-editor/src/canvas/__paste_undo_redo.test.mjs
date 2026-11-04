@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
 const expectedOps = JSON.parse(readFileSync(new URL(
-  "../../../../test/support/fixtures/paper-editor/paste-redo-ops.json",
+  "../../test-inputs/paper-editor/paste-redo-ops.json",
   import.meta.url,
 ), "utf8"));
 

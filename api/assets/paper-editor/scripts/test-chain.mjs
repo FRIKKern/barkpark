@@ -8,7 +8,6 @@ const PKG = join(dirname(SELF), "..");
 
 export const FIRST = [
   "src/__test_chain_census.mjs",
-  "src/__path_filter.test.mjs",
   "src/__path_filter_scan.test.mjs",
   "src/__rig.test.mjs",
   "src/__smoke.mjs",

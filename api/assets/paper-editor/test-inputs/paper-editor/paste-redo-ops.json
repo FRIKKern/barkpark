@@ -1,0 +1,14 @@
+[
+  {
+    "op": "patch-block",
+    "id": "paragraph-1",
+    "patch": {
+      "content": [
+        {"type": "text", "value": "Start "},
+        {"type": "strong", "children": [{"type": "text", "value": "Bold"}]},
+        {"type": "text", "value": " and "},
+        {"type": "em", "children": [{"type": "text", "value": "italic"}]}
+      ]
+    }
+  }
+]

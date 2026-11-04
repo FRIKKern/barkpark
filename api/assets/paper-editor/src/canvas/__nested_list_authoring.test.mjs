@@ -15,7 +15,7 @@ globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 await import("../index.js");
 await import("./index.js");
 
-const fixture = JSON.parse(readFileSync(new URL("../../../../test/support/fixtures/nested-list-carriers.json", import.meta.url))).blocks[0];
+const fixture = JSON.parse(readFileSync(new URL("../../test-inputs/nested-list-carriers.json", import.meta.url))).blocks[0];
 const clone = value => structuredClone(value);
 function position(ed, text, offset = 0) {
   let found;
