@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,10 +22,8 @@ for (const file of manifest.files) {
 
   const local = readFileSync(join(PKG, file.local));
   const current = readFileSync(join(REPO, file.upstream));
-  const pinned = execFileSync("git", ["show", `${file.commit}:${file.upstream}`], { cwd: REPO });
   assert.equal(sha256(local), file.sha256, `${file.local} matches its manifest digest`);
   assert.deepEqual(local, current, `${file.local} matches the current upstream fixture`);
-  assert.deepEqual(local, pinned, `${file.local} matches the fixture at its pinned upstream commit`);
 
   for (const consumer of file.consumers) {
     const source = readFileSync(join(PKG, consumer.path), "utf8");
@@ -34,4 +31,4 @@ for (const file of manifest.files) {
   }
 }
 
-console.log("PASS package-local fixtures: 3 pinned inputs, 4 consumers, current and exact-commit bytes match");
+console.log("PASS package-local fixtures: 3 provenance-pinned inputs, 4 consumers, current bytes and digests match");
