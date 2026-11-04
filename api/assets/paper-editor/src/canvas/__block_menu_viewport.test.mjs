@@ -76,20 +76,6 @@ function insideViewport(menu) {
   return r;
 }
 
-// WCAG 2.x contrast.
-const hex = (h) => { h = h.replace("#", ""); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
-const rgba = (s) => { const m = s.match(/rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/); return { c: [+m[1], +m[2], +m[3]], a: +m[4] }; };
-const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
-const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-const over = (fg, a, bg) => fg.map((v, i) => Math.round(v * a + bg[i] * (1 - a)));
-const tokens = (css, selector) => {
-  const at = css.indexOf(selector + " {");
-  assert.ok(at >= 0, `rule ${selector}`);
-  const body = css.slice(at, css.indexOf("}", at));
-  const get = (k) => (body.match(new RegExp(`${k}:\\s*([^;]+);`)) || [])[1].trim();
-  return { soft: get("--paper-ink-soft"), accentSoft: get("--paper-accent-soft"), chrome: get("--paper-chrome-bg") };
-};
-
 try {
   const root = document.createElement("div");
   root.className = "bp-paper-editor";
@@ -144,29 +130,18 @@ try {
   });
   canvas._handle._closeMenu();
 
-  // Popup contrast on the tinted ACTIVE row (axe checks the open menu, whose
-  // first row is active): the description/badge uses the soft ink there.
-  const shell = readFileSync(new URL("../../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+  // The package owns the wikilink badge. The Barkpark host owns the slash row
+  // and its theme contrast, which its host-only test reads from the live shell.
   const bundle = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-  check("the active slash row and wikilink row show their faint text in the soft ink", () => {
-    assert.match(shell, /\.bp-slash-item\.is-active \.bp-slash-desc \{ color: var\(--paper-ink-soft\); \}/);
+  check("the active wikilink row shows its faint text in the soft ink", () => {
     assert.match(bundle, /\.bp-wikilink-item\.is-active \.bp-wikilink-type-badge \{ color: var\(--paper-ink-soft\); \}/);
   });
-  for (const [label, sel] of [["light", 'html[data-theme="light"] .bp-slash-menu'], ["dark", 'html[data-theme="dark"] .bp-slash-menu']]) {
-    check(`${label}: soft ink on the active slash row meets AA 4.5:1`, () => {
-      const t = tokens(shell, sel);
-      const a = rgba(t.accentSoft);
-      const bg = over(a.c, a.a, hex(t.chrome));
-      const r = ratio(hex(t.soft), bg);
-      assert.ok(r >= 4.5, `${r.toFixed(2)}:1`);
-    });
-  }
 } catch (e) {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.message}`);
 } finally {
-  if (ran !== 7) { failures += 1; console.log(`FAIL  ran ${ran} of 7 checks`); }
+  if (ran !== 5) { failures += 1; console.log(`FAIL  ran ${ran} of 5 checks`); }
   dom.window.close();
 }
 if (failures) { console.log(`${failures} failure(s)`); process.exit(1); }
-console.log("block menu viewport + popup contrast passed");
+console.log("block menu viewport + local popup CSS passed");

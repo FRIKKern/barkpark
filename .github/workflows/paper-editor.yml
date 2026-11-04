@@ -38,6 +38,7 @@ on:
     branches: [main]
     paths:
       - "api/assets/paper-editor/**"
+      - "api/assets/paper-editor-host-tests/**"
       # Every file a step of this workflow reads from outside the folder above.
       # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
       # walks every entry point this workflow runs, collects each path literal
@@ -72,6 +73,7 @@ on:
   pull_request:
     paths:
       - "api/assets/paper-editor/**"
+      - "api/assets/paper-editor-host-tests/**"
       # Every file a step of this workflow reads from outside the folder above.
       # DERIVED, not hand-kept: src/__path_filter.test.mjs (in `npm test`)
       # walks every entry point this workflow runs, collects each path literal
@@ -131,6 +133,9 @@ jobs:
 
       - name: Smoke + unit suites
         run: npm test
+
+      - name: Barkpark host-only editor assertions
+        run: node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
