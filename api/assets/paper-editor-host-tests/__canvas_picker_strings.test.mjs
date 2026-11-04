@@ -5,9 +5,9 @@
 // node-view hands them to its picker. A host with no strings leaves the pickers on
 // their English defaults.
 //
-// Run: node src/canvas/__canvas_picker_strings.test.mjs
+// Run: node ../paper-editor-host-tests/__canvas_picker_strings.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -32,10 +32,10 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 const fetchMock = async () => ({ ok: true, json: async () => ({ documents: [], result: { hits: [] } }) });
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
-await import("../../../../priv/static/assets/bp-asset-browser.js");
-await import("../../../../priv/static/assets/bp-media-picker.js");
-await import("../../../../priv/static/assets/bp-reference-picker.js");
-const { BpPaperCanvas } = await import("./index.js");
+await import("../../priv/static/assets/bp-asset-browser.js");
+await import("../../priv/static/assets/bp-media-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
+const { BpPaperCanvas } = await import("../paper-editor/src/canvas/index.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
 const MEDIA = JSON.stringify({ replace: "Bytt bilde", remove: "Fjern" });

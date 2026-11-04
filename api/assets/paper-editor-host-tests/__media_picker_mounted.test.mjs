@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -99,10 +99,10 @@ window.fetch = fetchMock;
 
 // The shared dialog focus manager the browser's trap() comes from; every
 // layout that loads the browser loads it first.
-await import("../../../../priv/static/assets/bp-modal-focus.js");
-await import("../../../../priv/static/assets/bp-asset-browser.js");
-await import("../../../../priv/static/assets/bp-media-picker.js");
-const { BpPaperCanvas } = await import("./index.js");
+await import("../../priv/static/assets/bp-modal-focus.js");
+await import("../../priv/static/assets/bp-asset-browser.js");
+await import("../../priv/static/assets/bp-media-picker.js");
+const { BpPaperCanvas } = await import("../paper-editor/src/canvas/index.js");
 
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 assert.ok(customElements.get("bp-media-picker"));

@@ -10,12 +10,12 @@
 // run (as PaperCanvasConcurrentEditsTest pins for the LiveView side). Both
 // edits must persist, A must never see a conflict, and A's typing must survive
 // the release that finally paints the peer's paragraph.
-// Run: node src/canvas/__paper_focused_typing_peer_saves_mounted.test.mjs
+// Run: node ../paper-editor-host-tests/__paper_focused_typing_peer_saves_mounted.test.mjs
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -44,12 +44,12 @@ Object.defineProperty(window, "crypto", { configurable: true, value: {
   randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
 } });
 
-await import("./index.js");
-const { TextSelection } = await import("@tiptap/pm/state");
-const { DEBOUNCE_MS } = await import("../contract.js");
+await import("../paper-editor/src/canvas/index.js");
+const { TextSelection } = await import("../paper-editor/node_modules/@tiptap/pm/dist/state/index.js");
+const { DEBOUNCE_MS } = await import("../paper-editor/src/contract.js");
 
 vm.runInContext(
-  readFileSync(new URL("../../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   vm.createContext({ window, document, customElements, CustomEvent, FormData: window.FormData,
     setTimeout, clearTimeout }),
 );

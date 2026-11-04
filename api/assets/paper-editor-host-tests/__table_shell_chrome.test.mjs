@@ -6,8 +6,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
-const mirror = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+const mirror = readFileSync(new URL("../paper-editor/src/styles.css", import.meta.url), "utf8");
 
 const rules = (css) => {
   const out = new Map();

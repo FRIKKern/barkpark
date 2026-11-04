@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM, VirtualConsole } from "jsdom";
+import { JSDOM, VirtualConsole } from "./jsdom.mjs";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -31,16 +31,16 @@ function environment(html) {
     customElements: window.customElements,
   });
   vm.runInContext(
-    readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+    readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
     context,
   );
   return { dom, window, hooks: window.BarkparkPaperEditorHooks, navigationErrors };
 }
 
 function shippedMorphdom(window) {
-  window.eval(readFileSync(new URL("../../../priv/static/assets/phoenix.js", import.meta.url), "utf8"));
+  window.eval(readFileSync(new URL("../../priv/static/assets/phoenix.js", import.meta.url), "utf8"));
   const source = readFileSync(
-    new URL("../../../priv/static/assets/phoenix_live_view.js", import.meta.url),
+    new URL("../../priv/static/assets/phoenix_live_view.js", import.meta.url),
     "utf8",
   );
   const instrumented = source.replace(

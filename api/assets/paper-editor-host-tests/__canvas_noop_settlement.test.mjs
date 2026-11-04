@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const BLOCKS = [{ id: "p-1", type: "paragraph", content: [{ type: "text", value: "Alpha" }] }];
 const dom = new JSDOM(`<!doctype html><html><head></head><body>
@@ -45,7 +45,7 @@ Object.defineProperty(window, "crypto", { configurable: true, value: {
   randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
 } });
 
-await import("./index.js");
+await import("../paper-editor/src/canvas/index.js");
 
 const context = vm.createContext({
   window,
@@ -58,7 +58,7 @@ const context = vm.createContext({
   customElements: window.customElements,
 });
 vm.runInContext(
-  readFileSync(new URL("../../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 

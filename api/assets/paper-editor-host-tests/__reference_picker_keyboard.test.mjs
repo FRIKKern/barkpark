@@ -2,7 +2,7 @@
 // options answered mousedown only (Enter/Space fire click), the input was not
 // a combobox, arrows did nothing, and the result count was not announced.
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -29,9 +29,9 @@ const fetchMock = async (url, options = {}) => {
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
-await import("../../../../priv/static/assets/bp-search-intel.js");
+await import("../../priv/static/assets/bp-search-intel.js");
 globalThis.BpSearchIntel = window.BpSearchIntel;
-await import("../../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 
 const picker = document.createElement("bp-reference-picker");
 picker.setAttribute("ref-type", "author");
