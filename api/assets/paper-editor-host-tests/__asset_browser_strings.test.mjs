@@ -7,9 +7,9 @@
 //
 // Runs the TRACKED static assets under jsdom.
 //
-// Run: node src/__asset_browser_strings.test.mjs
+// Run: node ../paper-editor-host-tests/__asset_browser_strings.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
@@ -20,8 +20,8 @@ globalThis.window = window;
 let failLoad = false;
 globalThis.fetch = window.fetch = async () =>
   failLoad ? { ok: false, status: 500, json: async () => ({}) } : { ok: true, json: async () => ({ result: { hits: [] } }) };
-await import("../../../priv/static/assets/bp-asset-browser.js");
-await import("../../../priv/static/assets/bp-media-picker.js");
+await import("../../priv/static/assets/bp-asset-browser.js");
+await import("../../priv/static/assets/bp-media-picker.js");
 
 const NB = {
   library: "Mediebibliotek",

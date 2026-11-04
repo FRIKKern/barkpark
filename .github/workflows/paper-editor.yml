@@ -136,9 +136,35 @@ jobs:
 
       - name: Barkpark host-only editor assertions
         run: |
+          node ../paper-editor-host-tests/__array_focus.test.mjs
+          node ../paper-editor-host-tests/__asset_browser_strings.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_add_collection_name.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_landmarks.test.mjs
+          node ../paper-editor-host-tests/__datetime_hook_late_script.test.mjs
+          node ../paper-editor-host-tests/__modal_focus.test.mjs
+          node ../paper-editor-host-tests/__overflow_menu_keyboard.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_filter.test.mjs
+          node ../paper-editor-host-tests/__press_answer_locale.test.mjs
+          node ../paper-editor-host-tests/__press_answer_row_name.test.mjs
+          node ../paper-editor-host-tests/__public_layout_bootstrap.test.mjs
+          node ../paper-editor-host-tests/__rte_internal_link.test.mjs
+          node ../paper-editor-host-tests/__rte_preview_strings.test.mjs
+          node ../paper-editor-host-tests/__tab_keys.test.mjs
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
+          node ../paper-editor-host-tests/callout-parity.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_filmstrip_names.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_folder_dialog.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_keyboard.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_locale.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_strings.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_upload_session.test.mjs
+          node ../paper-editor-host-tests/__boundary_focus.test.mjs
+          node ../paper-editor-host-tests/__paper_link_ref_copy_controls.test.mjs
+          node ../paper-editor-host-tests/__paper_links_header_inline.test.mjs
+          node ../paper-editor-host-tests/__reference_picker_blur.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs

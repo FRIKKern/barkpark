@@ -1,9 +1,9 @@
 // task-99bc7de193ae9efe: the reference field's suggestion list stayed open after
 // focus left the field (Tab, Shift+Tab, a click elsewhere), floating over the
 // fields below; nothing but Escape inside the field or a pick closed it.
-// Run: node src/canvas/__reference_picker_blur.test.mjs
+// Run: node ../paper-editor-host-tests/__reference_picker_blur.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -34,9 +34,9 @@ const fetchMock = async (url, options = {}) => {
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
-await import("../../../../priv/static/assets/bp-search-intel.js");
+await import("../../priv/static/assets/bp-search-intel.js");
 globalThis.BpSearchIntel = window.BpSearchIntel;
-await import("../../../../priv/static/assets/bp-reference-picker.js");
+await import("../../priv/static/assets/bp-reference-picker.js");
 
 const picker = document.createElement("bp-reference-picker");
 picker.setAttribute("ref-type", "author");

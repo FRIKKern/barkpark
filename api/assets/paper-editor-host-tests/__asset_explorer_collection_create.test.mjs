@@ -3,7 +3,7 @@
 // posts { title } to the media-scoped folder door, with the session header.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   runScripts: "outside-only",
@@ -11,7 +11,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 });
 const { window } = dom;
 for (const file of ["bp-search-intel.js", "bp-asset-explorer.js"]) {
-  window.eval(readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"));
+  window.eval(readFileSync(new URL(`../../priv/static/assets/${file}`, import.meta.url), "utf8"));
 }
 const Explorer = window.customElements.get("bp-asset-explorer");
 const create = Explorer.prototype._createCollection;

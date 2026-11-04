@@ -4,7 +4,7 @@
 // same credentials: a bearer when the page has one, otherwise x-requested-with.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   runScripts: "outside-only",
@@ -12,7 +12,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 });
 const { window } = dom;
 window.eval(
-  readFileSync(new URL("../../../priv/static/assets/bp-asset-explorer.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-asset-explorer.js", import.meta.url), "utf8"),
 );
 
 const Explorer = window.customElements.get("bp-asset-explorer");

@@ -5,14 +5,14 @@
 // Studio root layout and the paper layout.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const helper = readFileSync(
-  new URL("../../../priv/static/assets/bp-modal-focus.js", import.meta.url),
+  new URL("../../priv/static/assets/bp-modal-focus.js", import.meta.url),
   "utf8",
 );
 const root = readFileSync(
-  new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+  new URL("../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
   "utf8",
 );
 assert.ok(

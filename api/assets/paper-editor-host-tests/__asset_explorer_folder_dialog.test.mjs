@@ -1,10 +1,10 @@
 // task-3713c75065d471d4: the media library's New folder dialog (role=dialog,
 // aria-modal) dropped focus to <body> on close, answered Escape only from its
 // text input, let Tab walk out into the page behind it, and titled itself h3
-// under the page's h1. Run: node src/__asset_explorer_folder_dialog.test.mjs
+// under the page's h1. Run: node ../paper-editor-host-tests/__asset_explorer_folder_dialog.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   runScripts: "outside-only",
@@ -20,7 +20,7 @@ window.fetch = async (url) => ({
 });
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 for (const file of ["bp-modal-focus.js", "bp-search-intel.js", "bp-asset-explorer.js"]) {
-  window.eval(readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"));
+  window.eval(readFileSync(new URL(`../../priv/static/assets/${file}`, import.meta.url), "utf8"));
 }
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
