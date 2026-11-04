@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "0.1.0-alpha.1",
-  "build": "dba9c4142323",
+  "build": "f10675ed3f80",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -1401,6 +1401,7 @@
       "data-lead",
       "data-live",
       "data-locked",
+      "data-media",
       "data-node-view-failed",
       "data-note-body",
       "data-note-pending",

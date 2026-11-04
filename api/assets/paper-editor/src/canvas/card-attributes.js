@@ -3,7 +3,7 @@
 // null/absent round-trips ABSENT. Closes over BOTH the attr key (`attrKey`, e.g.
 // "media") and the DOM data-attr name (`dataName`, e.g. "data-media") because TipTap's
 // renderHTML receives only the full attrs object.
-function jsonAttr(attrKey, dataName) {
+export function jsonAttr(attrKey, dataName) {
   return {
     default: null,
     parseHTML: (el) => {
@@ -58,8 +58,5 @@ export function cardAttributes(cardType) {
       renderHTML: (attrs) =>
         attrs.title != null ? { "data-title": attrs.title } : {},
     },
-    // media / action — PRESENT-ONLY JSON carriers for the whole image/action element.
-    media: jsonAttr("media", "data-media"),
-    action: jsonAttr("action", "data-action"),
   };
 }

@@ -64,7 +64,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 // imports this file for the pure mediaUrlFromValue helper without dragging the WC/DOM
 // path into the harness.
 import { canvasScope } from "./field-node.js";
-import { cardAttributes } from "./card-attributes.js";
+import { cardAttributes, jsonAttr } from "./card-attributes.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
 
@@ -150,7 +150,12 @@ export const Card = Node.create({
   defining: true,
 
   addAttributes() {
-    return cardAttributes(BP_CARD_BP_TYPE);
+    return {
+      ...cardAttributes(BP_CARD_BP_TYPE),
+      // The host surface scanner reads these carrier names from addAttributes.
+      media: jsonAttr("media", "data-media"),
+      action: jsonAttr("action", "data-action"),
+    };
   },
 
   parseHTML() {
