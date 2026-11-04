@@ -6,8 +6,9 @@
 // prose/heading/list/divider children project to their editable nodes; an empty
 // column seeds+strips a sentinel paragraph; an unknown top-level key (gap) survives
 // the coarse patch; a phantom nested null bpId (the depth>0 attr the live getJSON
-// gains via BpAttrs) is immune to the coarse content-diff. DOM-free — imports only
-// run-convert.js (which imports the pure convert.js), never TipTap.
+// gains via BpAttrs) is immune to the coarse content-diff. The conversion closure
+// stays package-owned; run-convert.js reaches the package's TipTap field modules.
+// Host CSS mirrors and canonical surface assertions live in the companion host test.
 //
 // Run: node src/__columns.test.mjs   (or: npm test)
 
@@ -35,9 +36,7 @@ function check(name, fn) {
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
 const columnStyles = [
-  ["../../paper-surface/paper-surface.css", ".bp-paper-surface"],
   ["./styles.css", ".bp-paper-editor-body"],
-  ["../../../priv/static/assets/bp-paper-editor-shell.css", ".bp-paper-editor-body"],
 ].map(([path, scope]) => {
   const css = readFileSync(new URL(path, import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "");
@@ -62,7 +61,7 @@ check("section-cell columns reset the page evidence band in reader and editor mi
 });
 
 check("wrapperless canvas grid columns reset evidence at the direct-child boundary", () => {
-  for (const sheet of columnStyles.slice(1)) {
+  for (const sheet of columnStyles) {
     assertEvidenceReset(sheet, ".bp-canvas-section > .bp-section__grid > .bp-cols");
   }
 });
@@ -108,7 +107,7 @@ check("a column cell resets the evidence band for every block it holds, nested s
 });
 
 check("nested tables use their column width, not the page evidence band", () => {
-  for (const path of ["../../paper-surface/paper-surface.css", "./styles.css"]) {
+  for (const path of ["./styles.css"]) {
     const css = readFileSync(new URL(path, import.meta.url), "utf8");
     assert.match(css, /\.bp-cols__c \.bp-table\s*\{[^}]*--bp-evidence-width:\s*100%;[^}]*--bp-evidence-pull:\s*0px;/,
       `${path}: a nested table must not inherit the page-wide breakout`);

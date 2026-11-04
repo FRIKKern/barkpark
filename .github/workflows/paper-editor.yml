@@ -152,6 +152,61 @@ jobs:
           node ../paper-editor-host-tests/__tab_keys.test.mjs
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/callout-parity.test.mjs
+          node ../paper-editor-host-tests/contract-truth.test.mjs
+          node ../paper-editor-host-tests/contextual-controls.test.mjs
+          node ../paper-editor-host-tests/card-action-label-inline.test.mjs
+          node ../paper-editor-host-tests/card-noop-settlement.test.mjs
+          node ../paper-editor-host-tests/__code_interior_host.test.mjs
+          node ../paper-editor-host-tests/__columns_host.test.mjs
+          node ../paper-editor-host-tests/__canvas_media_uploader.test.mjs
+          node ../paper-editor-host-tests/__card_media_bridge.test.mjs
+          node ../paper-editor-host-tests/__card_title_contextual_inline.test.mjs
+          node ../paper-editor-host-tests/__collection_focus.test.mjs
+          node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
+          node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
+          node ../paper-editor-host-tests/__columns_track_controls.test.mjs
+          node ../paper-editor-host-tests/__contextual_history.test.mjs
+          node ../paper-editor-host-tests/__document_revision_announce.test.mjs
+          node ../paper-editor-host-tests/__fallback_validation_recovery.test.mjs
+          node ../paper-editor-host-tests/__field_autosave_rev.test.mjs
+          node ../paper-editor-host-tests/__field_flush.test.mjs
+          node ../paper-editor-host-tests/__figure_image_bridge.test.mjs
+          node ../paper-editor-host-tests/__footnote_painted_copy.test.mjs
+          node ../paper-editor-host-tests/__form_collection_controls.test.mjs
+          node ../paper-editor-host-tests/__generic_field_flush.test.mjs
+          node ../paper-editor-host-tests/__halt_resync.test.mjs
+          node ../paper-editor-host-tests/__inline_text.test.mjs
+          node ../paper-editor-host-tests/__master_insert_queue.test.mjs
+          node ../paper-editor-host-tests/__mutation_concurrency.test.mjs
+          node ../paper-editor-host-tests/__nested_canvas_context.test.mjs
+          node ../paper-editor-host-tests/__paper_hooks_strings.test.mjs
+          node ../paper-editor-host-tests/__paper_remote_carets_hook.test.mjs
+          node ../paper-editor-host-tests/__reader_hooks.test.mjs
+          node ../paper-editor-host-tests/__reconnect_mode.test.mjs
+          node ../paper-editor-host-tests/__server_insert_queue.test.mjs
+          node ../paper-editor-host-tests/__focus_doc_header.test.mjs
+          node ../paper-editor-host-tests/__local_time.test.mjs
+          node ../paper-editor-host-tests/__new_doc_focus.test.mjs
+          node ../paper-editor-host-tests/__scope_switch_focus.test.mjs
+          node ../paper-editor-host-tests/__press_answer_fast_reply.test.mjs
+          node ../paper-editor-host-tests/__press_answer_flash_word.test.mjs
+          node ../paper-editor-host-tests/__press_answer_watchdog.test.mjs
+          node ../paper-editor-host-tests/__picker_asset_ref.test.mjs
+          node ../paper-editor-host-tests/__picker_chrome.test.mjs
+          node ../paper-editor-host-tests/__picker_focal.test.mjs
+          node ../paper-editor-host-tests/__picker_metadata.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_preview.test.mjs
+          node ../paper-editor-host-tests/__picker_remove_focus.test.mjs
+          node ../paper-editor-host-tests/__picker_upload_keyboard.test.mjs
+          node ../paper-editor-host-tests/__picker_upload_type.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_hit_preview.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_hit_type_icon.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_strings.test.mjs
+          node ../paper-editor-host-tests/__picker_reference_type_words.test.mjs
+          node ../paper-editor-host-tests/__picker_search_no_autosave.test.mjs
+          node ../paper-editor-host-tests/__rte_keyboard.test.mjs
+          node ../paper-editor-host-tests/__rte_pt_blocks.test.mjs
+          node ../paper-editor-host-tests/__rte_vocabulary.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs

@@ -18,7 +18,7 @@ defmodule BarkparkWeb.Studio.PaperCanvasHaltResyncTest do
     * the STORED canvas `runs`, so the host can put the run back on storage.
 
   The host half (drop the refused batch, apply the stored run, surface the
-  reason) is pinned by `api/assets/paper-editor/src/__halt_resync.test.mjs`.
+  reason) is pinned by `api/assets/paper-editor-host-tests/__halt_resync.test.mjs`.
   """
   use BarkparkWeb.ConnCase, async: false
 

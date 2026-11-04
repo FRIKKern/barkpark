@@ -153,6 +153,7 @@ test("reach names the command that runs each kind of test", () => {
       "apps/mobile/__tests__/conformance.test.tsx",
       "js/packages/react/tests/conformance.test.tsx",
       "api/assets/paper-editor/src/__surface.test.mjs",
+      "api/assets/paper-editor-host-tests/__reader_hooks.test.mjs",
       ".github/workflows/x.yml: Step",
     ]),
     [
@@ -162,12 +163,14 @@ test("reach names the command that runs each kind of test", () => {
       "cd apps/mobile && pnpm exec jest __tests__/conformance.test.tsx",
       "cd js && pnpm --filter @barkpark/react exec vitest run tests/conformance.test.tsx",
       "cd api/assets/paper-editor && node src/__surface.test.mjs",
+      "node api/assets/paper-editor-host-tests/__reader_hooks.test.mjs",
     ],
   );
 });
 
 test("reach lists a changed test file as one to run", () => {
   assert.ok(isTest("api/test/x_test.exs"));
-  assert.ok(isTest("api/assets/paper-editor/src/__reader_hooks.test.mjs"));
+  assert.ok(isTest("api/assets/paper-editor/src/__callout_parity.test.mjs"));
+  assert.ok(isTest("api/assets/paper-editor-host-tests/__reader_hooks.test.mjs"));
   assert.ok(!isTest("api/lib/x.ex"));
 });
