@@ -275,11 +275,11 @@ type Barkpark struct {
 	// COMMIT DISTANCE (dr-w24-s2) — the control plane's own measurement of the
 	// commit the box actually serves, which is a DIFFERENT question from
 	// `UpdateState` above. UpdateState is the box's release-TAG self-grade; these
-	// three are one GitHub compare of the served sha against `main`. They
-	// disagree in production right now: rows read commit_distance 2493 /
-	// commit_ancestry "behind" / update_state "current", because no release tag
-	// has been cut since 2026-07-08 — a box that reached the newest tag stays
-	// `current` however far main runs ahead of it.
+	// three are one GitHub compare of the served sha against `main`. They can
+	// disagree: a box that runs the newest release tag grades itself `current`
+	// while main has moved past the tag. dr-w24-s2 read that gap as `behind`,
+	// written when no tag had been cut for months. Decision 0011 replaced the
+	// rule: a box serving LatestReleaseCommit below is current.
 	//
 	//   - CommitDistance — commits of `main` this box does NOT have. A POINTER on
 	//     purpose, the AutoupdateEnabled *bool idiom: nil is UNMEASURED (an empty
@@ -297,6 +297,13 @@ type Barkpark struct {
 	CommitDistance          *int   `json:"commit_distance"`
 	CommitAncestry          string `json:"commit_ancestry"`
 	CommitDistanceCheckedAt string `json:"commit_distance_checked_at"`
+	// LatestReleaseCommit is the commit the newest `vA.B.C` release tag points
+	// at, as the control plane last read it from GitHub (decision 0011, which
+	// supersedes dr-w24-s2's rule). A box whose GitCommit equals it runs the
+	// latest release, and `bp cloud status` reads it as current even when
+	// CommitAncestry says main is ahead. Empty when the plane has not read the
+	// tags since it booted, or predates the field. Empty keeps the old rule.
+	LatestReleaseCommit string `json:"latest_release_commit"`
 
 	// On-demand VERIFY verdict (BP-ONB-09) — the cached headline of the last
 	// golden-path probe run the control plane persisted onto the row. Purely

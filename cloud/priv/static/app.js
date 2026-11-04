@@ -7894,18 +7894,16 @@
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
         bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 10
-    // dr-w25: TWO independent sources can say `behind`, and until this slice the
-    // console read only the weaker one. `update_state` is the box's RELEASE-TAG
-    // self-grade; `commit_ancestry` is the control plane's own compare of the
-    // sha the box serves against main (see behindByCommits below). A box pinned
-    // at the newest tag grades itself `current` however far main runs ahead — so
-    // a row reading commit_ancestry "behind" + update_state "current" rendered
-    // live-green here while the SAME payload's commit column said 2,493 behind.
-    // Ported byte-for-byte from the Go twin's predicate (cloud_status_cmd.go
-    // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
-    // — same rung, same label, same bucket; it simply stops missing the boxes
-    // whose release-tag grade cannot express the gap.
-    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 11
+    // TWO independent sources can say `behind`: `update_state`, the box's
+    // RELEASE-TAG self-grade, and `commit_ancestry`, the control plane's own
+    // compare of the sha the box serves against main (see behindByCommits
+    // below). Decision 0011 (docs/decisions/0011-latest-release-is-current.md)
+    // supersedes dr-w24-s2/dr-w25: a box serving exactly the latest release
+    // tag's commit (`latest_release_commit`) is current, however far main has
+    // moved past the tag. Ported from the Go twin's predicate
+    // (cloud_status_cmd.go attentionStatus:
+    // `live && (b.UpdateState == "behind" || (behindByCommits(b) && !onLatestRelease(b)))`).
+    if (live && (bp.update_state === "behind" || (behindByCommits(bp) && !onLatestRelease(bp)))) return "behind"; // 11
     if (removing) return "removing";                              // 12
     if (!host) return "provisioning";                            // 13 (rank-2 already excluded)
     return "ok";                                                // 14
@@ -8367,13 +8365,11 @@
   // `update_state` is the box's RELEASE-TAG self-grade; `commit_ancestry` /
   // `commit_distance` are the control plane's OWN compare of the sha the box
   // actually serves against `main` (barkpark_json emits all three, written
-  // hourly). They answer DIFFERENT questions and they disagree in production
-  // right now — one row reads commit_distance 2493, commit_ancestry "behind",
-  // update_state "current", because no release tag has been cut since
-  // 2026-07-08, so a box pinned at the newest tag grades itself `current`
-  // however far main runs ahead. Until this block the console read update_state
-  // twelve times and these columns ZERO times — a reassuring grade rendered
-  // beside a refutation it never looked at.
+  // hourly). They answer DIFFERENT questions. A box on the newest release tag
+  // grades itself `current` while main moves past the tag. When no tag had
+  // been cut for months, dr-w24-s2 ruled such a box behind. Decision 0011
+  // supersedes that: a box serving the latest release tag's commit is current,
+  // and commitBehindParts says "on the latest release" instead of "behind".
   //
   // Ported from the Go CLI's shipped reader (internal/cli/cloud_status_cmd.go:
   // behindCell / behindDetail / commitDistanceUnknown), phrasing and all —
@@ -8393,6 +8389,15 @@
   var COMMIT_DISTANCE_UNMETERED = "UNMETERED";
   function behindByCommits(bp) {
     return String((bp && bp.commit_ancestry) || "").trim() === "behind";
+  }
+  // Decision 0011: the box serves exactly the commit the latest release tag
+  // points at. Both shas must be present and at least 7 characters; either may
+  // be abbreviated. Ported from Go's onLatestRelease.
+  function onLatestRelease(bp) {
+    var served = String((bp && bp.git_commit) || "").trim().toLowerCase();
+    var release = String((bp && bp.latest_release_commit) || "").trim().toLowerCase();
+    if (served.length < 7 || release.length < 7) return false;
+    return served.indexOf(release) === 0 || release.indexOf(served) === 0;
   }
   function commitBehindCell(bp) {
     bp = bp || {};
@@ -8418,6 +8423,15 @@
   function commitBehindParts(bp) {
     bp = bp || {};
     if (!behindByCommits(bp)) return { fact: "", note: "" };
+    if (onLatestRelease(bp) && bp.update_state !== "behind") {
+      // Decision 0011: Go's latestReleaseDetail, verbatim.
+      var latest = String(bp.update_latest_release || "").trim();
+      var release = latest ? "the latest release " + latest : "the latest release";
+      var ahead = bp.commit_distance == null
+        ? "main is ahead of it"
+        : "main is " + String(bp.commit_distance) + " commits ahead of it";
+      return { fact: "on " + release + "; " + ahead, note: "" };
+    }
     var fact = bp.commit_distance == null
       ? "behind main by an unmeasured number of commits"
       : String(bp.commit_distance) + " commits behind main";
@@ -32515,6 +32529,7 @@
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
       fleetVerifyText: fleetVerifyText,
       commitBehindCell: commitBehindCell, commitBehindDetail: commitBehindDetail, commitBehindParts: commitBehindParts,
+      onLatestRelease: onLatestRelease,
       fleetCommitDistanceText: fleetCommitDistanceText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,

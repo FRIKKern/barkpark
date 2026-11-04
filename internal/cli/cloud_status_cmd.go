@@ -195,12 +195,13 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	// passive update drift.
 	case live && deployStalled(b):
 		return "deploy_stalled"
-	// TWO independent sources can say `behind`, and until dr-w24-s2 only the
-	// weaker one was read (see behindByCommits). The rung is UNCHANGED — same
-	// label, same bucket, same decision-32 vocabulary (rank 8 → 9 with the
-	// deploy_stalled insertion) — it simply stops missing the boxes whose
-	// release-tag grade cannot express the gap.
-	case live && (b.UpdateState == "behind" || behindByCommits(b)):
+	// TWO independent sources can say `behind`: the box's release-tag grade and
+	// the plane's commit distance from main (see behindByCommits). Decision
+	// 0011 (docs/decisions/0011-latest-release-is-current.md) supersedes
+	// dr-w24-s2: a box that serves exactly the latest release tag's commit is
+	// current, so main moving past the tag no longer puts it here. A box behind
+	// the latest release still reads behind through either source.
+	case live && (b.UpdateState == "behind" || (behindByCommits(b) && !onLatestRelease(b))):
 		return "behind"
 	case removing:
 		return "removing"
@@ -721,21 +722,21 @@ func humanElapsed(seconds float64) string {
 	}
 }
 
-// --- commit distance (dr-w24-s2) ---------------------------------------------
+// --- commit distance (dr-w24-s2, decision 0011) ------------------------------
 //
 // `update_state` is the box's RELEASE-TAG self-grade; `commit_ancestry` /
 // `commit_distance` are the control plane's own compare of the sha the box
-// actually serves against `main`. They answer different questions and they
-// disagree in production right now — one row reads commit_distance 2493,
-// commit_ancestry "behind", update_state "current" — because no release tag has
-// been cut since 2026-07-08, so every box that reached the newest tag is pinned
-// at `current` however far main runs ahead. (update_state is NOT structurally
-// incapable of saying `behind`: a live row says exactly that today, 0.2.24 vs
-// 0.2.25. It just cannot see an untagged gap.)
+// actually serves against `main`. They answer different questions. A box that
+// runs the newest release tag grades itself `current` while main moves past
+// the tag.
 //
-// The measurement has been written hourly and read by NOBODY: before this slice
-// no serializer, no CLI and no console carried it. These four functions are the
-// whole reader.
+// dr-w24-s2 (2026-08-08) put every box behind main in ATTENTION. No release had
+// been cut since 2026-07-08 then, so a box on the newest tag could be 2,493
+// commits old and still grade itself `current`. Releases are now cut often, and
+// decision 0011 (docs/decisions/0011-latest-release-is-current.md) supersedes
+// that rule: a box whose served commit equals the latest release tag's commit
+// (`latest_release_commit`) is current. The BEHIND column still prints the
+// distance from main for every row.
 
 // commitDistanceUnmetered is what the BEHIND column prints for a box the plane
 // asked about and could not grade. Loud on purpose, and never a number: a NULL
@@ -754,6 +755,37 @@ const commitDistanceUnmetered = "UNMETERED"
 // human.
 func behindByCommits(b cloudclient.Barkpark) bool {
 	return strings.TrimSpace(b.CommitAncestry) == "behind"
+}
+
+// onLatestRelease reports whether the box serves exactly the commit the latest
+// release tag points at (decision 0011). Both shas must be present: an empty
+// served commit or a plane that did not send the tag commit never counts, so
+// the commit-distance rule still applies to them. The comparison accepts a
+// short sha on either side as long as it has at least 7 characters.
+func onLatestRelease(b cloudclient.Barkpark) bool {
+	served := strings.ToLower(strings.TrimSpace(b.GitCommit))
+	release := strings.ToLower(strings.TrimSpace(b.LatestReleaseCommit))
+	if len(served) < 7 || len(release) < 7 {
+		return false
+	}
+	return strings.HasPrefix(served, release) || strings.HasPrefix(release, served)
+}
+
+// latestReleaseDetail is the DETAIL sentence for a box that runs the latest
+// release while main has moved past it. The row is healthy, and the sentence
+// says why the BEHIND column beside it is not zero.
+func latestReleaseDetail(b cloudclient.Barkpark) string {
+	if !onLatestRelease(b) || !behindByCommits(b) {
+		return ""
+	}
+	release := "the latest release"
+	if latest := strings.TrimSpace(b.UpdateLatestRelease); latest != "" {
+		release = "the latest release " + sanitizeCell(latest)
+	}
+	if b.CommitDistance != nil {
+		return fmt.Sprintf("on %s; main is %d commits ahead of it", release, *b.CommitDistance)
+	}
+	return "on " + release + "; main is ahead of it"
 }
 
 // commitDistanceUnknown reports a box the plane MEASURED and could not grade —
@@ -1004,7 +1036,10 @@ func attentionBucket(status string) string {
 // States whose row already explains itself (degraded shows health/agent, a
 // release-tag `behind` IS the message) yield "". A box behind BY COMMITS is the
 // exception (dr-w24-s2): its release-tag grade is sitting on the same row saying
-// `current`, so the row does NOT explain itself and behindDetail says so.
+// `current`, so the row does NOT explain itself and behindDetail says so. An ok
+// box on the latest release with main ahead of it (decision 0011) gets
+// latestReleaseDetail, so a non-zero BEHIND cell on a healthy row explains
+// itself.
 //
 // The UNMETERED MARKER rides on top of whatever the status said, on ANY row: a
 // box we cannot read is a fact about the reading, not about the verdict.
@@ -1038,6 +1073,10 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		// "" for a release-tag behind (the UPDATE column already says it); the
 		// commit-distance sentence for a box whose tag grade disagrees.
 		reason = behindDetail(b)
+	case "ok":
+		// Decision 0011: a box on the latest release reads ok, and its BEHIND
+		// cell still prints the distance from main. Say why the two agree.
+		reason = latestReleaseDetail(b)
 	}
 	// Markers ride on top of the status's own reason, on ANY row — including a
 	// row that reads `ok`, which is the whole point of every one of them: what we
@@ -1591,9 +1630,13 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// unknown"; the distance itself is tri-state below.
 		"commit_ancestry":            r.BP.CommitAncestry,
 		"commit_distance_checked_at": r.BP.CommitDistanceCheckedAt,
-		"autoupdate_paused":          r.BP.AutoupdatePaused,
-		"pinned_release":             r.BP.PinnedRelease,
-		"channel":                    r.BP.Channel,
+		// Decision 0011: the latest release tag's commit, beside git_commit, so
+		// a script can see why a box behind main reads ok. ALWAYS present; empty
+		// when the plane has not read the tags or predates the field.
+		"latest_release_commit": r.BP.LatestReleaseCommit,
+		"autoupdate_paused":     r.BP.AutoupdatePaused,
+		"pinned_release":        r.BP.PinnedRelease,
+		"channel":               r.BP.Channel,
 		// dr-w11-payload-divergence-close: the launch placement/size pins and the
 		// alert latch. ALWAYS present, like `channel` beside them — an empty
 		// region/server_type is the plane's own "no pin recorded" (an adopted
@@ -2014,8 +2057,8 @@ func statusDash(s string) string {
 //     every row says something: commitCell never returns "".
 //   - BEHIND  the plane's measured commit distance from main (dr-w24-s2) — only
 //     when the control plane emits an ancestry at all. Once on, every row says
-//     something: a number, `even`, or the loud UNMETERED. It is the column that
-//     contradicts UPDATE, and that is the point.
+//     something: a number, `even`, or the loud UNMETERED. A healthy row on the
+//     latest release can show a number here (decision 0011); its DETAIL says so.
 //   - CHANNEL the release channel (prod/staging) — only when the CP emits it
 //   - POLICY  compact autoupdate flag (pin@tag / paused / off / auto)
 //   - DETAIL  the control plane's own reason for a failure/suspension

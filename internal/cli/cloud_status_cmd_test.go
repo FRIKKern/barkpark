@@ -1161,8 +1161,10 @@ func TestDeployCensusSiteDecodesLive(t *testing.T) {
 // the control plane has been measuring commit distance hourly with ZERO readers.
 //
 // update_state is not incapable of saying `behind` (a live row says it today).
-// It is pinned: no release tag has been cut since 2026-07-08, so every box that
-// reached the newest tag grades `current` however far main runs ahead of it.
+// It was pinned: no release tag had been cut since 2026-07-08, so every box that
+// reached the newest tag graded `current` however far main ran ahead of it.
+// Decision 0011 narrows this rule. These rows carry no latest_release_commit,
+// so they still read behind; the decision-0011 tests below cover the exemption.
 
 // behindProdRow is the real production shape, verbatim — the row this whole
 // slice exists for.
@@ -1225,6 +1227,121 @@ func TestCommitDistanceEntersAttentionBucketRendered(t *testing.T) {
 	}
 	if strings.Contains(got, "0 behind") {
 		t.Fatalf("no row may render `0 behind`:\n%s", got)
+	}
+}
+
+// --- decision 0011: a box on the latest release is current -----------------
+//
+// dr-w24-s2 put every box behind main in ATTENTION. Decision 0011 supersedes
+// that rule: a box whose served commit equals the latest release tag's commit
+// reads ok. The row below is gyl's real shape on 2026-11-04: v0.2.39 at
+// e2942e055, 17 commits behind main, update_state current.
+
+const v0239Commit = "e2942e0559e198b706a3bd1ad193f97fd4cae775"
+
+func latestReleaseRow() cloudclient.Barkpark {
+	d := 17
+	return cloudclient.Barkpark{
+		ID: "bp-gyl", Name: "gyl", Slug: "gyl", Host: "h", URL: "https://gyl.example",
+		LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+		UpdateState: "current", UpdateRunningRelease: "0.2.39", UpdateLatestRelease: "0.2.39",
+		GitCommit:      v0239Commit,
+		CommitDistance: &d, CommitAncestry: "behind",
+		CommitDistanceCheckedAt: "2026-11-04T12:17:04Z",
+		LatestReleaseCommit:     v0239Commit,
+	}
+}
+
+// TestLatestReleaseBoxIsHealthy is the new rule. MUTATION TARGET: drop the
+// `!onLatestRelease(b)` guard in attentionStatus and this reds with "behind".
+func TestLatestReleaseBoxIsHealthy(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{latestReleaseRow()})
+	if got := ranked[0].Status; got != "ok" {
+		t.Fatalf("a box on the latest release classified %q, want ok", got)
+	}
+	if got := ranked[0].Bucket; got != "healthy" {
+		t.Fatalf("bucket = %q, want healthy", got)
+	}
+	const want = "on the latest release 0.2.39; main is 17 commits ahead of it"
+	if got := ranked[0].Detail; got != want {
+		t.Fatalf("detail = %q, want %q", got, want)
+	}
+}
+
+// TestLatestReleaseRuleAcceptsShortSha keeps the comparison working when either
+// side carries an abbreviated sha of at least 7 characters.
+func TestLatestReleaseRuleAcceptsShortSha(t *testing.T) {
+	b := latestReleaseRow()
+	b.GitCommit = "e2942e055"
+	if !onLatestRelease(b) {
+		t.Fatal("a 9-character served sha that prefixes the release commit must count")
+	}
+	b.GitCommit = "e2942e"
+	if onLatestRelease(b) {
+		t.Fatal("a sha shorter than 7 characters must not count")
+	}
+}
+
+// TestBoxBehindLatestReleaseStillBehind keeps the other half of the rule: a box
+// that does not run the latest release tag's commit still reads behind, through
+// either source.
+func TestBoxBehindLatestReleaseStillBehind(t *testing.T) {
+	cases := map[string]func(*cloudclient.Barkpark){
+		"older commit, tag grade current": func(b *cloudclient.Barkpark) {
+			b.GitCommit = "1111111111111111111111111111111111111111"
+		},
+		"older release, tag grade behind": func(b *cloudclient.Barkpark) {
+			b.GitCommit = "1111111111111111111111111111111111111111"
+			b.UpdateState = "behind"
+			b.UpdateRunningRelease = "0.2.38"
+		},
+		"on the tag commit, but the box reports a newer release": func(b *cloudclient.Barkpark) {
+			b.UpdateState = "behind"
+			b.UpdateLatestRelease = "0.2.40"
+		},
+		"plane sent no release commit": func(b *cloudclient.Barkpark) {
+			b.LatestReleaseCommit = ""
+		},
+		"box reported no commit": func(b *cloudclient.Barkpark) {
+			b.GitCommit = ""
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := latestReleaseRow()
+			mutate(&b)
+			ranked := rankBarkparks([]cloudclient.Barkpark{b})
+			if ranked[0].Status != "behind" || ranked[0].Bucket != "attention" {
+				t.Fatalf("status/bucket = %q/%q, want behind/attention", ranked[0].Status, ranked[0].Bucket)
+			}
+		})
+	}
+}
+
+// TestLatestReleaseRowRendersHealthy is the same fact on rendered bytes.
+func TestLatestReleaseRowRendersHealthy(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{latestReleaseRow()})
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "HEALTHY", "healthy", ranked)
+	got := sout.String()
+	if !strings.Contains(got, "HEALTHY (1)") {
+		t.Fatalf("the box must be in the healthy bucket:\n%s", got)
+	}
+	if !strings.Contains(got, "on the latest release 0.2.39; main is 17 commits ahead of it") {
+		t.Fatalf("the DETAIL must say why a healthy row shows a distance:\n%s", got)
+	}
+}
+
+// TestBarkparkDecodesLatestReleaseCommit pins the wire key.
+func TestBarkparkDecodesLatestReleaseCommit(t *testing.T) {
+	var b cloudclient.Barkpark
+	if err := json.Unmarshal([]byte(`{"latest_release_commit":"`+v0239Commit+`"}`), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.LatestReleaseCommit != v0239Commit {
+		t.Fatalf("LatestReleaseCommit = %q", b.LatestReleaseCommit)
 	}
 }
 
@@ -1485,6 +1602,9 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		"commit_ancestry":            true,
 		"commit_distance_checked_at": true, "autoupdate_paused": true,
 		"pinned_release": true, "channel": true,
+		// Decision 0011: the latest release tag's commit. ALWAYS present, empty
+		// when the plane has not read the tags.
+		"latest_release_commit": true,
 		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
 		// state key is what keeps nil-as-unmeasured from collapsing into 0.
 		"err_5xx": true,

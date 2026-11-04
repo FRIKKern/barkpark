@@ -239,6 +239,10 @@ export function bpBase(over) {
       commit_distance: null,
       commit_ancestry: null,
       commit_distance_checked_at: null,
+      // Decision 0011: the latest release tag's commit. NULL until the control
+      // plane's first tags read after a boot; a NULL keeps the commit-distance
+      // rule.
+      latest_release_commit: null,
       // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
       // block on EVERY row, so a fixture that OMITS these keys makes
       // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and

@@ -1724,7 +1724,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `merge_pressure/2` gains `service_restarts`, `service_restarts_count` and
   # `service_restarts_window_s`. MEASURED by the PIN CO-EDIT arm on this branch
   # off origin/main ("181 -> 184").
-  @emitted_pinned 184
+  # 184 -> 185 (task-7cafe3817d21eda6, decision 0011): `barkpark_json/6` emits
+  # ONE new top-level key, `latest_release_commit`. MEASURED by the PIN
+  # CO-EDIT arm ("184 -> 185").
+  @emitted_pinned 185
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2139,7 +2142,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `refused`, `role`, `token` and `workspace` ride existing names and move
   # the SITE register, and `restore` is newly duplicated. MEASURED by the PIN
   # CO-EDIT arm.
-  @go_tag_pinned 430
+  # 430 -> 431 (task-7cafe3817d21eda6, decision 0011): `Barkpark` decodes ONE
+  # new NAME, `latest_release_commit`. MEASURED by the PIN CO-EDIT arm.
+  @go_tag_pinned 431
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2719,8 +2724,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 71 -> 74 (task-9d72b5f86487cf9b): the three service_restarts keys land in
   # `merge_pressure/2`'s guarded clause, which only the :when-unwrapping
   # walker sees, so `blind` stays put. MEASURED by the PIN CO-EDIT arm.
-  @barkpark_family_keys 74
-  @barkpark_family_keys_blind 52
+  # 74/52 -> 75/53 (task-7cafe3817d21eda6, decision 0011):
+  # `latest_release_commit` is a plain key in the base literal, so BOTH walkers
+  # see it and the pair moves together. MEASURED by the PIN CO-EDIT arm.
+  @barkpark_family_keys 75
+  @barkpark_family_keys_blind 53
 
   # ---------------------------------------------------------------------------
 
@@ -2816,7 +2824,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     #
     # 51 -> 52 (task-92b443a2c78a914f, a failed self-update's phase + tail): `update_last_failure` joins the base
     # literal (not the pipeline), which this literal number counts too.
-    assert MapSet.size(p.top) == 52
+    #
+    # 52 -> 53 (task-7cafe3817d21eda6, decision 0011): `latest_release_commit`
+    # joins the base literal.
+    assert MapSet.size(p.top) == 53
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure deploy_rate site_deploy) do
