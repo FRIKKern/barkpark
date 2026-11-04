@@ -507,30 +507,18 @@ assert.ok(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").lengt
 assert.doesNotMatch(rootSource, /export\s+\*/u, "the facade uses direct named re-exports");
 
 const leafPaths = new Set(GROUPS.map(({ path }) => resolve(here, path)));
-const importSpecifiers = (source) => [...source.matchAll(
-  /(?:^|\n)\s*import\s*\{[\s\S]*?\}\s*from\s*["']([^"']+)["'];/gu,
-)].map((match) => match[1]);
-const visiting = new Set();
-const visited = new Set();
-function walk(file) {
-  assert.notEqual(file, resolve(here, "run-convert.js"), "leaf dependency closure cannot reach the facade");
-  if (visiting.has(file)) {
-    assert.ok(!leafPaths.has(file), `converter leaf participates in a relative import cycle at ${file}`);
-    return;
-  }
-  if (visited.has(file)) return;
-  visiting.add(file);
-  for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
-    if (specifier.startsWith(".")) walk(resolve(dirname(file), specifier));
-  }
-  visiting.delete(file);
-  visited.add(file);
-}
-for (const path of leafPaths) walk(path);
-
 const actualImports = [];
 for (const [consumer, source] of Object.entries(sources)) {
-  for (const match of source.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/gu)) {
+  const importDeclarations = [...source.matchAll(/(?:^|\n)\s*import(?!\s*[.(])[\s\S]*?;/gu)];
+  const reexports = [...source.matchAll(
+    /(?:^|\n)\s*export\s+(?:\*(?:\s+as\s+[\w$]+)?|\{[\s\S]*?\})\s+from\s*["'][^"']+["']\s*;/gu,
+  )];
+  const namedImports = [...source.matchAll(
+    /(?:^|\n)\s*import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']\s*;/gu,
+  )];
+  assert.equal(importDeclarations.length + reexports.length, namedImports.length,
+    `${consumer} uses only the approved named static import form`);
+  for (const match of namedImports) {
     for (const token of match[1].split(",").map((value) => value.trim()).filter(Boolean)) {
       const [imported, local = imported] = token.split(/\s+as\s+/u);
       actualImports.push([consumer, match[2], imported, local]);
@@ -540,6 +528,27 @@ for (const [consumer, source] of Object.entries(sources)) {
 const orderRows = (rows) => rows.map((row) => row.join("\t")).sort();
 assert.deepEqual(orderRows(actualImports), orderRows(IMPORTS),
   "named import syntax equals the independently pre-proved owner table in both directions");
+
+// field-node.js and field-settings.js have one historical SCC below the structured-codec
+// boundary. This graph is deliberately the six newly extracted leaves: those leaves must
+// remain a DAG, and the exhaustive import table above fails closed on every other edge form.
+const leafDependencies = new Map([...leafPaths].map((path) => [path, new Set()]));
+for (const [consumer, specifier] of actualImports) {
+  if (!specifier.startsWith(".")) continue;
+  const dependency = resolve(dirname(resolve(here, consumer)), specifier);
+  if (leafPaths.has(dependency)) leafDependencies.get(resolve(here, consumer)).add(dependency);
+}
+const visiting = new Set();
+const visited = new Set();
+function walkLeaf(file) {
+  assert.ok(!visiting.has(file), `the six-leaf converter graph is acyclic at ${file}`);
+  if (visited.has(file)) return;
+  visiting.add(file);
+  for (const dependency of leafDependencies.get(file)) walkLeaf(dependency);
+  visiting.delete(file);
+  visited.add(file);
+}
+for (const path of leafPaths) walkLeaf(path);
 
 for (const { before, after, count } of CALLBACK_EDITS) {
   const all = Object.values(sources).join("\n");
