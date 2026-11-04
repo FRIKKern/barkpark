@@ -1,0 +1,573 @@
+/* PROSE LONG-TOKEN BREAK — the EDIT half of the View rule in
+   paper-surface.css (`.bp-paper-surface p, li`). It is not optional and not a
+   copy for tidiness: view_edit_parity_test.exs §2 reds the moment View
+   declares a property Edit does not, because a paper whose prose wraps at a
+   different word in Edit than in View is the exact drift that suite exists to
+   catch. `h1` beside it already carries the identical guard for the identical
+   reason. The View-side comment carries the measurements. */
+.bp-paper-editor-body p,
+.bp-paper-editor-body li { overflow-wrap: break-word; }
+/* A nested disclosure heading is not a document section boundary. */
+.bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: 1.9em; border-top: 0; padding-top: 0;
+  margin-inline: 0; width: auto; padding-inline: 0;
+}
+/* Reader-suppressed scaffolds remain keyboard-reachable without reserving
+ * document space until selected. These are transient editor decorations. */
+.bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
+  display: none;
+}
+.bp-paper-editor-body .bp-cols__c > .bp-resting-scaffold { display: none; }
+.bp-paper-editor-body .bp-scaffold-control {
+  position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
+  padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font: 14px/24px var(--paper-font-mono);
+  cursor: pointer;
+}
+.bp-paper-editor-body .bp-scaffold-control:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .bp-paper-editor-body .bp-scaffold-control { inset-inline-start: -16px; background: transparent; }
+}
+    /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
+       (paper-surface.css carries the measurement: `--paper-accent-soft` as a
+       border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
+       at-rest treatment drew no line at all). The decoration is tinted to 80% of
+       the accent — the measured floor that clears 3:1 in all ten theme×scheme
+       pairs. Keep byte-aligned with paper-surface.css AND
+       assets/paper-editor/src/styles.css; view_edit_parity_test.exs pins `a` and
+       `a:focus-visible` in @parity_elements (§2) and @mirror_elements (§5). */
+    .bp-paper-editor-body a  {
+      color: var(--paper-accent); text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);
+      text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+      text-decoration-skip-ink: auto;
+    }
+    .bp-paper-editor-body a:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 2px;
+    }
+    .bp-paper-editor-body ::selection { background: var(--paper-accent-soft); color: inherit; }
+    .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
+    .bp-paper-editor-body ul,
+    .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
+    .bp-paper-editor-body ul > li { list-style: disc; }
+    .bp-paper-editor-body ol > li { list-style: decimal; }
+    /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — the canvas
+       node-view emits `<p class="bp-role-*">` matching the reader, so these MIRROR
+       the single-source `.bp-paper-surface .bp-role-*` rules in paper-surface.css
+       (values byte-copied; view_edit_parity_test enforces the match). pullquote's
+       italic is an author mark the node emits INLINE (font-style:italic), NOT in the
+       class, so it stays out of these rules on both surfaces. Keep byte-aligned with
+       paper-surface.css + assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
+    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+    /* editable-table: the three reader table class rules, mirrored byte-for-byte from
+       paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
+       guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
+       reader binds — never hand-copy hex. The canvas flattens the reader thead/tbody
+       split into ONE <tbody>; the header row's cells carry `.bp-table__th` regardless,
+       and NO CSS targets thead/tbody, so the delta is visually byte-identical. Keep
+       byte-aligned with assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2 * var(--bp-table-centre, 1)); transform: translateX(calc(-50% * var(--bp-table-centre, 1))); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+    .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+    .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+    .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
+    .bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+    /* TYPED COLUMNS (the `cols` spec — text | num | delta | spark), mirrored
+       byte-for-byte from paper-surface.css `.bp-paper-surface .bp-table__*--num /
+       --spark / __spark`. walk.ex table_col_class/3 emits these modifiers on the
+       canvas cells too (the canvas mounts the reader producer), so without the
+       mirror a typed num column right-aligns in the reader and not in the editor.
+       view_edit_parity_test.exs §2/§5 guard the drift. Keep byte-aligned with the
+       other two copies. */
+    .bp-paper-editor-body .bp-table__th--num,
+    .bp-paper-editor-body .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+    .bp-paper-editor-body .bp-table__th--spark,
+    .bp-paper-editor-body .bp-table__td--spark { width: 1%; white-space: nowrap; }
+    .bp-paper-editor-body .bp-table__spark { display: block; width: 96px; height: 20px; }
+    .bp-paper-editor-body .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+    /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose
+       column exactly like .bp-table (the reader's three breakout classes). Values
+       byte-copied from paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart`
+       (view_edit_parity_test.exs §2 guards drift — pe-w2-parity-widening). Keep
+       byte-aligned with assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+    /* The stat grid's seams are drawn per CELL, not by a container ground (the
+       partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
+       reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
+       element); mirrored here for visual parity, byte-identical with the reader's
+       `.bp-paper-surface .bp-stats .bp-stat` and the bundle. */
+    .bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
+    .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+    /* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption>
+       through ONE class (paper-surface.css `.bp-paper-surface .bp-figcaption`)
+       instead of the ~200 bytes of inline caption styling it used to repeat at
+       three emit sites — one of which had drifted to a bare ink hex that is
+       2.97:1 on the dark ground. The canvas mounts figures through the SAME
+       reader producer, so the class arrives here too and needs the twin.
+       Values byte-copied from the View rule; view_edit_parity_test.exs §2
+       guards the drift. This note is a CSS comment, deliberately NOT a HEEx one:
+       that test strips CSS comments only, and its rule scanner reads everything
+       since the last `}` as the selector — so a HEEx comment here silently
+       swallows the selector and the gate goes vacuous. For the same reason the
+       note must never spell either CSS comment delimiter, which would close it
+       early and feed the remainder of this prose to the same scanner. Both
+       mistakes were made here and both were caught by the gate this rule arms.
+       Keep byte-aligned with assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
+    /* Explicit column compositions use the same evidence band as the reader;
+       prose surrounding the component remains on the measured column. */
+    .bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
+    @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
+    /* Nested columns use their section cell, not the page-wide evidence band. */
+    .bp-paper-editor-body .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+    /* A column cell is an authored boundary: every band-taking block inside it
+       (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+       asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+       cannot paint over the sibling column. Edit nests paper surfaces inside the
+       cell that re-derive the band from the default tokens, so they reset too. */
+    .bp-paper-editor-body .bp-cols__c, .bp-paper-editor-body .bp-cols__c .bp-paper-surface, .bp-paper-editor-body .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+    /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
+       the .bp-table* selectors so it never leaks into the parity comparison). The
+       control rails reveal on hover so an idle table reads byte-identically to /papers. */
+    .bp-canvas-table { position: relative; }
+/* Column-resize grips (plan #25): thin hit areas on each column's right edge, visible on hover.
+ * Without these the grip layer is static flow: it stacks above the table and its full-width
+ * grips cover the first header cell, so that cell's text cannot take the caret. */
+.bp-canvas-table__resizers { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity var(--dur-1) ease-out; }
+.bp-canvas-table:hover .bp-canvas-table__resize, .bp-canvas-table__resize:active { opacity: 1; }
+/* Idle controls add no reader spacing. When exposed, reserve their own space
+ * BELOW the table: grids have no safe gutter for floating controls. */
+.bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
+.bp-canvas-table:hover > .bp-canvas-table__controls, .bp-canvas-table:focus-within > .bp-canvas-table__controls, .bp-canvas-table__controls[open] { position: relative; opacity: 1; pointer-events: auto; }
+.bp-canvas-table__controls > summary { cursor: pointer; padding: 6px 0; width: fit-content; }
+.bp-canvas-table__controls > summary:focus-visible, .bp-canvas-table__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-table__cols, .bp-canvas-table__rows { display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 0; padding: 4px 0; }
+    .bp-canvas-table__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+    .bp-canvas-table__btn:disabled { opacity: 0.4; cursor: default; }
+    /* Block chrome ported VERBATIM from the paper-editor bundle
+       (assets/paper-editor/src/styles.css blockquote/hr/img) — Studio runs
+       with BP_PAPER_EDITOR_NO_INJECT so this inline mirror is the ONLY styles
+       it sees; keep it byte-aligned with the bundle. */
+    .bp-paper-editor-body blockquote {
+      margin: 12pt 0 0; padding: 12pt 16pt;
+      border-left: 4px solid var(--paper-accent);
+      background: var(--paper-accent-soft); border-radius: 2px; font-style: normal;
+    }
+    .bp-paper-editor-body blockquote > :first-child { margin-top: 0; }
+    .bp-paper-editor-body blockquote > :last-child { margin-bottom: 0; }
+    .bp-paper-editor-body hr {
+      border: 0; border-top: 1px solid var(--paper-rule); margin: 12pt 0 0;
+    }
+    /* Canvas section-divider — the §-on-a-hairline the Divider atom (divider-node.js
+       renderHTML) stamps, byte-aligned with the reader's inline styles in
+       Figures.section_divider_html/0 (figures.ex:33-37). Bound off the same custom
+       props (no hex fallback — --paper-rule/--paper-bg/--paper-ink-soft are
+       defined light+dark in BOTH sinks), a dark-mode improvement over the reader's
+       light-only inline hex. The mark paints the PAGE token (--paper-bg) — it masks
+       the hairline, it is not a fill. Keep BYTE-IDENTICAL with the styles.css copy. */
+    .bp-paper-editor-body .bp-section-divider {
+      position: relative; text-align: center; margin: 2.4rem 0;
+      border-top: 1px solid var(--paper-rule);
+    }
+    .bp-paper-editor-body .bp-section-divider__mark {
+      position: relative; top: -0.7rem; display: inline-block;
+      padding: 0 0.8rem; background: var(--paper-bg);
+      color: var(--paper-ink-soft); font-size: 1.1rem;
+    }
+    .bp-paper-editor-body img {
+      display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
+      border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
+    }
+    /* Doc footer status bar (gap #4) — a muted, sans, end-of-surface row with
+       word + block count and a save affordance, like the original editor. */
+    .bp-paper-footer {
+      margin-top: 32px;
+      padding-top: 12px;
+      border-top: 1px solid var(--paper-rule);
+      font-family: var(--font);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      color: var(--paper-ink-faint);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .bp-paper-footer-sep { opacity: 0.5; }
+    .bp-paper-footer-save { margin-left: auto; color: var(--paper-ink-soft); }
+    .bp-paper-history-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    [data-paper-history-status] { color: var(--paper-ink-soft); }
+    /* Restore the surface's old-style hanging figures in the editable text.
+       The bundled ProseMirror base CSS kills ligatures + onum with
+       `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
+       this higher-specificity rule (`.bp-paper-surface .ProseMirror`) wins it
+       back so `1234567890` renders as old-style numerals, matching surface.
+       The feature list is the surface's own, and there is deliberately NO
+       `font-variant-numeric`: the reader has none, and `oldstyle-nums` here gave
+       every editable element a computed style the reader lacks for the same
+       glyphs (editor_control_island_parity_test). */
+    .bp-paper-surface .ProseMirror {
+      font-variant-ligatures: normal;
+      -webkit-font-variant-ligatures: normal;
+      font-feature-settings: "kern", "liga", "onum";
+    }
+    .bp-paper-editor-body code {
+      font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
+      background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
+    }
+
+    /* ── canvas node-view chrome, ported VERBATIM from the paper-editor bundle
+       (assets/paper-editor/src/styles.css). Studio runs with
+       BP_PAPER_EDITOR_NO_INJECT = true, so it loads ONLY this inline mirror —
+       without these rules the canvas callout renders with no padding, sheet/embed
+       atoms render as bare text, and code frames fall back to the plain-<pre> look.
+       Corrected values here are the lockstep target the bundle branch mirrors:
+       callout padding 16px all sides (walk.ex:1136/1146), title font-weight 700
+       (view title is <strong>, walk.ex:1130-1133), chip tokens bound to real
+       --paper-* vars, and the compound pre.bp-canvas-code frame (figures.ex:25) —
+       a bare --paper-bg-deep slab, no left bar (task-ddb1e0ab09a62466). */
+    .bp-paper-editor-body pre.bp-canvas-code {
+      background: var(--paper-bg-deep); border: 0;
+      border-radius: var(--bp-codeblock-radius); padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin);
+      font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: normal; overflow-x: auto;
+    }
+    /* The <textarea> EDIT island inside the frame — S9. Bound to the same
+       --bp-codeblock- and --paper- tokens as the reader <pre> so the editable code
+       renders byte-identically (0.9rem/1.5, mono, ink). Keep BYTE-IDENTICAL with
+       assets/paper-editor/src/styles.css. */
+    /* The highlight layer under the textarea (code-node.js + code-highlight.js, plan #27): the SAME
+       text painted with hljs-* tokens, metrics identical to the island above it, which shows only its
+       caret and selection. Keep BYTE-IDENTICAL with the styles.css copy (the code-interior test checks). */
+    /* Scoped under the editor body so it outranks `.bp-paper-editor-body code` (inline-code size
+     * and padding): the layer must paint at the textarea's metrics or clicks land a line off. */
+    .bp-paper-editor-body .bp-canvas-code-hl {
+      position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+      margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+      display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+    }
+    .bp-canvas-code-area {
+      position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
+      display: block;
+      font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      white-space: pre; overflow-wrap: normal;
+      background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
+    }
+    /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout
+       hook; the tone card (padding/border-left/background/color) rides the
+       reader's `bp-callout`/`bp-callout--<tone>` classes. Studio inherits the
+       tone rules from the inlined paper-surface.css `.bp-paper-surface .bp-callout*`
+       cascade (the canvas mounts inside `.bp-paper-surface`), so — like the
+       list bottom-margin single-producer rule — we DELIBERATELY declare NO
+       `.bp-callout--<tone>` rules here; the embedder bundle (styles.css) carries
+       the hand-copied mirror instead. Keep byte-aligned with styles.css. */
+    .bp-canvas-callout > strong { font-weight: 700; }
+    /* Run-in ONLY on the non-collapsible <div> root — the collapsible <details>
+       keeps a block body below its <summary>. */
+    div.bp-canvas-callout > .bp-callout__body { display: inline; }
+    /* loop-epic/editable-section: `bp-canvas-section` is a thin edit-only layout
+       hook. Parity rides the node-view's INLINE styles hand-matching the reader (a
+       flex-column PdBox, a bold title on its own line, two `bp-hr` rules — Studio
+       inherits `.bp-paper-surface .bp-hr` from the inlined paper-surface.css). The
+       section has NO reader class, so these rules add ONLY edit affordances, kept
+       inert so View == Edit. Keep byte-aligned with styles.css. */
+    .bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
+    .bp-canvas-section > .bp-section__title { font-weight: 700; }
+    /* Canvas grid children have no section-cell wrapper. */
+    .bp-canvas-section > .bp-section__grid > .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+    /* S2 layout-engine: section-grid mirror. In grid mode the node-view swaps the
+         body class from `bp-section__body` (flex column) to `bp-section__grid` (CSS
+         grid) + sets `--bp-tracks`. Studio inlines the reader `.bp-paper-surface
+         .bp-section__grid` via Stylesheet.css(); this canvas-scoped copy keeps the
+         THREE grid copies (paper-surface.css + styles.css + here) in lockstep (RISK
+         #3 — a docs/parity check should pin them). `--bp-grid-gap` is a token VAR,
+         never px (D2). Keep BYTE-ALIGNED with styles.css. */
+    .bp-canvas-section > .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+    @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .bp-canvas-section .bp-section__cell { grid-column: 1 / -1 !important; } }
+    .bp-canvas-section .bp-section__cell { min-width: 0; }
+    .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
+    .bp-canvas-section.bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+    /* FRAMED-FINALE (charter D34, variant="framed"): the canvas node-view toggles
+         `bp-section--framed` on its wrapper when attrs.variant === "framed". Editor
+         mirror of the reader frame — hairline border in rule color, and the frame
+         REPLACES the section's own direct-child `bp-hr` band. Editor-only (NOT in the
+         parity gate's @parity_elements). Keep byte-aligned with styles.css:599-600. */
+    .bp-paper-editor-body .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+    .bp-paper-editor-body .bp-section--framed > .bp-hr { display: none; }
+    /* ── section declaration panel (pe-bl-declaration-panel). variant="declaration"
+       frames a closing section as a signed document: a double hairline ink frame, generous CSS
+       padding (never spacer paragraphs), the section's own .bp-hr band hidden, and
+       a short signature rule above its LAST block — the signature slot is simply
+       the section's last paragraph, so every reader keeps the words (the TUI and
+       email degrade to a plain section). Mirror: paper-editor/src/styles.css and
+       the shell stylesheet. */
+    .bp-paper-editor-body .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline: var(--bp-rule-hairline) solid var(--paper-ink); outline-offset: 4px; padding: 2rem 2.25rem 1.75rem; margin: 2.5rem 4px; }
+    .bp-paper-editor-body .bp-section--declaration > .bp-hr { display: none; }
+    .bp-paper-editor-body .bp-section--declaration > :first-child, .bp-paper-editor-body .bp-section--declaration > .bp-hr:first-child + * { margin-top: 0; }
+    .bp-paper-editor-body .bp-section--declaration > p:has(+ .bp-hr:last-child),
+    .bp-paper-editor-body .bp-section--declaration > p:last-child { margin-top: 2.25rem; padding-top: 0.5rem; border-top: var(--bp-rule-hairline) solid var(--paper-ink); width: min(100%, 20rem); }
+    /* S2 layout-engine: the hover-revealed layout controls (mode toggle + tracks
+         stepper) — EDIT-ONLY chrome, hidden at rest, NO reader counterpart. Keep
+         BYTE-IDENTICAL with styles.css. */
+    .bp-canvas-section { position: relative; }
+.bp-canvas-section__controls { position: absolute; top: 0; right: 0; z-index: 2; display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; margin: 0; }
+    .bp-canvas-section:hover > .bp-canvas-section__controls, .bp-canvas-section:focus-within > .bp-canvas-section__controls { opacity: 1; pointer-events: auto; }
+    .bp-canvas-section__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+    .bp-canvas-section__tracks { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); }
+    /* card WIDGET (MODEL B — S10, parity2-bug-card-slot-chrome): `bp-canvas-card`
+         is a thin edit-only hook. PARITY rides the reader's OWN model-B shapes — the
+         node-view root carries bp-card[ bp-card--tone] and its slots are bare
+         semantics (h2 / p / img / a.bp-button, byte-aligned with card_html/2), all
+         painted by the inlined `.bp-paper-surface` cascade (paper-surface.css) — so
+         ONLY the edit-only control row lives here (hidden at rest, revealed on
+         hover/focus-within; NO reader counterpart). Keep BYTE-IDENTICAL with
+         styles.css. */
+    .bp-canvas-card { position: relative; }
+    .bp-canvas-card__controls { position: absolute; bottom: 100%; left: 0; right: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
+    .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; pointer-events: auto; }
+    .bp-canvas-card:has([data-test-id="paper-card-action-label"]:focus) .bp-canvas-card__controls { opacity: 0; pointer-events: none; }
+    .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+    /* Note-only mirror of styles.css. This is the root-linked shell source;
+       native browser measurement, not stylesheet text, proves geometry. */
+    /* Canonical Note paint keeps its surface styling, not the enclosing page geometry. */
+    .bp-paper-surface .bp-canvas-note-preview > .bp-paper-surface { max-width: none; max-inline-size: none; min-inline-size: 0; min-height: 0; margin: 0; padding: 0; }
+    [data-bp-fleet-body] [contenteditable="plaintext-only"] { cursor: text; }
+    .bp-canvas-note-field { width: 100%; box-sizing: border-box; font: inherit; color: inherit; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 5px; padding: 0.35rem 0.5rem; }
+    /* stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin).
+         The stage does NOT emit the reader pipeline-cell class (it stays gate-forbidden
+         to protect the legacy pipeline), so its cell look is hand-mirrored from the
+         inlined paper-surface.css `.bp-pnode*` rules — keep BYTE-ALIGNED with the
+         styles.css + paper-surface.css copies (the card THREE-copy lockstep). */
+    .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+    .bp-canvas-stage--src { border-color: var(--paper-ink-faint-line); }
+    .bp-canvas-stage__k, .bp-canvas-stage__t, .bp-canvas-stage__d, .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; font-family: inherit; line-height: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
+    .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+    .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+    .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+    .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+    .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
+    /* The generic read-only bpOpaque carry chip (a nested section / composite /
+       codelist carried verbatim inside a section body) reuses `.bp-canvas-readonly`
+       for the chip frame; `.bp-canvas-opaque` is a marker hook. */
+    .bp-canvas-opaque { user-select: none; }
+.bp-canvas-readonly {
+      margin: 1em 0;
+      user-select: none;
+      /* pdd-t17: the server-painted fleet hole must never overflow the canvas
+       * column (cards clipped under the sidebar, found live) — contain and
+       * scroll horizontally inside the atom instead, like the reader does. */
+      max-width: 100%;
+      overflow-x: auto;
+      min-width: 0;
+    }
+    /* pdd-t12c: the read-only atoms are keyboard-focusable (tabindex on the
+       node-view wrapper) so a non-mouse user can reach + select them (→ Backspace
+       deletes). Same 2px accent outline as every other keyboard affordance here.
+       MUST stay in lockstep with styles.css. */
+    .bp-canvas-readonly:focus-visible {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
+      border-radius: 6px;
+    }
+    /* pdd-t12c: a node-SELECTED atom (mouse click-select or keyboard Enter/Space)
+       is armed — the next Backspace deletes it. ProseMirror adds
+       .ProseMirror-selectednode but ships no CSS for it; without this rule the
+       armed state is invisible. MUST stay in lockstep with styles.css. */
+    .bp-canvas-readonly.ProseMirror-selectednode {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
+      border-radius: 6px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+    }
+    .bp-canvas-readonly-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 6px;
+      background: var(--paper-bg-deep, #f4f4ef);
+      color: var(--paper-ink-soft, #6b6b66);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.2;
+    }
+    /* A declared object block (Sanity's block object row): full width, an icon, the kind
+     * title and a preview line, each its own element for a host to style. The chip's
+     * text keeps "Title · value" for its name; the separator is not shown. */
+    .bp-canvas-object-row .bp-canvas-readonly-chip { display: flex; width: 100%; box-sizing: border-box; gap: 10px; padding: 8px 12px; font-weight: 400; }
+    .bp-canvas-object-icon { flex: none; position: relative; width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; }
+    .bp-canvas-object-icon::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid currentColor; }
+    .bp-canvas-object-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+    .bp-canvas-object-title { color: var(--paper-ink); font-weight: 600; }
+    .bp-canvas-object-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .bp-canvas-object-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper-ink-soft); }
+.bp-canvas-object-media { display: contents; }
+.bp-canvas-object-doc, .bp-canvas-opaque .bp-canvas-object-more { display: none; }
+/* Contract 1.12.0 `block-cards`: a declared object block is a card, as Sanity's block
+ * object: 4 px in, a 33 px tile with the type's icon, its preview title (13/19 px, 500)
+ * and a "…" at the right; the ring of the image card. Without the attribute the row
+ * above is unchanged. */
+bp-paper-canvas[block-cards] .bp-canvas-object-row { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 1px; background: var(--paper-chrome-bg); box-shadow: 0 0 0 1px var(--paper-rule); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row:hover { box-shadow: 0 0 0 1px var(--paper-chrome-border); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row.ProseMirror-selectednode { outline: none; border-radius: 1px; background: var(--paper-edit-hover); box-shadow: 0 0 0 1px var(--paper-accent); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row .bp-canvas-readonly-chip { flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 0; border: 0; border-radius: 0; background: none; }
+bp-paper-canvas[block-cards] .bp-canvas-object-media { display: flex; flex: none; width: 33px; height: 33px; align-items: center; justify-content: center; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--paper-rule); color: var(--paper-ink); }
+bp-paper-canvas[block-cards] .bp-canvas-object-media .bp-canvas-object-icon { display: none; }
+bp-paper-canvas[block-cards] .bp-canvas-object-doc { display: block; }
+bp-paper-canvas[block-cards] .bp-canvas-object-text:has(.bp-canvas-object-preview) .bp-canvas-object-title { display: none; }
+bp-paper-canvas[block-cards] :is(.bp-canvas-object-title, .bp-canvas-object-preview) { font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink); }
+bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-canvas-object-more { display: inline-flex; margin-top: 0; height: 33px; }
+    /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
+       <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
+       names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
+       BESIDE the summary chip, not inside it: the chip still says what this block
+       resolves to, the picker says which document that is. Three overrides the
+       read-only atom's own rules make necessary: user-select (the atom sets `none`;
+       a typeahead input IS text to select, so the island opts back in), overflow (the
+       atom clips horizontally — pdd-t17, cards under the sidebar — but the picker's
+       dropdown hangs BELOW the input, so an atom carrying one must not clip, or the
+       affordance is dead the moment you type in it), and cursor/caret (the atom is a
+       selectable read-only unit; the input is not).
+       MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-readonly:has(.bp-canvas-readonly-retarget) {
+      overflow: visible;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .bp-canvas-readonly-retarget {
+      display: inline-block;
+      flex: 1 1 220px;
+      min-width: 0;
+      user-select: text;
+      cursor: auto;
+    }
+    /* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
+       inheriting the atom margin/overflow guard, focus ring, selectednode wash, and
+       loading chip. Restore the reader figure margin (figure_html article
+       margin:1.6rem 0), overriding .bp-canvas-readonly's 1em. The child paint hole is
+       .bp-paper-surface (data-bp-fleet-body), the canonical paper-surface sink, so the
+       injected child HTML styles itself identically to /papers with NO extra CSS (D8).
+       The editable caption reproduces the reader <figcaption>, which since
+       papers/captions-floor is styled by ONE class (.bp-figcaption, mirrored above)
+       rather than by inline styles — so it copies THAT rule's values (serif, roman,
+       0.9rem/1.45, --paper-ink-soft) plus an input reset, because an <input> inherits
+       none of it. The empty-caption resting-hide is JS, not CSS.
+       MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-figure { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; }
+    .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
+    input.bp-canvas-diagram-caption,
+    .bp-canvas-figure-caption-input {
+      display: block; width: 100%; box-sizing: border-box;
+      border: none; background: transparent; padding: 0; margin: 0;
+      color: var(--paper-ink-soft, #6a6a6a);
+      font-size: 0.9rem; line-height: 1.45;
+      font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
+    }
+    .bp-canvas-figure-caption-input:focus { outline: none; }
+    /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
+       bp-canvas-tasklist", inheriting the atom margin/overflow guard, focus ring,
+       selectednode wash, and loading chip. The ROWS paint hole is .bp-paper-surface
+       (data-bp-fleet-body), the canonical paper-surface sink, so the server-injected
+       resolved-rows HTML styles itself identically to /papers with NO extra CSS (D8).
+       The title/query <input> islands are EDIT-ONLY chrome (NO reader counterpart —
+       the reader shows resolved rows, never an editable filter — so they do NOT trip
+       the view↔edit byte-compare); the empty-input resting-hide is JS, not CSS. MUST
+       stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-tasklist-title {
+      display: block; width: 100%; box-sizing: border-box;
+      border: none; background: transparent; padding: 0; margin: 0 0 0.4rem;
+      color: var(--paper-ink, #1a1a1a);
+      font-weight: 600; font-size: 1.05rem;
+      font-family: var(--paper-font-serif, system-ui, -apple-system, sans-serif);
+    }
+    .bp-canvas-tasklist-query {
+      display: block; width: 100%; box-sizing: border-box;
+      border: 1px solid var(--paper-rule, #e0e0e0); border-radius: 4px;
+      background: transparent; padding: 0.2rem 0.4rem; margin: 0 0 0.6rem;
+      color: var(--paper-ink-soft, #6a6a6a);
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .bp-canvas-tasklist-title:focus, .bp-canvas-tasklist-query:focus { outline: none; }
+    .bp-canvas-tasklist-query:focus { border-color: var(--paper-ink-soft, #6a6a6a); }
+    /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so
+       they do NOT trip the view↔edit parity byte-compare). An empty column gets a
+       min-height + a subtle dashed outline so it is visible and clickable; the
+       read-only bpColumnAtom renders a "· <bpType> ·" chip for a non-first-class
+       child carried verbatim. Bound to the --paper-* token vocabulary. Keep
+       BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-cols__c:empty,
+    .bp-cols__c:has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
+    .bp-cols__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
+    /* S2 layout-engine: section-grid EDIT-ONLY empty-cell guard (edit-chrome; NO
+         reader counterpart — the analogous .bp-cols__c:empty hack above, RISK #2). An
+         empty/placeholder grid cell gets a min-height + dashed outline so it stays a
+         visible caret target. Keep BYTE-IDENTICAL with styles.css. */
+    .bp-canvas-section .bp-section__cell > :empty,
+    .bp-canvas-section .bp-section__cell > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
+    /* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
+       counterpart — the reader `.bp-term*` paint ships in paper-surface.css and is
+       inherited through the ancestor .bp-paper-surface cascade). The title/footer inputs
+       are de-chromed so they LOOK like the reader's mono/soft-ink spans; the live toggle
+       + "+ footer" affordance are hover/focus-revealed (the table-rail precedent). Bound
+       to the --paper- and --st- token vocabulary. Keep BYTE-IDENTICAL with
+       assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-term { position: relative; }
+    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
+    .bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
+    .bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+    .bp-canvas-term__live-toggle { margin-left: auto; }
+    .bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
+    .bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
+    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
+    .bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
+    .bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
+    /* Featured-image placeholder (t13) — the calm evergreen ghost frame an
+       asset-less image picker shows in the canvas. It IS the affordance (rule 5):
+       click / Enter / right-click opens the media picker. Colour rides --paper-*
+       so it is dark/light safe (this mirror MUST stay in lockstep with
+       assets/paper-editor/src/styles.css — paper-editor-mirror-check). */
+    /* Canvas field block (field-node.js), laid out as the reader's `.bp-field`
+     * row: a small mono label beside the value in the Paper's own type. The value
+     * control was a browser-default input (Arial 13px on white); it now inherits
+     * the page and shows only a faint hairline on hover and focus. Checkbox and
+     * colour controls keep their native shape. Values mirror paper-surface.css
+     * `.bp-field` / `.bp-field__l` / `.bp-field__v`. */
+    .bp-canvas-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; padding: 0.36rem 0; }
+    .bp-canvas-field-label { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); }
+/* Contract 1.13.0: a bound field block's binding (field-binding.js), as LiveView Beta's
+   Properties row: its n/max badge and an unbind x, in a third column at the right. Only
+   on a canvas whose host sets data-field-caps; otherwise the row is unchanged. */
+.bp-canvas-field--bound { grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr) auto; }
+.bp-canvas-field-binding { display: inline-flex; align-items: center; gap: 4px; justify-self: end; align-self: center; }
+.bp-canvas-field-binding[hidden], .bp-canvas-field-badge[hidden], .bp-canvas-field-unbind[hidden] { display: none; }
+.bp-canvas-field-badge { padding: 1px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 999px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.7rem/1.3 var(--paper-font-mono); }
+.bp-canvas-field-badge.is-at-cap { color: var(--paper-ink); }
+.bp-canvas-field-unbind { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--paper-ink-soft); font: 15px/1 var(--paper-font-sans, system-ui, sans-serif); cursor: pointer; }
+.bp-canvas-field-unbind:hover, .bp-canvas-field-unbind:focus-visible { background: var(--paper-edit-hover); color: var(--paper-ink); }
+    /* The label is a focus target (role=textbox): WCAG 2.2's 2.5.8 wants 24x24 px at least,
+       and the 0.75rem text alone is 19 px tall (task-b30758fec3a27a16). */
+    .bp-canvas-field-label { box-sizing: border-box; min-width: 24px; min-height: 24px; }
+    /* The label is its own editing surface (role=textbox, tabindex 0): a keyboard
+       user needs to see they are on it (WCAG 2.4.7). Same cue as the scaffold control. */
+    .bp-canvas-field-label[role="textbox"]:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select) { box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--paper-ink); font-family: inherit; font-size: 0.98rem; line-height: 1.5; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):hover { border-bottom-color: var(--paper-rule); }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):focus { outline: none; border-bottom-color: var(--paper-ink-soft); }
+    textarea.bp-canvas-field-control { resize: vertical; field-sizing: content; min-height: 1.5em; }
+    .bp-canvas-field-control:is(input[type="checkbox"], input[type="color"]) { justify-self: start; }
+    @media (max-width: 560px) { .bp-canvas-field { grid-template-columns: 1fr; row-gap: 2px; } }

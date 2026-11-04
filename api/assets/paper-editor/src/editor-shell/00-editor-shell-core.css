@@ -1,0 +1,740 @@
+/* bp-paper-editor-shell.css — the Beta paper block editor's SHELL stylesheet:
+   the LiveView-side editor chrome (block frame, hover toolbar, drag grip,
+   context menu, field/property rows, ghost slots) plus the canvas node-view
+   and popup skins (slash menu, command palette, format bubble).
+
+   ONE copy, two layouts. Extracted VERBATIM from root.html.heex's inline
+   <style> (the rules between the paper-surface embed and the Studio sheet-grid
+   block) so the public paper reader can paint the same editor without a second
+   copy. root.html.heex links it from EXACTLY the point the rules used to sit
+   at, between its two <style> halves, so the Studio cascade is unchanged.
+
+   Tokens (--paper-*, --bp-*) come from paper-surface.css, which BOTH layouts
+   embed earlier in the page (Render.Stylesheet.css()). This file only consumes
+   them, except in the two body-appended popups that re-declare their own.
+
+   Not built from a source: it IS the source. The bundle's own standalone
+   stylesheet (assets/paper-editor/src/styles.css -> bp-paper-editor.css) is the
+   hand-kept mirror for embedders, held in lockstep by view_edit_parity_test. */
+
+    /* ── In-Studio Beta block editor (Edit mode). Card chrome + uppercase
+       type-label strips are GONE (B1) — each block reads as clean prose on
+       the page. The block container is transparent with generous rhythm;
+       the move/delete controls + drag grip are de-emphasised, hover-revealed
+       (a floating toolbar replaces them in B2). */
+    /* Authored siblings use the reader's collapsing block margins. Contain the
+       document's outer margins without turning each block into a flex item. */
+    .bp-paper-editor { display: flow-root; padding: 0; }
+    /* spd-w18 — the empty-body sentence is a real message, not chrome. It was
+       `--paper-ink-faint` + italic, which is the same faint-grey family the
+       owner read as a dead control; raised to `--paper-ink-soft` upright so it
+       reads as text the product means. */
+    .bp-paper-editor-empty { color: var(--paper-ink-soft); }
+    .bp-paper-editor-empty code {
+      font-family: var(--font-mono); font-size: 0.9em; color: var(--paper-ink);
+    }
+
+    /* spd-w18 — the never-blank state for a document Studio resolved but cannot
+       render (no block list, no body_html). It replaces an EMPTY <article>: the
+       whole point is that it is impossible to mistake for absence, so it carries
+       weight, a border and full-ink copy rather than faint chrome. */
+    .bp-paper-unrenderable {
+      display: flex; flex-direction: column; gap: 10px;
+      margin: 8px 0 4px; padding: 16px 18px;
+      border: 1px solid var(--paper-ink-faint-line);
+      border-left: 3px solid var(--paper-accent);
+      border-radius: 6px;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-title {
+      margin: 0; font-family: var(--font); font-weight: 600; font-size: 15px;
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-reason {
+      margin: 0; font-family: var(--font); font-size: 13px; line-height: 1.55;
+      color: var(--paper-ink-soft);
+    }
+    .bp-paper-unrenderable-reason code {
+      font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* Studio's unresolved-document notice: the main-region wrapper is a flex
+       box so the card inside stretches exactly as it did as a direct
+       .pane-layout child. */
+    .bp-unresolved-main { display: flex; }
+    /* No uniform inter-block gap — prose rhythm rides on the element margins
+       inside `.bp-paper-editor-body` (type-aware) so we don't double-space.
+       Bound-FIELD blocks have no such element rhythm, so they get a wrapper
+       gap restored below (`:has(.bp-paper-edit-form|.bp-paper-edit-field)`)
+       to keep title/slug/featuredImage from collapsing together. */
+    .bp-paper-edit-block {
+      position: relative;
+      border: 0; border-radius: 0; background: transparent;
+      padding: 0; margin: 0;
+    }
+    .bp-paper-edit-block:has(.bp-paper-edit-form),
+    .bp-paper-edit-block:has(.bp-paper-edit-field) { margin-top: 6pt; }
+    /* Faint hover outline marks the active block without a card frame. The
+       `--paper-edit-hover` token (0.10 in light vs the 0.08 `--paper-rule`)
+       + 10px offset give the active block a touch more presence; the token is
+       theme-scoped to a warm-light alpha in dark so it reads in both modes. */
+    .bp-paper-edit-block:hover,
+    .bp-paper-edit-block:focus-within { outline: 1px solid var(--paper-edit-hover); outline-offset: 10px; border-radius: 2px; }
+    /* The chrome cluster floats in the block's LEFT MARGIN, hidden until the
+       block is hovered/active, then fades in (Portable-Doc `.paper-floating-
+       chrome` contract: quick in / slow out, transparent bg, ink-faint
+       glyphs that warm to ink-soft on hover). The default (resting) transition
+       carries the SLOWEST rung (--dur-3) so a mouse-leave fades out gently; the
+       hover/focus rule swaps in the QUICKEST (--dur-1) so the chrome appears
+       promptly when you arrive. Both were hand-typed (0.30s / 0.15s) until
+       spd-b21 emitted the ladder; the ratio survives the retune to 0.28s. */
+    .bp-paper-edit-toolbar {
+      position: absolute; top: 4px; left: -10px;
+      transform: translateX(-100%);
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      margin: 0; opacity: 0; pointer-events: none;
+      transition: opacity var(--dur-3) ease-out;
+      /* A4: the original's floating-chrome PILL (warm chrome surface, hairline
+         border, soft shadow) — replaces the bare transparent strip. Themed via
+         the `--paper-chrome-*` tokens so it reads warm in light AND dark. */
+      background: var(--paper-chrome-bg);
+      border: 0.75px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 2px 8px hsl(var(--bp-shadow-hsl) / 0.06);
+      padding: 4px 3px;
+    }
+    .bp-paper-edit-block:hover .bp-paper-edit-toolbar,
+    .bp-paper-edit-block:focus-within .bp-paper-edit-toolbar {
+      opacity: 1; pointer-events: auto;
+      transition: opacity var(--dur-1) ease-out;
+    }
+    /* Type label is dropped from view — kept in DOM for tests/a11y only. */
+    .bp-paper-edit-kind {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .bp-paper-edit-actions { display: flex; flex-direction: column; gap: 2px; }
+    /* Minimal, unobtrusive control buttons (override the zinc .btn chrome).
+       Transparent bg, small, ink-faint → ink-soft on hover (per
+       `.paper-block__drag-handle`). Delete stays subtle until hovered. */
+    .bp-paper-edit-toolbar .btn,
+    .bp-paper-drag-grip {
+      height: 20px; min-width: 18px; padding: 0 3px;
+      border: 0; background: transparent; color: var(--paper-ink-faint);
+      font-size: 13px; line-height: 1; border-radius: 3px;
+      transition: color 0.16s ease-out, background 0.16s ease-out;
+    }
+    .bp-paper-edit-toolbar .btn:hover { background: transparent; color: var(--paper-ink-soft); }
+    .bp-paper-edit-toolbar .btn-destructive:hover { color: var(--paper-accent); background: var(--paper-accent-soft); }
+    .bp-paper-edit-toolbar .btn:disabled { opacity: 0.35; }
+    /* Narrow pages have no outer gutter for the desktop control rail. Dock
+       only the focused block's controls; placing them above the block covers
+       the preceding prose, and nested blocks must not stack several docks. */
+    @media (max-width: 720px) {
+      .bp-paper-edit-toolbar {
+        position: fixed; top: auto; left: 0; right: 0; bottom: 0; transform: none;
+        flex-direction: row; justify-content: flex-end; z-index: 10;
+        padding: 0.5rem max(1rem, env(safe-area-inset-right, 0px)) calc(0.5rem + env(safe-area-inset-bottom, 0px));
+        border-radius: 0;
+      }
+      .bp-paper-edit-toolbar .bp-paper-edit-actions { flex-direction: row; }
+      .bp-paper-edit-block:is(:hover, :focus-within) .bp-paper-edit-toolbar {
+        opacity: 0; pointer-events: none;
+      }
+      .bp-paper-edit-block:focus-within:not(:has(.bp-paper-edit-block:focus-within)) > .bp-paper-edit-toolbar {
+        opacity: 1; pointer-events: auto;
+      }
+      .bp-paper-edit-toolbar .btn,
+      .bp-paper-edit-toolbar .bp-paper-drag-grip { min-width: 32px; height: 32px; }
+      .bp-paper-editor { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+      body:has(.bp-paper-editor) > .bp-view-controls {
+        padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+      }
+    }
+    /* The ⋮⋮ drag handle — grab affordance, warms on hover like the others. */
+    .bp-paper-drag-grip {
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: grab; user-select: none; letter-spacing: -1px;
+    }
+    .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
+    .bp-paper-drag-grip:active { cursor: grabbing; }
+    /* pdd-t12c: a locked grip is a tab stop (it carries the template note for
+       keyboard/SR users) — draw the standard accent ring so the stop is visible. */
+    .bp-paper-drag-grip:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
+    .bp-paper-dragging { opacity: 0.5; }
+    /* pdd-t2: a template-locked block's grip is inert — quiet, no grab cursor
+       (the span carries no draggable/data-drag-grip when locked). */
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip,
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:active {
+      cursor: default; opacity: 0.45;
+    }
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:hover {
+      color: inherit;
+    }
+
+    /* Right-click block context menu (singleton, appended to <body>). A fixed
+       overlay — ZERO layout impact at rest (`[hidden]` ⇒ display:none). Shares
+       the warm floating-chrome look of `.bp-paper-edit-toolbar`: `--paper-chrome-*`
+       surface, hairline border, soft shadow. UI font (var(--font)), not the
+       serif body font, so the labels read as chrome, not prose. */
+    .bp-paper-context-menu {
+      position: fixed; z-index: 1000; top: 0; left: 0;
+      min-width: 148px; padding: 4px;
+      display: flex; flex-direction: column;
+      background: var(--paper-chrome-bg);
+      border: 0.75px solid var(--paper-chrome-border);
+      border-radius: 8px;
+      box-shadow: 0 6px 20px hsl(var(--bp-shadow-hsl) / 0.14);
+      font-family: var(--font); font-size: 13px; line-height: 1.2;
+      color: var(--paper-ink);
+    }
+    .bp-paper-context-menu[hidden] { display: none; }
+    .bp-paper-context-menu__item {
+      display: block; width: 100%; text-align: left;
+      padding: 6px 10px; margin: 0;
+      border: 0; border-radius: 5px; background: transparent;
+      color: var(--paper-ink); font: inherit; cursor: pointer;
+      transition: color 0.14s ease-out, background 0.14s ease-out;
+    }
+    .bp-paper-context-menu__item:hover,
+    .bp-paper-context-menu__item:focus-visible {
+      background: var(--paper-bg-deep); outline: none;
+    }
+    .bp-paper-context-menu__item:disabled {
+      opacity: 0.35; cursor: default; background: transparent;
+    }
+    .bp-paper-context-menu__item--destructive { color: var(--paper-accent); }
+    .bp-paper-context-menu__item--destructive:hover,
+    .bp-paper-context-menu__item--destructive:focus-visible {
+      background: var(--paper-accent-soft); color: var(--paper-accent);
+    }
+    .bp-paper-context-menu__sep {
+      height: 1px; margin: 4px 6px;
+      background: var(--paper-rule);
+    }
+    /* pdd-t2: the calm template note shown when the menu opens on a locked
+       block (its move/delete items disable) — a quiet statement, not an error. */
+    .bp-paper-context-menu__note {
+      padding: 6px 10px; font-size: 12px;
+      color: var(--paper-ink-faint); user-select: none; cursor: default;
+    }
+    .bp-paper-context-menu__note[hidden] { display: none; }
+
+    /* Edit forms — inputs read as quiet underlined text on the page, not
+       boxed form controls (the page IS the form). */
+    .bp-paper-edit-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+    /* Authoring fields can use an external hidden form owner. The display rule
+       above must not override its native hidden state or create a margin stop. */
+    .bp-paper-edit-form[hidden] { display: none; }
+    .bp-paper-edit-text { flex: 1 1 200px; min-width: 120px; }
+    .bp-paper-edit-textarea { flex: 1 1 100%; width: 100%; }
+    .bp-paper-edit-form input[type="text"],
+    .bp-paper-edit-form input[type="number"],
+    .bp-paper-edit-form textarea,
+    .bp-paper-edit-form select,
+    .bp-paper-edit-field input[type="text"],
+    .bp-paper-edit-field input[type="number"],
+    .bp-paper-edit-field textarea,
+    .bp-paper-edit-field select {
+      font-family: var(--paper-font-serif); color: var(--paper-ink);
+      background: transparent; border: 0;
+      border-bottom: 1px solid var(--paper-rule);
+      border-radius: 0; padding: 4px 2px; font-size: 18px; line-height: 1.55;
+    }
+    .bp-paper-edit-form input[type="text"]:focus,
+    .bp-paper-edit-form input[type="number"]:focus,
+    .bp-paper-edit-form textarea:focus,
+    .bp-paper-edit-form select:focus,
+    .bp-paper-edit-field input[type="text"]:focus,
+    .bp-paper-edit-field input[type="number"]:focus,
+    .bp-paper-edit-field textarea:focus,
+    .bp-paper-edit-field select:focus {
+      outline: none; border-bottom-color: var(--paper-accent);
+    }
+    .bp-paper-edit-code, .bp-paper-edit-form .bp-paper-edit-code {
+      font-family: var(--paper-font-mono); font-size: 14px;
+      background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
+      border-radius: 4px; padding: 10px 12px;
+    }
+    .bp-paper-edit-form .btn {
+      background: transparent; border: 1px solid var(--paper-rule);
+      color: var(--paper-ink-soft); font-family: var(--font);
+    }
+    .bp-paper-edit-form .btn:hover { background: var(--paper-accent-soft); color: var(--paper-ink); }
+    .bp-paper-edit-level, .bp-paper-edit-tone { flex: 0 0 auto; }
+    .bp-paper-edit-ordered { font-size: 14px; color: var(--paper-ink-faint); display: inline-flex; align-items: center; gap: 4px; flex: 1 1 100%; }
+    .bp-paper-edit-readonly { color: var(--paper-ink-faint); font-style: italic; font-size: 14px; }
+
+    /* ── arrayOf chips variant (data-array-variant="chips") ──────────────────
+       A thin render skin over the arrayOf data path: each chip is an editable
+       text input + a remove affordance; "+ Add" appends an empty chip. */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chips {
+      list-style: none; margin: 0; padding: 0;
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 6px; border-radius: 999px;
+      background: var(--paper-accent-soft); color: var(--paper-ink);
+      font-size: 14px; font-family: var(--font);
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip input {
+      border: none; background: transparent; color: inherit;
+      font: inherit; padding: 0; min-width: 4ch; width: auto;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip input:focus {
+      outline: none;
+    }
+    /* The chip input kills its own focus ring (transparent/borderless), so the
+       pill hosts the ring instead — mirrors the format-toolbar focus pattern so
+       keyboard users see which value they're editing (WCAG 2.4.7). */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip:focus-within {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button {
+      border: none; background: transparent; cursor: pointer;
+      color: var(--paper-ink-faint); font-size: 14px; line-height: 1; padding: 0;
+    }
+    /* WCAG 2.4.7 — the destructive remove button had only a :hover cue; give
+       keyboard focus a visible ring so it's reachable without a mouse. */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button:focus-visible {
+      color: var(--paper-ink); outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button:hover {
+      color: var(--paper-ink);
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] > form > button {
+      margin-top: 6px; font-size: 14px; font-family: var(--font);
+      color: var(--paper-ink-soft); background: transparent;
+      border: 1px dashed var(--paper-ink-faint-line); border-radius: 6px;
+      padding: 2px 8px; cursor: pointer;
+    }
+    .bp-paper-composite-block[data-array-variant="chips"] > form > button:hover {
+      background: var(--paper-accent-soft); color: var(--paper-ink);
+    }
+
+    /* ── View ↔ Edit parity per block type ──────────────────────────────────
+       Edit-side rules that mirror the View pane's inline styling for blocks
+       that aren't rich-text (byline / callout / eyebrow / ingress / pullquote
+       / code / diagram / divider / section). Targets the per-type wrapper
+       attribute `data-block-type=<type>` added in studio_live.ex so blocks
+       become CSS-addressable. Each block matches the inline style emitted
+       by render.ex (with style: :article) byte-for-byte where possible,
+       degrading gracefully where the Edit pane uses different controls
+       (e.g. select + input + textarea triple in callout vs single <div>
+       wrapper on the View). */
+
+    /* byline — 0.9rem muted serif with hairline bottom rule. The hairline
+       (`border-bottom:1px solid var(--paper-rule)`) already comes from the base
+       `.bp-paper-edit-form input/textarea` rule above, which mirrors the
+       `.bp-role-byline` rule in paper-surface.css (the View now emits that
+       CLASS, not inline styles); only the spacing (`margin:0 0 1.4rem`,
+       `padding-bottom:0.6rem`) needs mirroring. */
+    .bp-paper-edit-block[data-block-type="byline"] input.bp-paper-edit-text,
+    .bp-paper-edit-block[data-block-type="byline"] textarea {
+      font-size: 0.9rem;
+      color: var(--paper-ink-soft);
+      margin: 0 0 1.4rem;
+      padding-bottom: 0.6rem;
+    }
+
+    /* eyebrow — small uppercase accent kicker */
+    .bp-paper-edit-block[data-block-type="eyebrow"] input.bp-paper-edit-text {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--paper-accent);
+    }
+
+    /* ingress — larger, slightly heavier lead-in paragraph */
+    .bp-paper-edit-block[data-block-type="ingress"] textarea.bp-paper-edit-textarea {
+      font-size: 1.28rem;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    /* pullquote — italic, larger, muted, with terracotta left rule. Margin +
+       padding mirror the `.bp-role-pullquote` rule in paper-surface.css
+       (`margin:1.6rem 0`, `padding:0.2rem 0 0.2rem 1.2rem`) — the View now
+       emits that CLASS, not inline styles. */
+    .bp-paper-edit-block[data-block-type="pullquote"] textarea.bp-paper-edit-textarea {
+      font-style: italic;
+      font-size: 1.2rem;
+      color: var(--paper-ink-soft);
+      border-left: 3px solid var(--paper-rule);
+      border-bottom: 0;
+      margin: 1.6rem 0;
+      padding: 0.2rem 0 0.2rem 1.2rem;
+      line-height: 1.5;
+    }
+
+    /* callout — neutral accent card wrapping the form chrome. The tone
+       <select> can change at runtime; CSS can't read its value, so the
+       Edit-side card uses the default (info) accent stripe. The actual
+       tone-specific colour only shows after save in the View pane.
+       Padding (`padding:16px`) mirrors the `.bp-callout` rule in
+       paper-surface.css — the View now emits `bp-callout` + a
+       `bp-callout--<tone>` modifier (plain div AND collapsible <details>)
+       rather than inline tone styles. */
+    .bp-paper-edit-block[data-block-type="callout"] .bp-paper-edit-form {
+      border-left: 4px solid var(--paper-accent);
+      background: var(--paper-accent-soft);
+      padding: 16px;
+      border-radius: 0;
+    }
+    .bp-paper-edit-block[data-block-type="callout"] textarea.bp-paper-edit-textarea {
+      color: var(--paper-ink);
+      border-bottom: 0;
+    }
+
+    /* code — parchment ground, terracotta left rule, monospace surface.
+       Overrides the generic `.bp-paper-edit-code` border so it matches the
+       View's `<pre>` rather than the full-border code box look. Padding +
+       margin are a byte-copy of the View <pre>'s `padding:0.9rem 1.1rem` and
+       `margin:1.2rem 0` (figures.ex:25 code_block_html), overriding the base
+       `.bp-paper-edit-code` 10px 12px by later-source, higher-specificity
+       cascade. */
+    .bp-paper-edit-block[data-block-type="code"] textarea.bp-paper-edit-code {
+      border: 0;
+      border-left: 3px solid var(--paper-reading-accent);
+      border-radius: 0;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin: 1.2rem 0;
+      padding: 0.9rem 1.1rem;
+    }
+
+    /* diagram — figure card chrome (warm bg + thin rule + corner radius).
+       Source textarea sits inside as a transparent monospace surface. Margin
+       byte-copies the View <figure>'s `margin:1.6rem 0` (figures.ex:83). */
+    .bp-paper-edit-block[data-block-type="diagram"] .bp-paper-edit-form {
+      background: var(--paper-bg-deep);
+      border: 1px solid var(--paper-rule);
+      border-radius: 4px;
+      margin: 1.6rem 0;
+      padding: 1.2rem;
+    }
+    .bp-paper-edit-block[data-block-type="diagram"] textarea.bp-paper-edit-code {
+      border: 0;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+    }
+
+    /* section — centered bold title (sits between the View's two PdHr rules
+       in the rendered output; the rules themselves are drawn purely on View). */
+    .bp-paper-edit-block[data-block-type="section"] input.bp-paper-edit-text {
+      font-weight: 600;
+      text-align: center;
+    }
+
+    /* divider — replace the "— divider —" placeholder with the real § glyph
+       straddling a hairline, mirroring section_divider_html/0 on View. */
+    .bp-paper-edit-block[data-block-type="divider"] .bp-paper-edit-readonly {
+      position: relative;
+      text-align: center;
+      margin: 2.4rem 0;
+      border-top: 1px solid var(--paper-rule);
+      font-size: 0;       /* hide the placeholder text */
+      font-style: normal; /* clear the base italic */
+      height: 1px;
+    }
+    .bp-paper-edit-block[data-block-type="divider"] .bp-paper-edit-readonly::before {
+      content: "§";
+      position: absolute;
+      top: -0.7rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: inline-block;
+      padding: 0 0.8rem;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink-soft);
+      font-size: 1.1rem;
+    }
+
+    /* Bound field blocks render cleanly + minimally. */
+    .bp-paper-edit-field { display: flex; flex-direction: column; gap: 2px; }
+    .bp-paper-edit-fieldlabel {
+      font-size: 12px; color: var(--paper-ink-faint);
+      letter-spacing: 0.02em; font-family: var(--font);
+    }
+
+    /* ── Priority B: bound fields read as a DOCUMENT, not a form ────────────
+       A block carries `data-field-name` only when it is BOUND to a schema
+       field (synthesis emits `fieldName`; free body blocks have none). For
+       those we hide the muted "Title/Slug/Featured Image" label entirely and
+       drop the boxy form chrome so title/slug/image read as prose. The bound
+       editors (BarkparkFieldBlockBridge / pickers) keep working — only the
+       presentation changes. */
+    .bp-paper-edit-field[data-field-name] .bp-paper-edit-fieldlabel {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    /* Drop the inter-field hairline rules between adjacent bound blocks — the
+       underline on the text inputs + the per-edit-block margin already separate
+       them; stacked rules read as a CMS form. */
+    .bp-paper-edit-field[data-field-name] input[type="text"],
+    .bp-paper-edit-field[data-field-name] textarea {
+      border-bottom: 0;
+    }
+    /* The base `.bp-paper-edit-text { flex: 1 1 200px }` is a WIDTH basis, but the
+       field container is `display:flex; flex-direction:column`, so flexbox reads
+       the 200px as HEIGHT — blowing every single-line input up into a ~200px-tall
+       empty box (the "air"; the visible border is the :hover outline wrapping it).
+       Collapse single-line inputs to natural height; leave textareas (multi-line). */
+    .bp-paper-edit-field input.bp-paper-edit-text {
+      flex: 0 0 auto;
+      height: auto;
+      min-height: 0;
+    }
+
+    /* Title → a large borderless serif H1 (32px/600), no label, no box.
+       line-height:1.1 / letter-spacing:-0.02em mirror walk.ex heading_style(1)
+       inline strings (walk.ex:335-345) and the already-aligned
+       .bp-paper-surface h1 (:2331) / .bp-paper-editor-body h1 (:2876) — so the
+       bound title field and the rendered H1 match on every mode toggle. */
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"] {
+      font-family: var(--paper-font-serif);
+      font-size: 32px; font-weight: 600; line-height: 1.1;
+      letter-spacing: -0.02em; color: var(--paper-ink);
+      padding: 0; margin: 0; border: 0; background: transparent;
+    }
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]::placeholder {
+      color: var(--paper-ink-faint);
+    }
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]:focus {
+      outline: none; border: 0;
+    }
+    /* WCAG 2.4.7 — keyboard focus (:focus-visible, placed AFTER the :focus reset
+       so same-specificity later-wins) gets a ring; pointer clicks keep the clean
+       borderless look. */
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 3px;
+    }
+
+    /* Slug → muted inline text, small, faint — sits quietly under the title. */
+    .bp-paper-edit-field[data-field-name="slug"] input[type="text"] {
+      font-family: var(--paper-font-mono);
+      font-size: 13px; color: var(--paper-ink-faint);
+      padding: 0; margin: 0; border: 0; background: transparent;
+    }
+    .bp-paper-edit-field[data-field-name="slug"] input[type="text"]:focus {
+      outline: none; border: 0; color: var(--paper-ink-soft);
+    }
+
+    /* Featured image (any bound image field) → inline figure. The media WC
+       shows the picked image when set, or a slim unobtrusive affordance at
+       rest; no big dropzone card, no "Featured Image" label. The WC styling
+       lives in its own component CSS — here we just strip the field chrome and
+       let it sit inline as a figure on the page. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] {
+      gap: 0; margin: 6pt 0 0;
+    }
+    /* Scope the bp-media-picker internals (light-DOM WC) for the BOUND image
+       on the paper surface: a picked image becomes a flush inline figure; at
+       rest the empty box collapses to a slim "Add image" affordance instead of
+       the big bordered dropzone card. Upload/browse stay fully functional. */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] bp-media-picker {
+      display: block;
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-preview-img {
+      display: block; max-width: 100%; height: auto; margin: 0;
+      border-radius: 3px; border: 1px solid var(--paper-rule);
+      background: var(--paper-bg-deep);
+    }
+    /* Empty state: collapse the WC's "No image selected" drop card to a slim
+       affordance. font-size:0 hides the WC's own text node; the ::before
+       carries the visible "+ Add image" label at readable size. Border and
+       min-height are zeroed so the Studio dashed drop-target chrome never
+       reaches the paper surface (the WC's click/drop targets keep working). */
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty {
+      font-size: 0; padding: 0; border: 0; min-height: 0;
+      justify-content: flex-start; background: transparent;
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty::before {
+      content: attr(data-label-short);
+      font-family: var(--font); font-size: 13px;
+      color: var(--paper-ink-faint);
+    }
+    .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-actions {
+      display: flex; gap: 6px; margin-top: 4px;
+    }
+
+    /* IMAGE content blocks (t13) — the seeded locked `role:"featured"` image is
+       a `type:"image"` run BOUNDARY, so its empty state renders here (the
+       per-block path), not in the canvas node-view. Echo the CANVAS ghost frame
+       (.bp-canvas-field-image-empty): calm evergreen dashed frame, doctrine
+       copy via the same font-size:0 + ::before swap the bound-image affordance
+       above uses. The WC's click / drop / keyboard targets keep working. */
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty {
+      flex-direction: column; gap: 6px;
+      min-height: 132px; padding: 28px 20px;
+      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border-radius: 10px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+      color: var(--paper-accent, #1e5347);
+      font-size: 0; /* hide the WC's own copy; ::before/::after carry ours */
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:hover,
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:focus-visible {
+      border-color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #1e5347);
+      background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::before {
+      content: attr(data-label-add);
+      font-size: 14px; font-weight: 600; letter-spacing: 0.005em;
+    }
+    .bp-paper-edit-field[data-field-type="image"][data-block-role="featured"] .bp-mp-empty::before {
+      content: attr(data-label-featured);
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::after {
+      content: attr(data-label-hint);
+      font-size: 12px; font-weight: 500;
+      color: var(--paper-ink-faint, #82918b);
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-preview-img {
+      display: block; max-width: 100%; height: auto;
+      border-radius: 3px; border: 1px solid var(--paper-rule, #d9d2c4);
+      background: var(--paper-bg-deep, #efe9dc);
+    }
+
+    /* Add-block row — quiet hairline divider, muted control. */
+    .bp-paper-add-block {
+      display: flex; align-items: center; gap: 8px;
+      padding-top: 16px; margin-top: 24px;
+      border-top: 1px solid var(--paper-rule);
+    }
+    .bp-paper-add-block label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--paper-ink-soft); font-family: var(--font); }
+    .bp-paper-add-block select { font-family: var(--font); font-size: 13px; }
+    .bp-paper-surface .bp-paper-add-block { flex-wrap: wrap; }
+    .bp-paper-surface .bp-paper-add-block label {
+      flex-wrap: wrap; min-width: 0; font-family: var(--paper-font-ui, system-ui, sans-serif);
+    }
+    .bp-paper-surface .bp-paper-add-block :is(select, button) {
+      background: var(--paper-bg-deep); color: var(--paper-ink);
+      border: 1px solid var(--paper-rule); border-radius: 6px;
+      padding: 7px 12px; max-width: 100%;
+      font: 500 0.8rem/1.4 var(--paper-font-ui, system-ui, sans-serif);
+    }
+    .bp-paper-surface .bp-paper-add-block button { cursor: pointer; color: var(--paper-accent); }
+    .bp-paper-surface .bp-paper-add-block :is(select, button):focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px;
+    }
+
+    /* ── Properties panel (Storage Model A) — a quiet collapsible above the
+       body. Each row is a bound field rendered as label + cap badge + unbind ×
+       over the existing value control. */
+    .bp-properties {
+      margin: 0 0 18px; padding: 0 0 14px;
+      border-bottom: 1px solid var(--paper-rule);
+    }
+    .bp-properties-summary {
+      cursor: pointer; list-style: none;
+      font-family: var(--font); font-size: 12px; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--paper-ink-faint);
+      margin-bottom: 8px;
+    }
+    .bp-properties-summary::-webkit-details-marker { display: none; }
+    .bp-prop-row { margin-top: 8px; }
+    .bp-prop-head {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font);
+    }
+    .bp-prop-label { font-size: 13px; color: var(--paper-ink-soft); }
+    .bp-prop-badge {
+      font-size: 11px; color: var(--paper-ink-faint);
+      border: 1px solid var(--paper-rule); border-radius: 999px;
+      padding: 1px 7px; line-height: 1.4;
+    }
+    .bp-prop-badge.is-at-cap {
+      color: var(--paper-accent); border-color: var(--paper-accent);
+    }
+    .bp-prop-unbind { margin-left: auto; opacity: 0.5; }
+    .bp-prop-unbind:hover { opacity: 1; color: var(--paper-accent); background: transparent; }
+    .bp-prop-row .bp-paper-edit-field { margin-top: 2px; }
+    .bp-prop-add {
+      display: flex; align-items: center; gap: 8px; margin-top: 12px;
+    }
+    .bp-prop-add label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--paper-ink-soft); font-family: var(--font); }
+    .bp-prop-add select { font-family: var(--font); font-size: 13px; }
+
+    /* Rich-text WC wrapper — the editable "paragraph/heading/list" surface.
+       No card frame; it sits flush on the page reading as prose. */
+    .bp-paper-edit-wc {
+      border: 0; background: transparent; padding: 0;
+    }
+    /* Type-aware vertical rhythm — mirrors `.bp-paper-surface h1/h2/h3/p/li`
+       so the editable text breathes exactly like the read/preview surface.
+       Each prose block is its OWN single-element ProseMirror, so inter-block
+       rhythm rides on the leading element's margin-top (NOT a uniform wrapper
+       gap — that is neutralized below for prose to avoid double-spacing). The
+       very first block in the editor zeroes its leading margin so the document
+       doesn't open with a gap. */
+    .bp-paper-editor-body { outline: none; }
+    [data-bp-text-boundary] {
+      margin-block: 12px;
+      padding: 10px 12px;
+      border-inline-start: 2px solid var(--paper-accent, currentColor);
+      color: var(--paper-ink-soft);
+      font-family: var(--paper-font-ui, system-ui, sans-serif);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    /* Empty-block ghost text — @tiptap/extension-placeholder stamps `is-empty`
+       (current empty node) / `is-editor-empty` (whole-empty editor) + a
+       `data-placeholder` attr on the node. Render it as a muted, non-shifting
+       prefix (float + height:0 so it never nudges the caret). The faint ink
+       token (#8a8278) is the original Portable Doc editor's exact hint colour. */
+    .bp-paper-editor-body .ProseMirror .is-empty::before,
+    .bp-paper-editor-body .ProseMirror .is-editor-empty::before {
+      content: attr(data-placeholder);
+      color: var(--paper-ink-faint);
+      float: left;
+      height: 0;
+      pointer-events: none;
+    }
+    /* A1: kill the browser-default blue focus ring on the editable surface.
+       The contenteditable/ProseMirror otherwise paints `outline: rgb(0,95,204)
+       auto` on focus — a blue box that screams "input". Mirrors the original
+       Portable Doc editor, which has no focus ring on the paper. */
+    .bp-paper-surface [contenteditable]:focus,
+    .bp-paper-surface .ProseMirror:focus,
+    .bp-paper-surface .ProseMirror-focused { outline: none; }
+    .bp-paper-editor > .bp-paper-edit-block:first-child .bp-paper-editor-body > :first-child { margin-top: 0; }
+    /* Heading vertical rhythm — TOP-only margins, byte-mirrored from the shared
+       .bp-paper-surface block above (view_edit_parity_test §2 enforces the match).
+       Top-only so the flat ProseMirror (collapse) and div-wrapped reader (additive)
+       land identical. */
+    .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; overflow-wrap: break-word; }
+    /* h2 takes the DISPLAY VOICE (device 3): the per-step `--bp-h2-weight`, not the
+       shared `--bp-heading-weight`, plus `text-wrap: balance` — byte-identical with
+       paper-surface.css `.bp-paper-surface h2` (which carries the reasoning) and
+       the bundle; view_edit_parity_test.exs §2/§5 pin both declarations. */
+    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h4 { font-size: calc((var(--bp-h3-size) + var(--bp-body-size)) / 2); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.4em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h5 { font-size: var(--bp-body-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h6 { font-size: calc(var(--bp-body-size) * 0.9); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
+    /* THE SECTION HEAD — the Studio canvas's copy of the device the reader draws
+       with `.bp-paper-surface > #paper-body > h2` (paper-surface.css carries the
+       full reasoning) and the embedder bundle repeats. A TOP-LEVEL level-2
+       heading is a section boundary: `--bp-section-beat` of air above the rule,
+       the rule, `--bp-section-gap` between rule and words. DIRECT child, so a
+       component node-view's own h2 is untouched. Byte-mirrored across all three
+       editor copies AND the reader — view_edit_parity_test.exs §9 pins the set. */
+    .bp-paper-editor-body > h2,
+.bp-paper-editor-body > .ProseMirror > h2 {
+      margin-top: var(--bp-section-beat);
+      border-top: var(--bp-section-rule) solid var(--paper-rule);
+      padding-top: var(--bp-section-gap);
+      margin-inline: var(--bp-evidence-pull, 0px);
+      width: var(--bp-evidence-width, 100%);
+      box-sizing: border-box;
+      padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
+    }
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }

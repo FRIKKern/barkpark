@@ -1,0 +1,432 @@
+/* ── Chat-block BASE tokens (hand-authored — charter D6, rpu-w1-chat-tokens). ──
+   The three chat blocks (chat-thinking / chat-todo / chat-tool-diff, emitted by
+   render/components.ex) style themselves with inline
+   `var(--primary | --muted-surface | --border-muted | --fg-dim | --font-mono)`
+   and NO fallback. Those five live only in root.html.heex's Studio <style>, so
+   OUTSIDE Studio — the `/papers` reader, the sheet `.html` export, any embedder
+   that loads only this stylesheet — they resolved to nothing and the chat chrome
+   collapsed to browser defaults. Define them ON the paper surface so chat
+   self-resolves on every surface that inlines Stylesheet.css/0.
+
+   Deliberately NOT in the design/tokens.json GENERATED block above: the four
+   colour values are lifted VERBATIM from root.html.heex's DEFAULT theme (they
+   must match the Studio bytes exactly, not an emit-derived value), and
+   `--font-mono` ALIASES this surface's own `--paper-font-mono` rather than
+   carrying a stack. They follow the SAME 4-block dual-swap shape as the
+   generated status tones (bare-light → prefers-dark → explicit-light →
+   explicit-dark) so an explicit light theme on a dark OS still wins over the
+   `prefers-color-scheme` block, and every dark value is re-skinned in the
+   `@media (prefers-color-scheme: dark)` block the reader reads.
+
+   NOTE (rpu-w1 review): D6 spec light `--border-muted: var(--border)`, but
+   `--border` lives ONLY in root.html.heex (Studio), so on a non-Studio surface
+   it was undefined and `border-top: 1px solid var(--border-muted)` (the
+   chat-tool-diff divider) collapsed to `border-style: none` in light mode.
+   Resolved here to the concrete light value `--border` carries in
+   root.html.heex's default theme — hsl(240 5.9% 90%) — so it self-resolves on
+   every surface with IDENTICAL rendering to Studio, without introducing a bare
+   `--border` token (which the paper-editor mirror would push into the editor's
+   light `:root`, wrongly overriding the inherited Studio dark `--border`). The
+   dark blocks already carry a concrete `--border-muted`. */
+.bp-paper-surface, .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+}
+
+/* ── diff + filetree containers (W7 code-story blocks — charter D85). ─────────
+   Both blocks self-style INLINE with the same evergreen tokens as the chat
+   family above (mono, --muted-surface chrome, --ok/--danger diff rows shared
+   with chat-tool-diff per D76), so they read identically in email. These
+   container rules add ONLY the paper-surface chrome (a reading font-size the
+   Studio-only `text-xs` class can't supply here) plus the filetree
+   annotation/legend hooks — no new token layer (D85); every duplicated value
+   agrees byte-for-byte with the emitters' inline declarations. */
+/* Both BREAK OUT to the evidence band: a unified diff and a file tree are
+   fixed-width monospace artifacts whose line length is set by the source, not by
+   the column, and both already carry `overflow-x: auto` — so the column was
+   buying nothing but a scrollbar.
+
+   Unlike .bp-table / .bp-stats / .bp-chart, the breakout for these two is
+   PRODUCED INLINE (components.ex diff_html/filetree_html), and it has to be:
+   these emitters write the whole box as an inline `style=`, and an inline
+   declaration beats any class rule. Declaring the width here and the pull there
+   is precisely the half-breakout Part K and the rig's centre-offset assertion
+   refuse — measured, before it shipped: the diff took the 1040px band and grew
+   entirely to the RIGHT, overflowing portabledoc-showcase by 110px at 1280.
+
+   The emitters are style-BLIND (`diff_html(block)` takes no `:article`/`:email`),
+   shared with the chat-tool-diff family so the two read identically in email
+   (D76). That is why the breakout rides `var(--bp-evidence-*, <fallback>)` rather
+   than a style branch: email defines neither custom property, so the fallbacks
+   resolve to `margin: 4px 0px; width: 100%` — byte-for-byte today's email
+   geometry. The declarations below mirror the emitters' inline ones, which is
+   the invariant this rule block has always kept. */
+.bp-paper-surface .bp-diff, .bp-paper-surface .bp-filetree {
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
+  background: var(--muted-surface); border-radius: 6px; padding: 6px 8px;
+  margin: 4px var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%); box-sizing: border-box; overflow-x: auto;
+}
+.bp-paper-surface .bp-filetree-note { white-space: pre; }
+/* The note colours ride these modifiers, not the markup (task-2c5d3da1b7f7db25). */
+.bp-paper-surface .bp-filetree-note--ok { color: var(--ok); }
+.bp-paper-surface .bp-filetree-note--soft { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-filetree-note--danger { color: var(--danger); }
+.bp-paper-surface .bp-filetree-legend { color: var(--paper-ink-soft); font-size: 12px; margin-top: 4px; }
+
+.bp-paper-surface .bp-tasks {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  margin: 1.6rem 0;
+}
+.bp-paper-surface .bp-tasks--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; overflow-wrap: break-word; }
+.bp-paper-surface .bp-tasks__list { border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+
+/* the glyph ladder — one shared set with the terminal */
+.bp-paper-surface .bp-g { display: inline-flex; align-items: center; justify-content: center; width: 1.35em; flex: none; font-family: var(--paper-font-mono); font-weight: 600; line-height: 1; }
+.bp-paper-surface .bp-g--open    { color: var(--paper-ink); opacity: 0.5; }   /* 50% white — backlog */
+.bp-paper-surface .bp-g--ready   { color: var(--paper-ink); }                 /* full white — unchecked */
+.bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
+.bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
+.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-g--considering { color: var(--paper-ink); opacity: 0.35; } /* ◌ — dim: a candidate, below backlog on the ladder */
+.bp-paper-surface .bp-g--researching { color: var(--st-violet); }                /* ◎ — violet: active investigation, the wave's one new hue */
+.bp-paper-surface .bp-g--progress { color: var(--st-info); }
+/* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
+.bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
+@keyframes bp-braille {
+  0%  { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; }
+  40% { content: "\283C"; } 50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; }
+  80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+
+/* rows */
+.bp-paper-surface .bp-trow { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.86rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-trow:first-child { border-top: none; }
+.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-soft); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
+.bp-paper-surface .bp-trow__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-trow--open .bp-trow__t { opacity: 0.6; }               /* backlog title recedes */
+.bp-paper-surface .bp-trow--done .bp-trow__t { color: var(--paper-ink-soft); } /* done recedes */
+.bp-paper-surface .bp-trow__m { display: flex; align-items: center; gap: 0.6rem; flex: none; }
+.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-trow__p[data-p="1"] { color: var(--st-danger); }
+.bp-paper-surface .bp-trow__p[data-p="2"] { color: var(--st-warn); }
+.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-info); }
+.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-warn); }
+
+/* phase headers with rollup */
+.bp-paper-surface .bp-phase { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.9rem; background: var(--paper-bg-deep); border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-phase:first-child { border-top: none; }
+.bp-paper-surface .bp-phase__nm { font-weight: 600; font-size: 0.8rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-phase__rule { flex: 1; height: 1px; background: var(--paper-chrome-border); }
+.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* momentum header — always feel progress */
+.bp-paper-surface .bp-momentum { border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-momentum__row { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; color: var(--paper-ink-soft); flex-wrap: wrap; }
+.bp-paper-surface .bp-momentum__i { display: inline-flex; align-items: center; gap: 0.35rem; }
+.bp-paper-surface .bp-momentum__i b { color: var(--paper-ink); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-momentum__grow { flex: 1; }
+.bp-paper-surface .bp-momentum__pct { font-weight: 800; font-size: 0.95rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-momentum__track { height: 7px; border-radius: 999px; background: var(--paper-bg-deep); overflow: hidden; margin-top: 0.5rem; }
+.bp-paper-surface .bp-momentum__fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--st-info), var(--st-ok), var(--st-info)); background-size: 200% 100%; animation: bp-shimmer 3s linear infinite; }
+@keyframes bp-shimmer { to { background-position: 200% 0; } }
+
+/* colour reuse for momentum count labels */
+.bp-paper-surface .bp-g--ready { color: var(--paper-ink); }
+.bp-paper-surface .bp-g--done  { color: var(--st-ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-surface .bp-g--progress::before, .bp-paper-surface .bp-momentum__fill { animation: none; }
+  .bp-paper-surface .bp-g--progress::before { content: "\283F"; }
+}
+
+/* ── task detail — the "open a task and SEE it" card ── */
+.bp-paper-surface .bp-tdetail {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
+}
+/* Unresolved task-detail: the same honest dashed placeholder the sibling
+   live-query widgets use (.bp-tasks--empty), so an empty block keeps its
+   place in the column instead of collapsing to nothing. */
+.bp-paper-surface .bp-tdetail--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
+/* The task title is free-form author text set at 1.15rem bold — the largest
+   type inside the detail card, and the only one of the card-title family that
+   outgrows prose. Measured at a 320px viewport, a single 30-character compound
+   noun puts the document 4px past the screen while the same word in a `<p>`
+   still fits.
+
+   CORRECTED (gp-b-mobile-reading-column). This comment used to end "`.bp-card__t`
+   (0.9rem) and `.bp-tasks__title` (1.05rem) are measured clean at the same width
+   and are deliberately left alone." Both now carry the guard, because that
+   sentence was true only of the token it was measured with. The measurement
+   behind it used a 30-character compound noun; against a 68-character paper
+   PERMALINK — the token a Barkpark paper most often actually carries — both
+   overflow (__narrow_render.mjs: .bp-tasks__title 442px and .bp-card__t 408px,
+   in viewports of 390, 360 and 320).
+
+   That case was INVISIBLE until the prose guard above landed. __narrow_render
+   skips any token its plain-prose CONTROL also fails, and before the `p, li`
+   rule plain prose failed the permalink too — so the two assertions were being
+   skipped, and their silence read as a pass. Fixing prose did not break these
+   blocks; it stopped hiding them.
+
+   Four pixels is a horizontal scrollbar on the whole page, which is why it is
+   worth a declaration: the cost of the overflow is not proportional to its
+   size. `break-word` rather than `anywhere` — the title never sizes its own
+   box, so the declaration that cannot participate in min-content sizing is the
+   one that cannot move a layout. */
+.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); overflow-wrap: break-word; }
+.bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 0.4rem; }
+.bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tl__seg { display: inline-flex; align-items: center; gap: 0.3rem; }
+.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__desc { font-size: 0.9rem; color: var(--paper-ink); line-height: 1.55; margin-top: 0.9rem; }
+.bp-paper-surface .bp-tdetail__lbl { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); font-weight: 700; margin: 1rem 0 0.45rem; }
+.bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-soft); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
+.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); overflow-wrap: anywhere; }
+.bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
+.bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); overflow-wrap: anywhere; }
+.bp-paper-surface .bp-rail__more { font-size: 0.75rem; color: var(--paper-ink-soft); padding-left: 0.3rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 0.9rem; overflow-wrap: anywhere; }
+
+/* ── task board (kanban) ── */
+.bp-paper-surface .bp-board {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+/* Same move as `.bp-card` below, for the same reason and with the same colours:
+   a task board is a ROW of columns, so a 3px top accent drew one heavy line
+   across the whole board. On the left edge it still names each column's state
+   and can no longer be mistaken for a section boundary. No committed fixture
+   renders a task board, so this one is proven by the DECLARATION census
+   (check.mjs Part M) rather than by a photograph — which is the half of the
+   census that exists for exactly this case. */
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-left: 3px solid var(--paper-ink-faint-line); }
+.bp-paper-surface .bp-board__col--ready { border-left-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-left-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
+/* The terminal lane (task-881952f8d8417f4b): LAST in the column order and visibly
+   quieter than the live lanes, so abandoned work is legible without competing with
+   claimable work. It keeps the faint default border (no `--st-*` tone of its own)
+   and drops back in opacity — the same de-emphasis vocabulary `.bp-g--considering`
+   already uses. Tokens only; no colour literal. */
+.bp-paper-surface .bp-board__col--cancel { opacity: 0.55; }
+.bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bp-paper-surface .bp-board__label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
+.bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
+.bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
+.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+/* DRAFT chip on a draft-only task row (PDS-D749) — board card, task-list row and
+   roadmap lane all paint it inside their title span; same amber outline as the
+   Studio board's .bp-draft. */
+.bp-paper-surface .bp-draft { display: inline-block; vertical-align: 0.1em; font-family: var(--paper-font-mono); font-size: x-small; font-weight: 700; color: var(--st-warn); border: 1px solid var(--st-warn); border-radius: 3px; padding: 0 4px; }
+
+/* ── roadmap (author-dated phase/task bars) ── */
+.bp-paper-surface .bp-roadmap {
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 14px 16px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
+}
+.bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
+.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
+.bp-paper-surface .bp-rm__lane { display: flex; align-items: center; gap: 10px; }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__lbl { font-weight: 700; color: var(--paper-ink); }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__bar { opacity: 0.32; height: 8px; top: 8px; }
+.bp-paper-surface .bp-rm__lbl { width: 34%; flex: none; font-size: 0.78rem; color: var(--paper-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.bp-paper-surface .bp-rm__track { position: relative; flex: 1; height: 22px; background: var(--paper-bg-deep); border-radius: 5px; }
+.bp-paper-surface .bp-rm__bar { position: absolute; top: 5px; height: 12px; border-radius: 4px; min-width: 3px; }
+.bp-paper-surface .bp-rm__bar--open { background: var(--paper-ink); opacity: 0.35; }
+.bp-paper-surface .bp-rm__bar--ready { background: var(--paper-ink); opacity: 0.55; }
+.bp-paper-surface .bp-rm__bar--progress { background: var(--st-info); }
+.bp-paper-surface .bp-rm__bar--blocked { background: var(--st-warn); }
+.bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
+.bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint-line); }
+/* A lane with no geometry (task-e8e80abb16460f44): no bar, a dashed empty track
+   and the "not scheduled" marker, so it never reads as a full-span bar. */
+.bp-paper-surface .bp-rm__lane--unplaced .bp-rm__track { background: none; border: 1px dashed var(--paper-rule); }
+.bp-paper-surface .bp-rm__unplaced { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-family: var(--paper-font-mono); font-size: x-small; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+/* roadmap v2 point markers — the HTML twin of the Go reader's diamond glyphs
+   (internal/pdrender/taskblocks.go: note ◇ at the bar's start, milestone ◆ at its
+   end). Both are rotated squares centred on their offset; milestone is filled and
+   note is hollow, so the two read apart with colour stripped. */
+.bp-paper-surface .bp-rm__ms,
+.bp-paper-surface .bp-rm__note { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); }
+.bp-paper-surface .bp-rm__ms { background: var(--paper-ink); }
+.bp-paper-surface .bp-rm__note { border: 1.5px solid var(--paper-ink-soft); background: var(--paper-bg); }
+
+/* ── status legend — the shared vocabulary key ── */
+.bp-paper-surface .bp-legend {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
+.bp-paper-surface .bp-legend__r:first-child { border-top: none; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
+
+/* ── notes: annotated label-chip list (the "what upgraded" column) ── */
+.bp-paper-surface .bp-notes { display: flex; flex-direction: column; gap: 0.9rem; margin: 1.4rem 0; }
+.bp-paper-surface .bp-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; }
+.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.bp-paper-surface .bp-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; }
+.bp-paper-surface .bp-note__d b { color: var(--paper-ink); font-weight: 600; }
+@media (max-width: 520px) { .bp-paper-surface .bp-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-paper-surface .bp-note__k { justify-self: start; } }
+
+/* ── terminal chrome — the bp tasks board look ── */
+.bp-paper-surface .bp-term {
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 18px 44px -24px rgba(0,0,0,0.28);
+}
+.bp-paper-surface .bp-term__bar { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--paper-rule); background: color-mix(in srgb, var(--paper-ink) 4%, transparent); }
+.bp-paper-surface .bp-term__dots { display: inline-flex; gap: 6px; }
+.bp-paper-surface .bp-term__dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--paper-ink-faint-line); opacity: 0.55; }
+.bp-paper-surface .bp-term__dots i:nth-child(1) { background: #ef4444; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(2) { background: #f59e0b; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(3) { background: #22c55e; opacity: 0.85; }
+.bp-paper-surface .bp-term__title { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
+.bp-paper-surface .bp-term__live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 22%, transparent); }
+.bp-paper-surface .bp-term__body { padding: 0.5rem 0.4rem; }
+.bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
+.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
+
+/* ── columns — responsive multi-column layout ──
+   A columns block is an explicit composition surface, so it may use the
+   evidence band while the surrounding prose remains on the measured column. */
+.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
+@media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-cols__c { min-width: 0; }
+.bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
+/* Nested columns use their section cell, not the page-wide evidence band. */
+.bp-paper-surface .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+/* A column cell is an authored boundary: every band-taking block inside it
+   (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+   asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+   cannot paint over the sibling column. Edit nests paper surfaces inside the
+   cell that re-derive the band from the default tokens, so they reset too. */
+.bp-paper-surface .bp-cols__c, .bp-paper-surface .bp-cols__c .bp-paper-surface, .bp-paper-surface .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+
+/* ── section grid — the step-2 layout engine (mode:grid). Shared class so the
+   reader AND the canvas node-view paint the SAME grid (parity by construction).
+   `--bp-tracks` is a structural column count; `--bp-grid-gap` is a token VAR
+   (never px — D2). Keep BYTE-IDENTICAL with the styles.css + root.html.heex
+   mirrors (the .bp-cols trio precedent). */
+.bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+@media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+/* Authored desktop spans must not create implicit tracks in the one-column reader. */
+@media (max-width: 720px) { .bp-paper-surface .bp-section__cell { grid-column: 1 / -1 !important; } }
+.bp-paper-surface .bp-section__cell { min-width: 0; }
+.bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
+.bp-paper-surface .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+
+/* ── section frame — the framed-finale device (charter D19). A `section` with
+   variant="framed" carries `.bp-section--framed` on its OWN box div (stamped by
+   compose/walk: fixed literal, :article-gated, whitelisted), one level INSIDE
+   the classless stream wrapper — NEVER on the wrapper itself, which would kill
+   the `div:not([class])` section-head beat above (probed: borderTop 0px vs 2px).
+   The hairline frame REPLACES the section's own two-rule band (the direct-child
+   `.bp-hr` pair), matching the TUI's square border; breathing room is CSS
+   padding — NEVER spacer paragraphs (the publish floor walks the subtree).
+   Mirror: paper-editor/src/styles.css. */
+.bp-paper-surface .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+.bp-paper-surface .bp-section--framed > .bp-hr { display: none; }
+
+/* ── section declaration panel (pe-bl-declaration-panel). variant="declaration"
+   frames a closing section as a signed document: a double hairline ink frame, generous CSS
+   padding (never spacer paragraphs), the section's own .bp-hr band hidden, and
+   a short signature rule above its last block when that block is a paragraph —
+   the signature slot is simply the section's last paragraph, so every reader keeps the words (the TUI and
+   email degrade to a plain section). Mirror: paper-editor/src/styles.css and
+   the shell stylesheet. */
+.bp-paper-surface .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline: var(--bp-rule-hairline) solid var(--paper-ink); outline-offset: 4px; padding: 2rem 2.25rem 1.75rem; margin: 2.5rem 4px; }
+.bp-paper-surface .bp-section--declaration > .bp-hr { display: none; }
+.bp-paper-surface .bp-section--declaration > :first-child, .bp-paper-surface .bp-section--declaration > .bp-hr:first-child + * { margin-top: 0; }
+.bp-paper-surface .bp-section--declaration > p:has(+ .bp-hr:last-child),
+.bp-paper-surface .bp-section--declaration > p:last-child { margin-top: 2.25rem; padding-top: 0.5rem; border-top: var(--bp-rule-hairline) solid var(--paper-ink); width: min(100%, 20rem); }
+
+/* ── cards: titled rule/feature card grid ── */
+.bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
+/* The verdict accent moved from the card's TOP edge to its LEFT edge, and only
+   the edge moved — the colour, the width and the four status variants are the
+   ones that were already there. A cards grid puts three cards side by side, so a
+   3px top accent drew a heavy horizontal line straight across the page: measured
+   on the committed panel, `portabledoc-showcase` and `hobby-hardening-capstone`
+   spent 13 of their heavy rules on card tops. Weight is how a reader tells a
+   section boundary from chrome, and a component is not allowed to spend it.
+   2026-10-05 the owner ruled every line very low contrast and black or white,
+   and the 3px coloured left rail went the way of the callout's: the frame is
+   one neutral hairline, and the tone is a 6px dot in the top-right corner
+   (`--bp-card-dot`) — the same device as the callout's label dot. */
+.bp-paper-surface .bp-card { position: relative; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-card[class*="bp-card--"] { padding-right: 30px; }
+.bp-paper-surface .bp-card[class*="bp-card--"]::before { content: ""; position: absolute; top: 14px; right: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--bp-card-dot); }
+.bp-paper-surface .bp-card--info { --bp-card-dot: var(--st-info); }
+.bp-paper-surface .bp-card--ok { --bp-card-dot: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { --bp-card-dot: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { --bp-card-dot: var(--st-danger); }
+/* bp-card__t/__d stay: the LEGACY `cards` fleet grid (components.ex cards_html/1)
+ * still emits them. The card WIDGET's model-A slot-chrome rules (__media/__action,
+ * STEP 4) are GONE (S10, parity2-bug-card-slot-chrome): model B recurses slots to
+ * bare semantics (h2 / p / img / a.bp-button) — no reader element carried them. */
+.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); overflow-wrap: break-word; }
+.bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+/* STEP 4 canvas edit hook — a light hover-revealed control row; chrome only (bp-canvas-*). */
+.bp-paper-surface .bp-canvas-card { position: relative; }
+.bp-paper-surface .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
+.bp-paper-surface .bp-canvas-card:hover .bp-canvas-card__controls, .bp-paper-surface .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
+.bp-paper-surface .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+
+/* stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin). The
+ * stage does NOT emit the reader `.bp-pnode` cell class (it stays gate-forbidden to
+ * protect the legacy pipeline), so its cell look is hand-mirrored here from the
+ * `.bp-pnode*` rules above — keep BYTE-ALIGNED. Studio mounts the canvas inside
+ * `.bp-paper-surface`, so this scope paints it. The reader never emits bp-canvas-stage,
+ * so these rules are inert on the reader surface. */
+.bp-paper-surface .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-canvas-stage--src { border-color: var(--paper-ink-faint-line); }
+.bp-paper-surface .bp-canvas-stage__k, .bp-paper-surface .bp-canvas-stage__t, .bp-paper-surface .bp-canvas-stage__d, .bp-paper-surface .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
+.bp-paper-surface .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); cursor: pointer; }
+
+/* ── pipeline: source → emit → gate flow ── */
+.bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }
+.bp-paper-surface .bp-pipe { display: flex; align-items: stretch; gap: 8px; min-width: min-content; }
+.bp-paper-surface .bp-pnode { flex: 1 1 0; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-pnode--src { border-color: var(--paper-ink-faint-line); }
+.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pnode__src { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-accent); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-soft); font-size: 1.1rem; flex: none; }
+

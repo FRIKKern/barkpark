@@ -1,5 +1,4 @@
 node_modules/
-# npm pack output (scripts/pack-stage.mjs)
+# Local build output (scripts/build-local.mjs) and npm pack output
 /dist/
-/LICENSE
 *.tgz

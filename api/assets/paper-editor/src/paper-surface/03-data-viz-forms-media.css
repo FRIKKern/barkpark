@@ -1,0 +1,645 @@
+/* ── data-viz slate: stat / stats / heatmap / chart (gui-premium w1) ──
+   Browser twins of the pdrender creative slate. All color resolves through the
+   paper tokens; intensity/series index only ever drive a custom property or an
+   indexed class — author data never carries color. */
+.bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
+
+/* A STANDALONE STAT IS SHRINK-TO-FIT AND MUST STILL FIT.
+
+   `display: inline-flex` sizes this box from its own max-content, so a stat
+   that is NOT inside a `.bp-stats` grid is bounded by nothing: the grid's
+   override `.bp-paper-surface .bp-stats .bp-stat` (further down this file) is
+   what supplies `min-width: 0` and `display: flex`, and it cannot reach the
+   top-level `<div class="bp-stat">` that `stat_html/1` emits for a lone stat
+   (frozen in js/packages/react/tests/fixtures/pd-golden/stat.golden.json).
+   `.bp-stat__v`'s own `max-width: 100%` is then 100% of a box already as wide
+   as its content, so it constrains nothing and the DOCUMENT grows.
+
+   MEASURED in headless Chromium at a 390px viewport, `.bp-stat__v` carrying the
+   45-character branch name `feat/deploy-with-barkpark-warm-pool-provision`,
+   `document.documentElement.scrollWidth`:
+
+     this rule as it was                       632px   (page scrolls 242px)
+     + max-width: 100%                         408px   (still scrolls 18px)
+     + max-width: 100%; box-sizing: border-box 390px   (no scroll)
+
+   BOTH declarations are load-bearing, which is why the middle row is written
+   down and not just the endpoints. Under the default `content-box`,
+   `max-width: 100%` caps the CONTENT box at the 358px column and then lays the
+   32px of padding and 2px of border OUTSIDE that cap — a 392px border box
+   starting at the 16px gutter, i.e. a 408px document, measured. `box-sizing:
+   border-box` is what folds that chrome back inside the cap. Neither
+   declaration is redundant; removing either re-opens the defect.
+
+   Asserted, not remembered:
+   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs, and measured end
+   to end by api/assets/paper-editor/src/__narrow_render.mjs. */
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; max-width: 100%; box-sizing: border-box; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
+/* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
+   fits, and a contained overflow.
+
+   `.bp-stat__v` is the largest type in the sheet and it sits in a cell far
+   narrower than a phone screen: `.bp-stats` is `repeat(auto-fit, minmax(140px,
+   1fr))`, so at a 390px viewport the 358px reading column makes exactly two
+   ~178px tracks, ~149px of them inside the cell's padding.
+
+   WHAT WAS WRONG. The rule used to read `overflow-wrap: anywhere` at a flat
+   1.7rem, which stops the page scrolling sideways by breaking the value. Both
+   halves of that break are wrong, and they are different wrongs:
+
+     * `anywhere` breaks INSIDE a number. `$1,234,567.89` has no break
+       opportunity of its own, so `anywhere` splits it mid-digit — the reader
+       gets `$1,234,56` over `7.89` and has to reassemble a figure by eye.
+     * ordinary wrapping breaks a compound value at its spaces. Measured on
+       /papers/heggemsnes-act at 390x844, `8 min 10 s` rendered as `8 min 10`
+       over `s`, which reads as two numbers.
+
+   WHAT REPLACES IT, in three parts that only work together:
+
+     * `white-space: nowrap` — a value never breaks, at a space or inside a
+       digit run. This is the actual contract.
+     * `font-size: clamp(1.15rem, 5.6vw, 1.7rem)` — the size is what makes
+       nowrap affordable. The 1.7rem MAX is reached at a 486px viewport, so
+       every desktop width renders exactly the size this rule always rendered
+       (measured: the 1280 and 1920 rig baselines are unmoved). Below it the
+       value tracks the cell that shrank: 21.8px at 390, where `8 min 10 s`
+       measures 135px inside a 149px cell — measured in headless Chromium, the
+       same way the old `anywhere` threshold was.
+     * `max-width: 100%; overflow-x: auto` — the safety net for the value no
+       clamp can size for. A figure longer than its cell scrolls INSIDE the
+       cell instead of growing the document, so the page still never rocks
+       sideways; that guarantee was `anywhere`'s job and it does not lapse.
+
+   NOT AN ELLIPSIS, still. Several nowrap labels in this sheet pair with
+   `overflow: hidden; text-overflow: ellipsis`. That clamp is wrong for a
+   figure: it presents a shortened number as though it were the whole number.
+   `overflow-x: auto` hides no digit — every one stays reachable — which is why
+   it is the containment that may be used here and the ellipsis is not.
+
+   The arithmetic above is asserted, not remembered:
+   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs. */
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: clamp(1.15rem, 5.6vw, 1.7rem); font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; white-space: nowrap; max-width: 100%; overflow-x: auto; }
+/* The label is prose in a 179px track. `break-word` is enough here — the label
+   never sizes its own box (the grid track does), so the min-content behaviour
+   `.bp-stat__v` needs is not required, and the weaker declaration is the one
+   that cannot move a layout. */
+.bp-paper-surface .bp-stat__l { order: 2; font-size: 0.75rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
+.bp-paper-surface .bp-stat__bar { order: 1; height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin: 2px 0 0; }
+.bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
+.bp-paper-surface .bp-stat__spark { order: 4; width: 100%; height: 26px; margin-top: 4px; }
+.bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+
+/* The stat strip BREAKS OUT to the evidence band. This is the clearest case for
+   the whole device: `auto-fit` + `minmax` means the grid does not merely get
+   wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
+   8. The component gains resolution with the screen instead of stacking tiles
+   the reader then has to scroll past.
+
+   THE SEAMS ARE DRAWN BY THE CELLS, NOT THE GROUND (task-0098ba55d2642545,
+   charter D36). The hairline grid used to be a rule-tinted CONTAINER ground
+   showing through 1px gaps. That paints every empty grid area too: a strip whose
+   item count is not a multiple of the track count leaves the remainder of its
+   last row as a solid rule-tinted slab (auto-fit only collapses TRAILING tracks,
+   and 9 stats at 7 tracks is a full row plus two cells and five slabs). So the
+   container is transparent, `overflow: hidden` clips what the cells paint past
+   its edge, and each cell paints its own seams:
+
+     * `box-shadow: 1px 0` — the 1px gap column to its RIGHT, its own height;
+     * `box-shadow: 0 1px` — the 1px gap row BELOW it, its own width;
+     * `::after`, a 1x1 dot at its bottom-right corner — the crossing pixel
+       neither one-sided shadow reaches.
+
+   ONE-SIDED, never a ring. `--paper-rule` is translucent in the default light
+   skin (rgba(21, 33, 29, 0.09)), and a ring on every cell paints each seam
+   twice (both neighbours' rings land in the same gap), so the seam goes ~1.9x
+   darker there — chrome getting louder, which is exactly what the rule ladder
+   above forbids. Each gap pixel is painted by exactly one cell: the
+   right seam by the cell on its left, the bottom seam by the cell above, the
+   crossing by the cell up-left of it. The exterior edges (last column's right,
+   last row's bottom) fall outside the container and `overflow: hidden` drops
+   them — so a full row renders byte-for-byte as before, and a partial row's
+   remainder is page ground bounded by hairlines on its top and left, i.e. a
+   grid whose cells stop where the data stops. Measured by the rig as
+   `statRemainder` (the probe at the empty track must hit a transparent
+   container) with the committed `stat-partial-row` fixture — eleven cells,
+   prime, so the last row is partial at every band width (8+3 @1280, 9+2
+   @1920). Container and cell rules are mirrored on both editor twins
+   (`.bp-paper-editor-body .bp-stats` / `… .bp-stat`). */
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
+
+.bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
+.bp-paper-surface .bp-gauge__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-gauge__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-gauge__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-gauge__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-gauge__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-gauge__n { font-size: 0.75rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
+.bp-paper-surface .bp-gauge__note { font-size: 0.75rem; color: var(--paper-ink-soft); }
+
+.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: block; width: fit-content; max-width: var(--bp-evidence-width, 100%); margin-inline: var(--bp-evidence-pull, 0px); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; overflow-x: auto; }
+.bp-paper-surface .bp-heat__grid { display: grid; gap: 4px; align-items: center; }
+.bp-paper-surface .bp-heat__c { aspect-ratio: 1; min-height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--paper-accent) calc(var(--i, 0) * 88%), var(--paper-rule)); }
+.bp-paper-surface .bp-heat__rl, .bp-paper-surface .bp-heat__cl { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-heat__rl { padding-right: 8px; text-align: right; }
+.bp-paper-surface .bp-heat__cl { text-align: center; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; align-self: end; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
+
+/* The chart BREAKS OUT to the evidence band. Its svg is `width: 100%` over a
+   640-unit viewBox with a `min-width: 640px` legibility floor (below), so band
+   width buys real horizontal resolution for the series — the plot stops
+   compressing weeks into pixels — while the tick labels stay at their authored
+   size. */
+.bp-paper-surface .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-chart__t { font-size: 0.78rem; font-weight: 600; color: var(--paper-ink); margin-bottom: 8px; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): the svg's text is sized
+   in viewBox units (640 wide), so a bare width:100% scaled EVERY label with the
+   container — 11px ticks painted 4.26px at a 360 viewport. The min-width pins
+   the svg at its viewBox size so text never paints below its authored px; the
+   scroll wrapper (same idiom as .bp-heat__scroll) scrolls the figure at narrow
+   widths instead of shrinking it. The 720px article shell keeps the wide end
+   unchanged. */
+.bp-paper-surface .bp-chart__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.bp-paper-surface .bp-chart__grid { stroke: var(--paper-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bp-paper-surface .bp-chart__axis { stroke: var(--paper-ink-faint-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 12px; }
+.bp-paper-surface .bp-chart__s { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.bp-paper-surface .bp-chart__b { stroke: none; opacity: 0.85; }
+.bp-paper-surface .bp-chart__s0 { stroke: var(--paper-accent); }
+.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface rect.bp-chart__s0 { fill: var(--paper-accent); }
+.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+.bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-chart__swatch { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
+.bp-paper-surface .bp-chart__key .bp-chart__s0 { background: var(--paper-accent); }
+.bp-paper-surface .bp-chart__key .bp-chart__s1 { background: var(--bp-tone-info-fg, #3b82f6); }
+.bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
+.bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
+/* chart ANNOTATION layer (regions / refLines / points — data_viz.ex
+   `annotations` attr): washes behind the series, guides above them, labels in
+   the tick voice. Tones ride the same --bp-tone-* family as the series.
+   Region opacity climbs with severity (info/ok 0.10 → warn 0.14 → danger 0.18)
+   so tone reads as weight as well as hue — at a flat 0.08 the info and danger
+   washes were indistinguishable in both themes
+   (probe-figure-fidelity-2026-08-12); the ceiling stays low enough that the
+   series always paints clearly through the wash. */
+.bp-paper-surface .bp-chart__region { fill: var(--paper-ink-soft); opacity: 0.08; }
+.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); opacity: 0.14; }
+.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); opacity: 0.18; }
+.bp-paper-surface .bp-chart__refline { stroke: var(--paper-ink-soft); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; opacity: 0.65; }
+.bp-paper-surface .bp-chart__refline--info { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__refline--warn { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__refline--danger { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 12px; }
+.bp-paper-surface .bp-chart__pt { fill: var(--paper-accent); stroke: var(--paper-bg); stroke-width: 1.5; }
+
+/* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
+   stat denominators (gui-premium w5) ──
+   Quantile bin classes bp-heat__c--b0..b3 (zero/gap = --z) carry TWO channels,
+   the web read of the TUI shade ladder ░▒▓█: the color step (color-mix over
+   the accent — the same idiom as the legacy `--i` ramp, stepped at 22/44/66/88%)
+   AND a non-color channel — a growing ink inner marker on shade cells, the
+   exact value text on `--v` cells — so the datum survives grayscale and print.
+   Calendar heatmaps render EVERY week inside a horizontally scrollable
+   container; the web never width-drops weeks the way the terminal must. */
+.bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
+
+/* ── jarl figure family: kilde stamp, stat unit/body, duel, lineage
+   (jdf-bl-historiene-renderer-reconciliation) ──
+   THE KILDE LAW: every figure datum carries a source ref, surfaced as the
+   small mono «kilde» stamp under the figure. Units are always their own span
+   beside the display-string number, never fused into it. */
+/* VERDICT stat values — a KPI cell whose `verdict` is "loss" or "peace" paints
+   its DIGITS in the verdict ink (design/tokens.json color.verdict). Only the
+   value moves: the label, body and rule keep the page voice, so the number is
+   the one thing carrying the judgement and the tile does not become a coloured
+   box. The `--denom`/`--unit` suffixes deliberately stay `--paper-ink-soft` —
+   "71/118" reads as one number with a dim divisor whatever the verdict is.
+   check.mjs Part H's verdict arm reads THIS rule; deleting it reds the gate. */
+.bp-paper-surface .bp-stat__v--loss  { color: var(--bp-verdict-loss); }
+.bp-paper-surface .bp-stat__v--peace { color: var(--bp-verdict-peace); }
+.bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-stat__body { order: 3; font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
+/* Trial dots (pe-bl-stat-tile-dots): `dots: {on, of}` — "2 of 10 trials" as a
+   discrete array under the value. Filled = on. The array is one role="img"
+   with an "on of total" label; the dots are aria-hidden. Shape, not color
+   alone, carries the datum: an "on" dot is filled, an "off" dot is a ring. */
+.bp-paper-surface .bp-stat__dots { order: 1; display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 0; }
+.bp-paper-surface .bp-stat__dot { width: 8px; height: 8px; border-radius: 50%; border: var(--bp-rule-hairline) solid var(--paper-accent); box-sizing: border-box; }
+.bp-paper-surface .bp-stat__dot--on { background: var(--paper-accent); }
+
+.bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
+.bp-paper-surface .bp-kilde__ref { word-break: break-word; }
+.bp-paper-surface .bp-kilde__ref a { color: inherit; }
+/* Inside the hairline grid the kilde is a full-width grid item under the last
+   row. The seam above it is the last row's cells painting their bottom gap
+   (see `.bp-stats .bp-stat` above) — it needs no fill of its own now that the
+   container has no ground, and it draws no seam of its own either: one that
+   spanned the full width would double-paint the seam the cells already drew.
+   Under a partial last row the seam therefore stops where the cells stop and
+   the stamp sits on open ground — the grid ends where the data ends. The
+   padding-top gives the stamp its air below the seam. */
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; padding-top: 0; }
+
+.bp-paper-surface .bp-duel { margin: 1.4rem 0; }
+/* jf-w1-engine-narrow-dark-fixes: self-contain horizontally, the same three
+   declarations .bp-table (above) uses — width:100% is kept so nothing changes
+   at >=720px, display:block + overflow-x:auto is the escape hatch for a duel
+   with long legend/value text at narrow measures. */
+.bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+.bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
+.bp-paper-surface .bp-duel__th--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__label { font-size: 0.82rem; font-weight: 600; color: var(--paper-ink); text-align: left; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__delta { display: block; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 400; color: var(--paper-ink-soft); margin-top: 3px; }
+.bp-paper-surface .bp-duel__val { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--paper-ink); text-align: right; white-space: nowrap; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__val--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__unit { font-size: 0.75rem; color: var(--paper-ink-soft); margin-left: 0.35em; }
+
+/* route (sport track): the SVG carries its own presentation attributes (it must
+   survive a CSS-less email client), so the stanza owns only the figure rhythm +
+   the meta/caption typography — the inline sizes in data_viz.ex are the email
+   floor, these refine the reader read. */
+.bp-paper-surface .bp-route { margin: 1.4rem 0; }
+.bp-paper-surface .bp-route__map { display: block; width: 100%; height: auto; }
+.bp-paper-surface .bp-route__meta { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.78rem !important; color: var(--paper-ink-soft) !important; margin-top: 8px !important; }
+.bp-paper-surface .bp-route__caption { font-size: 0.82rem !important; color: var(--paper-ink-soft) !important; font-style: italic; margin-top: 3px !important; }
+/* The track strokes `currentColor`, and the separator dot carries no inline ink:
+   the theme paints both here (task-ef9f386f8cb5e32a). */
+.bp-paper-surface .bp-route__map { color: var(--paper-accent); }
+.bp-paper-surface .bp-route__sep { color: var(--paper-rule); }
+
+/* paper-links theme paint (task-ef9f386f8cb5e32a). The renderer keeps geometry
+   and type inline, borders included (`border-top:3px double` stays in the
+   markup), and leaves every var(--paper-*) colour to these rules, keyed by
+   layout (list = the default card list, chapters, timeline). The Studio editor
+   carries the same classes, so View and Edit paint through one rule. */
+.bp-paper-surface .bp-plinks--list { border-top-color: var(--paper-rule); }
+.bp-paper-surface .bp-plinks--chapters,
+.bp-paper-surface .bp-plinks--timeline { border-top-color: var(--paper-ink); }
+.bp-paper-surface .bp-plinks__title { color: var(--paper-ink); }
+.bp-paper-surface .bp-plinks__desc { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plinks__grid--chapters,
+.bp-paper-surface .bp-plinks__grid--timeline { border-color: var(--paper-rule); }
+.bp-paper-surface .bp-plink--list { border-color: var(--paper-rule); border-left-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-plink--chapters,
+.bp-paper-surface .bp-plink--timeline { border-color: var(--paper-rule); }
+.bp-paper-surface .bp-plink__eyebrow--chapters { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__eyebrow--timeline { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__title--list { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__title--chapters,
+.bp-paper-surface .bp-plink__title--timeline { color: var(--paper-ink); }
+.bp-paper-surface .bp-plink__desc { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__foot--chapters { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__foot--timeline { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__reason { color: var(--paper-ink); }
+.bp-paper-surface .bp-plink__meta { color: var(--paper-ink-soft); }
+
+/* THE CLOCK STRIP (pe-bl-clock-strip-block). Lineage is a DATED STRIP: stops
+   read left-to-right along ONE continuous spine, the way the four-cell clock
+   strip in /papers/eight-minute-erasure §I reads. Three things the old
+   `repeat(auto-fit, minmax(150px, 1fr))` grid could not do, each measured in
+   pixels before it was changed:
+
+   1. SIDE-BY-SIDE. auto-fit fits as many 150px tracks as the box holds and
+      WRAPS the rest: inside the 672px reading column four stops render 3+1,
+      and the fourth stop starts a second row that reads as a second timeline.
+      `grid-auto-flow: column` lays exactly ONE track per stop, always — four
+      dated stops are four columns at any width.
+   2. A CONTINUOUS SPINE. The line used to be a per-node `border-top`, so every
+      14px gap CUT it — four dashes, not a spine. The rule now lives on the
+      TRACK (`__nodes`), one unbroken hairline the whole strip long, and each
+      stop marks its own place on it with a tick that carries the stop's tone
+      (`bp-lineage__node--{info,ok,warn,danger}` — the per-stop verdict, in the
+      same four-word vocabulary `bp-chart__region--*` already uses).
+   3. EVIDENCE WIDTH. A time axis gains resolution with every pixel, so the
+      strip breaks out of the reading column onto the evidence band exactly as
+      `.bp-stats` and `.bp-table` do — it is evidence, not prose, and the
+      column starves it. Below the column the band collapses to 100% and the
+      TRACK self-scrolls (`overflow-x: auto`, the inner boundary pe-w1-air-beat
+      established), so at 360px the stops stay side-by-side on one spine, the
+      spine still spans the full visible width, and the page body still never
+      scrolls sideways. */
+.bp-paper-surface .bp-lineage { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 14px; border-top: 1px solid var(--paper-rule); overflow-x: auto; overscroll-behavior-x: contain; }
+/* No marker: the generic `ol > li { list-style: decimal }` painted an ordinal in the
+   14px gap, inside the previous stop's column, where a long kicker ran into it. */
+.bp-paper-surface .bp-lineage__node { position: relative; padding-top: 9px; min-width: 0; list-style: none; }
+.bp-paper-surface .bp-lineage__node::before { content: ""; position: absolute; top: -1px; left: 0; width: 11px; height: 2px; background: var(--paper-accent); }
+.bp-paper-surface .bp-lineage__node--info::before { background: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok::before { background: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn::before { background: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger::before { background: var(--bp-tone-danger-fg); }
+/* A kicker wraps inside its own column: a nowrap kicker longer than the column
+   ran under the next stop's kicker and title (the August Chronicle's
+   "31 AUG · PRODUCT FOUNDATIONS"; task-e7b990a88c9f8df0). */
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); overflow-wrap: anywhere; }
+.bp-paper-surface .bp-lineage__node--info .bp-lineage__overline { color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok .bp-lineage__overline { color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn .bp-lineage__overline { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger .bp-lineage__overline { color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
+.bp-paper-surface .bp-lineage__unit { font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+/* jf-w1-engine-narrow-dark-fixes: a stop can be squeezed to its 150px floor at
+   narrow measures — a long unbroken body string (a URL, a compound word) then
+   blows the column out sideways instead of wrapping. `anywhere` (not
+   break-word) so it also counts toward text-wrap balancing rather than being
+   treated as unbreakable for layout purposes. */
+.bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; overflow-wrap: anywhere; }
+
+.bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
+.bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }
+.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.75rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
+
+.bp-paper-surface .bp-heat__c--z,
+.bp-paper-surface .bp-heat__c--b0,
+.bp-paper-surface .bp-heat__c--b1,
+.bp-paper-surface .bp-heat__c--b2,
+.bp-paper-surface .bp-heat__c--b3 { position: relative; }
+.bp-paper-surface .bp-heat__c--z { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--z::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--paper-ink-faint-line); }
+.bp-paper-surface .bp-heat__c--b0 { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b1 { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b2 { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b3 { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b0::after,
+.bp-paper-surface .bp-heat__c--b1::after,
+.bp-paper-surface .bp-heat__c--b2::after,
+.bp-paper-surface .bp-heat__c--b3::after { content: ""; position: absolute; border-radius: 1px; background: color-mix(in srgb, var(--paper-ink) 42%, transparent); }
+.bp-paper-surface .bp-heat__c--b0::after { inset: 41%; }
+.bp-paper-surface .bp-heat__c--b1::after { inset: 33%; }
+.bp-paper-surface .bp-heat__c--b2::after { inset: 24%; }
+.bp-paper-surface .bp-heat__c--b3::after { inset: 15%; }
+
+/* value cells: the exact number IS the second channel — the bin color moves to
+   an underline strip so ink text keeps full contrast on every theme. These come
+   AFTER the marker rules so the strip geometry wins at equal specificity. */
+.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.75rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
+.bp-paper-surface .bp-heat__c--v::after { content: ""; position: absolute; inset: auto 15% 0; top: auto; width: auto; height: 3px; margin: 0; border-radius: 2px; }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z::after { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b0::after { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b1::after { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b2::after { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b3::after { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+
+/* Σ marginals: dim mono sums, the grand total emphasized. */
+.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
+.bp-paper-surface .bp-heat__sum--grand { font-weight: 650; color: var(--paper-ink); }
+.bp-paper-surface .bp-heat__cl--sum { text-align: right; padding-right: 7px; }
+
+/* ── form / questionnaire: the premium read (gui-premium w2) ──
+   forms.ex emits <fieldset class="bp-form-question bp-form-q--<type>"> cards
+   with classed option rows (article mode). The stylesheet owns ALL geometry:
+   numbered question cards, custom evergreen control faces (appearance:none),
+   the scale + yes/no as segmented rows. Everything resolves through the paper
+   tokens, so both schemes hold. */
+.bp-paper-surface .bp-form { display: flex; flex-direction: column; gap: 12px; margin: 2rem 0; counter-reset: bpq; }
+.bp-paper-surface .bp-form-grill::before,
+.bp-paper-surface .bp-form-questionnaire::before { content: "Grill"; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-questionnaire::before { content: "Questionnaire"; }
+
+.bp-paper-surface .bp-form-question { counter-increment: bpq; margin: 0; padding: 15px 17px 17px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; }
+.bp-paper-surface .bp-form-question > legend { float: left; width: 100%; padding: 0; margin: 0; font-size: 1.02rem; font-weight: 650; line-height: 1.35; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-question > legend::before { content: counter(bpq, decimal-leading-zero); display: block; margin-bottom: 5px; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.09em; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-note { clear: both; font-style: italic; font-size: 0.88rem; color: var(--paper-ink-soft); margin: 0.35rem 0 0; line-height: 1.5; }
+.bp-paper-surface .bp-form-opts { clear: both; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
+
+/* option rows — the whole row is the control */
+.bp-paper-surface .bp-form-opt { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border: 1px solid var(--paper-chrome-border); border-radius: 9px; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease; }
+.bp-paper-surface .bp-form-opt:hover { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt:has(input:checked) { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt > span { font-size: 0.92rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-opt > input { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin: 0; flex: none; border: 1.5px solid var(--paper-ink-faint); background: transparent; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease; }
+.bp-paper-surface .bp-form-opt > input[type="radio"] { border-radius: 50%; }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"] { border-radius: 4px; }
+.bp-paper-surface .bp-form-opt > input[type="radio"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); box-shadow: inset 0 0 0 3px var(--paper-bg-deep); }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); }
+.bp-paper-surface .bp-form-opt > input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+
+/* the scale + yes/no read as segmented rows; the plain lists stay stacked */
+.bp-paper-surface .bp-form-q--scale .bp-form-opts,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opts { flex-direction: row; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt { flex: 1 1 0; justify-content: center; padding: 10px 0; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > input,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > span { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-form-q--single .bp-form-opts,
+.bp-paper-surface .bp-form-q--multi .bp-form-opts { flex-direction: column; }
+
+.bp-paper-surface .bp-form-q--text textarea,
+.bp-paper-surface .bp-form textarea { display: block; width: 100%; box-sizing: border-box; min-height: 5rem; padding: 10px 12px; font: inherit; font-size: 0.92rem; line-height: 1.5; color: var(--paper-ink); background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 9px; resize: vertical; }
+.bp-paper-surface .bp-form textarea:focus { outline: none; border-color: var(--paper-accent); box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+.bp-paper-surface .bp-form label { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-form fieldset { min-inline-size: 0; }
+
+/* ── field blocks: the aligned definition list (gui-premium w2) ──
+   The browser twin of the TUI's aligned field rows (#1497): a fixed-clamp dim
+   mono label column so CONSECUTIVE field blocks line up as one list, hairline
+   rules between adjacent rows, value affordances (swatch / preview / sub-rows)
+   in the value column. */
+.bp-paper-surface .bp-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; margin: 0; padding: 0.36rem 0; }
+.bp-paper-surface .bp-field + .bp-field { border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-field__l { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); transform: translateY(-1px); }
+.bp-paper-surface .bp-field__v { color: var(--paper-ink); font-size: 0.98rem; line-height: 1.5; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-field__mono { font-family: var(--paper-font-mono); font-size: 0.84em; }
+.bp-paper-surface .bp-field__none { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-field__swatch { display: inline-block; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--paper-chrome-border); margin-right: 7px; vertical-align: -1px; }
+.bp-paper-surface .bp-field__img { display: block; max-width: 220px; border-radius: 8px; border: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-field__sub { display: flex; gap: 0.7rem; align-items: baseline; }
+.bp-paper-surface .bp-field__sub > b { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); min-width: 4.2rem; flex: none; }
+.bp-paper-surface .bp-field__list { margin: 0; padding-left: 1.2rem; }
+.bp-paper-surface .bp-field__list li::marker { color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.8em; }
+@media (max-width: 560px) { .bp-paper-surface .bp-field { grid-template-columns: 1fr; row-gap: 2px; } }
+
+/* ── mermaid diagram polish (gui-premium w1) ──
+   The SVG palette is baked by the themed init in bulldocs.html.heex; this only
+   centers the render inside the (already tokenized) figure card. */
+/* `safe center`, not `center`: with the PRE-HYDRATION source text (long
+   unbreakable mermaid lines) a plain `center` overflows the flex line
+   symmetrically — the left half clips UNREACHABLY (scrollLeft can't go
+   negative) and the spill widens the document on narrow viewports. `safe`
+   falls back to start-alignment exactly when content overflows, keeping the
+   first character visible and the scroll usable; the centered look is
+   unchanged once the (max-width-bounded) SVG replaces the source. */
+.bp-paper-surface pre.mermaid { display: flex; justify-content: safe center; margin: 0; max-width: 100%; overflow-x: auto; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): with useMaxWidth the
+   engine emits width="100%" and stamps the diagram's NATURAL width as an
+   inline max-width — so a wide sequence diagram scaled its labels down to
+   3.73px at a 360 viewport. Requesting an over-large width lets the ALWAYS-
+   BINDING max-width clamp resolve the actual size: the engine's inline stamp
+   wins the cascade and pins the svg at EXACTLY its natural width — labels
+   paint at their authored px and the pre's overflow-x:auto scrolls the
+   diagram at narrow widths instead of shrinking its text away — while an
+   unstamped svg falls back to this rule's own max-width:100% and stays
+   container-bound exactly as before. `flex:none` is load-bearing: the pre is
+   a flex row, and default flex-shrink would squeeze the svg right back to
+   the container width. */
+.bp-paper-surface pre.mermaid svg { width: 9999px; max-width: 100%; height: auto; flex: none; }
+
+/* ── unsupported-block degrade (gui-premium w5) ──
+   The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
+   for a forward-compat or corrupt Pd-node kind ("Unsupported block: <kind>" /
+   "invalid block") rather than raising — papers are schemaless. Until now that
+   fallback rendered as a bare unstyled div. Give it the SAME honest dashed-box
+   treatment as `.bp-dataviz--empty`: a faint mono note in a dashed frame that
+   reads as a deliberate "nothing renders here" state, never a broken layout.
+   Appended at the end of the hand-authored section, clear of the data-viz slate
+   region above (concurrently owned by gp-w5-dataviz-fidelity). */
+.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
+
+/* ── undelivered-block delivery wave (study /papers/portabledoc-potential-study;
+   tasks task-392e09d6e29c42d1 + task-49fcdc3e45c93c02). ──────────────────────
+   Every family below already EMITS this markup from render/*.ex but had zero
+   reader rules — bare browser defaults (or, for the bar families, literally
+   invisible fills). One section, one family per stanza, everything scoped
+   `.bp-paper-surface` and drawn from the `--paper-*` tokens so all four themes
+   inherit. The bar families mirror the ratified `.bp-gauge` anatomy above. */
+
+/* bar-chart: label + fill track + optional digit (data_viz.ex bar_chart_html). */
+.bp-paper-surface .bp-bar-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-bar-chart__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-bar-chart__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-bar-chart__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-bar-chart__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-bar-chart__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
+
+/* criteria-progress: the task family's meter — same row anatomy. */
+.bp-paper-surface .bp-criteria-progress { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-criteria-progress__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-criteria-progress__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-criteria-progress__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-criteria-progress__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-criteria-progress__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
+
+/* steps: numbered procedure — counter chip + title + indented body. The
+   ::marker suppression matters: bp-steps is a semantic <ol> and the generic
+   list rules would otherwise paint the browser "1." beside our own chip
+   (double numbering, seen live on the rev-7 essay). */
+.bp-paper-surface .bp-steps { margin: 1.4rem 0 1.4rem 0; padding: 0; list-style: none; counter-reset: bp-step; }
+.bp-paper-surface .bp-steps__step::marker { content: ""; }
+.bp-paper-surface .bp-steps__step { list-style: none; counter-increment: bp-step; position: relative; padding: 0 0 14px 2.6rem; }
+.bp-paper-surface .bp-steps__step::before { content: counter(bp-step); position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.bp-paper-surface .bp-steps__step:not(:last-child)::after { content: ""; position: absolute; left: 0.82rem; top: 1.9rem; bottom: 0; width: 1px; background: var(--paper-rule); }
+.bp-paper-surface .bp-steps__title { font-weight: 700; margin: 0.15rem 0 0.2rem; }
+.bp-paper-surface .bp-steps__body > :first-child { margin-top: 0.3rem; }
+
+/* tabs / code-tabs: shared strip anatomy. Server HTML shows EVERY panel
+   (no-JS degrade); hydration hides the non-active ones, so the strip must
+   read as controls and the active tab must be visibly marked. */
+.bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-tabs--editor { overflow: visible; }
+.bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }
+.bp-paper-surface .bp-tabs__panel, .bp-paper-surface .bp-code-tabs__panel { padding: 12px 15px; }
+.bp-paper-surface .bp-tabs__panel[hidden], .bp-paper-surface .bp-code-tabs__panel[hidden] { display: none; }
+.bp-paper-surface .bp-tabs__section { padding: 10px 15px; }
+.bp-paper-surface .bp-tabs__label, .bp-paper-surface .bp-code-tabs__label { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; color: var(--paper-ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+
+/* expandable: native <details> chrome (zero-JS disclosure). */
+.bp-paper-surface .bp-expandable { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 0; }
+.bp-paper-surface .bp-expandable > summary { padding: 10px 15px; font-weight: 700; cursor: pointer; color: var(--paper-ink); }
+.bp-paper-surface .bp-expandable > summary:hover { color: var(--paper-accent); }
+.bp-paper-surface .bp-expandable__body { padding: 2px 15px 12px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-expandable__body > :first-child { margin-top: 0.6rem; }
+
+/* footnote: the endnote list — small, ruled off from the prose. Sized in `em`
+   with the roles: it is prose ABOUT prose. This is where the em sweep stops.
+   The rest of this sheet's `rem` sizes are COMPONENT chrome — chart keys, gauge
+   labels, task rows, table headers, form furniture — fixed-size UI that happens
+   to sit on a paper, and that should NOT grow when someone raises the reading
+   size. The dividing line is whether a reader reads it as part of the sentence. */
+.bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-footnote__note { margin: 0.25rem 0; }
+.bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-soft); }
+
+/* equation: centered display math (native MathML) + honest empty degrade. */
+.bp-paper-surface .bp-equation { margin: 1.5rem 0; text-align: center; font-size: 1.08em; overflow-x: auto; }
+.bp-paper-surface .bp-equation--empty { border: 1px dashed var(--paper-chrome-border); border-radius: 10px; padding: 10px 13px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; text-align: left; }
+
+/* api-endpoint: method chip + path + params table. Method tones ride the
+   status palette so GET/POST/DELETE read at a glance without new colors. */
+.bp-paper-surface .bp-api-endpoint { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-api-endpoint__head { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: var(--paper-bg-deep); }
+.bp-paper-surface .bp-api-endpoint__method { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 6px; background: var(--paper-rule); color: var(--paper-ink); flex: none; }
+.bp-paper-surface .bp-api-endpoint__method--get { color: var(--st-ok); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--post { color: var(--st-info); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--put, .bp-paper-surface .bp-api-endpoint__method--patch { color: var(--st-warn); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--delete { color: var(--st-danger); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__path { font-family: var(--paper-font-mono); font-size: 0.8rem; background: none; padding: 0; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-api-endpoint__params { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.bp-paper-surface .bp-api-endpoint__params th { text-align: left; padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-api-endpoint__params td { padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-api-endpoint__params tr:last-child td { border-bottom: none; }
+
+/* toc: the in-paper nav card; sticky variant pins in article mode. */
+.bp-paper-surface .bp-toc { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 12px 15px; }
+.bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; list-style: none; }
+.bp-paper-surface .bp-toc__list--bulleted { list-style: disc; }
+.bp-paper-surface .bp-toc__item { margin: 3px 0; list-style: none; }
+.bp-paper-surface .bp-toc__list--bulleted > .bp-toc__item { list-style: disc; }
+.bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-toc__item[data-level="2"] { margin-left: 1.1rem; font-size: 0.92em; }
+.bp-paper-surface .bp-toc__item[data-level="3"] { margin-left: 2.2rem; font-size: 0.88em; }
+.bp-paper-surface .bp-toc--sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+
+/* asciicast: the player mount — reserve height so the figure never jumps. */
+.bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); border-color: var(--paper-rule); }
+/* The player's own control bar draws `border-top: 2px` (asciinema-player 3.8.0,
+   `div.ap-player div.ap-control-bar`), which is a vendor stylesheet loaded from
+   a CDN — so a terminal recording put a section-weight rule inside a figure, and
+   nothing in this repo declared it. Four classes beat the vendor's two-class,
+   two-type selector; only the WIDTH is overridden, so the bar keeps the colour
+   the player computes from the cast's own theme.
+
+   This is the one rule in this file the render rig cannot photograph: the rig
+   blocks every non-loopback host, so the player never hydrates and the bar does
+   not exist in a hermetic capture. It is proven against the vendor bytes
+   instead — the cascade, not the picture. */
+.bp-paper-surface .bp-asciicast .ap-player .ap-control-bar { border-top-width: var(--bp-rule-hairline); }
+
+/* chat transcript blocks (Studio-sourced): one shared quiet-card treatment —
+   their inner layout is inline-styled by components.ex; this supplies the
+   frame those inline styles assumed. */
+.bp-paper-surface .bp-chat-approval, .bp-paper-surface .bp-chat-plan, .bp-paper-surface .bp-chat-question, .bp-paper-surface .bp-chat-thinking, .bp-paper-surface .bp-chat-todo, .bp-paper-surface .bp-chat-tool-diff { margin: 1.1rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 10px 13px; font-size: 0.85rem; }
+
+/* valueref-accept: the inline baseline-accept affordance (walk.ex). */
+.bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.75rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
+.bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }
+
+/* pre-gate badge (compose.ex `pre-gate-badge`, inserted by
+   Content.Papers.PreGateRegister.annotate/3): the 2026-09-02 grandfather ruling
+   made visible. One line under the byline rule, in the SYSTEM's voice — the
+   masthead roles are the author's serif, this is caps-mono — sized below the
+   byline (0.9em of the body) so it annotates the title block and never competes
+   with it. Colour is the existing callout tone FOREGROUND only (no pill, no
+   rule, no motion): neutral for the 37 papers whose reader is unaffected, the
+   warn tone for the one whose table header renders empty. The browser title
+   attribute carries the register's reader_behaviour. `--tucked` is set only
+   when the badge sits directly under a byline: its negative top margin
+   collapses against the byline's 1.4rem bottom margin to a 0.5rem seat under
+   the rule; without a byline the 0.6rem top margin seats it under the title
+   like a dateline (reader-owned spacing — no spacer block). Prints as plain
+   text. */
+.bp-paper-surface .bp-pregate {
+  margin: 0.6rem 0 1.4rem; font-family: var(--paper-font-mono); font-size: 0.72rem;
+  font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.4;
+  color: var(--bp-tone-neutral-fg); hyphens: none; overflow-wrap: break-word;
+}
+.bp-paper-surface .bp-pregate--warning { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-pregate--tucked { margin-top: -0.9rem; }

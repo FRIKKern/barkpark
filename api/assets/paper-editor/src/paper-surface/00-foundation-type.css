@@ -1,0 +1,690 @@
+/*
+ * paper-surface.css — the ONE canonical paper-surface stylesheet
+ * (Paper editor parity Stage 2, wave 1 · charter Decision 4).
+ *
+ * SINGLE SOURCE for the portable paper-surface layer: the `--paper-*` theme
+ * tokens, the `--bp-*` typography tokens (Stage-1 single-source, #896), and the
+ * `.bp-paper-surface` element rules (h1-h6/p/a/ul/ol/li/code/pre/img). The
+ * Studio View + Edit panes and the /papers reader all resolve THESE selectors
+ * against THESE tokens — parity by construction, not by hand-matched mirrors.
+ *
+ * Embedded inline, never fetched over the network (CSP + self-contained
+ * standalone exports), through
+ * Barkpark.PortableDoc.Render.Stylesheet.css/0 (compile-time @external_resource)
+ * by three sinks:
+ *   - Studio         barkpark_web/layouts/root.html.heex     (<%= raw(css()) %>)
+ *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (bp-theme
+ *                    `--paper-*` overrides layer AFTER this source)
+ *   - sheet export   plugins/sheets/html.ex                  (standalone <head>)
+ *
+ * EXTRACTED VERBATIM from root.html.heex (values byte-identical — move only):
+ *   --paper-* light/dark theme tokens   (was root.html.heex ~2233-2262)
+ *   --paper-* fallback tokens + fonts    (was ~2263-2291)
+ *   --bp-* typography tokens             (was ~2293-2327)
+ *   .bp-paper-surface element rules      (was ~2363-2406)
+ *
+ * KEPT in root.html.heex (Studio-shell / NOT portable — Decision 4):
+ *   surface CHROME (bg/color/font/size/line-height/tracking, max-width, padding,
+ *     media-query padding, .bp-paper-body) — the Studio page shell; the reader
+ *     owns its own 820/720px bp-theme shell, so surface chrome is NOT shared.
+ *   html[data-editor-focus] interplay, .bp-paper-editor-body typography mirror,
+ *     the inline-style de-inline override hacks (a later wave deletes them),
+ *     .bp-canvas-* node-view chrome, and the valueref stale-marker /
+ *     clickable-cursor affordances (Studio-only; the reader emits valuerefs
+ *     as plain text).
+ */
+/* ── `--paper-*` reading-surface theme tokens are now GENERATED into the marker
+   region below (design/tokens.json color.paper.surface → design/emit.mjs; VERBATIM
+   capture, ts-w1). What stays hand-authored here: the serif/mono FONT stacks and
+   the callout `--bp-tone-*` companions (the latter become the paperCallout token
+   family in a later wave). */
+html[data-theme="dark"] .bp-paper-surface,
+html[data-theme="dark"] .bp-paper-body {
+  /* Callout TONE tokens — DARK companions (authored): deepened bg, lifted fg,
+     consistent with the cool bp-dark token style above; kept readable-contrast.
+     Light values are lifted verbatim from Util.tone_palette/1 (fallback block). */
+  --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
+  --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
+  --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
+  --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
+  --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
+}
+/* Fallback fonts + callout companions so a pre-paint no-data-theme load still gets
+   the light bp theme. The `--paper-*` colour fallback is in the GENERATED marker
+   region below (the html[data-theme] blocks win over it, as before). */
+.bp-paper-surface, .bp-paper-body {
+  /* Reading serif. Iowan Old Style leads the stack — the macOS system serif the
+     ORIGINAL Portable Doc editor renders in — so native reads pixel-match the
+     editor where the OS has that face. Source Serif 4 IS self-hosted now
+     (@font-face'd variable woff2, Roman + Italic, since #1984 — see
+     root.html.heex), so it supplies the same serif everywhere the OS lacks
+     Iowan; it is a real font here, not a bare fallback name. The stack ORDER and
+     these font values are owned by au-w5-reading-typography (human-gated) — do
+     not reorder or retune them here. */
+  --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
+  --paper-font-mono: ui-monospace, Menlo, monospace;
+  /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
+     Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
+     the `bp-callout--info` modifier is the emitted default here too. Dark
+     companions live in the html[data-theme="dark"] block above. */
+  --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
+  --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
+  --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
+  --bp-tone-danger-bg:  #f7e9e6; --bp-tone-danger-fg:  #a63a2e;
+  --bp-tone-neutral-bg: #edf0ee; --bp-tone-neutral-fg: #4a544f;
+}
+
+/* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
+   These `--bp-*` reading-scale vars feed BOTH the VIEW (`.bp-paper-surface
+   h1/p/li/...`) and EDIT (`.bp-paper-editor-body h1/p/li/...`) rules below.
+   Both panes descend from `.bp-paper-surface` (the Edit body lives inside
+   `<main class="bp-paper-shell bp-paper-surface">`), so both INHERIT these
+   — the two rule sets no longer have to be hand-matched byte-for-byte.
+   The NUMBERS themselves are NO LONGER hand-authored here: size/line-height/
+   heading-weight VAR-BRIDGE onto the emitted `--tok-reading-*` block (from
+   design/tokens.json via design/emit.mjs), declared just below on this same
+   `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
+   resolve. tokens.json is now the ONE source; change a reading value THERE and
+   `node design/emit.mjs --write` moves View AND Edit together. Since
+   pe-w1-reader-editorial-typography the `--bp-*-tracking` letter-spacings bridge
+   too: `type.reading.<step>.letterSpacing` was declared in tokens.json and
+   emitted nowhere, so hand-authored numbers sat beside a source that claimed to
+   own them. A step with no letterSpacing emits no tracking var and no --bp-*
+   twin (h3 today), rather than a var() that resolves to nothing.
+   Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
+   styles.css `:root`, re-derived by the mirror). NOT related to walk.ex
+   heading_style/2: that is the NON-ARTICLE (email / stylesheet-less) fallback
+   and is byte-frozen at its own 32/24/20px scale — article headings emit bare
+   `<hN>` and read the tokens below.
+   NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
+   deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
+   re-introduces double-spacing; see styles.css :84). */
+.bp-paper-surface, .bp-paper-body {
+  --bp-body-size: var(--tok-reading-body-size);
+  --bp-body-lh: var(--tok-reading-body-lh);
+  --bp-body-tracking: var(--tok-reading-body-tracking);
+  /* THE DISPLAY SIZE IS VIEWPORT-CLAMPED, and the token is still the ceiling.
+     `--tok-reading-h1-size` (40px) is sized for the 580px reading column. On a
+     390px phone the column is 358px and a nine-word title wrapped to FIVE lines
+     of 40px display type — measured on /papers/heggemsnes-act, headless
+     Chromium at 390x844: 40px -> 5 lines, 34px -> 4, 28px -> 3. A title that
+     costs a third of the first screen is not a title, it is a wall.
+
+     `clamp(28px, 8vw, <token>)`: the token is the MAX, so every width at or
+     above 500px (40 / 0.08) renders the authored 40px and desktop is untouched
+     byte-for-byte. Below it the display size tracks the viewport the column
+     tracks — 31.2px at 390 (4 lines), floor 28px at 350 and under. The floor is
+     not a taste number: 28px is the largest size that still reads as display
+     type against the 18px body while fitting the title inside four lines.
+
+     ON THE TOKEN, NOT ON A SHELL. `.bp-paper-surface h1` is byte-mirrored into
+     root.html.heex and paper-editor/src/styles.css and view_edit_parity_test
+     compares it property-by-property, so a media override per shell would have
+     to be written three times and kept in sync by hand — and root.html.heex is
+     forbidden from DEFINING a `--bp-*` token at all (stylesheet_test.exs:85).
+     Clamping the token instead moves the reader and both editor surfaces
+     together, which is what parity means. */
+  --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
+  --bp-h2-weight: var(--tok-reading-h2-weight);
+  --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
+  --bp-heading-weight: var(--tok-reading-heading-weight);
+  --bp-para-margin-top: 12pt;
+  /* ── The AIR scale (space.air → the emitted `--tok-air-*` block below), bridged
+     onto `--bp-air-*` exactly like the type scale above so a block rule reads a
+     `--bp-*` name and the emitted layer stays the one source.
+
+     WHAT IT IS: how much room an EVIDENCE block takes before it starts. The
+     numbers are ratios of `--tok-air-beat` (the benchmark artifact's AIR UNIT,
+     22px), so the LAW ships rather than six literals: code 1.1x, table
+     1.36x, asciicast 1.45x, callout 1.55x, stats 1.64x, figure 1.82x — which
+     resolve within 0.2px of the measured scale in
+     tooling/paper-excellence/evidence/erasure.html (24/30/32/34/36/40px).
+
+     WHY IT WAS NEEDED: `.bp-table` and `.bp-callout` carried NO margin at all, so
+     a table opened 0px under the ingress that introduced it — measured on
+     /papers/eight-minute-erasure. Air is what tells a reader an argument just
+     handed off to its evidence; with none, the evidence reads as another line of
+     the sentence above it.
+
+     Margins here are TOP-ONLY, for the same reason the headings below are: the
+     flat edit ProseMirror has sibling margins that COLLAPSE and the div-wrapped
+     reader has none, so only a one-sided margin lands both surfaces on the same
+     spacing (additive == collapsed when the other side is zero).
+
+     NOT `--bp-para-margin-top`, AND THAT IS NOW A RULING RATHER THAN A DEFERRAL
+     (2026-09-02, task-741e0de1ddb3a482). This note used to say retuning the
+     reader's prose rhythm to 22px was "a real question ... type.reading's to
+     answer". It is answered: the prose beat STAYS at 12pt/16px, and 22px is
+     re-read as the artifact's AIR UNIT rather than as anyone's paragraph beat.
+
+     The two numbers are not competing measurements of one thing. 22px is the
+     unit the EVIDENCE ladder is expressed in; 16px is the rhythm PROSE is set
+     on. Anchoring the ladder on the artifact is what reproduces its measured
+     evidence spacing, and it does not oblige the reader's paragraphs to match.
+
+     WHY THE PROSE BEAT DOES NOT RISE TO 22. The ladder's bottom rung is code, at
+     1.1 x 22 = 24.2px. Against a 16px prose beat, the step from a paragraph to
+     the evidence it introduces is 8.2px — a step a reader can see, which is the
+     entire job of the scale. Against 22 it would be 2.2px: the evidence would
+     open at the same distance as the next sentence, and the air would stop
+     saying anything. Worse, paragraph-to-paragraph (22) would then exceed
+     heading-to-paragraph (16), so a heading would sit CLOSER to the paragraph
+     below it than two paragraphs sit to each other — a heading that has lost its
+     grip on the text it introduces. And 16px is 0.556 of the 28.8px line box,
+     inside the classical half-line-to-full-line paragraph window; 22px is 0.76,
+     which reads as a loose block, not as continuous argument.
+
+     The relation is ASSERTED, not remembered: tooling/paper-excellence/rig
+     measures the rendered prose beat against the rendered code air on every
+     (scheme x width) cell and reds unless the prose beat stays a clear step
+     below the ladder's bottom rung. Raising the beat to 22 reds it. */
+  --bp-air-code: var(--tok-air-code);
+  --bp-air-table: var(--tok-air-table);
+  --bp-air-asciicast: var(--tok-air-asciicast);
+  --bp-air-callout: var(--tok-air-callout);
+  --bp-air-stats: var(--tok-air-stats);
+  --bp-air-figure: var(--tok-air-figure);
+  /* ── The SECTION BOUNDARY (space.section → the emitted `--tok-section-*` block
+     below), bridged onto `--bp-section-*` exactly like the air scale above.
+
+     WHAT IT IS: the air scale spaces the blocks INSIDE an argument. This is the
+     boundary BETWEEN arguments — the two-part device the benchmark artifact
+     (tooling/paper-excellence/evidence/erasure.html) draws with
+     `section { margin-bottom: 92px }` and
+     `.sec-head { border-top: 2px solid var(--ink); padding-top: 16px }`. Air alone
+     reads as a long pause; a rule alone reads as decoration. Together they say
+     one thing ended and another began, which is the only reason to spend 92px.
+
+     WHERE IT LANDS, and why it is the `h2` element rule and not a wrapper. There
+     is no section box to hang it on: a `section` BLOCK flattens into its children
+     (render/compose.ex `compose_section_stack/2`), and a paper's real boundaries
+     are its level-2 headings — all 51 h2s across the six rig fixtures follow
+     non-heading content, so "level-2 heading" and "section opening" are the same
+     event in this corpus. The `h2` element ALSO happens to be the only carrier
+     both surfaces can agree on: View emits a bare one (walk.ex `heading/3`)
+     and Edit is a FLAT ProseMirror document whose heading node admits no wrapper
+     and no sibling chrome. A `.bp-section-head` wrapper div, or a `p + h2`
+     sibling selector, would each exist on exactly one of the two — the drift the
+     parity gate exists to red. So the rule goes on the element, and BOTH surfaces
+     get it from this one declaration.
+
+     WHAT THIS DELIBERATELY DOES NOT SHIP: the artifact's `.sec-head .label`
+     eyebrow above the heading. It needs a slot INSIDE the head, and the two DOMs
+     disagree about where that is — Edit's h2 is a flat sibling of the paragraph
+     before it, the reader's is inside its own keyed stream `div`
+     (bulldocs_live.ex), so the "an eyebrow block directly above an h2 takes the
+     rule" law would need two different selectors and would be true in neither
+     rig nor reader at once. It wants a heading-carried eyebrow slot on both
+     engines, which is a data + editor-node change, not a stylesheet one.
+
+     `beat` is a ratio of `--tok-air-beat` and NOT an `em` of the heading: at
+     1.9em the old margin was hostage to the h2 font size, so a type-scale change
+     silently retuned section rhythm. Anchored on the beat, section air and
+     evidence air retune together — which is the whole point of storing a ratio. */
+  --bp-section-beat: var(--tok-section-beat);
+  --bp-section-rule: var(--tok-section-rule);
+  --bp-section-gap: var(--tok-section-gap);
+  /* ── The RULE LADDER (space.rule → the emitted `--tok-rule-*` block below).
+
+     WHAT IT IS: `--bp-section-rule` above is the STRUCTURAL weight, and it is
+     spent on exactly one thing — the head of a section. This is the other rung:
+     the weight every horizontal line that is NOT a boundary draws at. Two
+     weights, and the difference between them IS the hierarchy — a reader learns
+     at scroll speed that a thick line means a new argument started and a thin
+     one means these rows belong together.
+
+     WHY IT IS A TOKEN AND NOT A `1px` LITERAL. Because a census cannot assert
+     "chrome is quieter than structure" unless both weights have names. The
+     benchmark artifact (tooling/paper-excellence/evidence/erasure.html) draws 59
+     horizontal rules and spends the heavy weight on 8 — its six `.sec-head`
+     openings and the two edges of its closing `.declaration` frame — with every
+     other line at `1px solid var(--rule)`. Measured with the same census, this
+     reader had drifted: a table header underline was 2px, a card's top accent
+     3px, a button's frame 2px, so a table in the middle of an argument drew a
+     line exactly as loud as the boundary between two arguments.
+
+     Both arms of that census are gates now: check.mjs Part M reads every
+     horizontal border DECLARATION in this file and its editor mirror, and
+     tooling/paper-excellence/rig/shoot.mjs counts every rule that actually
+     PAINTS on the rendered panel. A declaration-only census would miss an inline
+     style; a rendered-only census would miss a heavy rule on a class no fixture
+     happens to use. */
+  --bp-rule-hairline: var(--tok-rule-hairline);
+  /* ── The EVIDENCE BAND (space.evidence → the emitted `--tok-evidence-*` block
+     below), bridged onto `--bp-evidence-*` exactly like the air scale above.
+
+     WHAT IT IS: prose holds the 660px reading column because 66-72 characters
+     per line is what a sentence is legible at. A table, a stat strip, a chart, a
+     diagram or a terminal recording is NOT prose — it has no measure to hold,
+     and the column starves it. So a block that IMPROVES WITH WIDTH steps out of
+     the column into a wider band, centered on the same axis, while every prose
+     block stays exactly where it was. The benchmark artifact
+     tooling/paper-excellence/evidence/erasure.html ships the same split:
+     `--measure: 66ch` for `.col`, `--wide: 1040px` for `.wide`, a 1.58x ratio.
+
+     THE LAW, not the literal. `--bp-evidence-width` is ONE expression composed
+     from all five tokens, read by every breakout rule below and by the four
+     article <figure> emitters in render/figures.ex:
+
+       max( 100%,                                    never narrower than the column
+            min( max(band, 100cqw * fill),           grow with the screen, floored
+                 bandMax,                            but capped
+                 100cqw - 2 * gutter ) )             and never touching the edges
+
+     Read outward-in: the band SITS at 1040px (the artifact's number) from ~1120px
+     of available width, starts GROWING once 65% of the screen exceeds it (1600px),
+     and stops at 1240px. Below the column it collapses to `100%` — the component
+     simply fills the column again, which is what makes 360px safe.
+
+     WHY `100cqw` AND NOT `100vw`: cqw resolves against the nearest inline-size
+     container, and the Studio declares one on the editor's content pane
+     (`.editor-with-preview .editor-panel-main.bp-paper-body`, root.html.heex).
+     So inside the editor the band measures the PANE, and on the reader — where
+     no container exists and cqw falls back to the small viewport per spec — it
+     measures the screen. Both correct from one expression. `100vw` would have
+     been correct on the reader and blown out of the pane in the editor, and a
+     viewport @media beside a pane-relative width would have disagreed with
+     itself; that is also why the growth clause is arithmetic and not a
+     breakpoint. The `gutter` doubles as the scrollbar allowance: cqw/vw both
+     COUNT the classic scrollbar, so a band clamped to `100cqw - 80px` cannot
+     reach the edge that a ~15px scrollbar occupies. The page body never scrolls
+     sideways; a component wider than its own band self-scrolls instead
+     (`overflow-x: auto`, the inner boundary pe-w1-air-beat established).
+
+     `--bp-evidence-pull` is the negative margin that re-centers the wider box on
+     the column's own axis: `50%` resolves against the containing block, so the
+     band centers on the COLUMN rather than on the screen, and stays centered
+     under any left rail or pane offset the column itself sits behind.
+
+     Captions do NOT ride the band: `--bp-evidence-caption` returns a figcaption
+     to a reading measure inside a figure that may be 1240px wide, because a
+     caption is prose and inherits prose's law, not its figure's. (The value is
+     `50ch`, calibrated to the CPL that actually lands — `ch` is the advance of
+     the digit zero, not the mean — and papers/captions-floor moved the caption
+     from system-ui italic to the reading serif, so the ch it resolves against
+     changed with it; the rig's `captionCpl` / `captionWidth` baselines pin the
+     rendered number. The consumer is now the ONE `.bp-figcaption` rule below,
+     not three inline copies.) */
+  --bp-evidence-band: var(--tok-evidence-band);
+  --bp-evidence-band-max: var(--tok-evidence-band-max);
+  --bp-evidence-fill: var(--tok-evidence-fill);
+  --bp-evidence-gutter: var(--tok-evidence-gutter);
+  --bp-evidence-caption: var(--tok-evidence-caption);
+  --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
+  --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
+  /* 1: a table is centred (papers). 0: it starts at the text's left edge, for a host whose
+     column is the text, with no evidence band (EMBED-CONTRACT, Styling). */
+  --bp-table-centre: 1;
+  --bp-li-gap: 4pt;
+  --bp-list-indent: 24px;
+  --bp-code-size: 0.92em;
+  --bp-code-pad: 0.08em 0.35em;
+  --bp-code-radius: 3px;
+  --bp-pre-size: 14px;
+  --bp-pre-lh: 1.5;
+  --bp-pre-pad: 14px 16px;
+  --bp-pre-margin: 0 0 22px;
+  --bp-pre-radius: 4px;
+  /* Code-BLOCK frame tokens (S9 code-interior). DISTINCT from --bp-pre-* (the
+     generic 14px <pre>) and --bp-code-* (the inline-code chip): the article code
+     block is its own square-cornered --paper-bg-deep slab. These single-source
+     the literals Figures.code_block_html/1 + the .bp-canvas-code editor frame both
+     paint, so View↔Edit move together. The 3px --bp-codeblock-accent-w left bar
+     retired with task-ddb1e0ab09a62466: it existed because the reader body was
+     painted --paper-bg-deep and the slab was invisible; the body now stands on
+     --paper-bg and the slab is its own mark. */
+  --bp-codeblock-size: 0.9rem;
+  --bp-codeblock-lh: 1.5;
+  --bp-codeblock-pad: 0.9rem 1.1rem;
+  --bp-codeblock-margin: var(--bp-air-code) 0 0;
+  --bp-codeblock-radius: 0;
+  --bp-img-margin: 0 0 22px;
+  --bp-img-radius: 3px;
+}
+
+/* ── The reading surface's OWN type. Until pe-w1-reader-editorial-typography
+   these six declarations lived ONLY in root.html.heex, so `--bp-body-size`
+   resolved 18px on every surface and exactly one surface consumed it: Studio.
+   The public /papers reader carries `.bp-paper-surface` on its <main> but read
+   nothing from it and inherited the browser's 16px — the token was single-source
+   and unread, which looks identical to single-source and honoured until you
+   measure. Measured on the rig's 5-paper panel at 1440: 16px/26.4px and 86.7
+   characters per line, against an editorial band of 66-72.
+
+   Declared HERE (portable, both sinks) rather than as surface CHROME, which is
+   the one thing the header excludes from this file — the exclusion is about the
+   Studio PAGE (background, column width, padding), not about the type. Type is
+   the portable half: the reader and the canvas must set a word in the same size
+   or every parity rule below compares against a different baseline.
+
+   Left in root.html.heex deliberately: background/color/font-family (the Studio
+   page paints its own), max-width/padding (each surface owns its column). */
+.bp-paper-surface {
+  font-size: var(--bp-body-size);
+  line-height: var(--bp-body-lh);
+  letter-spacing: var(--bp-body-tracking);
+  /* onum = oldstyle figures: numerals that sit on the prose's x-height instead
+     of standing at cap height mid-sentence. */
+  font-feature-settings: "kern", "liga", "onum";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Block typography (ported from paper.css). These apply to BOTH the
+   View-mode read-only stream rows and the Edit-mode block list, so a
+   paper reads as clean prose in either mode. */
+.bp-paper-surface h1, .bp-paper-surface h2, .bp-paper-surface h3,
+.bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
+  font-family: var(--paper-font-serif);
+  font-weight: var(--bp-heading-weight); color: var(--paper-ink);
+  /* A heading is the widest type on the page, so it runs out of line before
+     prose does: measured in headless Chromium at a 390px viewport, an h1 holding
+     a single unbreakable 23-character word already pushes the document wider
+     than the screen, while the same word in a `<p>` still fits. Ordinary words
+     reach that length in the languages this surface publishes in — Norwegian
+     and German compounds are single words by construction — so the reader who
+     hits it is not holding a malformed document, just a long noun.
+
+     `break-word`, NOT `anywhere`: only `anywhere` participates in min-content
+     sizing, which would let a shrink-to-fit ancestor collapse around a heading
+     that fits perfectly well today. `break-word` acts solely when a word has a
+     whole line to itself and still does not fit, so every layout that was not
+     already overflowing is untouched — verified by diffing every element's
+     rendered geometry at 1280px before and after.
+
+     Automatic hyphenation is deliberately NOT the answer here: `hyphens:
+     manual` is set on prose below as an explicit choice, and turning it on for
+     headings alone would hyphenate display type against that decision. */
+  overflow-wrap: break-word;
+}
+/* Heading margins are intentionally ZERO. The user controls vertical
+   rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
+   margin into the heading itself fights the block model and makes the
+   end result hard to author.
+
+   line-height + letter-spacing values match render.ex `heading_style/2`
+   INLINE values (level1: 1.1 / -0.02em, level2: 1.2, level3: 1.25). The
+   inline wins on the View pane, so the Edit pane CSS must mirror it to
+   keep View ↔ Edit byte-aligned. (Parity audit caught the previous
+   1.3 / -0.01em CSS as visible drift against the inline.) */
+/* Heading vertical rhythm — TOP-only margins so the flat edit ProseMirror
+   (siblings, margins collapse) and the div-wrapped reader (no collapse) land on
+   the SAME spacing: with zero bottom margins, additive==collapsed. This single
+   source feeds both surfaces; the first heading is clamped to 0 by each surface's
+   :first-child rule. */
+.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; }
+/* ── THE DISPLAY VOICE (device 3, charter D29/D36) ────────────────────────────
+   A section head is the one place the paper speaks in its display voice, and
+   that voice is BIG AND LIGHT: ~2.0x the body (36px over 18px), weight 400, a
+   tight 1.15 leading and -0.015em tracking. Size does the work; weight steps
+   back so the head reads as an opening, not a shout — the h1 keeps the shared
+   600 and stays the loudest thing on the page by weight, the h3 keeps 600 and
+   stays the smallest by size, so hierarchy survives at every level.
+
+   `font-weight` reads `--bp-h2-weight` — the PER-STEP channel (tokens.json
+   type.reading.h2.weight → --tok-reading-h2-weight → the bridge above) — and
+   NOT the shared `--bp-heading-weight` the h1–h6 group rule binds. The shared
+   scalar is pinned at 600 by design/validate.mjs and never moves; a level that
+   wants its own voice declares its own weight. Declared on this element rule
+   (same specificity as the group rule, later in source) so it wins on h2 alone.
+
+   `text-wrap: balance` — a two-line head at 36px is a ragged block, and the
+   browser's greedy breaker leaves a lone word on line two more often than not;
+   balance splits the head into lines of roughly equal length so the head is
+   one shape, not a line and a stub. Headings are short (≤6 lines, the balance
+   ceiling in Chromium), so it always applies. Both editor twins carry the
+   identical declarations — view_edit_parity_test.exs §2/§5 pin font-weight
+   and text-wrap across all three files. */
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; }
+.bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+/* h4–h6 (owner ruling 2026-10-03 #63: six heading levels). They step down from
+   the h3 by size on the existing reading tokens, with no new token: h4 sits
+   halfway between h3 and body, h5 is the body size, h6 a tenth smaller. All
+   keep the shared heading weight, so each still reads as a heading. Both editor
+   twins carry the same declarations (view_edit_parity_test). */
+.bp-paper-surface h4 { font-size: calc((var(--bp-h3-size) + var(--bp-body-size)) / 2); line-height: var(--bp-h3-lh); margin: 1.4em 0 0; }
+.bp-paper-surface h5 { font-size: var(--bp-body-size); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; }
+.bp-paper-surface h6 { font-size: calc(var(--bp-body-size) * 0.9); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; }
+/* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
+   A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
+   artifact's device on one element: `--bp-section-beat` of air above the rule
+   (the rule sits INSIDE the heading's border box, so this margin is the gap a
+   reader sees), the rule itself, and `--bp-section-gap` between the rule and the
+   words. It OVERRIDES the 1.9em prose margin on the element rule above, which
+   stays as the rhythm for every OTHER h2 on the surface.
+
+   WHY THIS IS SCOPED AND THE PROSE RULE IS NOT. `h2` is not exclusively a
+   section heading here: component chrome emits bare ones too — `.bp-card` titles
+   inside a grid cell, and (classed) `.bp-diff-title`, `.bp-goal-rail-title`,
+   `.bp-mail-subject`. A card title is not a boundary between arguments, and the
+   element rule cannot tell them apart. Position can: a section head is a block of
+   the DOCUMENT, and every component h2 is nested inside its component.
+
+   THREE LEGS, because the document has three shapes and the law is one:
+     1. `> #paper-body > h2` — the legacy/whole-body reader and the hermetic
+        render rig, which concatenate block HTML directly into the article.
+     2. `> #paper-body > div:not([class]) > h2` — the BLOCK-BACKED reader, where
+        every top-level block is its own keyed stream item
+        (a `div` carrying id + data-block-id, bulldocs_live.ex `phx-update="stream"`). The
+        `:not([class])` is load-bearing: that wrapper carries id + data only,
+        while a `card` block at top level IS a classed div, so this leg reaches
+        the stream item without reaching into the component.
+   The reader's leg 2 is what ships, so the rig renders THAT shape (render.exs
+   mirrors the LiveView wrapper and asserts it) rather than measuring leg 1 and
+   calling the reader proven.
+
+   The EDIT twin — `.bp-paper-editor-body > h2`, the flat ProseMirror document
+   whose heading node is a direct child and admits no wrapper of its own — is the
+   third leg, and lives in the editor bundle beside the other `.bp-paper-editor-body`
+   heading rules (api/assets/paper-editor/src/styles.css), because this file is
+   `.bp-paper-surface`-scoped by its own header. The two are byte-mirrored the same
+   way the h1/h2/h3 margins are, and view_edit_parity_test.exs pins the pair. */
+.bp-paper-surface > #paper-body > h2,
+.bp-paper-surface > #paper-body > div:not([class]) > h2 {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-rule);
+  padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
+}
+/* The SAME device for a level-2 heading that OPENS a `section` container. The
+   container is one box deeper than a bare block (stream item, then the box div
+   compose_section_stack/2 emits), so the two legs above stop one level short of
+   it on the live reader; compose drops the container's rule pair when its first
+   child is a heading precisely so this heading can carry the boundary alone.
+   `:first-child` is load-bearing: an h2 later in the box is a sub-argument, not
+   a boundary. The `.bp-section--wide` legs cover the classed box. Same three
+   declarations, read from the same tokens (view_edit_parity_test.exs §9 pins the
+   bare legs; this one has no Edit twin because the canvas has no section box). */
+.bp-paper-surface > #paper-body > div:not([class]) > div:not([class]) > h2:first-child,
+.bp-paper-surface > #paper-body > .bp-section--wide > h2:first-child,
+.bp-paper-surface > #paper-body > div:not([class]) > .bp-section--wide > h2:first-child {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-rule);
+  padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
+}
+/* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
+   hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
+   of white space; nothing on this surface is justified (text-align stays
+   `start`, ragged right), so all `auto` bought was broken words down the right
+   edge of every paragraph. `manual` still honours an author's own soft hyphen. */
+.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the same `break-word` the heading rule above already
+   takes (`.bp-paper-surface h1..h6`) and for the same reason, with the same
+   deliberate NOT-`anywhere`. Headings were guarded; RUNNING PROSE was not, and
+   running prose is where this codebase's unbreakable tokens actually live: a
+   40-character git SHA, a bare paper URL, a `--flag=value`.
+
+   MEASURED, on the live public reader, not argued from the cascade
+   (/papers/paper-editing-parity-status-2026-09-07 through headless Chromium):
+
+     viewport   gutter   content box   <p> over its own box   document scroll
+     360px      16px     328px         28 paragraphs (worst   392px in a 360px
+                                       376px vs 328px)        viewport — the
+                                                              WHOLE PAGE slid
+                                                              sideways by 32px
+     390px      16px     358px         6 paragraphs           392 vs 390
+
+   The gutter ladder is NOT the defect — it already steps 40/24/16 at 767/479
+   and measured exactly that. The column is the right WIDTH; a word inside it
+   simply had no way to break.
+
+   `break-word` acts only once a word has a whole line to itself and still does
+   not fit, so every column already wide enough for its content is untouched:
+   verified by diffing every rendered element geometry on the live reader at
+   1280px with and without this rule — identical.
+
+   It rides the SHARED surface sheet rather than bulldocs.html.heex on purpose:
+   put it in the reader layout alone and View wraps a line at a different word
+   than Edit, which is the one drift measure_parity_test.exs exists to prevent.
+   `li` is included because a list item is prose in a narrower box than the
+   paragraph beside it. */
+.bp-paper-surface p,
+.bp-paper-surface li { overflow-wrap: break-word; }
+/* Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+   2026-07-31): an exact empty paragraph is never published layout. The engines
+   (walk.ex paragraph/3, blocks/core.ts paragraph) no longer emit `<p></p>` at
+   all; this rule is belt-and-braces for LEGACY CACHED HTML that still carries
+   the scaffold — it must not paint a blank paragraph-height row. View-only by
+   selector: `.bp-paper-editor-body` is untouched, so the editable scaffold
+   stays visible while composing (doctrine invariant 1). */
+.bp-paper-surface p:empty { display: none; }
+/* THE LINK AFFORDANCE — a real underline, not a hue. The at-rest treatment was
+   `text-decoration: none` + `border-bottom: 1px solid var(--paper-accent-soft)`,
+   and `--paper-accent-soft` is alpha 0.10 light / 0.16 dark: composited over the
+   reading ground it computes to 1.14–1.35:1 across the five bp themes — no line
+   at all, leaving COLOUR as the only signal that a word is a link (WCAG 1.4.1).
+   The underline is now the text decoration itself, tinted to 80% of the accent
+   so it reads as ink rather than as a rule. 80% is the measured floor with head-
+   room: the decoration clears 3:1 against `--paper-bg-deep` in all ten
+   theme×scheme pairs (min 3.25:1, ember light), where 75% only just reaches 3.00
+   and 45% peaks at 2.83. `skip-ink: auto` keeps descenders legible and the
+   offset lifts the line clear of the serif baseline.
+   Byte-identical in root.html.heex and assets/paper-editor/src/styles.css — `a`
+   and `a:focus-visible` are in view_edit_parity_test.exs's @parity_elements
+   (§2) and @mirror_elements (§5), so drift on any of the three copies reds.
+   walk.ex's `:email` link clause keeps its own INLINE `text-decoration:underline`
+   (frozen — Outlook has no stylesheet): a deliberate fourth site, not a mirror. */
+.bp-paper-surface a  {
+  color: var(--paper-accent); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);
+  text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+  text-decoration-skip-ink: auto;
+}
+/* Keyboard focus was UNAUTHORED on the prose surface: the only `:focus-visible`
+   rule in this file was the lightbox image's, so a reader tabbing through a
+   paper's links got the UA default ring drawn over accent-coloured type. An
+   accent ring, offset so it never sits on the glyphs. */
+.bp-paper-surface a:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 2px;
+}
+/* Selection was the UA system highlight — a blue that belongs to no theme and
+   fights every one of the five. Tint it with the theme's own soft accent and
+   leave the ink alone so selected prose stays as readable as unselected prose. */
+.bp-paper-surface ::selection { background: var(--paper-accent-soft); color: inherit; }
+/* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
+/* Top-only, like p: a list sits one paragraph-beat below the prose above it and
+   adds nothing below (the next block owns that gap), so a list never doubles it. */
+.bp-paper-surface ul, .bp-paper-surface ol { margin: var(--bp-para-margin-top) 0 0; padding-left: var(--bp-list-indent); }
+.bp-paper-surface li > :is(ul, ol) { margin-top: var(--bp-li-gap); }
+.bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
+.bp-paper-surface ul > li { list-style: disc; }
+.bp-paper-surface ol > li { list-style: decimal; }
+/* Checklist (list block with task:true): no marker, a disabled native checkbox ahead of the text,
+ * done items muted and struck. State is data; the reader never toggles it. */
+.bp-paper-surface ul.bp-checklist { list-style: none; padding-left: 0; }
+.bp-paper-surface .bp-checklist__item { display: flex; align-items: flex-start; gap: 0.55em; list-style: none; }
+.bp-paper-surface .bp-checklist__box { flex: 0 0 auto; margin: 0.35em 0 0; width: 1em; height: 1em; accent-color: var(--paper-accent); }
+.bp-paper-surface .bp-checklist__body { flex: 1 1 auto; min-width: 0; }
+.bp-paper-surface .bp-checklist__item[data-checked="true"] .bp-checklist__body { color: var(--paper-ink-soft); text-decoration: line-through; text-decoration-color: var(--paper-rule); }
+.bp-paper-surface code {
+  font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
+  background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
+}
+.bp-paper-surface pre {
+  font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh);
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
+  border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
+}
+/* The renderer's code slab and diagram frame carry no colour inline
+   (task-2c5d3da1b7f7db25): their ground, ink and rule colour live here. Layout,
+   type and the frame's border width and style stay in the markup. */
+.bp-paper-surface .bp-codeblock { background: var(--paper-bg-deep); color: var(--paper-ink); }
+.bp-paper-surface .bp-diagram { background: var(--paper-bg-deep); border-color: var(--paper-rule); }
+.bp-paper-surface img {
+  display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
+  border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
+}
+
+/* THE ONE FIGCAPTION. Every article <figure> the renderer emits — diagram and
+   asciicast (render/figures.ex), image / child frame (render/compose.ex) — used
+   to carry the SAME ~200 bytes of inline caption styling at three emit sites,
+   and the third copy had drifted: a literal `color:#55635e` where its two
+   siblings read `var(--paper-ink-soft, …)`. On the dark ground that literal is
+   2.97:1 — a contrast FAIL the token-reading copies did not have (7.05:1). One
+   class cannot drift from itself, which is the whole reason this rule exists.
+
+   THE TYPE: serif and ROMAN, not system-ui and italic. A caption sits inside a
+   serif paper and was the one run on the page that changed voice; and italic
+   Iowan at 14px is the weakest glyph set this surface ships. 0.9rem/1.45 keeps
+   the 14.4px the inline styles measured — above the 12px floor below — and
+   --paper-ink-soft is 6.65:1 light / 7.05:1 dark.
+
+   THE MEASURE, NOT THE BAND: a caption is prose and never rides the figure's
+   width, so `--bp-evidence-caption` returns it to a reading measure inside a
+   card that may be 1240px wide.
+
+   LEFT-ALIGNED, NOT CENTRED, and that is a measured choice. `margin-inline:
+   auto` was tried first and is worse everywhere: whenever the figure is NOT
+   broken out — a narrow viewport, the Studio pane, any host without the band —
+   the figure IS the column, so centring pushes the caption into the middle of
+   the column instead of onto the prose's left edge (measured 389.8px off, on
+   the showcase at 1280 in the rig harness). Left-aligned, the caption starts at
+   the figure's own content edge: exactly the prose edge for the unpadded
+   figures, and the card's text inset for the padded diagram card, which is
+   where a caption inside a card belongs.
+
+   The one case this does NOT nail is a figure that HAS broken out to the band:
+   there the caption sits at the band's inset, (band − column)/2 left of the
+   prose. That offset is only computable ON the figure — percentages there
+   resolve against the column — and from inside the caption `var(--bp-evidence-
+   pull)` resolves against the FIGURE, so it yields the figure's own padding,
+   not the column offset. Closing it means moving the breakout off `<figure>`
+   onto an inner wrapper (so the caption is a column-width child), which is a
+   bigger change than this rule and would double-pull any .bp-table/.bp-stats/
+   .bp-chart nested inside a figure. Left-aligned is strictly better than
+   centred in the meantime, and wrong in one case instead of two.
+
+   The :email / default clauses keep their inline <div>: an email client has no
+   stylesheet to carry a class. Both editor surfaces mirror this rule
+   (root.html.heex and assets/paper-editor/src/styles.css) and
+   view_edit_parity_test.exs §2/§5 byte-compare all three. */
+.bp-paper-surface .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
+
+/* The public reader progressively enhances only PortableDoc article images.
+   The renderer emits this data hook in :article mode; email and default output
+   stays a bare image. Keeping the trigger styling here makes focus treatment
+   part of the canonical Paper surface while the dialog itself remains reader
+   chrome in bulldocs.html.heex. */
+.bp-paper-article img[data-bp-lightboxable="true"] {
+  cursor: zoom-in;
+  transition: opacity 140ms ease;
+}
+.bp-paper-article img[data-bp-lightboxable="true"]:hover { opacity: 0.94; }
+.bp-paper-article img[data-bp-lightboxable="true"]:focus-visible {
+  outline: 3px solid var(--paper-accent);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-article img[data-bp-lightboxable="true"] { transition: none; }
+}
+
