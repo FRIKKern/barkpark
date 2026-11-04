@@ -266,10 +266,25 @@ await check("the package extractor fails closed on incomplete text inputs and in
   await assert.rejects(() => extractPackageSurfaceEvidence({ ...syntheticInput, bundleSource: syntheticBundle.replace('static BUILD_SHA = "abcdef123456";', "") }), /BUILD_SHA/);
 });
 
+const staticImportSpecifiers = (source) => {
+  const specifiers = [];
+  for (const [index, line] of source.split("\n").entries()) {
+    if (!/\bimport\b/.test(line)) continue;
+    const match = line.match(/^\s*import\s+(?:(?:[^"']+?)\s+from\s+)?(["'])([^"']+)\1;\s*$/);
+    assert.ok(match, `unsupported or multiline static import at line ${index + 1}`);
+    specifiers.push(match[2]);
+  }
+  return specifiers.sort();
+};
+
 await check("the package extractor has only its three approved static dependencies", () => {
   const source = readFileSync(new URL("../scripts/surface-package.mjs", import.meta.url), "utf8");
-  const imports = [...source.matchAll(/^import[\s\S]*?from\s+["']([^"']+)["'];$/gm)].map((match) => match[1]).sort();
+  const imports = staticImportSpecifiers(source);
   assert.deepEqual(imports, ["../src/contract-surface.mjs", "./writes.mjs", "jsdom"]);
+  assert.throws(() => staticImportSpecifiers('import {\n  readFileSync,\n} from "node:fs";'), /unsupported or multiline static import/);
+  assert.throws(() => staticImportSpecifiers('import "./unapproved.mjs"'), /unsupported or multiline static import/);
+  assert.throws(() => staticImportSpecifiers('const unused = 0; import "./unapproved.mjs";'), /unsupported or multiline static import/);
+  assert.throws(() => staticImportSpecifiers('const dependency = import("./unapproved.mjs");'), /unsupported or multiline static import/);
   assert.doesNotMatch(source, /\bimport\s*\(|node:|Barkpark|host-profile|readerClasses|readerAttributes/);
 });
 
