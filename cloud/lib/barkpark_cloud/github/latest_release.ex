@@ -16,9 +16,15 @@ defmodule BarkparkCloud.GitHub.LatestRelease do
   own: one call every 3 minutes is 20 an hour.
 
   The cache lives in `:persistent_term` on the node that runs the job. It holds
-  the etag, the release, and `observed_at`, the time this node first saw that
-  release. A restart loses it, which costs one full 200 response and resets
-  `observed_at` to the restart time.
+  the etag, the release, the commit its tag points at, and `observed_at`, the
+  time this node first saw that release. A restart loses it, which costs one
+  full 200 response and resets `observed_at` to the restart time.
+
+  The commit is the tag's peeled commit sha, as the tags list reports it under
+  `commit.sha`. `GET /v1/barkparks` serves it on every row as
+  `latest_release_commit` (decision 0011), so a reader can tell a box that runs
+  the latest release from a box that is behind it. It is nil until the first
+  successful read after a boot, and nil when the tag carries no usable sha.
 
   Never raises. Every failure is `{:error, reason}`.
 
@@ -37,7 +43,14 @@ defmodule BarkparkCloud.GitHub.LatestRelease do
     {"accept", "application/vnd.github+json"}
   ]
 
-  @type entry :: %{release: String.t(), observed_at: DateTime.t(), etag: String.t() | nil}
+  @type entry :: %{
+          release: String.t(),
+          commit: String.t() | nil,
+          observed_at: DateTime.t(),
+          etag: String.t() | nil
+        }
+
+  @sha_re ~r/^[0-9a-f]{40}$/
 
   @doc """
   The newest `A.B.C` release, with the time this node first saw it.
@@ -58,7 +71,7 @@ defmodule BarkparkCloud.GitHub.LatestRelease do
       {:ok, %{status: 200, body: body} = resp} ->
         with {:ok, tags} when is_list(tags) <- Jason.decode(body),
              release when is_binary(release) <- max_release(tags) do
-          {:ok, remember(cached, release, etag_of(resp))}
+          {:ok, remember(cached, release, release_commit(tags, release), etag_of(resp))}
         else
           nil -> {:error, :no_release_tags}
           _ -> {:error, :unusable_body}
@@ -103,6 +116,39 @@ defmodule BarkparkCloud.GitHub.LatestRelease do
   end
 
   @doc """
+  The commit sha the `vA.B.C` tag for `release` points at, from a GitHub tags
+  list, or nil when the tag is missing or its sha is not a full lowercase hex
+  sha.
+  """
+  @spec release_commit([map()], String.t()) :: String.t() | nil
+  def release_commit(tags, release) when is_list(tags) and is_binary(release) do
+    name = "v" <> release
+
+    Enum.find_value(tags, fn
+      %{"name" => ^name, "commit" => %{"sha" => sha}} when is_binary(sha) ->
+        sha = String.downcase(sha)
+        if Regex.match?(@sha_re, sha), do: sha
+
+      _ ->
+        nil
+    end)
+  end
+
+  def release_commit(_tags, _release), do: nil
+
+  @doc """
+  The cached latest release and its commit, without a network call. Returns
+  `%{release: nil, commit: nil}` when this node has not read the tags yet.
+  """
+  @spec cached_latest() :: %{release: String.t() | nil, commit: String.t() | nil}
+  def cached_latest do
+    case cached() do
+      %{release: release} = entry -> %{release: release, commit: Map.get(entry, :commit)}
+      _ -> %{release: nil, commit: nil}
+    end
+  end
+
+  @doc """
   Parse `"A.B.C"` or `"vA.B.C"` into an integer 3-tuple, as the box compares.
   """
   @spec parse(term()) :: {:ok, {non_neg_integer(), non_neg_integer(), non_neg_integer()}} | :error
@@ -126,14 +172,14 @@ defmodule BarkparkCloud.GitHub.LatestRelease do
 
   # A new release gets a new `observed_at`. The same release with a new etag
   # (another tag such as cli-v* was pushed) keeps the old one.
-  defp remember(cached, release, etag) do
+  defp remember(cached, release, commit, etag) do
     observed_at =
       case cached do
         %{release: ^release, observed_at: at} -> at
         _ -> DateTime.utc_now()
       end
 
-    entry = %{release: release, observed_at: observed_at, etag: etag}
+    entry = %{release: release, commit: commit, observed_at: observed_at, etag: etag}
     if entry != cached, do: :persistent_term.put(@cache_key, entry)
     entry
   end

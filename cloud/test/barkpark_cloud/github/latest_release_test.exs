@@ -95,6 +95,35 @@ defmodule BarkparkCloud.GitHub.LatestReleaseTest do
     assert LatestRelease.fetch() == {:error, :no_http_client}
   end
 
+  test "keeps the commit the latest release tag points at (decision 0011)" do
+    sha = "e2942e0559e198b706a3bd1ad193f97fd4cae775"
+
+    body =
+      Jason.encode!([
+        %{"name" => "v0.2.38", "commit" => %{"sha" => String.duplicate("a", 40)}},
+        %{"name" => "v0.2.39", "commit" => %{"sha" => String.upcase(sha)}}
+      ])
+
+    {http, _} = scripted([ok(200, body, ~s("e1"))])
+
+    assert {:ok, %{release: "0.2.39", commit: ^sha}} = LatestRelease.fetch(http_client: http)
+    assert LatestRelease.cached_latest() == %{release: "0.2.39", commit: sha}
+  end
+
+  test "a tag without a full sha has no commit, and an empty cache says so" do
+    assert LatestRelease.cached_latest() == %{release: nil, commit: nil}
+
+    assert LatestRelease.release_commit([%{"name" => "v0.2.39"}], "0.2.39") == nil
+
+    assert LatestRelease.release_commit(
+             [%{"name" => "v0.2.39", "commit" => %{"sha" => "e2942e0"}}],
+             "0.2.39"
+           ) == nil
+
+    {http, _} = scripted([ok(200, tags(["v0.2.39"]), ~s("e1"))])
+    assert {:ok, %{release: "0.2.39", commit: nil}} = LatestRelease.fetch(http_client: http)
+  end
+
   test "parse/1 reads A.B.C with or without a v" do
     assert LatestRelease.parse("0.2.34") == {:ok, {0, 2, 34}}
     assert LatestRelease.parse("v0.2.34") == {:ok, {0, 2, 34}}

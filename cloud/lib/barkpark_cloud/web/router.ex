@@ -13980,12 +13980,11 @@ defmodule BarkparkCloud.Web.Router do
       # dr-w24-s2 COMMIT DISTANCE — the control plane's OWN measurement of the
       # commit each box actually serves (`BarkparkCloud.GitHub.CommitDistance`,
       # written hourly by the UpdateStatusWorker), beside the box's release-tag
-      # self-grade above. They are DIFFERENT questions and they disagree today:
-      # prod carries rows reading `commit_distance: 2493, commit_ancestry:
-      # "behind", update_state: "current"` — the tag grade is pinned at `current`
-      # because no release tag has been cut since 2026-07-08, however far `main`
-      # runs ahead. Until this line existed the measurement had ZERO readers: no
-      # serializer, no CLI, no console.
+      # self-grade above. They are DIFFERENT questions and they can disagree: a
+      # box on the newest release tag grades itself `current` while `main` moves
+      # past the tag. Decision 0011 lets a reader treat a box that serves
+      # `latest_release_commit` below as current; this measurement still says
+      # how far `main` is ahead of it.
       #
       # `commit_distance` is NULL for UNMEASURED — an empty `git_commit`, a 404
       # on an unknown sha, and a rate-limit refusal all land NULL, never 0 — so
@@ -13997,6 +13996,14 @@ defmodule BarkparkCloud.Web.Router do
       commit_distance: bp.commit_distance,
       commit_ancestry: bp.commit_ancestry,
       commit_distance_checked_at: bp.commit_distance_checked_at,
+      # Decision 0011: the commit the newest `vA.B.C` tag points at, as Cloud's
+      # ReleaseWatchWorker last read it from GitHub (`GitHub.LatestRelease`).
+      # A reader compares it with `git_commit`. A box serving exactly this
+      # commit runs the latest release, so `bp cloud status` and the console
+      # read it as current even when `commit_ancestry` says main is ahead.
+      # NULL until this node's first tags read after a boot, which takes at
+      # most 3 minutes; a NULL keeps the commit-distance rule.
+      latest_release_commit: BarkparkCloud.GitHub.LatestRelease.cached_latest().commit,
       # isu-w5.2 fleet-autoupdate policy + channel — the console renders the
       # rollout state (enabled/paused/pinned/channel) per row. EXACT names —
       # sibling slices S3/S4 read these off the fleet-list JSON. The in-flight

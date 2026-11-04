@@ -5708,6 +5708,28 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
   assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
   assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+
+  // DECISION 0011 supersedes the rule above for one shape: a box serving the
+  // latest release tag's commit is current, however far main has moved past
+  // the tag. gyl on 2026-11-04: v0.2.39 at e2942e055, 17 commits behind main.
+  const V0239 = "e2942e0559e198b706a3bd1ad193f97fd4cae775";
+  const onRelease = {
+    ...LIVE, update_state: "current", update_running_release: "0.2.39", update_latest_release: "0.2.39",
+    git_commit: V0239, latest_release_commit: V0239, commit_ancestry: "behind", commit_distance: 17,
+  };
+  assert.equal(hooks.onLatestRelease(onRelease), true);
+  assert.equal(hooks.classifyBp(onRelease), "ok",
+    "a box on the latest release must read healthy even when main is ahead of the tag");
+  assert.equal(hooks.bucketOf(onRelease), "healthy");
+  assert.equal(hooks.commitBehindDetail(onRelease), "on the latest release 0.2.39; main is 17 commits ahead of it");
+  assert.equal(hooks.onLatestRelease({ ...onRelease, git_commit: "e2942e055" }), true);
+  assert.equal(hooks.onLatestRelease({ ...onRelease, git_commit: "e2942e" }), false);
+  // A box behind the latest release still reads behind, through either source.
+  assert.equal(hooks.classifyBp({ ...onRelease, git_commit: "1".repeat(40) }), "behind");
+  assert.equal(hooks.classifyBp({ ...onRelease, update_state: "behind", update_latest_release: "0.2.40" }), "behind");
+  // No release commit from the plane, or no served commit: the old rule holds.
+  assert.equal(hooks.classifyBp({ ...onRelease, latest_release_commit: null }), "behind");
+  assert.equal(hooks.classifyBp({ ...onRelease, git_commit: "" }), "behind");
 });
 
 // ── the deploy verdict + diverged, client side (dr-w10-s1 / dr-w24-followup) ──
