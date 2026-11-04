@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -16,7 +16,7 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 
-const { BpPaperEditor } = await import("./index.js");
+const { BpPaperEditor } = await import("../paper-editor/src/index.js");
 assert.ok(BpPaperEditor);
 
 let uuid = 0;
@@ -39,7 +39,7 @@ const context = vm.createContext({
   customElements: window.customElements,
 });
 vm.runInContext(
-  readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
+  readFileSync(new URL("../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"),
   context,
 );
 
