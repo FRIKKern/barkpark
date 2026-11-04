@@ -262,7 +262,11 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest do
 
     # Every seat of the old token is carried, through the mint's `workspaces`.
     assert Enum.sort(FakeBox.seats("tok-successor-1")) == ["acme", "other"]
-    assert [%{"workspaces" => ["other"]}] = FakeBox.mints()
+    assert [%{"workspaces" => ["other"]} = mint] = FakeBox.mints()
+
+    # No `dataset` in the mint: the box would bind the successor to it, and the
+    # operator's `bp setup` token would then 403 on every other dataset.
+    refute Map.has_key?(mint, "dataset")
 
     audit = Repo.get_by!(AuditEvent, target_id: bp.id, action: "barkpark.admin_token_rotated")
     assert audit.team_id == team.id
