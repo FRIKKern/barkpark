@@ -14,17 +14,23 @@
 // assertFolds, the seeded PRNG + generator vocabulary, canonical/normalize, project→
 // reconstruct) live in src/smoke/harness.mjs; each section's own fixtures travel with it.
 //
-//   round-trip.mjs        S0 prose/marks/list round-trips + the S0 projector fold gates
-//   node-views.mjs        S3.x divider/callout/code/diagram/field/sheet/embed projection
+//   round-trip.mjs        S0 prose/marks/list round-trips
+//   run-round-trip.mjs    S0 projector fold gates
+//   node-views*.mjs       S3.x divider/callout/code/diagram/field/sheet/embed projection
 //   field-pickers.mjs     TAIL field-image/field-reference picker cases
 //   echo.mjs              S4a server-echo reconcile + id-stamp
 //   autocomplete-slash.mjs  S-slash direct-insert + P5 command-palette registry/fuzzy
+//   autocomplete-compound-presets.mjs  compound + section-preset insert gates
 //   projection-fuzz.mjs   the 1000+1000 load-identity / edit-fold property gates
 //   markdown.mjs          the blocks⇄markdown converter cases + the 2000-iter fuzz
 //   source-mode.mjs       P5 markdown source-mode realignment gates
 
 import "./smoke/round-trip.mjs";
+import "./smoke/run-round-trip.mjs";
 import "./smoke/node-views.mjs";
+import "./smoke/node-views-code-diagram.mjs";
+import "./smoke/node-views-fields.mjs";
+import "./smoke/node-views-readonly-action.mjs";
 import "./smoke/sections.mjs";
 import "./smoke/cards.mjs";
 import "./smoke/note.mjs";
@@ -32,6 +38,7 @@ import "./smoke/stage.mjs";
 import "./smoke/field-pickers.mjs";
 import "./smoke/echo.mjs";
 import "./smoke/autocomplete-slash.mjs";
+import "./smoke/autocomplete-compound-presets.mjs";
 import "./smoke/projection-fuzz.mjs";
 import "./smoke/markdown.mjs";
 import "./smoke/source-mode.mjs";
