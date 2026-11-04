@@ -5,7 +5,7 @@ import { gridToVisible, visibleToGrid, PLACEHOLDER_CELL } from "./table-grid.js"
 // ── table ⇄ canvas nested node tree ──────────────────────────────────────────
 //
 // The `table` block ⇄ the bpTable > bpTableRow > bpTableHeaderCell|bpTableCell node
-// tree. Block shape (compose.ex:406-425): { type:"table", rows:[[cell,…],…], head:[cell,
+// tree. Block shape (compose.ex): { type:"table", rows:[[cell,…],…], head:[cell,
 // …]? }. `rows` is a list of body rows; `head` is an OPTIONAL single header row (a list
 // of cells). A cell is an INLINE array — the SAME shape a paragraph/callout body carries
 // — so cell↔node uses inlineArrayToTiptap / tiptapInlineToPd verbatim. The header row is
