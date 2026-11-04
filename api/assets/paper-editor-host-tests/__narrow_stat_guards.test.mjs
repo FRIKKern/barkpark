@@ -93,6 +93,8 @@
 // is redundant; removing either re-opens the defect, at 390px and at 320px.
 // With both, `npm run narrow:render` at `BP_NARROW_WIDTHS=390,320` is ALL PASS.
 //
+// The shared stylesheet is copied verbatim into frozen SDK archives. Its guard
+// citations retain this suite's earlier package path until those archives are recut.
 // Run: node ../paper-editor-host-tests/__narrow_stat_guards.test.mjs
 
 import assert from "node:assert/strict";
