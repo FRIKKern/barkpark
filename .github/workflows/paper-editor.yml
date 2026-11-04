@@ -266,6 +266,7 @@ jobs:
           node ../paper-editor-host-tests/save-ack-mounted.test.mjs
           node ../paper-editor-host-tests/sheet-embed-retarget-audit.test.mjs
           node ../paper-editor-host-tests/canvas-shell-parity.test.mjs
+          node ../paper-editor-host-tests/testing-ground-traps-goldens.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
