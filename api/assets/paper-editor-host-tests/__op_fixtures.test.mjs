@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { applyOps } from "./smoke/harness.mjs";
+import { applyOps } from "../paper-editor/src/smoke/harness.mjs";
 import {
   buildCardBodyOp,
   buildTableCellsOp,
@@ -8,9 +8,9 @@ import {
   tableProjection,
   tableProjectionMatchesAction,
   tableProjectionMatchesCells,
-} from "./convert.js";
+} from "../paper-editor/src/convert.js";
 
-const dir = new URL("../../../priv/portable_doc/goldens/ops/", import.meta.url);
+const dir = new URL("../../priv/portable_doc/goldens/ops/", import.meta.url);
 const fixtures = Object.fromEntries(readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => {
   const fixture = JSON.parse(readFileSync(new URL(name, dir), "utf8"));
   return [fixture.op.op, fixture];

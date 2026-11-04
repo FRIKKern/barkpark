@@ -15,10 +15,10 @@
 // remove-block (the assertion can fail), and every non-textblock block node in
 // the canvas schema is reached by the corpus (a node no stored block reaches
 // fails the run).
-// Run: node src/canvas/__data_loss_key_matrix_mounted.test.mjs
+// Run: node ../paper-editor-host-tests/__data_loss_key_matrix_mounted.test.mjs
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -44,12 +44,12 @@ window.Range.prototype.getClientRects ||= () => [];
 window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
 window.Element.prototype.getClientRects ||= () => [];
 
-await import("./index.js");
-const { NodeSelection, TextSelection } = await import("@tiptap/pm/state");
+await import("../paper-editor/src/canvas/index.js");
+const { NodeSelection, TextSelection } = await import("../paper-editor/node_modules/@tiptap/pm/dist/state/index.js");
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ── the corpus ──────────────────────────────────────────────────────────────
-const GOLDEN_DIR = new URL("../../../../../js/packages/react/tests/fixtures/pd-golden/", import.meta.url);
+const GOLDEN_DIR = new URL("../../../js/packages/react/tests/fixtures/pd-golden/", import.meta.url);
 const corpus = readdirSync(GOLDEN_DIR)
   .filter((f) => f.endsWith(".golden.json"))
   .sort()

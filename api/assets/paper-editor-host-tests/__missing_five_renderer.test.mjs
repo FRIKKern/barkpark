@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
-import { diffShapes, shapeOf } from "../../../../priv/portable_doc/conformance/conformance.mjs";
-import { runToOps, runToTiptap } from "./run-convert.js";
+import { JSDOM } from "./jsdom.mjs";
+import { diffShapes, shapeOf } from "../../priv/portable_doc/conformance/conformance.mjs";
+import { runToOps, runToTiptap } from "../paper-editor/src/canvas/run-convert.js";
 
 const TYPES = ["arrayOf", "codelist", "composite", "localizedText", "paper-links", "pre-gate-badge"];
 const fixtures = TYPES.map((type) => {
-  const path = new URL(`../../../../priv/portable_doc/goldens/blocks/${type}.golden.json`, import.meta.url);
+  const path = new URL(`../../priv/portable_doc/goldens/blocks/${type}.golden.json`, import.meta.url);
   const golden = JSON.parse(readFileSync(path, "utf8"));
   return {
     type,
@@ -41,7 +41,7 @@ globalThis.CSS ||= { escape: String };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 window.Range.prototype.getClientRects = () => [];
 window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0 });
-await import("../index.js");
+await import("../paper-editor/src/index.js");
 
 try {
   for (const { type, block, html } of fixtures) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 // Whole-inventory no-data-loss round trip at the canvas seam (the click-to-edit
 // census property, pinned in-repo): mount ONE canvas holding every pd-parity
@@ -21,9 +21,9 @@ window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 
 const fetchMock = async () => ({ ok: true, json: async () => ({ documents: [] }) });
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
-await import("../index.js");
+await import("../paper-editor/src/index.js");
 
-const GOLD = new URL("../../../../test/support/fixtures/pd-parity/", import.meta.url);
+const GOLD = new URL("../../test/support/fixtures/pd-parity/", import.meta.url);
 const blocks = [];
 for (const f of readdirSync(GOLD).sort()) {
   const g = JSON.parse(readFileSync(new URL(f, GOLD), "utf8"));

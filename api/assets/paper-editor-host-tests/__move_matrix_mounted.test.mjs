@@ -25,9 +25,9 @@
 // any original block.
 // Control: a paste that carries only the plain text of a cut block IS reported
 // as not restored, so the round-trip assertion can fail.
-// Run: node src/canvas/__move_matrix_mounted.test.mjs
+// Run: node ../paper-editor-host-tests/__move_matrix_mounted.test.mjs
 import { readdirSync, readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -53,16 +53,16 @@ window.Range.prototype.getClientRects ||= () => [];
 window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
 window.Element.prototype.getClientRects ||= () => [];
 
-await import("./index.js");
-const { docToBlocks } = await import("./run-convert.js");
-const { NodeSelection, TextSelection } = await import("@tiptap/pm/state");
+await import("../paper-editor/src/canvas/index.js");
+const { docToBlocks } = await import("../paper-editor/src/canvas/run-convert.js");
+const { NodeSelection, TextSelection } = await import("../paper-editor/node_modules/@tiptap/pm/dist/state/index.js");
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 const canonical = (v) => JSON.stringify(v, (k, val) =>
   val && typeof val === "object" && !Array.isArray(val)
     ? Object.fromEntries(Object.keys(val).sort().map((key) => [key, val[key]])) : val);
 
 // ── the corpus (the key matrix's) ───────────────────────────────────────────
-const GOLDEN_DIR = new URL("../../../../../js/packages/react/tests/fixtures/pd-golden/", import.meta.url);
+const GOLDEN_DIR = new URL("../../../js/packages/react/tests/fixtures/pd-golden/", import.meta.url);
 const corpus = readdirSync(GOLDEN_DIR)
   .filter((f) => f.endsWith(".golden.json"))
   .sort()
