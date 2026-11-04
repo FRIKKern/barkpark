@@ -695,9 +695,114 @@ jobs:
             sleep "$RETRY_SLEEP_SECONDS"
           done
 
-  instance:
+  instance-pause:
+    # ── IS GUERRILLA'S AUTOUPDATE PAUSED IN CLOUD? ───────────────────────────
+    #
+    # `bp cloud autoupdate pause guerrilla` stops Cloud's rollout from updating
+    # the box. Before this job the push deploy below ignored that flag and
+    # deployed guerrilla over SSH on every relevant merge. This job reads the
+    # flag first, and the `instance` job skips while it is true.
+    #
+    # THE READ uses the seam record-delivery already uses: SSH to the control
+    # plane with DEPLOY_SSH_KEY, take WORKER_TOKEN from the running container,
+    # and call Cloud's own API, `GET /v1/internal/barkparks`, from that host.
+    # No new secret. The token never leaves the control plane and is never
+    # printed. The row is the one whose `host` equals GUERRILLA_HOST.
+    #
+    # PUSH ONLY. A workflow_dispatch is a person asking for this deploy by
+    # name, so it deploys whatever the flag says.
+    #
+    # FAILS OPEN. When the state cannot be read (SSH, container, token, HTTP,
+    # no matching row, or a control plane that does not serve the field yet)
+    # this job warns and the deploy runs as it did before the check existed.
+    # Every command is guarded so the job itself does not fail, and `instance`
+    # also runs when it does (`!cancelled()` below).
     needs: changes
-    if: needs.changes.outputs.instance == 'true'
+    if: needs.changes.outputs.instance == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 3
+    outputs:
+      paused: ${{ steps.read.outputs.paused }}
+    steps:
+      - id: read
+        name: Read guerrilla's autoupdate pause state from Cloud
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        run: |
+          set +e
+          paused=false
+          reason=""
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
+          # Runs on the control plane. It prints KEY=value lines and always
+          # exits 0, so this step branches on what it says, not on its rc.
+          REMOTE='set -u
+          CID="$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)"
+          if [ -z "$CID" ]; then echo "PAUSE_ERROR=no_control_plane_container"; exit 0; fi
+          WT="$(docker exec "$CID" printenv WORKER_TOKEN)"
+          if [ -z "$WT" ]; then echo "PAUSE_ERROR=empty_worker_token"; exit 0; fi
+          F="$(mktemp)"
+          CODE="$(curl -s -o "$F" -w "%{http_code}" --max-time 30 -H "authorization: Bearer $WT" https://barkpark.cloud/v1/internal/barkparks)"
+          echo "PAUSE_CURL_RC=$?"
+          echo "PAUSE_HTTP=$CODE"
+          echo "PAUSE_BODY=$(tr -d "\n" < "$F")"
+          rm -f "$F"
+          exit 0'
+          if [ -z "$CP_HOST" ] || [ -z "$GUERRILLA_HOST" ]; then
+            reason="CP_HOST or GUERRILLA_HOST is not set"
+          elif ! out="$($SSH "root@${CP_HOST}" "$REMOTE")"; then
+            reason="the control plane could not be reached over SSH"
+          else
+            err="$(printf '%s\n' "$out" | sed -n 's/^PAUSE_ERROR=//p')"
+            http="$(printf '%s\n' "$out" | sed -n 's/^PAUSE_HTTP=//p')"
+            curl_rc="$(printf '%s\n' "$out" | sed -n 's/^PAUSE_CURL_RC=//p')"
+            body="$(printf '%s\n' "$out" | sed -n 's/^PAUSE_BODY=//p')"
+            if [ -n "$err" ]; then
+              reason="$err"
+            elif [ "$curl_rc" != "0" ] || [ "$http" != "200" ]; then
+              reason="GET /v1/internal/barkparks answered http=${http:-none} curl_rc=${curl_rc:-none}"
+            else
+              # true / false for the matching row, "absent" when the row has no
+              # such key (a control plane older than the field), "none" when no
+              # row has this host.
+              state="$(printf '%s' "$body" | jq -r --arg h "$GUERRILLA_HOST" '
+                [.barkparks[]? | select(.host == $h)] as $rows
+                | if ($rows | length) == 0 then "none"
+                  elif any($rows[]; .autoupdate_paused == true) then "true"
+                  elif all($rows[]; has("autoupdate_paused")) then "false"
+                  else "absent" end' 2>/dev/null)"
+              case "$state" in
+                true) paused=true ;;
+                false) : ;;
+                none) reason="no Cloud row has guerrilla's host" ;;
+                absent) reason="Cloud does not serve autoupdate_paused yet" ;;
+                *) reason="the fleet list did not parse" ;;
+              esac
+            fi
+          fi
+          rm -f /tmp/deploy_key
+          if [ "$paused" = "true" ]; then
+            echo "::notice title=guerrilla deploy skipped::guerrilla's autoupdate is paused in Cloud, so this push does not deploy it. Run 'bp cloud autoupdate resume guerrilla' to deploy again."
+            echo "guerrilla autoupdate: PAUSED in Cloud. The instance deploy is skipped." >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "$reason" ]; then
+            echo "::warning title=guerrilla pause state unknown::could not read guerrilla's autoupdate pause state from Cloud (${reason}). Deploying as before."
+          else
+            echo "guerrilla autoupdate is not paused in Cloud. Deploying."
+          fi
+          echo "paused=$paused" >> "$GITHUB_OUTPUT"
+          exit 0
+
+  instance:
+    needs: [changes, instance-pause]
+    # `!cancelled()` so a skipped or failed instance-pause does not skip this
+    # job. Only a successful read of a paused flag skips it.
+    if: >-
+      !cancelled() && needs.changes.outputs.instance == 'true' &&
+      needs.instance-pause.outputs.paused != 'true'
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -2068,7 +2173,7 @@ jobs:
     # and a current box says GREEN-BECAUSE-SHIPPED. An unageable strand is
     # CANNOT READ, exit 3.
     name: Production serves the newest deploy-relevant main commit
-    needs: [changes, control-plane, instance]
+    needs: [changes, control-plane, instance, instance-pause]
     # THE PRECONDITION IS A RULE NOW, NOT AN ENUMERATION (task-c5955c660c7b9e55).
     #
     # It used to read `(control-plane success || instance success)`. That was a
@@ -2109,6 +2214,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CP_RESULT: ${{ needs.control-plane.result }}
           INSTANCE_RESULT: ${{ needs.instance.result }}
+          # "true" only when instance-pause read guerrilla's autoupdate as
+          # paused in Cloud. A paused box is not owed this run's commits.
+          INSTANCE_PAUSED: ${{ needs.instance-pause.outputs.paused }}
         run: |
           # shellcheck disable=SC1091
           . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
@@ -2200,10 +2308,16 @@ jobs:
           # adjudicator needs to tell "the box is behind" from "the box would
           # not say", and a substring match on prose cannot carry that.
           inst_state=absent
-          if body="$(bp_curl_body -s --max-time 15 https://guerrilla.barkpark.cloud/status.json)"; then
+          if [ "${INSTANCE_PAUSED:-}" != "true" ] && body="$(bp_curl_body -s --max-time 15 https://guerrilla.barkpark.cloud/status.json)"; then
             inst_sha="$(printf '%s' "$body" | jq -er '.commit // empty' 2>/dev/null)" || inst_sha=""
           fi
-          if [ -z "$inst_sha" ]; then
+          if [ "${INSTANCE_PAUSED:-}" = "true" ]; then
+            # The push deploy skipped guerrilla on purpose (instance-pause), so
+            # a commit it lacks is not a strand. Not read, not green: the
+            # detail says PAUSED.
+            echo "content instance: autoupdate PAUSED in Cloud, so this run did not deploy it and it is not owed this run's commits"
+            detail="${detail}instance: PAUSED (autoupdate paused in Cloud). "
+          elif [ -z "$inst_sha" ]; then
             echo "::warning::the content instance did not say what it serves — UNCHECKED, not green"
             detail="${detail}instance: UNCHECKED (/status.json gave no commit). "
             inst_state=unchecked

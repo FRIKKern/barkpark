@@ -52,7 +52,6 @@ defmodule BarkparkCloud.Registry.Adoption do
 
   @cloud_label "barkpark cloud admin"
   @project "default"
-  @dataset "production"
 
   @typedoc "Why an adoption was refused. Nothing is stored on any of these."
   @type refusal ::
@@ -245,11 +244,14 @@ defmodule BarkparkCloud.Registry.Adoption do
   defp blank_to(v, default) when is_binary(v), do: if(String.trim(v) == "", do: default, else: v)
   defp blank_to(_, default), do: default
 
+  # The body names no `dataset`. The box binds a token to one dataset when the
+  # mint names one (`dataset_bound`), and this token is the one `bp setup
+  # --target cloud` saves as the operator's server token. A bound token answers
+  # 403 on every other dataset of a box the operator owns.
   defp mint_cloud_credential(target, workspace, token) do
     body = %{
       label: @cloud_label,
       permissions: ["read", "write", "admin"],
-      dataset: @dataset,
       no_expiry: true
     }
 

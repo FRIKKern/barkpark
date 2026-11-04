@@ -1724,7 +1724,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `merge_pressure/2` gains `service_restarts`, `service_restarts_count` and
   # `service_restarts_window_s`. MEASURED by the PIN CO-EDIT arm on this branch
   # off origin/main ("181 -> 184").
-  @emitted_pinned 184
+  # 184 -> 185 (task-7cafe3817d21eda6, decision 0011): `barkpark_json/6` emits
+  # ONE new top-level key, `latest_release_commit`. MEASURED by the PIN
+  # CO-EDIT arm ("184 -> 185").
+  @emitted_pinned 185
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2139,7 +2142,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `refused`, `role`, `token` and `workspace` ride existing names and move
   # the SITE register, and `restore` is newly duplicated. MEASURED by the PIN
   # CO-EDIT arm.
-  @go_tag_pinned 430
+  # 430 -> 431 (task-7cafe3817d21eda6, decision 0011): `Barkpark` decodes ONE
+  # new NAME, `latest_release_commit`. MEASURED by the PIN CO-EDIT arm.
+  # 431 -> 437 (bp barkparks backfill-media-sha1): the new
+  # internal/cloudclient/media_sha1_backfill.go decodes `MediaSha1Backfill`
+  # and its reply. Six new NAMES ride with it. MEASURED by the PIN CO-EDIT arm.
+  @go_tag_pinned 437
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2219,6 +2227,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # NEWLY DUPLICATED, 1 -> 2: `AdoptRequest.AdminToken` (the box token the
     # caller sends; Credentials.AdminToken is the other site).
     "admin_token" => 2,
+    # media_sha1_backfill.go: NEWLY DUPLICATED, 1 -> 2.
+    "applied" => 2,
+    # media_sha1_backfill.go: NEWLY DUPLICATED, 1 -> 2.
+    "apply" => 2,
     "artifact_sha256" => 2,
     "artifact_url" => 2,
     "as_of" => 5,
@@ -2230,7 +2242,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # AdoptResult / AdoptStep, the POST /v1/barkparks/adopt envelope).
     # NEWLY DUPLICATED, 1 -> 2: `AdoptResult.Barkpark`, the adopted row.
     "barkpark" => 2,
-    "barkpark_id" => 6,
+    # media_sha1_backfill.go: 6 -> 7.
+    "barkpark_id" => 7,
     # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
     "basis" => 7,
     "became_live_at" => 2,
@@ -2325,7 +2338,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "covering_bound" => 2,
     "covered" => 2,
     "current_deployment_id" => 2,
-    "dataset" => 2,
+    # media_sha1_backfill.go: 2 -> 4.
+    "dataset" => 4,
     # Crossed INTO this register in W6 S4 (declared ONCE before the host-space
     # report landed, twice now): MetricsSpace.DBSize joined the existing
     # `db_size` declaration. Same crossing for `reported_at`, `top_relations`
@@ -2379,7 +2393,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # /v1/tokens PAT surface). `PAT.ExpiresAt` joins the one
     # existing declaration elsewhere in the package — NEWLY DUPLICATED, 1 -> 2.
     "expires_at" => 2,
-    "failed" => 2,
+    # media_sha1_backfill.go: 2 -> 3.
+    "failed" => 3,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
     "failure_class" => 3,
     "failure_rate" => 2,
@@ -2404,7 +2419,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). `PAT.ID`, 14 -> 15.
-    "id" => 16,
+    # media_sha1_backfill.go: 16 -> 17.
+    "id" => 17,
     "image_tag" => 2,
     "in_flight" => 2,
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
@@ -2419,6 +2435,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "kind" => 5,
     "label" => 7,
     "last_seen_at" => 2,
+    # media_sha1_backfill.go: NEWLY DUPLICATED, 1 -> 2.
+    "limit" => 2,
     "live" => 2,
     # dr-w16-bl-live-per-attempt-reaches-the-site-owner: NEWLY DUPLICATED, 1 -> 2.
     # `DeployCensusSite.LiveRate` joins `DeployCensus`'s fleet-level declaration.
@@ -2492,7 +2510,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one reason site (10 -> 11). `SiteBuildLogRecord.Reason` — the CLOSED relay
     # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Reason` — the closed refusal vocabulary the bytes reader names instead of inspecting a term.
-    "reason" => 13,
+    # media_sha1_backfill.go: 13 -> 14.
+    "reason" => 14,
     "refused" => 5,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
@@ -2609,6 +2628,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "trigger" => 3,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Truncated` joins the single existing declaration — whether the tail is a prefix of the log.
     "truncated" => 2,
+    # media_sha1_backfill.go: NEWLY DUPLICATED, 1 -> 2.
+    "unhashed" => 2,
     # task-9d72b5f86487cf9b: 2 -> 3. `ServiceRestart.Unit`, the systemd unit
     # the restart happened to.
     "unit" => 3,
@@ -2627,7 +2648,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # task-5283ad9f9238f7fe: 2 -> 3, `AdoptResult.Adopted.Workspace` (internal/cloudclient/adopt.go).
     # task-c6185553d0bd7869: 4 -> 6, the restored seat row and the refused row
     # in internal/cloudclient/token_seat_restore.go.
-    "workspace" => 6
+    # media_sha1_backfill.go: 6 -> 8.
+    "workspace" => 8
   }
 
   # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
@@ -2664,7 +2686,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
@@ -2719,8 +2741,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 71 -> 74 (task-9d72b5f86487cf9b): the three service_restarts keys land in
   # `merge_pressure/2`'s guarded clause, which only the :when-unwrapping
   # walker sees, so `blind` stays put. MEASURED by the PIN CO-EDIT arm.
-  @barkpark_family_keys 74
-  @barkpark_family_keys_blind 52
+  # 74/52 -> 75/53 (task-7cafe3817d21eda6, decision 0011):
+  # `latest_release_commit` is a plain key in the base literal, so BOTH walkers
+  # see it and the pair moves together. MEASURED by the PIN CO-EDIT arm.
+  @barkpark_family_keys 75
+  @barkpark_family_keys_blind 53
 
   # ---------------------------------------------------------------------------
 
@@ -2816,7 +2841,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     #
     # 51 -> 52 (task-92b443a2c78a914f, a failed self-update's phase + tail): `update_last_failure` joins the base
     # literal (not the pipeline), which this literal number counts too.
-    assert MapSet.size(p.top) == 52
+    #
+    # 52 -> 53 (task-7cafe3817d21eda6, decision 0011): `latest_release_commit`
+    # joins the base literal.
+    assert MapSet.size(p.top) == 53
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure deploy_rate site_deploy) do

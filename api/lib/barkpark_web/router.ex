@@ -3293,6 +3293,13 @@ defmodule BarkparkWeb.Router do
     # `token_minted` audit rows, never from the request; see
     # `Barkpark.Auth.TokenSeatRestore`. Dry run unless the body says apply.
     post("/tokens/:id/seats/restore", TokenSeatRestoreController, :create)
+
+    # Hash the media files born before `media_files.sha1`, the backfill
+    # `Barkpark.Release.backfill_media_sha1/1` runs from a shell. Barkpark Cloud
+    # calls it with the admin token it holds, for a box nobody has a shell on.
+    # A dry run unless the body says apply; an apply hashes one page and
+    # answers the cursor for the next. See `Barkpark.Media.Sha1Backfill`.
+    post("/media/sha1-backfill", MediaSha1BackfillController, :create)
   end
 
   # Organizations and their OIDC sign-in, set up without a server shell

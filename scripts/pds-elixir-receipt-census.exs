@@ -1196,6 +1196,7 @@ defmodule PDS.Census do
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/admin/tokens/:id/seats/restore", "BarkparkWeb.TokenSeatRestoreController", :create, :status_only_receipt},
+    {:post, "/v1/admin/media/sha1-backfill", "BarkparkWeb.MediaSha1BackfillController", :create, :status_only_receipt},
     # OrgSsoController (task-25386fa77a664587): each action renders the stored row it
     # wrote (org, connection with client_secret_set, domain with verified) or
     # `deleted: true`, so success is read off the body, not the status alone.

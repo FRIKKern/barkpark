@@ -137,7 +137,12 @@ defmodule BarkparkCloud.Web.RouterAdoptTest do
       mint = Enum.at(reqs, 2)
 
       assert %{"label" => "barkpark cloud admin", "permissions" => ["read", "write", "admin"]} =
-               Jason.decode!(mint.body)
+               mint_body = Jason.decode!(mint.body)
+
+      # No `dataset` in the mint: the box would bind Cloud's credential to it,
+      # and `bp setup --target cloud` saves that credential as the operator's
+      # server token, which would then 403 on every other dataset.
+      refute Map.has_key?(mint_body, "dataset")
 
       assert Repo.exists?(
                from(j in ProvisionJob,

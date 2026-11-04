@@ -3231,7 +3231,7 @@ func doRequestStreamCT(method, rawURL string, headers map[string]string, body io
 	// whose hand-built body omitted request_id still renders one.
 	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
-	respBody, err := readCapped(resp.Body, maxResponseBytes)
+	respBody, err := readCapped(resp.Body, responseByteCap)
 	if err != nil {
 		return resp.StatusCode, nil, ct, err
 	}
@@ -3316,7 +3316,7 @@ func doRequestUsing(client *http.Client, method, rawURL string, headers map[stri
 	// the headers away on the way back to their ~40 call sites.
 	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
-	respBody, err := readCapped(resp.Body, maxResponseBytes)
+	respBody, err := readCapped(resp.Body, responseByteCap)
 	if err != nil {
 		return resp.StatusCode, nil, ct, resp.Header, err
 	}
@@ -3326,6 +3326,20 @@ func doRequestUsing(client *http.Client, method, rawURL string, headers map[stri
 // maxResponseBytes caps how much of an HTTP response body the generic request
 // paths will buffer.
 const maxResponseBytes = 64 << 20 // 64MB — generous cap for query/doc bodies; hostile or runaway responses fail loudly instead of OOMing
+
+// responseByteCap is the cap doRequest and doRequestStream apply. It equals
+// maxResponseBytes and is a variable only so a test can lower it and make the
+// --all walk meet an over-cap page without allocating 64MB.
+var responseByteCap int64 = maxResponseBytes
+
+// responseTooLargeError is readCapped's refusal of an over-cap body. It is a
+// type so the --all walk can tell "this page was too big" from every other
+// transport failure and retry the same offset with fewer rows.
+type responseTooLargeError struct{ max int64 }
+
+func (e *responseTooLargeError) Error() string {
+	return fmt.Sprintf("response exceeds %d bytes — refusing to parse a truncated body", e.max)
+}
 
 // readCapped reads at most max bytes from r, failing loudly rather than silently
 // truncating: it reads one byte past the cap so an over-limit body is detected
@@ -3337,7 +3351,7 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(b)) > max {
-		return nil, fmt.Errorf("response exceeds %d bytes — refusing to parse a truncated body", max)
+		return nil, &responseTooLargeError{max: max}
 	}
 	return b, nil
 }
@@ -4168,6 +4182,45 @@ func walkPageSizeFor(cmd manifest.Command) int {
 	return defaultWalkPageSize
 }
 
+// walkPageByteTarget is the response size an --all page aims for: a quarter
+// of the client's byte cap. Pensum's session records average about 150 kB a
+// row with their payload, so the query route's 999-row window asked for about
+// 150 MB in one response and readCapped refused it (2026-11-04). A page sized
+// to a quarter of the cap leaves room for rows that are larger than the
+// previous page's average.
+func walkPageByteTarget() int64 { return responseByteCap / 4 }
+
+// shrinkWalkPageSize picks the next window after a page overflowed the cap.
+// The client stops reading at the cap, so it never learns how far over the
+// body was. Pensum's 999-row page was more than twice the cap, and a quarter
+// of 999 rows was still 37 MB. So the window drops to a sixteenth, a quarter
+// of the target if the body had been exactly at the cap, and
+// nextWalkPageSize grows it back from the real size of the next page. It
+// never goes below one row.
+func shrinkWalkPageSize(pageSize int) int {
+	return max(pageSize/16, 1)
+}
+
+// nextWalkPageSize sizes the next window from the bytes the last one cost. It
+// scales the row count toward walkPageByteTarget, grows at most twice per page
+// so one page of small rows cannot jump straight back to an over-cap window,
+// and never exceeds the caller's own page size.
+func nextWalkPageSize(pageSize, bodyBytes, maxPageSize int) int {
+	if bodyBytes <= 0 {
+		return pageSize
+	}
+	n := int(int64(pageSize+1) * walkPageByteTarget() / int64(bodyBytes))
+	return min(max(n, 1), 2*pageSize, maxPageSize)
+}
+
+// noteWalkSummary prints, under -v, how many requests an --all walk made, the
+// rows it kept and the bytes it read.
+func noteWalkSummary(out *writer, pages, rows int, bytes int64) {
+	if out.verbose {
+		out.errf("bp: --all fetched %d pages, %d rows, %d bytes", pages, rows, bytes)
+	}
+}
+
 func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, opts paginatedAllOpts) int {
 	if opts.pageSize <= 0 {
 		opts.pageSize = defaultWalkPageSize
@@ -4243,9 +4296,25 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// returning every row). So the warning waits for the next page and is
 	// printed only when that page has rows. -1 = nothing pending.
 	pendingUnverified := -1
+	// The window may shrink or regrow page by page (nextWalkPageSize), but
+	// never past the size the caller asked for.
+	maxPageSize := pageSize
+	pages, walkBytes := 0, int64(0)
 	for {
 		pageURL := withOffsetLimit(baseURL, offset, pageSize+1)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
+		var tooLarge *responseTooLargeError
+		if errors.As(err, &tooLarge) && pageSize > 1 {
+			// The page did not fit under the client's byte cap. Ask for the
+			// SAME offset again with fewer rows. Nothing from this page was
+			// kept, so the anchor and the stall check are untouched.
+			smaller := shrinkWalkPageSize(pageSize)
+			if out.verbose {
+				out.errf("bp: --all page at offset %d exceeded %d bytes with %d rows; retrying with %d rows", offset, tooLarge.max, pageSize+1, smaller+1)
+			}
+			pageSize = smaller
+			continue
+		}
 		if err != nil {
 			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 				out.userErr("request failed: %v", err)
@@ -4258,6 +4327,8 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			renderError(out, ae)
 			return ae.exit, false
 		}
+		pages++
+		walkBytes += int64(len(respBody))
 		rows, k := extractListRows(unwrapResult(respBody))
 		// PDS wave 27 — the reader half of the epic's law. extractListRows
 		// returns the "" sentinel for ANY body it cannot read as a list
@@ -4360,6 +4431,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			if offset == 0 && filter == nil {
 				// The verbatim body still carries page.dataset_ambiguous, so the
 				// machine half needs nothing here — only the prose half.
+				noteWalkSummary(out, pages, len(docs), walkBytes)
 				warnIfDatasetTwinsWithheld(out, unwrapResult(respBody))
 				renderSuccess(out, cmd, respBody)
 				return exitOK, false
@@ -4378,7 +4450,12 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		}
 		anchor = lookahead
 		offset += pageSize
+		// Size the next window from this page's bytes. The lookahead row
+		// still lands at exactly the next offset, so a resized page keeps the
+		// boundary anchored.
+		pageSize = nextWalkPageSize(pageSize, len(respBody), maxPageSize)
 	}
+	noteWalkSummary(out, pages, len(all), walkBytes)
 
 	// key is always set here: the loop runs at least once and refuses (above)
 	// any page it could not read a key from, so an unknown envelope can no

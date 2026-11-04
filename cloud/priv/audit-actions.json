@@ -55,6 +55,7 @@
     { "verb": "barkpark.adopted", "label": "attached an existing Barkpark" },
     { "verb": "barkpark.admin_token_rotated", "label": "rotated the admin token Cloud holds" },
     { "verb": "barkpark.token_seats_restored", "label": "restored a box token's workspace seats" },
+    { "verb": "barkpark.media_sha1_backfilled", "label": "hashed a box's media files that had no SHA-1" },
     { "verb": "barkpark.push_relay_provisioned", "label": "provisioned a git push relay" },
     {
       "verb": "barkpark.credentials_refused",
