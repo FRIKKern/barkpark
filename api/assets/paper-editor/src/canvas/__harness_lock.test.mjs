@@ -21,7 +21,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../../..");
 const HARNESS_DIR = "api/assets/paper-editor/src/canvas";
 
 let failures = 0;
@@ -42,7 +41,7 @@ const S1_HARNESS_SHA256 =
   "4ee15511d3566c4c26e75754e248edf3885d20965676a9f8062d60ba71980fb4";
 
 check("__harness.html is byte-locked (S1 assertions unchanged)", () => {
-  const path = join(REPO, HARNESS_DIR, "__harness.html");
+  const path = join(HERE, "__harness.html");
   const actual = createHash("sha256").update(readFileSync(path)).digest("hex");
   if (actual !== S1_HARNESS_SHA256) {
     throw new Error(
@@ -60,7 +59,7 @@ check("__harness.html is byte-locked (S1 assertions unchanged)", () => {
 // missing or empty, so the S1 RUN literal is asserted separately: the lock is
 // about those three blocks, and this says so in terms a reader recognises.
 check("__harness.html still carries its hardcoded three-block S1 RUN", () => {
-  const src = readFileSync(join(REPO, HARNESS_DIR, "__harness.html"), "utf8");
+  const src = readFileSync(join(HERE, "__harness.html"), "utf8");
   for (const needle of ["const RUN = [", '"b-h"', '"b-p"', '"b-l"', "el.blocks = RUN;"]) {
     if (!src.includes(needle)) {
       throw new Error(`the S1 harness no longer contains ${JSON.stringify(needle)}`);
@@ -70,7 +69,7 @@ check("__harness.html still carries its hardcoded three-block S1 RUN", () => {
 
 check("the committed fixture is a versioned capture of a published paper", () => {
   const f = JSON.parse(
-    readFileSync(join(REPO, HARNESS_DIR, "__fixtures/paper-mechanical-spacing-doctrine.json"), "utf8"),
+    readFileSync(join(HERE, "__fixtures/paper-mechanical-spacing-doctrine.json"), "utf8"),
   );
   if (f.version !== 1) throw new Error(`version is ${JSON.stringify(f.version)}, expected 1`);
   if (!Array.isArray(f.blocks) || f.blocks.length === 0) throw new Error("blocks is not a non-empty array");
