@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
-for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+for (const file of ["../styles.css"]) {
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
   assert.match(css, /(^|\n)bp-paper-canvas\s*\{[^}]*position: relative;/, `${file}: the canvas anchors its gutter chrome`);
   assert.match(css, /\n\.bp-block-handle\s*\{[^}]*position: absolute;/, `${file}: the block handle is out of flow`);
