@@ -206,6 +206,12 @@ defmodule Barkpark.PortableDoc.Validate do
 
   defp check_items(acc, _value, _node, _path, _depth, _schema), do: acc
 
+  defp check_all_of(acc, value, %{at: []}, path, depth, %{type_dispatch: dispatch} = schema)
+       when is_map(dispatch) do
+    branches = if is_map(value), do: Map.get(dispatch, Map.get(value, "type"), []), else: []
+    Enum.reduce(branches, acc, &check(value, &1, path, depth, schema, &2))
+  end
+
   defp check_all_of(acc, value, node, path, depth, schema),
     do: Enum.reduce(node.all_of, acc, &check(value, &1, path, depth, schema, &2))
 
