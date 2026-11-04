@@ -241,6 +241,7 @@ jobs:
           node ../paper-editor-host-tests/__reference_picker_keyboard.test.mjs
           node ../paper-editor-host-tests/__reference_picker_mounted.test.mjs
           node ../paper-editor-host-tests/__canvas_picker_strings.test.mjs
+          node ../paper-editor-host-tests/note.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
