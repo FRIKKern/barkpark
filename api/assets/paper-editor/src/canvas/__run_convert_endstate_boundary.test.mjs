@@ -525,10 +525,6 @@ for (const [consumer, source] of Object.entries(sources)) {
     }
   }
 }
-const orderRows = (rows) => rows.map((row) => row.join("\t")).sort();
-assert.deepEqual(orderRows(actualImports), orderRows(IMPORTS),
-  "named import syntax equals the independently pre-proved owner table in both directions");
-
 // field-node.js and field-settings.js have one historical SCC below the structured-codec
 // boundary. This graph is deliberately the six newly extracted leaves: those leaves must
 // remain a DAG, and the exhaustive import table above fails closed on every other edge form.
@@ -549,6 +545,10 @@ function walkLeaf(file) {
   visited.add(file);
 }
 for (const path of leafPaths) walkLeaf(path);
+
+const orderRows = (rows) => rows.map((row) => row.join("\t")).sort();
+assert.deepEqual(orderRows(actualImports), orderRows(IMPORTS),
+  "named import syntax equals the independently pre-proved owner table in both directions");
 
 for (const { before, after, count } of CALLBACK_EDITS) {
   const all = Object.values(sources).join("\n");
