@@ -1495,7 +1495,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet(n, _width, %{style: :article} = pal) do
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
-    col_widths = Map.get(n, "col_widths")
+    col_widths = prepare_col_widths(Map.get(n, "col_widths"))
     {anchors, covered} = sheet_merge_lookup(n)
     styles = Map.get(n, "styles")
 
@@ -1566,7 +1566,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet(n, _width, pal) do
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
-    col_widths = Map.get(n, "col_widths")
+    col_widths = prepare_col_widths(Map.get(n, "col_widths"))
     {anchors, covered} = sheet_merge_lookup(n)
     styles = Map.get(n, "styles")
 
@@ -1857,12 +1857,17 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp sheet_default_align_class(_cell), do: nil
 
-  # Emit an inline `width:Npx;` style fragment for the col at `idx` (0-based).
-  # Returns `""` when no col_widths list is present or the entry is 0.
-  defp col_width_style(nil, _idx), do: ""
+  # Prepare the width list once per sheet. Cells then use constant-time tuple
+  # lookup instead of walking the list again for every column.
+  defp prepare_col_widths(col_widths) when is_list(col_widths), do: List.to_tuple(col_widths)
+  defp prepare_col_widths(_col_widths), do: {}
 
-  defp col_width_style(col_widths, idx) when is_list(col_widths) do
-    case Enum.at(col_widths, idx) do
+  # Emit an inline `width:Npx;` style fragment for the col at `idx` (0-based).
+  # Returns `""` when no width is present, the index is outside the tuple, or
+  # the stored entry is not a positive integer.
+  defp col_width_style(col_widths, idx)
+       when is_tuple(col_widths) and is_integer(idx) and idx >= 0 and idx < tuple_size(col_widths) do
+    case elem(col_widths, idx) do
       w when is_integer(w) and w > 0 -> "width:#{w}px;"
       _ -> ""
     end
