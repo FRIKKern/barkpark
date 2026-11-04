@@ -164,6 +164,26 @@ jobs:
           node ../paper-editor-host-tests/__collection_focus.test.mjs
           node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
           node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
+          node ../paper-editor-host-tests/__columns_track_controls.test.mjs
+          node ../paper-editor-host-tests/__contextual_history.test.mjs
+          node ../paper-editor-host-tests/__document_revision_announce.test.mjs
+          node ../paper-editor-host-tests/__fallback_validation_recovery.test.mjs
+          node ../paper-editor-host-tests/__field_autosave_rev.test.mjs
+          node ../paper-editor-host-tests/__field_flush.test.mjs
+          node ../paper-editor-host-tests/__figure_image_bridge.test.mjs
+          node ../paper-editor-host-tests/__footnote_painted_copy.test.mjs
+          node ../paper-editor-host-tests/__form_collection_controls.test.mjs
+          node ../paper-editor-host-tests/__generic_field_flush.test.mjs
+          node ../paper-editor-host-tests/__halt_resync.test.mjs
+          node ../paper-editor-host-tests/__inline_text.test.mjs
+          node ../paper-editor-host-tests/__master_insert_queue.test.mjs
+          node ../paper-editor-host-tests/__mutation_concurrency.test.mjs
+          node ../paper-editor-host-tests/__nested_canvas_context.test.mjs
+          node ../paper-editor-host-tests/__paper_hooks_strings.test.mjs
+          node ../paper-editor-host-tests/__paper_remote_carets_hook.test.mjs
+          node ../paper-editor-host-tests/__reader_hooks.test.mjs
+          node ../paper-editor-host-tests/__reconnect_mode.test.mjs
+          node ../paper-editor-host-tests/__server_insert_queue.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
