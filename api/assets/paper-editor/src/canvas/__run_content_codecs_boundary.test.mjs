@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as root from "./run-convert.js";
+import * as codecs from "./run-content-codecs.js";
 
 const ROOT_EXPORTS = [
   "blockParents",
@@ -99,5 +103,74 @@ assert.deepEqual(root.runToOps([card], cardDoc), [{
     },
   },
 }]);
+
+const CODEC_EXPORTS = [
+  "calloutBlockToNode",
+  "calloutNodeChanged",
+  "calloutNodeToBlock",
+  "calloutNodeToPatch",
+  "cardBlockEditable",
+  "cardBlockToNode",
+  "cardNodeChanged",
+  "cardNodeToBlock",
+  "cardNodeToPatch",
+  "noteBlockToNode",
+  "noteNodeChanged",
+  "noteNodeToBlock",
+  "noteNodeToPatch",
+  "stableNoteKey",
+];
+assert.deepEqual(Object.keys(codecs), CODEC_EXPORTS, "codec leaf namespace stays exact");
+
+const DECLARATIONS = [
+  "calloutBodyInline", "calloutBlockToNode", "calloutNodeToBlock", "calloutNodeToPatch",
+  "calloutNodeChanged", "stableCalloutKey", "noteScalarText", "noteNoRichShadow",
+  "noteInlineTerminal", "noteFieldState", "noteState", "flattenInlineText",
+  "flattenInlineNode", "noteNodeBodyText", "noteBlockToNode", "noteNodeToBlock",
+  "noteNodeToPatch", "noteNodeChanged", "stableNoteKey", "cardBodyInline", "cardTitle",
+  "cardMedia", "cardAction", "optionalCardText", "cardSlotSupported",
+  "cardBodyContentSupported", "cardBlockEditable", "cardBlockToNode", "cardNodeSlotOverlay",
+  "cardNodeToSlots", "cardNodeToBlock", "cardNodeToPatch", "cardNodeChanged", "stableCardKey",
+];
+const here = dirname(fileURLToPath(import.meta.url));
+const rootPath = resolve(here, "run-convert.js");
+const leafPath = resolve(here, "run-content-codecs.js");
+const rootSource = readFileSync(rootPath, "utf8");
+const leafSource = readFileSync(leafPath, "utf8");
+for (const name of DECLARATIONS) {
+  const pattern = new RegExp(`\\bfunction\\s+${name}\\s*\\(`, "g");
+  assert.equal([...leafSource.matchAll(pattern)].length, 1, `${name} is defined exactly once in the leaf`);
+  assert.equal([...rootSource.matchAll(pattern)].length, 0, `${name} is absent from the root`);
+}
+
+const importSpecifiers = source => [...source.matchAll(
+  /(?:^|\n)\s*(?:import|export)\s+(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']/g,
+)].map(match => match[1]);
+assert.deepEqual(importSpecifiers(leafSource), ["../convert.js", "./projection-json.js", "./run-kinds.js"]);
+assert.equal((rootSource.match(/from "\.\/run-content-codecs\.js"/g) || []).length, 1,
+  "root imports the codec leaf exactly once");
+assert.doesNotMatch(leafSource, /from ["']\.\/run-convert\.js["']/,
+  "codec leaf never imports the root");
+
+const visiting = new Set();
+const visited = new Set();
+function walk(file) {
+  assert.notEqual(file, rootPath, "codec dependency closure cannot reach run-convert");
+  assert.ok(!visiting.has(file), `relative import cycle at ${file}`);
+  if (visited.has(file)) return;
+  visiting.add(file);
+  const source = readFileSync(file, "utf8");
+  for (const specifier of importSpecifiers(source)) {
+    if (specifier.startsWith(".")) walk(resolve(dirname(file), specifier));
+  }
+  visiting.delete(file);
+  visited.add(file);
+}
+walk(leafPath);
+
+assert.ok(rootSource.split("\n").length - 1 > 800, "residual run-convert remains an explicit size gap");
+assert.ok(leafSource.split("\n").length - 1 < 800, "codec leaf stays below 800 physical lines");
+assert.ok(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").length - 1 < 800,
+  "boundary test stays below 800 physical lines");
 
 console.log("run content codec public boundary passed");
