@@ -245,44 +245,49 @@ async function proveAsyncGuard(family) {
   document.body.appendChild(host);
   const editor = host._editor;
   assert.ok(editor?.view?.dom?.isConnected, `${family}: real mounted editor`);
+  let menu;
+  let completed = false;
 
-  replaceText(editor, `${trigger}old`);
-  await tick();
-  replaceText(editor, `${trigger}new`);
-  await tick();
-  assert.deepEqual(queryOrder, ["old", "new"], `${family}: request order`);
+  try {
+    replaceText(editor, `${trigger}old`);
+    await tick();
+    replaceText(editor, `${trigger}new`);
+    await tick();
+    assert.deepEqual(queryOrder, ["old", "new"], `${family}: request order`);
 
-  requests.get("new").resolve(family === "wikilink"
-    ? [{ title: expectedTitle, id: "wiki-new", type: "paper" }]
-    : ["tag-newer"]);
-  await tick();
-  const menu = [...document.querySelectorAll(".bp-wikilink-menu")]
-    .find((candidate) => candidate.style.display === "block");
-  assert.equal(menu?.querySelector(".bp-wikilink-title")?.textContent, expectedTitle);
+    requests.get("new").resolve(family === "wikilink"
+      ? [{ title: expectedTitle, id: "wiki-new", type: "paper" }]
+      : ["tag-newer"]);
+    await tick();
+    menu = [...document.querySelectorAll(".bp-wikilink-menu")]
+      .find((candidate) => candidate.style.display === "block");
+    assert.equal(menu?.querySelector(".bp-wikilink-title")?.textContent, expectedTitle);
 
-  requests.get("old").resolve(family === "wikilink"
-    ? [{ title: "Wiki older", id: "wiki-old", type: "paper" }]
-    : ["tag-older"]);
-  await tick();
-  assert.equal(menu.querySelector(".bp-wikilink-title")?.textContent, expectedTitle,
-    `${family}: older response cannot replace newer results`);
+    requests.get("old").resolve(family === "wikilink"
+      ? [{ title: "Wiki older", id: "wiki-old", type: "paper" }]
+      : ["tag-older"]);
+    await tick();
+    assert.equal(menu.querySelector(".bp-wikilink-title")?.textContent, expectedTitle,
+      `${family}: older response cannot replace newer results`);
 
-  replaceText(editor, `${trigger}late`);
-  await tick();
-  assert.deepEqual(queryOrder, ["old", "new", "late"], `${family}: late request recorded`);
-  escape(editor);
-  assert.equal(menu.style.display, "none", `${family}: keyboard close hides menu`);
-  requests.get("late").resolve(family === "wikilink"
-    ? [{ title: lateTitle, id: "wiki-late", type: "paper" }]
-    : ["tag-late"]);
-  await tick();
-  assert.equal(menu.style.display, "none", `${family}: late response cannot reopen menu`);
-  assert.equal(menu.querySelector(".bp-wikilink-title")?.textContent, expectedTitle,
-    `${family}: post-close response cannot install results`);
-
-  host.remove();
-  await tick();
-  assert.equal(menu.isConnected, false, `${family}: disconnected editor destroys menu DOM`);
+    replaceText(editor, `${trigger}late`);
+    await tick();
+    assert.deepEqual(queryOrder, ["old", "new", "late"], `${family}: late request recorded`);
+    escape(editor);
+    assert.equal(menu.style.display, "none", `${family}: keyboard close hides menu`);
+    requests.get("late").resolve(family === "wikilink"
+      ? [{ title: lateTitle, id: "wiki-late", type: "paper" }]
+      : ["tag-late"]);
+    await tick();
+    assert.equal(menu.style.display, "none", `${family}: late response cannot reopen menu`);
+    assert.equal(menu.querySelector(".bp-wikilink-title")?.textContent, expectedTitle,
+      `${family}: post-close response cannot install results`);
+    completed = true;
+  } finally {
+    host.remove();
+    await tick();
+    if (completed) assert.equal(menu.isConnected, false, `${family}: disconnected editor destroys menu DOM`);
+  }
 }
 
 try {
