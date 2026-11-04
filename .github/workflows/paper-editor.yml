@@ -253,6 +253,11 @@ jobs:
           node ../paper-editor-host-tests/fleet-hover-island.test.mjs
           node ../paper-editor-host-tests/surface.test.mjs
           node ../paper-editor-host-tests/table-contextual.test.mjs
+          node ../paper-editor-host-tests/__op_fixtures.test.mjs
+          node ../paper-editor-host-tests/__data_loss_key_matrix_mounted.test.mjs
+          node ../paper-editor-host-tests/__inventory_untouched.test.mjs
+          node ../paper-editor-host-tests/__missing_five_renderer.test.mjs
+          node ../paper-editor-host-tests/__move_matrix_mounted.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
         run: node src/__conformance.mjs
