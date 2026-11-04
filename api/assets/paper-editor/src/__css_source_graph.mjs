@@ -20,7 +20,7 @@ const inside = (path, directory) => {
 
 const inOrEqual = (path, directory) => path === directory || inside(path, directory);
 
-const provenance = () => {
+const validateProvenance = () => {
   const keys = Object.keys(CODE_TOKENS_PROVENANCE).sort();
   if (!Object.isFrozen(CODE_TOKENS_PROVENANCE) ||
       JSON.stringify(keys) !== JSON.stringify(["consumer", "schemaVersion", "sha256", "source"]) ||
@@ -29,6 +29,9 @@ const provenance = () => {
       CODE_TOKENS_PROVENANCE.source !== "api/assets/paper-surface/code-tokens.css" ||
       !/^[0-9a-f]{64}$/.test(CODE_TOKENS_PROVENANCE.sha256))
     throw new Error("css source graph: invalid code-token provenance record");
+};
+
+const validateSharedDigest = () => {
   const digest = createHash("sha256").update(readFileSync(CSS_SHARED_INPUT)).digest("hex");
   if (digest !== CODE_TOKENS_PROVENANCE.sha256)
     throw new Error(`css source graph: shared stylesheet digest ${digest} does not match provenance`);
@@ -95,10 +98,11 @@ function parseImports(path, source) {
 export function readCssSourceGraph(options) {
   const { production, rootPath, authoredDir, sharedPath } = selectedPaths(options);
   if (production) {
+    validateProvenance();
     physical(CSS_ROOT, "root stylesheet");
     physical(CSS_AUTHORED_DIR, "authored directory", true);
     physical(CSS_SHARED_INPUT, "shared stylesheet");
-    provenance();
+    validateSharedDigest();
   }
   const root = canonical(rootPath, "root stylesheet");
   const authored = realpathSync(authoredDir);

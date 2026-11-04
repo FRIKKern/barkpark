@@ -35,6 +35,8 @@ assert.equal(CODE_TOKENS_PROVENANCE.source, "api/assets/paper-surface/code-token
 assert.match(CODE_TOKENS_PROVENANCE.sha256, /^[0-9a-f]{64}$/);
 assert.equal(sha256(readFileSync(CSS_SHARED_INPUT)), CODE_TOKENS_PROVENANCE.sha256);
 assert.equal(readAuthoredCss(), graph.authoredCss, "the default authored reader uses the production graph");
+assert.throws(() => readCssSourceGraph({ extra: CSS_ROOT }), /unknown option/);
+assert.throws(() => readCssSourceGraph(null), /options must be an object/);
 
 const fixture = mkdtempSync(join(tmpdir(), "pd-css-source-graph-"));
 try {
@@ -120,7 +122,7 @@ await productionRejects("shared-symlink", /regular physical file|symlink/, ({ sh
 await productionRejects("root-symlink", /regular physical file|symlink/, ({ root }) => {
   const target = `${root}.physical`; cpSync(root, target); rmSync(root); symlinkSync(target, root);
 });
-await productionRejects("partial-override", /all three/, () => {}, module => module.readCssSourceGraph({ sharedPath: module.CSS_SHARED_INPUT }));
+await productionRejects("partial-override", /all three/, () => {}, (module, paths) => module.readCssSourceGraph({ sharedPath: paths.canonical }));
 await productionRejects("mixed-production", /outside production|production path/, () => {}, (module, paths) => module.readCssSourceGraph({
   rootPath: module.CSS_ROOT, authoredDir: join(paths.source, "styles"), sharedPath: paths.canonical,
 }));

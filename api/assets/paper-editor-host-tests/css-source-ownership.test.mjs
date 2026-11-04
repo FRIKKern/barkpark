@@ -10,9 +10,9 @@ import { CODE_TOKENS_PROVENANCE } from "../paper-editor/src/code-tokens.provenan
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const digest = value => createHash("sha256").update(value).digest("hex");
 const repoPath = path => relative(REPO, path).split(sep).join("/");
-const graph = readCssSourceGraph();
 
 assert.equal(CODE_TOKENS_PROVENANCE.source, "api/assets/paper-surface/code-tokens.css");
+const graph = readCssSourceGraph();
 const canonical = readFileSync(resolve(REPO, CODE_TOKENS_PROVENANCE.source));
 const consumedPath = resolve(REPO, "api/assets/paper-editor/src", CODE_TOKENS_PROVENANCE.consumer);
 const consumed = readFileSync(consumedPath);
