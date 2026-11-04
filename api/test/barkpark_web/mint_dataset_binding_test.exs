@@ -49,7 +49,9 @@ defmodule BarkparkWeb.MintDatasetBindingTest do
           "write",
           "admin"
         ],
-        nil, dataset_bound: dataset_bound)
+        nil,
+        dataset_bound: dataset_bound
+      )
 
     {:ok, _} = TenancyAuth.create_membership(ws.id, t.id, "admin", "api_token")
     {raw, t}
