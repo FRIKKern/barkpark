@@ -105,7 +105,7 @@ export async function runSync({
   const sinks = expectedSinks({
     built,
     rawSurface: assembleAsset("paper-surface", { root }),
-    rawTokens: readPackageFile("src/code-tokens.css", { root }),
+    rawTokens: surfaceOnly ? null : readPackageFile("src/code-tokens.css", { root }),
     surfaceOnly,
   });
   const stale = sinks.flatMap(([destination, bytes]) => {

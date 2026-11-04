@@ -381,6 +381,11 @@ await check("with no toolchain, --surface-only writes the raw surface and says s
   assert.equal(code, 0);
   assert.deepEqual(listTree(repo), [RAW_SURFACE_SINK]);
   assert.ok(lines.some((line) => line.includes("was not composed")), "it says the profile was not composed");
+  const bare = inScratch("sync-bare-package");
+  cpSync(path.join(root, "src/paper-surface"), path.join(bare, "src/paper-surface"), { recursive: true });
+  const bareRepo = inScratch("sync-bare-repo");
+  assert.equal((await sync(bareRepo, { root: bare, write: true, surfaceOnly: true, build: never, hasToolchain: () => false })).code, 0, "the surface fragments alone are enough");
+  assert.deepEqual(listTree(bareRepo), [RAW_SURFACE_SINK]);
   await assert.rejects(sync(repo, { build: never, hasToolchain: () => false }), /run npm ci first/);
   await assert.rejects(sync(repo, { write: true, build: never, hasToolchain: () => false }), /run npm ci first/);
   await assert.rejects(sync(repo, { surfaceOnly: true }), /--surface-only is a write mode/);
