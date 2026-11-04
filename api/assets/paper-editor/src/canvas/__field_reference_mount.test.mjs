@@ -31,8 +31,6 @@ const fetchMock = async () => ({ ok: true, json: async () => ({ documents: [] })
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
-// The public reader loaded the picker WITHOUT bp-search-intel.js: no global here.
-await import("../../../../priv/static/assets/bp-reference-picker.js");
 // A media picker whose value setter throws stands in for any picker WC that
 // fails while its node view is built.
 class ThrowingMediaPicker extends window.HTMLElement {
@@ -62,26 +60,7 @@ const mount = (blocks) => {
 };
 
 try {
-  // 1. The reported repro: lead paragraph, field-reference, end paragraph.
-  {
-    const { canvas, events, pm } = mount([
-      paragraph("f-lead", "Lead paragraph."),
-      { id: "t-field-reference", type: "field-reference", label: "Companion paper", value: "terminal-mermaid-diagrams" },
-      paragraph("f-end", "End paragraph."),
-    ]);
-    assert.equal(pm.children.length, 3, "all three blocks paint in Edit");
-    assert.match(pm.textContent, /Lead paragraph\./);
-    assert.match(pm.textContent, /End paragraph\./);
-    const picker = pm.querySelector("bp-reference-picker");
-    assert.ok(picker, "the reference picker mounts");
-    assert.equal(picker.value, "terminal-mermaid-diagrams");
-    assert.match(picker.textContent, /terminal-mermaid-diagrams/, "the picker paints the stored reference");
-    assert.equal(canvas.hasAttribute("data-mount-failed"), false);
-    assert.deepEqual(events, { node: [], run: [] });
-    canvas.remove();
-  }
-
-  // 2. A picker WC that throws while built degrades to a read-only atom; the rest
+  // 1. A picker WC that throws while built degrades to a read-only atom; the rest
   //    of the run stays editable and the failure is reported.
   {
     const { canvas, events, pm } = mount([
@@ -101,7 +80,7 @@ try {
     canvas.remove();
   }
 
-  // 3. Any other node view that throws: the run never rests as an empty editor.
+  // 2. Any other node view that throws: the run never rests as an empty editor.
   {
     const createElement = document.createElement.bind(document);
     document.createElement = (tag, ...rest) => {

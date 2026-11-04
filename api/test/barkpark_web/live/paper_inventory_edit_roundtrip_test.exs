@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.PaperInventoryEditRoundtripTest do
   # No-data-loss by round trip, server half. The canvas half
-  # (assets/paper-editor/src/canvas/__inventory_untouched.test.mjs) mounts every
+  # (assets/paper-editor-host-tests/__inventory_untouched.test.mjs) mounts every
   # pd-parity golden input block in one canvas, types " QZMRK" into the target
   # paragraph and pins the ONE op the editor emits. This test stores the same
   # inventory as a public paper, pushes that exact op through the public editor
@@ -15,7 +15,8 @@ defmodule BarkparkWeb.PaperInventoryEditRoundtripTest do
   @dataset "production"
   @goldens Path.expand("../../support/fixtures/pd-parity", __DIR__)
   @target_id "inv-target"
-  # The op __inventory_untouched.test.mjs asserts the canvas emits.
+  # The op assets/paper-editor-host-tests/__inventory_untouched.test.mjs asserts
+  # the canvas emits.
   @edit_op %{
     "op" => "patch-block",
     "id" => @target_id,

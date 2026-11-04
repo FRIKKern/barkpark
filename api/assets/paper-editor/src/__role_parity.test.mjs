@@ -42,8 +42,8 @@ function check(name, fn) {
   }
 }
 
-check("opening canvas preserves paragraph rhythm in both editor stylesheets", () => {
-  for (const path of ["./styles.css", "../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+check("opening canvas preserves paragraph rhythm in the package stylesheet", () => {
+  for (const path of ["./styles.css"]) {
     const css = readFileSync(new URL(path, import.meta.url), "utf8");
     const openingRule = css.match(/\.bp-paper-editor > \.bp-paper-edit-canvas:nth-child\(1 of[^}]+\}/)?.[0];
     assert.ok(openingRule, `${path}: opening canvas rule must be present`);

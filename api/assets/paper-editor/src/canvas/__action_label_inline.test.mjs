@@ -28,7 +28,6 @@ globalThis.CSS ||= { escape: (value) => String(value) };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 for (const [name, path] of [
-  ["shell", "../../../../priv/static/assets/bp-paper-editor-shell.css"],
   ["styles.css", "../styles.css"],
 ]) {
   const css = readFileSync(new URL(path, import.meta.url), "utf8");

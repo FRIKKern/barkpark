@@ -4,13 +4,12 @@
 // inline-code rule: smaller size, padding) outranked the bare `.bp-canvas-code-hl`
 // rule, so on /papers the layer painted at 0.92em with inline padding and every
 // click put the caret about a line away from the token it hit. The language input
-// sat over the first line's right end on hover. Both sinks are checked: the live
-// shell (/papers, Studio) and the bundle mirror (embedders).
+// sat over the first line's right end on hover. This package check owns the bundle
+// source used by embedders; Barkpark's live shell is checked by the host companion.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const sinks = {
-  shell: readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8"),
   "styles.css": readFileSync(new URL("./styles.css", import.meta.url), "utf8"),
 };
 
