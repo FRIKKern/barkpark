@@ -1324,12 +1324,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # set `head` explicitly.
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
-    # Typed columns (Compose.table_col_types) — an index-aligned list of
-    # text|num|delta|spark. ABSENT ⇒ [] ⇒ table_col_class/3 returns "" for every
-    # column, so the emitted bytes are identical to the untyped render.
-    cols = Map.get(n, "cols", []) |> List.wrap()
-    # Per-cell alignment and the header column (plan #26) are read once for both row groups.
-    aligns = Map.get(n, "aligns")
+    # Typed columns (Compose.table_col_types) arrive as an index-aligned list of
+    # text|num|delta|spark. Prepare one tuple for constant-time cell lookup.
+    # ABSENT ⇒ [] ⇒ {} ⇒ no modifier, preserving the untyped render bytes.
+    cols = n |> Map.get("cols", []) |> List.wrap() |> List.to_tuple()
+    # Per-cell alignment is likewise indexed once for both row groups.
+    aligns = n |> Map.get("aligns") |> prepare_table_aligns()
     head_col? = Map.get(n, "headCol") == true
 
     thead =
@@ -1451,19 +1451,56 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # ONLY thing num changes: a num cell's body is the legacy text body.
   # ` style="text-align:right"` on an aligned cell (plan #26); the vocabulary is closed
   # (compose.ex table_cell_align/1), escaped all the same.
+  defp prepare_table_aligns(%{} = aligns) do
+    head = aligns |> Map.get("head", []) |> List.wrap()
+    rows = Map.get(aligns, "rows", [])
+
+    if proper_list?(head) and proper_list?(rows) and
+         Enum.all?(rows, &(List.wrap(&1) |> proper_list?())) do
+      rows = rows |> Enum.map(&(List.wrap(&1) |> List.to_tuple())) |> List.to_tuple()
+      {:table_aligns, List.to_tuple(head), rows}
+    else
+      aligns
+    end
+  end
+
+  defp prepare_table_aligns(aligns), do: aligns
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_not_a_list), do: false
+
+  defp table_align_attr({:table_aligns, head, _rows}, :head, _r, c) do
+    head
+    |> tuple_value(c)
+    |> table_align_attr()
+  end
+
+  defp table_align_attr({:table_aligns, _head, rows}, :rows, r, c) do
+    rows
+    |> tuple_value(r, {})
+    |> tuple_value(c)
+    |> table_align_attr()
+  end
+
   defp table_align_attr(%{} = aligns, area, r, c) do
     list =
       if area == :head,
         do: Map.get(aligns, "head", []),
         else: Enum.at(Map.get(aligns, "rows", []), r, [])
 
-    case Enum.at(List.wrap(list), c) do
-      a when a in ["center", "right"] -> ~s( style="#{escape_attr("text-align:" <> a)}")
-      _ -> ""
-    end
+    list
+    |> List.wrap()
+    |> Enum.at(c)
+    |> table_align_attr()
   end
 
   defp table_align_attr(_aligns, _area, _r, _c), do: ""
+
+  defp table_align_attr(align) when align in ["center", "right"],
+    do: ~s( style="#{escape_attr("text-align:" <> align)}")
+
+  defp table_align_attr(_align), do: ""
 
   defp table_span_lookup(n) do
     n
@@ -1476,13 +1513,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   defp table_col_class(cols, index, base) do
-    case Enum.at(cols, index) do
+    case tuple_value(cols, index) do
       "num" -> " #{base}--num"
       "delta" -> " #{base}--num"
       "spark" -> " #{base}--spark"
       _ -> ""
     end
   end
+
+  defp tuple_value(tuple, index, default \\ nil)
+
+  defp tuple_value(tuple, index, _default)
+       when is_tuple(tuple) and is_integer(index) and index >= 0 and index < tuple_size(tuple),
+       do: elem(tuple, index)
+
+  defp tuple_value(_tuple, _index, default), do: default
 
   # PdSheet — dense spreadsheet value grid; the same node shape the TUI's
   # pdrender already consumes (head/rows/col_widths, all-plain-string cells).
