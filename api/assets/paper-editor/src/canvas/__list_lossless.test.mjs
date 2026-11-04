@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { tiptapToBlock } from "../convert.js";
 import "../__list_carriers.test.mjs";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 for (const path of ["../styles.css"]) {
-  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /\[data-bp-text-boundary\]\s*\{[^}]*border-inline-start:/,
     "both the standalone editor and the public/Studio shell distinguish the notice from authored prose");
 }

@@ -19,6 +19,7 @@ import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readAuthoredCss } from "../api/assets/paper-editor/src/__css_source_graph.mjs";
 
 // ── --selftest: this tripwire's negative half ────────────────────────────────
 // This gate ran for its whole life with nothing exercising it, and produced two
@@ -574,6 +575,10 @@ console.log("\ndesign/check.mjs — Part E: hand-stamped color-literal exemption
 const failedBeforeE = failed;
 
 const here = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_CSS_PATH = "api/assets/paper-editor/src/styles.css";
+const readDesignSource = (path) => path === PACKAGE_CSS_PATH
+  ? readAuthoredCss()
+  : readFileSync(join(repoRoot, path), "utf8");
 // Any generator-owned block — `/* BEGIN GENERATED: <name> … END GENERATED: <name> */`
 // — is emitter output, not a hand-stamp. Today three generators write such blocks:
 // `tokens` (the theme compiler, design/emit.mjs), `paper-surface` (the reader→editor
@@ -601,7 +606,7 @@ function stripLedgerNoise(text, path) {
 }
 
 function countLedgerLiterals(path) {
-  const text = readFileSync(join(repoRoot, path), "utf8");
+  const text = readDesignSource(path);
   const cleaned = stripLedgerNoise(text, path);
   return (cleaned.match(LEDGER_LITERAL) || []).length;
 }
@@ -2123,7 +2128,7 @@ console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
   ];
 
   for (const { path, head } of SECTION_SURFACES) {
-    const css = readFileSync(join(repoRoot, path), "utf8");
+    const css = readDesignSource(path);
 
     for (const key of SECTION_KEYS) {
       const value =
@@ -2220,7 +2225,7 @@ console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-
 
   // ── arm 1: the token reaches a real consumer on both surfaces ──────────────
   for (const path of RULE_SURFACES) {
-    const css = readFileSync(join(repoRoot, path), "utf8");
+    const css = readDesignSource(path);
     for (const key of RULE_KEYS) {
       const value = `${tokens.space.rule[key]}${RULE_UNITS[key]}`;
       if (!css.includes(`--tok-rule-${key}: ${value};`))
@@ -2249,7 +2254,7 @@ console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-
   // — the `(?![a-z-])` is what keeps `radius`, `color` and `style` out.
   const HORIZONTAL_BORDER = /border(?:-top|-bottom)?(?:-width)?(?![a-z-])\s*:\s*([^;}]*)/g;
   for (const path of RULE_SURFACES) {
-    const css = readFileSync(join(repoRoot, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    const css = readDesignSource(path).replace(/\/\*[\s\S]*?\*\//g, " ");
     for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       for (const [decl, value] of body.matchAll(HORIZONTAL_BORDER)) {
         const px = /(\d*\.?\d+)px/.exec(value);
@@ -2350,7 +2355,7 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
   const unit = tokens.motion._unit;
   for (const path of MOTION_SURFACES) {
     let text;
-    try { text = readFileSync(join(repoRoot, path), "utf8"); }
+    try { text = readDesignSource(path); }
     catch (e) { nFail(`  Part N FAIL: ${path} — cannot read (${e.message})`); continue; }
     const src = motionBlankComments(text, path);
     for (const step of MOTION_STEPS) {
@@ -2395,7 +2400,7 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
   const MOTION_LITERAL = /(?<![\w.-])\d*\.?\d+m?s(?![\w-])/gi;
 
   function countMotionLiterals(path) {
-    const src = motionBlankAll(readFileSync(join(repoRoot, path), "utf8"), path);
+    const src = motionBlankAll(readDesignSource(path), path);
     let n = 0;
     for (const m of src.matchAll(MOTION_DECL)) n += (m[1].match(MOTION_LITERAL) || []).length;
     return n;
@@ -2506,7 +2511,7 @@ console.log("\ndesign/check.mjs — Part O: hand-stamped type/measure literal ra
   const typeBlank = (m) => m.replace(/[^\n]/g, " ");
 
   function countTypeLiterals(path) {
-    const src = motionBlankAll(readFileSync(join(repoRoot, path), "utf8"), path)
+    const src = motionBlankAll(readDesignSource(path), path)
       .replace(/@media[^{]*/gi, typeBlank);
     let n = 0;
     for (const m of src.matchAll(TYPE_DECL)) {
@@ -2563,7 +2568,7 @@ console.log("\ndesign/check.mjs — Part O: hand-stamped type/measure literal ra
       // file holds beyond the baseline's worth, which for an appended rule is
       // the one that was just added. Reported with line + text so the author
       // does not have to bisect the file.
-      const src = motionBlankAll(readFileSync(join(repoRoot, entry.path), "utf8"), entry.path)
+      const src = motionBlankAll(readDesignSource(entry.path), entry.path)
         .replace(/@media[^{]*/gi, typeBlank);
       const hits = [];
       for (const m of src.matchAll(TYPE_DECL)) {

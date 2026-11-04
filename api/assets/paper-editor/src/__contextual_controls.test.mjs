@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
-const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const styles = readAuthoredCss();
 
 assert.match(styles, /\[data-test-id="paper-canvas-resume-warning"\]\s*\{[^}]*font-family:\s*var\(--paper-font-ui/s,
   "standalone reconnect recovery uses editor chrome rather than document prose");

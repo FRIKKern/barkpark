@@ -5,7 +5,7 @@
 //
 // WHY THIS FILE EXISTS. design/emit-fence.test.mjs proves `node design/emit.mjs
 // --write` refuses to replace an unattributed generated region. But TWO other
-// commands write the SAME region — `api/assets/paper-editor/src/styles.css`
+// commands write the SAME region — `api/assets/paper-editor/src/styles/theme.css`
 // between the `BEGIN/END GENERATED: paper-surface` markers:
 //
 //   • node design/paper-editor-mirror.mjs --write
@@ -52,6 +52,10 @@ const SHELL = "scripts/paper-editor-mirror-check.sh";
 const HEEX = "api/lib/barkpark_web/layouts/root.html.heex";
 // The editor rules the mirror check reads moved out of root.html.heex (edit-on-the-link slice 2).
 const SHELL_CSS = "api/priv/static/assets/bp-paper-editor-shell.css";
+const CSS_ENTRY = "api/assets/paper-editor/src/styles.css";
+const CSS_GRAPH = "api/assets/paper-editor/src/__css_source_graph.mjs";
+const CSS_AUTHORED = "api/assets/paper-editor/src/styles";
+const CSS_SHARED = "api/assets/paper-surface/code-tokens.css";
 
 const tempRoots = [];
 process.on("exit", () => {
@@ -70,9 +74,10 @@ function makeTree() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "mirror-fence-")));
   tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
+  cpSync(join(repoRoot, CSS_AUTHORED), join(root, CSS_AUTHORED), { recursive: true });
   const files = new Set([
     ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
-    SHELL, HEEX, SHELL_CSS,
+    SHELL, HEEX, SHELL_CSS, CSS_ENTRY, CSS_GRAPH, CSS_SHARED,
   ]);
   for (const rel of files) {
     const dst = join(root, rel);

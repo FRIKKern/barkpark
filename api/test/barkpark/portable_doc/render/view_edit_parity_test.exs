@@ -214,11 +214,6 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # load ONLY it. Its `.bp-paper-editor-body` element rules are a hand-kept
   # mirror of root.html.heex's ("keep byte-aligned" comments both sides), so
   # they are the same cross-file drift surface — §5 puts them on the wire too.
-  @bundle_css Path.expand(
-                "../../../../assets/paper-editor/src/styles.css",
-                __DIR__
-              )
-
   # ── CSS micro-parser ───────────────────────────────────────────────────────
   # Scans a stylesheet for every LEAF rule block (`selector { decls }` whose
   # declaration body has no nested braces — i.e. not an `@media` wrapper) and
@@ -269,7 +264,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # plus the shell stylesheet it links. Concatenated in load order (the <link>
   # sits between the halves, and no rule in the second half restyles the editor).
   defp edit_css, do: strip_comments(File.read!(@root_heex) <> "\n" <> File.read!(@shell_css))
-  defp bundle_css, do: strip_comments(File.read!(@bundle_css))
+  defp bundle_css, do: strip_comments(Barkpark.Test.PaperEditorCSS.authored_css!())
 
   test "empty Table cells reserve the editor caret line without visible or persisted text" do
     for {css, prefix} <- [

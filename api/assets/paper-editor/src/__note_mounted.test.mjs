@@ -5,7 +5,6 @@ import {
   runToOps,
   docToBlocks,
   assert,
-  readFileSync,
   applyOps,
   check,
   tick,
@@ -17,6 +16,7 @@ import {
   original,
   mount,
 } from "./note-mounted-harness.mjs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 try {
   check("note mounted: schema retains full carrier and label input emits lossless folded edit", () => {
@@ -306,7 +306,7 @@ try {
     });
   }
   check("note server paint adds no competing note-row CSS family to the package stylesheet", () => {
-    const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    const styles = readAuthoredCss();
     const noteRules = text => text.split("\n").map(line => line.trim()).filter(line => line.startsWith(".bp-canvas-note") || line.startsWith("@media (max-width: 520px) { .bp-canvas-note"));
     const rowRules = noteRules(styles).filter(line => line.startsWith(".bp-canvas-note {") || line.startsWith(".bp-canvas-note__") || line.startsWith("@media"));
     assert.deepEqual(rowRules, [], "the host contributes no competing note-row layout or typography");
@@ -318,8 +318,8 @@ try {
       "min-height": "0", margin: "0", padding: "0",
     };
     // This rule starts with .bp-paper-surface, outside the noteRules filter above.
-    for (const path of ["./styles.css"]) {
-      const css = readFileSync(new URL(path, import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const [path, source] of [["./styles.css", readAuthoredCss()]]) {
+      const css = source.replace(/\/\*[\s\S]*?\*\//g, "");
       const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head.trim() === selector);
       assert.ok(rule, `${path}: missing Note-only nested-surface neutralizer`);
       const declarations = Object.fromEntries(rule[2].split(";").filter(part => part.trim()).map(part => part.split(":").map(value => value.trim())));

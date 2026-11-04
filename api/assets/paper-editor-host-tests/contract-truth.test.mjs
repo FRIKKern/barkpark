@@ -20,6 +20,7 @@ import {
   names,
   known,
   ownOrParentReads,
+  packageCss,
   pkg,
   reachIns,
   root,
@@ -29,10 +30,10 @@ import {
 } from "../paper-editor/src/__contract_truth_support.mjs";
 
 const hostCss = stripComments([
-  path.join(root, "src/styles.css"),
-  path.join(root, "../paper-surface/paper-surface.css"),
-  path.join(root, "../paper-surface/code-tokens.css"),
-].map((file) => readFileSync(file, "utf8")).join("\n"));
+  packageCss,
+  readFileSync(path.join(root, "../paper-surface/paper-surface.css"), "utf8"),
+  readFileSync(path.join(root, "../paper-surface/code-tokens.css"), "utf8"),
+].join("\n"));
 const hostSource = `${js}\n${hostCss}`;
 const bundle = readFileSync(path.join(root, "../../priv/static/assets/bp-paper-editor.bundle.js"), "utf8");
 const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");

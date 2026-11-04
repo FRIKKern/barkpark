@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
-const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const styles = readAuthoredCss();
 assert.match(styles, /\.bp-canvas-table__controls \{ position: absolute; opacity: 0; pointer-events: none;/);
 assert.match(styles, /\.bp-canvas-table:hover > \.bp-canvas-table__controls, \.bp-canvas-table:focus-within > \.bp-canvas-table__controls, \.bp-canvas-table__controls\[open\] \{ position: relative; opacity: 1; pointer-events: auto;/,
   "visible controls must reserve space below the table, including keyboard focus");

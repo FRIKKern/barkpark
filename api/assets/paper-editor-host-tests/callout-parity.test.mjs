@@ -8,16 +8,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readAuthoredCss } from "../paper-editor/src/__css_source_graph.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(
   join(__dirname, "../paper-editor/src/canvas/callout-node.js"),
   "utf8",
 );
-const bundleCss = readFileSync(
-  join(__dirname, "../paper-editor/src/styles.css"),
-  "utf8",
-);
+const bundleCss = readAuthoredCss();
 const surfaceCss = readFileSync(
   join(__dirname, "../paper-surface/paper-surface.css"),
   "utf8",

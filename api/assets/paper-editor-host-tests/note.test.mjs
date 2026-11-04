@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "./jsdom.mjs";
 import { check, report } from "../paper-editor/src/smoke/harness.mjs";
 import { docToBlocks, runToOps } from "../paper-editor/src/canvas/run-convert.js";
+import { readAuthoredCss } from "../paper-editor/src/__css_source_graph.mjs";
 
 const { window } = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 globalThis.window = window;
@@ -38,7 +39,7 @@ await import("../paper-editor/src/canvas/index.js");
 try {
   check("note server paint uses the live shell stylesheet linked by the root layout", () => {
     const css = path => readFileSync(new URL(path, import.meta.url), "utf8");
-    const styles = css("../paper-editor/src/styles.css");
+    const styles = readAuthoredCss();
     const shell = css("../../priv/static/assets/bp-paper-editor-shell.css");
     const root = css("../../lib/barkpark_web/layouts/root.html.heex");
     assert.match(root, /<link rel="stylesheet" href=\{BarkparkWeb\.StaticAssets\.path\("bp-paper-editor-shell\.css"\)\} \/>/);

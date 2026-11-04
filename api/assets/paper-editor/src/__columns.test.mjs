@@ -13,7 +13,7 @@
 // Run: node src/__columns.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 import {
   runToTiptap,
   runToOps,
@@ -36,9 +36,9 @@ function check(name, fn) {
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
 const columnStyles = [
-  ["./styles.css", ".bp-paper-editor-body"],
-].map(([path, scope]) => {
-  const css = readFileSync(new URL(path, import.meta.url), "utf8")
+  ["./styles.css", ".bp-paper-editor-body", readAuthoredCss()],
+].map(([path, scope, source]) => {
+  const css = source
     .replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .flatMap(([, selectors, body]) => selectors.split(",").map((selector) => ({
@@ -107,8 +107,7 @@ check("a column cell resets the evidence band for every block it holds, nested s
 });
 
 check("nested tables use their column width, not the page evidence band", () => {
-  for (const path of ["./styles.css"]) {
-    const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  for (const [path, css] of [["./styles.css", readAuthoredCss()]]) {
     assert.match(css, /\.bp-cols__c \.bp-table\s*\{[^}]*--bp-evidence-width:\s*100%;[^}]*--bp-evidence-pull:\s*0px;/,
       `${path}: a nested table must not inherit the page-wide breakout`);
   }

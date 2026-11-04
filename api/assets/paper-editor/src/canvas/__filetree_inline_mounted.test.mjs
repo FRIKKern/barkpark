@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 // task-bbfdcf4c80b8300d long tail: a file tree's lines and legend edit where the
 // reader paints them. Before this, the tree was a read-only server paint whose
 // text was editable only in the "Edit file tree" disclosure, and at top level the
 // canvas atom clipped the reader's evidence pull (the census read OCCLUDED).
 for (const file of ["../styles.css"]) {
-  const css = readFileSync(new URL(file, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /\n\.bp-canvas-technical \{ overflow-x: visible; \}/,
     `${file}: the technical atom never clips the reader's evidence pull`);
 }

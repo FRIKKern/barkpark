@@ -54,11 +54,12 @@ import {
   BP_SECTION_NODE_NAME,
   BP_SECTION_BP_TYPE,
 } from "./canvas/section-node.js";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const readSrc = (rel) => readFileSync(join(__dirname, rel), "utf8");
 const SRC = readSrc("./canvas/section-node.js");
-const STYLES = readSrc("./styles.css");
+const STYLES = readAuthoredCss();
 
 let failures = 0;
 function check(name, fn) {

@@ -4,8 +4,8 @@
 // ligatures plus old-style figures, so the restore must out-rank that real,
 // late runtime rule without disabling TipTap's CSS injection.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -28,7 +28,7 @@ window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 
 
 const editorStyle = document.createElement("style");
 editorStyle.dataset.portableDocEditorStyle = "";
-editorStyle.textContent = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+editorStyle.textContent = readAuthoredCss();
 document.head.appendChild(editorStyle);
 
 // Import after installing the DOM: @tiptap/core decides whether CSS can be

@@ -27,7 +27,7 @@
 // Run: node src/__role_parity.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 import { Eyebrow, Byline, Ingress, Pullquote } from "./canvas/role-nodes.js";
 
 let failures = 0;
@@ -43,8 +43,7 @@ function check(name, fn) {
 }
 
 check("opening canvas preserves paragraph rhythm in the package stylesheet", () => {
-  for (const path of ["./styles.css"]) {
-    const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  for (const [path, css] of [["./styles.css", readAuthoredCss()]]) {
     const openingRule = css.match(/\.bp-paper-editor > \.bp-paper-edit-canvas:nth-child\(1 of[^}]+\}/)?.[0];
     assert.ok(openingRule, `${path}: opening canvas rule must be present`);
     assert.match(openingRule, /> :first-child:not\(p\)\s*\{\s*margin-top: 0;/,

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 // r2b click-to-edit census (task-bbfdcf4c80b8300d): authored text in pipeline,
 // lineage, duel, heatmap, chart and form/questionnaire paints was read-only in
 // Edit (0/n in place). Each stored string the reader paints now edits where it
 // reads; numbers and derived readouts stay panel-edited; reader bytes are kept.
 for (const file of ["../styles.css"]) {
-  assert.match(readFileSync(new URL(file, import.meta.url), "utf8"),
+  assert.match(readAuthoredCss(),
     /\[data-bp-fleet-body\] \[contenteditable="plaintext-only"\]\s*\{\s*cursor:\s*text;/,
     `${file}: native inline fields keep the text cursor without changing reader DOM`);
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { declaredInContract, declaredInTypes, reachInsInContract } from "./contract-surface.mjs";
 import { schemaAttributes, writtenAttributes } from "../scripts/writes.mjs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const read = (rel) => readFileSync(path.join(root, rel), "utf8");
@@ -20,7 +21,7 @@ export const stripComments = (text) => text.replace(/(^|\s)\/\*[\s\S]*?\*\//g, "
 export const sourceFiles = walk(path.join(root, "src")).filter((file) => /\.(js|css)$/.test(file) && !path.basename(file).startsWith("__"));
 export const rawJs = sourceFiles.filter((file) => file.endsWith(".js")).map((file) => readFileSync(file, "utf8")).join("\n");
 export const js = stripComments(rawJs).replace(/\?\.(?=[(\[])/g, "").replace(/\?\.(?!\d)/g, ".").replace(/\n\s*(?=\.(?!\.))/g, "");
-export const packageCss = stripComments(read("src/styles.css"));
+export const packageCss = stripComments(readAuthoredCss());
 export const packageSource = `${js}\n${packageCss}`;
 
 const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

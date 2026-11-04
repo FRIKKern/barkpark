@@ -5,12 +5,12 @@
 // further down. Every editable kind now keeps its island in a closed, out-of-flow
 // "Configure" disclosure: hover reveals only the absolutely placed toggle.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 // styles.css owns the portable bare-embedder half of this layout contract.
 for (const file of ["../styles.css"]) {
-  const css = readFileSync(new URL(file, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-fleet-config\s*\{[^}]*bottom: 100%;/s,
     `${file}: a closed fleet disclosure sits in the gap above the block, out of flow`);
   assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-fleet-config\[open\]\s*\{[^}]*position: relative;/s,

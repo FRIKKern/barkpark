@@ -134,7 +134,7 @@ on:
       - "internal/semrole/tokens_gen.go"
       - "internal/taskboard/testdata/styleguide_lifecycle.txt"
       - "internal/taskboard/tokens_gen.go"
-      - "api/assets/paper-editor/src/styles.css"
+      - "api/assets/paper-editor/src/styles/theme.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/lib/barkpark/portable_doc/render/tokens_gen.ex"
       - "api/lib/barkpark_web/controllers/error_html.ex"

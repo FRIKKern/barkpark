@@ -10,8 +10,8 @@
 //
 // Run: node src/canvas/__link_picker_host_mounted.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -357,7 +357,7 @@ test("data-strings: the # menu shares the label, a word left out stays English, 
 });
 
 test("the picker's colours are --paper-picker-* properties with today's values", () => {
-  const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  const css = readAuthoredCss();
   const block = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `${selector} exists`);

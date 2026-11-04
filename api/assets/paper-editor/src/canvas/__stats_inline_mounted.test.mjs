@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 for (const path of ["../styles.css"]) {
-  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   const rule = css.match(/\.bp-paper-surface \.bp-canvas-stats-inline > \.bp-paper-surface\s*\{([^}]+)\}/)?.[1];
   assert.ok(rule, "nested Stats paint retains the enclosing reader evidence band");
   for (const token of ["band", "band-max", "fill", "gutter", "width", "pull"]) {
