@@ -496,44 +496,15 @@ const rootSource = readFileSync(resolve(here, "run-convert.js"), "utf8");
 
 for (const group of GROUPS) {
   const source = sources[group.path];
-  assert.equal(sha256(source), group.moduleHash, `${group.path} keeps its exact projected source`);
   assert.ok(source.split("\n").length - 1 < 700, `${group.path} remains below 700 physical lines`);
   assert.ok(source.split("\n").length - 1 <= group.cap, `${group.path} remains below its planned cap`);
   assert.doesNotMatch(source, /export\s+\*/u, `${group.path} uses explicit exports`);
   assert.doesNotMatch(source, /from ["']\.\/run-convert\.js["']/u, `${group.path} never imports the facade`);
-  let aggregate = "";
-  for (const entry of DECLARATIONS.filter(({ group: id }) => id === group.id)) {
-    const declaration = source.slice(entry.start, entry.end);
-    const attached = source.slice(entry.attachedStart, entry.end);
-    assert.equal(sha256(declaration), entry.declHash, `${entry.name} declaration stays exact`);
-    assert.equal(sha256(attached), entry.attachedHash, `${entry.name} comments and body stay exact`);
-    aggregate += `${entry.name}\0${attached}\0`;
-  }
-  assert.equal(sha256(aggregate), group.aggregateHash, `${group.path} aggregate stays exact`);
 }
 assert.ok(rootSource.split("\n").length - 1 < 800, "the public facade stays below 800 physical lines");
 assert.ok(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").length - 1 < 800,
   "the permanent boundary stays below 800 physical lines");
 assert.doesNotMatch(rootSource, /export\s+\*/u, "the facade uses direct named re-exports");
-
-for (const { before, after, count } of CALLBACK_EDITS) {
-  const all = Object.values(sources).join("\n");
-  assert.equal(all.split(after).length - 1, count, `approved callback edit appears once: ${after}`);
-  assert.equal(all.split(before).length - 1, 0, `superseded callback form is absent: ${before}`);
-}
-
-const actualImports = [];
-for (const [consumer, source] of Object.entries(sources)) {
-  for (const match of source.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/gu)) {
-    for (const token of match[1].split(",").map((value) => value.trim()).filter(Boolean)) {
-      const [imported, local = imported] = token.split(/\s+as\s+/u);
-      actualImports.push([consumer, match[2], imported, local]);
-    }
-  }
-}
-const orderRows = (rows) => rows.map((row) => row.join("\t")).sort();
-assert.deepEqual(orderRows(actualImports), orderRows(IMPORTS),
-  "named import syntax equals the independently pre-proved owner table in both directions");
 
 const leafPaths = new Set(GROUPS.map(({ path }) => resolve(here, path)));
 const importSpecifiers = (source) => [...source.matchAll(
@@ -553,5 +524,38 @@ function walk(file) {
   visited.add(file);
 }
 for (const path of leafPaths) walk(path);
+
+const actualImports = [];
+for (const [consumer, source] of Object.entries(sources)) {
+  for (const match of source.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/gu)) {
+    for (const token of match[1].split(",").map((value) => value.trim()).filter(Boolean)) {
+      const [imported, local = imported] = token.split(/\s+as\s+/u);
+      actualImports.push([consumer, match[2], imported, local]);
+    }
+  }
+}
+const orderRows = (rows) => rows.map((row) => row.join("\t")).sort();
+assert.deepEqual(orderRows(actualImports), orderRows(IMPORTS),
+  "named import syntax equals the independently pre-proved owner table in both directions");
+
+for (const { before, after, count } of CALLBACK_EDITS) {
+  const all = Object.values(sources).join("\n");
+  assert.equal(all.split(after).length - 1, count, `approved callback edit appears once: ${after}`);
+  assert.equal(all.split(before).length - 1, 0, `superseded callback form is absent: ${before}`);
+}
+
+for (const group of GROUPS) {
+  const source = sources[group.path];
+  let aggregate = "";
+  for (const entry of DECLARATIONS.filter(({ group: id }) => id === group.id)) {
+    const declaration = source.slice(entry.start, entry.end);
+    const attached = source.slice(entry.attachedStart, entry.end);
+    assert.equal(sha256(declaration), entry.declHash, `${entry.name} declaration stays exact`);
+    assert.equal(sha256(attached), entry.attachedHash, `${entry.name} comments and body stay exact`);
+    aggregate += `${entry.name}\0${attached}\0`;
+  }
+  assert.equal(sha256(aggregate), group.aggregateHash, `${group.path} aggregate stays exact`);
+  assert.equal(sha256(source), group.moduleHash, `${group.path} keeps its exact projected source`);
+}
 
 console.log("run-convert endstate extraction boundary passed");
