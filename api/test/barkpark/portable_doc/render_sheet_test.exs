@@ -128,6 +128,54 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
       assert html =~ "width:120px"
     end
 
+    test "col_widths keep exact positive, invalid and out-of-bounds HTML in both style paths" do
+      node = %{
+        "kind" => "PdSheet",
+        "head" => ["A", "B", "C", "D", "E", "F", "G"],
+        "rows" => [["a", "b", "c", "d", "e", "f", "g"]],
+        "col_widths" => [80, 0, -1, "120", nil, 120]
+      }
+
+      email =
+        ~s(<table role="presentation" style="border-collapse:collapse;width:100%"><thead><tr>) <>
+          ~s(<th style="width:80px;border-bottom:2px solid #e2e6e5;padding:6px 10px;text-align:left;font-weight:bold">A</th>) <>
+          Enum.map_join(["B", "C", "D", "E"], fn cell ->
+            ~s(<th style="border-bottom:2px solid #e2e6e5;padding:6px 10px;text-align:left;font-weight:bold">#{cell}</th>)
+          end) <>
+          ~s(<th style="width:120px;border-bottom:2px solid #e2e6e5;padding:6px 10px;text-align:left;font-weight:bold">F</th>) <>
+          ~s(<th style="border-bottom:2px solid #e2e6e5;padding:6px 10px;text-align:left;font-weight:bold">G</th></tr></thead><tbody><tr>) <>
+          ~s(<td style="width:80px;border:1px solid #e2e6e5;padding:6px 10px;vertical-align:top">a</td>) <>
+          Enum.map_join(["b", "c", "d", "e"], fn cell ->
+            ~s(<td style="border:1px solid #e2e6e5;padding:6px 10px;vertical-align:top">#{cell}</td>)
+          end) <>
+          ~s(<td style="width:120px;border:1px solid #e2e6e5;padding:6px 10px;vertical-align:top">f</td>) <>
+          ~s(<td style="border:1px solid #e2e6e5;padding:6px 10px;vertical-align:top">g</td></tr></tbody></table>)
+
+      article =
+        ~s(<table role="presentation" class="bp-table"><thead><tr>) <>
+          ~s(<th class="bp-sheet__th" style="width:80px;">A</th>) <>
+          Enum.map_join(["B", "C", "D", "E"], &~s(<th class="bp-sheet__th">#{&1}</th>)) <>
+          ~s(<th class="bp-sheet__th" style="width:120px;">F</th><th class="bp-sheet__th">G</th></tr></thead><tbody><tr>) <>
+          ~s(<td class="bp-sheet__td" style="width:80px;">a</td>) <>
+          Enum.map_join(["b", "c", "d", "e"], &~s(<td class="bp-sheet__td">#{&1}</td>)) <>
+          ~s(<td class="bp-sheet__td" style="width:120px;">f</td><td class="bp-sheet__td">g</td></tr></tbody></table>)
+
+      assert Render.render_html(node, @opts) == email
+      assert Render.render_html(node, %{doctype: false, style: :article}) == article
+
+      without_widths = Map.delete(node, "col_widths")
+
+      for invalid <- [nil, %{}, "80"] do
+        invalid_node = Map.put(node, "col_widths", invalid)
+
+        assert Render.render_html(invalid_node, @opts) ==
+                 Render.render_html(without_widths, @opts)
+
+        assert Render.render_html(invalid_node, %{doctype: false, style: :article}) ==
+                 Render.render_html(without_widths, %{doctype: false, style: :article})
+      end
+    end
+
     test "cell values are HTML-escaped" do
       node = %{
         "kind" => "PdSheet",
