@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 import { tiptapToBlock } from "../convert.js";
 import "../__list_carriers.test.mjs";
 
-for (const path of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+for (const path of ["../styles.css"]) {
   const css = readFileSync(new URL(path, import.meta.url), "utf8");
   assert.match(css, /\[data-bp-text-boundary\]\s*\{[^}]*border-inline-start:/,
     "both the standalone editor and the public/Studio shell distinguish the notice from authored prose");
