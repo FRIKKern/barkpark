@@ -1924,6 +1924,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp compose_table(b, style) do
     col_types = table_col_types(b, style)
+    col_types_by_index = List.to_tuple(col_types)
 
     compose_cell = fn cell ->
       cell
@@ -1933,7 +1934,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
 
     compose_typed_cell = fn cell, index ->
-      case Enum.at(col_types, index) do
+      col_type =
+        if index < tuple_size(col_types_by_index),
+          do: elem(col_types_by_index, index),
+          else: nil
+
+      case col_type do
         "delta" -> table_delta_cell(cell, compose_cell)
         "spark" -> table_spark_cell(cell, compose_cell)
         _ -> compose_cell.(cell)
