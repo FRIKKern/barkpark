@@ -37,7 +37,7 @@ const ATTR = [
   ["layouts/root.html.heex", "Studio"],
   ["web/app/globals.css", "web"],
   ["controllers/session_html.ex", "login"],
-  ["paper-surface.css", "paper-surface"],
+  ["01-components-generated-theme.css", "paper-surface"],
 ];
 
 test("N-theme: every attribute surface renders a DISTINCT block per injected theme", () => {

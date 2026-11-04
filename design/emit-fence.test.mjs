@@ -59,7 +59,14 @@ function makeTree() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
   tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
-  const files = new Set([...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH]);
+  const files = new Set([
+    ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
+    "api/assets/paper-editor/src/paper-surface/00-foundation-type.css",
+    "api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css",
+    "api/assets/paper-editor/src/paper-surface/03-data-viz-forms-media.css",
+    "api/assets/paper-editor/scripts/source-assets.mjs",
+    "api/assets/paper-editor/scripts/sync-barkpark.mjs",
+  ]);
   for (const rel of files) {
     const dst = join(root, rel);
     mkdirSync(dirname(dst), { recursive: true });
