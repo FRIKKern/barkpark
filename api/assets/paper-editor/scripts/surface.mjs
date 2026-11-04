@@ -1,6 +1,6 @@
-// Writes host-profile/surface.json: what the committed build offers a host, what it
-// needs from one, the page vocabulary it shares with the reader, what it keeps to
-// itself, and the reach-ins between them.
+// Composes host-profile/surface.json: what a build offers a host, what it needs
+// from one, the page vocabulary it shares with the reader, what it keeps to itself,
+// and the reach-ins between them.
 //   declared  index.d.ts's names for the editor's elements (canvas, editor, both,
 //             window, css); __contract_truth.test.mjs holds it equal to
 //             EMBED-CONTRACT.md's Surface index.
@@ -21,9 +21,12 @@
 //             - events the bundle dispatches.
 // A host profile checks a host's sources against this file.
 //
-// Run: node scripts/surface.mjs   (npm run build runs it; src/__surface.test.mjs
-// fails when the committed file is stale)
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+// This module writes nothing. packageSurface() reads one build directory and the
+// package's own sources. surface() adds the live Barkpark reader. The one writer of
+// the tracked file is scripts/sync-barkpark.mjs; the host surface test holds it
+// byte-equal to this composition.
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canvasSourceLeafNames, elementClassBody, extractPackageSurfaceEvidence } from "./surface-package.mjs";
@@ -41,18 +44,18 @@ export {
 } from "./surface-package.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const assets = path.join(root, "../../priv/static/assets");
 const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
+const localDist = path.join(root, "dist");
 export const surfacePath = path.join(root, "host-profile/surface.json");
 
 const sorted = (list) => [...new Set(list)].sort();
 const leaves = (value) => Array.isArray(value) ? value : Object.values(value).flatMap(leaves);
 
-export async function packageSurface() {
+export async function packageSurface({ dir = localDist } = {}) {
   const canvasDir = path.join(root, "src/canvas");
   return extractPackageSurfaceEvidence({
-    bundleSource: readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8"),
-    editorCssSource: readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8"),
+    bundleSource: readFileSync(path.join(dir, "bp-paper-editor.bundle.js"), "utf8"),
+    editorCssSource: readFileSync(path.join(dir, "bp-paper-editor.css"), "utf8"),
     typesSource: readFileSync(path.join(root, "index.d.ts"), "utf8"),
     contractSource: readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"),
     elementSources: {
@@ -96,14 +99,20 @@ export function composeBarkparkSurface(packageEvidence, readerSource) {
   };
 }
 
-export async function surface() {
-  const readerSource = readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
-  return composeBarkparkSurface(await packageSurface(), readerSource);
+export const liveReaderSource = () => readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
+
+// The whole profile for a build directory. With none it makes a temporary build, so
+// `npm test` on a clean checkout has no dist/ to need and no host asset to read.
+export async function surface({ dir } = {}) {
+  if (dir) return composeBarkparkSurface(await packageSurface({ dir }), liveReaderSource());
+  const { buildLocal } = await import("./build-local.mjs");
+  const outDir = mkdtempSync(path.join(tmpdir(), "bp-surface-"));
+  try {
+    const { evidence } = await buildLocal({ outDir, logLevel: "warning" });
+    return composeBarkparkSurface(evidence, liveReaderSource());
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
 }
 
 export const render = (value) => `${JSON.stringify(value, null, 2)}\n`;
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  writeFileSync(surfacePath, render(await surface()));
-  console.log(`wrote ${path.relative(root, surfacePath)}`);
-}

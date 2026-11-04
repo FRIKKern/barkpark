@@ -18,6 +18,7 @@ import {
   notClasses,
   sourceMembers,
   stylesheetClasses,
+  validatePackageProfile,
 } from "../scripts/surface-package.mjs";
 import { classWords, lex, readerAttributes, readerClasses, schemaAttributes, writtenAttributes } from "../scripts/writes.mjs";
 import { reachInsInContract } from "./contract-surface.mjs";
@@ -320,6 +321,38 @@ await check("the package extractor has only its three approved static dependenci
   assert.doesNotMatch(source, /\bimport\s*\(|node:|Barkpark|host-profile|readerClasses|readerAttributes/);
 });
 
+await check("package profile validation holds the package fields and the shape, and takes no view on reader ownership", () => {
+  const evidence = { contract: "1.0.0", editor: "2.0.0", build: "abc123abc123", declared: { canvas: { tag: ["x"] } }, host: { picker: { method: ["y"] } }, reachIns: { classes: ["z"] } };
+  const profile = () => ({
+    ...structuredClone(evidence),
+    reader: { classes: ["bp-a"], attributes: ["data-a"] },
+    internal: { members: { canvas: ["_a"], editor: ["_b"] }, classes: ["bp-b"], attributes: ["data-b"], events: ["bp-e"] },
+  });
+  validatePackageProfile(evidence, profile());
+  const rejected = (change, pattern) => {
+    const planted = profile();
+    change(planted);
+    assert.throws(() => validatePackageProfile(evidence, planted), pattern);
+  };
+  for (const field of ["contract", "editor", "build"]) rejected((p) => { p[field] = "other"; }, new RegExp(`profile ${field} differs`));
+  for (const field of ["declared", "host", "reachIns"]) rejected((p) => { p[field] = {}; }, new RegExp(`profile ${field} differs`));
+  rejected((p) => { delete p.reader; }, /profile keys are/);
+  rejected((p) => { p.extra = []; }, /profile keys are/);
+  rejected((p) => { const { contract, ...rest } = p; for (const k of Object.keys(p)) delete p[k]; Object.assign(p, rest, { contract }); }, /profile keys are/);
+  rejected((p) => { p.reader.classes = "bp-a"; }, /reader\.classes must be an array/);
+  rejected((p) => { p.reader.attributes = [""]; }, /reader\.attributes must be an array/);
+  rejected((p) => { p.internal.members.canvas = ["_b", "_a"]; }, /internal\.members\.canvas must be sorted/);
+  rejected((p) => { p.internal.events = ["bp-e", "bp-e"]; }, /internal\.events must be sorted/);
+  rejected((p) => { delete p.internal.classes; }, /internal\.classes must be an array/);
+
+  // The same name in two lists and an empty list are both legal here: subtraction in
+  // composeBarkparkSurface decides them, not a rule added for this check.
+  const open = profile();
+  open.reader.classes = [];
+  open.internal.classes = ["bp-a"];
+  open.internal.attributes = ["bp-a"];
+  validatePackageProfile(evidence, open);
+});
 
 if (failures) {
   console.log(`\n${failures} surface check(s) FAILED`);

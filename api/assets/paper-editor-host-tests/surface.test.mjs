@@ -1,15 +1,18 @@
 // surface.test.mjs — committed build, shell, and host-profile surface integration.
 //
-// The pure reader fixtures remain package-owned in src/__surface.test.mjs.
+// The pure reader fixtures remain package-owned in src/__surface.test.mjs. This file
+// reads the host's own committed assets, composes them with the live reader, and
+// runs the real sync-barkpark --check against every Barkpark sink.
 //
 // Run: node ../paper-editor-host-tests/surface.test.mjs
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "./jsdom.mjs";
-import { composeBarkparkSurface, packageSurface, render, stylesheetClasses, surface, surfacePath } from "../paper-editor/scripts/surface.mjs";
+import { composeBarkparkSurface, liveReaderSource, packageSurface, render, stylesheetClasses, surface, surfacePath } from "../paper-editor/scripts/surface.mjs";
 import { schemaAttributes } from "../paper-editor/scripts/writes.mjs";
 import { declaredInTypes, reachInsInContract } from "../paper-editor/src/contract-surface.mjs";
 
@@ -17,8 +20,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../pape
 const assets = path.join(root, "../../priv/static/assets");
 const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-const fresh = await surface();
-const packageEvidence = await packageSurface();
+const fresh = await surface({ dir: assets });
+const packageEvidence = await packageSurface({ dir: assets });
 const readerSource = readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
 
 let failures = 0;
@@ -39,7 +42,7 @@ await check("the committed surface.json is a fresh read of the committed build",
   if (committed === render(fresh)) return;
   const [was, now] = [JSON.parse(committed), fresh].map((s) => new Set(leaves({ contract: [s.contract], editor: [s.editor], build: [s.build], declared: s.declared, host: s.host, reachIns: s.reachIns, reader: s.reader, internal: s.internal })));
   const moved = [...[...now].filter((l) => !was.has(l)).map((l) => `+ ${l}`), ...[...was].filter((l) => !now.has(l)).map((l) => `- ${l}`)];
-  assert.fail(`run npm run build in api/assets/paper-editor and commit host-profile/surface.json\n${moved.join("\n") || "(same names, different bytes)"}`);
+  assert.fail(`run npm run sync:barkpark:write in api/assets/paper-editor and commit host-profile/surface.json\n${moved.join("\n") || "(same names, different bytes)"}`);
 });
 
 await check("surface.json names this package's versions and the bundle's BUILD_SHA", () => {
@@ -64,7 +67,27 @@ await check("package evidence is nonvacuous and composition alone applies Barkpa
 await check("reader composition fails closed and package extraction remains independent", async () => {
   assert.throws(() => composeBarkparkSurface(packageEvidence, ""), /reader/i);
   assert.throws(() => composeBarkparkSurface(packageEvidence, '~s(<div class="bp-only">)'), /attribute/i);
-  assert.ok((await packageSurface()).candidates.classes.includes("bp-callout"));
+  assert.ok((await packageSurface({ dir: assets })).candidates.classes.includes("bp-callout"));
+});
+
+await check("the live reader composition is nonvacuous: real reader source, real reader names, and only subtraction changes", () => {
+  assert.equal(liveReaderSource(), readerSource, "surface.mjs reads the same live reader this test reads");
+  assert.ok(readerSource.length > 10000, `only ${readerSource.length} bytes of reader source`);
+  assert.ok(fresh.reader.classes.length > 50, `only ${fresh.reader.classes.length} reader classes`);
+  assert.ok(fresh.reader.attributes.length > 5, `only ${fresh.reader.attributes.length} reader attributes`);
+  const minus = (list, ...others) => list.filter((name) => !others.some((other) => other.includes(name)));
+  const { candidates } = packageEvidence;
+  assert.deepEqual(fresh.internal.members.canvas, minus(candidates.members.canvas, fresh.reader.attributes));
+  assert.deepEqual(fresh.internal.members.editor, minus(candidates.members.editor, fresh.reader.attributes));
+  assert.deepEqual(fresh.internal.classes, minus(candidates.classes, fresh.reader.classes, fresh.reader.attributes));
+  assert.deepEqual(fresh.internal.attributes, minus(candidates.attributes, fresh.reader.attributes));
+  assert.deepEqual(fresh.internal.events, minus(candidates.events, fresh.reader.attributes));
+});
+
+await check("a fresh build composes to the committed profile and every Barkpark sink matches it (sync-barkpark --check)", () => {
+  const run = spawnSync(process.execPath, [path.join(root, "scripts/sync-barkpark.mjs"), "--check"], { encoding: "utf8" });
+  assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
+  assert.match(run.stdout, /all 11 Barkpark sinks match a fresh build/);
 });
 
 await check("package surface includes both editor child modules' unique member evidence", () => {

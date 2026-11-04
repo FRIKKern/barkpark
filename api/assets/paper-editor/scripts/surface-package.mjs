@@ -134,3 +134,35 @@ export async function extractPackageSurfaceEvidence({
     dom.window.close();
   }
 }
+
+const PACKAGE_FIELDS = ["contract", "editor", "build", "declared", "host", "reachIns"];
+const PROFILE_FIELDS = [...PACKAGE_FIELDS, "reader", "internal"];
+
+const requireOrdered = (name, list) => {
+  if (!Array.isArray(list) || list.some((entry) => typeof entry !== "string" || entry.length === 0))
+    throw new Error(`package surface: profile ${name} must be an array of non-empty strings`);
+  if (JSON.stringify(list) !== JSON.stringify(sorted(list)))
+    throw new Error(`package surface: profile ${name} must be sorted and hold each name once`);
+};
+
+// The part of a composed profile the package alone can vouch for: its shape, its
+// sorted lists, and deep equality for everything read from the package. Which names
+// are reader vocabulary takes the live reader, so it stays with the composer.
+export function validatePackageProfile(evidence, profile) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile))
+    throw new Error("package surface: profile must be an object");
+  const keys = Object.keys(profile);
+  if (JSON.stringify(keys) !== JSON.stringify(PROFILE_FIELDS))
+    throw new Error(`package surface: profile keys are ${JSON.stringify(keys)}, expected ${JSON.stringify(PROFILE_FIELDS)}`);
+  for (const field of PACKAGE_FIELDS) {
+    if (JSON.stringify(profile[field]) !== JSON.stringify(evidence[field]))
+      throw new Error(`package surface: profile ${field} differs from the package evidence`);
+  }
+  requireOrdered("reader.classes", profile.reader?.classes);
+  requireOrdered("reader.attributes", profile.reader?.attributes);
+  requireOrdered("internal.members.canvas", profile.internal?.members?.canvas);
+  requireOrdered("internal.members.editor", profile.internal?.members?.editor);
+  requireOrdered("internal.classes", profile.internal?.classes);
+  requireOrdered("internal.attributes", profile.internal?.attributes);
+  requireOrdered("internal.events", profile.internal?.events);
+}

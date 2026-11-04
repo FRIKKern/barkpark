@@ -119,7 +119,16 @@ npm test
 npm run pack:check   # builds, checks notices, packs, and inspects the tarball
 ```
 
-`prepack` runs `npm run build`, checks the notices, and copies the built files into `dist/`.
+`npm run build` writes seven files into `dist/` from this package's sources and reads nothing outside it. `prepack` runs it and checks the notices. `pack:check` also holds the packed `dist/`, `LICENSE` and `host-profile/surface.json` to this package.
+
+Barkpark consumes the build through an explicit outward step:
+
+```sh
+npm run sync:barkpark:check   # fresh build against every Barkpark sink; names each stale one
+npm run sync:barkpark:write   # the same, then writes the stale sinks
+```
+
+`scripts/sync-barkpark.mjs` is the only path from this package to Barkpark. It writes the raw surface and code tokens in `api/assets/paper-surface`, six browser assets in `api/priv/static/assets`, two files in `web/public`, and `host-profile/surface.json`, which it composes with the live reader. Nothing copies those files back into this package.
 
 Run the **PortableDoc editor release** workflow in its default dry-run mode to
 get the verified tarball and SHA-256. Use that artifact for the app matrix and
