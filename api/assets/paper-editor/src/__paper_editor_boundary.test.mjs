@@ -4,7 +4,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
@@ -205,11 +206,18 @@ assert.equal(BpPaperEditor.prototype._maybeSlash.call({ _editable: false }),
 assert.equal(BpPaperEditor.prototype._maybeWikilink.call({ _editable: false }),
   paperEditorAutocompleteMethods._maybeWikilink.call({ _editable: false }));
 
-const { surface } = await import("../scripts/surface.mjs");
-const baselineSurface = JSON.parse(readFileSync(path.join(root, "host-profile/surface.json"), "utf8"));
-const currentSurface = await surface();
-assert.deepEqual(currentSurface.internal.members.editor, baselineSurface.internal.members.editor,
-  "surface reader retains the exact editor private-member inventory");
+// The tracked profile holds the reader's names, so this check needs no host tree.
+const { buildLocal } = await import("../scripts/build-local.mjs");
+const trackedSurface = JSON.parse(readFileSync(path.join(root, "host-profile/surface.json"), "utf8"));
+const surfaceBuild = mkdtempSync(path.join(tmpdir(), "bp-boundary-"));
+try {
+  const { evidence } = await buildLocal({ outDir: surfaceBuild, logLevel: "warning" });
+  const readerAttributes = new Set(trackedSurface.reader.attributes);
+  assert.deepEqual(evidence.candidates.members.editor.filter((name) => !readerAttributes.has(name)), trackedSurface.internal.members.editor,
+    "the built editor keeps the exact private-member inventory in the tracked profile");
+} finally {
+  rmSync(surfaceBuild, { recursive: true, force: true });
+}
 
 const deferred = () => {
   let resolve;

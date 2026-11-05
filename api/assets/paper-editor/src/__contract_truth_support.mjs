@@ -18,7 +18,14 @@ export const walk = (dir) => readdirSync(dir).flatMap((name) => {
   return statSync(file).isDirectory() ? walk(file) : [file];
 });
 export const stripComments = (text) => text.replace(/(^|\s)\/\*[\s\S]*?\*\//g, "$1").replace(/(^|[\s;{}),])\/\/.*$/gm, "$1");
-export const sourceFiles = walk(path.join(root, "src")).filter((file) => /\.(js|css)$/.test(file) && !path.basename(file).startsWith("__"));
+// src/bp-paper-mermaid.js is its own output, copied unchanged. The editor does not
+// import it: to the editor it is a host-supplied piece. It is the one file left out.
+const OWN_OUTPUT = path.join(root, "src/bp-paper-mermaid.js");
+const packageFiles = walk(path.join(root, "src")).filter((file) => /\.(js|css)$/.test(file) && !path.basename(file).startsWith("__"));
+export const sourceFiles = packageFiles.filter((file) => file !== OWN_OUTPUT);
+const leftOut = packageFiles.filter((file) => !sourceFiles.includes(file));
+if (leftOut.length !== 1 || leftOut[0] !== OWN_OUTPUT)
+  throw new Error(`contract truth: the scan must leave out only ${OWN_OUTPUT}, it left out ${JSON.stringify(leftOut)}`);
 export const rawJs = sourceFiles.filter((file) => file.endsWith(".js")).map((file) => readFileSync(file, "utf8")).join("\n");
 export const js = stripComments(rawJs).replace(/\?\.(?=[(\[])/g, "").replace(/\?\.(?!\d)/g, ".").replace(/\n\s*(?=\.(?!\.))/g, "");
 export const packageCss = stripComments(readAuthoredCss());

@@ -25,8 +25,7 @@
 // package's own sources. surface() adds the live Barkpark reader. The one writer of
 // the tracked file is scripts/sync-barkpark.mjs; the host surface test holds it
 // byte-equal to this composition.
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canvasSourceLeafNames, elementClassBody, extractPackageSurfaceEvidence } from "./surface-package.mjs";
@@ -101,18 +100,9 @@ export function composeBarkparkSurface(packageEvidence, readerSource) {
 
 export const liveReaderSource = () => readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
 
-// The whole profile for a build directory. With none it makes a temporary build, so
-// `npm test` on a clean checkout has no dist/ to need and no host asset to read.
-export async function surface({ dir } = {}) {
-  if (dir) return composeBarkparkSurface(await packageSurface({ dir }), liveReaderSource());
-  const { buildLocal } = await import("./build-local.mjs");
-  const outDir = mkdtempSync(path.join(tmpdir(), "bp-surface-"));
-  try {
-    const { evidence } = await buildLocal({ outDir, logLevel: "warning" });
-    return composeBarkparkSurface(evidence, liveReaderSource());
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-  }
+// The whole profile for a build directory.
+export async function surface({ dir }) {
+  return composeBarkparkSurface(await packageSurface({ dir }), liveReaderSource());
 }
 
 export const render = (value) => `${JSON.stringify(value, null, 2)}\n`;
