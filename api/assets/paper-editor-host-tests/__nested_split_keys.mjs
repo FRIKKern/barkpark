@@ -19,7 +19,7 @@
 // nested_split_keys.json, which patch_nested_split_test.exs folds through Patch
 // and the canvas batch write (NESTED_SPLIT_WRITE=1 rewrites it).
 //
-//   Run:  node src/__nested_split_keys.mjs        (or: npm run nested-split:keys)
+//   Run:  node ../paper-editor-host-tests/__nested_split_keys.mjs   (from api/assets/paper-editor)
 //   Env:  BP_PLAYWRIGHT_FROM=<package.json that can require("playwright")>
 //
 // Playwright lives in the js/ monorepo's node_modules; a worktree finds it through
@@ -35,11 +35,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { exitRig, skip, tally } from "./__rig.mjs";
-import { applyOps } from "./smoke/harness.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
+import { applyOps } from "../paper-editor/src/smoke/harness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const ASSETS = join(REPO, "api/priv/static/assets");
 const FIXTURE = join(REPO, "api/test/support/fixtures/paper-editor/nested_split_keys.json");
 
@@ -342,7 +342,7 @@ try {
       if (!names.has(id)) names.set(id, `c-keys-${names.size + 1}`);
       return names.get(id);
     }));
-    const fixture = { recorded_by: "api/assets/paper-editor/src/__nested_split_keys.mjs", scenes };
+    const fixture = { recorded_by: "api/assets/paper-editor-host-tests/__nested_split_keys.mjs", scenes };
     if (process.env.NESTED_SPLIT_WRITE === "1") writeFileSync(FIXTURE, JSON.stringify(fixture, null, 2) + "\n");
     const shape = (f) => JSON.stringify(f.scenes.map(({ scene, before, client_after, typed }) => ({ scene, before, client_after, typed }))).replace(/c-keys-\d+/g, "c-keys");
     if (shape(JSON.parse(readFileSync(FIXTURE, "utf8"))) !== shape(fixture)) throw new Error("the recording's after-states differ from the fixture (NESTED_SPLIT_WRITE=1 rewrites it)");

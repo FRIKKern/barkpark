@@ -187,9 +187,9 @@ export const STEPS = [
     gate: "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex",
   }),
   conformance("editor-canvas", {
-    inputs: ["api/assets/paper-editor/src/**"],
-    check: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && node src/__conformance.mjs",
-    write: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && CONFORMANCE_WRITE=1 node src/__conformance.mjs",
+    inputs: ["api/assets/paper-editor/src/**", "api/assets/paper-editor-host-tests/__conformance.mjs"],
+    check: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && node ../paper-editor-host-tests/__conformance.mjs",
+    write: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && CONFORMANCE_WRITE=1 node ../paper-editor-host-tests/__conformance.mjs",
     gate: ".github/workflows/paper-editor.yml: PortableDoc conformance (editor canvas vs the golden pack)",
   }),
   conformance("react", {

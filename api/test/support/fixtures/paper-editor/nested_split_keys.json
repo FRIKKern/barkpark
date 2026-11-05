@@ -1,5 +1,5 @@
 {
-  "recorded_by": "api/assets/paper-editor/src/__nested_split_keys.mjs",
+  "recorded_by": "api/assets/paper-editor-host-tests/__nested_split_keys.mjs",
   "scenes": [
     {
       "scene": "keys-section",

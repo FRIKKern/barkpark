@@ -1,4 +1,4 @@
 {
- "_comment": "Known View/Edit computed-style divergences measured by src/__view_edit_parity_matrix.mjs. Each entry is tolerated at every scenario; the matrix fails on any divergence NOT listed here and on any entry that no longer fires (delete it). Adding an entry needs a reason a reviewer can check.",
+ "_comment": "Known View/Edit computed-style divergences measured by ../paper-editor-host-tests/__view_edit_parity_matrix.mjs. Each entry is tolerated at every scenario; the matrix fails on any divergence NOT listed here and on any entry that no longer fires (delete it). Adding an entry needs a reason a reviewer can check.",
  "entries": []
 }

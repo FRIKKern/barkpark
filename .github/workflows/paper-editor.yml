@@ -272,9 +272,11 @@ jobs:
           node ../paper-editor-host-tests/testing-ground-traps-goldens.test.mjs
           node ../paper-editor-host-tests/testing-ground-builds.test.mjs
           node ../paper-editor-host-tests/testing-ground-server.test.mjs
+          node ../paper-editor-host-tests/hosts-e12-baseline.test.mjs
+          node ../paper-editor-host-tests/__rig_rule.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
-        run: node src/__conformance.mjs
+        run: node ../paper-editor-host-tests/__conformance.mjs
 
       - name: Rebuild bundle
         run: npm run build
@@ -298,7 +300,7 @@ jobs:
   # regex-match declarations out of it. That catches a deleted declaration. It
   # cannot tell you whether the page actually scrolls sideways on a phone, and
   # it cannot find a block whose overflow nobody has thought about yet.
-  # `src/__narrow_render.mjs` is the half that measures — it renders every
+  # `../paper-editor-host-tests/__narrow_render.mjs` is the half that measures — it renders every
   # golden fixture, plus long unbreakable author tokens injected one field at a
   # time, in headless Chromium and asserts documentElement.scrollWidth against
   # the viewport at 390px and 320px.
@@ -337,6 +339,10 @@ jobs:
         with:
           node-version: 20
 
+      # The picker and harness rigs build the package into a temp folder.
+      - name: Install package dependencies
+        run: npm ci
+
       - name: Cache chrome-headless-shell
         uses: actions/cache@v6
         with:
@@ -368,7 +374,7 @@ jobs:
           out="$RUNNER_TEMP/narrow-render.txt"
           status=0
           BP_NARROW_WIDTHS=390,320 BP_NARROW_VERBOSE=1 \
-            node src/__narrow_render.mjs > "$out" 2>&1 || status=$?
+            node ../paper-editor-host-tests/__narrow_render.mjs > "$out" 2>&1 || status=$?
           cat "$out"
 
           # PROVE IT MEASURED. Everything below fails a run that produced a

@@ -3,14 +3,14 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { exitRig, skip, tally } from "./__rig.mjs";
-import { drills } from "./testing-ground/drills/index.mjs";
-import { barkparkFold } from "./testing-ground/barkpark-fold.mjs";
-import { caretRead, lightsOf, play } from "./testing-ground/play.mjs";
-import { besideMain, makeBuild, pickBuild } from "./testing-ground/builds.mjs";
-import { mainBuild, start } from "./testing-ground/server.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
+import { drills } from "../paper-editor/src/testing-ground/drills/index.mjs";
+import { barkparkFold } from "../paper-editor/src/testing-ground/barkpark-fold.mjs";
+import { caretRead, lightsOf, play } from "../paper-editor/src/testing-ground/play.mjs";
+import { besideMain, makeBuild, pickBuild } from "../paper-editor/src/testing-ground/builds.mjs";
+import { mainBuild, start } from "../paper-editor/src/testing-ground/server.mjs";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const ONLY = process.env.TG_ONLY;
 
 function playwright() {

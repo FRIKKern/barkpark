@@ -1,14 +1,17 @@
 // Real-Chrome regression for the two reader-shaped editable rows in this lane.
-// Run after `npm run build`: BP_REQUIRE_CHROME=1 node src/__diff_note_keys.mjs
+// Run: BP_REQUIRE_CHROME=1 node src/__diff_note_keys.mjs
+// It builds the package into a temp folder and serves that build.
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildLocal } from "../scripts/build-local.mjs";
 import { launchChrome, evaluate, waitFor } from "../hosts/browser.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ASSETS = join(HERE, "../../../priv/static/assets");
+const ASSETS = mkdtempSync(join(tmpdir(), "bp-diff-note-"));
+process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
+await buildLocal({ outDir: ASSETS, logLevel: "warning" });
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
 <link rel="stylesheet" href="/bp-paper-editor.css"></head><body>

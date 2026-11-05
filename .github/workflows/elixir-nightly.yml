@@ -53,7 +53,7 @@
 # person was reached.
 #
 # SECOND JOB: THE VIEW/EDIT PARITY MATRIX (task-2e171ca12cb82b76). PR #20125
-# committed api/assets/paper-editor/src/__view_edit_parity_matrix.mjs, which
+# committed api/assets/paper-editor-host-tests/__view_edit_parity_matrix.mjs, which
 # renders every block type through the reader (View) and both edit surfaces
 # (the canvas and the public /papers LiveView editor) in headless Chromium and
 # diffs the computed style of the element that paints each run of text. Until
@@ -413,7 +413,7 @@ jobs:
           out="$RUNNER_TEMP/view-edit-parity/clean.log"
           mkdir -p "$RUNNER_TEMP/view-edit-parity"
           status=0
-          npm run test:view-edit-parity > "$out" 2>&1 || status=$?
+          node ../paper-editor-host-tests/__view_edit_parity_matrix.mjs > "$out" 2>&1 || status=$?
           cat "$out"
           total=$(grep '^TOTAL view/edit style divergences: ' "$out" || true)
           {
@@ -441,7 +441,7 @@ jobs:
           set -uo pipefail
           out="$RUNNER_TEMP/view-edit-parity/planted.log"
           status=0
-          npm run test:view-edit-parity > "$out" 2>&1 || status=$?
+          node ../paper-editor-host-tests/__view_edit_parity_matrix.mjs > "$out" 2>&1 || status=$?
           cat "$out"
           if [ "$status" -eq 0 ]; then
             echo "::error::the planted divergence exited 0 — the matrix can no longer red."
@@ -472,7 +472,7 @@ jobs:
           CI_FAILURE_KEY: view-edit-parity
           CI_FAILURE_DETAIL: |
             The nightly View/Edit parity matrix failed on main
-            (api/assets/paper-editor/src/__view_edit_parity_matrix.mjs, owned by
+            (api/assets/paper-editor-host-tests/__view_edit_parity_matrix.mjs, owned by
             the studio lane). Read the `View/Edit parity matrix` step: each FAIL
             line names the scenario and surface, and the indented lines under it
             name fixture, text, axis, and the View and Edit values. A STALE line
@@ -482,5 +482,5 @@ jobs:
             (compile, npm ci, chrome-headless-shell install) is the venue, not
             parity. Screenshots and report.json are in the
             `view-edit-parity-<sha>` artifact.
-            Reproduce: cd api/assets/paper-editor && npm run test:view-edit-parity
+            Reproduce: cd api/assets/paper-editor && MIX_ENV=test node ../paper-editor-host-tests/__view_edit_parity_matrix.mjs
         run: bash scripts/file-ci-failure-issue.sh

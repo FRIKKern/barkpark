@@ -10,7 +10,7 @@ const REPO = resolve(dirname(SELF), "../../..");
 const PKG = join(REPO, "api/assets/paper-editor");
 const WORKFLOW = join(REPO, ".github/workflows/paper-editor.yml");
 const NOT_READ = new Map([
-  ["api/lib/barkpark/portable_doc/bpml/parser.ex", "src/__narrow_render.mjs"],
+  ["api/lib/barkpark/portable_doc/bpml/parser.ex", "../paper-editor-host-tests/__narrow_render.mjs"],
   ["internal/", "src/canvas/__filetree_inline_mounted.test.mjs"],
 ]);
 

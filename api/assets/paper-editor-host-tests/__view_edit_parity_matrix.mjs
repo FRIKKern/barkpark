@@ -25,7 +25,7 @@
 //   TOTAL view/edit style divergences: <n> (known <k>, unexpected <u>, stale <s>)
 //
 // Run (needs Chromium and a compiled MIX_ENV=test api tree):
-//   npm run test:view-edit-parity            (from api/assets/paper-editor)
+//   MIX_ENV=test node ../paper-editor-host-tests/__view_edit_parity_matrix.mjs   (from api/assets/paper-editor)
 //
 // Environment:
 //   BP_CHROME=/path/to/chrome-headless-shell
@@ -45,11 +45,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
-import { AXES, diffSurface, classify, staleEntries } from "./view-edit-parity-compare.js";
-import { exitRig, skip } from "./__rig.mjs";
+import { AXES, diffSurface, classify, staleEntries } from "../paper-editor/src/view-edit-parity-compare.js";
+import { exitRig, skip } from "../paper-editor/src/__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const API = join(REPO, "api");
 const PACKAGE = join(REPO, "api/assets/paper-editor");
 const RENDER_API = process.env.BP_PARITY_RENDER_API || API;
@@ -59,7 +59,7 @@ const REPORT_ONLY = process.env.BP_PARITY_REPORT_ONLY === "1";
 const SHELL_CSS = process.env.BP_PARITY_SHELL_CSS || join(REPO, "api/priv/static/assets/bp-paper-editor-shell.css");
 const PLANT = process.env.BP_PARITY_PLANT || "";
 const REMOVE_DIAGRAM = process.env.BP_PARITY_REMOVE_DIAGRAM === "1";
-const KNOWN = JSON.parse(readFileSync(join(HERE, "view-edit-parity.known.json"), "utf8")).entries;
+const KNOWN = JSON.parse(readFileSync(join(PACKAGE, "src/view-edit-parity.known.json"), "utf8")).entries;
 
 function gitIdentity(path) {
   const resolvedPath = realpathSync(path);

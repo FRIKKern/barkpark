@@ -53,7 +53,7 @@
 // one answer. Which is the whole reason this is a rendered measurement and not
 // a reading: a source reading dates faster than the thing it describes.
 //
-//   Run:  node src/__compose_fullbleed_render.mjs
+//   Run:  node ../paper-editor-host-tests/__compose_fullbleed_render.mjs   (from api/assets/paper-editor)
 //   Env:  BP_CHROME=/path/to/chrome     pin the binary
 //         BP_FULLBLEED_VERBOSE=1        print the full measurement table
 //
@@ -66,10 +66,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { exitRig, skip, tally } from "./__rig.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO = join(__dirname, "../../../..");
+const REPO = join(__dirname, "../../..");
 const VERBOSE = !!process.env.BP_FULLBLEED_VERBOSE;
 // 1280 and 700 both hit the 660px surface cap but differ in gutter (the
 // 767px breakpoint), 390 is a phone. Three DIFFERENT content widths, which is

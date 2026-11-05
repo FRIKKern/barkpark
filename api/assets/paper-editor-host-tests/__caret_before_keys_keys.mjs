@@ -9,7 +9,7 @@
 // host acknowledges every batch; the rig folds them through the patch.ex reference fold
 // (smoke/harness.mjs applyOps) and checks that the doc and the saved blocks agree.
 //
-//   Run:  node src/__caret_before_keys_keys.mjs        (or: npm run caret-before-keys:keys)
+//   Run:  node ../paper-editor-host-tests/__caret_before_keys_keys.mjs   (from api/assets/paper-editor)
 //   Env:  BP_PLAYWRIGHT_FROM=<package.json that can require("playwright")>
 //
 // Playwright lives in the js/ monorepo's node_modules; a worktree finds it through the
@@ -23,11 +23,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { exitRig, skip, tally } from "./__rig.mjs";
-import { applyOps } from "./smoke/harness.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
+import { applyOps } from "../paper-editor/src/smoke/harness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const ASSETS = join(REPO, "api/priv/static/assets");
 const TRIES = 5;
 

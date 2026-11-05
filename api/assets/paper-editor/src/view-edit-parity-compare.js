@@ -1,5 +1,5 @@
 // view-edit-parity-compare.js — the pure comparison half of the View/Edit
-// computed-style parity matrix (src/__view_edit_parity_matrix.mjs).
+// computed-style parity matrix (../paper-editor-host-tests/__view_edit_parity_matrix.mjs).
 //
 // The browser half collects, per fixture, an OWNER map: visible text (or a form
 // control's value) -> the computed style of the element that paints it. This

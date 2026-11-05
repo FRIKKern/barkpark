@@ -1,9 +1,9 @@
-import { JSDOM } from "jsdom";
+import { JSDOM } from "./jsdom.mjs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MISSING, PACK, cli, diffShapes, shapeOf } from "../../../priv/portable_doc/conformance/conformance.mjs";
-import { runToTiptap } from "./canvas/run-convert.js";
-import { projectMountedTableForReader } from "./canvas/table-node.js";
+import { MISSING, PACK, cli, diffShapes, shapeOf } from "../../priv/portable_doc/conformance/conformance.mjs";
+import { runToTiptap } from "../paper-editor/src/canvas/run-convert.js";
+import { projectMountedTableForReader } from "../paper-editor/src/canvas/table-node.js";
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 window.Range.prototype.getClientRects = () => [];
@@ -17,7 +17,7 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.CSS ||= { escape: String };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
-await import("./index.js");
+await import("../paper-editor/src/index.js");
 
 const fragments = JSON.parse(readFileSync(join(PACK, "fragments.json"), "utf8"));
 const PLUMBING_ATTRS = ["contenteditable", "draggable", "spellcheck", "tabindex", "data-bp-id", "data-bp-type", "data-field-type", "data-test-id", "data-bp-conformance-root", "data-bp-fleet-id"];

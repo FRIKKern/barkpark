@@ -10,7 +10,7 @@
 //      light/dark, while saving a screenshot of every surface.
 //
 // Run from anywhere:
-//   node api/assets/paper-editor/src/__reader_canvas_render.mjs
+//   node api/assets/paper-editor-host-tests/__reader_canvas_render.mjs
 //
 // Useful environment variables:
 //   BP_CHROME=/path/to/chrome-headless-shell
@@ -37,10 +37,10 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
-import { exitRig, skip } from "./__rig.mjs";
+import { exitRig, skip } from "../paper-editor/src/__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const API = join(REPO, "api");
 const PACKAGE = join(REPO, "api/assets/paper-editor");
 const RENDER_API = process.env.BP_PARITY_RENDER_API || API;

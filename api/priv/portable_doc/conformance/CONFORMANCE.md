@@ -10,7 +10,7 @@ conformance/<renderer>.json ◄── { renderer, compare, pack_stamp, ran_at_sh
 | Renderer | Report | Runner | Compare | CI |
 |---|---|---|---|---|
 | Elixir reader (reference) | `elixir.json` | `api/lib/mix/tasks/barkpark.portable_doc.conformance.ex` | dom | Elixir gate (`conformance_test.exs`) |
-| Editor canvas (read = edit) | `editor-canvas.json` | `api/assets/paper-editor/src/__conformance.mjs` | dom | paper-editor |
+| Editor canvas (read = edit) | `editor-canvas.json` | `api/assets/paper-editor-host-tests/__conformance.mjs` | dom | paper-editor |
 | `@barkpark/react` | `react.json` | `js/packages/react/tests/conformance.test.tsx` | dom | js-tests |
 | Go pdrender (TUI) | `pdrender.json` | `internal/pdrender/conformance_test.go` | text | go-tests |
 | pdrender WASM blob | `pdrender-wasm.json` | `cmd/pdrender-wasm/conformance.mjs` | text | pdrender-wasm |

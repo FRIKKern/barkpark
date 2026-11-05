@@ -1,13 +1,13 @@
 // __harness_generic_run.mjs — the browser runner for __harness_generic.html.
 //
-//   node api/assets/paper-editor/src/canvas/__harness_generic_run.mjs
+//   node src/canvas/__harness_generic_run.mjs     (from the package, after npm ci)
 //
-// THE ONE COMMAND. That line, from a clean checkout at the repo root, is the
-// whole reproduction: it starts a static file server over the repo, drives
+// THE ONE COMMAND. That line is the whole reproduction: it builds the package
+// into a temp folder, starts a static file server over the package, drives
 // headless Chromium against the generic harness, and prints every assertion.
 //
-// WHAT IT PROVES. A static file server over the repo (NO Phoenix, no database,
-// no /api) plus headless Chromium, driving the generic canvas harness:
+// WHAT IT PROVES. A static file server over the package (NO Phoenix, no
+// database, no /api) plus headless Chromium, driving the generic canvas harness:
 //
 //   1. the committed capture of a REAL PUBLISHED paper mounts clean and round
 //      trips — __assertCleanMount().clean and __assertRoundTrip().ok;
@@ -21,7 +21,7 @@
 // The byte-lock on __harness.html and the fixture's provenance need no browser,
 // so they live in __harness_lock.test.mjs and run in `npm test` on every PR.
 //
-// CHROME. Same discovery as src/__narrow_render.mjs: BP_CHROME, then the
+// CHROME. Same discovery as ../paper-editor-host-tests/__narrow_render.mjs: BP_CHROME, then the
 // puppeteer cache, then the system Chrome. With no browser it prints SKIP and
 // exits 0 (1 under BP_REQUIRE_CHROME=1, __rig.mjs): a gate that cannot run everywhere is a gate people learn to ignore,
 // and the always-on half already lives in __harness_lock.test.mjs.
@@ -39,13 +39,14 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { buildLocal } from "../../scripts/build-local.mjs";
 import { exitRig, skip, tally } from "../__rig.mjs";
 
 const execFileP = promisify(execFile);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../../..");
-const HARNESS_DIR = "api/assets/paper-editor/src/canvas";
+const PACKAGE = join(HERE, "../..");
+const HARNESS_DIR = "src/canvas";
 const REAL_FIXTURE = "./__fixtures/paper-mechanical-spacing-doctrine.json";
 
 const rig = tally();
@@ -87,15 +88,18 @@ function findChrome() {
 
 const CHROME = findChrome();
 
-const fixturePath = join(REPO, HARNESS_DIR, "__fixtures/paper-mechanical-spacing-doctrine.json");
+const fixturePath = join(PACKAGE, HARNESS_DIR, "__fixtures/paper-mechanical-spacing-doctrine.json");
 
 // ── 2. the static server ─────────────────────────────────────────────────────
 //
-// Plain files off disk, rooted at the repo. `overlay` serves a few in-memory
+// Plain files off disk, rooted at the package, with /dist/ served from the temp
+// build. `overlay` serves a few in-memory
 // fixtures (the malformed and mutated arms) so the repo is not littered with
 // deliberately-broken JSON — the bytes live in this file, where the reason for
 // each one is next to it.
 
+const DIST = mkdtempSync(join(tmpdir(), "bp-harness-dist-"));
+process.on("exit", () => rmSync(DIST, { recursive: true, force: true }));
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 const overlay = new Map();
 
@@ -107,8 +111,9 @@ const server = createServer((req, res) => {
     res.end(overlay.get(path));
     return;
   }
-  const abs = normalize(join(REPO, path));
-  if (!abs.startsWith(normalize(REPO)) || !existsSync(abs)) {
+  const base = path.startsWith("/dist/") ? DIST : PACKAGE;
+  const abs = normalize(join(base, path.startsWith("/dist/") ? path.slice("/dist".length) : path));
+  if (!abs.startsWith(normalize(base)) || !existsSync(abs)) {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("not found");
     return;
@@ -196,6 +201,7 @@ if (!CHROME) {
   console.log("      Set BP_CHROME=/path/to/chrome, or `npx @puppeteer/browsers install chrome-headless-shell`.");
   process.exit(skip("browser arms — no Chromium found."));
 } else {
+  await buildLocal({ outDir: DIST, logLevel: "warning" });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     // ── the green: a real published paper, clean mount + round trip ──────────

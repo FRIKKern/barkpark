@@ -15,7 +15,7 @@
 // causes were elsewhere. Every claim below is a measurement taken from
 // headless Chromium, not an argument about cascade.
 //
-//   Run:  node src/__narrow_render.mjs          (or: npm run narrow:render)
+//   Run:  node ../paper-editor-host-tests/__narrow_render.mjs   (from api/assets/paper-editor)
 //   Env:  BP_CHROME=/path/to/chrome   pin the binary
 //         BP_NARROW_WIDTHS=390,320    viewports to test
 //         BP_NARROW_VERBOSE=1         print every case, not just failures
@@ -57,10 +57,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { exitRig, skip, tally } from "./__rig.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO = join(__dirname, "../../../..");
+const REPO = join(__dirname, "../../..");
 const WIDTHS = (process.env.BP_NARROW_WIDTHS || "390,320").split(",").map(Number);
 const VERBOSE = !!process.env.BP_NARROW_VERBOSE;
 

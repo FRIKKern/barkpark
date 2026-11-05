@@ -79,7 +79,7 @@
 //
 // MEASURED, headless Chromium at 390px, `.bp-stat__v` carrying the
 // 45-character branch name `feat/deploy-with-barkpark-warm-pool-provision`,
-// `document.documentElement.scrollWidth` (`npm run narrow:render`):
+// `document.documentElement.scrollWidth` (`node __narrow_render.mjs`):
 //
 //   base rule as it was                          632px   page scrolls 242px
 //   + max-width: 100%                            408px   page scrolls  18px
@@ -91,7 +91,7 @@
 // 392px border box starting at the 16px gutter, a 408px document.
 // `box-sizing: border-box` folds the chrome back inside. Neither declaration
 // is redundant; removing either re-opens the defect, at 390px and at 320px.
-// With both, `npm run narrow:render` at `BP_NARROW_WIDTHS=390,320` is ALL PASS.
+// With both, `node __narrow_render.mjs` at `BP_NARROW_WIDTHS=390,320` is ALL PASS.
 //
 // The shared stylesheet is copied verbatim into frozen SDK archives. Its guard
 // citations retain this suite's earlier package path until those archives are recut.

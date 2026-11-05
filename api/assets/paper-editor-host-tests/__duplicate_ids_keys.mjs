@@ -4,10 +4,10 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { exitRig, skip, tally } from "./__rig.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const FIXTURE = join(REPO, "api/test/support/fixtures/paper-editor/duplicate_ids_keys.json");
 const ASSET = "api/priv/static/assets";
 
@@ -288,7 +288,7 @@ try {
       if (!names.has(id)) names.set(id, `c-keys-${names.size + 1}`);
       return names.get(id);
     }));
-    const fixture = { recorded_by: "api/assets/paper-editor/src/__duplicate_ids_keys.mjs", scenes };
+    const fixture = { recorded_by: "api/assets/paper-editor-host-tests/__duplicate_ids_keys.mjs", scenes };
     const text = oneScenePerLine(fixture);
     if (process.env.DUPLICATE_IDS_WRITE === "1") writeFileSync(FIXTURE, text);
     if (readFileSync(FIXTURE, "utf8") !== text) throw new Error("the recording's batches, echoes or screens differ from the fixture (DUPLICATE_IDS_WRITE=1 rewrites it)");

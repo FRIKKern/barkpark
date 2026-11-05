@@ -8,7 +8,7 @@
 // the lines on screen and the saved blocks agree, and that a fresh canvas mounted on
 // the saved blocks (the reload) shows the same lines.
 //
-//   Run:  node src/__enter_empty_line_keys.mjs        (or: npm run enter-empty-line:keys)
+//   Run:  node ../paper-editor-host-tests/__enter_empty_line_keys.mjs   (from api/assets/paper-editor)
 //   Env:  BP_PLAYWRIGHT_FROM=<package.json that can require("playwright")>
 //
 // Playwright lives in the js/ monorepo's node_modules; a worktree finds it through
@@ -25,11 +25,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { exitRig, skip, tally } from "./__rig.mjs";
-import { applyOps } from "./smoke/harness.mjs";
+import { exitRig, skip, tally } from "../paper-editor/src/__rig.mjs";
+import { applyOps } from "../paper-editor/src/smoke/harness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, "../../../..");
+const REPO = join(HERE, "../../..");
 const ASSETS = join(REPO, "api/priv/static/assets");
 
 function playwright() {

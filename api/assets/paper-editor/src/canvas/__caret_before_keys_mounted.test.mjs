@@ -4,7 +4,7 @@
 // without a selectionchange; the key is a keydown on the editor. It also pins what the
 // fix stands on: prosemirror-view's view.domObserver.flush (an internal), that a
 // composing keydown reads nothing, and that ProseMirror's 20 ms focus resync does not
-// put the old caret back. The real-key half is src/__caret_before_keys_keys.mjs.
+// put the old caret back. The real-key half is ../../paper-editor-host-tests/__caret_before_keys_keys.mjs.
 // Run: node src/canvas/__caret_before_keys_mounted.test.mjs   (or: npm test)
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
