@@ -68,7 +68,7 @@ const TELEGRAM_API_BASE = "https://api.telegram.org";
  *
  *   (2) THE SYNCHRONOUS MOUNT THROW. `startPolling()` can throw AT MOUNT: if
  *       `resetWebhook()` (the `deleteWebhook` call) rejects, the vendor sets
- *       `pollingActive = false` and RETHROWS (index.js:1047-1051). Before this
+ *       `pollingActive = false` and RETHROWS (in the vendor's index.js). Before this
  *       watchdog that rethrow permanently failed the install with ZERO retry —
  *       one transient Telegram 5xx at boot and the bot never polled again. The
  *       supervisor wraps the initial arm in the same bounded backoff, so a

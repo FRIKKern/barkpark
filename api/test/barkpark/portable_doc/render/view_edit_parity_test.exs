@@ -797,7 +797,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # INLINE styles on a `<div>`/`<span>` pair (Figures.section_divider_html/0,
   # figures.ex:33-37) with light-only hex fallbacks. The edit side re-expresses the
   # SAME values as a hand-mirrored `.bp-section-divider` / `.bp-section-divider__mark`
-  # CSS pair in BOTH root.html.heex (~L3392-3400) and styles.css (~L452-460), bound
+  # CSS pair in BOTH root.html.heex (~L3392-3400) and src/styles/content.css (`.bp-section-divider`), bound
   # off the same custom props (dark-aware, no hex fallback). §5/§6 lock the two CSS
   # copies together but NOTHING locked them to the reader's inline source — and it
   # drifted once already (the figures.ex hex fallbacks changed after the mjs
