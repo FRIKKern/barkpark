@@ -13,12 +13,12 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 `bp instance up` runs this guide to the owner's first sign-in. It creates the resource group when it is missing, so an empty or new group works. After `az login` as a user who may create app registrations, run one of these in an empty directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | BARKPARK_CLI_VERSION=1.26.16 sh
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp instance up --azure --path vm --resource-group <resource group> --host <dns label> --owner <owner upn>
 bp instance up --azure --path containerapps --resource-group <resource group> --region norwayeast --owner <owner upn>
 ```
 
-Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
+`--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. On Path A, `--disk-sku` and `--disk-gb` set the OS disk, by default a 30 GiB Premium SSD with 120 IOPS. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
 
 `--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 

@@ -457,6 +457,8 @@ func TestInstanceUpFlagErrors(t *testing.T) {
 		{[]string{"--azure", "--path", "containerapps", "--resource-group", "rg", "--owner", "o@x.no", "--host", "label"}, "your own domain"},
 		{[]string{"--azure", "--path", "vm", "--resource-group", "rg", "--owner", "o@x.no", "--host", "l", "--image", "a", "--from-source", "main"}, "not both"},
 		{[]string{"--azure", "--path", "vm", "--resource-group", "rg", "--host", "l"}, "--owner is required"},
+		{[]string{"--azure", "--path", "vm", "--resource-group", "rg", "--owner", "o@x.no", "--host", "l", "--disk-gb", "8"}, "30 to 4095"},
+		{[]string{"--azure", "--path", "containerapps", "--resource-group", "rg", "--owner", "o@x.no", "--disk-sku", "Premium_LRS"}, "need --path vm"},
 	} {
 		_, stderr, code := runUp(t, tc.args...)
 		if code != exitUsage || !strings.Contains(stderr, tc.want) {
@@ -513,5 +515,22 @@ func TestInstanceUpRegistersMissingProviders(t *testing.T) {
 	}
 	if f.has("az provider register --namespace Microsoft.Compute") != 1 || f.has("az provider register --namespace Microsoft.Network") != 0 || listed != 2 {
 		t.Errorf("registered wrong providers (listed %d):\n%s", listed, f.dump())
+	}
+}
+
+func TestInstanceUpVMDiskFlags(t *testing.T) {
+	f := stubInstanceUp(t)
+	if err := os.MkdirAll("key", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runUp(t, append(vmArgs(), "--disk-sku", "Premium_LRS", "--disk-gb", "128")...)
+	if code != exitOK {
+		t.Fatalf("exit %d\n%s\ncalls:\n%s", code, stderr, f.dump())
+	}
+	create := f.find("az vm create").String()
+	for _, want := range []string{"--storage-sku Premium_LRS", "--os-disk-size-gb 128"} {
+		if !strings.Contains(create, want) {
+			t.Errorf("vm create lacks %q: %s", want, create)
+		}
 	}
 }
