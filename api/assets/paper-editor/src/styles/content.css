@@ -75,7 +75,7 @@
  * Keep byte-aligned with paper-surface.css AND root.html.heex;
  * view_edit_parity_test.exs pins `a` and `a:focus-visible` in @parity_elements
  * (§2) and @mirror_elements (§5). Rebuild the committed artifact after editing
- * (npm run build:web). */
+ * (npm run build, then npm run sync:barkpark:write). */
 .bp-paper-editor-body a  {
   color: var(--paper-accent); text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);

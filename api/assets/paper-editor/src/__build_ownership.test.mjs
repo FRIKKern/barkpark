@@ -3,8 +3,8 @@
 // Package sources give seven files in dist/. A build reads nothing outside the
 // package and writes nothing outside its output directory. scripts/sync-barkpark.mjs
 // is the one path out to Barkpark, and scripts/pack-check.mjs holds the tarball to
-// this package. Fragment and assembly digests are pinned here, so an edit to a CSS
-// fragment, emit --write included, updates these pins in the same diff.
+// this package. The fragments are held by relations, so an edit to one, emit --write
+// included, moves no pin here.
 //
 // Everything runs in temporary directories. The sync and pack paths run on synthetic
 // trees with an injected build, so this file never writes a real Barkpark sink and
@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { transform } from "esbuild";
 import { assertExactOutputs, assertPackageInputs, buildLocal, DIST, LOCAL_OUTPUTS } from "../scripts/build-local.mjs";
 import { inspectPack, REQUIRED } from "../scripts/pack-check.mjs";
 import { ASSET_MANIFEST, assembleAsset, PACKAGE_ROOT, readFragments, readPackageFile, validateCuts, validateFragmentSizes, validateMarkers } from "../scripts/source-assets.mjs";
@@ -46,44 +47,24 @@ const check = async (name, fn) => {
   }
 };
 
-const FRAGMENT_PINS = {
-  "paper-surface": {
-    "00-foundation-type.css": [44742, "996c21019b9a2cef4a47ef78bb7a4f0404d22fb269e586374490189f82e692a6"],
-    "01-components-generated-theme.css": [46382, "b8336b140f264add639ce746bf3a64201260465737c096dcf8be9c19941c6e92"],
-    "02-chat-code-story-layout.css": [37559, "49e8c430cf69822eee4c00af06a72f39866cb37669be1c2d958d0d24202295eb"],
-    "03-data-viz-forms-media.css": [57098, "e934d754c12bf4a4ec5f08b755dc9b2c6ddffcec649a5e8d0a05492af3cceace"],
-  },
-  "editor-shell": {
-    "00-editor-shell-core.css": [39352, "dc39a687197622fe5e991842edb596171a193bb0729b16fb5bbbb065aa79e718"],
-    "01-canvas-blocks-fields.css": [48261, "3074c3375dbfa9ae4762d0513aae1699672fefed9c8101df1f578575108c2d30"],
-    "02-native-blocks-link-preview.css": [24059, "7b6bdef84cf23bf07a8a122415b85cd205bc094cc799a93bc539068128a9de6a"],
-    "03-contextual-editors.css": [31385, "2dbb2786d2bfd0690be17faf7ad12c120e4cd27f91564ea7d85d7ba3742902e0"],
-    "04-contextual-panels-gutter.css": [20668, "63c6dd1a684e9b124d7da380c825ae7df1e8f91005d184dbcbf0d5074e6ece16"],
-  },
-};
-const ASSEMBLED = { "paper-surface": "3079769e19b1c4bad968e1b244d234e9f44995d9232edaf2e434978ff256ac7d", "editor-shell": "004898ef2561adc2a4f632f1a1effb99b5739928432294923412ed224279dcee" };
-const SURFACE_MIN = "2beafddb4b9bdcdffd643f9b991d05350ca0ad1ffdefa1bae16c9518884a6312";
 const MERMAID = "497f333123b6d476ef8f5290824db16ae3a9b2d967ed2a9d898375a519f939a9";
 
 // ── fragments ──────────────────────────────────────────────────────────────
 
-await check("each fragment has its pinned size and hash, whatever the manifest order", () => {
-  for (const [id, pins] of Object.entries(FRAGMENT_PINS)) {
+// Relations, not digests: a fragment is source, so an edit to one, emit --write included,
+// moves no pin here. The bytes a host gets are held by sync-barkpark --check.
+await check("the fragments on disk are the manifest's, each within its limits", () => {
+  for (const id of ["paper-surface", "editor-shell"]) {
     const { dir, fragments } = ASSET_MANIFEST[id];
-    assert.deepEqual(fragments.map((f) => f.name).sort(), Object.keys(pins).sort(), `${id}: the manifest names exactly the pinned fragments`);
-    for (const [name, [size, digest]] of Object.entries(pins)) {
-      const bytes = readPackageFile(`${dir}/${name}`);
-      assert.equal(bytes.length, size, `${dir}/${name} size`);
-      assert.equal(sha(bytes), digest, `${dir}/${name} hash`);
-    }
+    assert.deepEqual(fragments.map((f) => f.name).sort(), readdirSync(path.join(root, dir)).sort(), `${id}: the manifest names exactly the files in ${dir}`);
+    for (const { name, bytes } of readFragments(id)) assert.ok(bytes.length > 0, `${dir}/${name} is empty`);
     validateFragmentSizes(readFragments(id), ASSET_MANIFEST[id], id);
   }
 });
 
-await check("the fragments concatenate with an empty separator to the approved digests", () => {
-  for (const [id, digest] of Object.entries(ASSEMBLED)) {
+await check("the fragments concatenate with an empty separator", () => {
+  for (const id of ["paper-surface", "editor-shell"]) {
     const assembled = assembleAsset(id);
-    assert.equal(sha(assembled), digest, `${id} assembly digest`);
     assert.ok(assembled.equals(Buffer.concat(readFragments(id).map((part) => part.bytes))), `${id} adds nothing between fragments`);
     assert.equal(assembled.at(-1), 10, `${id} keeps its final newline`);
   }
@@ -98,15 +79,6 @@ await check("the physical line budgets hold on every new file", () => {
     "src/__build_ownership.test.mjs": 500,
     "src/bp-paper-mermaid.js": 236,
     LICENSE: 201,
-    "src/paper-surface/00-foundation-type.css": 690,
-    "src/paper-surface/01-components-generated-theme.css": 719,
-    "src/paper-surface/02-chat-code-story-layout.css": 432,
-    "src/paper-surface/03-data-viz-forms-media.css": 645,
-    "src/editor-shell/00-editor-shell-core.css": 740,
-    "src/editor-shell/01-canvas-blocks-fields.css": 573,
-    "src/editor-shell/02-native-blocks-link-preview.css": 524,
-    "src/editor-shell/03-contextual-editors.css": 603,
-    "src/editor-shell/04-contextual-panels-gutter.css": 283,
   };
   for (const [rel, budget] of Object.entries(budgets)) assert.ok(lines(rel) <= budget, `${rel} has ${lines(rel)} lines, budget ${budget}`);
 });
@@ -234,9 +206,10 @@ await check("the exact-output check refuses a missing file and an extra one", ()
   assert.throws(() => assertExactOutputs(dir, { dev: true }), /expected exactly/, "the profile is not an eighth output");
 });
 
-await check("the outputs are the assembled and copied package bytes", () => {
-  assert.equal(sha(builtBytes["bp-paper-surface.css"]), SURFACE_MIN, "minified surface");
-  assert.equal(sha(builtBytes["bp-paper-editor-shell.css"]), ASSEMBLED["editor-shell"], "shell is the assembly, unchanged");
+await check("the outputs are the assembled and copied package bytes", async () => {
+  const { code } = await transform(assembleAsset("paper-surface").toString("utf8"), { loader: "css", minify: true });
+  assert.equal(builtBytes["bp-paper-surface.css"].toString("utf8"), code, "the surface is the assembly, minified");
+  assert.ok(builtBytes["bp-paper-editor-shell.css"].equals(assembleAsset("editor-shell")), "shell is the assembly, unchanged");
   assert.equal(sha(builtBytes["bp-paper-mermaid.js"]), MERMAID, "mermaid is the package copy, unchanged");
   assert.ok(builtBytes["contract.js"].equals(readPackageFile("src/contract.js")), "contract is the package copy, unchanged");
 });

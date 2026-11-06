@@ -581,6 +581,8 @@ const PACKAGE_CSS_PATH = "api/assets/paper-editor/src/styles.css";
 // sink path stays the name these Parts report and design/exemptions.json keys on,
 // because the sink holds these same bytes (sync-barkpark --check).
 const RAW_SURFACE_PATH = "api/assets/paper-surface/paper-surface.css";
+// A failure on that name tells the reader where the literal really lives.
+const atSource = (path) => path === RAW_SURFACE_PATH ? `${path} (edit its fragment under api/assets/paper-editor/src/paper-surface/, not this synced copy)` : path;
 const readDesignSource = (path) => path === PACKAGE_CSS_PATH
   ? readAuthoredCss()
   : path === RAW_SURFACE_PATH
@@ -642,7 +644,7 @@ for (const entry of ledger.entries) {
   ledgerRows.push({ path: entry.path, baseline, actual, delta });
   if (delta > 0) {
     fail(
-      `  Part E FAIL: ${entry.path} GREW ${baseline} → ${actual} (+${delta}). A new ` +
+      `  Part E FAIL: ${atSource(entry.path)} GREW ${baseline} → ${actual} (+${delta}). A new ` +
       `hand-stamped color literal was added outside the generated block. Tokenize it ` +
       `(consume var(--…) from the emitted BEGIN/END GENERATED block); if it is genuinely ` +
       `un-tokenizable, RAISE the baseline in design/exemptions.json IN THIS SAME DIFF with a note.`
@@ -2430,7 +2432,7 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
     rows.push({ path: entry.path, baseline, actual, delta });
     if (delta > 0)
       nFail(
-        `  Part N FAIL: ${entry.path} GREW ${baseline} → ${actual} (+${delta}). A new hand-typed ` +
+        `  Part N FAIL: ${atSource(entry.path)} GREW ${baseline} → ${actual} (+${delta}). A new hand-typed ` +
           `duration literal landed in a transition/animation declaration. Spend a ladder rung — ` +
           `var(--dur-1|--dur-2|--dur-3) — from the emitted GENERATED block; if the timing is ` +
           `genuinely off-ladder (a spinner loop, a long attention pulse), RAISE the baseline in ` +
@@ -2591,7 +2593,7 @@ console.log("\ndesign/check.mjs — Part O: hand-stamped type/measure literal ra
         firstNew = `${entry.path}:${line}: ${m[0].trim().replace(/\s+/g, " ").slice(0, 100)}`;
       }
       oFail(
-        `  Part O FAIL: ${entry.path} GREW ${baseline} → ${actual} (+${delta}). A new hand-stamped ` +
+        `  Part O FAIL: ${atSource(entry.path)} GREW ${baseline} → ${actual} (+${delta}). A new hand-stamped ` +
           `type/measure literal landed in a font-size/letter-spacing/line-height/max-width ` +
           `declaration.\n` +
           (firstNew ? `    first literal past the baseline: ${firstNew}\n` : "") +

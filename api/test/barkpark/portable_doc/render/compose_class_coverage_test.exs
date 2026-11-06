@@ -76,7 +76,8 @@ defmodule Barkpark.PortableDoc.Render.ComposeClassCoverageTest do
 
            #{Enum.map_join(missing, "\n", fn {root, files} -> "  .#{root}  (emitted by #{Enum.join(files, ", ")})" end)}
 
-           Ship a stanza in api/assets/paper-surface/paper-surface.css (see the
+           Ship a stanza in its fragment under api/assets/paper-editor/src/paper-surface/
+           and run `npm run sync:barkpark:write` in api/assets/paper-editor (see the
            delivery-wave section for the house anatomy), or — consciously — add
            the root to @allowlist with a one-line justification.
            """
