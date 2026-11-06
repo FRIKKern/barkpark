@@ -238,6 +238,29 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
          DBConnection.ConnectionError.exception(
            "client #PID<0.1.0> timed out because it queued and checked out the connection for longer than 15000ms"
          )}}, "storage_unavailable", 503, [:reason]},
+      # A write statement cancelled by Postgres, 57014 (task-0f07d4c008199ba0).
+      # Same write arm as a pool timeout.
+      {"query_canceled_returned",
+       {:error,
+        %Postgrex.Error{
+          postgres: %{
+            code: :query_canceled,
+            pg_code: "57014",
+            severity: "ERROR",
+            message: "canceling statement due to user request"
+          }
+        }}, "storage_unavailable", 503, [:reason]},
+      {"query_canceled_returned_tagged",
+       {:error,
+        {:batch,
+         %Postgrex.Error{
+           postgres: %{
+             code: :query_canceled,
+             pg_code: "57014",
+             severity: "ERROR",
+             message: "canceling statement due to statement timeout"
+           }
+         }}}, "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},

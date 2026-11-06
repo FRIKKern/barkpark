@@ -1620,6 +1620,22 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {tag, %DBConnection.ConnectionError{} = e}} = term) when is_atom(tag),
     do: pool_timeout_or_unmatched(e, term)
 
+  # A CANCELLED STATEMENT IN A WRITE (task-0f07d4c008199ba0, rehearsal #24192).
+  #
+  # When the 15 s checkout deadline above fires while a statement is running,
+  # the pool disconnects and Postgres cancels that statement. The write then
+  # raises `Postgrex.Error` SQLSTATE 57014 (`:query_canceled`) instead of the
+  # `DBConnection.ConnectionError`, and the batch transaction rolls back. A
+  # statement cut off by `statement_timeout` raises the same code. Both are
+  # transient, the transaction applied nothing, and a smaller resend is the
+  # right move. The mutate batch hands the raised form here as a value. The
+  # answer is the same write arm and the same fixed message as a pool timeout.
+  defp build({:error, %Postgrex.Error{} = e} = term),
+    do: query_canceled_or_unmatched(e, term)
+
+  defp build({:error, {tag, %Postgrex.Error{} = e}} = term) when is_atom(tag),
+    do: query_canceled_or_unmatched(e, term)
+
   # ── CATCH-ALL: an unanticipated reason term. NEVER BARE, NEVER SILENT ───────
   #
   # This clause used to render `message: "unknown error"` and log nothing, so an
@@ -1689,6 +1705,34 @@ defmodule Barkpark.Content.Errors do
       unmatched(term)
     end
   end
+
+  defp query_canceled_or_unmatched(%Postgrex.Error{} = e, term) do
+    if query_canceled?(e) do
+      Logger.error(
+        "Barkpark.Content.Errors: a write statement was cancelled (57014) " <>
+          "— answering 503 storage_unavailable/connection_unavailable " <>
+          "(#{reason_descriptor(term)})"
+      )
+
+      build(
+        {:error,
+         {:connection_unavailable,
+          "the database cancelled a statement in this write before it finished, " <>
+            "most often because the connection timed out under load. Nothing was " <>
+            "refused on its merits and this is transient. A write batch is one " <>
+            "transaction, so a cancelled batch applied nothing. Re-read the ids you " <>
+            "sent, then resend the request, smaller if it was a large batch."}}
+      )
+    else
+      unmatched(term)
+    end
+  end
+
+  @doc false
+  # Public so the mutate batch can tell a cancelled statement from every other
+  # raised `Postgrex.Error`, which keeps propagating.
+  def query_canceled?(%Postgrex.Error{postgres: %{code: :query_canceled}}), do: true
+  def query_canceled?(_), do: false
 
   @doc false
   # Public for the test that pins which connection faults count as a pool
