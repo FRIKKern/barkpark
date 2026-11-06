@@ -4,7 +4,7 @@
   "packages": [
     {
       "name": "@tiptap/core",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -19,7 +19,7 @@
     },
     {
       "name": "@tiptap/extension-blockquote",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -34,7 +34,7 @@
     },
     {
       "name": "@tiptap/extension-bold",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -49,7 +49,7 @@
     },
     {
       "name": "@tiptap/extension-code-block",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -64,7 +64,7 @@
     },
     {
       "name": "@tiptap/extension-code",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -79,7 +79,7 @@
     },
     {
       "name": "@tiptap/extension-document",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -94,7 +94,7 @@
     },
     {
       "name": "@tiptap/extension-hard-break",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -109,7 +109,7 @@
     },
     {
       "name": "@tiptap/extension-heading",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -124,7 +124,7 @@
     },
     {
       "name": "@tiptap/extension-highlight",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -139,7 +139,7 @@
     },
     {
       "name": "@tiptap/extension-horizontal-rule",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -154,7 +154,7 @@
     },
     {
       "name": "@tiptap/extension-italic",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -169,7 +169,7 @@
     },
     {
       "name": "@tiptap/extension-link",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -184,7 +184,7 @@
     },
     {
       "name": "@tiptap/extension-list",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -199,7 +199,7 @@
     },
     {
       "name": "@tiptap/extension-paragraph",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -214,7 +214,7 @@
     },
     {
       "name": "@tiptap/extension-placeholder",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -229,7 +229,7 @@
     },
     {
       "name": "@tiptap/extension-strike",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -244,7 +244,7 @@
     },
     {
       "name": "@tiptap/extension-subscript",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -259,7 +259,7 @@
     },
     {
       "name": "@tiptap/extension-superscript",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -274,7 +274,7 @@
     },
     {
       "name": "@tiptap/extension-task-item",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -289,7 +289,7 @@
     },
     {
       "name": "@tiptap/extension-task-list",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -304,7 +304,7 @@
     },
     {
       "name": "@tiptap/extension-text-align",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -319,7 +319,7 @@
     },
     {
       "name": "@tiptap/extension-text",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -334,7 +334,7 @@
     },
     {
       "name": "@tiptap/extension-typography",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -349,7 +349,7 @@
     },
     {
       "name": "@tiptap/extension-underline",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -364,7 +364,7 @@
     },
     {
       "name": "@tiptap/extensions",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -379,7 +379,7 @@
     },
     {
       "name": "@tiptap/pm",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -394,7 +394,7 @@
     },
     {
       "name": "@tiptap/starter-kit",
-      "version": "3.31.4",
+      "version": "3.32.2",
       "license": "MIT",
       "repository": "https://github.com/ueberdosis/tiptap",
       "bundledInto": [
@@ -454,7 +454,7 @@
     },
     {
       "name": "linkifyjs",
-      "version": "4.3.3",
+      "version": "4.4.0",
       "license": "MIT",
       "repository": "git+https://github.com/nfrasser/linkifyjs.git",
       "bundledInto": [
@@ -514,9 +514,9 @@
     },
     {
       "name": "prosemirror-dropcursor",
-      "version": "1.8.2",
+      "version": "1.8.4",
       "license": "MIT",
-      "repository": "git://github.com/prosemirror/prosemirror-dropcursor.git",
+      "repository": "git+https://code.haverbeke.berlin/prosemirror/prosemirror-dropcursor.git",
       "bundledInto": [
         "bp-paper-editor.bundle.js"
       ],
@@ -619,9 +619,9 @@
     },
     {
       "name": "prosemirror-transform",
-      "version": "1.12.0",
+      "version": "1.12.4",
       "license": "MIT",
-      "repository": "git://github.com/prosemirror/prosemirror-transform.git",
+      "repository": "git+https://code.haverbeke.berlin/prosemirror/prosemirror-transform.git",
       "bundledInto": [
         "bp-paper-editor.bundle.js"
       ],
