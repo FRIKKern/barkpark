@@ -81,6 +81,17 @@ const origin = `http://127.0.0.1:${server.address().port}/`;
 
 const chrome = await launchChrome();
 const { cdp } = chrome;
+// A throw outside the try below, such as one in the page server, would end node
+// before the finally runs and leave Chrome behind.
+let closing;
+const closeChrome = () => (closing ??= chrome.close());
+const failAndClose = async (error) => {
+  console.error(error);
+  await closeChrome();
+  process.exit(1);
+};
+process.once("uncaughtException", failAndClose);
+process.once("unhandledRejection", failAndClose);
 const equal = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`${label}: ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
@@ -153,6 +164,6 @@ try {
 
   console.log(`PASS real Chrome ${chrome.chrome.version}: diff prefix traps; note keyboard run, FormatBubble, repaint edit/undo/redo`);
 } finally {
-  await chrome.close();
+  await closeChrome();
   await new Promise(resolve => server.close(resolve));
 }
