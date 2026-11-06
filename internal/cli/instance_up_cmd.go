@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -73,6 +74,8 @@ type instanceUpState struct {
 	StudioOrigin  string            `json:"studio_origin"`
 	Size          string            `json:"size,omitempty"`
 	PostgresSku   string            `json:"postgres_sku,omitempty"`
+	DiskSku       string            `json:"disk_sku,omitempty"`
+	DiskGB        string            `json:"disk_gb,omitempty"`
 	AlertEmail    string            `json:"alert_email,omitempty"`
 	SSHKey        string            `json:"ssh_key,omitempty"`
 	Subscription  string            `json:"subscription,omitempty"`
@@ -233,7 +236,7 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	a, err := parseHzArgs(args, []string{
 		"path", "resource-group", "host", "owner", "breakglass", "image", "from-source", "region",
 		"org", "org-name", "env-file", "state", "studio-origin", "size", "postgres-sku",
-		"alert-email", "ssh-key",
+		"disk-sku", "disk-gb", "alert-email", "ssh-key",
 	}, []string{"azure"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -346,6 +349,7 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 		{&st.Owner, "owner", false}, {&st.Breakglass, "breakglass", false}, {&st.Image, "image", false},
 		{&st.FromSource, "from-source", false}, {&st.OrgName, "org-name", false}, {&st.EnvFile, "env-file", true},
 		{&st.StudioOrigin, "studio-origin", false}, {&st.Size, "size", false}, {&st.PostgresSku, "postgres-sku", false},
+		{&st.DiskSku, "disk-sku", false}, {&st.DiskGB, "disk-gb", false},
 		{&st.AlertEmail, "alert-email", false}, {&st.SSHKey, "ssh-key", false},
 	} {
 		if err := set(f.field, f.flag, f.identity); err != nil {
@@ -364,6 +368,14 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 	}
 	if st.Owner == "" || !strings.Contains(st.Owner, "@") {
 		return fmt.Errorf("--owner is required: the owner's Entra user principal name, such as owner@example.com")
+	}
+	if (st.DiskSku != "" || st.DiskGB != "") && st.Path != instanceTargetVM {
+		return fmt.Errorf("--disk-sku and --disk-gb set the VM's OS disk and need --path vm")
+	}
+	if st.DiskGB != "" {
+		if n, err := strconv.Atoi(st.DiskGB); err != nil || n < 30 || n > 4095 {
+			return fmt.Errorf("--disk-gb is %q; give the OS disk size in GiB, 30 to 4095", st.DiskGB)
+		}
 	}
 	if st.Image != "" && st.FromSource != "" {
 		return fmt.Errorf("give --image or --from-source, not both")

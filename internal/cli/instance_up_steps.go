@@ -331,6 +331,12 @@ func stepUpVM(u *instanceUp) error {
 		args := []string{"vm", "create", "-g", st.ResourceGroup, "-n", instanceUpVMName, "--image", "Ubuntu2204",
 			"--size", st.Size, "--location", st.Region, "--admin-username", instanceUpVMUser,
 			"--ssh-key-values", st.SSHKey + ".pub", "--public-ip-sku", "Standard"}
+		if st.DiskSku != "" {
+			args = append(args, "--storage-sku", st.DiskSku)
+		}
+		if st.DiskGB != "" {
+			args = append(args, "--os-disk-size-gb", st.DiskGB)
+		}
 		if l := st.dnsLabel(); l != "" {
 			args = append(args, "--public-ip-address-dns-name", l)
 		}

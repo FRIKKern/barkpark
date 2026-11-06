@@ -18,7 +18,7 @@ bp instance up --azure --path vm --resource-group <resource group> --host <dns l
 bp instance up --azure --path containerapps --resource-group <resource group> --region norwayeast --owner <owner upn>
 ```
 
-Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
+Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. On Path A the VM's OS disk is Premium SSD with 30 GiB unless you say otherwise, which Azure gives 120 IOPS and 25 MB/s. `--disk-sku <sku>` and `--disk-gb <n>` set its class and size, such as `--disk-sku Premium_LRS --disk-gb 128` for 500 IOPS and 100 MB/s. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
 
 `--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 
