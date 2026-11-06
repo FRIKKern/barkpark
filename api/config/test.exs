@@ -403,6 +403,11 @@ config :barkpark, schema_catalog_cache: false
 # turns it on.
 config :barkpark, studio_connect_handoff: false
 
+# OFF in test: fixtures write documents without an announcement, and a census
+# kept across tests would outlive its sandbox. `type_census_cache_test.exs`
+# turns it on.
+config :barkpark, type_census_cache: false
+
 # Dedup candidate-fetch EXIT SEAM (Barkpark.Dedup.ScanSeam). Compiles a
 # one-verb (`exit/1`) fault injector into the candidate fetch of BOTH dedup
 # surfaces so the `catch :exit` arm — pool-checkout death, which arrives as an

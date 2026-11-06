@@ -57,7 +57,10 @@ defmodule Barkpark.Content.Query do
                         `order_collations/0`; applies to text field order terms
     - `:content_keys` — `nil` (default: all of `content`) or the top-level
                         content keys to read; each document's `content` then
-                        holds only those of them it has
+                        holds only those of them it has. `{:named_in, text}`
+                        reads every top-level key whose name occurs anywhere
+                        in `text`, for a caller that knows which text names
+                        the keys it reads but not the keys a document holds
 
   The `:drafts` perspective merges draft/published pairs at SQL level via
   `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
@@ -156,19 +159,50 @@ defmodule Barkpark.Content.Query do
   # decodes only them. A product on the gyldendal-no catalogue holds about
   # 6 kB of content; a page of 200 cost about 1 ms a row to read and render
   # whatever `?fields=` kept, 0.07 ms a row for a 0.5 kB themaCode.
+  #
+  # The select names every column but `content`. A `select_merge` of `content`
+  # over the whole row kept `d.content` in the select list as well, so
+  # Postgres still sent each whole value and Postgrex still decoded it, and
+  # then the projection replaced it.
+  @row_fields_but_content Document.__schema__(:fields) -- [:content]
+
   defp select_content_keys(query, nil), do: query
 
+  # `{:named_in, text}`: every top-level key whose name is a substring of
+  # `text`. A Studio desk row reads only the paths its schema's `list_preview`
+  # names, and every key such a path starts from is spelled out in that spec,
+  # so the spec's text keeps every key the row reads, and maybe a few more.
+  # A long article holds about 17 kB of content; a desk page of 100 read and
+  # decoded all of it to show a title and a date.
+  # A stored value that is not an object comes back as stored, as a full read
+  # returns it.
+  defp select_content_keys(query, {:named_in, text}) when is_binary(text) do
+    select(query, [d], %{
+      struct(d, ^@row_fields_but_content)
+      | content:
+          type(
+            fragment(
+              "(SELECT CASE WHEN jsonb_typeof(s.c) = 'object' THEN (SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM jsonb_each(s.c) AS e WHERE strpos(?, e.key) > 0) ELSE s.c END FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s)",
+              type(^text, :string),
+              d.content
+            ),
+            :map
+          )
+    })
+  end
+
   defp select_content_keys(query, keys) when is_list(keys) do
-    select_merge(query, [d], %{
-      content:
-        type(
-          fragment(
-            "(SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, jsonb_each(CASE WHEN jsonb_typeof(s.c) = 'object' THEN s.c ELSE '{}'::jsonb END) AS e WHERE e.key = ANY(?))",
-            d.content,
-            type(^keys, {:array, :string})
-          ),
-          :map
-        )
+    select(query, [d], %{
+      struct(d, ^@row_fields_but_content)
+      | content:
+          type(
+            fragment(
+              "(SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, jsonb_each(CASE WHEN jsonb_typeof(s.c) = 'object' THEN s.c ELSE '{}'::jsonb END) AS e WHERE e.key = ANY(?))",
+              d.content,
+              type(^keys, {:array, :string})
+            ),
+            :map
+          )
     })
   end
 

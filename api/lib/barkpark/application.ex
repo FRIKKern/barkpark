@@ -566,6 +566,9 @@ defmodule Barkpark.Application do
         # document-list topics, so it starts after PubSub and before the
         # Endpoint.
         BarkparkWeb.Studio.ConnectHandoff,
+        # Keeps the type census between document writes; it subscribes to the
+        # same document-list topics, so it also starts after PubSub.
+        Barkpark.Content.TypeCensusCache,
         {Task.Supervisor, name: Barkpark.TaskSupervisor},
         # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
         # could not clean up after itself (PDS-D210). The export engine's
