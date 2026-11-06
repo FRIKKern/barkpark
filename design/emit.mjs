@@ -48,15 +48,17 @@
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
 // and the §6 cross-surface parity assertion.
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
-import { ASSET_MANIFEST, validateFragmentSizes } from "../api/assets/paper-editor/scripts/source-assets.mjs";
+import { ASSET_MANIFEST, assembleAsset, validateFragmentSizes } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 import { derive } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The raw surface sink sync-barkpark owns. Named here because a bare design tree may not hold that script.
+const RAW_SURFACE_SINK = "api/assets/paper-surface/paper-surface.css";
 export const repoRoot = join(here, "..");
 
 // ── the w4 seam (charter D22) ────────────────────────────────────────────────
@@ -3605,7 +3607,15 @@ function run(mode, { force = false } = {}) {
   if (mode === "write") writeManifest(nextRegions);
   // The package owns the surface; the raw host sink and the profile follow it through
   // the one outward path. --surface-only leaves the six browser assets to a full sync.
-  if (surfaceWritten) {
+  // A rerun that regenerates nothing still repairs (--write) or reports (--check) a raw
+  // sink left behind, for example by a sync that failed. A tree with no sink has nothing
+  // to go stale here; sync-barkpark --check reports a missing one. Only a build can compare
+  // the profile, so a --write with a toolchain always syncs and --check leaves it to that gate.
+  const packageRoot = join(repoRoot, "api/assets/paper-editor");
+  const rawSink = join(repoRoot, RAW_SURFACE_SINK);
+  const rawSinkStale = existsSync(rawSink) && !readFileSync(rawSink).equals(assembleAsset("paper-surface", { root: packageRoot }));
+  if (mode === "check" && rawSinkStale) { console.error(`  STALE ${RAW_SURFACE_SINK} differs from the assembled package surface`); changed++; }
+  if (mode === "write" && (surfaceWritten || rawSinkStale || existsSync(join(packageRoot, "node_modules")))) {
     const synced = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: "inherit" });
     if (synced.status !== 0) { console.error(`emit --write: sync-barkpark --surface-only exited ${synced.status}`); process.exit(1); }
   }
