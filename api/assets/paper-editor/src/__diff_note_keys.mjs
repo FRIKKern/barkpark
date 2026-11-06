@@ -87,11 +87,15 @@ let closing;
 const closeChrome = () => (closing ??= chrome.close());
 const failAndClose = async (error) => {
   console.error(error);
-  await closeChrome();
-  process.exit(1);
+  try {
+    await closeChrome();
+  } finally {
+    process.exit(1);
+  }
 };
-process.once("uncaughtException", failAndClose);
-process.once("unhandledRejection", failAndClose);
+// on, not once: a second error during the close must wait for it too, or node dies and leaves the profile.
+process.on("uncaughtException", failAndClose);
+process.on("unhandledRejection", failAndClose);
 const equal = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`${label}: ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);

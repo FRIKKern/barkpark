@@ -1,7 +1,8 @@
-// Loaded with --import by __inward_read.test.mjs. Records every fs call, import, require
-// and child process that leaves the package, however the path was built. The text guard
-// in __build_ownership can only see a path spelled out. esbuild reads natively, so its
-// reads stay with the input census in scripts/build-local.mjs.
+// Loaded with --import by __inward_read.test.mjs. Records the fs calls, imports, requires
+// and child processes that leave the package in this run, however the path was built. The
+// text guard in __build_ownership can only see a path spelled out. esbuild reads natively,
+// so its reads stay with the input census in scripts/build-local.mjs. The test's header
+// lists what this does not see.
 //
 // It does nothing unless INWARD_READ_LOG is set, so it also passes when run alone.
 import cp from "node:child_process";

@@ -3,8 +3,9 @@
 // Package sources give seven files in dist/. A build reads nothing outside the
 // package and writes nothing outside its output directory. scripts/sync-barkpark.mjs
 // is the one path out to Barkpark, and scripts/pack-check.mjs holds the tarball to
-// this package. The fragments are held by relations, so an edit to one, emit --write
-// included, moves no pin here.
+// this package. The editor-shell fragments are pinned, so an edit to one moves its pin in
+// the same diff. The paper-surface fragments, which emit --write can edit, are held by
+// relations and by sync-barkpark --check.
 //
 // Everything runs in temporary directories. The sync and pack paths run on synthetic
 // trees with an injected build, so this file never writes a real Barkpark sink and
@@ -47,18 +48,45 @@ const check = async (name, fn) => {
   }
 };
 
+// emit never writes the shell fragments, so their bytes stay pinned. An edit moves these
+// in the same diff. The paper-surface fragments are emit's to write, so they get relations.
+const FRAGMENT_PINS = {
+    "00-editor-shell-core.css": [39352, "dc39a687197622fe5e991842edb596171a193bb0729b16fb5bbbb065aa79e718"],
+    "01-canvas-blocks-fields.css": [48261, "3074c3375dbfa9ae4762d0513aae1699672fefed9c8101df1f578575108c2d30"],
+    "02-native-blocks-link-preview.css": [24059, "7b6bdef84cf23bf07a8a122415b85cd205bc094cc799a93bc539068128a9de6a"],
+    "03-contextual-editors.css": [31385, "2dbb2786d2bfd0690be17faf7ad12c120e4cd27f91564ea7d85d7ba3742902e0"],
+    "04-contextual-panels-gutter.css": [20668, "63c6dd1a684e9b124d7da380c825ae7df1e8f91005d184dbcbf0d5074e6ece16"],
+};
+const ASSEMBLED = { "editor-shell": "004898ef2561adc2a4f632f1a1effb99b5739928432294923412ed224279dcee" };
 const MERMAID = "497f333123b6d476ef8f5290824db16ae3a9b2d967ed2a9d898375a519f939a9";
 
 // ── fragments ──────────────────────────────────────────────────────────────
 
-// Relations, not digests: a fragment is source, so an edit to one, emit --write included,
-// moves no pin here. The bytes a host gets are held by sync-barkpark --check.
+await check("the editor-shell fragments have their pinned size and hash", () => {
+  const { dir } = ASSET_MANIFEST["editor-shell"];
+  for (const [name, [size, digest]] of Object.entries(FRAGMENT_PINS)) {
+    const bytes = readPackageFile(`${dir}/${name}`);
+    assert.equal(bytes.length, size, `${dir}/${name} size`);
+    assert.equal(sha(bytes), digest, `${dir}/${name} hash`);
+  }
+  assert.equal(sha(assembleAsset("editor-shell")), ASSEMBLED["editor-shell"], "editor-shell assembly digest");
+});
+
+// Relations, not digests: emit --write can edit a surface fragment, and that moves no pin
+// here. The bytes a host gets are held by sync-barkpark --check.
 await check("the fragments on disk are the manifest's, each within its limits", () => {
   for (const id of ["paper-surface", "editor-shell"]) {
     const { dir, fragments } = ASSET_MANIFEST[id];
-    assert.deepEqual(fragments.map((f) => f.name).sort(), readdirSync(path.join(root, dir)).sort(), `${id}: the manifest names exactly the files in ${dir}`);
+    assert.deepEqual(fragments.map((f) => f.name).sort(), readdirSync(path.join(root, dir)).filter((name) => name !== ".DS_Store").sort(), `${id}: the manifest names exactly the files in ${dir}`);
     for (const { name, bytes } of readFragments(id)) assert.ok(bytes.length > 0, `${dir}/${name} is empty`);
     validateFragmentSizes(readFragments(id), ASSET_MANIFEST[id], id);
+  }
+});
+
+await check("the manifest lists each asset's fragments in file name order", () => {
+  for (const id of ["paper-surface", "editor-shell"]) {
+    const names = ASSET_MANIFEST[id].fragments.map((f) => f.name);
+    assert.deepEqual(names, [...names].sort(), `${id}: a swap in the manifest reorders the assembled bytes`);
   }
 });
 
@@ -209,7 +237,7 @@ await check("the exact-output check refuses a missing file and an extra one", ()
 await check("the outputs are the assembled and copied package bytes", async () => {
   const { code } = await transform(assembleAsset("paper-surface").toString("utf8"), { loader: "css", minify: true });
   assert.equal(builtBytes["bp-paper-surface.css"].toString("utf8"), code, "the surface is the assembly, minified");
-  assert.ok(builtBytes["bp-paper-editor-shell.css"].equals(assembleAsset("editor-shell")), "shell is the assembly, unchanged");
+  assert.equal(sha(builtBytes["bp-paper-editor-shell.css"]), ASSEMBLED["editor-shell"], "shell is the assembly, unchanged");
   assert.equal(sha(builtBytes["bp-paper-mermaid.js"]), MERMAID, "mermaid is the package copy, unchanged");
   assert.ok(builtBytes["contract.js"].equals(readPackageFile("src/contract.js")), "contract is the package copy, unchanged");
 });
@@ -353,6 +381,17 @@ await check("--surface-only writes the raw surface and the profile, and no brows
   await sync(repo, { write: true, surfaceOnly: true });
   for (const sink of browserBefore) assert.equal(readFileSync(path.join(repo, sink), "utf8"), "older browser asset", sink);
   assert.ok(readFileSync(path.join(repo, RAW_SURFACE_SINK)).equals(assembleAsset("paper-surface")));
+});
+
+await check("--surface-only says when a full sync is still needed, and only then", async () => {
+  const repo = inScratch("sync-surface-only-behind");
+  await sync(repo, { write: true });
+  const quiet = await sync(repo, { write: true, surfaceOnly: true });
+  assert.ok(!quiet.lines.some((line) => line.includes("full sync")), "every sink matches, so nothing is owed");
+  writeFileSync(path.join(repo, BROWSER_SINKS["bp-paper-editor.bundle.js"][0]), "older bundle");
+  const { code, lines } = await sync(repo, { write: true, surfaceOnly: true });
+  assert.equal(code, 0);
+  assert.equal(lines.filter((line) => line.includes("a full sync is still needed")).length, 1, lines.join("\n"));
 });
 
 await check("with no toolchain, --surface-only writes the raw surface and says so; every other mode refuses", async () => {

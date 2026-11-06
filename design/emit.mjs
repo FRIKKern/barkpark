@@ -3608,16 +3608,19 @@ function run(mode, { force = false } = {}) {
   // The package owns the surface; the raw host sink and the profile follow it through
   // the one outward path. --surface-only leaves the six browser assets to a full sync.
   // A rerun that regenerates nothing still repairs (--write) or reports (--check) a raw
-  // sink left behind, for example by a sync that failed. A tree with no sink has nothing
-  // to go stale here; sync-barkpark --check reports a missing one. Only a build can compare
-  // the profile, so a --write with a toolchain always syncs and --check leaves it to that gate.
+  // sink left behind, for example by a sync that failed. Only a build can compare the
+  // profile, so a --write with a toolchain always syncs and --check leaves it to that gate.
   const packageRoot = join(repoRoot, "api/assets/paper-editor");
   const rawSink = join(repoRoot, RAW_SURFACE_SINK);
-  const rawSinkStale = existsSync(rawSink) && !readFileSync(rawSink).equals(assembleAsset("paper-surface", { root: packageRoot }));
+  const rawSinkMissing = !existsSync(rawSink);
+  const rawSinkStale = !rawSinkMissing && !readFileSync(rawSink).equals(assembleAsset("paper-surface", { root: packageRoot }));
+  if (mode === "check" && rawSinkMissing) { console.error(`  MISSING ${RAW_SURFACE_SINK}`); changed++; }
   if (mode === "check" && rawSinkStale) { console.error(`  STALE ${RAW_SURFACE_SINK} differs from the assembled package surface`); changed++; }
   if (mode === "write" && (surfaceWritten || rawSinkStale || existsSync(join(packageRoot, "node_modules")))) {
-    const synced = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: "inherit" });
-    if (synced.status !== 0) { console.error(`emit --write: sync-barkpark --surface-only exited ${synced.status}`); process.exit(1); }
+    syncSurface(changed);
+  } else if (mode === "write" && rawSinkMissing) {
+    console.error(`emit --write: ${RAW_SURFACE_SINK} is missing and this tree has no toolchain. Fix: cd api/assets/paper-editor && npm ci && npm run sync:barkpark:write`);
+    process.exit(1);
   }
   if (mode !== "write" && changed) {
     console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json or are UNATTRIBUTED. Fix: node design/emit.mjs --write`);
@@ -3627,6 +3630,24 @@ function run(mode, { force = false } = {}) {
   console.log(mode === "write"
     ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated${orphanKeys.length ? ` (${orphanKeys.length} orphan slot(s) pruned)` : ""}.`
     : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror), every generated region attributed.`);
+}
+
+// The surface-only sync, the one outward step. A failure names that step and its cause,
+// not a stack, because emit may have had nothing to do with the code that broke.
+function syncSurface(changed) {
+  const { status, signal, stderr } = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: ["ignore", "inherit", "pipe"], encoding: "utf8" });
+  if (status === 0) {
+    process.stderr.write(stderr);
+    return;
+  }
+  const lines = (stderr ?? "").split("\n");
+  const start = lines.findIndex((line) => /^\w*Error\b|^sync-barkpark:/.test(line));
+  const stack = lines.findIndex((line, at) => at > start && /^\s+at /.test(line));
+  const cause = start < 0 ? [] : lines.slice(start, stack < 0 ? undefined : stack).filter((line) => line.trim());
+  console.error(`emit --write: ${changed} artifact(s) regenerated, but the sync step failed: sync-barkpark --surface-only exited ${status ?? signal}.`);
+  for (const line of cause) console.error(`  ${line}`);
+  console.error("Fix that, then rerun emit --write.");
+  process.exit(1);
 }
 
 // CLI

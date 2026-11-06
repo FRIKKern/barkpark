@@ -46,6 +46,7 @@ const CSS_SENTINEL = "  --bp-hand-authored-sentinel-DO-NOT-DELETE: 1;";
 // A whole-file (Go) artifact's region IS the entire file, so any hand-written line
 // makes its digest miss the ledger. A trailing comment is enough and never compiles.
 const GO_SENTINEL = "// bp-hand-authored-sentinel-DO-NOT-DELETE";
+const RAW_SINK = "api/assets/paper-surface/paper-surface.css";
 
 // Build a throwaway copy of EXACTLY the tree emit.mjs reads: all of design/ (its
 // own source + tokens.json + themes + derive + the mirror module + the manifest)
@@ -73,6 +74,10 @@ function makeTree() {
     mkdirSync(dirname(dst), { recursive: true });
     copyFileSync(join(repoRoot, rel), dst);
   }
+  // The raw sink, made from this tree's own fragments so it starts in step whatever the
+  // real tree holds. emit --check reports a tree without it.
+  mkdirSync(join(root, dirname(RAW_SINK)), { recursive: true });
+  writeFileSync(join(root, RAW_SINK), assembledText("paper-surface", { root: join(root, "api/assets/paper-editor") }));
   return root;
 }
 
@@ -619,17 +624,8 @@ test("evaluateMirror tells a fragment over its limit from a missing fragment", (
   assert.match(evaluateMirror(gone).error, /canonical source missing/);
 });
 
-// A tree holding the raw sink, byte-equal to its assembled fragments. Temp tree only.
-const RAW_SINK = "api/assets/paper-surface/paper-surface.css";
-function treeWithSink() {
-  const root = makeTree();
-  mkdirSync(join(root, dirname(RAW_SINK)), { recursive: true });
-  writeIn(root, RAW_SINK, assembledText("paper-surface", { root: join(root, "api/assets/paper-editor") }));
-  return root;
-}
-
 test("a rerun of emit --write repairs a stale raw sink when no artifact changed", () => {
-  const root = treeWithSink();
+  const root = makeTree();
   const fresh = readIn(root, RAW_SINK);
   writeIn(root, RAW_SINK, `${fresh}/* stale */\n`);
   const fragmentBefore = readIn(root, SURFACE_PATH);
@@ -641,7 +637,7 @@ test("a rerun of emit --write repairs a stale raw sink when no artifact changed"
 });
 
 test("emit --check reports a stale raw sink and writes nothing", () => {
-  const root = treeWithSink();
+  const root = makeTree();
   const fresh = readIn(root, RAW_SINK);
   const stale = `${fresh}/* stale */\n`;
   writeIn(root, RAW_SINK, stale);
@@ -651,20 +647,41 @@ test("emit --check reports a stale raw sink and writes nothing", () => {
   assert.equal(readIn(root, RAW_SINK), stale, "--check writes nothing");
 });
 
-test("a sink in step is left alone, and a tree with no sink still checks clean", () => {
-  const root = treeWithSink();
+test("a sink in step is left alone", () => {
+  const root = makeTree();
   const check = emit(root, ["--check"]);
   assert.equal(check.code, 0, check.err);
   const write = emit(root, ["--write"]);
   assert.equal(write.code, 0, write.err);
   assert.doesNotMatch(write.out, /WROTE {2}api\/assets\/paper-surface/);
-  const bare = emit(makeTree(), ["--check"]);
-  assert.equal(bare.code, 0, bare.err);
+});
+
+test("a missing raw sink with no toolchain is reported, and exits non-zero, in both modes", () => {
+  const root = makeTree();
+  rmSync(join(root, RAW_SINK));
+  const check = emit(root, ["--check"]);
+  assert.equal(check.code, 1, check.out);
+  assert.match(check.err, /MISSING api\/assets\/paper-surface\/paper-surface\.css/);
+  const write = emit(root, ["--write"]);
+  assert.equal(write.code, 1, write.out);
+  assert.match(write.err, /paper-surface\.css is missing and this tree has no toolchain/);
+  assert.equal(existsSync(join(root, RAW_SINK)), false, "it reports; it does not pretend to repair");
+});
+
+test("a sync that cannot build fails the emit by name, with no stack", () => {
+  const root = makeTree();
+  mkdirSync(join(root, "api/assets/paper-editor/node_modules"));
+  const { code, err } = emit(root, ["--write"]);
+  assert.equal(code, 1);
+  assert.match(err, /the sync step failed: sync-barkpark --surface-only exited 1/);
+  assert.match(err, /Error \[?ERR_MODULE_NOT_FOUND|Cannot find/, "the cause is named");
+  assert.doesNotMatch(err, /^\s+at /m, "no stack");
+  assert.doesNotMatch(err, /Node\.js v\d/, "no crash banner");
 });
 
 test("with a toolchain a quiet rerun still syncs, and a failed sync fails the emit", () => {
   const sync = "api/assets/paper-editor/scripts/sync-barkpark.mjs";
-  const root = treeWithSink();
+  const root = makeTree();
   mkdirSync(join(root, "api/assets/paper-editor/node_modules"));
   writeIn(root, sync, 'import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./ran.txt", import.meta.url), process.argv.slice(2).join(" "));\n');
   const ran = emit(root, ["--write"]);

@@ -1,8 +1,16 @@
-// __inward_read.test.mjs — the package reads nothing of its host, by any path.
+// __inward_read.test.mjs — a run of the build reads nothing of the host.
 //
 // A read the text guard in __build_ownership cannot see, because the path is built at
 // run time, shows up here. The build and the notices check run under
 // __inward_read_tracer.mjs, and a probe keeps the tracer itself honest.
+//
+// Traced: fs calls, streams, import, require and child processes, on the main thread of
+// this run and of any child node that keeps NODE_OPTIONS.
+// Not traced: worker threads, a child node with a cleared env, native addons, a branch
+// this run does not take, and scripts/pack-check.mjs, which is not run here. For pack-check
+// only the text guard in __build_ownership applies, and it catches a spelled path only.
+// A read through a symlink is __build_ownership's job. scripts/sync-barkpark.mjs may read
+// the host by design.
 //
 // The contract truth scan is held here too, from outside the support file that narrows
 // it: one leaf left out of that scan, with a read planted in it, must go red.
@@ -13,13 +21,14 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = mkdtempSync(path.join(tmpdir(), "bp-inward-read-"));
+// Resolved: node runs a script by its real path, so a symlinked TMPDIR would read as outside.
+const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "bp-inward-read-")));
 process.once("exit", () => rmSync(scratch, { recursive: true, force: true }));
 
 let failures = 0;
@@ -59,7 +68,7 @@ function traced(label, args) {
 }
 const shown = (hits) => [...new Set(hits.map(({ op, target }) => `${op}: ${target}`))];
 
-await check("the tracer sees every way a path can leave the package", () => {
+await check("the tracer sees fs calls, streams, import, require and child processes that leave the package", () => {
   const probe = inScratch("probe.mjs", `
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -89,7 +98,7 @@ fs.readFileSync(path.join(process.env.INWARD_READ_ROOT, "package.json"));
 });
 
 let inputs = {};
-await check("a real build reaches nothing outside the package, by any path", () => {
+await check("a traced build reaches nothing outside the package", () => {
   const out = inScratch("build-inputs.json");
   const driver = inScratch("build.mjs", `
 import { writeFileSync } from "node:fs";
@@ -105,7 +114,7 @@ writeFileSync(process.argv[4], JSON.stringify(Object.fromEntries(Object.entries(
   assert.deepEqual(shown(hits), []);
 });
 
-await check("the notices check reaches nothing outside the package, by any path", () => {
+await check("the traced notices check reaches nothing outside the package", () => {
   const { status, output, hits } = traced("notices", ["scripts/third-party-notices.mjs", "--check"]);
   assert.equal(status, 0, output);
   assert.deepEqual(shown(hits), []);

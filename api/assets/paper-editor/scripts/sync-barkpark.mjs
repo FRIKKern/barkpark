@@ -128,6 +128,11 @@ export async function runSync({
   if (unwritten.length) throw new Error(`sync-barkpark: ${unwritten.map(([destination]) => destination).join(", ")} did not take the write`);
   for (const { destination } of stale) log(`WROTE  ${destination}`);
   log(`sync-barkpark --write${surfaceOnly ? " --surface-only" : ""}: ${stale.length} of ${sinks.length} sinks written`);
+  if (surfaceOnly && built) {
+    const behind = expectedSinks({ built, rawSurface: sinks[0][1], rawTokens: readPackageFile("src/code-tokens.css", { root }) })
+      .filter(([destination, bytes]) => staleReason(repo, destination, bytes));
+    if (behind.length) warn(`sync-barkpark: ${behind.length} other sinks still differ from this build, so a full sync is still needed: cd api/assets/paper-editor && npm run sync:barkpark:write`);
+  }
   if (!toolchain) warn("sync-barkpark: no node_modules here, so host-profile/surface.json was not composed. Run npm ci, then npm run sync:barkpark:check in api/assets/paper-editor.");
   return 0;
 }
