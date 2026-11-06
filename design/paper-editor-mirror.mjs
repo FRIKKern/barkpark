@@ -328,13 +328,13 @@ export function evaluateMirror(root = repoRoot) {
   let surfaceText;
   try {
     surfaceText = assembledText("paper-surface", { root: join(root, "api/assets/paper-editor") });
-  } catch {
+  } catch (error) {
     return {
       name: MIRROR_NAME,
       path: BUNDLE_PATH,
       abs: bundleAbs,
       current: null,
-      error: `canonical source missing: ${SURFACE_PATH} (the ONE source the mirror is generated from)`,
+      error: `${error.code === "ENOENT" ? "canonical source missing" : "canonical source will not assemble"}: ${SURFACE_PATH} (the ONE source the mirror is generated from): ${error.message}`,
     };
   }
   let bundleText;

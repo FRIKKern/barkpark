@@ -32,7 +32,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, AUDIT_ACTIONS_PATH } from "./emit.mjs";
-import { SURFACE_PATH, BUNDLE_PATH, MIRROR_NAME } from "./paper-editor-mirror.mjs";
+import { evaluateMirror, SURFACE_PATH, BUNDLE_PATH, MIRROR_NAME } from "./paper-editor-mirror.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -588,4 +588,32 @@ test("a later run sweeps trees a SIGKILLed run left behind, and spares a live on
   assert.equal(r.status, 0, `sweep child failed\n${r.stdout}\n${r.stderr}`);
   assert.ok(!existsSync(stale), "a tree older than the stale bar survived the sweep");
   assert.ok(existsSync(fresh), "the sweep removed a FRESH tree — it could belong to a concurrent run");
+});
+
+// Three more themes take the generated fragment past its 800 line limit.
+test("a theme that overflows the surface fragment is refused by name, before anything is written", () => {
+  const root = makeTree();
+  const spec = JSON.parse(readIn(root, "design/fixtures/theme-fixture.json"));
+  for (const name of ["fx-a", "fx-b", "fx-c"]) writeIn(root, `design/themes/${name}.json`, JSON.stringify({ ...spec, name }));
+  const manifest = "design/emit-manifest.json";
+  const [surfaceBefore, manifestBefore] = [readIn(root, SURFACE_PATH), readIn(root, manifest)];
+  const { code, err } = emit(root, ["--write"]);
+  assert.equal(code, 1);
+  assert.match(err, /REFUSED, nothing written/);
+  assert.match(err, /01-components-generated-theme\.css has \d+ physical lines \(max 800\)/);
+  assert.doesNotMatch(err, /ERR_INVALID_ARG_TYPE|canonical source missing/);
+  assert.equal(readIn(root, SURFACE_PATH), surfaceBefore, "the fragment was not written");
+  assert.equal(readIn(root, manifest), manifestBefore, "the manifest was not written");
+});
+
+test("evaluateMirror tells a fragment over its limit from a missing fragment", () => {
+  const over = makeTree();
+  writeIn(over, SURFACE_PATH, `${readIn(over, SURFACE_PATH)}${"/* pad */\n".repeat(200)}`);
+  const big = evaluateMirror(over).error;
+  assert.match(big, /will not assemble/);
+  assert.match(big, /physical lines \(max 800\)/);
+  assert.doesNotMatch(big, /canonical source missing/);
+  const gone = makeTree();
+  rmSync(join(gone, SURFACE_PATH));
+  assert.match(evaluateMirror(gone).error, /canonical source missing/);
 });

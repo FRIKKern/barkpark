@@ -53,6 +53,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
+import { ASSET_MANIFEST, validateFragmentSizes } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 import { derive } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -3512,6 +3513,18 @@ function run(mode, { force = false } = {}) {
     // what we would emit is not at risk, whatever the ledger says about it.
     u.blocked = u.drift && u.attribution !== "attributed";
   }
+  // A surface fragment has a size limit, and past it nothing can assemble the surface.
+  // Refuse here, before any file is written, and name the limit.
+  const surfaceUnit = results.find((r) => r.name === "paper-surface" && !r.error);
+  if (surfaceUnit) {
+    try {
+      validateFragmentSizes([{ name: surfaceUnit.path.split("/").at(-1), bytes: Buffer.from(surfaceUnit.expected) }], ASSET_MANIFEST["paper-surface"], "paper-surface");
+    } catch (error) {
+      console.error(`emit: REFUSED, nothing written. The regenerated ${surfaceUnit.path} would break its limit: ${error.message}`);
+      console.error(`  Move hand-written rules out of that fragment into another one in ASSET_MANIFEST, then run emit again.`);
+      process.exit(1);
+    }
+  }
   if (mode === "write") {
     const blocked = units.filter((u) => u.blocked);
     if (blocked.length && !force) {
@@ -3575,6 +3588,7 @@ function run(mode, { force = false } = {}) {
     errored++;
   } else {
     const post = evaluateMirror(repoRoot);
+    if (post.error) { console.error(`  ERROR ${post.name}: ${post.error}`); process.exit(1); }
     const drift = post.current !== post.expected;
     if (mode === "write") {
       if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; surfaceWritten = true; }
@@ -3587,7 +3601,7 @@ function run(mode, { force = false } = {}) {
     }
   }
 
-  if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
+  if (errored) { console.error(`emit: ${errored} artifact(s) could not be evaluated; see the ERROR lines above.`); process.exit(1); }
   if (mode === "write") writeManifest(nextRegions);
   // The package owns the surface; the raw host sink and the profile follow it through
   // the one outward path. --surface-only leaves the six browser assets to a full sync.
