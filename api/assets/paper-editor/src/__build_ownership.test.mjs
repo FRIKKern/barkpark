@@ -180,10 +180,18 @@ await check("no module on a build or pack path names a Barkpark path, except the
   };
   for (const entry of ["scripts/build-local.mjs", "scripts/pack-check.mjs", "scripts/third-party-notices.mjs"]) walk(entry);
   assert.ok(seen.has("scripts/surface.mjs") && seen.has("scripts/source-assets.mjs") && seen.has("scripts/build-bundle.mjs") && seen.size >= 8, `walked only ${[...seen.keys()]}`);
-  const outward = /\.\.\/\.\.\/|\.\.\/paper-surface|priv\/static|api\/assets\/paper-surface|web\/public/;
+  // A step up in any spelling. The package root itself is the one step a module may take.
+  const outward = /\.\.\/\.\.\/|\.\.\/paper-surface|priv\/static|api\/assets\/paper-surface|web\/public|["'`]\.\.\/?["'`]|["'`]\.\.\/(?!src\/)|dirname\(\s*(?:path\.)?dirname|createRequire/;
+  const packageRootLine = /path\.resolve\(path\.dirname\(.*?\),\s*"\.\."\)/;
   const code = (text) => text.split("\n").filter((line) => !/^\s*\/\//.test(line));
-  const hits = [...seen].flatMap(([rel, text]) => code(text).filter((line) => outward.test(line)).map((line) => `${rel}: ${line.trim()}`));
-  assert.deepEqual(hits, [`scripts/surface.mjs: const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");`]);
+  const hits = [...seen].flatMap(([rel, text]) => code(text).filter((line) => outward.test(line.replace(packageRootLine, ""))).map((line) => `${rel}: ${line.trim()}`));
+  // The walk above follows literal imports only, so a computed one must be named here.
+  const computed = [...seen].flatMap(([rel, text]) => code(text).filter((line) => /\bimport\s*\(\s*[^"'\s]/.test(line)).map((line) => `${rel}: ${line.trim()}`));
+  assert.deepEqual(computed, ["scripts/pack-check.mjs: const shipped = await import(pathToFileURL(contract).href);"]);
+  assert.deepEqual(hits, [
+    `scripts/build-local.mjs: if (!/^(src|node_modules)\\//.test(input) || input.split("/").includes(".."))`,
+    `scripts/surface.mjs: const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");`,
+  ]);
   const reader = code(seen.get("scripts/surface.mjs")).filter((line) => line.includes("readerDir"));
   assert.ok(reader.every((line) => !line.includes("export async function packageSurface")), "packageSurface does not take the reader");
 });
