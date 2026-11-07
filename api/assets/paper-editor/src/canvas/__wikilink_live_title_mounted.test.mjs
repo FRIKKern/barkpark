@@ -602,29 +602,32 @@ await check("the card names a renamed target by its live title", async () => {
   canvas.remove();
 });
 
-await check("at 160 paragraphs a keystroke repaints in under a frame, or under 4x bare on a loaded machine", async () => {
+await check("at 160 paragraphs a keystroke repaints in under a frame, or under 4x bare at the same moment", async () => {
   const many = Array.from({ length: 160 }, (_, i) => ({ id: `m${i}`, type: "paragraph", content: [{ type: "text", value: `Row ${i} links ` }, link("Plan", "n-plan"), { type: "text", value: " and " }, link(`Note ${i}`, `n-${i}`), { type: "text", value: " here." }] }));
-  const time = async (titles) => {
+  const open = async (titles) => {
     const { canvas, editor } = await mount({ blocks: many, titles });
     await tick(50);
-    const painted = canvas.querySelectorAll(".bp-wikilink-label").length;
-    const at = posOf(editor, "Row 80") + 3;
-    const times = [];
-    for (let i = 0; i < 60; i++) {
-      const t0 = performance.now();
-      editor.view.dispatch(editor.state.tr.insertText("x", at));
-      times.push(performance.now() - t0);
-    }
-    const each = times.sort((a, b) => a - b)[30];
-    canvas.remove();
-    return { painted, each };
+    return { canvas, editor, at: posOf(editor, "Row 80") + 3, painted: canvas.querySelectorAll(".bp-wikilink-label").length, times: [] };
   };
-  const bare = await time(null);
-  const live = await time((id) => `Title of ${id}`);
-  console.log(`      ${live.each.toFixed(2)} ms per keystroke with 320 painted links, ${bare.each.toFixed(2)} ms with none (median, jsdom)`);
+  const key = ({ editor, at, times }) => {
+    const t0 = performance.now();
+    editor.view.dispatch(editor.state.tr.insertText("x", at));
+    times.push(performance.now() - t0);
+  };
+  const median = ({ times }) => times.sort((a, b) => a - b)[30];
+  const bare = await open(null);
+  const live = await open((id) => `Title of ${id}`);
+  for (let i = 0; i < 60; i++) {
+    key(bare);
+    key(live);
+  }
+  const [liveMs, bareMs] = [median(live), median(bare)];
+  bare.canvas.remove();
+  live.canvas.remove();
+  console.log(`      ${liveMs.toFixed(2)} ms per keystroke with 320 painted links, ${bareMs.toFixed(2)} ms with none (median, jsdom)`);
   assert.equal(live.painted, 320);
   assert.equal(bare.painted, 0);
-  assert.ok(live.each < Math.max(16, bare.each * 4), `${live.each} ms painted, ${bare.each} ms bare`);
+  assert.ok(liveMs < Math.max(16, bareMs * 4), `${liveMs} ms painted, ${bareMs} ms bare`);
 });
 
 if (failures > 0) {
