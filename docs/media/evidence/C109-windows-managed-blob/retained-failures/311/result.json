@@ -1,0 +1,146 @@
+{
+  "status": "failed",
+  "startedAt": "2026-10-15T01:32:11.804Z",
+  "root": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-u3ju8o",
+  "data": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-u3ju8o\\data",
+  "release": "C:\\Users\\Frikk\\Documents\\GitHub\\barkdown\\runtime\\C109-full-current-303",
+  "source": "ae3be838480c7910b23b9a9568c61d16c08b23a0",
+  "build": ".git/C109-runtime304/result.json",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "osRelease": "10.0.26200"
+  },
+  "checks": [
+    {
+      "name": "fresh owned release migrates versioned server DDL and boots",
+      "record": {
+        "version": 1,
+        "hostPid": 10740,
+        "hostStartedAt": "2026-10-15T01:32:11.8617126Z",
+        "pid": 38612,
+        "startedAt": "2026-10-15T01:32:52.6697377Z",
+        "port": 59156,
+        "pgPort": 59157,
+        "bootId": "a292a4a0-a737-4128-845c-a512c9a3f729",
+        "launchedAt": "2026-10-15T01:32:53.564Z"
+      }
+    },
+    {
+      "name": "four real uploads bind raw scope, Unicode display names and native originals"
+    },
+    {
+      "name": "actual compiled release unit transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 5521,
+      "owner": "2026-10-15T01:32:59.9128651Z",
+      "total": 63,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "actual compiled release writer transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 2727,
+      "owner": "2026-10-15T01:33:05.4385935Z",
+      "total": 1,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "real independent SQL lock wait in both directions and rollback preserve native originals"
+    },
+    {
+      "name": "owned precommit release worker interrupted before outer commit",
+      "exitCode": null,
+      "signal": "SIGTERM",
+      "elapsedMs": 3307,
+      "owner": "2026-10-15T01:33:08.1686110Z"
+    },
+    {
+      "name": "abrupt database death before commit restores raw row and asset documents; no intent survives"
+    },
+    {
+      "name": "actual compiled release commit transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 2667,
+      "owner": "2026-10-15T01:33:47.4168634Z",
+      "total": 1,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "actual compiled release fence transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 2475,
+      "owner": "2026-10-15T01:33:50.0864244Z",
+      "total": 1,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "database insert, update and COPY cannot claim pending case-alias address"
+    },
+    {
+      "name": "actual compiled release resume transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 2462,
+      "owner": "2026-10-15T01:34:29.6350813Z",
+      "total": 1,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "actual compiled release fence-resume transaction proof",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 2318,
+      "owner": "2026-10-15T01:34:32.1001943Z",
+      "total": 1,
+      "failures": 0,
+      "skipped": 0,
+      "excluded": 0
+    },
+    {
+      "name": "owned server and PostgreSQL restart retain exact pending operation and originals"
+    },
+    {
+      "name": "existing ordinary HTTP delete still removes unreserved row, documents and bytes",
+      "response": {
+        "status": 200,
+        "body": {
+          "result": {
+            "filename": "c105-ordinary-----------50065fe4-6eda-4f08-8846-7a9ec689e733-b43294eb.png",
+            "dataset": "production",
+            "deleted": "e5df4734-5ad9-4a2c-8a62-30ff1b1c2ed1"
+          },
+          "syncTags": [
+            "bp:ds:production:media"
+          ]
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Internal transaction only; HTTP delete unchanged",
+    "Original-blob writer lock/admission proof only; no native cleanup, HTTP adoption, rendition/cache/remote writer coverage or full reconciliation",
+    "No real library, Mac, admission settlement, installer or stage acceptance",
+    "Full current-source locked backend built on Windows; reader/package/adoption acceptance separate"
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: Owned ExUnit proof failed; retain .git/C109-native311/exunit-effect-failure.log\n\n1 !== 0\n\n    at proof (file:///C:/Users/Frikk/Documents/GitHub/barkdown/.git/media-fence-native311.mjs:25:1179)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///C:/Users/Frikk/Documents/GitHub/barkdown/.git/media-fence-native311.mjs:55:3",
+  "finalPgStatus": 3,
+  "finalPgSignal": null,
+  "elapsedMs": 146154,
+  "finishedAt": "2026-10-15T01:34:37.958Z",
+  "privateDataRetained": true
+}

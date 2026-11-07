@@ -19,6 +19,8 @@ defmodule Barkpark.Media.Blobstore.Local do
 
   alias Barkpark.Media
   alias Barkpark.Media.Blobstore
+  alias Barkpark.Media.Storage.LocalWrite
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   # ── PATH PROVENANCE ────────────────────────────────────────────────────────
   #
@@ -92,19 +94,21 @@ defmodule Barkpark.Media.Blobstore.Local do
   # the only caller of this verb — never client text.
   # sobelow_skip ["Traversal.FileModule"]
   def put_file(relative_path, source_path, _opts) do
-    full_path = Media.file_path(relative_path)
+    LocalWrite.run(relative_path, fn ->
+      full_path = Media.file_path(relative_path)
 
-    with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.cp(source_path, full_path),
-         {:ok, %File.Stat{size: received}} <- File.stat(source_path) do
-      Blobstore.receipt(received, :stat, stat_blob(relative_path))
-    else
-      # cp may have written a partial file before failing → best-effort cleanup
-      # so no orphan blob survives (moved here verbatim from Media.upload/3).
-      {:error, _reason} ->
-        _ = File.rm(full_path)
-        {:error, :storage_unavailable}
-    end
+      with :ok <- File.mkdir_p(Path.dirname(full_path)),
+           :ok <- File.cp(source_path, full_path),
+           {:ok, %File.Stat{size: received}} <- File.stat(source_path) do
+        Blobstore.receipt(received, :stat, stat_blob(relative_path))
+      else
+        # cp may have written a partial file before failing → best-effort cleanup
+        # so no orphan blob survives (moved here verbatim from Media.upload/3).
+        {:error, _reason} ->
+          _ = File.rm(full_path)
+          {:error, :storage_unavailable}
+      end
+    end)
   end
 
   @impl true
@@ -116,14 +120,16 @@ defmodule Barkpark.Media.Blobstore.Local do
   # backslash/null/space shape.
   # sobelow_skip ["Traversal.FileModule"]
   def put_bytes(relative_path, body, _opts) do
-    full_path = Media.file_path(relative_path)
+    LocalWrite.run(relative_path, fn ->
+      full_path = Media.file_path(relative_path)
 
-    with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.write(full_path, body) do
-      Blobstore.receipt(byte_size(body), :stat, stat_blob(relative_path))
-    else
-      {:error, _reason} -> {:error, :storage_unavailable}
-    end
+      with :ok <- File.mkdir_p(Path.dirname(full_path)),
+           :ok <- File.write(full_path, body) do
+        Blobstore.receipt(byte_size(body), :stat, stat_blob(relative_path))
+      else
+        {:error, _reason} -> {:error, :storage_unavailable}
+      end
+    end)
   end
 
   @impl true
@@ -144,8 +150,16 @@ defmodule Barkpark.Media.Blobstore.Local do
   # here, not clause (1).
   # sobelow_skip ["Traversal.FileModule"]
   def delete(relative_path) do
-    _ = File.rm(Media.file_path(relative_path))
-    :ok
+    managed? = Door.enabled?()
+
+    LocalWrite.run(relative_path, fn ->
+      case File.rm(Media.file_path(relative_path)) do
+        :ok -> :ok
+        {:error, :enoent} -> :ok
+        {:error, _} when managed? -> {:error, :storage_unavailable}
+        {:error, _} -> :ok
+      end
+    end)
   end
 
   @impl true

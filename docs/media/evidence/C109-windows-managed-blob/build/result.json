@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "startedAt": "2026-10-15T01:24:04.721Z",
+  "source": "ae3be838480c7910b23b9a9568c61d16c08b23a0",
+  "checkout": "C:\\Users\\Frikk\\Documents\\GitHub\\barkpark-windows-media-settlement",
+  "sourceLockSha256": "efa18c78282bbc6a145576a4e0f64bf745317b9774dc590ce43b6287a4d84c38",
+  "output": "C:\\Users\\Frikk\\Documents\\GitHub\\barkdown\\runtime\\C109-full-current-303",
+  "build": "C:\\Users\\Frikk\\Documents\\GitHub\\barkdown\\runtime\\C109-full-current-303.build",
+  "appPin": "944a57a1e0b2a210d44e5215c13519a378d6efb8",
+  "appAdopted": false,
+  "scope": "Full Windows backend dependencies and production release assembly from explicit clean candidate; no production pin substitution",
+  "limits": [
+    "No generated reader/package assembly or installer acceptance",
+    "Full upstream CI remains separate",
+    "No real database or library is started by this build"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "elapsedMs": 183522,
+  "finishedAt": "2026-10-15T01:27:08.244Z",
+  "toolchain": {
+    "otp": "28",
+    "elixir": "1.20.1",
+    "erts": "16.4"
+  },
+  "files": 4635,
+  "bytes": 178401818
+}
