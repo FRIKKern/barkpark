@@ -204,7 +204,7 @@ jobs:
         env:
           SHORT_SHA: ${{ needs.gate.outputs.short_sha }}
         run: echo "SHA_TAG=$IMAGE:sha-$SHORT_SHA" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: api-image-digest-*
