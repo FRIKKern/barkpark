@@ -4029,20 +4029,20 @@ export function docToBlocks(doc, options = {}) {
   });
 }
 
-// The fewest move-block ops that fold `running` into nextSeq's order, or null when
-// the batch would not reproduce it. Stable = the longest increasing subsequence
-// of running positions in nextSeq order, plus every locked id (a locked block
-// never moves). Each other id moves right after its nextSeq predecessor, left to
+// The fewest moves of blocks already here that fold `running` into nextSeq's order,
+// or null when the batch would not reproduce it. Stable = the longest increasing
+// subsequence of those blocks' running positions in nextSeq order, plus every locked
+// id (a locked block never moves). A new block moves unless its insert placed it. Each other id moves right after its nextSeq predecessor, left to
 // right: nothing is ever spliced between a moved id and its predecessor, so the
 // fold lands exactly on nextSeq. The fold is simulated to prove it.
-function minimalMoves(running, nextSeq, lockedIds, prevIds) {
+function minimalMoves(running, nextSeq, lockedIds, prevIndex) {
   const ids = nextSeq.map((e) => e.id);
   if (running.length !== ids.length) return null;
   const pos = new Map(running.map((id, i) => [id, i]));
   if (ids.some((id) => !pos.has(id))) return null;
   // Only blocks that were already here can stay put. A new block sits wherever its
   // insert anchored it, so counting it could make an untouched block the one that moves.
-  const kept = ids.filter((id) => prevIds.has(id));
+  const kept = ids.filter((id) => prevIndex.has(id));
   const seq = kept.map((id) => pos.get(id));
   // Longest increasing subsequence of `seq` (patience sorting, O(n log n)).
   const tails = [];
@@ -4265,7 +4265,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // walk below would emit moves for b and c, blocks the author never touched.
   // The minimal batch is checked by folding it; if it does not reproduce
   // nextSeq, the greedy walk runs instead.
-  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds, new Set(prev.map((b) => b.id)));
+  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds, prevIndex);
   if (minimal) {
     for (const op of minimal) ops.push(op);
     running.length = 0;

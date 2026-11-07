@@ -32,7 +32,7 @@ test("a block typed next to any order of blocks, as after a collaborator's move,
     const at = Math.floor(random() * (ids.length + 1));
     doc.content.splice(at, 0, { type: "paragraph", attrs: { bpId: null, bpType: null }, content: [{ type: "text", text: "new" }] });
     const ops = runToOps(blocks, doc);
-    const inserted = ops.find((o) => o.op === "insert-after" || o.op === "insert-at-end")?.block?.id;
+    const inserted = ops.find((o) => o.op === "insert-after")?.block?.id;
     assert.ok(inserted, `seed ${seed}: no insert in ${JSON.stringify(ops)}`);
     const touched = ops.filter((o) => (o.id ?? o.block?.id) !== inserted);
     assert.deepEqual(touched, [], `seed ${seed}: ${ids} + new at ${at}`);
