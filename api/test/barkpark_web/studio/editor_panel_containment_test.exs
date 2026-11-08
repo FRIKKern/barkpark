@@ -93,15 +93,15 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # said so (spd-b10f closes that gap). It is a fourth source of `position: fixed`
   # and the most dangerous one: the `<bp-paper-editor>` custom element mounts
   # INSIDE the `studio-paper-editor` `.editor-panel` root, so anything this sheet
-  # positions that does not portal renders under a panel. esbuild emits it to
+  # positions that does not portal renders under a panel. Build, then sync, put it at
   # `priv/static/assets/bp-paper-editor.css` (index.js `ensureStyles/0` links it),
   # which the `*.js` glob below never sees — the SOURCE is the honest census input.
   @paper_editor_css Path.expand("../../../assets/paper-editor/src/styles.css", __DIR__)
   defp paper_editor_css, do: Barkpark.Test.PaperEditorCSS.authored_css!()
 
   # The BUILT sheet (spd-census-built-paper-editor-css). `assets/paper-editor`'s
-  # `npm run build` runs `esbuild src/styles.css --bundle --outfile=
-  # ../../priv/static/assets/bp-paper-editor.css --minify`, and that artifact is
+  # `npm run build` bundles `src/styles.css` into `dist/bp-paper-editor.css`, and
+  # `npm run sync:barkpark:write` copies it to `priv/static/assets/`. That copy is
   # COMMITTED — it, not the source above, is the byte stream `ensureStyles/0`
   # links into the page. It escaped every census this file runs: the source
   # census reads `src/styles.css`, and the artifact census globs
