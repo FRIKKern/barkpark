@@ -245,15 +245,28 @@ func writeResult(path string, result Result) error {
 
 ### 3. Permission Model
 
-**Workspace Isolation:**
+**Working Directory Isolation (NOT Sandbox):**
 ```bash
-# Each bot gets isolated workspace
+# Each bot gets dedicated working directory
 /barkpark/workspaces/<bot-id>/
   ├── .git/           # Bot-specific repos
   ├── projects/       # Cloned codebases
   ├── artifacts/      # Generated files
   └── .mcp/           # MCP server configs
 ```
+
+**IMPORTANT:** `--cwd` only sets the working directory. It does NOT:
+- ❌ Prevent accessing parent directories (`cd ..`)
+- ❌ Prevent reading `/etc/passwd`, `/tmp`, etc.
+- ❌ Prevent writing to other bots' workspaces
+- ❌ Provide true filesystem isolation
+
+For real isolation, use:
+- ✅ Docker containers with volume mounts
+- ✅ Bubblewrap sandboxing
+- ✅ systemd DynamicUser with ProtectSystem/ProtectHome
+- ✅ chroot jails
+- ✅ Kubernetes pods
 
 **Execution User:**
 ```bash

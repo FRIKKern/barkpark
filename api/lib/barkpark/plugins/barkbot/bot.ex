@@ -17,8 +17,21 @@ defmodule Barkpark.Plugins.Barkbot.Bot do
   @foreign_key_type :binary_id
   
   @providers ~w(claude-code anthropic-api openai-api mock)
+  @production_providers ~w(claude-code anthropic-api openai-api)
   @statuses ~w(active inactive)
   @auth_statuses ~w(authenticated not_authenticated unknown error)
+  
+  @doc """
+  Get allowed providers for current environment.
+  Mock is only available in dev/test.
+  """
+  def allowed_providers do
+    if Mix.env() == :prod do
+      @production_providers
+    else
+      @providers
+    end
+  end
   
   schema "barkbot_bots" do
     field :bot_id, :string  # Slug identifier, e.g. "my-assistant"
@@ -88,7 +101,7 @@ defmodule Barkpark.Plugins.Barkbot.Bot do
       :last_health_check_at
     ])
     |> validate_required([:bot_id, :name, :provider, :workspace_id])
-    |> validate_inclusion(:provider, @providers)
+    |> validate_inclusion(:provider, allowed_providers())
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:auth_status, @auth_statuses)
     |> validate_number(:max_tokens, greater_than: 0, less_than_or_equal_to: 200_000)

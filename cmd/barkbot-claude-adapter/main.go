@@ -107,10 +107,34 @@ func run() int {
 	ctx, cancelTimeout := context.WithTimeout(ctx, time.Duration(*timeoutSec)*time.Second)
 	defer cancelTimeout()
 
-	// Execute claude CLI
+	// Execute claude CLI with process group for proper cancellation
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, *claudeBin, args...)
 	cmd.Dir = *workspace
+	
+	// Set process group ID so we can kill entire tree
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	
+	// Handle graceful shutdown with escalation
+	go func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			// Get process group ID
+			pgid, err := syscall.Getpgid(cmd.Process.Pid)
+			if err == nil {
+				// Kill entire process group (negative PID)
+				fmt.Fprintf(os.Stderr, "Sending SIGTERM to process group %d\n", pgid)
+				syscall.Kill(-pgid, syscall.SIGTERM)
+				
+				// Escalate to SIGKILL after 5 seconds
+				time.Sleep(5 * time.Second)
+				if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+					fmt.Fprintf(os.Stderr, "Escalating to SIGKILL for process group %d\n", pgid)
+					syscall.Kill(-pgid, syscall.SIGKILL)
+				}
+			}
+		}
+	}()
 
 	outputBytes, err := cmd.CombinedOutput()
 	executionMs := time.Since(start).Milliseconds()
