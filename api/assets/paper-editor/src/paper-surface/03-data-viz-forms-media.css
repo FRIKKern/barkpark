@@ -32,8 +32,8 @@
    declaration is redundant; removing either re-opens the defect.
 
    Asserted, not remembered:
-   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs, and measured end
-   to end by api/assets/paper-editor/src/__narrow_render.mjs. */
+   api/assets/paper-editor-host-tests/__narrow_stat_guards.test.mjs, and measured
+   end to end by api/assets/paper-editor-host-tests/__narrow_render.mjs. */
 .bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; max-width: 100%; box-sizing: border-box; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
 /* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
    fits, and a contained overflow.
@@ -77,7 +77,7 @@
    it is the containment that may be used here and the ellipsis is not.
 
    The arithmetic above is asserted, not remembered:
-   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs. */
+   api/assets/paper-editor-host-tests/__narrow_stat_guards.test.mjs. */
 .bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: clamp(1.15rem, 5.6vw, 1.7rem); font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; white-space: nowrap; max-width: 100%; overflow-x: auto; }
 /* The label is prose in a 179px track. `break-word` is enough here — the label
    never sizes its own box (the grid track does), so the min-content behaviour
