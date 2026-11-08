@@ -962,8 +962,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
              `studio-paper-editor` `.editor-panel` root — so this is an
              unaudited fixed surface under a panel.
 
-             Either the artifact was hand-edited (it is generated: `cd
-             api/assets/paper-editor && npm run build`), or it was built from a
+             Either the artifact was hand-edited (it is generated: `cd api/assets/paper-editor`,
+             then `npm run build && npm run sync:barkpark:write`), or it was built from a
              `styles.css` that was never committed. Fix the SOURCE, rebuild, and
              classify the selector in @paper_editor_fixed_inventory.
              """
@@ -976,8 +976,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
                #{source_only |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n  ")}
 
              Every other guard in this file reads the source, so a stale artifact
-             makes them certify a stylesheet nobody is served. Rebuild and commit:
-             `cd api/assets/paper-editor && npm run build`.
+             makes them certify a stylesheet nobody is served. Rebuild, sync and commit:
+             `cd api/assets/paper-editor && npm run build && npm run sync:barkpark:write`.
              """
 
       # Belt and braces: the built set is the SAME set the source census

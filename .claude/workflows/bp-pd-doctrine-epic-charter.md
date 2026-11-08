@@ -45,7 +45,7 @@ DEFERRED: t5 APPLY stays the human gate (tooling merged; note t20a's seed change
 
 ### Wave-4 mechanics (all builders)
 - Everything in "Wave-1/2 mechanics" still binds. Suite baseline **7322/0**. Doctrine rules 1-6 + D1-D13 are settled — do not relitigate.
-- `bp-media-picker.js` has NO build step — edit the tracked file in place, gate with `node --check`. The paper-editor bundle rules are unchanged: source-union → REBUILD (`npm run build` + `build:web` if the mirror changed) → `node --check` the bundle → `scripts/paper-editor-mirror-check.sh`. JS slices extend `npm test` with new `__*.test.mjs`.
+- `bp-media-picker.js` has NO build step — edit the tracked file in place, gate with `node --check`. The paper-editor bundle rules are unchanged: source-union → REBUILD (`npm run build`, then `npm run sync:barkpark:write`) → `node --check` the bundle → `scripts/paper-editor-mirror-check.sh`. JS slices extend `npm test` with new `__*.test.mjs`.
 - Any client veto is a REAL PM Plugin (t14 — filterTransaction as an editorProp is DEAD CODE) with the `host._programmaticApply` exemption; ghost-slot materialization MUST use the programmatic-apply path or it vetoes itself.
 - Branch integration PRs from origin/main; `git checkout -b` fails SILENTLY on dirty trees — verify `git branch --show-current`. Close tasks task-native with a fresh epoch, post-merge, from the main checkout (never from worktrees).
 - Live-verify against localhost:4000 per memory `local-portable-testing` (Studio paper URL = `/w/<ws>/p/<proj>/d/production/studio/open/paper/<slug>`; browser session ws is co-lab — create test papers via the SCOPED mutate URL).
@@ -75,7 +75,7 @@ DEFERRED: t5 APPLY stays the human gate (tooling merged; note t20a's seed change
 DEFERRED to wave 2: **t11** mainline gap-audit (audit is honest only AFTER wave 1's surface exists), **t5** migrate (locks UX must be proven first, D3 dry-run), **t7** classify (feeds sidebar v2). Then the unblocked spine: t8 fleet-in-canvas → t10 parity gate + t12 no-modes.
 
 ### Wave-1 mechanics (all builders)
-- The paper-editor bundle is COMMITTED (`api/priv/static/assets/bp-paper-editor.bundle.js` + web mirror). NEVER hand-merge it: on rebase/conflict, take source, re-run `npm run build` (+ `build:web` if the mirror changed), then `scripts/paper-editor-mirror-check.sh`.
+- The paper-editor bundle is COMMITTED (`api/priv/static/assets/bp-paper-editor.bundle.js` + web mirror). NEVER hand-merge it: on rebase/conflict, take source, re-run `npm run build` (it writes only `dist/`), then `npm run sync:barkpark:write` (it copies the bundle and the web mirror out), then `scripts/paper-editor-mirror-check.sh`.
 - JS slices add their new `src/**/__*.test.mjs` file; `npm test` (`scripts/test-chain.mjs`) finds it, so package.json is not edited.
 - DB-backed LiveView tests (paper_canvas_test.exs etc.) run locally where Postgres is up; CI's full suite (7119/0 baseline) is authoritative at PR time. Targeted `CC=clang mix test <file>` is the per-slice gate.
 - Visual verify against a REAL local server per memory `local-portable-testing`; `scripts/status-manifest-check.sh` untouched-green.
@@ -92,7 +92,7 @@ DEFERRED to wave 3: **t7** field classification (p3, feeds sidebar-v2; D1 says s
 
 ### Wave-2 mechanics (all builders)
 - Everything in "Wave-1 mechanics" still binds. Suite baseline **7207/0**.
-- Bundle conflicts: source-union then **REBUILD** (`npm run build` + `build:web` if the mirror changed) + `node --check` on the built bundle — a wave-1 union nested one slice's code inside another's unclosed function. Then `scripts/paper-editor-mirror-check.sh`.
+- Bundle conflicts: source-union then **REBUILD** (`npm run build`, then `npm run sync:barkpark:write`) + `node --check` on the built bundle — a wave-1 union nested one slice's code inside another's unclosed function. Then `scripts/paper-editor-mirror-check.sh`.
 - Sidebar/relations UI must resolve display strings via `Content.reference_title`, never print raw ids.
 - Close tasks task-native (`bp task close <id> <worker> <epoch>`, CAS); NEVER `bp doc patch`+publish a task with edges.
 - Verify against a REAL local server per memory `local-portable-testing`; canvas work needs `BARKPARK_PAPER_CANVAS=1`.

@@ -35,8 +35,8 @@ open with a packaged, unblockable checklist.
   BEFORE working. PR body carries `Task: <id>`. `cc` is a Claude wrapper — always
   `CC=/usr/bin/clang`.
 - D8 (below): every PR touching `api/assets/paper-editor/src/**` rebuilds AND commits
-  the bundle (`npm run build`, then commit the two artifacts under
-  api/priv/static/assets/). The build is deterministic — a dirty diff after your build
+  the bundle (`npm run build`, then `npm run sync:barkpark:write`, then commit the
+  sinks it changed). The build is deterministic — a dirty diff after your build
   means the committed bundle was stale, not flake.
 - The hollow-paper gate cannot false-negative content-ADDING edits (ratchet only halts
   the non-hollow→hollow edge) — a live-pass failure is a real editor bug, never gate
