@@ -88,9 +88,10 @@ export const ancestorReadNames = (cssText) => {
 
 const READ = /^\.\s*(?:(?:getAttribute|hasAttribute|getAttributeNode)\s*\(\s*["'`]([\w-]+)["'`]|(?:getAttributeNS|hasAttributeNS)\s*\([^,)]*,\s*["'`]([\w-]+)["'`]|attributes\s*(?:\[\s*["'`]([\w-]+)["'`]|\.getNamedItem\(\s*["'`]([\w-]+)["'`])|dataset\s*(?:\.(\w+)|\[\s*["'`](\w+)["'`])|(?:matches|closest)\s*\(\s*["'`]([^"'`]*)["'`])/;
 const readNames = (match) => match[1] ?? match[2] ?? match[3] ?? match[4] ? [match[1] ?? match[2] ?? match[3] ?? match[4]] : match[5] ?? match[6] ? [dataName(match[5] ?? match[6])] : [...match[7].matchAll(/\[\s*([\w-]+)/g)].map((attribute) => attribute[1]);
-const readsInTail = (tail) => [...tail.matchAll(/\.\s*(?:getAttribute|hasAttribute|getAttributeNode|getAttributeNS|hasAttributeNS|attributes|dataset|matches|closest)\b[^;\n]*/g)].flatMap((match) => {
-  const read = READ.exec(match[0]);
-  return read ? readNames(read) : [];
+// Off a parent or the document a class test is a read too: classList.contains("bp-x").
+const readsInTail = (tail) => [...tail.matchAll(/\.\s*(?:getAttribute|hasAttribute|getAttributeNode|getAttributeNS|hasAttributeNS|attributes|dataset|matches|closest|classList)\b[^;\n]*/g)].flatMap((match) => {
+  const read = READ.exec(match[0]) ?? /^\.\s*classList\s*\.\s*contains\s*\(\s*["'`]([\w-]+)["'`]/.exec(match[0]);
+  return !read ? [] : read.length === 2 ? [read[1]] : readNames(read);
 });
 const PARENT = String.raw`(?:\.(?:parentElement|parentNode|offsetParent)\b|\.getRootNode\(\s*\)|${DOCUMENT}\.(?:documentElement|body)\b|${DOCUMENT}\.(?:getElementById|querySelector(?:All)?)\([^)]*\))`;
 const destructured = (sourceText, receiver) => [...sourceText.matchAll(new RegExp(String.raw`\{([^{}]*)\}\s*=\s*${receiver}\.dataset\b`, "g"))]
