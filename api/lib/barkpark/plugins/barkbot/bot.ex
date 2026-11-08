@@ -100,7 +100,7 @@ defmodule Barkpark.Plugins.Barkbot.Bot do
       :auth_status,
       :last_health_check_at
     ])
-    |> validate_required([:bot_id, :name, :provider, :workspace_id])
+    |> validate_required([:bot_id, :name, :provider, :workspace_id, :hostname])
     |> validate_inclusion(:provider, allowed_providers())
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:auth_status, @auth_statuses)

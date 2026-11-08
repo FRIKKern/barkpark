@@ -213,10 +213,11 @@ defmodule Barkpark.Plugins.Barkbot.Web.ChatLive do
   defp get_computer_info(nil), do: nil
   
   defp get_computer_info(bot) do
+    # Require explicit machine assignment - no fallback to localhost
     %{
-      hostname: bot.hostname || System.get_env("HOSTNAME", "unknown"),
-      cpu_cores: bot.cpu_cores || get_cpu_cores(),
-      memory_gb: bot.memory_gb || get_memory_gb(),
+      hostname: bot.hostname,
+      cpu_cores: bot.cpu_cores,
+      memory_gb: bot.memory_gb,
       location: bot.location || "Unknown location",
       status: if(bot.enabled, do: "online", else: "offline")
     }
