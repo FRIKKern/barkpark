@@ -706,7 +706,7 @@ const { CONTRACT_VERSION, EDITOR_VERSION, BUILD_SHA } = customElements.get("bp-p
 ## Host profiles
 
 ```
-host-profile/surface.json   what this build offers (declared) and keeps to itself (internal); npm run build writes it
+host-profile/surface.json   what this build offers (declared) and keeps to itself (internal); npm run sync:barkpark:write writes it
 host-profile/check.mjs      node check.mjs <profile.json> [surface.json]; no dependencies
 host-profile/<host>.json    one per host: Barkpark's studio, reader and web live here, each app keeps its own
 ```

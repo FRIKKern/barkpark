@@ -80,7 +80,7 @@
     "notices": "node scripts/third-party-notices.mjs",
     "notices:check": "node scripts/third-party-notices.mjs --check",
     "pack:check": "node scripts/pack-check.mjs",
-    "prepack": "npm run build && node scripts/third-party-notices.mjs --check"
+    "prepack": "npm run build && node scripts/third-party-notices.mjs --check && node scripts/pack-check.mjs --prepack"
   },
   "devDependencies": {
     "@tiptap/core": "3.31.4",

@@ -692,3 +692,30 @@ test("with a toolchain a quiet rerun still syncs, and a failed sync fails the em
   assert.equal(failed.code, 1);
   assert.match(failed.err, /sync-barkpark --surface-only exited 3/);
 });
+
+test("evaluateMirror names the fragment at fault, not fragment 01", () => {
+  const F00 = "api/assets/paper-editor/src/paper-surface/00-foundation-type.css";
+  const over = makeTree();
+  writeIn(over, F00, `${readIn(over, F00)}${"/* pad */\n".repeat(200)}`);
+  const big = evaluateMirror(over).error;
+  assert.match(big, /00-foundation-type\.css has \d+ physical lines \(max 800\)/);
+  assert.doesNotMatch(big, /01-components-generated-theme/);
+  const gone = makeTree();
+  rmSync(join(gone, F00));
+  assert.match(evaluateMirror(gone).error, /canonical source missing: api\/assets\/paper-editor\/src\/paper-surface\/00-foundation-type\.css/);
+});
+
+test("a failed sync with no error line still shows what it printed, and a loud sync that passes is not cut off", () => {
+  const sync = "api/assets/paper-editor/scripts/sync-barkpark.mjs";
+  const root = makeTree();
+  mkdirSync(join(root, "api/assets/paper-editor/node_modules"));
+  writeIn(root, sync, 'process.stderr.write("odd failure text\\nsecond line\\n");\nprocess.exit(3);\n');
+  const failed = emit(root, ["--write"]);
+  assert.equal(failed.code, 1);
+  assert.match(failed.err, /exited 3/);
+  assert.match(failed.err, /odd failure text[\s\S]*second line/);
+  writeIn(root, sync, 'process.stderr.write("x".repeat(2 * 1024 * 1024));\n');
+  const loud = spawnSync(process.execPath, [join(root, "design", "emit.mjs"), "--write"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(loud.status, 0, loud.stderr.slice(-300));
+});
+

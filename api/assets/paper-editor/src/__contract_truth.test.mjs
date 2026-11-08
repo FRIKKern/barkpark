@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import {
   ancestorReadNames,
+  ownOrParentReads,
   appears,
   contract,
   dispatched,
@@ -136,8 +137,10 @@ check("every event the source listens for by a literal name is a DOM event, decl
 });
 
 check("every package attribute and class the source reads off an ancestor or the document is declared, editor-internal or a reach-in", () => {
-  const reads = ancestorReadNames(packageCss);
-  assert.ok(reads.has("data-paper-palette") && reads.has("data-theme"), "the selector scan found nothing");
+  // Selectors, plus direct reads off a parent or the document: document.documentElement.getAttribute(...) and the like.
+  const reads = new Set([...ancestorReadNames(packageCss), ...ownOrParentReads(js).parents]);
+  const probe = ownOrParentReads('document.documentElement.getAttribute("data-a"); document.body.dataset.bB; x.ownerDocument.documentElement.classList.contains("bp-c")').parents;
+  assert.ok(reads.has("data-paper-palette") && reads.has("data-theme") && ["data-a", "data-b-b", "bp-c"].every((name) => probe.has(name)), "the selector or document read scan found nothing");
   assert.deepEqual([...reads].filter((name) => !known(name)).sort(), []);
 });
 

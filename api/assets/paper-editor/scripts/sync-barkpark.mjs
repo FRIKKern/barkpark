@@ -15,7 +15,7 @@
 // before committing a rebuilt editor. Design tooling runs without this package's
 // node_modules, so with no toolchain it writes the raw surface, says the profile was
 // not composed, and leaves the stale state for --check to catch.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,7 @@ export function expectedSinks({ built, rawSurface, rawTokens, surfaceOnly = fals
 const staleReason = (repo, destination, bytes) => {
   const at = path.join(repo, destination);
   if (!existsSync(at)) return "missing";
+  if (!statSync(at).isFile()) return "not a file";
   return readFileSync(at).equals(bytes) ? null : "stale";
 };
 
@@ -123,6 +124,8 @@ export async function runSync({
     return 0;
   }
 
+  const blocked = stale.filter(({ reason }) => reason === "not a file");
+  if (blocked.length) throw new Error(`sync-barkpark: ${blocked.map(({ destination }) => destination).join(", ")} is not a file; nothing was written. Move it aside, then rerun.`);
   for (const { destination, bytes } of stale) writeAtomic(repo, destination, bytes);
   const unwritten = sinks.filter(([destination, bytes]) => staleReason(repo, destination, bytes));
   if (unwritten.length) throw new Error(`sync-barkpark: ${unwritten.map(([destination]) => destination).join(", ")} did not take the write`);

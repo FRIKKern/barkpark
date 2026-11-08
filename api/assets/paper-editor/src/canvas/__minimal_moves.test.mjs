@@ -24,7 +24,7 @@ function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0, 4).join(" | ")}`);
   }
 }
-const EXPECTED = 6;
+const EXPECTED = 7;
 
 const para = (id) => ({ id, type: "paragraph", content: [{ type: "text", value: `Block ${id}.` }] });
 const byId = (ids) => ids.map(para);
@@ -100,6 +100,21 @@ check("a LOCKED block never moves, and the batch still folds to the target", () 
   const ops = runToOps(prevBlocks, runToTiptap(nextBlocks));
   assert.deepEqual(ops.filter((o) => o.op === "move-block" && o.id === "lk"), [], JSON.stringify(ops));
   assert.deepEqual(fold(prev, ops), next, JSON.stringify(ops));
+});
+
+check("a block its insert already placed gets no move, while a collaborator's reorder still moves", () => {
+  // The writer types after a while a collaborator has moved b below c. The insert
+  // anchors the new block after a, where it belongs, so only b or c moves.
+  const doc = runToTiptap(byId(["a", "c", "b"]));
+  doc.content.splice(1, 0, { type: "paragraph", attrs: { bpId: null, bpType: null }, content: [{ type: "text", text: "new" }] });
+  const ops = runToOps(byId(["a", "b", "c"]), doc);
+  const inserted = ops.find((o) => o.op === "insert-after");
+  assert.equal(inserted?.afterId, "a", JSON.stringify(ops));
+  const moves = ops.filter((o) => o.op === "move-block");
+  assert.deepEqual(moves.filter((o) => o.id === inserted.block.id), [], `the placed block moved: ${JSON.stringify(ops)}`);
+  assert.equal(moves.length, 1, JSON.stringify(ops));
+  const order = ["a", inserted.block.id, "b", "c"];
+  assert.deepEqual(fold(order, moves), ["a", inserted.block.id, "c", "b"], JSON.stringify(ops));
 });
 
 if (ran !== EXPECTED) { failures += 1; console.log(`FAIL  ran ${ran} of ${EXPECTED} checks`); }

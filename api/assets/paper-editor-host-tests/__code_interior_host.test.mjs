@@ -65,7 +65,8 @@ check("paper-surface.css defines a distinct --bp-codeblock-* family (not a --bp-
     assert.ok(
       surface.includes(tok),
       `paper-surface.css is missing ${tok} — the code-block frame family must be ` +
-        `single-sourced there so the mirror-check propagates it to the bundle.`,
+        `single-sourced there so the mirror-check propagates it to the bundle. It lives in ` +
+        `api/assets/paper-editor/src/paper-surface/00-foundation-type.css; edit it there and run npm run sync:barkpark:write.`,
     );
   }
   assert.ok(surface.includes("--bp-pre-size: 14px"), "generic --bp-pre-size must stay 14px, untouched by S9.");

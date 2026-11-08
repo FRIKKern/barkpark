@@ -264,7 +264,7 @@ await check("the package scripts are the approved set", () => {
   assert.equal(scripts["build:dev"], "node scripts/build-local.mjs --dev");
   assert.equal(scripts["sync:barkpark:check"], "node scripts/sync-barkpark.mjs --check");
   assert.equal(scripts["sync:barkpark:write"], "node scripts/sync-barkpark.mjs --write");
-  assert.equal(scripts.prepack, "npm run build && node scripts/third-party-notices.mjs --check");
+  assert.equal(scripts.prepack, "npm run build && node scripts/third-party-notices.mjs --check && node scripts/pack-check.mjs --prepack");
   assert.equal(scripts["pack:check"], "node scripts/pack-check.mjs");
   assert.equal("build:web" in scripts, false);
   assert.equal("pack:stage" in scripts, false);
@@ -394,6 +394,22 @@ await check("--surface-only says when a full sync is still needed, and only then
   assert.equal(lines.filter((line) => line.includes("a full sync is still needed")).length, 1, lines.join("\n"));
 });
 
+await check("a sink that is a directory is reported, and a write refuses it before writing anything", async () => {
+  const repo = inScratch("sync-sink-directory");
+  await sync(repo, { write: true });
+  const sink = BROWSER_SINKS["bp-paper-editor.bundle.js"][0];
+  rmSync(path.join(repo, sink));
+  mkdirSync(path.join(repo, sink));
+  writeFileSync(path.join(repo, RAW_SURFACE_SINK), "stale");
+  const checked = await sync(repo);
+  assert.equal(checked.code, 1);
+  assert.ok(checked.lines.includes(`NOT A FILE  ${sink}`), checked.lines.join("\n"));
+  const before = snapshot(repo);
+  await assert.rejects(sync(repo, { write: true }), /is not a file; nothing was written/);
+  assert.deepEqual(snapshot(repo), before, "nothing was written");
+  assert.equal((await sync(repo, { write: true, surfaceOnly: true })).code, 0, "the surface sinks still sync");
+});
+
 await check("with no toolchain, --surface-only writes the raw surface and says so; every other mode refuses", async () => {
   const repo = inScratch("sync-no-toolchain");
   const never = async () => assert.fail("no toolchain means no build");
@@ -459,7 +475,7 @@ await check("the pack checks name a missing output, an extra one and a leaked so
   assert.ok(failed.includes("tarball leaks a file it should not ship: scripts/build-local.mjs"));
 });
 
-await check("the pack checks hold dist, LICENSE and the profile to this package", async () => {
+await check("the pack checks hold dist, LICENSE and the profile to this package, and prepack refuses a stale profile", async () => {
   const dist = packFixture("stale-dist");
   writeFileSync(path.join(dist.pkgDir, "dist/bp-paper-mermaid.js"), "changed");
   assert.ok((await inspect(dist)).includes("dist/bp-paper-mermaid.js differs from this package's dist/bp-paper-mermaid.js"));
@@ -470,6 +486,11 @@ await check("the pack checks hold dist, LICENSE and the profile to this package"
   const tracked = JSON.parse(readFileSync(path.join(profile.pkgRoot, "host-profile/surface.json"), "utf8"));
   for (const dir of [profile.pkgRoot, profile.pkgDir]) writeFileSync(path.join(dir, "host-profile/surface.json"), render({ ...tracked, build: "000000000000" }));
   assert.ok((await inspect(profile)).some((failure) => failure.includes("does not match the packed build") && failure.includes("build differs")));
+  // prepack's last step, so a bare npm pack or npm publish cannot ship that profile.
+  const prepack = (dir) => spawnSync(process.execPath, [path.join(root, "scripts/pack-check.mjs"), "--prepack", dir], { encoding: "utf8" });
+  const refused = prepack(profile.pkgRoot);
+  assert.ok(refused.status === 1 && /REFUSED, nothing packed[\s\S]*build differs/.test(refused.stderr), `prepack took a stale profile: ${refused.status} ${refused.stderr}`);
+  assert.equal(prepack(packFixture("prepack-good").pkgRoot).status, 0, "prepack refused a fresh profile");
 });
 
 if (failures) {

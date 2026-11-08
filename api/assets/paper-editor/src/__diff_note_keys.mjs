@@ -11,7 +11,34 @@ import { launchChrome, evaluate, waitFor } from "../hosts/browser.mjs";
 
 const ASSETS = mkdtempSync(join(tmpdir(), "bp-diff-note-"));
 process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
-await buildLocal({ outDir: ASSETS, logLevel: "warning" });
+// A throw outside the try below, such as one in the page server, would end node
+// before the finally runs and leave Chrome behind. The handlers come before the build,
+// so a kill during the build or the launch also gets a clean exit. The close waits for
+// a build under way, since esbuild would write the folder again after the exit removed
+// it, then for a launch under way; a launch that fails cleans up after itself. The build
+// wait stops at 10 s, so a build that never settles cannot make a kill hang. The timer is
+// unref'd, so it never holds node open by itself.
+let building = Promise.resolve();
+let launching;
+let closing;
+const buildSettled = () => Promise.race([building.then(() => {}, () => {}), new Promise((resolve) => setTimeout(resolve, 10_000).unref())]);
+const closeChrome = () => (closing ??= buildSettled().then(() => launching).then((chrome) => chrome?.close(), () => {}));
+const failAndClose = async (error) => {
+  console.error(error);
+  try {
+    await closeChrome();
+  } finally {
+    process.exit(1);
+  }
+};
+// on, not once: a second error during the close must wait for it too, or node dies and leaves the profile.
+process.on("uncaughtException", failAndClose);
+process.on("unhandledRejection", failAndClose);
+// A kill skips the finally as well, so SIGTERM and SIGINT close Chrome before node exits.
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]])
+  process.on(signal, () => closeChrome().finally(() => process.exit(code)));
+building = buildLocal({ outDir: ASSETS, logLevel: "warning" });
+await building;
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
 <link rel="stylesheet" href="/bp-paper-editor.css"></head><body>
@@ -79,23 +106,9 @@ const server = createServer((request, response) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}/`;
 
-const chrome = await launchChrome();
+launching = launchChrome();
+const chrome = await launching;
 const { cdp } = chrome;
-// A throw outside the try below, such as one in the page server, would end node
-// before the finally runs and leave Chrome behind.
-let closing;
-const closeChrome = () => (closing ??= chrome.close());
-const failAndClose = async (error) => {
-  console.error(error);
-  try {
-    await closeChrome();
-  } finally {
-    process.exit(1);
-  }
-};
-// on, not once: a second error during the close must wait for it too, or node dies and leaves the profile.
-process.on("uncaughtException", failAndClose);
-process.on("unhandledRejection", failAndClose);
 const equal = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`${label}: ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
