@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { DevtoolsSocket } from "./devtools-socket.mjs";
 
 export const CHROME_VERSION = "148.0.7778.167";
 
@@ -97,7 +98,8 @@ export async function launchChrome({ chrome = resolveChrome() } = {}) {
     const created = await fetch(`http://${endpoint.host}/json/new?about:blank`, { method: "PUT" });
     if (!created.ok) throw new Error(`Chrome target creation failed: ${created.status}`);
     const target = await created.json();
-    const socket = new WebSocket(target.webSocketDebuggerUrl);
+    // Not the global WebSocket: Node 20 has none without a flag. See devtools-socket.mjs.
+    const socket = new DevtoolsSocket(target.webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
       socket.addEventListener("open", resolve, { once: true });
       socket.addEventListener("error", () => reject(new Error("Chrome target WebSocket failed")), { once: true });
