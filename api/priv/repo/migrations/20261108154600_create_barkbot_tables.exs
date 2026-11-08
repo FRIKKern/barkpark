@@ -75,24 +75,7 @@ defmodule Barkpark.Repo.Migrations.CreateBarkbotTables do
     create index(:barkbot_conversations, [:workspace_id])
     create index(:barkbot_conversations, [:last_message_at])
     
-    # Messages table
-    create table(:barkbot_messages, primary_key: false) do
-      add :id, :binary_id, primary_key: true
-      add :conversation_id,
-        references(:barkbot_conversations, on_delete: :delete_all, type: :binary_id),
-        null: false
-      add :job_id, references(:barkbot_jobs, on_delete: :nilify_all, type: :binary_id)
-      add :role, :string, null: false
-      add :content, :text, null: false
-      add :tokens, :integer
-      
-      timestamps(type: :utc_datetime_usec, updated_at: false)
-    end
-    
-    create index(:barkbot_messages, [:conversation_id])
-    create index(:barkbot_messages, [:job_id])
-    
-    # Jobs table
+    # Jobs table (created before messages due to foreign key)
     create table(:barkbot_jobs, primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :bot_id, references(:barkbot_bots, on_delete: :delete_all, type: :binary_id),
@@ -139,8 +122,22 @@ defmodule Barkpark.Repo.Migrations.CreateBarkbotTables do
     create index(:barkbot_jobs, [:started_at])
     create index(:barkbot_jobs, [:cancel_requested])
     
-    # Fix circular reference - add job_id to messages after jobs table exists
-    # (Already added above in messages table creation)
+    # Messages table (created after jobs so job_id foreign key works)
+    create table(:barkbot_messages, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+      add :conversation_id,
+        references(:barkbot_conversations, on_delete: :delete_all, type: :binary_id),
+        null: false
+      add :job_id, references(:barkbot_jobs, on_delete: :nilify_all, type: :binary_id)
+      add :role, :string, null: false
+      add :content, :text, null: false
+      add :tokens, :integer
+      
+      timestamps(type: :utc_datetime_usec, updated_at: false)
+    end
+    
+    create index(:barkbot_messages, [:conversation_id])
+    create index(:barkbot_messages, [:job_id])
   end
 
   def down do

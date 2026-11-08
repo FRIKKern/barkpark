@@ -11,6 +11,7 @@ defmodule Barkpark.Plugins.Barkbot.Runner do
   """
   
   require Logger
+  import Ecto.Query
   alias Barkpark.Plugins.Barkbot.{Job, Bot, Jobs}
   
   @doc """

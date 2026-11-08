@@ -2,10 +2,6 @@
   "plugin_name": "barkbot",
   "module": "Barkpark.Plugins.Barkbot",
   "version": "0.1.0",
-  "capabilities": [
-    "ai_agent_execution",
-    "dedicated_computer_bots",
-    "llm_integration"
-  ],
+  "capabilities": ["schemas", "routes"],
   "description": "Persistent AI agents with dedicated computers - each BarkBot runs on its own Barkpark instance"
 }

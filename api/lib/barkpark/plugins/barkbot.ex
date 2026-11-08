@@ -20,82 +20,34 @@ defmodule Barkpark.Plugins.Barkbot do
   - `Barkbot.Web` - LiveView interface matching Grok Bot layout
   """
   
-  use Barkpark.Plugin
+  use Barkpark.Plugin, manifest_path: "../../../priv/plugins/barkbot/plugin.json"
   
   alias Barkpark.Plugins.Barkbot.{Bots, Jobs, Conversations}
   
-  @impl true
-  def register_schemas(repo) do
-    # BarkBot uses PostgreSQL tables, not document types
-    # Schema registration happens via migrations
+  @impl Barkpark.Plugin
+  def register_schemas(_ctx) do
     []
   end
   
-  @impl true
-  def register_routes(opts) do
-    import Phoenix.Router
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    bot_controller = Barkpark.Plugins.Barkbot.Web.BotController
+    job_controller = Barkpark.Plugins.Barkbot.Web.JobController
+    chat_live = Barkpark.Plugins.Barkbot.Web.ChatLive
     
-    scope "/barkbot", Barkpark.Plugins.Barkbot.Web, as: :barkbot do
-      # Bot management (admin only)
-      pipe_through [:browser, :require_admin]
-      
-      live "/", BotLive.Index, :index
-      live "/bots/new", BotLive.New, :new
-      live "/bots/:bot_id", BotLive.Show, :show
-      live "/bots/:bot_id/settings", BotLive.Settings, :settings
-      
-      # Chat interface (write permission)
-      pipe_through [:browser, :require_token]
-      
-      live "/chat", ChatLive.Index, :index
-      live "/chat/:conversation_id", ChatLive.Show, :show
-    end
-    
-    scope "/v1/plugins/barkbot", Barkpark.Plugins.Barkbot.Web, as: :barkbot_api do
-      pipe_through [:api, :require_token]
-      
-      # Bot API (admin only for creation)
-      post "/bots", BotController, :create
-      get "/bots", BotController, :list
-      get "/bots/:bot_id", BotController, :show
-      patch "/bots/:bot_id", BotController, :update
-      delete "/bots/:bot_id", BotController, :delete
-      
-      # Job API (write permission)
-      post "/jobs", JobController, :create
-      get "/jobs", JobController, :list
-      get "/jobs/:job_id", JobController, :show
-      post "/jobs/:job_id/cancel", JobController, :cancel
-      
-      # Conversation API
-      post "/conversations", ConversationController, :create
-      get "/conversations", ConversationController, :list
-      get "/conversations/:id", ConversationController, :show
-      post "/conversations/:id/messages", ConversationController, :add_message
-    end
-  end
-  
-  @impl true
-  def capabilities do
     [
-      %{
-        "id" => "barkbot.create_bot",
-        "name" => "Create BarkBot",
-        "description" => "Create a new AI agent bot on this instance",
-        "admin" => true
-      },
-      %{
-        "id" => "barkbot.submit_job",
-        "name" => "Submit Job",
-        "description" => "Submit an AI task for execution",
-        "admin" => false
-      },
-      %{
-        "id" => "barkbot.chat",
-        "name" => "Chat with Bot",
-        "description" => "Interactive conversation with BarkBot",
-        "admin" => false
-      }
+      {:get, "/v1/barkbot/bots", bot_controller, :index, auth: :token},
+      {:post, "/v1/barkbot/bots", bot_controller, :create, auth: :token},
+      {:get, "/v1/barkbot/bots/:id", bot_controller, :show, auth: :token},
+      {:put, "/v1/barkbot/bots/:id", bot_controller, :update, auth: :token},
+      {:delete, "/v1/barkbot/bots/:id", bot_controller, :delete, auth: :token},
+      
+      {:get, "/v1/barkbot/jobs", job_controller, :index, auth: :token},
+      {:post, "/v1/barkbot/jobs", job_controller, :create, auth: :token},
+      {:get, "/v1/barkbot/jobs/:id", job_controller, :show, auth: :token},
+      
+      {:live, "/barkbot/chat", chat_live, :index, auth: :token},
+      {:live, "/barkbot/chat/:bot_id", chat_live, :show, auth: :token}
     ]
   end
   
