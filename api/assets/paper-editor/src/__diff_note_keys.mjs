@@ -15,11 +15,14 @@ process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
 // before the finally runs and leave Chrome behind. The handlers come before the build,
 // so a kill during the build or the launch also gets a clean exit. The close waits for
 // a build under way, since esbuild would write the folder again after the exit removed
-// it, then for a launch under way; a launch that fails cleans up after itself.
+// it, then for a launch under way; a launch that fails cleans up after itself. The build
+// wait stops at 10 s, so a build that never settles cannot make a kill hang. The timer is
+// unref'd, so it never holds node open by itself.
 let building = Promise.resolve();
 let launching;
 let closing;
-const closeChrome = () => (closing ??= building.then(() => {}, () => {}).then(() => launching).then((chrome) => chrome?.close(), () => {}));
+const buildSettled = () => Promise.race([building.then(() => {}, () => {}), new Promise((resolve) => setTimeout(resolve, 10_000).unref())]);
+const closeChrome = () => (closing ??= buildSettled().then(() => launching).then((chrome) => chrome?.close(), () => {}));
 const failAndClose = async (error) => {
   console.error(error);
   try {
