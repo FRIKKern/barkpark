@@ -757,7 +757,10 @@ for (const row of DEFINITIONS) {
   assert.equal(fn.constructor.name === "AsyncFunction", row.async, "runtime async: " + row.key);
   if (row.exportSymbol) assert.equal(typeof namespaces.get(row.owner)[row.exportSymbol], "function", "leaf export: " + row.key);
 }
-for (const [owner, rows] of Map.groupBy(EXPORTS, (row) => row.owner)) {
+// Node 20, which CI runs, has no Map.groupBy.
+const exportsByOwner = new Map();
+for (const row of EXPORTS) exportsByOwner.set(row.owner, [...(exportsByOwner.get(row.owner) ?? []), row]);
+for (const [owner, rows] of exportsByOwner) {
   assert.deepEqual(Object.keys(namespaces.get(owner)).sort(), rows.map((row) => row.exported).sort(), "exact exports: " + owner);
 }
 
