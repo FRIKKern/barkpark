@@ -8,7 +8,7 @@ defmodule Barkpark.PaperEditorVendorDriftTest do
   `<script src>` the same component Phoenix serves. Both copies are committed.
   The sync is the only thing that writes them, and this test holds them equal.
 
-  Before that step existed a `build:web` npm script copied the pair and nothing
+  Before that step existed an npm script copied the pair and nothing
   invoked it, so they drifted, in committed files, for months: at `0b0bda6807` the api
   bundle was rebuilt 2026-08-31 alongside `src/`, while `web/public`'s JS copy
   was last synced 2026-07-31 and its CSS copy 2026-07-07 — the api side had

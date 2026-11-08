@@ -269,7 +269,8 @@ check("running prose (p, li) carries a long-token break guard", () => {
   assert.ok(
     m,
     "no `.bp-paper-surface p, .bp-paper-surface li { ... }` rule in " +
-      "paper-surface.css — running prose has no long-token break guard. " +
+      "paper-surface.css — running prose has no long-token break guard. It lives in " +
+      "api/assets/paper-editor/src/paper-surface/00-foundation-type.css; edit it there and run npm run sync:barkpark:write. " +
       "Measured without it at 360px on the live reader: 28 paragraphs " +
       "overflowed their 328px column and the document scrolled sideways " +
       "392 vs 360 (gp-b-mobile-reading-column).",

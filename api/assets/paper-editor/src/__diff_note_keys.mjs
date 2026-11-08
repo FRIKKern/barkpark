@@ -96,6 +96,9 @@ const failAndClose = async (error) => {
 // on, not once: a second error during the close must wait for it too, or node dies and leaves the profile.
 process.on("uncaughtException", failAndClose);
 process.on("unhandledRejection", failAndClose);
+// A kill skips the finally as well, so SIGTERM and SIGINT close Chrome before node exits.
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]])
+  process.on(signal, () => closeChrome().finally(() => process.exit(code)));
 const equal = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`${label}: ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);

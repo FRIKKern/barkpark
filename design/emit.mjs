@@ -3635,7 +3635,7 @@ function run(mode, { force = false } = {}) {
 // The surface-only sync, the one outward step. A failure names that step and its cause,
 // not a stack, because emit may have had nothing to do with the code that broke.
 function syncSurface(changed) {
-  const { status, signal, stderr } = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: ["ignore", "inherit", "pipe"], encoding: "utf8" });
+  const { status, signal, stderr } = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: ["ignore", "inherit", "pipe"], encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (status === 0) {
     process.stderr.write(stderr);
     return;
@@ -3643,7 +3643,8 @@ function syncSurface(changed) {
   const lines = (stderr ?? "").split("\n");
   const start = lines.findIndex((line) => /^\w*Error\b|^sync-barkpark:/.test(line));
   const stack = lines.findIndex((line, at) => at > start && /^\s+at /.test(line));
-  const cause = start < 0 ? [] : lines.slice(start, stack < 0 ? undefined : stack).filter((line) => line.trim());
+  // No recognised error line: show the last lines the sync printed rather than nothing.
+  const cause = start < 0 ? lines.filter((line) => line.trim()).slice(-8) : lines.slice(start, stack < 0 ? undefined : stack).filter((line) => line.trim());
   console.error(`emit --write: ${changed} artifact(s) regenerated, but the sync step failed: sync-barkpark --surface-only exited ${status ?? signal}.`);
   for (const line of cause) console.error(`  ${line}`);
   console.error("Fix that, then rerun emit --write.");

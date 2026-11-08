@@ -394,6 +394,22 @@ await check("--surface-only says when a full sync is still needed, and only then
   assert.equal(lines.filter((line) => line.includes("a full sync is still needed")).length, 1, lines.join("\n"));
 });
 
+await check("a sink that is a directory is reported, and a write refuses it before writing anything", async () => {
+  const repo = inScratch("sync-sink-directory");
+  await sync(repo, { write: true });
+  const sink = BROWSER_SINKS["bp-paper-editor.bundle.js"][0];
+  rmSync(path.join(repo, sink));
+  mkdirSync(path.join(repo, sink));
+  writeFileSync(path.join(repo, RAW_SURFACE_SINK), "stale");
+  const checked = await sync(repo);
+  assert.equal(checked.code, 1);
+  assert.ok(checked.lines.includes(`NOT A FILE  ${sink}`), checked.lines.join("\n"));
+  const before = snapshot(repo);
+  await assert.rejects(sync(repo, { write: true }), /is not a file; nothing was written/);
+  assert.deepEqual(snapshot(repo), before, "nothing was written");
+  assert.equal((await sync(repo, { write: true, surfaceOnly: true })).code, 0, "the surface sinks still sync");
+});
+
 await check("with no toolchain, --surface-only writes the raw surface and says so; every other mode refuses", async () => {
   const repo = inScratch("sync-no-toolchain");
   const never = async () => assert.fail("no toolchain means no build");

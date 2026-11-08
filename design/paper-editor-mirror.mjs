@@ -18,7 +18,7 @@
 // that pins that equivalence (emit --write must leave it git-clean).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 // The attribution fence helpers, imported from their ONE owner (design/emit.mjs)
 // rather than re-implemented here — see the CLI block at the bottom. emit.mjs
@@ -334,7 +334,10 @@ export function evaluateMirror(root = repoRoot) {
       path: BUNDLE_PATH,
       abs: bundleAbs,
       current: null,
-      error: `${error.code === "ENOENT" ? "canonical source missing" : "canonical source will not assemble"}: ${SURFACE_PATH} (the ONE source the mirror is generated from): ${error.message}`,
+      // Name the fragment that failed: the missing file, or the fragments, whose message names the one at fault.
+      error: error.code === "ENOENT"
+        ? `canonical source missing: ${error.path ? relative(root, error.path) : SURFACE_PATH} (one of the fragments the mirror is generated from): ${error.message}`
+        : `canonical source will not assemble: the paper-surface fragments in ${dirname(SURFACE_PATH)}/ (the ONE source the mirror is generated from): ${error.message}`,
     };
   }
   let bundleText;
