@@ -199,7 +199,7 @@ st_selftest() {
   trap 'rm -rf "$tmp"' RETURN
 
   local -a INPUTS=(
-    "design/status-manifest.json"
+    "design/status-manifest.json" "api/assets/paper-editor/scripts/source-assets.mjs"
     "api/assets/paper-editor/src/paper-surface/00-foundation-type.css"
     "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css"
     "api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css"
@@ -284,8 +284,16 @@ st_selftest() {
   arm "part 5b generated drift"  mobile-gen-label  "part 5: FAILED"
   arm "part 5b retyped table"    mobile-retype     "part 5: FAILED"
 
+  # --write past a fragment limit (9000 more tones overflow the byte cap): refused by name, nothing written.
+  local rc=0 w="$tmp/w"; mk_tree "$w"; cp "$w/$CSS" "$tmp/frag"
+  python3 -c 'import json,sys;p=sys.argv[1];m=json.load(open(p));v=next(iter(m["tones"].values()));m["tones"].update({f"zz{i}":v for i in range(9000)});json.dump(m,open(p,"w"))' "$w/$MANIFEST"
+  bash "$w/scripts/status-manifest-check.sh" --write > "$tmp/lim" 2>&1 || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q "REFUSED, nothing written.*01-components-generated-theme.css would break its limit" "$tmp/lim" && cmp -s "$tmp/frag" "$w/$CSS"; then
+    say "part 1 --write past the fragment limit — REFUSED by name, fragment untouched" 0
+  else say "part 1 --write past the fragment limit — expected exit 1, REFUSED and no write, got $rc" 1; sed 's/^/        /' "$tmp/lim"; fi
+
   # ARG DISPATCH — an unknown flag is still a refusal (2), not a silent check.
-  local rc=0
+  rc=0
   bash "$SELF" --no-such-flag > "$tmp/arg" 2>&1 || rc=$?
   if [ "$rc" -eq 2 ] && grep -q -- "--no-such-flag" "$tmp/arg"; then
     say "unknown argument -> exit 2, names the argument" 0
@@ -310,7 +318,7 @@ fi
 
 CSS_BEFORE="$(cksum < "$CSS")"
 python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$MOBILE_TSX" "$MOBILE_GEN_TS" <<'PY'
-import glob, json, os, re, sys
+import glob, json, os, re, subprocess, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 mobile_path = sys.argv[5]
@@ -345,6 +353,10 @@ current = marker.group(2)
 if mode == "--write":
     if current != generated:
         css = css[:marker.start(2)] + generated + css[marker.end(2):]
+        # The package's limit check, as emit runs it: past a limit, refuse by name and write nothing.
+        lim = subprocess.run(["node", "--input-type=module", "-e", 'import { ASSET_MANIFEST as M, validateFragmentSizes as v } from "./api/assets/paper-editor/scripts/source-assets.mjs"; import { readFileSync } from "node:fs"; try { v([{ name: process.argv[1].split("/").at(-1), bytes: readFileSync(0) }], M["paper-surface"], "paper-surface"); } catch (e) { console.error(e.message); process.exit(1); }', css_path], input=css.encode(), capture_output=True)
+        if lim.returncode:
+            sys.exit(f"status-manifest-check --write: REFUSED, nothing written. The regenerated {css_path} would break its limit: {lim.stderr.decode().strip()}")
         open(css_path, "w").write(css)
         print("status-manifest-check part 1: WROTE — regenerated the --st-* tone block from the manifest.")
     else:
