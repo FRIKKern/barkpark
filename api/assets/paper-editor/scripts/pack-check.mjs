@@ -14,6 +14,10 @@
 //      `barkpark.contractVersion` equals CONTRACT_VERSION.
 // It reads nothing outside this package; sync-barkpark.mjs owns the Barkpark sinks.
 // Exits 1 on any failure. Prints the file list and the tarball size.
+//
+// `node scripts/pack-check.mjs --prepack [dir]` is prepack's last step: it holds the
+// tracked profile to the dist/ just built, so a bare `npm pack` or `npm publish`
+// cannot ship a stale profile either. It refuses; it never rewrites the profile.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +44,16 @@ export const REQUIRED = [
   "contract.d.ts",
   ...LOCAL_OUTPUTS.map((name) => `dist/${name}`),
 ];
+
+// Why the profile in `dir` does not match the dist/ beside it, or null when it does.
+export async function profileMismatch(dir) {
+  try {
+    validatePackageProfile(await packageSurface({ dir: path.join(dir, "dist") }), JSON.parse(fs.readFileSync(path.join(dir, PROFILE), "utf8")));
+    return null;
+  } catch (error) {
+    return error.message;
+  }
+}
 
 const sameBytes = (a, b) => fs.existsSync(a) && fs.existsSync(b) && fs.readFileSync(a).equals(fs.readFileSync(b));
 
@@ -77,11 +91,8 @@ export async function inspectPack({ files, pkgDir, root = packageRoot, contractV
   }
 
   if (LOCAL_OUTPUTS.every((name) => files.includes(`dist/${name}`)) && files.includes(PROFILE)) {
-    try {
-      validatePackageProfile(await packageSurface({ dir: path.join(pkgDir, "dist") }), JSON.parse(fs.readFileSync(path.join(pkgDir, PROFILE), "utf8")));
-    } catch (error) {
-      fail(`${PROFILE} does not match the packed build (run npm run sync:barkpark:write): ${error.message}`);
-    }
+    const why = await profileMismatch(pkgDir);
+    if (why) fail(`${PROFILE} does not match the packed build (run npm run sync:barkpark:write): ${why}`);
   }
 
   const [pkgMajor] = pkg.version.split(".");
@@ -99,7 +110,16 @@ export async function inspectPack({ files, pkgDir, root = packageRoot, contractV
   return failures;
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === SELF) {
+const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === SELF;
+if (isMain && process.argv[2] === "--prepack") {
+  const dir = path.resolve(process.argv[3] ?? packageRoot);
+  const why = await profileMismatch(dir);
+  if (why) {
+    console.error(`prepack: REFUSED, nothing packed. ${PROFILE} does not match the build in ${path.join(dir, "dist")}: ${why}. Run npm run sync:barkpark:write, then pack again.`);
+    process.exit(1);
+  }
+  console.log(`prepack: ${PROFILE} matches dist/`);
+} else if (isMain) {
   const outputDir = process.argv[2];
   // Run prepack on its own first: npm prints lifecycle output on stdout, which
   // would break the --json parse below. Then pack without scripts.
