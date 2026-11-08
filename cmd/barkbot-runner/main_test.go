@@ -1,11 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -76,14 +76,13 @@ func TestRunnerCancellation(t *testing.T) {
 		t.Fatalf("Failed to build binary: %v", err)
 	}
 
-	// Run with long timeout
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binaryPath,
+	// Run with very short timeout so we can test SIGTERM
+	cmd := exec.Command(binaryPath,
 		"--provider", "mock",
 		"--model", "mock-model",
 		"--prompt", "This will be cancelled",
 		"--output", outputPath,
-		"--timeout", "60",
+		"--timeout", "10", // 10 seconds
 	)
 
 	// Start the process
@@ -91,12 +90,19 @@ func TestRunnerCancellation(t *testing.T) {
 		t.Fatalf("Failed to start: %v", err)
 	}
 
-	// Cancel after brief delay
-	time.Sleep(100 * time.Millisecond)
-	cancel()
+	// Wait for it to actually start executing
+	time.Sleep(200 * time.Millisecond)
+	
+	// Send SIGTERM (what supervisor does on cancel)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("Failed to send SIGTERM: %v", err)
+	}
 
-	// Wait for process to finish
+	// Wait for process to handle signal and exit
 	_ = cmd.Wait()
+	
+	// Give it a moment to write the output file
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify cancellation was recorded
 	data, err := os.ReadFile(outputPath)

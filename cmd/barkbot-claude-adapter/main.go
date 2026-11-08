@@ -220,18 +220,23 @@ func isAuthError(output string) bool {
 
 func extractSessionID(output []byte) string {
 	// Parse session ID from claude -p output
-	// Format: TBD based on actual CLI behavior
-	// For now, return empty (will be filled in after testing real CLI)
-	
-	// Expected format (hypothetical): session-abc123 or similar
+	// Supports various formats: "session: ID", "Session ID: ID", "SESSION: ID"
 	outputStr := string(output)
 	lines := strings.Split(outputStr, "\n")
 	
 	for _, line := range lines {
-		if strings.HasPrefix(line, "session:") || strings.HasPrefix(line, "Session ID:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				return parts[1]
+		lineLower := strings.ToLower(strings.TrimSpace(line))
+		
+		// Match patterns like "session: abc123" or "session id: abc123"
+		if strings.HasPrefix(lineLower, "session:") || 
+		   strings.HasPrefix(lineLower, "session id:") {
+			// Split on colon and get the part after it
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				sessionID := strings.TrimSpace(parts[1])
+				if sessionID != "" {
+					return sessionID
+				}
 			}
 		}
 	}
