@@ -13,11 +13,13 @@ const ASSETS = mkdtempSync(join(tmpdir(), "bp-diff-note-"));
 process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
 // A throw outside the try below, such as one in the page server, would end node
 // before the finally runs and leave Chrome behind. The handlers come before the build,
-// so a kill during the build or the launch also gets a clean exit. The close waits
-// for a launch under way; a launch that fails cleans up after itself.
+// so a kill during the build or the launch also gets a clean exit. The close waits for
+// a build under way, since esbuild would write the folder again after the exit removed
+// it, then for a launch under way; a launch that fails cleans up after itself.
+let building = Promise.resolve();
 let launching;
 let closing;
-const closeChrome = () => (closing ??= (launching ?? Promise.resolve()).then((chrome) => chrome?.close(), () => {}));
+const closeChrome = () => (closing ??= building.then(() => {}, () => {}).then(() => launching).then((chrome) => chrome?.close(), () => {}));
 const failAndClose = async (error) => {
   console.error(error);
   try {
@@ -32,7 +34,8 @@ process.on("unhandledRejection", failAndClose);
 // A kill skips the finally as well, so SIGTERM and SIGINT close Chrome before node exits.
 for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]])
   process.on(signal, () => closeChrome().finally(() => process.exit(code)));
-await buildLocal({ outDir: ASSETS, logLevel: "warning" });
+building = buildLocal({ outDir: ASSETS, logLevel: "warning" });
+await building;
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
 <link rel="stylesheet" href="/bp-paper-editor.css"></head><body>
