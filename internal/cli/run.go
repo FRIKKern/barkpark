@@ -4322,6 +4322,20 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			}
 			return exitGeneric, false
 		}
+		if status >= 500 && pageSize > 1 {
+			// A heavy page can fail on the server before it can overflow the
+			// cap here. On 2026-11-04 the 999-row Pensum page answered 503
+			// storage_unavailable after about 15 s, while 62 rows answered
+			// at once. A read changed nothing, so the walk asks for the same
+			// offset again with fewer rows. The window reaches one row in a
+			// few steps, and a server that still fails then is reported.
+			smaller := shrinkWalkPageSize(pageSize)
+			if out.verbose {
+				out.errf("bp: --all page at offset %d failed with HTTP %d with %d rows; retrying with %d rows", offset, status, pageSize+1, smaller+1)
+			}
+			pageSize = smaller
+			continue
+		}
 		if status < 200 || status >= 300 {
 			ae := classifyError(status, respBody)
 			renderError(out, ae)

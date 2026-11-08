@@ -183,7 +183,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // walk below would emit moves for b and c, blocks the author never touched.
   // The minimal batch is checked by folding it; if it does not reproduce
   // nextSeq, the greedy walk runs instead.
-  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds);
+  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds, prevIndex);
   if (minimal) {
     for (const op of minimal) ops.push(op);
     running.length = 0;

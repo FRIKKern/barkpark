@@ -2030,8 +2030,8 @@ USAGE
                     [--breakglass <email>] [--image <ref> | --from-source <ref>]
                     [--region <r>] [--org <slug>] [--org-name <n>]
                     [--env-file <f>] [--state <f>] [--studio-origin <o>]
-                    [--size <vm size>] [--postgres-sku <sku>]
-                    [--alert-email <e>] [--ssh-key <path>]
+                    [--size <vm size>] [--disk-sku <sku>] [--disk-gb <n>]
+                    [--postgres-sku <sku>] [--alert-email <e>] [--ssh-key <path>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the

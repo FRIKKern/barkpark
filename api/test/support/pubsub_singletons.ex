@@ -97,7 +97,15 @@ defmodule Barkpark.PubSubSingletons do
   # announcements in its own ETS table. The schema version read in `build/4`
   # runs in the CALLER's process (the dead render or the LiveView), never in
   # this GenServer's callbacks.
-  @no_repo [Barkpark.StudioChat.FleetHub, BarkparkWeb.Studio.ConnectHandoff]
+  #
+  # Barkpark.Content.TypeCensusCache subscribes to the same document-list
+  # topics and only counts the announcements in its own ETS table. The census
+  # read runs in the CALLER's process, never in this GenServer's callbacks.
+  @no_repo [
+    Barkpark.StudioChat.FleetHub,
+    BarkparkWeb.Studio.ConnectHandoff,
+    Barkpark.Content.TypeCensusCache
+  ]
 
   @doc "Singletons that reach `Repo`; `drain!/1` quiesces exactly these."
   @spec drained() :: [module()]

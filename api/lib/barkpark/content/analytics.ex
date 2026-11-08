@@ -23,7 +23,7 @@ defmodule Barkpark.Content.Analytics do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Document, MutationEvent}
+  alias Barkpark.Content.{CallerContext, Document, MutationEvent, TypeCensusCache}
 
   import Barkpark.Content.Scope,
     only: [
@@ -83,7 +83,17 @@ defmodule Barkpark.Content.Analytics do
   @spec type_census(String.t(), keyword()) :: [%{type: String.t(), total: non_neg_integer()}]
   def type_census(dataset, opts \\ []) do
     base = census_base(dataset, opts)
-    rows = census_rows(base)
+
+    # Kept between document writes (`TypeCensusCache`), except inside a
+    # transaction, which can see its own uncommitted writes. The ownership
+    # narrowing below still runs on every call.
+    rows =
+      if Repo.in_transaction?(),
+        do: census_rows(base),
+        else:
+          TypeCensusCache.fetch(Keyword.get(opts, :workspace_id), dataset, opts, fn ->
+            census_rows(base)
+          end)
 
     case maybe_scope_to_owner(base, census_types(rows), dataset, opts) do
       :unscoped -> rows

@@ -98,6 +98,54 @@ defmodule BarkparkWeb.MutateBatchConnectionFaultTest do
     assert {:error, :not_found} = Content.get_document("drafts." <> id, "post", @dataset)
   end
 
+  # task-0f07d4c008199ba0, found in rehearsal #24192: an import batch got 500
+  # `internal_error` after 16.8 s. The pool's checkout deadline fired during an
+  # insert, Postgres cancelled the statement (57014) and the batch raised
+  # `Postgrex.Error`. The raise here comes AFTER the first document is written,
+  # so the not_found check below proves the whole batch rolled back.
+  test "a cancelled statement mid-batch is the typed 503, and nothing is written", %{token: t} do
+    canceled = %Postgrex.Error{
+      postgres: %{
+        code: :query_canceled,
+        pg_code: "57014",
+        severity: "ERROR",
+        message: "canceling statement due to user request"
+      }
+    }
+
+    Process.put(:barkpark_mutations_between_barrier, fn -> raise canceled end)
+
+    first = "batch-canceled-a-#{System.unique_integer([:positive])}"
+    second = "batch-canceled-b-#{System.unique_integer([:positive])}"
+
+    {resp, _log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> t)
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/v1/data/mutate/#{@dataset}",
+          Jason.encode!(%{
+            "mutations" => [
+              %{"create" => %{"_id" => first, "_type" => "post", "title" => "a"}},
+              %{"create" => %{"_id" => second, "_type" => "post", "title" => "b"}}
+            ]
+          })
+        )
+      end)
+
+    refute Process.get(:barkpark_mutations_between_barrier), "the barrier never fired"
+    assert resp.status == 503, resp.resp_body
+    error = Jason.decode!(resp.resp_body)["error"]
+    assert error["code"] == "storage_unavailable"
+    assert error["reason"] == "connection_unavailable"
+    refute resp.resp_body =~ "internal_error"
+    refute resp.resp_body =~ "user request"
+
+    assert {:error, :not_found} = Content.get_document("drafts." <> first, "post", @dataset)
+    assert {:error, :not_found} = Content.get_document("drafts." <> second, "post", @dataset)
+  end
+
   test "any other exception at the same site still propagates (the rescue is narrow)", %{token: t} do
     Application.put_env(
       :barkpark,

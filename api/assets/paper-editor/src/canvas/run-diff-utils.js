@@ -56,18 +56,21 @@ export function opsRebaseSafe(ops, baseline, server) {
   return addressable && !hasOverlappingOps(ops, baseline, server);
 }
 
-// The fewest move-block ops that fold `running` into nextSeq's order, or null when
-// the batch would not reproduce it. Stable = the longest increasing subsequence
-// of running positions in nextSeq order, plus every locked id (a locked block
-// never moves). Each other id moves right after its nextSeq predecessor, left to
+// The fewest moves of blocks already here that fold `running` into nextSeq's order,
+// or null when the batch would not reproduce it. Stable = the longest increasing
+// subsequence of those blocks' running positions in nextSeq order, plus every locked
+// id (a locked block never moves). A new block moves unless its insert placed it. Each other id moves right after its nextSeq predecessor, left to
 // right: nothing is ever spliced between a moved id and its predecessor, so the
 // fold lands exactly on nextSeq. The fold is simulated to prove it.
-function minimalMoves(running, nextSeq, lockedIds) {
+function minimalMoves(running, nextSeq, lockedIds, prevIndex) {
   const ids = nextSeq.map((e) => e.id);
   if (running.length !== ids.length) return null;
   const pos = new Map(running.map((id, i) => [id, i]));
   if (ids.some((id) => !pos.has(id))) return null;
-  const seq = ids.map((id) => pos.get(id));
+  // Only blocks that were already here can stay put. A new block sits wherever its
+  // insert anchored it, so counting it could make an untouched block the one that moves.
+  const kept = ids.filter((id) => prevIndex.has(id));
+  const seq = kept.map((id) => pos.get(id));
   // Longest increasing subsequence of `seq` (patience sorting, O(n log n)).
   const tails = [];
   const prev = new Array(seq.length).fill(-1);
@@ -83,13 +86,14 @@ function minimalMoves(running, nextSeq, lockedIds) {
     tails[lo] = i;
   }
   const stable = new Set(lockedIds);
-  for (let i = tails.length ? tails[tails.length - 1] : -1; i !== -1; i = prev[i]) stable.add(ids[i]);
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i !== -1; i = prev[i]) stable.add(kept[i]);
   const ops = [];
   const order = running.slice();
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     if (stable.has(id)) continue;
     const after = i === 0 ? null : ids[i - 1];
+    if (order.indexOf(id) === (after == null ? 0 : order.indexOf(after) + 1)) continue;
     ops.push({ op: "move-block", id, after });
     order.splice(order.indexOf(id), 1);
     order.splice(after == null ? 0 : order.indexOf(after) + 1, 0, id);

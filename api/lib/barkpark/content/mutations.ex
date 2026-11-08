@@ -376,9 +376,19 @@ defmodule Barkpark.Content.Mutations do
       e ->
         Broadcast.clear_deferred_broadcasts()
 
-        case classify_search_vector_overflow(e, mutations) do
-          {:ok, reason} -> {:error, reason}
-          :no -> reraise(e, __STACKTRACE__)
+        cond do
+          # task-0f07d4c008199ba0 (rehearsal #24192): a statement cancelled by
+          # Postgres (57014) when the pool's checkout deadline fired mid-write.
+          # The transaction rolled back, so it goes back as a value and
+          # `Content.Errors` answers 503 storage_unavailable. Only this code.
+          Barkpark.Content.Errors.query_canceled?(e) ->
+            {:error, e}
+
+          true ->
+            case classify_search_vector_overflow(e, mutations) do
+              {:ok, reason} -> {:error, reason}
+              :no -> reraise(e, __STACKTRACE__)
+            end
         end
     after
       Process.delete(@dry_run_key)

@@ -460,7 +460,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         list_opts = [perspective: :drafts, filter_map: plugin_filter] ++ scope(opts)
 
         {docs, has_more, filter_error} =
-          list_page_preflighted(type_name, dataset, list_opts, opts)
+          list_page_preflighted(type_name, dataset, list_opts, opts, schema)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -554,7 +554,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           end
 
         {docs, has_more, filter_error} =
-          list_page_preflighted(type_name, dataset, list_opts, opts)
+          list_page_preflighted(type_name, dataset, list_opts, opts, schema)
 
         doc_pane = %{
           title:
@@ -1444,13 +1444,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   @doc false
   def desk_page, do: @desk_page
 
-  defp list_page_preflighted(type_name, dataset, list_opts, opts) do
+  # A row reads only what `doc_items/4` shows, so the page reads only the
+  # content keys the row can name (`row_content_keys/1`), not each document's
+  # whole content.
+  defp list_page_preflighted(type_name, dataset, list_opts, opts, schema) do
     limit = opts |> Keyword.get(:list_limits, %{}) |> Map.get(type_name, @desk_page)
 
     case filter_refusal(list_opts) do
       nil ->
-        {docs, has_more} =
-          Content.list_documents_page(type_name, dataset, Keyword.put(list_opts, :limit, limit))
+        page_opts =
+          list_opts
+          |> Keyword.put(:limit, limit)
+          |> Keyword.put(:content_keys, row_content_keys(schema))
+
+        {docs, has_more} = Content.list_documents_page(type_name, dataset, page_opts)
 
         {docs, has_more, nil}
 
@@ -1462,6 +1469,40 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # field) is raised while the query is built: the pane states it.
     e in Barkpark.Content.InvalidFilterError -> {[], false, resolved_refusal(e)}
   end
+
+  # The content keys a desk row can read, for `Content.Query`'s
+  # `{:named_in, text}`. Every path a row reads starts at a key the schema's
+  # `list_preview` spells out (`doc_items/4`, `PreviewText`,
+  # `TitleDerivation.preview_title/2`), so the text of every string in that
+  # spec, keys and values, names them all. `preview` is the write-time manifest
+  # a row without a `meta` spec shows (`manifest_description/1`). `title` and
+  # `_type` come from columns. A key the text names by accident is read for
+  # nothing, which costs bytes and never a wrong row.
+  @doc false
+  def row_content_keys(schema) do
+    specs =
+      if is_map(schema),
+        do:
+          for(
+            k <- [:list_preview, "list_preview", :listPreview, "listPreview"],
+            do: Map.get(schema, k)
+          ),
+        else: []
+
+    {:named_in, Enum.join(["preview" | spec_strings(specs, [])], "\n")}
+  end
+
+  defp spec_strings(text, acc) when is_binary(text), do: [text | acc]
+
+  defp spec_strings(atom, acc) when is_atom(atom) and not is_nil(atom) and not is_boolean(atom),
+    do: [Atom.to_string(atom) | acc]
+
+  defp spec_strings(list, acc) when is_list(list), do: Enum.reduce(list, acc, &spec_strings/2)
+
+  defp spec_strings(%{} = map, acc) when not is_struct(map),
+    do: Enum.reduce(map, acc, fn {k, v}, acc -> spec_strings(v, spec_strings(k, acc)) end)
+
+  defp spec_strings(_other, acc), do: acc
 
   defp list_documents_preflighted(type_name, dataset, list_opts) do
     case filter_refusal(list_opts) do
