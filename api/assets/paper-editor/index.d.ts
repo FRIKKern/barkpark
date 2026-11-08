@@ -156,7 +156,7 @@ export interface BpCanvasReadyDetail {
 export interface BpPaperBuildInfo {
   /** This contract's version, as EMBED-CONTRACT.md's title. */
   readonly CONTRACT_VERSION: string;
-  /** Since 1.21.0: the npm package version (package.json `version`, today "0.1.0-alpha.1"); not bumped per contract release. */
+  /** Since 1.21.0: the npm package version (package.json `version`, today "0.1.0-alpha.2"); not bumped per contract release. */
   readonly EDITOR_VERSION: string;
   /** Since 1.21.0: 12 hex of the sha-256 over esbuild's version and the bundle's input files; null unbuilt. Build options are not hashed: `build` and `build:dev` give the same sha. */
   readonly BUILD_SHA: string | null;

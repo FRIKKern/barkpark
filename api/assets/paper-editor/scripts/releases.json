@@ -1,0 +1,30 @@
+{
+  "releases": [
+    {
+      "version": "0.1.0-alpha.1",
+      "source": "FRIKKern/barkpark Actions run 41730501762 (PortableDoc editor release, hosted dry run)",
+      "tarball": {
+        "name": "portable-doc-editor-0.1.0-alpha.1.tgz",
+        "sha256": "46b4e3b6ee57fd1570bc194ac7a383c84ba2c9c4cc377cacce52e08a10ea00a1"
+      },
+      "files": {
+        "EMBED-CONTRACT.md": "85534acb6e4facbb2f5a15c2c27b0555c9ef1f72affc1d199cd072ca2e9f52dc",
+        "LICENSE": "cb2e26cecee438bcdee6b09e1e9b2df2187750996ddd69d85e12eb652e198ca2",
+        "README.md": "1503203aa77cd3bfc6622034cdeac2cac4db9e0dc6a82bf76796c023f2731766",
+        "THIRD-PARTY-NOTICES.txt": "4a5b8db1b79be6d9c707a2b90d8a74f7956190a30ae7382e3d3c590bfb109ea3",
+        "contract.d.ts": "310f48cb151083fa42e1e2c59ede5dcb0faa70f68eeb01cd0bd67b3b0830b9a9",
+        "dist/bp-paper-code.js": "1cb902e40797ebedc061cea8d4989419c32ae3b1841f31b943752858713942dc",
+        "dist/bp-paper-editor-shell.css": "004898ef2561adc2a4f632f1a1effb99b5739928432294923412ed224279dcee",
+        "dist/bp-paper-editor.bundle.js": "2e58cdd25434c3064d4b9856f5d27f7452f8b45a72be665c1070b2bdaeba41cd",
+        "dist/bp-paper-editor.css": "a22d092a7119e83b3b27acf248054a78d27f9c8041d28690ef0f42694ae70007",
+        "dist/bp-paper-mermaid.js": "497f333123b6d476ef8f5290824db16ae3a9b2d967ed2a9d898375a519f939a9",
+        "dist/bp-paper-surface.css": "2beafddb4b9bdcdffd643f9b991d05350ca0ad1ffdefa1bae16c9518884a6312",
+        "dist/contract.js": "76ffd55f8d0ba08d187034015068a971b8857e886209b1c74e31f8fa0f69d776",
+        "host-profile/surface.json": "c7b3b4d023ba32f47356356e7024dc890c597a8f08264e481dd5e5918ba8a7ef",
+        "index.d.ts": "111ac44892d4515422e25f31d753fa2863456757b90e31b529bafbbff4cff373",
+        "package.json": "ec5755ca9f7f53eac9585c0ab91b76c88a7caeba932448f4545bed1b52690540",
+        "third-party-notices.json": "83e90342334025e9c81cafc9c4949890c3811cd8b55c648393292d3268303d0f"
+      }
+    }
+  ]
+}
