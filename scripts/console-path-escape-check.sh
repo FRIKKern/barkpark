@@ -303,7 +303,13 @@ internal/cloudclient/client.go
 cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex
 cloud/lib/**
 api/assets/paper-surface/paper-surface.css
-api/assets/paper-editor/src/styles.css
+api/assets/paper-editor/src/paper-surface/00-foundation-type.css
+api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css
+api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css
+api/assets/paper-editor/src/paper-surface/03-data-viz-forms-media.css
+api/assets/paper-editor/scripts/source-assets.mjs
+api/assets/paper-editor/scripts/sync-barkpark.mjs
+api/assets/paper-editor/src/styles/theme.css
 api/lib/barkpark_web/layouts/root.html.heex
 api/lib/barkpark_web/layouts/bulldocs.html.heex
 api/lib/barkpark_web/layouts/sheets.html.heex

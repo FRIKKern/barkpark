@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,24 @@ test("#25094's first head reaches the three files that cost it three rounds", ()
 test("an editor source edit reaches the bundle, surface.json and only the canvas report", () => {
   const hit = names(["api/assets/paper-editor/src/canvas/caret-before-keys.js"]);
   assert.deepEqual(hit, ["paper-editor", "conformance-editor-canvas"]);
+});
+
+test("an editor edit is checked and written through the one outward sync", () => {
+  const step = STEPS.find((s) => s.name === "paper-editor");
+  assert.match(step.check, /&& npm run sync:barkpark:check$/);
+  assert.match(step.write, /&& npm run sync:barkpark:write$/);
+  assert.ok(step.gates.includes(".github/workflows/paper-editor.yml: Assert every Barkpark sink matches a fresh build"));
+  const workflow = readFileSync(join(root, ".github/workflows/paper-editor.yml"), "utf8");
+  assert.ok(workflow.includes("- name: Assert every Barkpark sink matches a fresh build\n        run: npm run sync:barkpark:check\n"), "the named gate runs the sync check");
+  const scripts = JSON.parse(readFileSync(join(root, "api/assets/paper-editor/package.json"), "utf8")).scripts;
+  assert.equal(scripts["sync:barkpark:check"], "node scripts/sync-barkpark.mjs --check");
+  assert.equal(scripts["sync:barkpark:write"], "node scripts/sync-barkpark.mjs --write");
+  const sink = names(["api/assets/paper-surface/paper-surface.css"]);
+  assert.ok(sink.includes("paper-editor") && sink.includes("golden-pack"), "the raw sink still reaches the sync and the pack");
+  for (const fragment of ["00-foundation-type", "01-components-generated-theme", "02-chat-code-story-layout", "03-data-viz-forms-media"]) {
+    const hit = names([`api/assets/paper-editor/src/paper-surface/${fragment}.css`]);
+    assert.deepEqual(sink.filter((n) => !hit.includes(n)), [], `${fragment} reaches everything its sink reaches`);
+  }
 });
 
 test("a render edit reaches the pack, every report, surface.json and the HTML goldens", () => {

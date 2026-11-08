@@ -6,7 +6,9 @@
 //    (names BP_CHROME) imports __rig.mjs, exits through exitRig(), never prints
 //    SKIP by hand, never calls process.exit(0) or sets process.exitCode, and
 //    keeps no PASS counter of its own. A new rig that skips green, ends on its
-//    own exit code, or counts its own passes, reds.
+//    own exit code, or counts its own passes, reds. The rigs that need the host
+//    live in paper-editor-host-tests/; __rig_rule.test.mjs there holds them to
+//    the same rule.
 //
 // Run: node src/__rig.test.mjs   (or: npm test)
 
@@ -15,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tally } from "./__rig.mjs";
+import { rigRuleBreaks, tally } from "./__rig.mjs";
 
 const SRC = fileURLToPath(new URL(".", import.meta.url));
 const RIG = new URL("./__rig.mjs", import.meta.url).href;
@@ -77,16 +79,9 @@ const rigs = walk(SRC)
   .filter((f) => !/__rig(\.test)?\.mjs$/.test(f))
   .map((f) => ({ f: relative(SRC, f), src: readFileSync(f, "utf8") }))
   .filter(({ src }) => src.includes("BP_CHROME"));
-assert.ok(rigs.length >= 6, `found ${rigs.length} rigs that look for a browser; the scan is broken`);
+assert.ok(rigs.length >= 2, `found ${rigs.length} rigs that look for a browser; the scan is broken`);
 
-const broken = rigs.flatMap(({ f, src }) => [
-  ...(/from "\.{1,2}\/(?:\.\.\/)*__rig\.mjs"/.test(src) ? [] : [`${f}: does not import __rig.mjs`]),
-  ...(/\bexitRig\(/.test(src) ? [] : [`${f}: does not exit through exitRig()`]),
-  ...(/process\.exit\((?!skip\()/.test(src) ? [`${f}: calls process.exit outside skip()`] : []),
-  ...(/process\.exitCode/.test(src) ? [`${f}: sets process.exitCode`] : []),
-  ...(/\blet passes\b|\bpasses\s*(\+\+|\+=)/.test(src) ? [`${f}: counts its own passes instead of tally()`] : []),
-  ...(/console\.log\([`"']SKIP/.test(src) ? [`${f}: prints SKIP by hand instead of skip()`] : []),
-]);
+const broken = rigs.flatMap(({ f, src }) => rigRuleBreaks(f, src));
 assert.deepEqual(broken, [], "every rig exits through __rig.mjs");
 
 console.log(`ok rig exit rule: ${cases.length} exit cases, ${rigs.length} rigs use it`);

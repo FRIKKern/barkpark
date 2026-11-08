@@ -1,4 +1,5 @@
-// __rig.mjs — the exit rule every rig under src/ shares: green means it measured.
+// __rig.mjs — the exit rule every rig shares, here and in
+// api/assets/paper-editor-host-tests/: green means it measured.
 //
 //   skip(what)          prints `SKIP  <what>` and returns 0, or, under
 //                       BP_REQUIRE_CHROME=1 (CI, where a browser is installed
@@ -10,6 +11,10 @@
 //   tally({ verbose })  the one PASS/FAIL counter rigs share: check(name, fn),
 //                       checkAsync(name, fn), record(name, ok, detail). PASS
 //                       lines print only when verbose; FAIL lines always.
+//   rigRuleBreaks(f, s) what a rig source `s` (file name `f`) does against the
+//                       rule. __rig.test.mjs applies it to the rigs in src/ and
+//                       paper-editor-host-tests/__rig_rule.test.mjs to the rigs
+//                       that moved there.
 //
 // Locally, with no browser, a SKIP still exits 0: `npm test` and the render
 // scripts stay runnable on a machine that has none.
@@ -55,4 +60,15 @@ export function tally({ verbose = true } = {}) {
     },
   };
   return t;
+}
+
+export function rigRuleBreaks(f, src) {
+  return [
+    ...(/from "[./\w-]*\/__rig\.mjs"/.test(src) ? [] : [`${f}: does not import __rig.mjs`]),
+    ...(/\bexitRig\(/.test(src) ? [] : [`${f}: does not exit through exitRig()`]),
+    ...(/process\.exit\((?!skip\()/.test(src) ? [`${f}: calls process.exit outside skip()`] : []),
+    ...(/process\.exitCode/.test(src) ? [`${f}: sets process.exitCode`] : []),
+    ...(/\blet passes\b|\bpasses\s*(\+\+|\+=)/.test(src) ? [`${f}: counts its own passes instead of tally()`] : []),
+    ...(/console\.log\([`"']SKIP/.test(src) ? [`${f}: prints SKIP by hand instead of skip()`] : []),
+  ];
 }

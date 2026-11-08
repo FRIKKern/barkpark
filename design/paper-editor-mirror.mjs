@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 // design/paper-editor-mirror.mjs — the ONE owner of the paper-editor token-mirror
 // transform. The paper editor's standalone bundle
-// (api/assets/paper-editor/src/styles.css) carries a GENERATED region that
-// de-scopes the paper-surface token layer (api/assets/paper-surface/paper-surface.css,
-// itself emitted from design/tokens.json). So the chain is:
+// (api/assets/paper-editor/src/styles/theme.css) carries a GENERATED region that
+// de-scopes the paper-surface token layer (the package's assembled
+// src/paper-surface fragments, its token block emitted from design/tokens.json).
+// So the chain is:
 //
-//     design/tokens.json  →(design/emit.mjs)→  paper-surface.css  →(this)→  styles.css mirror
+//     design/tokens.json  →(design/emit.mjs)→  surface fragment  →(this)→  package theme mirror
 //
 // Three callers share THIS one transform so they can never disagree:
-//   • design/emit.mjs                    — after emitting paper-surface.css, writes the mirror
+//   • design/emit.mjs                    — after emitting the surface fragment, writes the mirror
 //   • design/check.mjs                   — the drift gate: byte-diffs the committed mirror
 //   • scripts/paper-editor-mirror-check.sh (part 3) — delegates here (CLI parity: --write / none)
 //
 // Dependency-free (Node built-ins only), deterministic output. Ported byte-for-byte
-// from the former in-script python transform; the committed styles.css is the fixture
+// from the former in-script python transform; the committed theme fragment is the fixture
 // that pins that equivalence (emit --write must leave it git-clean).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 // The attribution fence helpers, imported from their ONE owner (design/emit.mjs)
 // rather than re-implemented here — see the CLI block at the bottom. emit.mjs
 // imports `evaluateMirror` from this module, so the two form an ES-module cycle;
@@ -33,8 +35,8 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
 
-export const SURFACE_PATH = "api/assets/paper-surface/paper-surface.css";
-export const BUNDLE_PATH = "api/assets/paper-editor/src/styles.css";
+export const SURFACE_PATH = "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css";
+export const BUNDLE_PATH = "api/assets/paper-editor/src/styles/theme.css";
 export const MIRROR_NAME = "paper-editor mirror";
 
 // A structural problem the transform can't represent (bad token scope, missing
@@ -171,7 +173,7 @@ function parseDecls(sel, body, type) {
     // fact that FONT_LITERALS is a THREE-KEY LIST and the fallback was silent.
     // Proven 2026-09-16: `--paper-font-display: var(--font-display);` added to a
     // paper-surface token scope landed byte-identically in
-    // api/assets/paper-editor/src/styles.css, and design/check.mjs,
+    // api/assets/paper-editor/src/styles/theme.css, and design/check.mjs,
     // design/mirror-fence.test.mjs (7/7) and `paper-editor-mirror.mjs --check`
     // (rc=0) were all green over it.
     const m = value.match(/^var\((--font[\w-]*)\)$/);
@@ -322,18 +324,17 @@ export function computeMirror(surfaceText, bundleText) {
 // whole-file `current`/`expected` so callers can byte-compare uniformly; file or
 // structural problems come back as `{ ..., error }`.
 export function evaluateMirror(root = repoRoot) {
-  const surfaceAbs = join(root, SURFACE_PATH);
   const bundleAbs = join(root, BUNDLE_PATH);
   let surfaceText;
   try {
-    surfaceText = readFileSync(surfaceAbs, "utf8");
-  } catch {
+    surfaceText = assembledText("paper-surface", { root: join(root, "api/assets/paper-editor") });
+  } catch (error) {
     return {
       name: MIRROR_NAME,
       path: BUNDLE_PATH,
       abs: bundleAbs,
       current: null,
-      error: `canonical source missing: ${SURFACE_PATH} (the ONE source the mirror is generated from)`,
+      error: `${error.code === "ENOENT" ? "canonical source missing" : "canonical source will not assemble"}: ${SURFACE_PATH} (the ONE source the mirror is generated from): ${error.message}`,
     };
   }
   let bundleText;
@@ -384,7 +385,7 @@ export function evaluateMirror(root = repoRoot) {
 //   node design/paper-editor-mirror.mjs --adopt            # bless what is on disk
 //
 // THE FENCE. This CLI writes the SAME generated region design/emit.mjs writes
-// (`api/assets/paper-editor/src/styles.css#paper-editor mirror`), so it must obey
+// (`api/assets/paper-editor/src/styles/theme.css#paper-editor mirror`), so it must obey
 // the SAME attribution rule: never replace a region whose SHA-256 does not match
 // design/emit-manifest.json, and name every line the replacement would drop.
 // Before this block existed, `--write` here (and its shell wrapper) was a side

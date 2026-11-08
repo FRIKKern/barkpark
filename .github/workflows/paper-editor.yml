@@ -8,26 +8,26 @@ name: paper-editor
 # (strike/underline round-trip was inert in Studio because convert.js changed
 # but the bundle didn't). This workflow catches both classes:
 #   1. convert.js round-trip regressions  -> npm run smoke
-#   2. stale committed bundle             -> rebuild + git diff --exit-code
-#   3. stale committed stylesheet         -> rebuild + git diff --exit-code
-#   4. @portable-doc/editor package     -> npm run pack:check
-# `npm run build` emits THREE artifacts -- the IIFE bundle and
-# bp-paper-editor.css (the stylesheet the LiveView editor and the web demo
-# load) from src/, plus bp-paper-surface.css (task-7fb8088ab39c7a36: the SAME
-# api/assets/paper-surface/paper-surface.css this file already reads for its
-# own trigger path, re-bundled so an external host can load the task/fleet
-# block styles GET /v1/papers/:slug/fleet-blocks renders, the way it already
-# loads bp-paper-editor.css for the canvas). The editor css was ungated until
-# 2026-09-01 and went stale once (#11816 added framed rules to src/styles.css
-# that the committed css never got) -- all three artifacts are diffed here,
-# and all three are trigger paths below.
+#   2. any stale Barkpark sink            -> npm run sync:barkpark:check
+#   3. @portable-doc/editor package     -> npm run pack:check
+# `npm run build` emits seven files into the package's own dist/ and writes no
+# Barkpark file. scripts/sync-barkpark.mjs is the one path out: --check builds
+# fresh in a temporary directory and compares the raw surface and code tokens,
+# six browser assets, two web/public copies and host-profile/surface.json, naming
+# each stale one. The set includes bp-paper-surface.css (task-7fb8088ab39c7a36:
+# built from the package's surface fragments so an external host can load the
+# task/fleet block styles GET /v1/papers/:slug/fleet-blocks renders, the way it
+# already loads bp-paper-editor.css for the canvas). The editor css was ungated
+# until 2026-09-01 and went stale once (#11816 added framed rules to
+# src/styles.css that the committed css never got) -- every sink is compared
+# here, and each is a trigger path below or under the package.
 # The freshness check is deterministic: `npm ci` pins esbuild via the
 # lockfile, and esbuild's minified output is reproducible per version.
 #
 # WHY paper-surface/** IS A TRIGGER PATH. Several suites under src/ do not test
-# the editor at all — they read api/assets/paper-surface/paper-surface.css and
-# assert things about the reading surface (the narrow-viewport wrap guards, for
-# one). While this workflow triggered only on paper-editor/**, those gates could
+# the editor at all — they read api/assets/paper-surface/paper-surface.css, the
+# synced sink of src/paper-surface/, and assert things about the reading surface
+# (the narrow-viewport wrap guards, for one). While this workflow triggered only on paper-editor/**, those gates could
 # never see the file they gate: a change to paper-surface.css alone ran the
 # Elixir suite (elixir.yml has no path filter) but not one of them, so a
 # regression to the very declarations they pin would ship green. A gate whose
@@ -46,6 +46,7 @@ on:
       # here matches nothing they read. Both arms must stay identical.
       # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
+      - "design/paper-editor-mirror.mjs"
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
@@ -68,7 +69,7 @@ on:
       - "api/priv/portable_doc/**"
       - "js/packages/react/**"
       - "web/public/bp-paper-editor.bundle.js"
-      - "LICENSE"
+      - "web/public/assets/bp-paper-editor.css"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -81,6 +82,7 @@ on:
       # here matches nothing they read. Both arms must stay identical.
       # (#16022: a sink moved without this list and main was red for 14 h.)
       - "api/assets/paper-surface/**"
+      - "design/paper-editor-mirror.mjs"
       # __modal_focus_guard.test.mjs scans every script in this folder, so a
       # new one must trigger too; it also holds the built bundle and css.
       - "api/priv/static/assets/*"
@@ -103,7 +105,7 @@ on:
       - "api/priv/portable_doc/**"
       - "js/packages/react/**"
       - "web/public/bp-paper-editor.bundle.js"
-      - "LICENSE"
+      - "web/public/assets/bp-paper-editor.css"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -152,6 +154,7 @@ jobs:
           node ../paper-editor-host-tests/__tab_keys.test.mjs
           node ../paper-editor-host-tests/block-menu-popup-contrast.test.mjs
           node ../paper-editor-host-tests/callout-parity.test.mjs
+          node ../paper-editor-host-tests/css-source-ownership.test.mjs
           node ../paper-editor-host-tests/contract-truth.test.mjs
           node ../paper-editor-host-tests/contextual-controls.test.mjs
           node ../paper-editor-host-tests/card-action-label-inline.test.mjs
@@ -269,35 +272,22 @@ jobs:
           node ../paper-editor-host-tests/testing-ground-traps-goldens.test.mjs
           node ../paper-editor-host-tests/testing-ground-builds.test.mjs
           node ../paper-editor-host-tests/testing-ground-server.test.mjs
+          node ../paper-editor-host-tests/hosts-e12-baseline.test.mjs
+          node ../paper-editor-host-tests/__rig_rule.test.mjs
 
       - name: PortableDoc conformance (editor canvas vs the golden pack)
-        run: node src/__conformance.mjs
+        run: node ../paper-editor-host-tests/__conformance.mjs
 
       - name: Rebuild bundle
         run: npm run build
 
-      - name: Assert committed bundle and stylesheet are fresh
-        run: |
-          stale=0
-          if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.bundle.js; then
-            echo "::error file=api/priv/static/assets/bp-paper-editor.bundle.js::Committed bundle is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
-            stale=1
-          fi
-          if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.css; then
-            echo "::error file=api/priv/static/assets/bp-paper-editor.css::Committed stylesheet is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
-            stale=1
-          fi
-          if ! git diff --exit-code ../../priv/static/assets/bp-paper-surface.css; then
-            echo "::error file=api/priv/static/assets/bp-paper-surface.css::Committed stylesheet is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
-            stale=1
-          fi
-          exit "$stale"
+      - name: Assert every Barkpark sink matches a fresh build
+        run: npm run sync:barkpark:check
 
       # The npm package @portable-doc/editor. pack:check runs prepack (build,
-      # third-party notices --check, copy into dist/), packs the tarball, and
-      # fails unless it holds the bundle, both stylesheets, the mermaid helper,
-      # the types, README, EMBED-CONTRACT, LICENSE and the notices, with the
-      # bundle and CSS byte-identical to api/priv/static/assets. A stale
+      # third-party notices --check), packs the tarball, and fails unless it
+      # holds the seven dist files, the types, README, EMBED-CONTRACT, LICENSE,
+      # the profile and the notices, byte-identical to this package. A stale
       # THIRD-PARTY-NOTICES.txt after a dependency bump fails here: run
       # `npm run notices` and commit the result.
       - name: Pack @portable-doc/editor and inspect the tarball
@@ -310,7 +300,7 @@ jobs:
   # regex-match declarations out of it. That catches a deleted declaration. It
   # cannot tell you whether the page actually scrolls sideways on a phone, and
   # it cannot find a block whose overflow nobody has thought about yet.
-  # `src/__narrow_render.mjs` is the half that measures — it renders every
+  # `../paper-editor-host-tests/__narrow_render.mjs` is the half that measures — it renders every
   # golden fixture, plus long unbreakable author tokens injected one field at a
   # time, in headless Chromium and asserts documentElement.scrollWidth against
   # the viewport at 390px and 320px.
@@ -349,6 +339,10 @@ jobs:
         with:
           node-version: 20
 
+      # The picker and harness rigs build the package into a temp folder.
+      - name: Install package dependencies
+        run: npm ci
+
       - name: Cache chrome-headless-shell
         uses: actions/cache@v6
         with:
@@ -380,7 +374,7 @@ jobs:
           out="$RUNNER_TEMP/narrow-render.txt"
           status=0
           BP_NARROW_WIDTHS=390,320 BP_NARROW_VERBOSE=1 \
-            node src/__narrow_render.mjs > "$out" 2>&1 || status=$?
+            node ../paper-editor-host-tests/__narrow_render.mjs > "$out" 2>&1 || status=$?
           cat "$out"
 
           # PROVE IT MEASURED. Everything below fails a run that produced a

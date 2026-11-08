@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHROME_VERSION, defaultChromePath } from "./browser.mjs";
 import { journeys } from "./journeys.mjs";
 import { profiles } from "./profiles.mjs";
-import { baselineBuild, options, stagedBuild, upgradeBuilds } from "./run.mjs";
+import { options, stagedBuild } from "./run.mjs";
 
 test("browser path names the one pinned chrome-headless-shell build", () => {
   assert.equal(defaultChromePath({ platform: "darwin", arch: "arm64", home: "/home/me" }), `/home/me/.cache/puppeteer/chrome-headless-shell/mac_arm-${CHROME_VERSION}/chrome-headless-shell-mac-arm64/chrome-headless-shell`);
@@ -62,22 +62,5 @@ test("candidate assets need a full source commit and matching SHA-256 manifest",
   }
 });
 
-test("E12 refuses a candidate that is the baseline bundle under different metadata", () => {
-  const baseline = baselineBuild();
-  const dir = mkdtempSync(join(tmpdir(), "bp-host-same-build-test-"));
-  const files = ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"];
-  assert.equal(baseline.sha.length, 40);
-  assert.equal(baseline.bundleSha256.length, 64);
-  try {
-    writeFileSync(join(dir, "source-commit"), "f".repeat(40) + "\n");
-    const sums = files.map((name) => {
-      const bytes = readFileSync(join(baseline.dir, name));
-      writeFileSync(join(dir, name), bytes);
-      return `${createHash("sha256").update(bytes).digest("hex")}  ${name}`;
-    });
-    writeFileSync(join(dir, "SHA256SUMS"), sums.join("\n") + "\n");
-    assert.throws(() => upgradeBuilds(null, dir), /byte-identical to baseline/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+// The E12 baseline test needs git history and the host sink, so it lives in
+// ../../paper-editor-host-tests/hosts-e12-baseline.test.mjs.

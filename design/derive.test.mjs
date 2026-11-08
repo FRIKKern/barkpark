@@ -32,6 +32,7 @@ import {
   SLOTS,
 } from "./derive.mjs";
 import { tokens, rawTokens } from "./emit.mjs";
+import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 
@@ -607,7 +608,7 @@ test("paper faint ink clears AA 4.5 on bg AND bg-deep and stays below ink-soft, 
 test("paper form option ring clears 3:1 non-text contrast on bg AND bg-deep, every theme × mode (WCAG 1.4.11, task-f7bbcc0256a563d3)", () => {
   // The ring is a control boundary, not decoration. Read the token the rule
   // actually paints, so a repoint to a lighter token (ink-faint-line) reds.
-  const css = readFileSync(new URL("../api/assets/paper-surface/paper-surface.css", import.meta.url), "utf8");
+  const css = assembledText("paper-surface");
   const rule = css.match(/\.bp-form-opt > input \{[^}]*\}/);
   assert.ok(rule, "paper-surface.css must carry a .bp-form-opt > input rule");
   const tok = rule[0].match(/border:[^;]*var\(--paper-([a-z-]+)\)/);
@@ -629,7 +630,7 @@ test("paper ghost-slot hint clears AA 4.5 on its tinted slot (rest and hover) ov
   // The hint is text on the slot's accent-soft tint (hover: edit-hover), not on
   // the bare paper ground — measuring it on bg alone is how a 4.19 shipped.
   // Read the token each rule paints from the shell stylesheet.
-  const css = readFileSync(new URL("../api/priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+  const css = assembledText("editor-shell");
   const rule = (sel) => {
     const m = css.match(new RegExp(sel.replace(/[.:]/g, "\\$&") + "\\s*\\{[^}]*\\}"));
     assert.ok(m, `bp-paper-editor-shell.css must carry a ${sel} rule`);

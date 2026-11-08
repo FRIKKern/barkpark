@@ -82,6 +82,7 @@ on:
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
+      - "api/assets/paper-editor/src/styles/**"
       - "scripts/paper-editor-mirror-check.sh"
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"
@@ -488,6 +489,7 @@ on:
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
+      - "api/assets/paper-editor/src/styles/**"
       - "scripts/paper-editor-mirror-check.sh"
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"

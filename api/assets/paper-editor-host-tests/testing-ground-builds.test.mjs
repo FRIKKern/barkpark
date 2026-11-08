@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { besideMain, buildEnv, makeBuild, pickBuild } from "../paper-editor/src/testing-ground/builds.mjs";
+import { besideMain, buildEnv, makeBuild, pickBuild, stageOldBuild } from "../paper-editor/src/testing-ground/builds.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
@@ -52,11 +52,19 @@ assert.deepEqual(buildEnv({ PATH: "/bin", HOME: "/h", TMPDIR: "/t", BARKPARK_TG_
 const head = git("rev-parse", "HEAD");
 const committed = Number(git("log", "-1", "--format=%ct", "HEAD")) * 1000;
 const version = git("show", "HEAD:api/assets/paper-editor/src/contract.js").match(/CONTRACT_VERSION = "([^"]+)"/)[1];
+const SEVEN = ["bp-paper-code.js", "bp-paper-editor-shell.css", "bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-mermaid.js", "bp-paper-surface.css", "contract.js"];
+const hostBundle = join(REPO, "api/priv/static/assets/bp-paper-editor.bundle.js");
+const hostBundleBefore = readFileSync(hostBundle);
 const built = makeBuild({ label: "HEAD", sha: head }, { repo: REPO });
 const root = join(built.dir, "../../../..");
 try {
   assert.deepEqual([built.label, built.sha], ["HEAD", head.slice(0, 10)]);
-  for (const name of ["bp-paper-editor.bundle.js", "bp-paper-editor.css", "bp-paper-editor-shell.css"]) assert.ok(existsSync(join(built.dir, name)), `${name} is in the build`);
+  assert.ok(built.dir.endsWith("/api/assets/paper-editor/dist"), `a build is the package's own dist: ${built.dir}`);
+  assert.deepEqual(readdirSync(built.dir).sort(), SEVEN, "a build is exactly the seven package outputs");
+  assert.deepEqual(readdirSync(root), ["api"], "a package-owned commit archives only the package");
+  assert.deepEqual(readdirSync(join(root, "api")), ["assets"], "a package-owned commit archives only the package");
+  assert.deepEqual(readdirSync(join(root, "api/assets")), ["paper-editor"], "a package-owned commit archives only the package");
+  assert.ok(hostBundleBefore.equals(readFileSync(hostBundle)), "a build writes nothing into this checkout's host assets");
   const bundle = join(built.dir, "bp-paper-editor.bundle.js");
   assert.ok(readFileSync(bundle, "utf8").includes(`"${version}"`), `the bundle carries contract ${version}`);
   assert.ok(statSync(bundle).mtimeMs > committed, "the bundle was built here, not just unpacked from the commit");
@@ -65,6 +73,27 @@ try {
   built.remove();
 }
 assert.equal(existsSync(root), false, "remove() deletes the whole tree");
+
+// A recorded contract's own archive built into its own host folder. Staging it reads
+// only that disposable tree and gives the same seven files.
+const oldTree = mkdtempSync(join(tmpdir(), "tg-old-"));
+try {
+  const hostAssets = join(oldTree, "api/priv/static/assets");
+  const oldSource = join(oldTree, "api/assets/paper-editor/src");
+  mkdirSync(hostAssets, { recursive: true });
+  mkdirSync(oldSource, { recursive: true });
+  for (const name of SEVEN.filter((n) => n !== "contract.js")) writeFileSync(join(hostAssets, name), `old ${name}`);
+  writeFileSync(join(oldSource, "contract.js"), "old contract");
+  stageOldBuild(oldTree);
+  const stagedDir = join(oldTree, "api/assets/paper-editor/dist");
+  assert.deepEqual(readdirSync(stagedDir).sort(), SEVEN, "an old build is staged as the same seven files");
+  assert.equal(readFileSync(join(stagedDir, "bp-paper-surface.css"), "utf8"), "old bp-paper-surface.css");
+  assert.equal(readFileSync(join(stagedDir, "contract.js"), "utf8"), "old contract");
+  rmSync(join(hostAssets, "bp-paper-code.js"));
+  assert.throws(() => stageOldBuild(oldTree), /ENOENT/, "an old build missing an output fails instead of serving a partial tree");
+} finally {
+  rmSync(oldTree, { recursive: true, force: true });
+}
 
 assert.throws(() => makeBuild({ label: "nothing", sha: "0".repeat(40) }, { repo: REPO }), /^Error: git archive 0{40}: fatal: /);
 const empty = mkdtempSync(join(tmpdir(), "tg-empty-"));
@@ -90,4 +119,4 @@ killed.kill("SIGTERM");
 await new Promise((resolve) => killed.on("exit", resolve));
 assert.equal(leftovers(), before, "a run stopped by SIGTERM removes its tree");
 
-console.log("PASS  testing-ground builds: a PR head by sha, a recorded contract tree, built from git archive, removed after, on a throw and on SIGTERM");
+console.log("PASS  testing-ground builds: a PR head by sha, a recorded contract tree, seven files in the archive's own dist, built from git archive, removed after, on a throw and on SIGTERM");

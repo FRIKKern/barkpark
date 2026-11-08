@@ -1,0 +1,486 @@
+
+/* ── Block typography. line-height + letter-spacing values are byte-aligned
+ * with render.ex heading_style/2 inline values (h1 1.1/-0.02em, h2 1.2,
+ * h3 1.25) — a parity contract; do NOT change them or View<->Edit drift
+ * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
+ * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
+.bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; overflow-wrap: break-word; }
+/* h2 takes the DISPLAY VOICE (device 3): the per-step `--bp-h2-weight`, not the
+ * shared `--bp-heading-weight`, plus `text-wrap: balance` — byte-identical with
+ * paper-surface.css `.bp-paper-surface h2` (which carries the reasoning) and the
+ * root.html.heex copy; view_edit_parity_test.exs §2/§5 pin both declarations. */
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h4 { font-size: calc((var(--bp-h3-size) + var(--bp-body-size)) / 2); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.4em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h5 { font-size: var(--bp-body-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h6 { font-size: calc(var(--bp-body-size) * 0.9); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
+/* THE SECTION HEAD — the EDIT twin of the reader's
+ * `.bp-paper-surface > #paper-body > h2` (+ its keyed-stream leg) in
+ * paper-surface.css, which carries the full reasoning. A TOP-LEVEL level-2
+ * heading is a section boundary and takes both halves of the device: the
+ * `--bp-section-beat` air above the rule, the rule, and `--bp-section-gap`
+ * between the rule and the words. Scoped to a DIRECT child so a component's own
+ * h2 (a `.bp-card` title in a grid cell) is untouched — the same exclusion the
+ * reader's legs make, expressed in the flat ProseMirror document where a heading
+ * node has no wrapper. Byte-mirrored with the reader declaration; the pair is
+ * pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
+.bp-paper-editor-body > h2,
+.bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-rule);
+  padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
+}
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the EDIT half of the View rule in
+   paper-surface.css (`.bp-paper-surface p, li`). It is not optional and not a
+   copy for tidiness: view_edit_parity_test.exs §2 reds the moment View
+   declares a property Edit does not, because a paper whose prose wraps at a
+   different word in Edit than in View is the exact drift that suite exists to
+   catch. `h1` beside it already carries the identical guard for the identical
+   reason. The View-side comment carries the measurements. */
+.bp-paper-editor-body p,
+.bp-paper-editor-body li { overflow-wrap: break-word; }
+/* A nested disclosure heading is not a document section boundary. */
+.bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: 1.9em; border-top: 0; padding-top: 0;
+  margin-inline: 0; width: auto; padding-inline: 0;
+}
+/* Out-of-flow access to reader-suppressed scaffolds. Selecting one restores
+ * native editing; no content or persisted layout attributes are changed. */
+.bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
+  display: none;
+}
+.bp-paper-editor-body .bp-cols__c > .bp-resting-scaffold { display: none; }
+.bp-paper-editor-body .bp-scaffold-control {
+  position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
+  padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font: 14px/24px var(--paper-font-mono);
+  cursor: pointer;
+}
+.bp-paper-editor-body .bp-scaffold-control:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .bp-paper-editor-body .bp-scaffold-control { inset-inline-start: -16px; background: transparent; }
+}
+/* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
+ * (paper-surface.css carries the measurement: `--paper-accent-soft` as a
+ * border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
+ * at-rest treatment drew no line at all). The decoration is tinted to 80% of the
+ * accent — the measured floor that clears 3:1 in all ten theme×scheme pairs.
+ * Keep byte-aligned with paper-surface.css AND root.html.heex;
+ * view_edit_parity_test.exs pins `a` and `a:focus-visible` in @parity_elements
+ * (§2) and @mirror_elements (§5). Rebuild the committed artifact after editing
+ * (npm run build, then npm run sync:barkpark:write). */
+.bp-paper-editor-body a  {
+  color: var(--paper-accent); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);
+  text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+  text-decoration-skip-ink: auto;
+}
+.bp-paper-editor-body a:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 2px;
+}
+.bp-paper-editor-body ::selection { background: var(--paper-accent-soft); color: inherit; }
+/* padding-left only — matches the EDIT rule in root.html.heex (the bottom
+ * margin belongs to the VIEW rule; pulling it here re-introduces double-spacing). */
+.bp-paper-editor-body ul,
+.bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
+.bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
+.bp-paper-editor-body ul > li { list-style: disc; }
+.bp-paper-editor-body ol > li { list-style: decimal; }
+/* Checklist (TipTap taskList/taskItem markup; the reader twin is .bp-checklist in
+ * paper-surface.css): no marker, native checkbox ahead of the text, done items struck. */
+.bp-paper-editor-body ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 0.55em; list-style: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label { flex: 0 0 auto; margin: 0.35em 0 0; user-select: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label input { width: 1em; height: 1em; margin: 0; accent-color: var(--paper-accent); cursor: pointer; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > div { flex: 1 1 auto; min-width: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li[data-checked="true"] > div > p { color: var(--paper-ink-soft); text-decoration: line-through; text-decoration-color: var(--paper-rule); }
+/* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — mirror of the
+ * single-source .bp-paper-surface .bp-role-* rules (paper-surface.css). The canvas
+ * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides
+ * INLINE off the node (font-style:italic), not the class. Keep byte-aligned with
+ * root.html.heex + paper-surface.css (view_edit_parity_test enforces it). */
+.bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
+.bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+.bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
+.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+/* editable-table: the three reader table class rules, mirrored byte-for-byte from
+ * paper-surface.css `.bp-paper-surface .bp-table*` (the embedder sink — the standalone
+ * bundle has no `.bp-paper-surface` ancestor, so it carries the hand-copied mirror).
+ * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
+ * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
+ * §2 guards drift vs the reader). */
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2 * var(--bp-table-centre, 1)); transform: translateX(calc(-50% * var(--bp-table-centre, 1))); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+.bp-cols__c .bp-table { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+.bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+.bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
+.bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+/* TYPED COLUMNS (the `cols` spec — text | num | delta | spark), mirrored
+   byte-for-byte from paper-surface.css `.bp-paper-surface .bp-table__*--num /
+   --spark / __spark`. walk.ex table_col_class/3 emits these modifiers on the
+   canvas cells too (the canvas mounts the reader producer), so without the
+   mirror a typed num column right-aligns in the reader and not in the editor.
+   view_edit_parity_test.exs §2/§5 guard the drift. Keep byte-aligned with the
+   other two copies. */
+.bp-paper-editor-body .bp-table__th--num,
+.bp-paper-editor-body .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.bp-paper-editor-body .bp-table__th--spark,
+.bp-paper-editor-body .bp-table__td--spark { width: 1%; white-space: nowrap; }
+.bp-paper-editor-body .bp-table__spark { display: block; width: 96px; height: 20px; }
+.bp-paper-editor-body .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+/* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose column
+ * exactly like .bp-table (the reader's three breakout classes). Values byte-copied from
+ * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
+ * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
+ * copy. */
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+/* The stat grid's seams are drawn per CELL, not by a container ground (the
+ * partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
+ * reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
+ * element); mirrored here for visual parity, byte-identical with the reader's
+ * `.bp-paper-surface .bp-stats .bp-stat` and the root.html.heex copy. */
+.bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
+.bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+/* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption> through ONE
+ * class (paper-surface.css `.bp-paper-surface .bp-figcaption`) instead of the ~200 bytes
+ * of inline caption styling it used to repeat at three emit sites — one of which had
+ * drifted to a bare ink hex that is 2.97:1 on the dark ground. The canvas mounts figures
+ * through the SAME reader producer, so the class arrives here too and needs the twin.
+ * Values byte-copied from the View rule (view_edit_parity_test.exs §2 guards drift).
+ * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-paper-editor-body .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
+/* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
+ * .bp-table* selectors). Control rails reveal on hover so an idle table reads
+ * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
+.bp-canvas-table { position: relative; }
+/* Column-resize grips (plan #25): thin hit areas on each column's right edge, visible on hover. */
+.bp-canvas-table__resizers { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity var(--dur-1) ease-out; }
+.bp-canvas-table:hover .bp-canvas-table__resize, .bp-canvas-table__resize:active { opacity: 1; }
+/* Idle controls add no reader spacing. When exposed, reserve their own space
+ * BELOW the table: grids have no safe gutter for floating controls. */
+.bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
+.bp-canvas-table:hover > .bp-canvas-table__controls, .bp-canvas-table:focus-within > .bp-canvas-table__controls, .bp-canvas-table__controls[open] { position: relative; opacity: 1; pointer-events: auto; }
+.bp-canvas-table__controls > summary { cursor: pointer; padding: 6px 0; width: fit-content; }
+.bp-canvas-table__controls > summary:focus-visible, .bp-canvas-table__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-table__cols, .bp-canvas-table__rows { display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 0; padding: 4px 0; }
+.bp-canvas-table__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.bp-canvas-table__btn:disabled { opacity: 0.4; cursor: default; }
+/* S10: columns CONTAINER grid — the hand-copied mirror of the single-source
+ * .bp-paper-surface .bp-cols/.bp-cols__c rules (paper-surface.css:499-503) for the
+ * STANDALONE embedder bundle (which has no .bp-paper-surface ancestor). In Studio the
+ * canvas mounts inside .bp-paper-surface, so the grid is inherited there for free; this
+ * mirror only paints the embedder host. bpColumns emits `--bp-cols:N` off the projected
+ * column count, and the reader's own grid rule reads it. Keep byte-aligned with
+ * paper-surface.css. */
+.bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-editor-body .bp-cols__c { min-width: 0; }
+.bp-paper-editor-body .bp-cols__c > :first-child { margin-top: 0; }
+/* Nested columns use their section cell, not the page-wide evidence band. */
+.bp-paper-editor-body .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+/* A column cell is an authored boundary: every band-taking block inside it
+   (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+   asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+   cannot paint over the sibling column. Edit nests paper surfaces inside the
+   cell that re-derive the band from the default tokens, so they reset too. */
+.bp-paper-editor-body .bp-cols__c, .bp-paper-editor-body .bp-cols__c .bp-paper-surface, .bp-paper-editor-body .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+/* S2 layout-engine: section grid — the hand-copied mirror of the single-source
+ * .bp-paper-surface .bp-section__grid rules (paper-surface.css) for the STANDALONE
+ * embedder bundle (no .bp-paper-surface ancestor). In Studio the canvas mounts
+ * inside .bp-paper-surface so the grid is inherited there for free; this mirror
+ * only paints the embedder host. The section node-view sets the body class
+ * `bp-section__grid` + a `--bp-tracks` style in grid mode. Keep byte-aligned with
+ * paper-surface.css + root.html.heex. */
+.bp-paper-editor-body .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-section__grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-section__cell { grid-column: 1 / -1 !important; } }
+.bp-paper-editor-body .bp-section__cell { min-width: 0; }
+.bp-paper-editor-body .bp-section__cell > :first-child { margin-top: 0; }
+.bp-paper-editor-body .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+/* Section frame — the framed-finale device (charter D19), hand-copied mirror of
+ * .bp-paper-surface .bp-section--framed (paper-surface.css) for the STANDALONE
+ * embedder bundle. Hairline frame in rule color + CSS padding (never spacer
+ * paragraphs); the frame replaces the section's own direct-child .bp-hr band.
+ * Keep byte-aligned with paper-surface.css. */
+.bp-paper-editor-body .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+.bp-paper-editor-body .bp-section--framed > .bp-hr { display: none; }
+/* ── section declaration panel (pe-bl-declaration-panel). variant="declaration"
+   frames a closing section as a signed document: a double hairline ink frame, generous CSS
+   padding (never spacer paragraphs), the section's own .bp-hr band hidden, and
+   a short signature rule above its last block when that block is a paragraph —
+   the signature slot is simply the section's last paragraph, so every reader keeps the words (the TUI and
+   email degrade to a plain section). Mirror: paper-editor/src/styles.css and
+   the shell stylesheet. */
+.bp-paper-editor-body .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline: var(--bp-rule-hairline) solid var(--paper-ink); outline-offset: 4px; padding: 2rem 2.25rem 1.75rem; margin: 2.5rem 4px; }
+.bp-paper-editor-body .bp-section--declaration > .bp-hr { display: none; }
+.bp-paper-editor-body .bp-section--declaration > :first-child, .bp-paper-editor-body .bp-section--declaration > .bp-hr:first-child + * { margin-top: 0; }
+.bp-paper-editor-body .bp-section--declaration > p:has(+ .bp-hr:last-child),
+.bp-paper-editor-body .bp-section--declaration > p:last-child { margin-top: 2.25rem; padding-top: 0.5rem; border-top: var(--bp-rule-hairline) solid var(--paper-ink); width: min(100%, 20rem); }
+.bp-paper-editor-body code {
+  font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
+  background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
+}
+.bp-paper-editor-body pre {
+  font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh);
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
+  border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
+}
+/* Canvas code node frame — out-ranks the generic pre rule above (higher
+ * specificity via the .bp-canvas-code class code-node.js stamps). S9: the
+ * node-view no longer sets fontFamily/whiteSpace inline (they were the drift),
+ * so this rule carries the WHOLE frame — a bare --paper-bg-deep slab, no left
+ * bar since task-ddb1e0ab09a62466 — incl. the mono font + ink colour, all bound
+ * to the --bp-codeblock-* / --paper-* tokens so it is byte-aligned AND
+ * theme-aligned with the VIEW block (figures.ex code_block_html/1). Keep
+ * BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-paper-editor-body pre.bp-canvas-code {
+  background: var(--paper-bg-deep); border: 0; border-radius: var(--bp-codeblock-radius);
+  padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin); font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: normal; overflow-x: auto;
+}
+/* The <textarea> EDIT island inside the frame. Form controls do not inherit the
+ * frame font, so bind the SAME --bp-codeblock- and --paper- tokens here — the
+ * editable code then renders byte-identically to the reader <pre> (0.9rem/1.5,
+ * mono, ink). white-space:pre + overflow-wrap:normal == the reader no-wrap
+ * pre; transparent/borderless so only the frame paints. NONE of this touches
+ * the island contract (stopEvent/ignoreMutation), so editing is unaffected.
+ * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+/* The highlight layer under the textarea: the SAME text painted with hljs-* tokens (code-highlight.js),
+ * metrics identical to the island above it, which shows only its caret and selection. */
+/* Scoped under the editor body so it outranks `.bp-paper-editor-body code` (inline-code size
+ * and padding): the layer must paint at the textarea's metrics or clicks land a line off. */
+.bp-paper-editor-body .bp-canvas-code-hl {
+  position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+  margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+  display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+}
+.bp-canvas-code-area {
+  position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
+  display: block;
+  font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  white-space: pre; overflow-wrap: normal;
+  background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  font-feature-settings: inherit; font-variant-ligatures: inherit;
+}
+.bp-paper-editor-body blockquote {
+  margin: 12pt 0 0; padding: 12pt 16pt;
+  border-left: 4px solid var(--paper-accent);
+  background: var(--paper-accent-soft); border-radius: 2px; font-style: normal;
+}
+.bp-paper-editor-body blockquote > :first-child { margin-top: 0; }
+.bp-paper-editor-body blockquote > :last-child { margin-bottom: 0; }
+.bp-paper-editor-body hr {
+  border: 0; border-top: 1px solid var(--paper-rule); margin: 12pt 0 0;
+}
+/* Canvas section-divider — the §-on-a-hairline the Divider atom (divider-node.js
+ * renderHTML) stamps, byte-aligned with the reader's inline styles in
+ * Figures.section_divider_html/0 (figures.ex:33-37). Bound off the same custom
+ * props (no hex fallback — --paper-rule/--paper-bg/--paper-ink-soft are
+ * defined light+dark in BOTH sinks), a dark-mode improvement over the reader's
+ * light-only inline hex. The mark paints the PAGE token (--paper-bg) — it masks
+ * the hairline, it is not a fill. Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-paper-editor-body .bp-section-divider {
+  position: relative; text-align: center; margin: 2.4rem 0;
+  border-top: 1px solid var(--paper-rule);
+}
+.bp-paper-editor-body .bp-section-divider__mark {
+  position: relative; top: -0.7rem; display: inline-block;
+  padding: 0 0.8rem; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font-size: 1.1rem;
+}
+.bp-paper-editor-body img {
+  display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
+  border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
+}
+.bp-paper-editor-body > :first-child { margin-top: 0; }
+
+/* ── Empty-block placeholder ghost text. ─────────────────────────────────── */
+.bp-paper-editor-body .ProseMirror .is-empty::before,
+.bp-paper-editor-body .ProseMirror .is-editor-empty::before {
+  content: attr(data-placeholder);
+  color: var(--paper-ink-faint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── Focus-ring kill — DE-SCOPED from `.bp-paper-surface [contenteditable]`.
+ * Standalone hosts have no .bp-paper-surface ancestor; without this the
+ * browser blue focus ring returns. */
+[contenteditable]:focus,
+.ProseMirror:focus,
+.ProseMirror-focused { outline: none; }
+
+/* ── Old-style hanging figures — scoped to the shared TipTap mount root, not
+ * `.bp-paper-surface` (standalone hosts have no such ancestor). The extra root
+ * class out-ranks TipTap's later-injected bare `.ProseMirror` reset and wins
+ * back ligatures + onum without disabling its runtime CSS. The surface's own
+ * feature list, and NO font-variant-numeric: the reader has none
+ * (editor_control_island_parity_test). */
+.bp-paper-editor-body > .ProseMirror {
+  font-variant-ligatures: normal;
+  -webkit-font-variant-ligatures: normal;
+  font-feature-settings: "kern", "liga", "onum";
+}
+
+/* ── View-mode inline-style overrides — DE-SCOPED from `.bp-paper-surface`.
+ * render.ex emits CANONICAL portable inline styles (#ffffff / #111827 /
+ * #1d4ed8 / #f3f4f6) for standalone export; render.ex must NOT change, so we
+ * override those inline colors HERE with !important so a rendered paper stays
+ * readable on warm paper in VIEW mode standalone too. Attribute-substring
+ * matching is byte-aligned with render.ex output — do not edit the hex. */
+[data-block-id] div[style*="background:#ffffff"],
+article div[style*="background:#ffffff"] {
+  background: transparent !important;
+  color: var(--paper-ink) !important;
+}
+[data-block-id] span[style*="color:#111827"],
+article span[style*="color:#111827"] {
+  color: var(--paper-ink) !important;
+}
+[data-block-id] a[style*="color:#1d4ed8"],
+article a[style*="color:#1d4ed8"] {
+  color: var(--paper-accent) !important;
+}
+[data-block-id] code[style*="background:#f3f4f6"],
+article code[style*="background:#f3f4f6"] {
+  background: var(--paper-bg-deep) !important;
+  color: var(--paper-ink) !important;
+}
+
+/* ── Wikilink autocomplete popup (`[[` trigger). ────────────────────────────
+ * Rendered into <body> by WikilinkMenu (src/wikilink-menu.js) and positioned
+ * fixed at the caret. Mirrors the slash-menu popup chrome exactly — same
+ * fixed-popup frame, same token bindings, same eyebrow + scrollable list +
+ * footer kbd-hint structure — but with a flat (group-free) candidate list and
+ * a type badge replacing the slash menu's hint glyph + desc pair.
+ *
+ * The --paper-* tokens are re-bound on the popup element directly (just like
+ * .bp-slash-menu in root.html.heex) so the popup stays warm in both themes
+ * even though it lives outside any .bp-paper-surface ancestor. Each one reads
+ * --paper-picker-<name> first, so a host themes the picker from :root
+ * (contract 1.16.0); the values here are the defaults. */
+
+/* Pre-paint / no-theme fallback — warm light defaults. */
+/* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+   (task-387501f9ce96c335): the accent colour, underlined so it is not told
+   apart by colour alone. Its hover card's Open goes to the linked paper. */
+.bp-paper-editor span[data-wikilink] {
+  color: var(--paper-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bp-wikilink-menu {
+  --paper-bg:           var(--paper-picker-bg, #fbfaf6);
+  --paper-ink:          var(--paper-picker-ink, #1f1a14);
+  --paper-ink-soft:     var(--paper-picker-ink-soft, #5b524a);
+  --paper-ink-faint:    var(--paper-picker-ink-faint, #787067);
+  --paper-rule:         var(--paper-picker-rule, rgba(31, 26, 20, 0.08));
+  --paper-rule-soft:    var(--paper-picker-rule-soft, rgba(31, 26, 20, 0.04));
+  --paper-accent:       var(--paper-picker-accent, #a23925);
+  --paper-accent-soft:  var(--paper-picker-accent-soft, rgba(162, 57, 37, 0.10));
+  --paper-chrome-bg:    var(--paper-picker-chrome-bg, #fefdf9);
+  --paper-chrome-border: var(--paper-picker-chrome-border, rgba(31, 26, 20, 0.12));
+  --paper-font-sans:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --paper-font-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  position: fixed; z-index: 200;
+  width: 280px; max-width: calc(100vw - 12px); box-sizing: border-box;
+  display: flex; flex-direction: column;
+  padding: 6px 0 4px;
+  background: var(--paper-chrome-bg);
+  border: 1px solid var(--paper-chrome-border);
+  border-radius: 6px;
+  box-shadow: var(--paper-picker-shadow, 0 4px 16px rgba(0, 0, 0, 0.08));
+  font-family: var(--paper-font-sans);
+  animation: bp-wikilink-fade 0.12s ease-out;
+}
+/* Dark companion — keyed on the host's [data-theme="dark"]. */
+:root[data-theme="dark"] .bp-wikilink-menu,
+html[data-theme="dark"] .bp-wikilink-menu {
+  --paper-bg:           var(--paper-picker-bg, #1b1815);
+  --paper-ink:          var(--paper-picker-ink, #ece6dc);
+  --paper-ink-soft:     var(--paper-picker-ink-soft, #b8ad9e);
+  --paper-ink-faint:    var(--paper-picker-ink-faint, #908679);
+  --paper-rule:         var(--paper-picker-rule, rgba(236, 230, 220, 0.10));
+  --paper-rule-soft:    var(--paper-picker-rule-soft, rgba(236, 230, 220, 0.05));
+  --paper-accent:       var(--paper-picker-accent, #d97a5f);
+  --paper-accent-soft:  var(--paper-picker-accent-soft, rgba(217, 122, 95, 0.14));
+  --paper-chrome-bg:    var(--paper-picker-chrome-bg, #221e1a);
+  --paper-chrome-border: var(--paper-picker-chrome-border, rgba(236, 230, 220, 0.14));
+}
+@keyframes bp-wikilink-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Eyebrow — uppercase letter-spaced "Link to page" header. Mirrors
+ * .bp-slash-eyebrow exactly (same font-size, spacing, color). */
+.bp-wikilink-menu__eyebrow {
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--paper-ink-faint); padding: 6px 14px;
+}
+/* Scrollable list region — eyebrow + footer stay pinned above/below. */
+.bp-wikilink-list {
+  display: block; padding: 2px 6px;
+  max-height: 320px; overflow-y: auto;
+}
+/* Candidate row — flex, title left + type badge right. No hint glyph column
+ * (the [[wikilink trigger has no icon, unlike slash-menu block types). */
+.bp-wikilink-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 5px 8px;
+  background: transparent; border: none; border-radius: 4px;
+  color: var(--paper-ink); font-family: inherit; font-size: 13px;
+  line-height: 1.2; text-align: left; cursor: pointer;
+  transition: background 0.08s ease-out;
+}
+.bp-wikilink-item:hover,
+.bp-wikilink-item.is-active { background: var(--paper-accent-soft); }
+/* Bold page title — fills the remaining space after the badge. */
+.bp-wikilink-title {
+  flex: 1 1 auto; min-width: 0;
+  font-weight: 600; letter-spacing: 0.005em;
+}
+/* Muted right-aligned type badge — mirrors .bp-slash-desc. */
+.bp-wikilink-type-badge {
+  flex: 0 0 auto; margin-left: auto; padding-left: 8px;
+  color: var(--paper-ink-faint); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100px;
+}
+/* The faint badge on the tinted active/hover row fell under AA; it steps up to
+ * the soft ink there, as .bp-slash-desc does (task-be754bd628311c5f). */
+.bp-wikilink-item:hover .bp-wikilink-type-badge,
+.bp-wikilink-item.is-active .bp-wikilink-type-badge { color: var(--paper-ink-soft); }
+/* Non-selectable "Searching…" / "No matching pages" row. */
+.bp-wikilink-empty {
+  padding: 6px 8px;
+  color: var(--paper-ink-faint); font-size: 12px;
+  font-style: italic;
+}
+/* Footer hint bar with <kbd> chips for the keyboard contract. One line at any
+ * width (1.17.0): a host's longer words end in an ellipsis instead of wrapping. */
+.bp-wikilink-foot {
+  border-top: 1px solid var(--paper-rule-soft);
+  margin-top: 4px; padding: 8px 12px 4px;
+  font-size: 10.5px; color: var(--paper-ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bp-wikilink-foot-sep { opacity: 0.6; margin: 0 1px; }
+.bp-wikilink-foot kbd {
+  font-family: var(--paper-font-mono); font-size: 10px;
+  background: var(--paper-bg); border: 1px solid var(--paper-rule);
+  border-radius: 3px; padding: 0 3px; color: var(--paper-ink-soft);
+  margin: 0 1px;
+}

@@ -19,7 +19,7 @@ defmodule Barkpark.PortableDoc.Render.EditorLiveviewControlParityTest do
 
   The #16092 harness and the PR #20087 control test cannot see this, because
   neither mounts these LiveView controls. The rendered proof is
-  `npm run test:view-edit-parity` in api/assets/paper-editor, whose liveview
+  `MIX_ENV=test node ../paper-editor-host-tests/__view_edit_parity_matrix.mjs` in api/assets/paper-editor, whose liveview
   surface renders this editor. This test pins the declarations, so a rule edit
   reds without a browser.
   """

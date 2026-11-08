@@ -97,6 +97,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # `priv/static/assets/bp-paper-editor.css` (index.js `ensureStyles/0` links it),
   # which the `*.js` glob below never sees — the SOURCE is the honest census input.
   @paper_editor_css Path.expand("../../../assets/paper-editor/src/styles.css", __DIR__)
+  defp paper_editor_css, do: Barkpark.Test.PaperEditorCSS.authored_css!()
 
   # The BUILT sheet (spd-census-built-paper-editor-css). `assets/paper-editor`'s
   # `npm run build` runs `esbuild src/styles.css --bundle --outfile=
@@ -893,7 +894,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     end
 
     test "the paper-editor stylesheet declares position:fixed for exactly the inventoried selectors" do
-      found = fixed_position_selectors(File.read!(@paper_editor_css))
+      found = fixed_position_selectors(paper_editor_css())
       known = MapSet.new(Map.keys(@paper_editor_fixed_inventory))
 
       assert MapSet.difference(found, known) == MapSet.new([]),
@@ -917,7 +918,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     end
 
     test "the paper-editor census is non-vacuous: a planted selector fails it" do
-      css = File.read!(@paper_editor_css)
+      css = paper_editor_css()
       known = MapSet.new(Map.keys(@paper_editor_fixed_inventory))
 
       # Guard 1 — a path typo or an emptied sheet must not read as "all clear".
@@ -943,7 +944,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     end
 
     test "the BUILT paper-editor stylesheet censuses to the same fixed set as its source" do
-      source = minified_safe_fixed_selectors(File.read!(@paper_editor_css))
+      source = minified_safe_fixed_selectors(paper_editor_css())
       built = minified_safe_fixed_selectors(File.read!(@paper_editor_built_css))
 
       built_only = MapSet.difference(built, source)
@@ -985,7 +986,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     end
 
     test "the built-sheet census is non-vacuous in both directions" do
-      source_css = File.read!(@paper_editor_css)
+      source_css = paper_editor_css()
       built_css = File.read!(@paper_editor_built_css)
 
       # Guard 0 — the minified walker is not a second POLICY. On the authored

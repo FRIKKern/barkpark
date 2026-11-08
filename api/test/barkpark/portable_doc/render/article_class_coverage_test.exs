@@ -118,7 +118,8 @@ defmodule Barkpark.PortableDoc.Render.ArticleClassCoverageTest do
         #{Enum.join(unresolved, ", ")}
 
       A class that resolves to nothing renders as unstyled text. Fix one of:
-        • add the rule to api/assets/paper-surface/paper-surface.css (so View and
+        • add the rule to its fragment under api/assets/paper-editor/src/paper-surface/
+          and run `npm run sync:barkpark:write` in api/assets/paper-editor (so View and
           Edit resolve the same selector by construction), or
         • if this class is styled by a hosting layout or is a pure JS/content
           hook, add it to @layout_hooks with a one-line justification.

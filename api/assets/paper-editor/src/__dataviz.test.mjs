@@ -559,14 +559,14 @@ check("runToOps: a duel row REMOVED via the grid emits ONE patch-block with the 
 });
 
 check("the structured grid builds NO <button> (rule 6) and mounts on both kinds", () => {
-  // The DOM half of the grid lives in embed-node.js, which __atom_chrome.test.mjs
+  // The DOM half of the grid lives in fleet-editor.js, which __atom_chrome.test.mjs
   // guards for <button>. This arm pins the POSITIVE half the guard cannot see: the
   // grid really does build its reorder control, as a native <select>, for both kinds.
-  const src = readFileSync(new URL("./canvas/embed-node.js", import.meta.url), "utf8");
+  const src = readFileSync(new URL("./canvas/fleet-editor.js", import.meta.url), "utf8");
   assert.ok(/createElement\(\s*["']select["']\s*\)/.test(src),
     "the per-datum grid must build a native <select> reorder control");
   assert.ok(!/createElement\(\s*["']button["']\s*\)/.test(src),
-    "embed-node.js must build no <button> — rule 6 / __atom_chrome");
+    "fleet-editor.js must build no <button> — rule 6 / __atom_chrome");
 });
 
 if (failures > 0) {

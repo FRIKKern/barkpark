@@ -1,0 +1,283 @@
+/* A RESTING (closed) toggle is only as wide as its summary. At the panel's
+   min(32rem, 100vw - 2rem) it lay over the block's first row — on a phone
+   (hover: none keeps it tappable) across the whole row — and ate the tap aimed
+   at the text under it: a tabs label, a columns paragraph, a second code tab. */
+.bp-paper-contextual-controls:not([open]) { width: max-content; }
+.bp-paper-contextual-controls--gauge-list[open],
+.bp-paper-contextual-controls--tabs[open],
+.bp-paper-contextual-controls--section[open],
+.bp-paper-contextual-controls--columns[open],
+.bp-paper-contextual-controls--card[open],
+.bp-paper-contextual-controls--action[open],
+.bp-paper-contextual-controls--terminal[open],
+.bp-paper-contextual-controls--form[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--columns-empty {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--action-empty {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--gauge-list[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--tabs[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--columns[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--card[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--action[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--terminal[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
+.bp-canvas-tabs .bp-paper-contextual-controls[open],
+.bp-tabs--editor .bp-paper-contextual-controls[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-canvas-tabs .bp-paper-contextual-controls[open] > .bp-paper-contextual-panel,
+.bp-tabs--editor .bp-paper-contextual-controls[open] > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
+.bp-paper-contextual-toggle {
+  cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--paper-bg);
+}
+.bp-paper-contextual-panel {
+  width: 100%; max-width: 100%;
+  max-height: min(70vh, 42rem); overflow: auto; box-sizing: border-box;
+  margin-top: 0.55rem; padding: 0.75rem;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+  box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+}
+.bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
+.bp-paper-edit-form.bp-paper-stage-form { display: block; }
+.bp-paper-stage-form .bp-paper-contextual-panel { display: grid; gap: 0.65rem; }
+.bp-paper-contextual-preview textarea.bp-paper-inline-text {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
+  resize: none;
+  overflow: hidden;
+  outline-offset: 3px;
+}
+.bp-paper-contextual-preview textarea.bp-paper-inline-text:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-contextual-preview textarea.bp-paper-inline-text::placeholder {
+  color: var(--paper-ink-soft);
+}
+/* The citation is inline authoring, not a separate bound-field block. The
+   quote already owns its reader margin; its form must not add another gap. */
+.bp-paper-edit-block[data-block-type="blockquote"]:has(.bp-paper-quote-editor) { margin-top: 0; }
+.bp-paper-quote-editor .bp-paper-editor-body {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.bp-paper-quote-editor .bp-paper-editor-body p { margin: 0; }
+.bp-paper-edit-form.bp-paper-quote-cite-form { display: block; margin: 0; padding: 0; }
+.bp-paper-quote-editor .bp-blockquote__cite { display: block; position: relative; }
+.bp-paper-quote-editor .bp-blockquote__cite::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  pointer-events: none;
+}
+.bp-expandable.bp-paper-contextual-preview > summary > textarea.bp-paper-inline-text {
+  display: inline-block;
+  width: calc(100% - 1.5em);
+  vertical-align: top;
+}
+.bp-paper-contextual-panel .bp-paper-edit-fieldlabel {
+  display: grid; gap: 0.3rem; min-width: 0; color: var(--paper-ink-soft);
+}
+.bp-paper-contextual-panel fieldset.bp-paper-edit-form {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45rem;
+  min-inline-size: 0; margin: 0; padding: 0.75rem;
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+}
+.bp-paper-contextual-panel :is(input[type="text"], input[type="number"], textarea, select) {
+  width: 100%; min-width: 0; box-sizing: border-box;
+}
+.bp-paper-contextual-panel .bp-paper-edit-actions {
+  flex-direction: row; flex-wrap: wrap; gap: 0.4rem;
+}
+.bp-paper-contextual-panel button,
+.bp-paper-history-controls button {
+  min-height: 2rem; padding: 0.35rem 0.65rem;
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.8125rem;
+  line-height: 1.3; color: var(--paper-ink-soft); background: transparent;
+  border: 1px solid var(--paper-rule); border-radius: 4px; cursor: pointer;
+}
+.bp-paper-contextual-panel button:hover:not(:disabled),
+.bp-paper-history-controls button:hover:not(:disabled) {
+  color: var(--paper-ink); background: var(--paper-accent-soft);
+}
+.bp-paper-contextual-panel button:disabled,
+.bp-paper-history-controls button:disabled { opacity: 0.45; cursor: default; }
+.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible,
+.bp-paper-history-controls button:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 600px), (pointer: coarse) {
+  .bp-paper-history-controls button { min-width: 44px; min-height: 44px; }
+}
+@media (hover: none) {
+  .bp-paper-contextual-editor > .bp-paper-contextual-controls {
+    opacity: 1; pointer-events: auto;
+  }
+}
+/* Recovery is editor chrome, never a replacement document. */
+[data-bp-paper-conflict],
+[data-test-id="paper-canvas-resume-warning"] {
+  box-sizing: border-box; max-width: 100%; margin: 16px 0 24px; padding: 16px;
+  border: 1px solid var(--paper-rule); border-inline-start: 3px solid var(--paper-accent);
+  border-radius: 6px; color: var(--paper-ink); background: var(--paper-bg);
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+[data-bp-paper-conflict] .bp-conflict-title { display: block; font-size: 15px; margin-bottom: 4px; }
+[data-bp-paper-conflict] .bp-conflict-description { display: block; color: var(--paper-ink-soft); }
+[data-bp-paper-conflict] .bp-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+[data-bp-paper-conflict] button,
+[data-test-id="paper-canvas-resume-warning"] button {
+  min-height: 44px; padding: 8px 12px; border: 1px solid var(--paper-rule);
+  border-radius: 4px; background: transparent; color: var(--paper-ink);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+[data-bp-paper-conflict] button[data-action="keep"] { border-color: var(--paper-accent); color: var(--paper-accent); }
+[data-bp-paper-conflict] button:disabled { opacity: .55; cursor: not-allowed; }
+[data-bp-paper-conflict] :is(button, summary, pre, textarea):focus-visible,
+[data-test-id="paper-canvas-resume-warning"] :is(button, summary, a):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 3px; }
+[data-bp-paper-conflict] [data-conflict-detail] { margin-top: 12px; border-top: 1px solid var(--paper-rule); padding-top: 12px; }
+[data-bp-paper-conflict] [data-conflict-message] { margin: 0 0 12px; font: inherit; }
+[data-bp-paper-conflict] [data-reference-draft-text] {
+  box-sizing: border-box; width: 100%; max-width: 100%; min-height: 6rem;
+  margin: 8px 0 12px; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font: inherit;
+  line-height: 1.5; resize: vertical;
+}
+[data-bp-paper-conflict] summary,
+[data-test-id="paper-canvas-resume-warning"] summary { cursor: pointer; color: var(--paper-ink-soft); }
+[data-test-id="paper-canvas-resume-warning"] p { margin: 0 0 12px; font: inherit; }
+[data-test-id="paper-canvas-resume-warning"] details { margin-top: 12px; }
+[data-test-id="paper-canvas-resume-warning"] a { color: var(--paper-accent); }
+[data-bp-paper-conflict] pre {
+  box-sizing: border-box; width: 100%; max-height: 16rem; overflow: auto;
+  margin: 12px 0 0; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* Canvas block controls: keep in lockstep with the standalone editor. */
+/* The expandable container in the canvas: the reader's <details class="bp-expandable"> shape, always open,
+   with the summary as an editable island. */
+/* The canvas wrapper is a div, not <details>, so the reader's `> summary` rules are restated on the island. */
+.bp-canvas-expandable { position: relative; }
+.bp-canvas-expandable::before { content: "▾"; position: absolute; left: 15px; top: 10px; color: var(--paper-ink-soft); pointer-events: none; }
+.bp-canvas-expandable > .bp-expandable__summary { display: block; width: 100%; box-sizing: border-box; padding: 10px 15px 10px 34px; margin: 0; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--paper-ink); cursor: text; outline: none; }
+.bp-canvas-expandable > .bp-expandable__summary::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.ProseMirror-selectednode.bp-canvas-expandable { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* steps / tabs in the canvas: the reader's markup with a title input per row, a remove button and an add
+   button as edit-only chrome. */
+.bp-canvas-row__head { display: flex; align-items: center; gap: 6px; }
+.bp-canvas-row__head > input.bp-canvas-row__title { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; color: var(--paper-ink); outline: none; padding: 0; }
+.bp-canvas-row__head > input.bp-canvas-row__title::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.bp-canvas-row__remove, .bp-canvas-rows__add { appearance: none; border: 1px solid var(--paper-chrome-border); background: var(--paper-chrome-bg); color: var(--paper-ink-soft); border-radius: 4px; font: 12px/1 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 7px; cursor: pointer; }
+.bp-canvas-row__remove { opacity: 0; }
+.bp-canvas-row:hover > .bp-canvas-row__head > .bp-canvas-row__remove, .bp-canvas-row:focus-within > .bp-canvas-row__head > .bp-canvas-row__remove { opacity: 1; }
+.bp-canvas-rows__foot { margin: 0.3rem 0 1rem; }
+.bp-canvas-steps > .bp-canvas-row > .bp-canvas-row__head > input.bp-steps__title { font-weight: 700; }
+.bp-paper-surface .bp-canvas-tabs { overflow: visible; }
+.bp-canvas-tabs > .bp-tabs__panels > .bp-canvas-row { padding: 0; }
+.bp-canvas-tabs > .bp-tabs__panels > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-canvas-tabs > .bp-tabs__panels > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
+.bp-canvas-tabs > .bp-tabs__panels > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* find matches (canvas/find-replace.js): the host's bar drives them. */
+.bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
+.bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
+   row that hides at rest once the block has data. */
+.bp-canvas-island { position: relative; margin: 1rem 0 0; }
+.bp-canvas-island__empty { padding: 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-island__fields { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0.5rem 0 0; }
+.bp-canvas-island__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 220px; min-width: 0; font: 0.8rem/1.4 var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink-soft); }
+.bp-canvas-island__field--bool { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.bp-canvas-island__input { border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; min-width: 0; }
+.bp-canvas-island__input:focus { outline: none; border-color: var(--paper-accent); }
+textarea.bp-canvas-island__input { resize: vertical; }
+.bp-canvas-island__mono, .bp-canvas-equation__tex { font-family: var(--paper-font-mono, ui-monospace, monospace); }
+.bp-canvas-video video { max-width: 100%; border-radius: 6px; }
+.ProseMirror-selectednode.bp-canvas-island { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
+.bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
+.bp-canvas-image-frame { position: relative; }
+.bp-canvas-image-img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+.bp-canvas-image-empty { display: none; padding: 1.4rem 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-image--empty .bp-canvas-image-empty { display: block; }
+.bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
+.bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
+.bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-pick { display: none; flex: none; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 10px; cursor: pointer; }
+bp-paper-canvas[data-media-picker] .bp-canvas-image-pick { display: inline-block; }
+.bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
+.bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
+.bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
+.ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* Contract 1.11.0 `block-cards`: an image is a card, as Sanity's block object: a 1 px ring
+   (darker on hover, the accent when selected), a 33 px head with the file name and a … menu,
+   and the picture across the card's width. Without the attribute the head never shows. */
+.bp-canvas-image-head { display: none; }
+bp-paper-canvas[block-cards] .bp-canvas-image { margin-inline: 0; width: auto; border-radius: 1px; background: var(--paper-chrome-bg); box-shadow: 0 0 0 1px var(--paper-rule); }
+bp-paper-canvas[block-cards] .bp-canvas-image:hover { box-shadow: 0 0 0 1px var(--paper-chrome-border); }
+bp-paper-canvas[block-cards] .ProseMirror-selectednode.bp-canvas-image { outline: none; border-radius: 1px; background: var(--paper-edit-hover); box-shadow: 0 0 0 1px var(--paper-accent); }
+bp-paper-canvas[block-cards] .bp-canvas-image-head { display: flex; align-items: flex-start; gap: 8px; height: 33px; box-sizing: border-box; padding: 3px 4px 0 8px; }
+bp-paper-canvas[block-cards] .bp-canvas-image-img { width: 100%; border-radius: 0; object-fit: contain; }
+bp-paper-canvas[block-cards] .bp-canvas-image-chrome { padding: 0 8px 8px; }
+bp-paper-canvas[block-cards] .bp-canvas-image:not(.bp-canvas-image--focused, .bp-canvas-image--empty) .bp-canvas-image-chrome { display: none !important; }
+.bp-canvas-image-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink); }
+.bp-canvas-image-more, .bp-canvas-object-more { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; margin-top: -3px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-canvas-image-more:hover, .bp-canvas-image-more[aria-expanded="true"], .bp-canvas-object-more:hover, .bp-canvas-object-more[aria-expanded="true"] { background: var(--paper-edit-hover); color: var(--paper-ink); }
+.bp-canvas-image-more[hidden] { display: none; }
+.bp-block-menu.bp-canvas-card-menu { min-width: 0; padding: 4px; border-radius: 6px; }
+.bp-canvas-card-menu .bp-block-menu__item { gap: 8px; padding: 6px 12px 6px 6px; }
+.bp-canvas-card-menu svg { flex: none; }
+
+/* ── Block gutter (block-handle.js): + and ⋮⋮ beside the hovered top-level block. ──
+   Mirrors styles.css. /papers loads only this shell (BP_PAPER_EDITOR_NO_INJECT), so
+   without these rules the handle rendered IN FLOW at the end of its canvas: every
+   canvas grew 22px on hover and shrank 250ms after the pointer left, sliding the
+   page under the next click. */
+bp-paper-canvas { position: relative; display: block; }
+.bp-block-handle { position: absolute; display: flex; gap: 2px; align-items: center; height: 22px; z-index: 5; opacity: 0.85; }
+.bp-block-handle__btn { width: 22px; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--paper-ink-soft); font: 600 13px/1 var(--paper-font-sans, system-ui, sans-serif); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.bp-block-handle__btn:hover { background: var(--paper-edit-hover); color: var(--paper-ink); }
+.bp-block-handle__grip { cursor: grab; font-size: 14px; }
+.bp-block-handle--dragging .bp-block-handle__grip { cursor: grabbing; }
+/* Touch (task-be754bd628311c5f): the handle follows the caret to the block's
+   top-right corner, and every target is 44px; the block menu rows too. */
+.bp-block-handle--touch { height: 44px; gap: 0; opacity: 1; }
+.bp-block-handle--touch .bp-block-handle__btn { width: 44px; height: 44px; }
+@media (hover: none), (max-width: 768px) { .bp-block-menu__item { min-height: 44px; } }
+.bp-block-drop { position: absolute; height: 2px; background: var(--paper-accent); border-radius: 1px; pointer-events: none; z-index: 6; }
+.bp-block-menu { position: fixed; z-index: 200; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-block-menu__group { font-size: 10px; text-transform: uppercase; color: var(--paper-ink-soft); padding: 6px 8px 2px; }
+.bp-block-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bp-block-menu__item:hover, .bp-block-menu__item:focus-visible { background: var(--paper-edit-hover); outline: 0; }
+.bp-block-menu__item--danger { color: var(--bp-tone-danger-fg); }
+.bp-block-menu__glyph { width: 22px; text-align: center; font-size: 11px; color: var(--paper-ink-soft); }

@@ -7,10 +7,10 @@
 // sat over the first line's right end on hover. This package check owns the bundle
 // source used by embedders; Barkpark's live shell is checked by the host companion.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 const sinks = {
-  "styles.css": readFileSync(new URL("./styles.css", import.meta.url), "utf8"),
+  "styles.css": readAuthoredCss(),
 };
 
 // [ids, classes/attributes/pseudo-classes, types] for one selector (no :is/:where here).

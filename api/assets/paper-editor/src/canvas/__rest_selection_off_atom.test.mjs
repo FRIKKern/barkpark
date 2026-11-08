@@ -76,6 +76,9 @@ try {
     assert.deepEqual(ids(editor).slice(0, 1), ["st-title"]);
     assert.ok(ids(editor).includes("st-p2"));
   });
+} catch (error) {
+  failures += 1;
+  console.log(`FAIL  thrown outside a check\n      ${error?.stack ?? error}`);
 } finally {
   if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
   console.log("\nrest selection: all checks passed");

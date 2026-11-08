@@ -8,16 +8,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readAuthoredCss } from "../paper-editor/src/__css_source_graph.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(
   join(__dirname, "../paper-editor/src/canvas/callout-node.js"),
   "utf8",
 );
-const bundleCss = readFileSync(
-  join(__dirname, "../paper-editor/src/styles.css"),
-  "utf8",
-);
+const bundleCss = readAuthoredCss();
 const surfaceCss = readFileSync(
   join(__dirname, "../paper-surface/paper-surface.css"),
   "utf8",
@@ -104,8 +102,8 @@ check("the reader's callout tone modifiers each have a byte-equal embedder twin"
     `the embedder bundle has no \`.bp-paper-editor-body .bp-callout--${missing.join("/")}\` ` +
       "rule for a tone the reader paints. A standalone host has no `.bp-paper-surface` " +
       "ancestor, so that callout falls through to the bare `.bp-callout` default and " +
-      "Edit shows no tone where /papers shows one. Copy the reader rule into styles.css " +
-      "(and rebuild: npm run build:web).",
+      "Edit shows no tone where /papers shows one. Copy the reader rule into " +
+      "api/assets/paper-editor/src/styles/canvas.css (and run: npm run sync:barkpark:write).",
   );
 
   for (const mod of sorted(reader)) {

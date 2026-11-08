@@ -1,14 +1,17 @@
 // Real-Chrome regression for the two reader-shaped editable rows in this lane.
-// Run after `npm run build`: BP_REQUIRE_CHROME=1 node src/__diff_note_keys.mjs
+// Run: BP_REQUIRE_CHROME=1 node src/__diff_note_keys.mjs
+// It builds the package into a temp folder and serves that build.
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildLocal } from "../scripts/build-local.mjs";
 import { launchChrome, evaluate, waitFor } from "../hosts/browser.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ASSETS = join(HERE, "../../../priv/static/assets");
+const ASSETS = mkdtempSync(join(tmpdir(), "bp-diff-note-"));
+process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
+await buildLocal({ outDir: ASSETS, logLevel: "warning" });
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
 <link rel="stylesheet" href="/bp-paper-editor.css"></head><body>
@@ -78,6 +81,21 @@ const origin = `http://127.0.0.1:${server.address().port}/`;
 
 const chrome = await launchChrome();
 const { cdp } = chrome;
+// A throw outside the try below, such as one in the page server, would end node
+// before the finally runs and leave Chrome behind.
+let closing;
+const closeChrome = () => (closing ??= chrome.close());
+const failAndClose = async (error) => {
+  console.error(error);
+  try {
+    await closeChrome();
+  } finally {
+    process.exit(1);
+  }
+};
+// on, not once: a second error during the close must wait for it too, or node dies and leaves the profile.
+process.on("uncaughtException", failAndClose);
+process.on("unhandledRejection", failAndClose);
 const equal = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`${label}: ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
@@ -150,6 +168,6 @@ try {
 
   console.log(`PASS real Chrome ${chrome.chrome.version}: diff prefix traps; note keyboard run, FormatBubble, repaint edit/undo/redo`);
 } finally {
-  await chrome.close();
+  await closeChrome();
   await new Promise(resolve => server.close(resolve));
 }

@@ -3,7 +3,7 @@ defmodule Barkpark.PortableDoc.DuplicateIdsKeysTest do
   task-c91fbd0c5c7bb4a6 and task-42d085f7431b8417 criterion 2: what each editor
   contract sent for a real drop between sections and a real Enter inside a
   section, step or tab, recorded in headless Chromium by
-  `api/assets/paper-editor/src/__duplicate_ids_keys.mjs`. A drop saves on every
+  `api/assets/paper-editor-host-tests/__duplicate_ids_keys.mjs`. A drop saves on every
   contract; an old editor's split repeats an id and is refused; the tree's
   split never repeats one.
   """

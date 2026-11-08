@@ -26,6 +26,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const readSrc = (rel) => readFileSync(join(__dirname, rel), "utf8");
@@ -43,7 +44,7 @@ function check(name, fn) {
 }
 
 const codeNode = readSrc("canvas/code-node.js");
-const bundleCss = readSrc("styles.css");
+const bundleCss = readAuthoredCss();
 
 // ── 1. The inline font drift is GONE from the node-view source ────────────────
 

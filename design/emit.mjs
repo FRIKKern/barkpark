@@ -47,14 +47,18 @@
 // must already exist (mirrors the status-tones precedent). Go surfaces are whole
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
 // and the §6 cross-surface parity assertion.
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
+import { ASSET_MANIFEST, assembleAsset, validateFragmentSizes } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 import { derive } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The raw surface sink sync-barkpark owns. Named here because a bare design tree may not hold that script.
+const RAW_SURFACE_SINK = "api/assets/paper-surface/paper-surface.css";
 export const repoRoot = join(here, "..");
 
 // ── the w4 seam (charter D22) ────────────────────────────────────────────────
@@ -858,7 +862,7 @@ function styleguideSwatches() {
   }).join("\n");
 }
 
-// ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
+// ── surface: paper-surface (the generated fragment of the package's raw surface) ──
 // Reading font + reading type scale + status tones, plus the lifecycle
 // glyph-tone classes (.bp-lg--<state>) that give the CSS/GUI half of the §6
 // cross-surface parity assertion its hues. Additive (.bp-lg-- is a fresh, un-
@@ -3242,7 +3246,7 @@ export const ARTIFACTS = [
     markerBegin: BP_THEMES_MARKER_BEGIN, markerEnd: BP_THEMES_MARKER_END, build: bpThemesList },
   { name: "cloud SPA audit action labels", path: "cloud/priv/static/app.js", kind: "css",
     markerBegin: ACTION_LABELS_MARKER_BEGIN, markerEnd: ACTION_LABELS_MARKER_END, build: auditActionLabels },
-  { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
+  { name: "paper-surface", path: "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
   { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
@@ -3448,8 +3452,9 @@ function run(mode, { force = false } = {}) {
   const results = evaluateAll();
   const regions = readManifest() ?? {};
   let changed = 0, errored = 0;
+  let surfaceWritten = false;
 
-  // The mirror is a SECOND generation hop off the just-emitted paper-surface.css,
+  // The mirror is a SECOND generation hop off the just-emitted surface fragment,
   // so its write must run after the artifact loop. Its attribution, however, is a
   // property of the bundle on disk (a different file the loop never touches), so
   // it is safe — and necessary — to pre-flight it here with everything else.
@@ -3510,6 +3515,18 @@ function run(mode, { force = false } = {}) {
     // what we would emit is not at risk, whatever the ledger says about it.
     u.blocked = u.drift && u.attribution !== "attributed";
   }
+  // A surface fragment has a size limit, and past it nothing can assemble the surface.
+  // Refuse here, before any file is written, and name the limit.
+  const surfaceUnit = results.find((r) => r.name === "paper-surface" && !r.error);
+  if (surfaceUnit) {
+    try {
+      validateFragmentSizes([{ name: surfaceUnit.path.split("/").at(-1), bytes: Buffer.from(surfaceUnit.expected) }], ASSET_MANIFEST["paper-surface"], "paper-surface");
+    } catch (error) {
+      console.error(`emit: REFUSED, nothing written. The regenerated ${surfaceUnit.path} would break its limit: ${error.message}`);
+      console.error(`  Move hand-written rules out of that fragment into another one in ASSET_MANIFEST, then run emit again.`);
+      process.exit(1);
+    }
+  }
   if (mode === "write") {
     const blocked = units.filter((u) => u.blocked);
     if (blocked.length && !force) {
@@ -3550,7 +3567,10 @@ function run(mode, { force = false } = {}) {
   for (const r of results) {
     if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
     if (mode === "write") {
-      if (r.drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
+      if (r.drift) {
+        writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++;
+        if (r.name === "paper-surface") surfaceWritten = true;
+      }
       else { console.log(`  ok    ${r.name} (already current)`); }
       nextRegions[regionKey(r)] = regionDigest(r.expectedRegion);
     } else {
@@ -3560,8 +3580,8 @@ function run(mode, { force = false } = {}) {
     }
   }
   // Post-step: the paper-editor token mirror. It is DERIVED from the just-emitted
-  // paper-surface.css (a second generation hop), so it runs AFTER the artifact
-  // loop has written paper-surface.css to disk. One shared transform with
+  // surface fragment (a second generation hop), so it runs AFTER the artifact
+  // loop has written that fragment to disk. One shared transform with
   // design/check.mjs + scripts/paper-editor-mirror-check.sh — they can't disagree.
   // Re-evaluated here (not reusing the pre-flight copy) because the surface it
   // derives from may have just changed on disk.
@@ -3570,9 +3590,10 @@ function run(mode, { force = false } = {}) {
     errored++;
   } else {
     const post = evaluateMirror(repoRoot);
+    if (post.error) { console.error(`  ERROR ${post.name}: ${post.error}`); process.exit(1); }
     const drift = post.current !== post.expected;
     if (mode === "write") {
-      if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; }
+      if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; surfaceWritten = true; }
       else { console.log(`  ok    ${post.name} (already current)`); }
       nextRegions[regionKey(post)] = regionDigest(post.generatedBlock);
     } else {
@@ -3582,8 +3603,25 @@ function run(mode, { force = false } = {}) {
     }
   }
 
-  if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
+  if (errored) { console.error(`emit: ${errored} artifact(s) could not be evaluated; see the ERROR lines above.`); process.exit(1); }
   if (mode === "write") writeManifest(nextRegions);
+  // The package owns the surface; the raw host sink and the profile follow it through
+  // the one outward path. --surface-only leaves the six browser assets to a full sync.
+  // A rerun that regenerates nothing still repairs (--write) or reports (--check) a raw
+  // sink left behind, for example by a sync that failed. Only a build can compare the
+  // profile, so a --write with a toolchain always syncs and --check leaves it to that gate.
+  const packageRoot = join(repoRoot, "api/assets/paper-editor");
+  const rawSink = join(repoRoot, RAW_SURFACE_SINK);
+  const rawSinkMissing = !existsSync(rawSink);
+  const rawSinkStale = !rawSinkMissing && !readFileSync(rawSink).equals(assembleAsset("paper-surface", { root: packageRoot }));
+  if (mode === "check" && rawSinkMissing) { console.error(`  MISSING ${RAW_SURFACE_SINK}`); changed++; }
+  if (mode === "check" && rawSinkStale) { console.error(`  STALE ${RAW_SURFACE_SINK} differs from the assembled package surface`); changed++; }
+  if (mode === "write" && (surfaceWritten || rawSinkStale || existsSync(join(packageRoot, "node_modules")))) {
+    syncSurface(changed);
+  } else if (mode === "write" && rawSinkMissing) {
+    console.error(`emit --write: ${RAW_SURFACE_SINK} is missing and this tree has no toolchain. Fix: cd api/assets/paper-editor && npm ci && npm run sync:barkpark:write`);
+    process.exit(1);
+  }
   if (mode !== "write" && changed) {
     console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json or are UNATTRIBUTED. Fix: node design/emit.mjs --write`);
     process.exit(1);
@@ -3592,6 +3630,24 @@ function run(mode, { force = false } = {}) {
   console.log(mode === "write"
     ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated${orphanKeys.length ? ` (${orphanKeys.length} orphan slot(s) pruned)` : ""}.`
     : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror), every generated region attributed.`);
+}
+
+// The surface-only sync, the one outward step. A failure names that step and its cause,
+// not a stack, because emit may have had nothing to do with the code that broke.
+function syncSurface(changed) {
+  const { status, signal, stderr } = spawnSync(process.execPath, [join(repoRoot, "api/assets/paper-editor/scripts/sync-barkpark.mjs"), "--write", "--surface-only"], { stdio: ["ignore", "inherit", "pipe"], encoding: "utf8" });
+  if (status === 0) {
+    process.stderr.write(stderr);
+    return;
+  }
+  const lines = (stderr ?? "").split("\n");
+  const start = lines.findIndex((line) => /^\w*Error\b|^sync-barkpark:/.test(line));
+  const stack = lines.findIndex((line, at) => at > start && /^\s+at /.test(line));
+  const cause = start < 0 ? [] : lines.slice(start, stack < 0 ? undefined : stack).filter((line) => line.trim());
+  console.error(`emit --write: ${changed} artifact(s) regenerated, but the sync step failed: sync-barkpark --surface-only exited ${status ?? signal}.`);
+  for (const line of cause) console.error(`  ${line}`);
+  console.error("Fix that, then rerun emit --write.");
+  process.exit(1);
 }
 
 // CLI

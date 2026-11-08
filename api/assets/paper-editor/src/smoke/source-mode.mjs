@@ -10,9 +10,58 @@
 import assert from "node:assert/strict";
 import { check } from "./harness.mjs";
 import { runToTiptap, runToOps, docToBlocks } from "../canvas/run-convert.js";
+import * as runConvertNamespace from "../canvas/run-convert.js";
 import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
 import { realignBlockIds } from "../canvas/source-realign.js";
 import { buildCommandRegistry } from "../canvas/command-palette.js";
+
+check("P5 source: run-convert public namespace stays exact", () => {
+  assert.deepEqual(Object.keys(runConvertNamespace).sort(), [
+    "blockParents",
+    "docToBlocks",
+    "hasOverlappingOps",
+    "holdsNodeIds",
+    "idCarriesKind",
+    "nodeContentEqual",
+    "opsRebaseSafe",
+    "pendingUploadIndexes",
+    "reconcileServerEcho",
+    "runToOps",
+    "runToTiptap",
+    "withObjectOverrides",
+  ].sort());
+});
+
+check("P5 source: idCarriesKind keeps the direct kind and alias matrix", () => {
+  const cases = [
+    ["paragraph", "paragraph", true],
+    ["heading", "heading", true],
+    ["sheet", "sheet", true],
+    ["code", "code", true],
+    ["paragraph", "heading", true],
+    ["heading", "paragraph", true],
+    ["paragraph", "sheet", false],
+    ["sheet", "paragraph", false],
+    ["sheet", "embed", false],
+    ["embed", "sheet", false],
+    ["code", "heading", false],
+    ["heading", "code", false],
+  ];
+  for (const [from, to, expected] of cases) {
+    assert.equal(runConvertNamespace.idCarriesKind({ type: from }, { type: to }), expected, `${from} -> ${to}`);
+  }
+  const listKinds = [
+    "list", "bulletList", "bullet_list", "bullet-list", "bulletedList", "bulleted_list",
+    "bulleted-list", "orderedList", "ordered-list", "ordered_list", "numbered_list", "numberedList",
+  ];
+  const roleKinds = ["pullquote", "blockquote", "eyebrow", "byline", "ingress"];
+  for (const listKind of listKinds) {
+    for (const roleKind of roleKinds) {
+      assert.equal(runConvertNamespace.idCarriesKind({ type: listKind }, { type: roleKind }), true, `${listKind} -> ${roleKind}`);
+      assert.equal(runConvertNamespace.idCarriesKind({ type: roleKind }, { type: listKind }), true, `${roleKind} -> ${listKind}`);
+    }
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §P5 MARKDOWN SOURCE-MODE — no-edit-zero-ops + edited-one-patch, AGAINST L0.

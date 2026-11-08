@@ -84,10 +84,21 @@ const LEAF_ATOM_FILES = [
   "canvas/divider-node.js",
   "canvas/code-node.js",
   "canvas/diagram-node.js",
+  "canvas/readonly-atom-node.js",
+  "canvas/fleet-editor.js",
   "canvas/embed-node.js",
 ];
 
 check("leaf atom node-views construct no bare <button> chrome", () => {
+  assert.deepEqual(
+    LEAF_ATOM_FILES.filter((rel) => [
+      "canvas/readonly-atom-node.js",
+      "canvas/fleet-editor.js",
+      "canvas/embed-node.js",
+    ].includes(rel)),
+    ["canvas/readonly-atom-node.js", "canvas/fleet-editor.js", "canvas/embed-node.js"],
+    "the split read-only, Fleet editor, and Fleet facade owners all remain scanned",
+  );
   for (const rel of LEAF_ATOM_FILES) {
     const src = readSrc(rel);
     assert.ok(

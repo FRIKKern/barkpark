@@ -16,7 +16,6 @@ defmodule BarkparkWeb.Studio.FocusVisibleCssTest do
   @root Path.expand("../../../lib/barkpark_web/layouts/root.html.heex", __DIR__)
   @shell Path.expand("../../../priv/static/assets/bp-paper-editor-shell.css", __DIR__)
   @bundle_css Path.expand("../../../priv/static/assets/bp-paper-editor.css", __DIR__)
-  @src_css Path.expand("../../../assets/paper-editor/src/styles.css", __DIR__)
 
   # The declaration block of the first rule whose selector list is exactly `selector`.
   defp block(css, selector) do
@@ -40,14 +39,16 @@ defmodule BarkparkWeb.Studio.FocusVisibleCssTest do
   end
 
   test "the canvas field label shows keyboard focus in the shell, source and built stylesheets" do
-    for path <- [@shell, @src_css, @bundle_css] do
-      css = File.read!(path)
-
+    for {name, css} <- [
+          {Path.basename(@shell), File.read!(@shell)},
+          {"styles.css", Barkpark.Test.PaperEditorCSS.authored_css!()},
+          {Path.basename(@bundle_css), File.read!(@bundle_css)}
+        ] do
       rule =
         block(css, ~s(.bp-canvas-field-label[role="textbox"]:focus-visible)) ||
           block(css, ".bp-canvas-field-label[role=textbox]:focus-visible")
 
-      assert rule, "#{Path.basename(path)}: the field label has no :focus-visible rule"
+      assert rule, "#{name}: the field label has no :focus-visible rule"
       assert rule =~ "outline"
       assert rule =~ "--paper-accent"
     end

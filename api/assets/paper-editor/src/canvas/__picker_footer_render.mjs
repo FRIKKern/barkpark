@@ -2,26 +2,24 @@
 //
 // Barkever's J05 review saw `esc dismiss` wrap onto a second line at 1440 and 390 px. Line
 // boxes are layout, so this is measured in headless Chromium, not argued from the stylesheet:
-// the committed bundle and stylesheet (the files the job's freshness step proves are built from
-// src), a real <bp-paper-canvas> with `[[pla` typed, at 280, 390 and 1440 px (or BP_PICKER_WIDTHS).
+// a fresh temp build of this package's bundle and stylesheet, a real <bp-paper-canvas> with
+// `[[pla` typed, at 280, 390 and 1440 px (or BP_PICKER_WIDTHS).
 // Per width: the footer's text sits on one line, the default English words are not clipped,
 // and the menu stays inside the viewport. A host's longer words (data-strings) still keep one line.
 //
 //   Run:  node src/canvas/__picker_footer_render.mjs
 //   Env:  BP_CHROME=/path/to/chrome
-// It needs no node_modules: the narrow-render job runs it without `npm ci`.
+// It needs node_modules for that build: the narrow-render job runs `npm ci` first.
 //
 // No Chromium prints SKIP and exits 0, like __narrow_render.mjs; CI sets BP_REQUIRE_CHROME=1, where a SKIP exits 1.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { buildLocal } from "../../scripts/build-local.mjs";
 import { exitRig, skip, tally } from "../__rig.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ASSETS = join(HERE, "../../../../priv/static/assets");
 const WIDTHS = (process.env.BP_PICKER_WIDTHS || "280,390,1440").split(",").map(Number);
 
 function findChrome() {
@@ -49,6 +47,9 @@ if (!CHROME) {
   process.exit(skip("__picker_footer_render.mjs — no Chromium found. Set BP_CHROME or install chrome-headless-shell."));
 }
 
+const ASSETS = mkdtempSync(join(tmpdir(), "bp-picker-dist-"));
+process.on("exit", () => rmSync(ASSETS, { recursive: true, force: true }));
+await buildLocal({ outDir: ASSETS, logLevel: "warning" });
 const css = readFileSync(join(ASSETS, "bp-paper-editor.css"), "utf8");
 const bundle = join(ASSETS, "bp-paper-editor.bundle.js");
 const probe = `

@@ -1,6 +1,6 @@
-// Writes host-profile/surface.json: what the committed build offers a host, what it
-// needs from one, the page vocabulary it shares with the reader, what it keeps to
-// itself, and the reach-ins between them.
+// Composes host-profile/surface.json: what a build offers a host, what it needs
+// from one, the page vocabulary it shares with the reader, what it keeps to itself,
+// and the reach-ins between them.
 //   declared  index.d.ts's names for the editor's elements (canvas, editor, both,
 //             window, css); __contract_truth.test.mjs holds it equal to
 //             EMBED-CONTRACT.md's Surface index.
@@ -21,111 +21,88 @@
 //             - events the bundle dispatches.
 // A host profile checks a host's sources against this file.
 //
-// Run: node scripts/surface.mjs   (npm run build runs it; src/__surface.test.mjs
-// fails when the committed file is stale)
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+// This module writes nothing. packageSurface() reads one build directory and the
+// package's own sources. surface() adds the live Barkpark reader. The one writer of
+// the tracked file is scripts/sync-barkpark.mjs; the host surface test holds it
+// byte-equal to this composition.
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { JSDOM } from "jsdom";
-import { declaredInTypes, HOST_SUPPLIED, reachInsInContract } from "../src/contract-surface.mjs";
-import { classWords, readerAttributes, readerClasses, writtenAttributes } from "./writes.mjs";
+import { canvasSourceLeafNames, elementClassBody, extractPackageSurfaceEvidence } from "./surface-package.mjs";
+import { readerAttributes, readerClasses } from "./writes.mjs";
+
+export {
+  bundleEvents,
+  canvasMethodLeafNames,
+  canvasSourceLeafNames,
+  elementClassBody,
+  mountedMembers,
+  notClasses,
+  sourceMembers,
+  stylesheetClasses,
+} from "./surface-package.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const assets = path.join(root, "../../priv/static/assets");
 const readerDir = path.join(root, "../../lib/barkpark/portable_doc/render");
+const localDist = path.join(root, "dist");
 export const surfacePath = path.join(root, "host-profile/surface.json");
 
 const sorted = (list) => [...new Set(list)].sort();
+const leaves = (value) => Array.isArray(value) ? value : Object.values(value).flatMap(leaves);
 
-const grouped = (keys) => {
-  const out = {};
-  for (const key of [...keys].sort()) {
-    const [kind, element, name] = key.split("|");
-    ((out[element] ??= {})[kind] ??= []).push(name);
-  }
-  return out;
-};
-
-const byKind = (keys) => {
-  const out = {};
-  for (const key of [...keys].sort()) {
-    const [kind, name] = key.split("|");
-    (out[kind] ??= []).push(name);
-  }
-  return out;
-};
-
-export const stylesheetClasses = (css) =>
-  [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)].flatMap((m) => [...m[1].matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((c) => c[1]));
-
-export const bundleEvents = (js) => [...js.matchAll(/new\s+(?:Custom)?Event\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]);
-
-export const notClasses = (js) => [
-  ...[...js.matchAll(/(?:customElements\.define|createElement|getElementById)\(\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]),
-  ...[...js.matchAll(/\.id\s*=\s*["'`]([\w-]+)["'`]/g)].map((m) => m[1]),
-];
-
-export const sourceMembers = (text) => [...text.matchAll(/\bthis\.(_[A-Za-z]\w*)/g)].map((m) => m[1]);
-
-export async function mountedMembers(window, tag) {
-  const el = window.document.createElement(tag);
-  window.document.body.append(el);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  const members = [...Object.getOwnPropertyNames(window.customElements.get(tag).prototype), ...Object.getOwnPropertyNames(el)].filter((n) => n.startsWith("_"));
-  el.remove();
-  return members;
+export async function packageSurface({ dir = localDist } = {}) {
+  const canvasDir = path.join(root, "src/canvas");
+  return extractPackageSurfaceEvidence({
+    bundleSource: readFileSync(path.join(dir, "bp-paper-editor.bundle.js"), "utf8"),
+    editorCssSource: readFileSync(path.join(dir, "bp-paper-editor.css"), "utf8"),
+    typesSource: readFileSync(path.join(root, "index.d.ts"), "utf8"),
+    contractSource: readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"),
+    elementSources: {
+      canvas: [
+        elementClassBody(readFileSync(path.join(canvasDir, "index.js"), "utf8")),
+        ...canvasSourceLeafNames(readdirSync(canvasDir)).map((name) => readFileSync(path.join(canvasDir, name), "utf8")),
+      ],
+      editor: [
+        elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8")),
+        readFileSync(path.join(root, "src/paper-editor-runtime.js"), "utf8"),
+        readFileSync(path.join(root, "src/paper-editor-autocomplete.js"), "utf8"),
+      ],
+    },
+  });
 }
 
-export const elementClassBody = (text) => {
-  const start = text.search(/^class \w+ extends HTMLElement \{/m);
-  if (start === -1) throw new Error("no custom element class at column 0");
-  return text.slice(start, text.indexOf("\n}", start) + 2);
-};
-
-export async function surface() {
-  const types = declaredInTypes(readFileSync(path.join(root, "index.d.ts"), "utf8"));
-  const reachIns = reachInsInContract(readFileSync(path.join(root, "EMBED-CONTRACT.md"), "utf8"));
-  const names = new Set([...types, ...reachIns].map((k) => k.split("|").at(-1)));
-  const outside = (list) => sorted(list).filter((n) => !names.has(n));
-
-  const js = readFileSync(path.join(assets, "bp-paper-editor.bundle.js"), "utf8");
-  const css = readFileSync(path.join(assets, "bp-paper-editor.css"), "utf8");
-  const reader = readdirSync(readerDir).map((n) => readFileSync(path.join(readerDir, n), "utf8")).join("\n");
-  const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true, url: "http://localhost/" });
-  dom.window.BP_PAPER_EDITOR_NO_INJECT = true;
-  dom.window.eval(js);
-  const canvas = await mountedMembers(dom.window, "bp-paper-canvas");
-  const editorEl = await mountedMembers(dom.window, "bp-paper-editor");
-  const canvasSource = elementClassBody(readFileSync(path.join(root, "src/canvas/index.js"), "utf8"));
-  const editorSource = elementClassBody(readFileSync(path.join(root, "src/index.js"), "utf8"));
-  const editor = dom.window.customElements.get("bp-paper-editor");
-  const page = { classes: outside(readerClasses(reader)), attributes: outside(readerAttributes(reader)) };
-  const notClass = new Set([...notClasses(js), ...page.classes]);
-  const internal = (list) => outside(list).filter((n) => !page.attributes.includes(n));
-
+export function composeBarkparkSurface(packageEvidence, readerSource) {
+  if (typeof readerSource !== "string" || readerSource.length === 0)
+    throw new Error("surface: Barkpark reader source must be a non-empty string");
+  const classes = readerClasses(readerSource);
+  const attributes = readerAttributes(readerSource);
+  if (classes.length === 0) throw new Error("surface: Barkpark reader source has no class evidence");
+  if (attributes.length === 0) throw new Error("surface: Barkpark reader source has no attribute evidence");
+  const { candidates, ...evidence } = packageEvidence;
+  const names = new Set(leaves({ declared: evidence.declared, host: evidence.host, reachIns: evidence.reachIns }));
+  const outside = (list) => sorted(list).filter((name) => !names.has(name));
+  const page = { classes: outside(classes), attributes: outside(attributes) };
+  const internal = (list) => sorted(list).filter((name) => !page.attributes.includes(name));
   return {
-    contract: editor.CONTRACT_VERSION,
-    editor: editor.EDITOR_VERSION,
-    build: editor.BUILD_SHA,
-    declared: grouped([...types].filter((k) => !HOST_SUPPLIED.has(k.split("|")[1]))),
-    host: grouped([...types].filter((k) => HOST_SUPPLIED.has(k.split("|")[1]))),
-    reachIns: byKind(reachIns),
+    ...evidence,
     reader: page,
     internal: {
       members: {
-        canvas: internal([...canvas, ...sourceMembers(canvasSource)]),
-        editor: internal([...editorEl, ...sourceMembers(editorSource)]),
+        canvas: internal(candidates.members.canvas),
+        editor: internal(candidates.members.editor),
       },
-      classes: internal([...stylesheetClasses(css), ...classWords(js)].filter((n) => !notClass.has(n))),
-      attributes: internal(writtenAttributes(js).filter((n) => n.startsWith("data-"))),
-      events: internal(bundleEvents(js)),
+      classes: internal(candidates.classes.filter((name) => !page.classes.includes(name))),
+      attributes: internal(candidates.attributes),
+      events: internal(candidates.events),
     },
   };
 }
 
-export const render = (value) => `${JSON.stringify(value, null, 2)}\n`;
+export const liveReaderSource = () => readdirSync(readerDir).map((name) => readFileSync(path.join(readerDir, name), "utf8")).join("\n");
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  writeFileSync(surfacePath, render(await surface()));
-  console.log(`wrote ${path.relative(root, surfacePath)}`);
+// The whole profile for a build directory.
+export async function surface({ dir }) {
+  return composeBarkparkSurface(await packageSurface({ dir }), liveReaderSource());
 }
+
+export const render = (value) => `${JSON.stringify(value, null, 2)}\n`;

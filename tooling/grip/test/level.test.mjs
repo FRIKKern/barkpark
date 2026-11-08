@@ -174,12 +174,13 @@ test("a marker-spliced hand-authored file is NOT L4 — it is partly source", ()
   // GENERATED markers inside a file whose identity, structure and majority of
   // bytes are hand-written. Levelling these L4 would DEFLATE the authority of
   // an honest source read — the mirror-image bug of the inflation this list
-  // exists to stop. Every splice target in ARTIFACTS is pinned here.
+  // exists to stop. Each path below is a splice target in ARTIFACTS. The raw
+  // sink api/assets/paper-surface/paper-surface.css is not: fragment 01 is.
   const spliceTargets = [
     "cloud/priv/static/app.css",
     "cloud/priv/static/app.js",
     "cloud/priv/static/styleguide.html",
-    "api/assets/paper-surface/paper-surface.css",
+    "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css",
     "api/lib/barkpark_web/layouts/root.html.heex",
     "api/lib/barkpark_web/layouts/bulldocs.html.heex",
     "api/lib/barkpark_web/layouts/sheets.html.heex",

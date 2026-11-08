@@ -5,9 +5,10 @@
 // cell's text hit a grip instead of placing the caret.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "../paper-editor/src/__css_source_graph.mjs";
 
 const shell = readFileSync(new URL("../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
-const mirror = readFileSync(new URL("../paper-editor/src/styles.css", import.meta.url), "utf8");
+const mirror = readAuthoredCss();
 
 const rules = (css) => {
   const out = new Map();

@@ -1,0 +1,524 @@
+    .bp-canvas-field-image-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 132px;
+      margin: 0.4em 0;
+      padding: 28px 20px;
+      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border-radius: 10px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+      color: var(--paper-accent, #1e5347);
+      cursor: pointer;
+      user-select: none;
+      text-align: center;
+      transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .bp-canvas-field-image-empty:hover {
+      background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+    }
+    .bp-canvas-field-image-empty:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+    }
+    .bp-canvas-field-image-empty-icon {
+      width: 30px;
+      height: 30px;
+      opacity: 0.85;
+    }
+    .bp-canvas-field-image-empty-label {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+    }
+    .bp-canvas-field-image-empty-hint {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--paper-ink-faint, #82918b);
+    }
+    /* field-number's unit, after its number input: quiet text, not chrome. The
+       input and unit share the field row's value column. */
+    .bp-canvas-field-value { display: flex; align-items: baseline; min-width: 0; }
+    .bp-canvas-field-value > .bp-canvas-field-control { flex: 1 1 auto; min-width: 0; }
+    .bp-canvas-field-unit {
+      margin-inline-start: 0.4em;
+      color: var(--paper-ink-faint);
+    }
+
+    /* ── canvas action node-view (editable-action: the CTA button) ────────────
+       The CTA `action` block edited in-canvas: a live bp-button PREVIEW (byte-
+       matching the reader anchor classes below so it paints identically to /papers)
+       above a label/href/priority control row. The preview `.bp-button` / `--primary`
+       rules MIRROR paper-surface.css `.bp-paper-surface .bp-button` byte-for-byte,
+       scoped under .bp-canvas-action so they reach the editor sink
+       (.bp-paper-editor-body). Keep BYTE-IDENTICAL with the styles.css copy (the
+       paper-editor-mirror-check lockstep). */
+    .bp-canvas-action {
+      margin: 1em 0;
+      padding: 12px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 8px;
+      background: var(--paper-bg-deep, #f4f4ef);
+    }
+    .bp-canvas-action .bp-button {
+      display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
+      color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
+    }
+    .bp-canvas-action .bp-button--primary {
+      border: none; background: var(--paper-accent); color: #ffffff;
+    }
+    /* The label edits in place; an empty label keeps the button's shape and says what goes there. */
+    .bp-canvas-action [data-test-id="paper-action-label"]:empty::before { content: attr(data-placeholder); opacity: 0.6; }
+    .bp-canvas-action-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .bp-canvas-action-href {
+      flex: 1 1 160px;
+      min-width: 0;
+      padding: 6px 10px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 6px;
+      background: var(--paper-bg, #ffffff);
+      color: var(--paper-ink, #1a1a17);
+      font: inherit;
+      font-size: 13px;
+    }
+    .bp-canvas-action-priority {
+      flex: 0 0 auto;
+      padding: 6px 10px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 6px;
+      background: var(--paper-bg, #ffffff);
+      color: var(--paper-ink, #1a1a17);
+      font: inherit;
+      font-size: 13px;
+    }
+
+    /* ── pdd-t20c: GHOST SLOTS — an absent optional block's calm affordance ────
+       The t13 featured-placeholder generalized: each optional declaration whose
+       kind is absent (featured / ingress) is offered as an evergreen ghost in its
+       enforced place (after the title run). A click materializes the real block
+       via the op path; the ghost itself is LiveView chrome that never enters the
+       PM doc (D5). Same evergreen token vocabulary as the image placeholder, but a
+       quieter row so a doctrine paper opens calm, never damaged. Not a
+       `.bp-canvas-*` class — these render in the Studio shell, not the WC bundle,
+       so the mirror-check does not govern them. */
+    .bp-paper-ghost-slots {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0.5em 0;
+    }
+    .bp-paper-ghost-slot {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 12px 16px;
+      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border-radius: 10px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.08));
+      color: var(--paper-accent, #1e5347);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      user-select: none;
+      transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .bp-paper-ghost-slot:hover {
+      background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+    }
+    .bp-paper-ghost-slot:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+    }
+    .bp-paper-ghost-icon {
+      flex: 0 0 auto;
+      font-size: 18px;
+      line-height: 1;
+      opacity: 0.85;
+    }
+    .bp-paper-ghost-body {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .bp-paper-ghost-label {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+    }
+    /* Text on the slot's accent tint, not the bare paper: ink-soft clears AA
+       there in both modes where ink-faint did not (task-4fe2840b400afeb1). */
+    .bp-paper-ghost-hint {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--paper-ink-soft, #55635e);
+    }
+
+    /* ── Curated slash popover (B2) — "1:1 with Portable-Doc". ─────────────
+       Rendered into <body> by SlashMenu (src/slash-menu.js) and positioned
+       fixed at the caret. Mirrors Portable-Doc's `.paper-slash-popover`:
+       280px warm chrome surface, "Insert block" eyebrow, icon + bold name +
+       right-aligned muted description rows, accent-soft active row with a
+       rust icon, and a <kbd> footer hint bar.
+
+       The popover lives OUTSIDE `.bp-paper-surface` (appended to <body>), so
+       the `--paper-*` tokens scoped to the surface don't reach it. We re-bind
+       the handful it needs here, keyed on `html[data-theme]`, so it themes
+       warm in BOTH modes — cream popover in light, warm-dark in dark.
+       `--paper-rule-soft` is the footer-divider hairline (lighter than rule). */
+    html[data-theme="light"] .bp-slash-menu {
+      --paper-bg:          #fbfaf6;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-ink-faint:   #787067;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-rule-soft:   rgba(31, 26, 20, 0.04);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+    }
+    html[data-theme="dark"] .bp-slash-menu {
+      --paper-bg:          #1b1815;
+      --paper-ink:         #ece6dc;
+      --paper-ink-soft:    #b8ad9e;
+      --paper-ink-faint:   #908679;
+      --paper-rule:        rgba(236, 230, 220, 0.10);
+      --paper-rule-soft:   rgba(236, 230, 220, 0.05);
+      --paper-accent:      #d97a5f;
+      --paper-accent-soft: rgba(217, 122, 95, 0.14);
+      --paper-chrome-bg:   #221e1a;
+      --paper-chrome-border: rgba(236, 230, 220, 0.14);
+    }
+    /* Pre-paint / no-theme fallback — warm light defaults + fonts. */
+    .bp-slash-menu {
+      --paper-bg:          #fbfaf6;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-ink-faint:   #787067;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-rule-soft:   rgba(31, 26, 20, 0.04);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+      --paper-font-sans:   var(--font);
+      --paper-font-mono:   var(--font-mono);
+
+      position: fixed; z-index: 200;
+      width: 280px;
+      display: flex; flex-direction: column;
+      padding: 6px 0 4px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 6px;
+      box-shadow: 0 4px 16px hsl(var(--bp-shadow-hsl) / 0.08);
+      font-family: var(--paper-font-sans);
+      animation: bp-slash-fade 0.12s ease-out;
+    }
+    @keyframes bp-slash-fade {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    /* Eyebrow — uppercase letter-spaced "Insert block" header. */
+    .bp-slash-eyebrow {
+      font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--paper-ink-faint); padding: 6px 14px;
+    }
+    .bp-slash-list {
+      display: block; padding: 2px 6px;
+      max-height: 320px; overflow-y: auto;
+    }
+    .bp-slash-group {
+      padding: 6px 8px 2px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--paper-ink-faint);
+    }
+    .bp-slash-item {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 5px 8px;
+      background: transparent; border: none; border-radius: 4px;
+      color: var(--paper-ink); font-family: inherit; font-size: 13px;
+      line-height: 1.2; text-align: left; cursor: pointer;
+      transition: background 0.08s ease-out;
+    }
+    .bp-slash-item:hover,
+    .bp-slash-item.is-active { background: var(--paper-accent-soft); }
+    /* A finger needs a 44px row (task-be754bd628311c5f). */
+    @media (hover: none), (max-width: 768px) { .bp-slash-item { min-height: 44px; } }
+    .bp-slash-hint {
+      flex: 0 0 16px;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px;
+      color: var(--paper-ink-faint);
+      font-size: 13px; font-family: var(--paper-font-mono);
+      transition: color 0.08s ease-out;
+    }
+    /* Active/selected row recolors the icon to the rust accent. */
+    .bp-slash-item:hover .bp-slash-hint,
+    .bp-slash-item.is-active .bp-slash-hint { color: var(--paper-accent); }
+    .bp-slash-label {
+      flex: 1 1 auto; min-width: 0;
+      font-weight: 600; letter-spacing: 0.005em;
+    }
+    .bp-slash-desc {
+      flex: 0 0 auto; margin-left: auto; padding-left: 8px;
+      color: var(--paper-ink-faint); font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 130px;
+    }
+    /* On the tinted active/hover row the faint description fell under AA
+       (4.1:1 light, 3.8:1 dark); it steps up to the soft ink there
+       (task-be754bd628311c5f). */
+    .bp-slash-item:hover .bp-slash-desc,
+    .bp-slash-item.is-active .bp-slash-desc { color: var(--paper-ink-soft); }
+    /* ── EX2 — EXPECTED group. The top group of fields the doc's Expectation
+       recommends. Its eyebrow + ✦ hint + "expected" tag pick up the rust
+       accent so the recommended fields read distinctly from the generic
+       groups below. Reuses the existing .bp-slash-* tokens (themed both
+       modes via --paper-* variables); the group header text is "EXPECTED",
+       matched here on the data attribute the renderer stamps. */
+    .bp-slash-group[data-expected],
+    .bp-slash-item[data-expected] .bp-slash-hint {
+      color: var(--paper-accent);
+    }
+    .bp-slash-item[data-expected] .bp-slash-desc {
+      color: var(--paper-accent);
+      text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px;
+      opacity: 0.85;
+    }
+    /* Footer hint bar with <kbd> chips for the keyboard contract. */
+    .bp-slash-foot {
+      border-top: 1px solid var(--paper-rule-soft);
+      margin-top: 4px; padding: 8px 14px 4px;
+      font-size: 10.5px; color: var(--paper-ink-faint); letter-spacing: 0.04em;
+    }
+    .bp-slash-foot-sep { opacity: 0.6; margin: 0 2px; }
+    .bp-slash-foot kbd {
+      font-family: var(--paper-font-mono); font-size: 10px;
+      background: var(--paper-bg); border: 1px solid var(--paper-rule);
+      border-radius: 3px; padding: 0 4px; color: var(--paper-ink-soft);
+      margin: 0 1px;
+    }
+
+    /* ── P5 command palette (Cmd-P) — the Obsidian Cmd-P analog. REUSES the
+       `.bp-slash-*` popup DOM/CSS verbatim (rows / group headers / eyebrow /
+       footer all identical), so this modifier only does two things: widen the
+       centered modal a touch and style the query <input> the palette renders
+       under its eyebrow. No row restyling → no styling drift from the slash
+       menu. The popup carries BOTH `bp-slash-menu bp-cmd-palette`, so all the
+       themed --paper-* tokens above already apply. */
+    .bp-slash-menu.bp-cmd-palette {
+      width: 440px; max-width: calc(100vw - 24px);
+    }
+    .bp-cmd-input {
+      margin: 4px 14px 6px; padding: 7px 10px;
+      width: calc(100% - 28px); box-sizing: border-box;
+      background: var(--paper-bg);
+      border: 1px solid var(--paper-chrome-border); border-radius: 5px;
+      color: var(--paper-ink);
+      font-family: var(--paper-font-sans); font-size: 14px; line-height: 1.3;
+      outline: none;
+    }
+    .bp-cmd-input:focus {
+      border-color: var(--paper-accent);
+      box-shadow: 0 0 0 2px var(--paper-accent-soft);
+    }
+    .bp-cmd-input::placeholder { color: var(--paper-ink-faint); }
+
+    /* ── P5 Markdown SOURCE-MODE textarea — the Obsidian "source mode" analog.
+       Rendered by <bp-paper-canvas> (canvas/index.js) in place of the hidden rich
+       editor body when the user toggles source mode (Mod-Shift-m or the palette's
+       "Toggle Markdown source" command). Monospace, full-width, themed via the same
+       --paper-* tokens the surface defines (it lives INSIDE .bp-paper-surface, so
+       they cascade in). Auto-grows to its content (canvas sets height), no internal
+       scroll. No restyle of any existing class. */
+    .bp-canvas-source {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 16px 18px;
+      min-height: 160px;
+      resize: vertical;
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 6px;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
+      font-family: var(--paper-font-mono);
+      font-size: 14px;
+      line-height: 1.6;
+      tab-size: 2;
+      white-space: pre;
+      overflow-wrap: normal;
+      outline: none;
+    }
+    .bp-canvas-source:focus {
+      border-color: var(--paper-accent);
+      box-shadow: 0 0 0 2px var(--paper-accent-soft);
+    }
+    .bp-canvas-source::placeholder { color: var(--paper-ink-faint); }
+
+    /* ── Selection format bubble (B6) — "1:1 with Portable-Doc". ───────────
+       Rendered into <body> by FormatBubble (src/format-bubble.js) and
+       positioned fixed above the text selection. Mirrors Portable-Doc's
+       `.paper-format-bubble`: a small warm pill — B / I / </> / link buttons
+       in a tight row, active marks pressed to the rust accent, plus an inline
+       link input row that drops in when the link button is pressed.
+
+       Like the slash popover this lives OUTSIDE `.bp-paper-surface`, so we
+       re-bind the `--paper-*` tokens here keyed on html[data-theme] — warm in
+       BOTH modes. Sits above block chrome (z 200) and the slash popover never
+       co-occurs (slash needs a caret; bubble needs a range). */
+    html[data-theme="light"] .bp-paper-format {
+      --paper-bg:          #fbfaf6;
+      --paper-bg-deep:     #f5f2e9;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+    }
+    html[data-theme="dark"] .bp-paper-format {
+      --paper-bg:          #1b1815;
+      --paper-bg-deep:     #221e1a;
+      --paper-ink:         #ece6dc;
+      --paper-ink-soft:    #b8ad9e;
+      --paper-rule:        rgba(236, 230, 220, 0.10);
+      --paper-accent:      #d97a5f;
+      --paper-accent-soft: rgba(217, 122, 95, 0.14);
+      --paper-chrome-bg:   #221e1a;
+      --paper-chrome-border: rgba(236, 230, 220, 0.14);
+    }
+    /* Pre-paint / no-theme fallback — warm light defaults + fonts. */
+    .bp-paper-format {
+      --paper-bg:          #fbfaf6;
+      --paper-bg-deep:     #f5f2e9;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+      --paper-font-sans:   var(--font);
+      --paper-font-mono:   var(--font-mono);
+
+      position: fixed; z-index: 200;
+      display: flex; align-items: center; flex-wrap: wrap;
+      gap: 2px; padding: 3px 4px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+      font-family: var(--paper-font-sans);
+      animation: bp-paper-format-fade 0.12s ease-out;
+    }
+    @keyframes bp-paper-format-fade {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .bp-paper-format__btn {
+      width: 20px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 0; background: transparent; border-radius: 3px;
+      color: var(--paper-ink); font-family: inherit; font-size: 12px;
+      cursor: pointer; user-select: none; padding: 0;
+      transition: background 0.12s ease-out, color 0.12s ease-out;
+    }
+    .bp-paper-format__btn:hover { background: var(--paper-bg-deep); }
+    .bp-paper-format__btn--active,
+    .bp-paper-format__btn[aria-pressed="true"] {
+      background: var(--paper-accent-soft);
+      color: var(--paper-accent);
+    }
+    .bp-paper-format__btn--bold { font-weight: 800; font-family: var(--paper-font-serif); }
+    .bp-paper-format__btn--italic { font-style: italic; font-family: var(--paper-font-serif); }
+    .bp-paper-format__btn--code {
+      width: 24px; font-family: var(--paper-font-mono);
+      font-size: 11px; letter-spacing: -0.02em;
+    }
+    .bp-paper-format__btn--link { width: auto; padding: 0 5px; font-size: 11.5px; }
+    .bp-paper-format__btn:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px;
+    }
+    .bp-paper-format__sep {
+      width: 1px; height: 14px; background: var(--paper-rule); margin: 0 2px;
+    }
+    .bp-paper-format__link-row {
+      display: flex; align-items: center; gap: 4px;
+      flex-basis: 100%; margin-top: 3px; padding-top: 3px;
+      border-top: 1px solid var(--paper-rule);
+    }
+    .bp-paper-format__link-input {
+      width: 180px; height: 22px;
+      border: 1px solid var(--paper-rule); border-radius: 3px;
+      background: var(--paper-bg); padding: 0 6px;
+      font-family: var(--paper-font-sans); font-size: 12px;
+      color: var(--paper-ink); outline: none;
+    }
+    .bp-paper-format__link-input:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
+    .bp-paper-format__link-remove {
+      height: 22px;
+      border: 1px solid var(--paper-chrome-border); background: transparent;
+      border-radius: 3px; padding: 0 8px;
+      font-family: var(--paper-font-sans); font-size: 11.5px;
+      color: var(--paper-ink-soft); cursor: pointer;
+    }
+    .bp-paper-format__link-remove:hover {
+      color: var(--paper-accent); border-color: var(--paper-accent);
+    }
+
+    /* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+       (mirrored in styles.css for embedders). */
+    .bp-paper-editor span[data-wikilink] { color: var(--paper-accent); text-decoration: underline; text-underline-offset: 2px; }
+    /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
+       under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
+    /* Contract 1.14.0 block-cards: the link card is Sanity's annotation pill, inverted against
+       the page, 33 px high: the annotation's title, then 25 px icon buttons (Open for a document
+       link, Edit, Remove), 4 px apart. A host sets its exact colours. */
+    .bp-link-pill { position: fixed; z-index: 60; align-items: center; gap: 4px; height: 33px; box-sizing: border-box; padding: 4px 4px 4px 12px; border-radius: 6px; background: var(--paper-ink); color: var(--paper-bg); box-shadow: 0 7px 8px -4px color-mix(in srgb, black 20%, transparent), 0 12px 17px 2px color-mix(in srgb, black 14%, transparent), 0 5px 22px 4px color-mix(in srgb, black 12%, transparent); font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); }
+    .bp-link-pill__label { margin-right: 8px; white-space: nowrap; }
+    .bp-link-pill__btn { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+    .bp-link-pill__btn:hover, .bp-link-pill__btn:focus-visible { background: color-mix(in srgb, currentColor 22%, transparent); outline: none; }
+    .bp-link-pill__btn.bp-link-preview__remove { color: color-mix(in srgb, var(--danger) 45%, var(--paper-bg)); }
+
+    .bp-link-preview {
+      position: fixed; z-index: 200;
+      width: 320px; max-width: calc(100vw - 16px);
+      padding: 8px 10px 8px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+      font-family: var(--paper-font-sans, var(--font)); color: var(--paper-ink);
+      animation: bp-paper-format-fade var(--dur-1) ease-out;
+    }
+    .bp-link-preview__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .bp-link-preview__title { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 1.9.0: the host's type label for a wikilink's document, and its subtitle in place of [[target]]. */
+    .bp-link-preview__badge { flex: none; font-size: var(--text-2xs); color: var(--paper-ink-soft); }
+    .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: var(--text-2xs); color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr--subtitle { font-family: var(--paper-font-sans, var(--font)); font-size: var(--text-xs); }
+    .bp-link-preview__excerpt { font-size: var(--text-xs); line-height: var(--text-xs-lh); color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
+    .bp-link-preview__btn {
+      height: 22px; border: 1px solid var(--paper-chrome-border); background: transparent;
+      border-radius: 3px; padding: 0 8px;
+      font-family: var(--paper-font-sans); font-size: var(--text-xs);
+      color: var(--paper-ink-soft); cursor: pointer;
+    }
+    .bp-link-preview__btn:hover { color: var(--paper-accent); border-color: var(--paper-accent); }
+    .bp-link-preview__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+

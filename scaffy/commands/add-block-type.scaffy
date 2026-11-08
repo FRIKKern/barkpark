@@ -92,9 +92,10 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #    clause — by hand, next to its siblings.
 #
 # 3. Block-view CSS (optional). If the block needs styling beyond bare text,
-#    add a rule to api/assets/paper-surface/paper-surface.css scoped as
-#    `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout` at
-#    paper-surface.css:213). NEVER inject root.html.heex — it has no per-type
+#    add a rule to api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css
+#    scoped as `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout`
+#    there), then run `npm run sync:barkpark:write` in api/assets/paper-editor.
+#    NEVER inject root.html.heex — it has no per-type
 #    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run
 #    rendered fine with zero CSS; this step is genuinely optional.
 #

@@ -10,7 +10,7 @@ const REPO = resolve(dirname(SELF), "../../..");
 const PKG = join(REPO, "api/assets/paper-editor");
 const WORKFLOW = join(REPO, ".github/workflows/paper-editor.yml");
 const NOT_READ = new Map([
-  ["api/lib/barkpark/portable_doc/bpml/parser.ex", "src/__narrow_render.mjs"],
+  ["api/lib/barkpark/portable_doc/bpml/parser.ex", "../paper-editor-host-tests/__narrow_render.mjs"],
   ["internal/", "src/canvas/__filetree_inline_mounted.test.mjs"],
 ]);
 
@@ -21,6 +21,7 @@ assert.deepEqual(Object.keys(arms).sort(), ["pull_request", "push"], "the workfl
 
 const runs = new Map([[join(PKG, "scripts/test-chain.mjs"), chain(PKG).map((file) => join(PKG, file))]]);
 const { entries, sinks, visited } = scanner({ repo: REPO, pkg: PKG, notRead: NOT_READ, self: SELF, runs }).reads(yml, scripts);
+assert.match(yml, /^ +run: npm run sync:barkpark:check$/m, "the workflow must run the outward sync check: the test chain also reaches that script, so the census alone cannot see the step go");
 assert.ok(entries >= 200, `found ${entries} entry points; the workflow parse is broken`);
 assert.ok(sinks.size >= 20, `found ${sinks.size} outside reads; the scan is broken`);
 

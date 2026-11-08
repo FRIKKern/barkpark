@@ -67,6 +67,9 @@ try {
     const active = document.activeElement;
     assert.ok(!["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(active && active.tagName), active && active.tagName);
   });
+} catch (error) {
+  failures += 1;
+  console.log(`FAIL  thrown outside a check\n      ${error?.stack ?? error}`);
 } finally {
   if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
   console.log("\nfield block focus: all checks passed");

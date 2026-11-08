@@ -39,10 +39,6 @@ defmodule Barkpark.PortableDoc.Render.EditorControlIslandParityTest do
                "../../../../priv/static/assets/bp-paper-editor-shell.css",
                __DIR__
              )
-  @bundle_css Path.expand(
-                "../../../../assets/paper-editor/src/styles.css",
-                __DIR__
-              )
   @surface_css Path.expand(
                  "../../../../assets/paper-surface/paper-surface.css",
                  __DIR__
@@ -82,7 +78,8 @@ defmodule Barkpark.PortableDoc.Render.EditorControlIslandParityTest do
   defp sources do
     [
       {"bp-paper-editor-shell.css", strip_comments(File.read!(@shell_css))},
-      {"paper-editor/src/styles.css", strip_comments(File.read!(@bundle_css))}
+      {"paper-editor/src/styles.css",
+       strip_comments(Barkpark.Test.PaperEditorCSS.authored_css!())}
     ]
   end
 
@@ -121,7 +118,8 @@ defmodule Barkpark.PortableDoc.Render.EditorControlIslandParityTest do
     for {name, css, selector} <- [
           {"bp-paper-editor-shell.css", strip_comments(File.read!(@shell_css)),
            ".bp-paper-surface .ProseMirror"},
-          {"paper-editor/src/styles.css", strip_comments(File.read!(@bundle_css)),
+          {"paper-editor/src/styles.css",
+           strip_comments(Barkpark.Test.PaperEditorCSS.authored_css!()),
            ".bp-paper-editor-body > .ProseMirror"}
         ] do
       decls = declarations(css, selector)

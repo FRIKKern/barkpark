@@ -171,7 +171,7 @@ function fakePoller(
       startCalls.push(index);
       if (outcome instanceof Error) {
         // The vendor sets pollingActive = false and rethrows on resetWebhook
-        // failure (index.js:1047-1051). Mirror that exactly.
+        // failure (in the vendor's index.js). Mirror that exactly.
         polling = false;
         throw outcome;
       }

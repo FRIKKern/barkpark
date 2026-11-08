@@ -346,7 +346,9 @@ const scenes = [
     await flush();
   }),
   () => editorScene("table-structure", "table", gearTable, async ({ el }) => {
-    el.requestTableStructure("add-row");
+    const addRow = el.querySelector('button[title="Add row"][data-table-action="add-row"]');
+    if (!addRow || addRow.disabled) throw new Error("table-structure: enabled Add row button not found");
+    addRow.click();
     await tick(50);
   }),
   () => canvasScene("nested-edits", trip, async ({ editor, flush }) => {

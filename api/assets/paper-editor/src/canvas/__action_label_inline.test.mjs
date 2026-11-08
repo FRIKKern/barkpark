@@ -4,8 +4,8 @@
 // below it, so clicking the button's text placed no caret.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -30,7 +30,7 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 for (const [name, path] of [
   ["styles.css", "../styles.css"],
 ]) {
-  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /\.bp-canvas-action \[data-test-id="paper-action-label"\]:empty::before \{ content: attr\(data-placeholder\);/,
     `${name}: an empty in-place label keeps the button shape and names what goes there`);
   assert.doesNotMatch(css, /\.bp-canvas-action-label\b/, `${name}: no separate label input remains`);

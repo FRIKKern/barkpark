@@ -8,8 +8,8 @@
 // fixed-surface inventory: editor_panel_containment_test.exs).
 // Run: node src/canvas/__block_menu_viewport.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -132,7 +132,7 @@ try {
 
   // The package owns the wikilink badge. The Barkpark host owns the slash row
   // and its theme contrast, which its host-only test reads from the live shell.
-  const bundle = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  const bundle = readAuthoredCss();
   check("the active wikilink row shows its faint text in the soft ink", () => {
     assert.match(bundle, /\.bp-wikilink-item\.is-active \.bp-wikilink-type-badge \{ color: var\(--paper-ink-soft\); \}/);
   });

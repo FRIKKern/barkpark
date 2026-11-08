@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
 const { window } = dom;
@@ -15,7 +15,7 @@ window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, right: 
 await import("./index.js");
 
 for (const path of ["../styles.css"]) {
-  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /\.bp-expandable__body \.bp-paper-editor-body > \.ProseMirror > h2\s*\{\s*margin-top: 1\.9em; border-top: 0; padding-top: 0;/, "nested headings do not acquire root section rules");
   assert.match(css, /\.bp-paper-editor-body \.ProseMirror > \.bp-resting-scaffold\s*\{\s*display: none;/, "the package stylesheet preserves reader margin collapse");
   assert.match(css, /\.bp-paper-editor-body \.bp-scaffold-control:focus-visible\s*\{\s*outline: 2px solid var\(--paper-accent\)/, "hidden content controls retain visible keyboard focus");

@@ -5,7 +5,7 @@
 //
 // WHY THIS FILE EXISTS. design/emit-fence.test.mjs proves `node design/emit.mjs
 // --write` refuses to replace an unattributed generated region. But TWO other
-// commands write the SAME region — `api/assets/paper-editor/src/styles.css`
+// commands write the SAME region — `api/assets/paper-editor/src/styles/theme.css`
 // between the `BEGIN/END GENERATED: paper-surface` markers:
 //
 //   • node design/paper-editor-mirror.mjs --write
@@ -30,7 +30,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, cpSync, copyFileSync, readFileSync, writeFileSync,
-  realpathSync, rmSync,
+  realpathSync, rmSync, readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,15 @@ const SHELL = "scripts/paper-editor-mirror-check.sh";
 const HEEX = "api/lib/barkpark_web/layouts/root.html.heex";
 // The editor rules the mirror check reads moved out of root.html.heex (edit-on-the-link slice 2).
 const SHELL_CSS = "api/priv/static/assets/bp-paper-editor-shell.css";
+const CSS_ENTRY = "api/assets/paper-editor/src/styles.css";
+const CSS_GRAPH = "api/assets/paper-editor/src/__css_source_graph.mjs";
+const CSS_AUTHORED = "api/assets/paper-editor/src/styles";
+const CSS_SHARED = "api/assets/paper-surface/code-tokens.css";
+const SURFACE_FRAGMENTS = "api/assets/paper-editor/src/paper-surface";
+const SHELL_FRAGMENTS = "api/assets/paper-editor/src/editor-shell";
+const SOURCE_ASSETS = "api/assets/paper-editor/scripts/source-assets.mjs";
+const SYNC = "api/assets/paper-editor/scripts/sync-barkpark.mjs";
+const RAW_SURFACE = "api/assets/paper-surface/paper-surface.css";
 
 const tempRoots = [];
 process.on("exit", () => {
@@ -70,9 +79,13 @@ function makeTree() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "mirror-fence-")));
   tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
+  cpSync(join(repoRoot, CSS_AUTHORED), join(root, CSS_AUTHORED), { recursive: true });
+  for (const dir of [SURFACE_FRAGMENTS, SHELL_FRAGMENTS]) cpSync(join(repoRoot, dir), join(root, dir), { recursive: true });
   const files = new Set([
     ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
-    SHELL, HEEX, SHELL_CSS,
+    SHELL, HEEX, SHELL_CSS, CSS_ENTRY, CSS_GRAPH, CSS_SHARED, SOURCE_ASSETS, SYNC, RAW_SURFACE,
+    "api/assets/paper-editor/src/code-tokens.css",
+    "api/assets/paper-editor/src/code-tokens.provenance.mjs",
   ]);
   for (const rel of files) {
     const dst = join(root, rel);
@@ -188,7 +201,25 @@ function stageLegitimateDrift(root) {
 }
 
 // ── (d) does NOT over-fire: an attributed, legitimately stale mirror regenerates ─
-test("fence does NOT over-fire: a legitimate paper-surface.css change regenerates the mirror, exit 0, no refusal", () => {
+test("emit --write carries a changed surface fragment to the raw sink through the one outward sync", () => {
+  const root = makeTree();
+  const rawBefore = readIn(root, RAW_SURFACE);
+  const tok = JSON.parse(readIn(root, "design/tokens.json"));
+  tok.type.reading.body.size = tok.type.reading.body.size + 1;
+  writeIn(root, "design/tokens.json", `${JSON.stringify(tok, null, 2)}\n`);
+  const w = emit(root, ["--write"]);
+  assert.equal(w.code, 0, `emit --write should succeed\n${w.out}\n${w.err}`);
+  const raw = readIn(root, RAW_SURFACE);
+  assert.notEqual(raw, rawBefore, "the raw sink did not follow the fragment");
+  const fragments = readdirSync(join(root, SURFACE_FRAGMENTS)).sort().map((name) => readIn(root, `${SURFACE_FRAGMENTS}/${name}`)).join("");
+  assert.equal(raw, fragments, "the raw sink is the assembled fragments, byte for byte");
+  assert.match(w.err, /host-profile\/surface\.json was not composed/, "a tree with no toolchain says the profile did not move");
+  const quiet = emit(root, ["--write"]);
+  assert.equal(quiet.code, 0, `${quiet.out}\n${quiet.err}`);
+  assert.doesNotMatch(`${quiet.out}\n${quiet.err}`, /sync-barkpark/, "with no change nothing is synced");
+});
+
+test("fence does NOT over-fire: a legitimate surface fragment change regenerates the mirror, exit 0, no refusal", () => {
   const root = makeTree();
   const { bundleBefore } = stageLegitimateDrift(root);
   const r = mirror(root, ["--write"]);

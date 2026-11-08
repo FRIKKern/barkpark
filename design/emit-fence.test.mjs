@@ -32,7 +32,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, AUDIT_ACTIONS_PATH } from "./emit.mjs";
-import { SURFACE_PATH, BUNDLE_PATH, MIRROR_NAME } from "./paper-editor-mirror.mjs";
+import { evaluateMirror, SURFACE_PATH, BUNDLE_PATH, MIRROR_NAME } from "./paper-editor-mirror.mjs";
+import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -45,6 +46,7 @@ const CSS_SENTINEL = "  --bp-hand-authored-sentinel-DO-NOT-DELETE: 1;";
 // A whole-file (Go) artifact's region IS the entire file, so any hand-written line
 // makes its digest miss the ledger. A trailing comment is enough and never compiles.
 const GO_SENTINEL = "// bp-hand-authored-sentinel-DO-NOT-DELETE";
+const RAW_SINK = "api/assets/paper-surface/paper-surface.css";
 
 // Build a throwaway copy of EXACTLY the tree emit.mjs reads: all of design/ (its
 // own source + tokens.json + themes + derive + the mirror module + the manifest)
@@ -59,12 +61,23 @@ function makeTree() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
   tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
-  const files = new Set([...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH]);
+  const files = new Set([
+    ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
+    "api/assets/paper-editor/src/paper-surface/00-foundation-type.css",
+    "api/assets/paper-editor/src/paper-surface/02-chat-code-story-layout.css",
+    "api/assets/paper-editor/src/paper-surface/03-data-viz-forms-media.css",
+    "api/assets/paper-editor/scripts/source-assets.mjs",
+    "api/assets/paper-editor/scripts/sync-barkpark.mjs",
+  ]);
   for (const rel of files) {
     const dst = join(root, rel);
     mkdirSync(dirname(dst), { recursive: true });
     copyFileSync(join(repoRoot, rel), dst);
   }
+  // The raw sink, made from this tree's own fragments so it starts in step whatever the
+  // real tree holds. emit --check reports a tree without it.
+  mkdirSync(join(root, dirname(RAW_SINK)), { recursive: true });
+  writeFileSync(join(root, RAW_SINK), assembledText("paper-surface", { root: join(root, "api/assets/paper-editor") }));
   return root;
 }
 
@@ -581,4 +594,101 @@ test("a later run sweeps trees a SIGKILLed run left behind, and spares a live on
   assert.equal(r.status, 0, `sweep child failed\n${r.stdout}\n${r.stderr}`);
   assert.ok(!existsSync(stale), "a tree older than the stale bar survived the sweep");
   assert.ok(existsSync(fresh), "the sweep removed a FRESH tree — it could belong to a concurrent run");
+});
+
+// Three more themes take the generated fragment past its 800 line limit.
+test("a theme that overflows the surface fragment is refused by name, before anything is written", () => {
+  const root = makeTree();
+  const spec = JSON.parse(readIn(root, "design/fixtures/theme-fixture.json"));
+  for (const name of ["fx-a", "fx-b", "fx-c"]) writeIn(root, `design/themes/${name}.json`, JSON.stringify({ ...spec, name }));
+  const manifest = "design/emit-manifest.json";
+  const [surfaceBefore, manifestBefore] = [readIn(root, SURFACE_PATH), readIn(root, manifest)];
+  const { code, err } = emit(root, ["--write"]);
+  assert.equal(code, 1);
+  assert.match(err, /REFUSED, nothing written/);
+  assert.match(err, /01-components-generated-theme\.css has \d+ physical lines \(max 800\)/);
+  assert.doesNotMatch(err, /ERR_INVALID_ARG_TYPE|canonical source missing/);
+  assert.equal(readIn(root, SURFACE_PATH), surfaceBefore, "the fragment was not written");
+  assert.equal(readIn(root, manifest), manifestBefore, "the manifest was not written");
+});
+
+test("evaluateMirror tells a fragment over its limit from a missing fragment", () => {
+  const over = makeTree();
+  writeIn(over, SURFACE_PATH, `${readIn(over, SURFACE_PATH)}${"/* pad */\n".repeat(200)}`);
+  const big = evaluateMirror(over).error;
+  assert.match(big, /will not assemble/);
+  assert.match(big, /physical lines \(max 800\)/);
+  assert.doesNotMatch(big, /canonical source missing/);
+  const gone = makeTree();
+  rmSync(join(gone, SURFACE_PATH));
+  assert.match(evaluateMirror(gone).error, /canonical source missing/);
+});
+
+test("a rerun of emit --write repairs a stale raw sink when no artifact changed", () => {
+  const root = makeTree();
+  const fresh = readIn(root, RAW_SINK);
+  writeIn(root, RAW_SINK, `${fresh}/* stale */\n`);
+  const fragmentBefore = readIn(root, SURFACE_PATH);
+  const { code, out, err } = emit(root, ["--write"]);
+  assert.equal(code, 0, err);
+  assert.equal(readIn(root, SURFACE_PATH), fragmentBefore, "no artifact needed a rewrite");
+  assert.match(out, /WROTE {2}api\/assets\/paper-surface\/paper-surface\.css/);
+  assert.equal(readIn(root, RAW_SINK), fresh, "the sink matches the package surface again");
+});
+
+test("emit --check reports a stale raw sink and writes nothing", () => {
+  const root = makeTree();
+  const fresh = readIn(root, RAW_SINK);
+  const stale = `${fresh}/* stale */\n`;
+  writeIn(root, RAW_SINK, stale);
+  const { code, err } = emit(root, ["--check"]);
+  assert.equal(code, 1);
+  assert.match(err, /STALE api\/assets\/paper-surface\/paper-surface\.css/);
+  assert.equal(readIn(root, RAW_SINK), stale, "--check writes nothing");
+});
+
+test("a sink in step is left alone", () => {
+  const root = makeTree();
+  const check = emit(root, ["--check"]);
+  assert.equal(check.code, 0, check.err);
+  const write = emit(root, ["--write"]);
+  assert.equal(write.code, 0, write.err);
+  assert.doesNotMatch(write.out, /WROTE {2}api\/assets\/paper-surface/);
+});
+
+test("a missing raw sink with no toolchain is reported, and exits non-zero, in both modes", () => {
+  const root = makeTree();
+  rmSync(join(root, RAW_SINK));
+  const check = emit(root, ["--check"]);
+  assert.equal(check.code, 1, check.out);
+  assert.match(check.err, /MISSING api\/assets\/paper-surface\/paper-surface\.css/);
+  const write = emit(root, ["--write"]);
+  assert.equal(write.code, 1, write.out);
+  assert.match(write.err, /paper-surface\.css is missing and this tree has no toolchain/);
+  assert.equal(existsSync(join(root, RAW_SINK)), false, "it reports; it does not pretend to repair");
+});
+
+test("a sync that cannot build fails the emit by name, with no stack", () => {
+  const root = makeTree();
+  mkdirSync(join(root, "api/assets/paper-editor/node_modules"));
+  const { code, err } = emit(root, ["--write"]);
+  assert.equal(code, 1);
+  assert.match(err, /the sync step failed: sync-barkpark --surface-only exited 1/);
+  assert.match(err, /Error \[?ERR_MODULE_NOT_FOUND|Cannot find/, "the cause is named");
+  assert.doesNotMatch(err, /^\s+at /m, "no stack");
+  assert.doesNotMatch(err, /Node\.js v\d/, "no crash banner");
+});
+
+test("with a toolchain a quiet rerun still syncs, and a failed sync fails the emit", () => {
+  const sync = "api/assets/paper-editor/scripts/sync-barkpark.mjs";
+  const root = makeTree();
+  mkdirSync(join(root, "api/assets/paper-editor/node_modules"));
+  writeIn(root, sync, 'import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./ran.txt", import.meta.url), process.argv.slice(2).join(" "));\n');
+  const ran = emit(root, ["--write"]);
+  assert.equal(ran.code, 0, ran.err);
+  assert.equal(readIn(root, "api/assets/paper-editor/scripts/ran.txt"), "--write --surface-only");
+  writeIn(root, sync, "process.exit(3);\n");
+  const failed = emit(root, ["--write"]);
+  assert.equal(failed.code, 1);
+  assert.match(failed.err, /sync-barkpark --surface-only exited 3/);
 });

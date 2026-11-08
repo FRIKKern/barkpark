@@ -8,11 +8,11 @@
 // absolute, the old `Math.max(0, …)` clamp then parked it over the first word of a
 // block with no gutter, where it would take the click aimed at that word.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { readAuthoredCss } from "../__css_source_graph.mjs";
 
 for (const file of ["../styles.css"]) {
-  const css = readFileSync(new URL(file, import.meta.url), "utf8");
+  const css = readAuthoredCss();
   assert.match(css, /(^|\n)bp-paper-canvas\s*\{[^}]*position: relative;/, `${file}: the canvas anchors its gutter chrome`);
   assert.match(css, /\n\.bp-block-handle\s*\{[^}]*position: absolute;/, `${file}: the block handle is out of flow`);
   assert.match(css, /\n\.bp-block-drop\s*\{[^}]*position: absolute;/, `${file}: the drop line is out of flow`);

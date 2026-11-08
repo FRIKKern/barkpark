@@ -10,7 +10,8 @@
 #        stylesheet — inline in root.html.heex until edit-on-the-link lifted it
 #        into a static asset BOTH root.html.heex and the public paper reader
 #        layout link, so one copy paints the editor on both surfaces)
-#     2. api/assets/paper-editor/src/styles.css        (the de-scoped bundle)
+#     2. package-authored CSS reachable from
+#        api/assets/paper-editor/src/styles.css        (the de-scoped bundle)
 #   When a rule lands in one mirror but not the other, edit-mode-at-rest silently
 #   diverges from view mode (hyphens/callout/list-marker drift, cycles 57-58).
 #   This tripwire fails when a .bp-canvas-* class exists in one mirror but not the
@@ -25,7 +26,7 @@
 #
 #   Part 3 — generated paper-surface token layer. The `--paper-*` theme tokens +
 #   `--bp-*` typography tokens in the embedder bundle (styles.css) are GENERATED
-#   from the ONE canonical source (api/assets/paper-surface/paper-surface.css)
+#   from the ONE canonical source (the package's assembled src/paper-surface)
 #   via a deterministic de-scoping transform, and live between exact BEGIN/END
 #   GENERATED markers. Default mode byte-compares against the marked section
 #   (fails with a --write hint on drift); `--write` rewrites it in place. This
@@ -169,17 +170,57 @@ selftest() {
     && say "unknown argument -> exit 2, names the argument" 0 \
     || { say "unknown argument -> exit 2, names the argument (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
 
+  # 11. SOURCE-GRAPH ARM — missing imports, duplicate canonical targets,
+  # cycles, late/qualified imports and path/symlink escapes all red in the
+  # permanent graph test that owns the package-authored census input.
+  if node "$(dirname "$SELF")/../api/assets/paper-editor/src/__styles_source_graph.test.mjs" > "$tmp/out" 2>&1; then
+    say "package-authored import closure + negative controls -> PASS" 0
+  else
+    say "package-authored import closure + negative controls -> PASS" 1
+    sed 's/^/        /' "$tmp/out"
+  fi
+
   echo ""
-  if [ "$bad" -eq 0 ]; then echo "paper-editor-mirror-check --selftest: PASS (10/10)"; return 0; fi
+  if [ "$bad" -eq 0 ]; then echo "paper-editor-mirror-check --selftest: PASS (11/11)"; return 0; fi
   echo "paper-editor-mirror-check --selftest: FAILED ($bad case(s))"; return 1
 }
 
 if [[ "$MODE" == "selftest" ]]; then selftest; exit $?; fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HEEX="${PAPER_EDITOR_MIRROR_HEEX:-$ROOT/api/priv/static/assets/bp-paper-editor-shell.css}"
-BUNDLE="${PAPER_EDITOR_MIRROR_BUNDLE:-$ROOT/api/assets/paper-editor/src/styles.css}"
-SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
+HEEX="${PAPER_EDITOR_MIRROR_HEEX:-}"
+BUNDLE="${PAPER_EDITOR_MIRROR_BUNDLE:-$ROOT/api/assets/paper-editor/src/styles/theme.css}"
+AUTHORED_TMP=""
+SHELL_TMP=""
+trap 'rm -f "$AUTHORED_TMP" "$SHELL_TMP"' EXIT
+# The shell side is the package's assembled source. The served copy of it is held
+# byte-equal by sync-barkpark --check.
+if [ -z "$HEEX" ]; then
+  SHELL_TMP="$(mktemp)"
+  node --input-type=module - "$ROOT" "$SHELL_TMP" <<'NODE'
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+const [, , root, output] = process.argv;
+const assets = await import(pathToFileURL(join(root, "api/assets/paper-editor/scripts/source-assets.mjs")));
+writeFileSync(output, assets.assembleAsset("editor-shell", { root: join(root, "api/assets/paper-editor") }));
+NODE
+  HEEX="$SHELL_TMP"
+fi
+if [ -n "${PAPER_EDITOR_MIRROR_BUNDLE:-}" ]; then
+  PACKAGE_AUTHORED="$BUNDLE"
+else
+  AUTHORED_TMP="$(mktemp)"
+  node --input-type=module - "$ROOT" "$AUTHORED_TMP" <<'NODE'
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+const [, , root, output] = process.argv;
+const graph = await import(pathToFileURL(join(root, "api/assets/paper-editor/src/__css_source_graph.mjs")));
+writeFileSync(output, graph.readAuthoredCss(), "utf8");
+NODE
+  PACKAGE_AUTHORED="$AUTHORED_TMP"
+fi
 
 # ── Part 3: generated paper-surface token layer (source → bundle) ────────────
 # Delegates to the single Node owner (design/paper-editor-mirror.mjs). Runs first
@@ -205,7 +246,7 @@ fi
 HEEX_ONLY_ALLOW="${PAPER_EDITOR_MIRROR_HEEX_ALLOW-bp-canvas-source}"
 BUNDLE_ONLY_ALLOW="${PAPER_EDITOR_MIRROR_BUNDLE_ALLOW-}"
 
-python3 - "$HEEX" "$BUNDLE" "$HEEX_ONLY_ALLOW" "$BUNDLE_ONLY_ALLOW" <<'PY'
+python3 - "$HEEX" "$PACKAGE_AUTHORED" "$HEEX_ONLY_ALLOW" "$BUNDLE_ONLY_ALLOW" <<'PY'
 import re, sys
 
 heex_path, bundle_path, heex_allow, bundle_allow = sys.argv[1:5]

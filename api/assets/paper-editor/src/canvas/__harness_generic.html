@@ -14,19 +14,21 @@
     longer forks a harness into /tmp where nobody can review or re-run it.
 
     ── THE ONE COMMAND ───────────────────────────────────────────────────────
-    From a clean checkout, repo root:
+    From the package, after npm ci:
 
-        node api/assets/paper-editor/src/canvas/__harness_generic_run.mjs
+        node src/canvas/__harness_generic_run.mjs
 
-    That starts a static file server over the repo, drives headless Chromium
+    That builds the package into a temp folder, starts a static file server over
+    the package, drives headless Chromium
     against this page, and prints the __assertCleanMount / __assertRoundTrip
     results for the committed real-paper fixture. NO Phoenix, no database: the
     page is static files only.
 
     To look at it by hand instead:
 
-        python3 -m http.server 8123 --directory .      # repo root
-        open 'http://127.0.0.1:8123/api/assets/paper-editor/src/canvas/__harness_generic.html'
+        npm run build
+        python3 -m http.server 8123 --directory .      # package root
+        open 'http://127.0.0.1:8123/src/canvas/__harness_generic.html'
         # then in the console: __assertCleanMount(), __assertRoundTrip()
 
     ── INPUT ─────────────────────────────────────────────────────────────────
@@ -64,7 +66,7 @@
     // the relative path resolves under any static host.
     window.BP_PAPER_EDITOR_NO_INJECT = true;
   </script>
-  <link rel="stylesheet" href="../../../../priv/static/assets/bp-paper-editor.css" />
+  <link rel="stylesheet" href="../../dist/bp-paper-editor.css" />
 
   <style>
     body { margin: 0; padding: 2rem; font-family: system-ui, sans-serif; background: #fafafa; }
@@ -113,7 +115,7 @@
 
   <!-- The SAME built bundle __harness.html loads. The production canvas code is
        imported, never re-implemented: this page owns input + assertions only. -->
-  <script src="../../../../priv/static/assets/bp-paper-editor.bundle.js"></script>
+  <script src="../../dist/bp-paper-editor.bundle.js"></script>
 
   <script>
     const params = new URLSearchParams(location.search);
@@ -244,7 +246,7 @@
         if (Date.now() > deadline) {
           fail("The <bp-paper-canvas> element never produced a live editor " +
                "(el._editor stayed null for 5s) — is the bundle at " +
-               "priv/static/assets/bp-paper-editor.bundle.js present?");
+               "dist/bp-paper-editor.bundle.js present?");
           return;
         }
         setTimeout(tick, 20);

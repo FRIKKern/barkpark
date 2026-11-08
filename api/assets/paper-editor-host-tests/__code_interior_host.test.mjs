@@ -7,8 +7,9 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "../paper-editor/src/__css_source_graph.mjs";
 
-const bundleCss = readFileSync(new URL("../paper-editor/src/styles.css", import.meta.url), "utf8");
+const bundleCss = readAuthoredCss();
 const shell = readFileSync(
   new URL("../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url),
   "utf8",

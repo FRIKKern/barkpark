@@ -105,6 +105,9 @@ try {
     });
     canvas.closest(".bp-paper-editor").remove();
   }
+} catch (error) {
+  failures += 1;
+  console.log(`FAIL  thrown outside a check\n      ${error?.stack ?? error}`);
 } finally {
   if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
   console.log("\nfield quote: all checks passed");

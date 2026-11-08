@@ -95,10 +95,12 @@ export const STEPS = [
       ...RENDER,
     ],
     after: ["design-emit"],
+    check:
+      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run sync:barkpark:check",
     write:
-      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run build:web",
+      "cd api/assets/paper-editor && (test -d node_modules || npm ci) && npm run sync:barkpark:write",
     gates: [
-      ".github/workflows/paper-editor.yml: Assert committed bundle and stylesheet are fresh",
+      ".github/workflows/paper-editor.yml: Assert every Barkpark sink matches a fresh build",
       "api/assets/paper-editor/src/__surface.test.mjs",
       "api/test/barkpark/paper_editor_vendor_drift_test.exs",
     ],
@@ -162,6 +164,8 @@ export const STEPS = [
       ...READER_PAGE,
       ...GETTEXT,
       "api/assets/paper-surface/**",
+      // The raw surface's source: an edit here moves that sink through the sync.
+      "api/assets/paper-editor/src/paper-surface/**",
       "api/lib/barkpark/plugins/bulldocs/**",
       "api/lib/barkpark/content/papers/block_ops.ex",
       "api/lib/barkpark/portable_doc/patch.ex",
@@ -183,9 +187,9 @@ export const STEPS = [
     gate: "api/lib/mix/tasks/barkpark.portable_doc.conformance.ex",
   }),
   conformance("editor-canvas", {
-    inputs: ["api/assets/paper-editor/src/**"],
-    check: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && node src/__conformance.mjs",
-    write: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && CONFORMANCE_WRITE=1 node src/__conformance.mjs",
+    inputs: ["api/assets/paper-editor/src/**", "api/assets/paper-editor-host-tests/__conformance.mjs"],
+    check: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && node ../paper-editor-host-tests/__conformance.mjs",
+    write: "cd api/assets/paper-editor && (test -d node_modules || npm ci) && CONFORMANCE_WRITE=1 node ../paper-editor-host-tests/__conformance.mjs",
     gate: ".github/workflows/paper-editor.yml: PortableDoc conformance (editor canvas vs the golden pack)",
   }),
   conformance("react", {

@@ -54,13 +54,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
 
 export const SHEET_PATH = "api/lib/barkpark_web/layouts/root.html.heex";
 export const TOKENS_PATH = "design/tokens.json";
-export const EMITTED_SURFACE_PATH = "api/assets/paper-surface/paper-surface.css";
+export const EMITTED_SURFACE_PATH = "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css";
 
 // ── THE PIN ─────────────────────────────────────────────────────────────────
 // Horizontal advance of "0" — the definition of the CSS `ch` unit — at
@@ -166,7 +167,11 @@ export function parseStack(tokens) {
 // Returns { gate, faces, rows, failures, refusal }. A refusal (a parse that
 // could not find what it needs) is returned as a failure too — never swallowed,
 // never turned into a clean run.
-export function evaluateReadingMeasure({ read = (rel) => readFileSync(join(repoRoot, rel), "utf8") } = {}) {
+const readSource = (rel) => rel === EMITTED_SURFACE_PATH
+  ? assembledText("paper-surface", { root: join(repoRoot, "api/assets/paper-editor") })
+  : readFileSync(join(repoRoot, rel), "utf8");
+
+export function evaluateReadingMeasure({ read = readSource } = {}) {
   const failures = [];
   let gate = null, faces = null, rows = [], bodySize = null, emittedStack = null;
 

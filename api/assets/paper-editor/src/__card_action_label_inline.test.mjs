@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readAuthoredCss } from "./__css_source_graph.mjs";
 
-const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const styles = readAuthoredCss();
 
 assert.match(styles,
   /\.bp-canvas-card:has\(\[data-test-id="paper-card-action-label"\]:focus\) \.bp-canvas-card__controls \{ opacity: 0; pointer-events: none; \}/,

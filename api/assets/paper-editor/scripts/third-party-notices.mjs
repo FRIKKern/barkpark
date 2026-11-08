@@ -22,8 +22,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
 const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
-// The same entry points and options as the `build` script. write:false keeps
-// api/priv/static/assets untouched.
+// The same entry points and options as scripts/build-local.mjs. write:false keeps
+// dist/ untouched.
 const entries = [
   { in: "src/index.js", out: "bp-paper-editor.bundle.js", opts: { format: "iife" } },
   { in: "src/styles.css", out: "bp-paper-editor.css", opts: {} },
@@ -38,7 +38,7 @@ for (const entry of entries) {
     minify: true,
     write: false,
     metafile: true,
-    outfile: path.join("../../priv/static/assets", entry.out),
+    outfile: path.join("dist", entry.out),
     logLevel: "silent",
     ...entry.opts,
   });

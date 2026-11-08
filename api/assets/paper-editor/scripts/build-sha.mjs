@@ -16,7 +16,7 @@ export const bundleOptions = {
   entryPoints: ["src/index.js"],
   bundle: true,
   format: "iife",
-  outfile: "../../priv/static/assets/bp-paper-editor.bundle.js",
+  outfile: "dist/bp-paper-editor.bundle.js",
 };
 
 export async function buildSha() {

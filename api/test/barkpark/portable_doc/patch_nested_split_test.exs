@@ -8,7 +8,7 @@ defmodule Barkpark.PortableDoc.PatchNestedSplitTest do
   sends for those edits, recorded by
   `api/assets/paper-editor/src/canvas/__nested_split_id_mounted.test.mjs` (real Enter
   keydowns, pastes, then typing), and `nested_split_keys.json`, recorded by
-  `api/assets/paper-editor/src/__nested_split_keys.mjs` (Playwright's keyboard and
+  `api/assets/paper-editor-host-tests/__nested_split_keys.mjs` (Playwright's keyboard and
   mouse in Chromium: splits, a copy-drop and a move-drop). Every batch must apply through `Patch` and through
   the canvas batch write and land as the client believed it did: every typed
   string (the scene's `typed`), no repeated id.
