@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.PaneComponent
 
   @dataset "production"
   @type_name "desk_slice_note"
@@ -57,6 +58,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
   test "the root URL draws the desk root alone, its rows links", %{conn: conn, base: base} do
     {:ok, view, _html} = live(admin(conn), base)
+    render_async(view)
 
     assert has_element?(
              view,
@@ -65,11 +67,12 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
     refute has_element?(view, ~s([data-pane-index="1"]))
     assert has_element?(view, ~s([data-pane-index="0"] a[data-desk-row][href^="#{base}/"]))
-    refute has_element?(view, "#desk-panes [phx-click]")
+    refute has_element?(view, "#desk-panes a[phx-click]")
   end
 
   test "a deep link draws root, list and document", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
 
     assert has_element?(view, ~s([data-pane-index="0"][data-pane-kind="types"]))
     assert has_element?(view, ~s([data-pane-index="1"][data-pane-kind="list"]))
@@ -92,11 +95,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     b: b
   } do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
 
     beta = ~s([data-pane-index="1"] a[data-desk-row][href="#{base}/#{@type_name};#{b}"])
     assert has_element?(view, beta, "Beta note")
 
     view |> element(beta) |> render_click()
+    render_async(view)
     assert_patch(view, "#{base}/#{@type_name};#{b}")
 
     assert has_element?(view, ~s([data-pane-index="1"] a[aria-current="true"]), "Beta note")
@@ -105,8 +110,10 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
   test "closing a pane goes to the URL without it", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
 
     view |> element(~s([data-pane-index="2"] a.dk-close)) |> render_click()
+    render_async(view)
     assert_patch(view, "#{base}/#{@type_name}")
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
@@ -116,11 +123,111 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     base: base
   } do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};no-such-doc")
+    render_async(view)
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]))
     assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "no-such-doc")
 
     {:ok, view, _html} = live(admin(conn), "#{base}/no_such_type")
+    render_async(view)
     assert has_element?(view, ~s([data-pane-index="1"] .dk-note), "no_such_type")
+  end
+
+  describe "each pane reads alone" do
+    setup do
+      test = self()
+      id = "desk-slice-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        id,
+        [:barkpark, :desk, :pane_load],
+        fn _event, _measure, meta, _config -> send(test, {:pane_load, meta.kind}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "opening another document does not read the list again", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      render_async(view)
+
+      # One connected mount: the list once, the document once.
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+
+      view
+      |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{base}/#{@type_name};#{b}"]))
+      |> render_click()
+
+      render_async(view)
+
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+    end
+
+    test "a pane draws its frame before its read lands", %{conn: conn, base: base, a: a} do
+      test = self()
+
+      # Hold every read until the test lets it go.
+      swap_reader(fn pane, node, dataset, scope, title ->
+        send(test, {:reading, self()})
+
+        receive do
+          :go -> PaneComponent.read(pane, node, dataset, scope, title)
+        end
+      end)
+
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+
+      # The frames are there, busy, titled from the URL alone.
+      assert has_element?(view, ~s([data-pane-index="1"][aria-busy="true"]))
+      assert has_element?(view, ~s([data-pane-index="2"][aria-busy="true"] .pane-header-title), a)
+
+      for _ <- 1..2 do
+        assert_receive {:reading, task}
+        send(task, :go)
+      end
+
+      render_async(view)
+      refute has_element?(view, "[aria-busy]")
+      assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
+      assert page_title(view) =~ "Alpha note"
+    end
+  end
+
+  test "a read that fails is that pane's to show; the others stay up", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    swap_reader(fn
+      %{kind: :doc}, _node, _dataset, _scope, _title -> raise "the document read failed"
+      pane, node, dataset, scope, title -> PaneComponent.read(pane, node, dataset, scope, title)
+    end)
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] [role="alert"] button[phx-click="retry"]))
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha note")
+
+    # Retry reads again; with the fault gone the document shows.
+    Application.delete_env(:barkpark, PaneComponent)
+    view |> element(~s([data-pane-index="2"] button[phx-click="retry"])) |> render_click()
+    render_async(view)
+    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+  end
+
+  defp swap_reader(reader) do
+    Application.put_env(:barkpark, PaneComponent, reader: reader)
+    on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
   end
 
   test "someone who is not a workspace admin lands on the Studio", %{conn: conn, base: base} do
