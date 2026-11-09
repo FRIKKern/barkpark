@@ -74,7 +74,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def render(assigns) do
     ~H"""
     <style>
-      .dk { flex: 1; min-height: 0; }
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; }
       .dk .dk-doc { width: auto; flex: 1 0 600px; border-right: 0; }
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
@@ -86,7 +85,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
       .dk .dk-fields dd { margin: 0; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
     </style>
-    <div class="pane-layout dk" id="desk-panes" data-testid="panes" role="main">
+    <div
+      class="pane-layout dk"
+      id="desk-panes"
+      data-testid="panes"
+      role="main"
+      style="flex: 1 1 auto; min-height: 0"
+    >
       <section
         :for={pane <- @panes}
         id={"desk-pane-#{pane.index}"}

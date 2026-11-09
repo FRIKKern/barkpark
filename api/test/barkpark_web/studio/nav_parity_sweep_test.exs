@@ -178,6 +178,20 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/d/production/studio/_account"},
       active: "Structure"
     },
+    # The desk slice (/papers/desk-vertical-slice): a read-only desk beside the
+    # Studio's own, under the same underscore-reserved prefix.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_desk",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/_desk"},
+      active: "Structure"
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_desk/*panes",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/_desk/post"},
+      active: "Structure"
+    },
 
     # ── env-gated (mount hard-gates on the enabled? predicate; off in test) ──
     %{route: "/studio/tmux", disposition: :skip_env_gated, gated: :tmux},

@@ -1101,6 +1101,10 @@ defmodule PDS.Census do
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/*path", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_account", "BarkparkWeb.Studio.AccountLive", nil, :liveview_handle_event},
+    # The desk slice (task-e379a40230e117ec): rows proposed by `--routed-rows`
+    # and pasted verbatim. Read-only; it has no events of its own.
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_desk", "BarkparkWeb.Studio.DeskLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_desk/*panes", "BarkparkWeb.Studio.DeskLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins", "BarkparkWeb.Admin.PluginsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins/:plugin/settings", "BarkparkWeb.Admin.PluginSettingsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/api-tester", "BarkparkWeb.Studio.ApiTesterLive", nil, :liveview_handle_event},
