@@ -4,8 +4,14 @@ package cli
 // backup of one self-hosted instance taken from any Postgres reachable by URL
 // and any media directory, with no SSH, no sudo and no /opt/barkpark layout.
 //
-//	bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
-//	bp instance restore <dir> --database-url <url> --media-dir <dir>
+//	bp instance backup  [--database-url <url> --media-dir <dir> | --env-file <file>] --out <dir>
+//	bp instance restore <dir> [--database-url <url> --media-dir <dir> | --env-file <file>]
+//
+// The database URL and the media directory come from the flags, then from
+// --env-file, then from DATABASE_URL and BARKPARK_MEDIA_DIR in the
+// environment. On a VM from deploy.sh, backup with none of these reads
+// DATABASE_URL from /opt/barkpark/.env and backs up /opt/barkpark/uploads,
+// so a cron line holds no password.
 //
 // The backup is one directory with three members. db.dump and media.tar.gz use
 // the same names and formats as a bp-bundle-v1 (internal/cli/cloud/bundle.go):
@@ -82,38 +88,95 @@ type instanceBackupManifestV1 struct {
 	Secrets       instanceBackupSecrets `json:"secrets"`
 }
 
-// instanceBackupFlags reads --database-url and --media-dir, falling back to the
-// DATABASE_URL and BARKPARK_MEDIA_DIR the app itself reads. An Ecto-style
-// ecto:// URL is rewritten to postgresql:// so libpq accepts it.
-func instanceBackupFlags(a *hzArgs) (dbURL, mediaDir string, err error) {
+// instanceVMDir is where deploy.sh installs the app on a VM. Its .env holds
+// DATABASE_URL, and its uploads directory is the media the container mounts.
+// Tests replace it.
+var instanceVMDir = "/opt/barkpark"
+
+// instanceBackupFlags finds the database URL and the media directory. Each
+// comes from its flag, then --env-file, then DATABASE_URL and
+// BARKPARK_MEDIA_DIR in the environment. A file without BARKPARK_MEDIA_DIR
+// next to an uploads directory, as deploy.sh writes, uses that directory.
+// With vmDefault and no URL given, it reads deploy.sh's .env in
+// instanceVMDir and uses its uploads directory unless one is given. An Ecto-style ecto:// URL is rewritten to postgresql:// so
+// libpq accepts it. source names where the URL came from, never its value.
+func instanceBackupFlags(a *hzArgs, vmDefault bool) (dbURL, mediaDir, source string, err error) {
 	dbURL = strings.TrimSpace(a.val("database-url"))
-	if dbURL == "" {
-		dbURL = strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	}
 	mediaDir = strings.TrimSpace(a.val("media-dir"))
+	source = "--database-url"
+	envFile := strings.TrimSpace(a.val("env-file"))
+	implicit := false
+	if envFile == "" && vmDefault && dbURL == "" && strings.TrimSpace(os.Getenv("DATABASE_URL")) == "" {
+		if _, serr := os.Stat(filepath.Join(instanceVMDir, ".env")); serr == nil {
+			envFile, implicit = filepath.Join(instanceVMDir, ".env"), true
+		}
+	}
+	if envFile != "" {
+		env, ferr := readInstanceEnvFile(envFile)
+		if ferr != nil {
+			return "", "", "", ferr
+		}
+		if dbURL == "" {
+			dbURL, source = strings.TrimSpace(env["DATABASE_URL"]), envFile
+		}
+		// The VM's .env is the container's: a BARKPARK_MEDIA_DIR in it
+		// names a path inside the container, not on the host.
+		if mediaDir == "" && !implicit {
+			mediaDir = strings.TrimSpace(env["BARKPARK_MEDIA_DIR"])
+		}
+	}
+	if dbURL == "" {
+		dbURL, source = strings.TrimSpace(os.Getenv("DATABASE_URL")), "DATABASE_URL"
+	}
 	if mediaDir == "" {
 		mediaDir = strings.TrimSpace(os.Getenv("BARKPARK_MEDIA_DIR"))
 	}
+	if mediaDir == "" && envFile != "" {
+		if st, serr := os.Stat(filepath.Join(filepath.Dir(envFile), "uploads")); serr == nil && st.IsDir() {
+			mediaDir = filepath.Join(filepath.Dir(envFile), "uploads")
+		}
+	}
 	if dbURL == "" {
-		return "", "", fmt.Errorf("--database-url (or DATABASE_URL) is required")
+		if envFile != "" {
+			return "", "", "", fmt.Errorf("%s has no DATABASE_URL; pass --database-url", envFile)
+		}
+		return "", "", "", fmt.Errorf("--database-url, --env-file or DATABASE_URL is required")
 	}
 	if mediaDir == "" {
-		return "", "", fmt.Errorf("--media-dir (or BARKPARK_MEDIA_DIR) is required")
+		return "", "", "", fmt.Errorf("--media-dir (or BARKPARK_MEDIA_DIR) is required")
 	}
 	if rest, ok := strings.CutPrefix(dbURL, "ecto://"); ok {
 		dbURL = "postgresql://" + rest
 	}
 	for _, tool := range []string{"pg_dump", "pg_restore", "psql"} {
 		if _, lerr := exec.LookPath(tool); lerr != nil {
-			return "", "", fmt.Errorf("%s is not on PATH: install the Postgres client tools for the server's major version", tool)
+			return "", "", "", fmt.Errorf("%s is not on PATH: install the Postgres client tools for the server's major version", tool)
 		}
 	}
-	return dbURL, mediaDir, nil
+	return dbURL, mediaDir, source, nil
+}
+
+// readInstanceEnvFile reads KEY=VALUE settings. deploy.sh writes its .env
+// for root only, so a permission error says to run as root.
+func readInstanceEnvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if os.IsPermission(err) {
+		return nil, fmt.Errorf("%s is readable only by root: run bp with sudo", path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	env, err := parseInstanceEnv(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	return env, nil
 }
 
 func runInstanceBackup(out *writer, args []string) int {
-	const usage = "bp instance backup --database-url <url> --media-dir <dir> --out <dir>"
-	a, err := parseHzArgs(args, []string{"database-url", "media-dir", "out"}, nil, usage)
+	const usage = "bp instance backup [--database-url <url> --media-dir <dir> | --env-file <file>] --out <dir>"
+	a, err := parseHzArgs(args, []string{"database-url", "media-dir", "env-file", "out"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -121,10 +184,11 @@ func runInstanceBackup(out *writer, args []string) int {
 	if outDir == "" || len(a.pos) != 0 {
 		return useError(out, "usage", "--out <dir> is required (usage: "+usage+")", exitUsage)
 	}
-	dbURL, mediaDir, err := instanceBackupFlags(a)
+	dbURL, mediaDir, source, err := instanceBackupFlags(a, true)
 	if err != nil {
 		return useError(out, "usage", err.Error()+" (usage: "+usage+")", exitUsage)
 	}
+	out.errf("database from %s, media from %s", source, mediaDir)
 	man, err := instanceBackup(context.Background(), dbURL, mediaDir, outDir)
 	if err != nil {
 		return useError(out, "failed", "backup: "+err.Error(), exitGeneric)
@@ -139,15 +203,16 @@ func runInstanceBackup(out *writer, args []string) int {
 }
 
 func runInstanceRestore(out *writer, args []string) int {
-	const usage = "bp instance restore <dir> --database-url <url> --media-dir <dir>"
-	a, err := parseHzArgs(args, []string{"database-url", "media-dir"}, nil, usage)
+	const usage = "bp instance restore <dir> [--database-url <url> --media-dir <dir> | --env-file <file>]"
+	a, err := parseHzArgs(args, []string{"database-url", "media-dir", "env-file"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
 	if len(a.pos) != 1 {
 		return useError(out, "usage", "want exactly one backup <dir> (usage: "+usage+")", exitUsage)
 	}
-	dbURL, mediaDir, err := instanceBackupFlags(a)
+	// Restore never falls back to the live instance's .env: name the target.
+	dbURL, mediaDir, _, err := instanceBackupFlags(a, false)
 	if err != nil {
 		return useError(out, "usage", err.Error()+" (usage: "+usage+")", exitUsage)
 	}

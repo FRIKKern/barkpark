@@ -5,11 +5,10 @@ This page comes after setup in [SELF-HOST.md](SELF-HOST.md). The command referen
 
 ## Scheduled backups and the restore drill
 
-Barkpark schedules no backup. On a single VM, run `bp instance backup` from a daily cron job and copy the directory off the host. The database is local and media is in `/opt/barkpark/uploads`:
+Barkpark schedules no backup. On a single VM, run `bp instance backup` as root from a daily cron job and copy the directory off the host. With no `--database-url`, bp reads `DATABASE_URL` from `/opt/barkpark/.env` and backs up `/opt/barkpark/uploads`, so the cron line holds no password. bp 1.26.25 and newer do this:
 
 ```bash
-bp instance backup --database-url "postgresql://barkpark:<password from .env>@localhost/barkpark_prod" \
-  --media-dir /opt/barkpark/uploads --out /var/backups/barkpark/$(date +%F)
+sudo bp instance backup --out /var/backups/barkpark/$(date +%F)
 ```
 
 The backup holds no key. Keep a copy of the keys in `/opt/barkpark/.env` in a password manager, apart from the backups.

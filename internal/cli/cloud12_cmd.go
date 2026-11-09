@@ -2018,8 +2018,10 @@ USAGE
   bp instance admin-token <id> [--label <l>] [--expires-in <d> | --no-expiry]
                                (--install | --out <path> | --reveal) [--team <t>]
   bp instance studio-token --workspace <ws> [--dataset <d>] [--label <l>]
-  bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
-  bp instance restore <dir> --database-url <url> --media-dir <dir>
+  bp instance backup  [--database-url <url> --media-dir <dir> | --env-file <f>]
+                      --out <dir>
+  bp instance restore <dir> [--database-url <url> --media-dir <dir> |
+                      --env-file <f>]
   bp instance init  [--out <file>] [--target containerapps|vm] [--host <h>]
                     [--studio-origin <o>] [--owner-email <e>]
                     [--operator-emails <e,...>] [--breakglass-email <e>]
@@ -2058,9 +2060,13 @@ WHAT IT DOES
                document counts per type and sha256 of every file. Reads from one
                snapshot, so the instance may stay up. Keys are never included;
                the manifest names the ones restore needs from your secret store.
-               --database-url defaults to DATABASE_URL (add ?sslmode=require for
-               TLS), --media-dir to BARKPARK_MEDIA_DIR. Needs pg_dump, pg_restore
-               and psql for the server's Postgres major on PATH.
+               --database-url defaults to DATABASE_URL in --env-file, then in
+               the environment (add ?sslmode=require for TLS), --media-dir to
+               BARKPARK_MEDIA_DIR, or the uploads directory next to the file.
+               On a VM from deploy.sh with none of these, backup reads
+               /opt/barkpark/.env and /opt/barkpark/uploads; run it with sudo.
+               Needs pg_dump, pg_restore and psql for the server's Postgres
+               major on PATH.
   restore      restore <dir> into an EMPTY database on the same Postgres major
                and an empty media directory. Checks both checksums first, then
                after pg_restore compares every media file and per-type document

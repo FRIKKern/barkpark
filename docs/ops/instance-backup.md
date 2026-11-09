@@ -11,6 +11,10 @@ bp instance backup --database-url "$DATABASE_URL" --media-dir "$BARKPARK_MEDIA_D
 bp instance restore <dir> --database-url "$TARGET_URL" --media-dir <empty-dir>
 ```
 
+The flags fall back to `--env-file <file>`, then the environment. On a
+`deploy.sh` VM, `sudo bp instance backup --out <dir>` reads
+`/opt/barkpark/.env` and `/opt/barkpark/uploads`.
+
 `<dir>` holds `db.dump` (`pg_dump --format=custom`), `media.tar.gz` and
 `manifest.json`. The manifest records the Postgres major, document counts per
 type and the sha256 of both members and every media file. The counts and the
@@ -22,8 +26,8 @@ Restore refuses an older Postgres major, a database with tables and a
 non-empty media directory. It checks both member checksums first, and after
 `pg_restore` compares every media file and per-type count with the manifest.
 Any difference exits 1. Extensions the dump creates must be allowed on a
-managed server first (Azure: `azure.extensions`). The round trip is covered by
-`TestInstanceBackupRoundTripPostgres` in `internal/cli/instance_backup_cmd_test.go`,
-which runs when `BARKPARK_TEST_PG_URL` names a server it may create databases on.
+managed server first (Azure: `azure.extensions`). The Postgres tests in
+`internal/cli/instance_backup_*_test.go` run when `BARKPARK_TEST_PG_URL` names
+a server they may create databases on.
 
 The Hetzner object-storage backups and the restore drill are in [backup-dr.md](backup-dr.md).
