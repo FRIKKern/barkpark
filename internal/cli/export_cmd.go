@@ -59,7 +59,7 @@ type exportMeta struct {
 // NDJSON body, not the single JSON the generic command path decodes.
 func runExport(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if g.help {
-		out.outf("usage: bp export [--type <t>] [--perspective <p>] [--out <file>] [--media <dir>]")
+		out.outf("usage: bp export [--type <t>] [--perspective <p>] [--out <file>] [--media <dir>] [--schemas <file>]")
 		out.outf("       bp export --verify <file>")
 		out.outf("")
 		out.outf("Stream the active dataset as NDJSON (one document per line) for backup:")
@@ -93,10 +93,15 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("--media <dir> also writes every media file of the dataset to <dir>/files/<id>")
 		out.outf("with a <dir>/media.json list of ids and SHA-1s. `bp import <file> --media <dir>`")
 		out.outf("uploads them with the same asset ids. Run it again to resume a stopped export.")
+		out.outf("")
+		out.outf("--schemas <file> also writes every schema of the dataset to <file>, without")
+		out.outf("the server's schemaHash. `bp import <file> --schemas <file>` applies them to")
+		out.outf("the target before any document, and creates the dataset there. The target")
+		out.outf("workspace must exist: create it with `bp workspace create <slug>`.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts
-	var outPath, verifyPath, mediaDir string
+	var outPath, verifyPath, mediaDir, schemasPath string
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -115,6 +120,13 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 				return usageErrf(out, nil, "%v", err)
 			}
 			mediaDir = v
+			i = ni
+		case "--schemas":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--schemas")
+			if err != nil {
+				return usageErrf(out, nil, "%v", err)
+			}
+			schemasPath = v
 			i = ni
 		case "--verify":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--verify")
@@ -141,7 +153,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			i = ni
 		default:
-			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective / --out / --media / --verify)", a)
+			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective / --out / --media / --schemas / --verify)", a)
 		}
 	}
 
@@ -149,10 +161,22 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// it with the streaming flags would silently ignore one half of the command,
 	// so say so instead.
 	if verifyPath != "" {
-		if outPath != "" || opts.Type != "" || opts.Perspective != "" || mediaDir != "" {
-			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective / --media")
+		if outPath != "" || opts.Type != "" || opts.Perspective != "" || mediaDir != "" || schemasPath != "" {
+			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective / --media / --schemas")
 		}
 		return runExportVerify(out, verifyPath)
+	}
+
+	// The schemas are read first: the request is small, and a refusal here
+	// stops the run before the long document stream.
+	if schemasPath != "" {
+		dataset := ctx.Dataset
+		if dataset == "" {
+			dataset = "production"
+		}
+		if code := exportSchemas(out, ctx, dataset, schemasPath); code != exitOK {
+			return code
+		}
 	}
 
 	client := apiclient.New(apiclient.Config{
