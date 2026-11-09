@@ -2266,6 +2266,11 @@ defmodule BarkparkWeb.Router do
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
 
+      # The desk slice (/papers/desk-vertical-slice): read-only, admins only.
+      # Before the wildcard, or StudioLive takes `_desk` as a path.
+      live("/_desk", DeskLive)
+      live("/_desk/*panes", DeskLive)
+
       live("/*path", StudioLive)
     end
   end
