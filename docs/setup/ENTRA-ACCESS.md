@@ -1,7 +1,7 @@
-<!-- doc-tier: human | canonical-for: entra-access-control | budget: 1200tok -->
+<!-- doc-tier: human | canonical-for: entra-access-control | budget: 1400tok -->
 # Who keeps access with Entra sign-in
 
-This page belongs to [ENTRA.md](ENTRA.md). It covers removed users, the break-glass account and domain verification. The steps were run on a staging instance on 2026-10-27.
+This page belongs to [ENTRA.md](ENTRA.md). It covers removed users, seats in more workspaces, the break-glass account and domain verification. The steps were run on a staging instance on 2026-10-27.
 
 ## Removed users
 
@@ -20,6 +20,16 @@ az ad sp update --id "$SP_ID" --set appRoleAssignmentRequired=true
 `$SP_ID` is the enterprise app's object id. Entra then answers AADSTS50105 to a user in none of the assigned groups. The portal offers group assignment only with Entra ID P1. On 2026-10-27 the Graph call worked on a tenant without P1, and Entra enforced it.
 
 Both act at the next sign-in. Barkpark sessions that already exist keep working until they expire, by default 30 days after sign-in. To end access at once, disable the user in Entra and remove the seat with `bp workspace member-rm <email> -w <workspace> -p <project>`.
+
+## Seats in more workspaces
+
+After `bp org attach-workspace <org> <workspace>`, the first Entra sign-in gives each user a `member` seat there, or the role the group mapping gives. An existing account that should have another role needs a seat grant. `bp workspace member-add <email> --role owner` only invites an existing account, and an instance without `SMTP_HOST` never sends the invitation. Add `--bind_on_sso` instead:
+
+```bash
+bp -w <workspace> workspace member-add owner@example.com --role owner --bind_on_sso --yes
+```
+
+The answer is an invitation with `bind_on_sso: true`. The seat binds with that role at the user's next Entra sign-in through the organization, so a signed-in user signs out and in again. A group mapping still sets the role after it. `bp workspace invitation-ls` lists grants that have not bound yet. On an instance with mail, leave the flag out and the user accepts the invitation.
 
 ## Break-glass account
 

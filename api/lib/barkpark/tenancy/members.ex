@@ -180,6 +180,11 @@ defmodule Barkpark.Tenancy.Members do
   (`accept_invitation/2`). A second request for the same pending pair is
   `{:error, :already_invited}`.
 
+  `bind_on_sso: true` marks that invitation as a grant for an instance without
+  mail (task-1881e6e768d1be22): it is accepted on the user's next SSO sign-in
+  through the workspace's organization (`bind_sso_grants/2`). The user can
+  still accept it by hand.
+
   Refuses `{:error, :already_member}` rather than silently re-roling an
   existing seat — changing a role is `update_role/3`, and an "add" that quietly
   overwrote a role would be a privilege change disguised as a no-op.
@@ -197,7 +202,7 @@ defmodule Barkpark.Tenancy.Members do
          %User{} = user <- existing || Sso.find_or_create_user(email),
          nil <- TenancyAuth.membership(user.id, workspace_id, :user) do
       if invite?(existing, opts),
-        do: invite(workspace_id, user, email, role, opts[:actor]),
+        do: invite(workspace_id, user, email, role, opts),
         else: seat_now(workspace_id, user, email, role)
     else
       {:error, reason} -> {:error, reason}
@@ -227,10 +232,16 @@ defmodule Barkpark.Tenancy.Members do
     end
   end
 
-  defp invite(workspace_id, user, email, role, actor) do
+  defp invite(workspace_id, user, email, role, opts) do
     %Invitation{}
     |> Invitation.changeset(
-      %{workspace_id: workspace_id, user_id: user.id, role: role, invited_by: actor_ref(actor)},
+      %{
+        workspace_id: workspace_id,
+        user_id: user.id,
+        role: role,
+        invited_by: actor_ref(opts[:actor]),
+        bind_on_sso: opts[:bind_on_sso] == true
+      },
       valid_role_names(workspace_id)
     )
     |> Repo.insert()
@@ -260,6 +271,7 @@ defmodule Barkpark.Tenancy.Members do
           email: String.t() | nil,
           role: String.t(),
           invited_by: String.t() | nil,
+          bind_on_sso: boolean(),
           inserted_at: DateTime.t()
         }
 
@@ -270,6 +282,7 @@ defmodule Barkpark.Tenancy.Members do
       email: email,
       role: i.role,
       invited_by: i.invited_by,
+      bind_on_sso: i.bind_on_sso,
       inserted_at: i.inserted_at
     }
   end
@@ -357,6 +370,27 @@ defmodule Barkpark.Tenancy.Members do
         error
     end
   end
+
+  @doc """
+  Accept every grant (`bind_on_sso: true` invitation) addressed to `user_id`
+  in a workspace of `org_id`. Called on a successful SSO sign-in through that
+  organization's connection, before just-in-time provisioning, so the granted
+  role is the one the seat gets. Grants in other organizations' workspaces
+  stay pending. Returns the number of seats bound.
+  """
+  @spec bind_sso_grants(binary(), binary()) :: non_neg_integer()
+  def bind_sso_grants(org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
+    from(i in Invitation,
+      join: w in Barkpark.Tenancy.Workspace,
+      on: w.id == i.workspace_id,
+      where: i.user_id == ^user_id and i.bind_on_sso == true and w.organization_id == ^org_id,
+      select: i.id
+    )
+    |> Repo.all()
+    |> Enum.count(fn id -> match?({:ok, _}, accept_invitation(user_id, id)) end)
+  end
+
+  def bind_sso_grants(_org_id, _user_id), do: 0
 
   # Already seated by another path meanwhile: the existing seat stands.
   defp accept_seat(%Invitation{} = i) do

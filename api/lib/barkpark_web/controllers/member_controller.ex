@@ -120,12 +120,19 @@ defmodule BarkparkWeb.MemberController do
   directly (`201 {"member": …}`), as before. An existing UNCONFIRMED account
   is reclaimed, then seated: `201 {"member": …, "reclaimed": true,
   "warnings": [{"code": "account_reclaimed", …}]}`.
+
+  `"bind_on_sso": true` makes the invitation a seat grant for an instance
+  without mail: it is accepted on the user's next SSO sign-in through the
+  workspace's organization (task-1881e6e768d1be22). The answer is the same
+  `202 {"invitation": …}`, with `bind_on_sso: true`.
   """
   def create(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, email} <- fetch_string(params, "email", :missing_email),
          role <- Map.get(params, "role", @default_role) do
-      case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
+      opts = [actor: caller(conn), bind_on_sso: params["bind_on_sso"] in [true, "true"]]
+
+      case Members.add_user_member(ws_id, email, to_string(role), opts) do
         {:ok, {:invited, invitation}} ->
           notify_invitee(conn, invitation)
           conn |> put_status(:accepted) |> json(%{invitation: invitation})

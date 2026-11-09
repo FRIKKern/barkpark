@@ -54,6 +54,8 @@ defmodule BarkparkWeb.SamlController do
          # (a seat in the org, or a verified org domain): the IdP is tenant-
          # controlled and may assert any email (task-6f7cd94ab61cc688).
          {:ok, user} <- Sso.org_login_user(c.organization_id, email) do
+      # An admin's seat grant binds first, so its role is the one the seat gets.
+      Barkpark.Tenancy.Members.bind_sso_grants(c.organization_id, user.id)
       Sso.jit_provision(c.organization_id, user)
 
       # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint time —

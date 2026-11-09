@@ -249,17 +249,21 @@ defmodule Barkpark.Sso.Oidc do
       # new AND existing memberships (authoritative, mirroring SCIM group
       # sync). An absent/unmapped groups claim leaves existing roles alone,
       # unless `require_group_match` is on: then the sign-in is refused and
-      # the seats the connection gave are removed.
+      # the seats the connection gave are removed. An admin's seat grant
+      # (`bind_on_sso`) binds first, so its role is the one the seat gets;
+      # a mapped group role still wins after it.
       case Barkpark.Sso.resolve_group_role(c, claims) do
         nil when c.require_group_match ->
           Barkpark.Sso.remove_unmapped_user(c, user)
           {:error, :no_mapped_group}
 
         nil ->
+          Barkpark.Tenancy.Members.bind_sso_grants(c.organization_id, user.id)
           Barkpark.Sso.jit_provision(c.organization_id, user)
           {:ok, user, claims}
 
         role ->
+          Barkpark.Tenancy.Members.bind_sso_grants(c.organization_id, user.id)
           Barkpark.Sso.jit_provision(c.organization_id, user, role)
           Barkpark.Sso.set_org_member_role(c.organization_id, user.id, role)
           {:ok, user, claims}

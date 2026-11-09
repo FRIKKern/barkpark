@@ -821,4 +821,89 @@ defmodule Barkpark.Sso.OidcTest do
       assert role_in(ws.id, other.id) == "owner"
     end
   end
+
+  # task-1881e6e768d1be22: an instance without mail never delivers an
+  # invitation. A seat grant (`bind_on_sso: true`) binds with its role at the
+  # user's next SSO sign-in through the workspace's organization.
+  describe "seat grants bind on SSO sign-in" do
+    defp grant_setup do
+      {org, c} = connection("grantorg")
+      {:ok, home} = Tenancy.create_workspace(%{slug: "grant-home", name: "Home"})
+      {:ok, home} = Tenancy.assign_workspace_to_organization(home, org.id)
+      {:ok, second} = Tenancy.create_workspace(%{slug: "grant-second", name: "Second"})
+      {:ok, second} = Tenancy.assign_workspace_to_organization(second, org.id)
+
+      owner = Barkpark.AccountsFixtures.register_user("sso@oidcorg.com")
+      {:ok, _} = Tenancy.Auth.create_membership(home.id, owner.id, "owner", "user")
+      admin = Barkpark.AccountsFixtures.register_user("admin@grantorg.example")
+      {:ok, _} = Tenancy.Auth.create_membership(second.id, admin.id, "owner", "user")
+
+      %{c: c, owner: owner, admin: admin, second: second}
+    end
+
+    defp role_in(ws_id, user_id) do
+      Barkpark.Repo.one(
+        from m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+              m.principal_id == ^user_id,
+          select: m.role
+      )
+    end
+
+    defp pending(ws_id), do: Barkpark.Tenancy.Members.list_invitations(ws_id)
+
+    test "a grant seats the existing account with its role at the next sign-in" do
+      %{c: c, owner: owner, admin: admin, second: second} = grant_setup()
+
+      assert {:ok, {:invited, row}} =
+               Barkpark.Tenancy.Members.add_user_member(second.id, owner.email, "owner",
+                 actor: admin,
+                 bind_on_sso: true
+               )
+
+      assert row.bind_on_sso
+      assert role_in(second.id, owner.id) == nil
+
+      mock_op(claims())
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+      assert role_in(second.id, owner.id) == "owner"
+      assert pending(second.id) == []
+    end
+
+    test "a plain invitation stays pending, and JIT gives only the default seat" do
+      %{c: c, owner: owner, admin: admin, second: second} = grant_setup()
+
+      assert {:ok, {:invited, row}} =
+               Barkpark.Tenancy.Members.add_user_member(second.id, owner.email, "owner",
+                 actor: admin
+               )
+
+      refute row.bind_on_sso
+
+      mock_op(claims())
+      assert {:ok, _user, _} = callback(c)
+      assert role_in(second.id, owner.id) == "member"
+      assert [%{bind_on_sso: false}] = pending(second.id)
+    end
+
+    test "a grant in a workspace outside the organization stays pending" do
+      %{c: c, owner: owner} = grant_setup()
+      {:ok, outside} = Tenancy.create_workspace(%{slug: "grant-outside", name: "Outside"})
+      outsider = Barkpark.AccountsFixtures.register_user("admin@outside.example")
+      {:ok, _} = Tenancy.Auth.create_membership(outside.id, outsider.id, "owner", "user")
+
+      assert {:ok, {:invited, _}} =
+               Barkpark.Tenancy.Members.add_user_member(outside.id, owner.email, "admin",
+                 actor: outsider,
+                 bind_on_sso: true
+               )
+
+      mock_op(claims())
+      assert {:ok, _user, _} = callback(c)
+      assert role_in(outside.id, owner.id) == nil
+      assert [%{bind_on_sso: true}] = pending(outside.id)
+    end
+  end
 end

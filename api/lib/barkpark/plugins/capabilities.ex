@@ -2985,6 +2985,13 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "owner | admin | member | contributor (or a custom role). A contributor writes drafts but cannot publish.",
             default: "member"
+          ),
+          flag(
+            "bind_on_sso",
+            "bool",
+            "For an instance without mail: an existing account's invitation is " <>
+              "accepted on the user's next SSO sign-in through the workspace's organization.",
+            default: false
           )
         ],
         writes: true,

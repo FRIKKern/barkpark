@@ -76,6 +76,26 @@ defmodule BarkparkWeb.SeatInvitationTest do
     refute TenancyAuth.membership(ctx.victim.id, ctx.ws.id, :user)
   end
 
+  # task-1881e6e768d1be22: a seat grant for an instance without mail is still
+  # an invitation; it seats nothing until an SSO sign-in binds it.
+  test "bind_on_sso stores a grant and seats nothing", ctx do
+    resp =
+      admin(ctx.admin_raw)
+      |> post(
+        "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/members",
+        Jason.encode!(%{email: ctx.victim.email, role: "admin", bind_on_sso: true})
+      )
+
+    body = json_response(resp, 202)
+    assert body["invitation"]["bind_on_sso"] == true
+    assert body["invitation"]["role"] == "admin"
+    refute TenancyAuth.membership(ctx.victim.id, ctx.ws.id, :user)
+
+    refute json_response(seat(ctx, "new-#{System.unique_integer([:positive])}@example.com"), 201)[
+             "invitation"
+           ]
+  end
+
   test "the user's next self-minted PAT still binds to their own workspace", ctx do
     assert seat(ctx, ctx.victim.email).status == 202
 
