@@ -49,6 +49,7 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		Dataset:    firstNonEmpty(plan.Dataset, "production"),
 		InstanceID: strings.TrimSpace(plan.InstanceID),
 		Team:       strings.TrimSpace(plan.Team),
+		KeepActive: opts.KeepActive,
 	}
 
 	if opts.DryRun {
@@ -57,7 +58,11 @@ func executeConnect(plan SetupPlan, opts Options) error {
 			fmt.Fprintf(w, "dry-run: would connect to %s\n", server)
 			fmt.Fprintf(w, "  scope:  w=%s p=%s d=%s\n", saved.Workspace, saved.Project, saved.Dataset)
 			fmt.Fprintf(w, "  token:  %s\n", redactToken(saved.Token))
-			fmt.Fprintf(w, "  would write %s, remember this server, and default bp here (no network call, no write)\n", configHint())
+			if opts.KeepActive {
+				fmt.Fprintf(w, "  would write %s and remember this server without changing the active server (no network call, no write)\n", configHint())
+			} else {
+				fmt.Fprintf(w, "  would write %s, remember this server, and default bp here (no network call, no write)\n", configHint())
+			}
 			writeKnownServersLine(w, opts.KnownServers)
 		}
 		return nil
@@ -101,7 +106,9 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	// "bp now defaults here", which would be false in this directory.
 	defaultsLine := "bp now defaults here"
 	var warnings []string
-	if opts.RepoPin.shadows(server, saved.Name) {
+	if opts.KeepActive {
+		defaultsLine = "saved without changing the active server"
+	} else if opts.RepoPin.shadows(server, saved.Name) {
 		defaultsLine = "saved as your default server"
 		warnings = append(warnings, repoPinWarning(opts.RepoPin))
 	}

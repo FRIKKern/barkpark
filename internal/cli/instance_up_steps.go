@@ -826,7 +826,7 @@ func alreadyExists(err error) bool {
 	return strings.Contains(s, "already") || strings.Contains(s, "has been taken") || strings.Contains(s, "exists")
 }
 
-// stepUpConnect makes the instance bp's active server, then creates the
+// stepUpConnect saves the instance as a known bp server, then creates the
 // organization and its OIDC connection with the owners group mapped to
 // owner, and counts Entra MFA as Barkpark MFA.
 func stepUpConnect(u *instanceUp) error {
