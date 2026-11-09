@@ -27,25 +27,55 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def update(assigns, socket) do
     socket = assign(socket, Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
-    key = {Panes.pane_key(assigns.pane), assigns.dataset, assigns.node && assigns.node.filter}
+    key = data_key(assigns.pane, assigns.dataset, assigns.node)
+    same? = socket.assigns[:data_key] == key
+    # `loading` is nil once the read has landed, so `&&`, not `and`.
+    waiting? = same? && socket.assigns.data.loading
+    warm = assigns[:warm]
 
-    if socket.assigns[:data_key] == key,
-      do: {:ok, socket},
-      else: {:ok, socket |> assign(:data_key, key) |> load()}
+    cond do
+      # What a hover already read: the pane opens with its data.
+      warm && (waiting? || not same?) ->
+        {:ok, socket |> assign(:data_key, key) |> cancel_async(:load) |> adopt(warm)}
+
+      same? ->
+        {:ok, socket}
+
+      true ->
+        {:ok, socket |> assign(:data_key, key) |> load()}
+    end
+  end
+
+  @doc "What a pane's data depends on: two panes with one key show one read."
+  @spec data_key(Panes.pane(), String.t(), struct() | nil) :: term()
+  def data_key(pane, dataset, node),
+    do: {Panes.pane_key(pane), pane[:type], dataset, node && node.filter}
+
+  @doc """
+  One pane's read, as the pane itself runs it. `DeskLive` runs it ahead of a
+  click when a row is hovered (`source: :warm`).
+  """
+  @spec read_pane(Panes.pane(), struct() | nil, String.t(), keyword(), :pane | :warm) :: map()
+  def read_pane(pane, node, dataset, scope, source \\ :pane) do
+    meta = %{kind: pane.kind, key: data_key(pane, dataset, node), source: source}
+    :telemetry.execute([:barkpark, :desk, :pane_load], %{count: 1}, meta)
+    reader().(pane, node, dataset, scope, provisional_title(pane, node))
   end
 
   @impl true
   def handle_event("retry", _params, socket), do: {:noreply, load(socket)}
 
   @impl true
-  def handle_async(:load, {:ok, data}, socket) do
-    # The tab title follows the last pane; only the page can set it.
-    send(self(), {:desk_pane_title, socket.assigns.index, data.title})
-    {:noreply, assign(socket, :data, AsyncResult.ok(data))}
-  end
+  def handle_async(:load, {:ok, data}, socket), do: {:noreply, adopt(socket, data)}
 
   def handle_async(:load, {:exit, reason}, socket),
     do: {:noreply, assign(socket, :data, AsyncResult.failed(socket.assigns.data, reason))}
+
+  defp adopt(socket, data) do
+    # The tab title follows the last pane; only the page can set it.
+    send(self(), {:desk_pane_title, socket.assigns.index, data.title})
+    assign(socket, :data, AsyncResult.ok(data))
+  end
 
   @impl true
   def render(assigns) do
@@ -92,6 +122,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               class={["pane-item", selected?(@panes, @index, entry.next) && "selected"]}
               aria-current={selected?(@panes, @index, entry.next) && "true"}
               data-desk-row
+              data-desk-opens={entry.next.kind}
             >
               <span class="pane-item-label">{entry.title}</span>
               <span :if={entry.next.kind != :doc} class="pane-item-chevron" aria-hidden="true">
@@ -144,17 +175,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   defp load(socket) do
-    %{pane: pane, node: node, dataset: dataset, scope: scope, data_key: key} = socket.assigns
-    provisional = provisional_title(pane, node)
-    reader = reader()
+    %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
 
     socket
     |> assign(:data, AsyncResult.loading())
-    |> start_async(:load, fn ->
-      :telemetry.execute([:barkpark, :desk, :pane_load], %{count: 1}, %{kind: pane.kind, key: key})
-
-      reader.(pane, node, dataset, scope, provisional)
-    end)
+    |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
   end
 
   # Test seam: `config :barkpark, #{inspect(__MODULE__)}, reader: fun` swaps the

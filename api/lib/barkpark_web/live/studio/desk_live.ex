@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     socket =
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
-      |> assign(dataset: dataset, page_title: gettext("Desk"), panes: [], desk: nil)
+      |> assign(dataset: dataset, page_title: gettext("Desk"), panes: [], desk: nil, warm: %{})
 
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
@@ -64,6 +64,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
           pane: pane,
           index: index,
           node: node,
+          key: PaneComponent.data_key(pane, dataset, node),
           title: PaneComponent.provisional_title(pane, node)
         }
       end
@@ -78,6 +79,69 @@ defmodule BarkparkWeb.Studio.DeskLive do
        base: Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset),
        page_title: views |> List.last() |> Map.fetch!(:title)
      )}
+  end
+
+  # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
+  # so the click that follows opens it with its data. Kept for a short while
+  # and for a few panes only; a pane never shows a read older than that.
+  @warm_ttl_ms 30_000
+  @warm_cap 8
+
+  @impl true
+  def handle_event("warm", %{"href" => href}, socket) when is_binary(href) do
+    %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
+
+    with true <- String.starts_with?(href, base <> "/"),
+         pane =
+           href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root) |> List.last(),
+         true <- pane.kind in [:list, :doc],
+         node = node_of(pane, desk),
+         key = PaneComponent.data_key(pane, dataset, node),
+         false <- Map.has_key?(warm, key) do
+      socket =
+        socket
+        |> assign(:warm, Map.put(warm, key, :reading))
+        |> start_async({:warm, key}, fn ->
+          PaneComponent.read_pane(pane, node, dataset, scope, :warm)
+        end)
+
+      {:noreply, socket}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("warm", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_async({:warm, key}, {:ok, data}, socket) do
+    now = System.monotonic_time(:millisecond)
+
+    warm =
+      socket.assigns.warm
+      |> Map.put(key, {data, now})
+      |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
+      |> Enum.sort_by(
+        fn {_key, entry} -> if entry == :reading, do: now, else: elem(entry, 1) end,
+        :desc
+      )
+      |> Enum.take(@warm_cap)
+      |> Map.new()
+
+    {:noreply, assign(socket, :warm, warm)}
+  end
+
+  def handle_async({:warm, key}, {:exit, _reason}, socket),
+    do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
+
+  defp fresh?(:reading, _now), do: true
+  defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
+
+  defp warm(warm, key) do
+    case warm[key] do
+      {data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
+      _ -> nil
+    end
   end
 
   # A pane's read landed: the tab title follows the last pane's real title.
@@ -107,6 +171,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border-subtle); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
+      .dk [data-desk-leaving] { display: none; }
     </style>
     <div
       class="pane-layout dk"
@@ -114,6 +179,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-testid="panes"
       role="main"
       style="flex: 1 1 auto; min-height: 0"
+      phx-hook="Desk"
     >
       <.live_component
         :for={view <- @panes}
@@ -122,6 +188,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         pane={view.pane}
         index={view.index}
         node={view.node}
+        warm={warm(@warm, view.key)}
         panes={@chain}
         base={@base}
         dataset={@dataset}
