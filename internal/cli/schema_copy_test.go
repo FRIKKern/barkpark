@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -235,5 +236,93 @@ func TestImportSchemasRefusesAFileWithoutNames(t *testing.T) {
 	}
 	if len(dst.order) != 0 {
 		t.Errorf("a refused import wrote %v", dst.order)
+	}
+}
+
+// PART OF A DATASET (task-38f43e680192393f). --type takes several types as a
+// comma list or a repeated flag. The export writes only documents of those
+// types, one request per type in the order named, and --schemas writes only
+// their schemas. A named type with no schema is reported, not invented.
+func TestExportSeveralTypesWritesOnlyThoseTypesAndSchemas(t *testing.T) {
+	src := newSchemaFakeServer(t)
+	for _, name := range []string{"post", "author", "comment"} {
+		src.schemas[name] = map[string]any{"name": name, "fields": []any{map[string]any{"name": "title", "type": "string"}}}
+	}
+	src.seed("post-1", "post", map[string]any{"title": "One"})
+	src.seed("drafts.post-2", "post", map[string]any{"title": "Two"})
+	src.seed("author-1", "author", map[string]any{"name": "Ada"})
+	src.seed("comment-1", "comment", map[string]any{"title": "Left out"})
+
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup.ndjson")
+	schemasPath := filepath.Join(dir, "schemas.json")
+	var so, se strings.Builder
+	code := runExport(newWriter(&so, &se), globals{}, src.ctx(),
+		[]string{"--out", backup, "--schemas", schemasPath, "--type", "author,post", "--type", "post", "--type", "mediaAsset"})
+	if code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+
+	raw, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotTypes []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var head struct {
+			Type string `json:"_type"`
+		}
+		if err := json.Unmarshal([]byte(line), &head); err != nil {
+			t.Fatalf("line %q: %v", line, err)
+		}
+		gotTypes = append(gotTypes, head.Type)
+	}
+	if strings.Join(gotTypes, ",") != "author,post,post" {
+		t.Errorf("exported types = %v, want author, then both posts, and no comment", gotTypes)
+	}
+	if !strings.Contains(se.String(), "exported 3 documents") || !strings.Contains(se.String(), "of type author, post, mediaAsset") {
+		t.Errorf("export stderr = %s, want the count and the types", se.String())
+	}
+
+	sc, err := readSchemaCopy(schemasPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range sc.Schemas {
+		names = append(names, schemaCopyName(s))
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "author,post" {
+		t.Errorf("schema file holds %v, want author and post only", names)
+	}
+	if !strings.Contains(se.String(), "no schema for type mediaAsset") {
+		t.Errorf("export stderr = %s, want the type without a schema named", se.String())
+	}
+
+	var meta exportMeta
+	metaRaw, _ := os.ReadFile(backup + exportMetaSuffix)
+	if err := json.Unmarshal(metaRaw, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(meta.Types, ",") != "author,post,mediaAsset" || meta.Documents != 3 {
+		t.Errorf("sidecar = %+v, want the three types and 3 documents", meta)
+	}
+
+	// The partial file imports into an empty target with its schemas.
+	dst := newSchemaFakeServer(t)
+	if code, stdout, stderr := runImportForTest(t, dst.ctx(), globals{}, backup, "--schemas", schemasPath); code != exitOK {
+		t.Fatalf("import exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if len(dst.schemas) != 2 || len(dst.docs) != 3 {
+		t.Errorf("target holds %d schemas and %d documents, want 2 and 3", len(dst.schemas), len(dst.docs))
+	}
+}
+
+func TestExportTypeRefusesAnEmptyName(t *testing.T) {
+	src := newSchemaFakeServer(t)
+	var so, se strings.Builder
+	if code := runExport(newWriter(&so, &se), globals{}, src.ctx(), []string{"--type", "post,,author"}); code == exitOK {
+		t.Fatalf("export exit = 0, want a usage error")
 	}
 }
