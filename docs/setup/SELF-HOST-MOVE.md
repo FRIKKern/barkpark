@@ -23,23 +23,7 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
 
 ## Copy one dataset over the API
 
-Use this when you cannot reach the source's database or servers. It needs a token that reads the source and writes the target.
-
-```bash
-bp -s <source> -w <ws> -d production export --out backup.ndjson --media media
-bp -s <target> -w <ws> -d production import backup.ndjson --media media --dry-run
-bp -s <target> -w <ws> -d production import backup.ndjson --media media
-```
-
-- `export --media <dir>` writes every media file to `<dir>/files/<id>` and lists ids and SHA-1s in `<dir>/media.json`. A re-run skips files it already holds.
-- `import --media <dir>` uploads each file with `mediaFileId`, so the target keeps the asset id, the SHA-1 and each `asset-<id>` document. Byte duplicates keep their own ids. The exported `mediaAsset` rows then replace the documents the uploads made, with `fileInfo.path` pointing at the target's copy. A `/media/files/<path>` URL stored in other content still names the source's path.
-- The import writes each document as exported. The target adds no schema initial values and derives no title. A target older than this answers with a warning, and its creates still add them.
-- A batch the target cannot finish in time is sent again at half its documents, down to one. The report names the size it ended with. A stopped import prints `--from-line N`.
-- `import --media` skips each file the target lists with the same id, size and SHA-1, so a resumed run sends only the rest. An id the target holds with other bytes refuses it unless `--replace-media` is set.
-- A file stored before 2026-10-10 lacks a SHA-1 until a backfill. Both commands check and count it by size.
-- An older target ignores `mediaFileId` and stores a new id. The import then stops at the first file, before any document.
-- Media file ids are unique per instance. An import with `--media` into a second dataset on the same instance is refused with 409 at the first file, so copy media to another instance.
-- Empty the target first with `bp -s <target> -w <ws> -p <project> dataset empty production --confirm-production production`. It keeps the dataset and schemas.
+Use [SELF-HOST-COPY.md](SELF-HOST-COPY.md) when you cannot reach the source's database or servers. It copies one dataset with its schemas and media over the API.
 
 ## Compare schemas
 

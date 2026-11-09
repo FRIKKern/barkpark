@@ -246,6 +246,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"decodes result.id equal to the exported asset id and result.sha1 equal to the exported SHA-1, so an " +
 			"empty or HTML 200 refuses the import before any document is written.",
 	},
+	{
+		File: "internal/cli/schema_copy.go", Func: "applySchemas", Sites: 1,
+		Endpoint: "POST /v1/schemas/:dataset (one schema of a bp import --schemas)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through builtinWriteReceiptErr, and the schema counts as applied only when the receipt " +
+			"decodes a name equal to the name sent, so an empty or HTML 200 stops the import before any media " +
+			"or document is written.",
+	},
 	// ---- migrate ---------------------------------------------------------
 	{
 		File: "internal/cli/migrate_cmd.go", Func: "migrateSchemas", Sites: 1,

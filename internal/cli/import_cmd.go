@@ -84,6 +84,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	fromLine := 0
 	batchBytes := importDefaultBatchBytes
 	mediaDir := ""
+	schemasPath := ""
 	replaceMedia := false
 	i := 0
 	for i < len(args) {
@@ -120,6 +121,13 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			mediaDir = v
 			i = ni
+		case "--schemas":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--schemas")
+			if err != nil {
+				return usageErrf(out, func() { usageImport(out, false) }, "%v", err)
+			}
+			schemasPath = v
+			i = ni
 		case "--batch-bytes":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--batch-bytes")
 			if err != nil {
@@ -134,7 +142,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return usageErrf(out, func() { usageImport(out, false) },
-					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --media / --replace-media / --yes)", a)
+					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --media / --replace-media / --schemas / --yes)", a)
 			}
 			if path != "" {
 				return usageErrf(out, func() { usageImport(out, false) }, "import takes one file; got %q and %q", path, a)
@@ -189,6 +197,15 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
 		}
 		media = m
+	}
+
+	var schemas *schemaCopyFile
+	if schemasPath != "" {
+		sc, err := readSchemaCopy(schemasPath)
+		if err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
+		}
+		schemas = sc
 	}
 
 	rows, err := importReadRows(src)
@@ -266,13 +283,16 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		if refused {
 			refusedIDs = collisions
 		}
+		if schemas != nil && !out.machineOut() {
+			out.outf("dry run: %d schema(s) from %s would be applied to %s first", len(schemas.Schemas), schemasPath, scope)
+		}
 		if media != nil && !out.machineOut() {
 			out.outf("dry run: from %s, %s", mediaDir, media.planSummary("would be uploaded with their asset ids"))
 			if media.refused() {
 				out.outf("dry run: %s", media.refusal(scope))
 			}
 		}
-		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs, sanity)
+		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs, sanity, schemas)
 		if refused || (media != nil && media.refused()) {
 			return exitConflict
 		}
@@ -310,6 +330,17 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
+	// The schemas go first: the first one creates the dataset on a new
+	// target, and the documents after them are written against them.
+	if schemas != nil {
+		if err := applySchemas(out, ctx, dataset, schemas); err != nil {
+			return useError(out, "request_failed",
+				fmt.Sprintf("import: %v. No media or document was written; run the import again to apply the schemas again and continue.", err), exitGeneric)
+		}
+		if !out.machineOut() {
+			out.errf("import: applied %d schema(s) to %s", len(schemas.Schemas), scope)
+		}
+	}
 	if sanity != nil {
 		if err := sanity.upload(out, ctx, dataset, scope); err != nil {
 			return useError(out, "request_failed",
@@ -389,6 +420,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	}
 	if sanity != nil {
 		payload["sanity"] = sanity.summary()
+	}
+	if schemas != nil {
+		payload["schemas"] = len(schemas.Schemas)
 	}
 	if media != nil {
 		payload["media"] = len(media.assets)
@@ -741,7 +775,7 @@ func importActionCounts(rows []*importRow) map[string]int {
 
 // importRenderPlan prints the dry-run report: one row per document in apply
 // order, with what a real run would do to it.
-func importRenderPlan(out *writer, path, scope string, rows []*importRow, batches int, refusedIDs []string, sanity *sanityImport) {
+func importRenderPlan(out *writer, path, scope string, rows []*importRow, batches int, refusedIDs []string, sanity *sanityImport, schemas *schemaCopyFile) {
 	counts := importActionCounts(rows)
 	docs := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
@@ -756,6 +790,9 @@ func importRenderPlan(out *writer, path, scope string, rows []*importRow, batche
 	}
 	if sanity != nil {
 		payload["sanity"] = sanity.summary()
+	}
+	if schemas != nil {
+		payload["schemas"] = len(schemas.Schemas)
 	}
 	if out.emitStructured(payload) {
 		return
@@ -788,7 +825,7 @@ func usageImport(out *writer, toStdout bool) {
 	if toStdout {
 		p = out.outf
 	}
-	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--media <dir>] [--replace-media] [--yes]")
+	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--media <dir>] [--replace-media] [--schemas <file>] [--yes]")
 	p("")
 	p("Restore a `bp export` NDJSON backup into the active dataset (set it with -d).")
 	p("")
@@ -820,6 +857,10 @@ func usageImport(out *writer, toStdout bool) {
 	p("  --replace-media    with --media: when the target holds an id with another size")
 	p("                     or SHA-1, delete the target's file and upload the exported")
 	p("                     one. Without it the import refuses and names those ids")
+	p("  --schemas <file>   apply the schemas a `bp export --schemas <file>` wrote before")
+	p("                     any media or document. Each one is an upsert, so a re-run")
+	p("                     applies them again with no change. The first one creates the")
+	p("                     dataset. The workspace must exist: `bp workspace create <slug>`")
 	p("  --yes              skip the confirmation for a production target")
 	p("")
 	p("A batch holds at most 1000 mutations and is applied by the server as one")
