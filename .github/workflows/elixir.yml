@@ -1120,6 +1120,25 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: node scripts/check-vendor-freshness.mjs
 
+      # ── the editor's host-rig unit tests, riding this job ─────────────────
+      # (task-c809c97ad878284f)
+      #
+      # paper-editor.yml runs the editor's suites, but its workflow-level
+      # `paths:` filter means its jobs can never be required (see the freshness
+      # steps above). hosts/*.test.mjs ran in no workflow at all. They sit here
+      # for the same reasons the freshness gate does: this job always runs, and
+      # its red reds the required `Elixir gate`.
+      #
+      # These tests need no Chrome and no `npm ci`: only node builtins, the
+      # hosts/ files, and local servers they start themselves. The Chrome rigs
+      # (hosts/run.mjs, hosts/restore.mjs) are not named *.test.mjs and do not
+      # run here. A test that needs Chrome must not take that name. Same
+      # command as the package's `hosts:test` script; measured at ~0.3 s.
+      - name: The editor's host-rig tests pass (no Chrome)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        working-directory: api/assets/paper-editor
+        run: node --test hosts/*.test.mjs
+
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
     # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`
