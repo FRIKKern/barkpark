@@ -37,7 +37,7 @@ up prints each step as `[n/11]` on Path A and `[n/10]` on Path B, then its time 
 7. `deploy` on Path A runs `deploy.sh` on the VM.
 8. `ready` waits for `https://<host>/readyz`.
 9. `entra` on Path A deploys `entra.bicep`, adds the client secret through Microsoft Graph and waits until Entra accepts it.
-10. `connect` saves the instance as a bp server and connects the organization to Entra. The active server stays as it was unless you pass `--use`. Otherwise up prints the `bp use <name>` command.
+10. `connect` saves the instance in bp, switches to it only with `--use`, and connects the org to Entra.
 11. `verify` checks the settings and the instance URL.
 
 ## Before you start on Azure
