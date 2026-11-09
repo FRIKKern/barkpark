@@ -461,6 +461,14 @@ defmodule Barkpark.StudioChat.Recorder do
       # clobbering blocked while the ask is genuinely pending.
       pending_asks: MapSet.new(),
       runtime_text: "",
+      # One runtime turn may hold several assistant messages (text, a tool call,
+      # more text). `runtime_turn_open?` is true from :turn_started to the turn's
+      # end, so a SECOND :turn_started inside it (a registered claude host sends
+      # one per message_start) continues the turn instead of dropping its text
+      # (task-aa27c3d55ca8d009). `runtime_break?` marks a message edge: the next
+      # text_delta starts a new paragraph (`runtime_paragraph/2`).
+      runtime_turn_open?: false,
+      runtime_break?: false,
       # The progressive live-document accumulator (mobile charter D59-D64) and
       # the per-session monotone turn counter it stamps onto every frame.
       # RECORDER-owned by D63 because this is the only seam alive for the whole
@@ -1374,10 +1382,20 @@ defmodule Barkpark.StudioChat.Recorder do
       :turn_started ->
         StudioChat.update_status(state.session_id, "working")
 
-        %{state | runtime_text: ""}
-        |> stable_start()
-        |> clear_pending_asks()
-        |> publish_activity(%{state: :working, line: "thinking…"})
+        if Map.get(state, :runtime_turn_open?, false) do
+          # A next assistant message of the SAME turn (an older claude host sends
+          # turn_started for every message_start): keep the turn's text and its
+          # live document, start a new paragraph.
+          state
+          |> Map.put(:runtime_break?, true)
+          |> publish_activity(%{state: :working, line: "thinking…"})
+        else
+          %{state | runtime_text: ""}
+          |> Map.merge(%{runtime_turn_open?: true, runtime_break?: false})
+          |> stable_start()
+          |> clear_pending_asks()
+          |> publish_activity(%{state: :working, line: "thinking…"})
+        end
 
       :text_delta ->
         # Segments are NOT derived here. `capture_runtime_event/3` runs BEFORE the
@@ -1404,6 +1422,7 @@ defmodule Barkpark.StudioChat.Recorder do
         state = stable_settle(state, state.runtime_text)
 
         %{state | runtime_text: ""}
+        |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
         |> clear_pending_asks()
         |> publish_activity(%{state: :idle, line: nil})
 
@@ -1413,6 +1432,14 @@ defmodule Barkpark.StudioChat.Recorder do
       kind when kind in [:item_started, :item_completed] ->
         lifecycle = if kind == :item_started, do: :started, else: :completed
         item = get_in(event.native, ["params", "item"]) || %{}
+
+        # A text block ended (a registered claude host's item {type: "text"}):
+        # the turn's next text is a new paragraph.
+        state =
+          if kind == :item_completed and item["type"] == "text",
+            do: Map.put(state, :runtime_break?, true),
+            else: state
+
         commit_rail(state, StudioChat.rail_apply_codex_item(state.rail_snapshot, item, lifecycle))
 
       kind when kind in [:error, :process_failed, :protocol_error] ->
@@ -1422,6 +1449,7 @@ defmodule Barkpark.StudioChat.Recorder do
         # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
         # the offline rule untouched).
         state
+        |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
         |> stable_settle(state.runtime_text)
         |> publish_activity(%{state: :offline, line: nil})
         |> clear_pending_asks()
@@ -2273,10 +2301,50 @@ defmodule Barkpark.StudioChat.Recorder do
   # terminal frames, and the claude lane likewise settles BEFORE broadcasting the
   # frame that triggers the client's settle refetch.
   defp ingest_runtime_event(state, %Event{} = event, trusted_managed_ingress?) do
+    {state, event} = runtime_paragraph(state, event)
+
     state
     |> capture_runtime_event(event, trusted_managed_ingress?)
     |> tap(&broadcast(&1, {:studio_chat_runtime_event, event}))
     |> stable_runtime_delta(event)
+  end
+
+  # The first text after a message edge, in a turn that already has text, starts
+  # a new paragraph: "\n\n" goes in front of its delta. It is the EVENT that
+  # changes, before capture, so the durable text, the raw frame on the wire and
+  # the live document all count the same bytes (the D59 ingest order above).
+  # Without it a turn's messages ran together in the stored row.
+  defp runtime_paragraph(%{runtime_break?: true} = state, %Event{kind: :text_delta} = event) do
+    delta = runtime_delta(event)
+
+    cond do
+      delta == "" ->
+        {state, event}
+
+      state.runtime_text == "" ->
+        {%{state | runtime_break?: false}, event}
+
+      true ->
+        {%{state | runtime_break?: false},
+         %{event | native: put_runtime_delta(event.native, "\n\n" <> delta)}}
+    end
+  end
+
+  defp runtime_paragraph(state, event), do: {state, event}
+
+  # Every place `runtime_delta/1` (and a client) may read the delta from.
+  defp put_runtime_delta(native, text) do
+    Enum.reduce([{"params", "delta"}, {:params, :delta}], native, fn {params, delta}, acc ->
+      case acc do
+        %{^params => %{} = p} -> Map.put(acc, params, Map.put(p, delta, text))
+        _ -> acc
+      end
+    end)
+    |> then(fn acc ->
+      Enum.reduce(["delta", :delta], acc, fn key, n ->
+        if Map.has_key?(n, key), do: Map.put(n, key, text), else: n
+      end)
+    end)
   end
 
   # The runtime lane's text delta, derived only AFTER its raw frame is on the wire.

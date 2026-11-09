@@ -361,6 +361,8 @@ func TestProviderHelperProcess(t *testing.T) {
 		write(map[string]any{"type": "system", "subtype": "init", "session_id": "claude-thread"})
 		write(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start"}})
 		write(map[string]any{"type": "stream_event", "event": map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": "claude works"}}})
+		// A second assistant message in the same turn: no second turn_started (task-aa27c3d55ca8d009).
+		write(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start"}})
 		write(map[string]any{"type": "result", "subtype": "success", "is_error": false})
 		os.Exit(0)
 	}

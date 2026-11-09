@@ -2897,6 +2897,128 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # ── one turn, several assistant messages (task-aa27c3d55ca8d009) ────────────
+  #
+  # A registered claude host turn with text, a tool call, then more text. An
+  # older host sends turn_started at EVERY Claude message_start; the Recorder
+  # reset runtime_text there, so only the last message's text was stored. A new
+  # host sends one turn_started and marks each text block's edges with an item
+  # {type: "text"} (task-f13fc4b4dc2af6de). Both shapes must store ONE row with
+  # every message's text, in order, a paragraph apart.
+  describe "a turn of several assistant messages" do
+    defp host_ev(sid, kind, native \\ %{}),
+      do:
+        {:studio_chat_runtime_event,
+         %Event{kind: kind, provider: "claude", session_id: sid, native: native}}
+
+    defp host_delta(sid, text),
+      do: host_ev(sid, :text_delta, %{"delta" => text, "params" => %{"delta" => text}})
+
+    defp host_item(sid, kind, item),
+      do: host_ev(sid, kind, %{"item" => item, "params" => %{"item" => item}})
+
+    defp assistant_rows(sid),
+      do: StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "assistant"))
+
+    @bash %{
+      "type" => "tool_use",
+      "id" => "toolu_1",
+      "name" => "Bash",
+      "input" => %{"command" => "df -h"}
+    }
+
+    test "an older host's two turn_started in one turn store both texts (two message_start events)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "Let me check the disk."))
+      # Claude's second message_start, which the old host maps to turn_started
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "You have 40 GB "))
+      frame(recorder, host_delta(sid, "free."))
+      frame(recorder, host_ev(sid, :turn_completed))
+
+      assert [row] = assistant_rows(sid)
+      assert row.source_markdown == "Let me check the disk.\n\nYou have 40 GB free."
+    end
+
+    test "a new host's text items and tool items store both texts, and the wire carries the break",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      text1 = %{"type" => "text", "id" => "text-1"}
+      text2 = %{"type" => "text", "id" => "text-2"}
+
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_item(sid, :item_started, text1))
+      frame(recorder, host_delta(sid, "Let me check the disk."))
+      frame(recorder, host_item(sid, :item_completed, text1))
+      frame(recorder, host_item(sid, :item_started, @bash))
+      frame(recorder, host_item(sid, :item_completed, Map.put(@bash, "is_error", false)))
+      frame(recorder, host_item(sid, :item_started, text2))
+      frame(recorder, host_delta(sid, "You have 40 GB free."))
+      frame(recorder, host_item(sid, :item_completed, text2))
+      frame(recorder, host_ev(sid, :turn_completed))
+
+      assert [row] = assistant_rows(sid)
+      assert row.source_markdown == "Let me check the disk.\n\nYou have 40 GB free."
+
+      # The raw frame a client reads holds the same bytes the row stores.
+      deltas =
+        for {:studio_chat_runtime_event, %Event{kind: :text_delta, native: n}} <- drain_runtime(),
+            do: n["params"]["delta"]
+
+      assert deltas == ["Let me check the disk.", "\n\nYou have 40 GB free."]
+    end
+
+    test "a turn that starts after one completed does not join it", %{
+      sid: sid,
+      recorder: recorder
+    } do
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "first answer"))
+      frame(recorder, host_ev(sid, :turn_completed))
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "second answer"))
+      frame(recorder, host_ev(sid, :turn_completed))
+
+      assert Enum.map(assistant_rows(sid), & &1.source_markdown) == [
+               "first answer",
+               "second answer"
+             ]
+    end
+
+    test "a turn that starts after one failed does not join it", %{sid: sid, recorder: recorder} do
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "half an answer"))
+      frame(recorder, host_ev(sid, :error))
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_delta(sid, "a whole answer"))
+      frame(recorder, host_ev(sid, :turn_completed))
+
+      assert Enum.map(assistant_rows(sid), & &1.source_markdown) == [
+               "half an answer",
+               "a whole answer"
+             ]
+    end
+
+    test "a text edge before any text adds no break", %{sid: sid, recorder: recorder} do
+      frame(recorder, host_ev(sid, :turn_started))
+      frame(recorder, host_item(sid, :item_completed, %{"type" => "text", "id" => "text-1"}))
+      frame(recorder, host_delta(sid, "only text"))
+      frame(recorder, host_ev(sid, :turn_completed))
+
+      assert [%{source_markdown: "only text"}] = assistant_rows(sid)
+    end
+
+    defp drain_runtime(acc \\ []) do
+      receive do
+        {:studio_chat_runtime_event, _} = msg -> drain_runtime([msg | acc])
+        _other -> drain_runtime(acc)
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+  end
+
   # ── live ledger transitions re-broadcast for bp chat (tlv) ─────────────────
   #
   # The Recorder rides the SAME `documents:production` ledger stream Studio's
