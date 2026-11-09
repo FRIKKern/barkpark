@@ -225,7 +225,7 @@ func TestImportMediaRerunIsNotACollision(t *testing.T) {
 
 // Media file ids are unique per instance, so an import into a second dataset
 // on the same instance is refused 409. The error names that cause and the
-// SELF-HOST-MOVE.md section.
+// SELF-HOST-COPY.md page.
 func TestImportMediaSameInstanceConflictNamesCause(t *testing.T) {
 	src := newMediaFakeServer(t, "d/source")
 	src.store("55555555-5555-5555-5555-555555555555", "c.png", []byte("c"))
@@ -242,7 +242,7 @@ func TestImportMediaSameInstanceConflictNamesCause(t *testing.T) {
 		t.Fatalf("import exit = 0, want a refusal; stdout=%s", stdout)
 	}
 	all := stdout + stderr
-	for _, want := range []string{"unique per instance", "SELF-HOST-MOVE.md#copy-one-dataset-over-the-api"} {
+	for _, want := range []string{"unique per instance", "SELF-HOST-COPY.md"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("import output lacks %q: %s", want, all)
 		}
