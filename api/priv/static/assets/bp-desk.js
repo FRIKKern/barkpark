@@ -13,6 +13,10 @@
 //   * LAYOUT — panes that do not fit collapse to 51 px strips, by the rule the
 //              TanStack Studio uses (Sanity's own, see collapsed() below), from
 //              the width the browser measures. A click on a strip opens it.
+//   * KEYS   — in a list, ArrowDown / ArrowUp move from row to row and Home /
+//              End jump to the first / last (Sanity's list keys). Enter is the
+//              link's own. A row that had the focus when it was followed gets
+//              it back if the patch dropped it.
 //
 // Nothing here decides where a link goes: the href is the server's, and a
 // modifier click (new tab, new window) is left to the browser untouched.
@@ -272,6 +276,7 @@
       hook._onClick = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || !plainClick(e)) return;
+        hook._refocus = root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         if (hook._ahead) hook._settle(true);
         hook._ahead = paintAhead(root, row);
         if (!hook._ahead) return;
@@ -280,8 +285,38 @@
       };
 
       hook._onLoaded = function () {
-        if (!hook._ahead) return;
-        hook._settle(new URL(hook._ahead.href).pathname === window.location.pathname);
+        if (hook._ahead) hook._settle(new URL(hook._ahead.href).pathname === window.location.pathname);
+        hook._giveFocusBack();
+      };
+
+      // Following a row re-draws panes, and a re-drawn row loses the focus to
+      // <body>. The row with the same href takes it back; a focus the patch
+      // placed somewhere on purpose is left alone.
+      hook._refocus = null;
+      hook._giveFocusBack = function () {
+        var href = hook._refocus;
+        hook._refocus = null;
+        var doc = root.ownerDocument;
+        if (!href || (doc.activeElement && doc.activeElement !== doc.body)) return;
+        var again = Array.prototype.filter.call(root.querySelectorAll(ROW), function (a) {
+          return a.getAttribute("href") === href;
+        })[0];
+        if (again) again.focus({ preventScroll: true });
+      };
+
+      hook._onKey = function (e) {
+        var row = e.target.closest ? e.target.closest(ROW) : null;
+        if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
+        var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+        if (step === undefined) return;
+        var pane = paneOf(root, row);
+        if (!pane) return;
+        var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
+        var to = Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step));
+        e.preventDefault();
+        if (rows[to] === row) return;
+        rows[to].focus({ preventScroll: true });
+        if (rows[to].scrollIntoView) rows[to].scrollIntoView({ block: "nearest" });
       };
 
       hook._onIntent = function (e) {
@@ -317,6 +352,7 @@
       hook._layout();
 
       root.addEventListener("click", hook._onClick);
+      root.addEventListener("keydown", hook._onKey);
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
       window.addEventListener("phx:page-loading-stop", hook._onLoaded);
@@ -336,6 +372,7 @@
       root.removeEventListener("keydown", this._openStrip, true);
       window.removeEventListener("resize", this._queueLayout);
       root.removeEventListener("click", this._onClick);
+      root.removeEventListener("keydown", this._onKey);
       root.removeEventListener("pointerover", this._onIntent);
       root.removeEventListener("focusin", this._onIntent);
       window.removeEventListener("phx:page-loading-stop", this._onLoaded);
