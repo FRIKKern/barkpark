@@ -35,6 +35,7 @@ type activeLocalSession struct {
 	approvals map[string]approvalRequest
 	pending   map[string]chan map[string]any
 	nextID    atomic.Uint64
+	claude    *claudeTurn // the run's stream-json reader (claude_turn.go); one run per session
 }
 
 type approvalRequest struct {
@@ -201,7 +202,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, remot
 		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
 			return fmt.Errorf("decode claude JSONL: %w", err)
 		}
-		if event := session.claudeMessage(message); event != nil {
+		for _, event := range session.claudeMessage(message) {
 			if err := emit(event); err != nil {
 				return err
 			}
@@ -235,9 +236,7 @@ func claudeEvent(message map[string]any) map[string]any {
 		}
 	case "stream_event":
 		event, _ := message["event"].(map[string]any)
-		if event["type"] == "message_start" {
-			return map[string]any{"kind": "turn_started"}
-		}
+		// message_start (turn_started) and the block edges are claudeTurn's: they need the run's state.
 		if event["type"] == "content_block_delta" {
 			delta, _ := event["delta"].(map[string]any)
 			if delta["type"] == "text_delta" {
@@ -675,7 +674,7 @@ func (s *activeLocalSession) close() error {
 	return nil
 }
 
-func (s *activeLocalSession) claudeMessage(message map[string]any) map[string]any {
+func (s *activeLocalSession) claudeMessage(message map[string]any) []map[string]any {
 	if message["type"] == "control_response" {
 		response, _ := message["response"].(map[string]any)
 		if s.deliver(response) {
@@ -690,13 +689,19 @@ func (s *activeLocalSession) claudeMessage(message map[string]any) map[string]an
 			s.mu.Lock()
 			s.approvals[id] = approvalRequest{id: message["request_id"], method: "can_use_tool", input: input}
 			s.mu.Unlock()
-			return map[string]any{
+			return []map[string]any{{
 				"kind": "approval_requested", "approval_id": id,
 				"tool_name": request["tool_name"], "input": input, "title": request["title"],
-			}
+			}}
 		}
 	}
-	return claudeEvent(message)
+	s.mu.Lock()
+	if s.claude == nil {
+		s.claude = newClaudeTurn()
+	}
+	turn := s.claude
+	s.mu.Unlock()
+	return turn.events(message)
 }
 
 func (s *activeLocalSession) codexMessage(message map[string]any) (map[string]any, bool) {
