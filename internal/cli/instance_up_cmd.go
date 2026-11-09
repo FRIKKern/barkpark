@@ -5,13 +5,18 @@ package cli
 //
 //	bp instance up --azure --path vm|containerapps --resource-group <rg>
 //	               --owner <upn> [--host <dns label or host>] [--breakglass <email>]
-//	               [--image <ref> | --from-source <git ref>] [--region <r>]
+//	               [--image <ref> | --from-source <git ref>] [--region <r>] [--use]
 //
 // It runs the steps docs/setup/SELF-HOST.md and docs/setup/ENTRA.md describe:
 // preflight, resource group, settings file, check, deploy (a VM through the
 // embedded deploy.sh, or Container Apps through the embedded deploy/azure),
 // /readyz, the Entra app through the embedded entra-app-register.sh, the bp
 // connection and the organization's OIDC connection, and a last check.
+//
+// up saves the instance as a known bp server and leaves the active server as
+// it was, because other bp processes on the machine share that default. --use
+// also makes the instance the active server; otherwise up prints the bp use
+// command that does.
 //
 // A state file in the working directory, .bp-instance-up.json by default,
 // records each finished step and the values later steps need. A rerun skips
@@ -203,17 +208,49 @@ var instanceUpSleep = time.Sleep
 // instanceUpSelf is the bp binary the org commands run as. Tests replace it.
 var instanceUpSelf = os.Executable
 
-// instanceUpConnect saves the instance as bp's active server, as
-// `bp setup --target connect` does. Its report goes to stderr, so stdout
-// keeps only up's own result. Tests replace it.
+// instanceUpConnect saves the instance as a known bp server, as
+// `bp setup --target connect --keep-active` does, and leaves the active server
+// as it was. Its report goes to stderr, so stdout keeps only up's own result.
+// Tests replace it.
 var instanceUpConnect = func(out *writer, g globals, server, token string) error {
 	w := newWriter(out.stderr, out.stderr)
 	g.output, g.outputSet = "table", false
 	w.applyGlobals(g)
-	if code := runSetup(w, g, []string{"--target", "connect", "--server", server, "--token", token}); code != exitOK {
+	if code := runSetup(w, g, []string{"--target", "connect", "--server", server, "--token", token, "--keep-active"}); code != exitOK {
 		return fmt.Errorf("bp setup --target connect --server %s exited %d", server, code)
 	}
 	return nil
+}
+
+// instanceUpUse makes the saved instance the active server, as `bp use`
+// does, and returns the name it is saved under.
+func instanceUpUse(server string) (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	e, ok := cfg.FindServer(server)
+	if !ok {
+		return "", fmt.Errorf("%s is not a saved server; run bp setup --target connect --server %s", server, server)
+	}
+	cfg.SetActiveServer(e)
+	if err := SaveConfig(cfg); err != nil {
+		return "", err
+	}
+	return cfg.DisplayName(e), nil
+}
+
+// instanceUpServerName returns the name bp saved the instance under, or the
+// URL when the config does not list it.
+func instanceUpServerName(server string) string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return server
+	}
+	if e, ok := cfg.FindServer(server); ok {
+		return cfg.DisplayName(e)
+	}
+	return server
 }
 
 // instanceUp carries one run.
@@ -223,6 +260,10 @@ type instanceUp struct {
 	g         globals
 	st        *instanceUpState
 	statePath string
+	// use is --use: make the instance the active server at the end.
+	use bool
+	// serverName is the name bp saved the instance under.
+	serverName string
 }
 
 // instanceUpStep is one resumable step.
@@ -232,12 +273,12 @@ type instanceUpStep struct {
 }
 
 func runInstanceUp(out *writer, g globals, args []string) int {
-	const usage = "bp instance up --azure --path vm|containerapps --resource-group <rg> --owner <upn> [--host <dns label or host>] [--breakglass <email>] [--image <ref> | --from-source <git ref>] [--region <r>] [--org <slug>] [--state <file>]"
+	const usage = "bp instance up --azure --path vm|containerapps --resource-group <rg> --owner <upn> [--host <dns label or host>] [--breakglass <email>] [--image <ref> | --from-source <git ref>] [--region <r>] [--org <slug>] [--state <file>] [--use]"
 	a, err := parseHzArgs(args, []string{
 		"path", "resource-group", "host", "owner", "breakglass", "image", "from-source", "region",
 		"org", "org-name", "env-file", "state", "studio-origin", "size", "postgres-sku",
 		"disk-sku", "disk-gb", "alert-email", "ssh-key",
-	}, []string{"azure"}, usage)
+	}, []string{"azure", "use"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -262,7 +303,7 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	if err := st.merge(a); err != nil {
 		return useError(out, "usage", err.Error()+" (usage: "+usage+")", exitUsage)
 	}
-	u := &instanceUp{ctx: context.Background(), out: out, g: g, st: st, statePath: statePath}
+	u := &instanceUp{ctx: context.Background(), out: out, g: g, st: st, statePath: statePath, use: a.bools["use"]}
 	if resumed {
 		out.errf("resuming from %s: %d steps done.", statePath, len(st.Done))
 	}
@@ -292,6 +333,16 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 		}
 		out.errf("        %s took %s, %s to %s UTC", s.name, time.Since(start).Round(time.Second),
 			start.UTC().Format("15:04:05"), time.Now().UTC().Format("15:04:05"))
+	}
+	server := "https://" + st.host()
+	if u.use {
+		name, err := instanceUpUse(server)
+		if err != nil {
+			return useError(out, "failed", "--use: "+err.Error(), exitGeneric)
+		}
+		u.serverName = name
+	} else {
+		u.serverName = instanceUpServerName(server)
 	}
 	u.printNext()
 	return exitOK
@@ -506,12 +557,19 @@ func (u *instanceUp) printNext() {
 	st := u.st
 	signIn := fmt.Sprintf("https://%s/v1/auth/oidc/%s/start", st.host(), st.Org)
 	if u.out.emitStructured(map[string]any{"ok": true, "action": "up", "path": st.Path, "resource_group": st.ResourceGroup,
-		"host": st.host(), "org": st.Org, "sign_in_url": signIn, "state": u.statePath, "done": st.Done}) {
+		"host": st.host(), "org": st.Org, "sign_in_url": signIn, "state": u.statePath, "done": st.Done,
+		"server_name": u.serverName, "active": u.use}) {
 		return
 	}
 	o := u.out
 	o.outf("")
-	o.outf("Barkpark runs at https://%s and is the active server for bp.", st.host())
+	if u.use {
+		o.outf("Barkpark runs at https://%s and is now the active server for bp, saved as %s.", st.host(), u.serverName)
+	} else {
+		o.outf("Barkpark runs at https://%s. bp saved it as %s and kept the active server as it was.", st.host(), u.serverName)
+		o.outf("Switch to it with: bp use %s", u.serverName)
+		o.outf("Or run one command against it with: bp --server %s <command>", u.serverName)
+	}
 	o.outf("Sign-in link for the owner %s:", st.Owner)
 	o.outf("  %s", signIn)
 	o.outf("")

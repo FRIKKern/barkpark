@@ -123,6 +123,8 @@ func defaultUpReply(c instanceUpCmd) (string, error) {
 func stubInstanceUp(t *testing.T) *upFake {
 	t.Helper()
 	f := &upFake{t: t, reply: defaultUpReply, readyz: 200}
+	// up reads and may write bp's config; keep it away from the user's own.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	oldRun, oldGet, oldSleep, oldSelf, oldConnect := instanceUpRun, instanceUpGet, instanceUpSleep, instanceUpSelf, instanceUpConnect
 	instanceUpRun = func(_ context.Context, _ io.Writer, c instanceUpCmd) (string, error) {
 		f.calls = append(f.calls, c)

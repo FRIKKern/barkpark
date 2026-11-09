@@ -29,6 +29,9 @@ func (configStoreAdapter) Save(s setup.SavedConfig) error {
 	if err != nil {
 		cfg = &Config{}
 	}
+	// --keep-active remembers the server but leaves the active flat context
+	// as it was, so other bp processes on the machine keep their default.
+	before := activeFlat{cfg.Server, cfg.Token, cfg.Workspace, cfg.Project, cfg.Dataset}
 	cfg.RememberServer(ServerEntry{
 		Name:          s.Name,
 		Server:        s.Server,
@@ -41,8 +44,15 @@ func (configStoreAdapter) Save(s setup.SavedConfig) error {
 		Tier:          s.Tier,
 		LastConnected: s.LastConnected,
 	})
+	if s.KeepActive {
+		cfg.Server, cfg.Token, cfg.Workspace, cfg.Project, cfg.Dataset =
+			before.server, before.token, before.workspace, before.project, before.dataset
+	}
 	return SaveConfig(cfg)
 }
+
+// activeFlat is the active server and scope a --keep-active connect restores.
+type activeFlat struct{ server, token, workspace, project, dataset string }
 
 // loadKnownServers projects the persisted connect history into the setup
 // package's KnownServerInfo view (most-recent-first), marking the active one.
@@ -183,6 +193,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 		KnownServers: loadKnownServers(),
 		CloudLogin:   cloudLoginHook,
 		RepoPin:      currentRepoPin(),
+		KeepActive:   parsed["keep-active"],
 	}
 
 	// (3) NEVER-PROMPT / NEVER-HANG. No --target: the interactive wizard launches
@@ -450,6 +461,7 @@ FLAGS
   --target <t>        one of connect|cloud|local|deploy|provision
   --server <url>      server URL for connect (http:// or https://)
   --name <handle>     short name to save this server under (bp use <handle>)
+  --keep-active       connect: save the server but keep the active server as it is
   --token <tok>       bearer token to persist with the connection
   -w, --workspace <w> workspace scope (default: default)
   -p, --project <p>   project scope (default: default)
@@ -533,6 +545,12 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 		if name == "docker" {
 			plan.Docker = true
 			seen["docker"] = true
+			i++
+			continue
+		}
+		// Boolean: --keep-active. runSetup reads it from seen.
+		if name == "keep-active" {
+			seen["keep-active"] = true
 			i++
 			continue
 		}

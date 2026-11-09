@@ -170,6 +170,10 @@ type SavedConfig struct {
 	// connect (time.Now in the executor — kept out of the pure history helper).
 	// The adapter passes it straight into ServerEntry.LastConnected.
 	LastConnected string
+
+	// KeepActive tells the store to remember the server without making it
+	// the active one.
+	KeepActive bool
 }
 
 // KnownServerInfo is one remembered server projected into the setup package for
@@ -200,6 +204,11 @@ type Options struct {
 	DryRun  bool
 	Confirm bool
 	Out     io.Writer
+
+	// KeepActive makes a connect save the server under its name without
+	// making it the active server, so other bp processes on the machine
+	// keep their default. bp setup --keep-active and bp instance up set it.
+	KeepActive bool
 
 	// Store persists the connection on a successful connect. Required for a
 	// non-dry-run connect; a nil store on a real connect is an error.
