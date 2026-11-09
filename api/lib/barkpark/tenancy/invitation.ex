@@ -19,6 +19,9 @@ defmodule Barkpark.Tenancy.Invitation do
     field :user_id, :binary_id
     field :role, :string
     field :invited_by, :string
+    # Accepted on the user's next SSO sign-in through the workspace's
+    # organization (`Members.bind_sso_grants/2`), for instances without mail.
+    field :bind_on_sso, :boolean, default: false
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace
 
@@ -30,7 +33,7 @@ defmodule Barkpark.Tenancy.Invitation do
   @doc "`valid_roles` mirrors the membership changeset: built-ins plus the workspace's custom roles."
   def changeset(invitation, attrs, valid_roles) do
     invitation
-    |> cast(attrs, [:workspace_id, :user_id, :role, :invited_by])
+    |> cast(attrs, [:workspace_id, :user_id, :role, :invited_by, :bind_on_sso])
     |> validate_required([:workspace_id, :user_id, :role])
     |> validate_inclusion(:role, valid_roles)
     |> unique_constraint([:workspace_id, :user_id])
