@@ -45,11 +45,12 @@ const exportPartialSuffix = ".partial"
 // multipart upload rather than completing a truncated object and writes its
 // Manifest only after the pipe drains.
 type exportMeta struct {
-	Documents   int    `json:"documents"`
-	Bytes       int64  `json:"bytes"`
-	SHA256      string `json:"sha256"`
-	Scope       string `json:"scope"`
-	CompletedAt string `json:"completed_at"`
+	Documents   int      `json:"documents"`
+	Bytes       int64    `json:"bytes"`
+	SHA256      string   `json:"sha256"`
+	Scope       string   `json:"scope"`
+	Types       []string `json:"types,omitempty"`
+	CompletedAt string   `json:"completed_at"`
 }
 
 // runExport streams a dataset export (`bp export [--type <t>] [--perspective <p>]`),
@@ -59,7 +60,7 @@ type exportMeta struct {
 // NDJSON body, not the single JSON the generic command path decodes.
 func runExport(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if g.help {
-		out.outf("usage: bp export [--type <t>] [--perspective <p>] [--out <file>] [--media <dir>] [--schemas <file>]")
+		out.outf("usage: bp export [--type <t>[,<t>...]] [--perspective <p>] [--out <file>] [--media <dir>] [--schemas <file>]")
 		out.outf("       bp export --verify <file>")
 		out.outf("")
 		out.outf("Stream the active dataset as NDJSON (one document per line) for backup:")
@@ -98,9 +99,17 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("the server's schemaHash. `bp import <file> --schemas <file>` applies them to")
 		out.outf("the target before any document, and creates the dataset there. The target")
 		out.outf("workspace must exist: create it with `bp workspace create <slug>`.")
+		out.outf("")
+		out.outf("--type <t> exports only documents of type <t>. Name several types with a")
+		out.outf("comma list or a repeated --type: bp export --type post,author. Each type is")
+		out.outf("one request, written in the order named. --schemas then writes only the")
+		out.outf("schemas of those types. The filter does not follow references into other")
+		out.outf("types, so name every type the copied documents point at. --media still")
+		out.outf("writes every media file of the dataset.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts
+	var types []string
 	var outPath, verifyPath, mediaDir, schemasPath string
 	i := 0
 	for i < len(args) {
@@ -140,7 +149,15 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			if err != nil {
 				return usageErrf(out, nil, "%v", err)
 			}
-			opts.Type = v
+			for _, t := range strings.Split(v, ",") {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					return usageErrf(out, nil, "--type %q names an empty type", v)
+				}
+				if !containsString(types, t) {
+					types = append(types, t)
+				}
+			}
 			i = ni
 		case "--perspective":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
@@ -161,7 +178,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// it with the streaming flags would silently ignore one half of the command,
 	// so say so instead.
 	if verifyPath != "" {
-		if outPath != "" || opts.Type != "" || opts.Perspective != "" || mediaDir != "" || schemasPath != "" {
+		if outPath != "" || len(types) > 0 || opts.Perspective != "" || mediaDir != "" || schemasPath != "" {
 			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective / --media / --schemas")
 		}
 		return runExportVerify(out, verifyPath)
@@ -174,7 +191,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		if dataset == "" {
 			dataset = "production"
 		}
-		if code := exportSchemas(out, ctx, dataset, schemasPath); code != exitOK {
+		if code := exportSchemas(out, ctx, dataset, schemasPath, types); code != exitOK {
 			return code
 		}
 	}
@@ -249,13 +266,26 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		target = partialPath
 	}
 
-	err := client.Export(sigCtx, opts, func(line string) error {
-		if err := writeLine(line); err != nil {
-			return err
+	// One request per named type, in the order named. The server filter takes
+	// one type. Without --type the one request covers the whole dataset.
+	streams := types
+	if len(streams) == 0 {
+		streams = []string{""}
+	}
+	var err error
+	for _, t := range streams {
+		opts.Type = t
+		err = client.Export(sigCtx, opts, func(line string) error {
+			if err := writeLine(line); err != nil {
+				return err
+			}
+			docs++
+			return nil
+		})
+		if err != nil {
+			break
 		}
-		docs++
-		return nil
-	})
+	}
 
 	// The server cut the export and said so in-band. The marker goes into the
 	// output after the documents that did arrive, so the file carries its own
@@ -296,6 +326,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			Bytes:       byteCount,
 			SHA256:      hex.EncodeToString(hash.Sum(nil)),
 			Scope:       exportScope(ctx),
+			Types:       types,
 			CompletedAt: time.Now().UTC().Format(time.RFC3339),
 		}); code != exitOK {
 			return code
@@ -309,7 +340,11 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
-	out.errf("exported %d documents (%d bytes) from %s", docs, byteCount, exportScope(ctx))
+	if len(types) > 0 {
+		out.errf("exported %d documents (%d bytes) of type %s from %s", docs, byteCount, strings.Join(types, ", "), exportScope(ctx))
+	} else {
+		out.errf("exported %d documents (%d bytes) from %s", docs, byteCount, exportScope(ctx))
+	}
 	if outPath != "" {
 		out.errf("wrote %s and its sidecar %s — verify it later with: bp export --verify %s",
 			outPath, outPath+exportMetaSuffix, outPath)

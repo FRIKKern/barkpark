@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -86,7 +87,7 @@ func (f *importFakeServer) seed(id, typ string, fields map[string]any) {
 func (f *importFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/w/ws/p/proj/v1/data/export/"):
-		f.export(w)
+		f.export(w, r.URL.Query().Get("type"))
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/w/ws/p/proj/v1/data/mutate/"):
 		f.mutate(w, r)
 	default:
@@ -94,11 +95,16 @@ func (f *importFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *importFakeServer) export(w http.ResponseWriter) {
+// export streams every document, or only those of typ when the request
+// names one, as the server's ?type= filter does.
+func (f *importFakeServer) export(w http.ResponseWriter, typ string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	ids := make([]string, 0, len(f.docs))
 	for id := range f.docs {
+		if typ != "" && string(f.docs[id]["_type"]) != strconv.Quote(typ) {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)

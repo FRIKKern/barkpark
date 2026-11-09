@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -28,6 +29,7 @@ import (
 // schemaCopyFile is the file `bp export --schemas` writes.
 type schemaCopyFile struct {
 	Scope   string            `json:"scope"`
+	Types   []string          `json:"types,omitempty"`
 	Schemas []json.RawMessage `json:"schemas"`
 }
 
@@ -72,15 +74,35 @@ func fetchDatasetSchemas(ctx manifest.Context, dataset string) ([]json.RawMessag
 	return out, nil
 }
 
-// exportSchemas writes the dataset's schemas to path. It writes a temporary
-// file next to path and renames it, so a failed run leaves an earlier file
-// as it was.
-func exportSchemas(out *writer, ctx manifest.Context, dataset, path string) int {
+// exportSchemas writes the dataset's schemas to path, or only the schemas of
+// types when it names any. It writes a temporary file next to path and
+// renames it, so a failed run leaves an earlier file as it was.
+func exportSchemas(out *writer, ctx manifest.Context, dataset, path string, types []string) int {
 	schemas, err := fetchDatasetSchemas(ctx, dataset)
 	if err != nil {
 		return useError(out, "request_failed", fmt.Sprintf("export --schemas: reading the schemas of %s: %v", exportScope(ctx), err), exitGeneric)
 	}
-	body, err := json.MarshalIndent(schemaCopyFile{Scope: exportScope(ctx), Schemas: schemas}, "", "  ")
+	if len(types) > 0 {
+		kept := schemas[:0]
+		found := map[string]bool{}
+		for _, s := range schemas {
+			if name := schemaCopyName(s); containsString(types, name) {
+				kept = append(kept, s)
+				found[name] = true
+			}
+		}
+		schemas = kept
+		var missing []string
+		for _, t := range types {
+			if !found[t] {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) > 0 {
+			out.errf("export --schemas: %s has no schema for type %s, so the file leaves it out", exportScope(ctx), strings.Join(missing, ", "))
+		}
+	}
+	body, err := json.MarshalIndent(schemaCopyFile{Scope: exportScope(ctx), Types: types, Schemas: schemas}, "", "  ")
 	if err != nil {
 		return useError(out, "failed", fmt.Sprintf("export --schemas: %v", err), exitGeneric)
 	}
