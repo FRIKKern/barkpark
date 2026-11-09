@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: self-host-move | budget: 1500tok -->
+<!-- doc-tier: human | canonical-for: self-host-move | budget: 1600tok -->
 # Move an instance from a VM to Container Apps
 
 These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backup holds the database and media but no key, so the keys move by hand. A rehearsal on 2026-10-27 with 333 documents and 12 media files was down 123 seconds. A move between two private deployments on 2026-10-27 took 38 seconds for the restore job and 200 seconds from the second deployment to `/readyz`. `scripts/instance-move-rehearsal.sh` rehearses backup, restore and boot on one machine.
@@ -18,7 +18,7 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
 
    The job installs bp 1.26.10, the template's `bpCliVersion`, which restores into the same or a newer PostgreSQL major. The template runs 17. A VM from `deploy.sh` runs 17 too, and a VM built before 2026-10-28 keeps Ubuntu's 14 on 22.04 or 16 on 24.04.
 6. Set `restoreMode = false`, remove that address from `operatorIpRanges` and deploy again. The app starts on the restored database. API tokens move with the database, so the VM's admin token still works and the target skips its seed token.
-7. Wait for `/readyz` to answer 200. `/v1/auth/oidc/<org>/start` answers 302 only when the cloak key opens the SSO secret. Open a document with an encrypted field, and compare `bp schema ls` with the source.
+7. Wait for `/readyz` to answer 200. `/v1/auth/oidc/<org>/start` answers 302 only when the cloak key opens the SSO secret. Open a document with an encrypted field, and compare `bp schema ls -o json` with the source, as [below](#compare-schemas) says.
 8. Repoint DNS. Keep `PHX_HOST`, or passkeys and the Entra redirect URI stop working. Container Apps takes a custom domain only after a TXT record `asuid.<host>`, so a VM on a `cloudapp.azure.com` name needs your own domain before the move.
 
 ## Copy one dataset over the API
@@ -40,3 +40,7 @@ bp -s <target> -w <ws> -d production import backup.ndjson --media media
 - An older target ignores `mediaFileId` and stores a new id. The import then stops at the first file, before any document.
 - Media file ids are unique per instance. An import with `--media` into a second dataset on the same instance is refused with 409 at the first file, so copy media to another instance.
 - Empty the target first with `bp -s <target> -w <ws> -p <project> dataset empty production --confirm-production production`. It keeps the dataset and schemas.
+
+## Compare schemas
+
+`bp schema ls -o json` prints `datasetSchemaContentHash`. Equal values on two instances mean the dataset holds the same schemas. Each schema's `schemaHash` depends only on its content too. `datasetSchemaHash` is a change marker for one instance and never matches another. Both sides need a server release that serves it.
