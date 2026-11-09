@@ -694,7 +694,7 @@ Both element classes carry three statics:
 | Static | Value |
 |---|---|
 | `CONTRACT_VERSION` | this document's version, `"1.22.0"`. `<bp-paper-editor>` had it before 1.21.0 |
-| `EDITOR_VERSION` | since 1.21.0: the npm package version, `package.json`'s `version` (today `"0.1.0-alpha.1"`). It is not bumped per contract release |
+| `EDITOR_VERSION` | since 1.21.0: the npm package version, `package.json`'s `version` (today `"0.1.0-alpha.2"`). It is not bumped per contract release |
 | `BUILD_SHA` | since 1.21.0: 12 hex of the sha-256 over esbuild's version and every input file of the bundle. The same source builds the same bytes and sha; a change to a test leaves it alone. Build options are not hashed: `npm run build` and `npm run build:dev` give the same sha and different bytes. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
 
 ```js

@@ -239,7 +239,7 @@ const expected = {
   "static": [
     "BUILD_SHA|value|111|object|null",
     "CONTRACT_VERSION|value|111|string|\"1.22.0\"",
-    "EDITOR_VERSION|value|111|string|\"0.1.0-alpha.1\"",
+    "EDITOR_VERSION|value|111|string|\"0.1.0-alpha.2\"",
     "_imageFiles|value|011|function|_imageFiles|1",
     "length|value|010|number|0",
     "name|value|010|string|\"BpPaperCanvas\"",
@@ -284,7 +284,7 @@ const element = document.createElement("bp-paper-canvas");
 assert.equal(element.constructor, BpPaperCanvas);
 assert.equal(element.localName, "bp-paper-canvas");
 assert.equal(BpPaperCanvas.CONTRACT_VERSION, "1.22.0");
-assert.equal(BpPaperCanvas.EDITOR_VERSION, "0.1.0-alpha.1");
+assert.equal(BpPaperCanvas.EDITOR_VERSION, "0.1.0-alpha.2");
 assert.equal(BpPaperCanvas.BUILD_SHA, null, "unbuilt source keeps BUILD_SHA null");
 
 const guarded = await import(`./index.js?registration-guard=${Date.now()}`);

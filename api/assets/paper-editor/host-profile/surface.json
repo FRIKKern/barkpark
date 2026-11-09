@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
-  "editor": "0.1.0-alpha.1",
-  "build": "594d24ba3c83",
+  "editor": "0.1.0-alpha.2",
+  "build": "0b58c27de90a",
   "declared": {
     "canvas": {
       "DOM attribute": [

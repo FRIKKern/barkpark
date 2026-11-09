@@ -11,17 +11,21 @@
 //   4. the packed dist/, LICENSE and profile are byte-identical to this package's;
 //   5. the packed profile matches what the packed bundle and this package declare;
 //   6. the version policy holds: pre-1.0 alpha packages may ship the existing contract, otherwise majors match, and
-//      `barkpark.contractVersion` equals CONTRACT_VERSION.
+//      `barkpark.contractVersion` equals CONTRACT_VERSION;
+//   7. a version recorded in scripts/releases.json is packed with that release's bytes,
+//      file for file, or not at all: a version names one set of bytes.
 // It reads nothing outside this package; sync-barkpark.mjs owns the Barkpark sinks.
 // Exits 1 on any failure. Prints the file list and the tarball size.
 //
 // `node scripts/pack-check.mjs --prepack [dir]` is prepack's last step: it holds the
-// tracked profile to the dist/ just built, so a bare `npm pack` or `npm publish`
-// cannot ship a stale profile either. It refuses; it never rewrites the profile.
+// tracked profile to the dist/ just built, and the files to any release recorded at
+// this version, so a bare `npm pack` or `npm publish` cannot ship a stale profile or a
+// second, different copy of a released version. It refuses; it never rewrites a file.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CONTRACT_VERSION } from "../src/contract.js";
 import { LOCAL_OUTPUTS } from "./build-local.mjs";
@@ -31,6 +35,7 @@ import { packageSurface } from "./surface.mjs";
 const SELF = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(SELF), "..");
 const PROFILE = "host-profile/surface.json";
+const RELEASES = path.join(packageRoot, "scripts/releases.json");
 
 export const REQUIRED = [
   "package.json",
@@ -55,11 +60,27 @@ export async function profileMismatch(dir) {
   }
 }
 
+export const readReleases = (file = RELEASES) => JSON.parse(fs.readFileSync(file, "utf8")).releases;
+
+// When `version` is a recorded release, the files in `dir` that differ from it: changed,
+// missing or extra, over the release's files and `files`. Null for an unreleased version
+// or an exact match.
+export function releaseMismatch({ dir, version, files, releases = readReleases() }) {
+  const release = releases.find((entry) => entry.version === version);
+  if (!release) return null;
+  const sha = (name) => createHash("sha256").update(fs.readFileSync(path.join(dir, name))).digest("hex");
+  const names = [...new Set([...Object.keys(release.files), ...files])].sort();
+  const differ = names.filter((name) => !(name in release.files) || !fs.existsSync(path.join(dir, name)) || sha(name) !== release.files[name]);
+  return differ.length ? { release, differ } : null;
+}
+const releaseFailure = ({ release, differ }) =>
+  `version ${release.version} is already released (${release.source}, tarball sha256 ${release.tarball.sha256}) and these files differ from it: ${differ.join(", ")}. A version is packed once; bump package.json's version`;
+
 const sameBytes = (a, b) => fs.existsSync(a) && fs.existsSync(b) && fs.readFileSync(a).equals(fs.readFileSync(b));
 
 // The tarball checks, over an unpacked package directory and its file list. Returns
 // every failure at once. `root` is the package the tarball must equal.
-export async function inspectPack({ files, pkgDir, root = packageRoot, contractVersion = CONTRACT_VERSION }) {
+export async function inspectPack({ files, pkgDir, root = packageRoot, contractVersion = CONTRACT_VERSION, releases = readReleases() }) {
   const failures = [];
   const fail = (msg) => failures.push(msg);
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -102,6 +123,8 @@ export async function inspectPack({ files, pkgDir, root = packageRoot, contractV
   if (pkg.barkpark?.contractVersion !== contractVersion) {
     fail(`package.json barkpark.contractVersion is ${pkg.barkpark?.contractVersion}; src/contract.js says ${contractVersion}`);
   }
+  const released = releaseMismatch({ dir: pkgDir, version: pkg.version, files, releases });
+  if (released) fail(releaseFailure(released));
   const contract = path.join(pkgDir, "dist/contract.js");
   if (fs.existsSync(contract)) {
     const shipped = await import(pathToFileURL(contract).href);
@@ -114,11 +137,12 @@ const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === SELF;
 if (isMain && process.argv[2] === "--prepack") {
   const dir = path.resolve(process.argv[3] ?? packageRoot);
   const why = await profileMismatch(dir);
-  if (why) {
-    console.error(`prepack: REFUSED, nothing packed. ${PROFILE} does not match the build in ${path.join(dir, "dist")}: ${why}. Run npm run sync:barkpark:write, then pack again.`);
-    process.exit(1);
-  }
-  console.log(`prepack: ${PROFILE} matches dist/`);
+  const { version } = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+  const released = releaseMismatch({ dir, version, files: REQUIRED });
+  if (why) console.error(`prepack: REFUSED, nothing packed. ${PROFILE} does not match the build in ${path.join(dir, "dist")}: ${why}. Run npm run sync:barkpark:write, then pack again.`);
+  if (released) console.error(`prepack: REFUSED, nothing packed. ${releaseFailure(released)}.`);
+  if (why || released) process.exit(1);
+  console.log(`prepack: ${PROFILE} matches dist/, and no release recorded at ${version} has other bytes`);
 } else if (isMain) {
   const outputDir = process.argv[2];
   // Run prepack on its own first: npm prints lifecycle output on stdout, which
