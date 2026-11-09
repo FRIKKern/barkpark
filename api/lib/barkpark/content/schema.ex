@@ -879,20 +879,18 @@ defmodule Barkpark.Content.Schema do
 
   @doc """
   Deterministic 16-char hex content hash of a single schema definition.
-  Derived from `{name, fields sorted by name}` so it changes iff the schema
-  body changes, regardless of row metadata (updated_at, id).
+
+  It digests the schema exactly as `GET /v1/schemas` serves it, minus
+  `schemaHash` itself, encoded as JSON with every object's keys sorted. Row
+  metadata (id, inserted_at, updated_at, workspace and dataset ids) never
+  reaches it, and neither do keys the read path recomputes. A field stored
+  with an echoed `required?`, or with an explicit `of` equal to the served
+  default, therefore hashes the same as the schema it was pulled from. The
+  same schema applied on two instances reports the same hash
+  (task-bf1c4f2b2b930088).
   """
   def schema_hash_for_schema(%SchemaDefinition{} = schema) do
-    normalized_fields =
-      (schema.fields || [])
-      |> Enum.map(&stringify_keys/1)
-      |> Enum.sort_by(& &1["name"])
-
-    payload = :erlang.term_to_binary({schema.name, normalized_fields})
-
-    :crypto.hash(:sha256, payload)
-    |> Base.encode16(case: :lower)
-    |> binary_part(0, 16)
+    schema |> sdk_content() |> content_hash()
   end
 
   @doc """
@@ -900,6 +898,11 @@ defmodule Barkpark.Content.Schema do
   per-field `required?`, and `of`/`to` specs where applicable.
   """
   def serialize_schema_for_sdk(%SchemaDefinition{} = schema) do
+    content = sdk_content(schema)
+    Map.put(content, :schemaHash, content_hash(content))
+  end
+
+  defp sdk_content(%SchemaDefinition{} = schema) do
     %{
       id: schema.name,
       name: schema.name,
@@ -915,7 +918,6 @@ defmodule Barkpark.Content.Schema do
       # (unloaded/legacy) to the schema's own default rather than leaking nil.
       singleton: schema.singleton || false,
       kind: schema.kind || "document",
-      schemaHash: schema_hash_for_schema(schema),
       fields: Enum.map(schema.fields || [], &serialize_field/1),
       actions: schema.actions || [],
       groups: schema.groups || [],
@@ -942,6 +944,32 @@ defmodule Barkpark.Content.Schema do
     |> put_reader_writes(schema.reader_writes)
   end
 
+  # sha256 over canonical JSON: object keys sorted, list order kept. Unlike
+  # `:erlang.term_to_binary/1` the bytes do not depend on the OTP release or on
+  # map size, so two instances agree on the digest of equal content.
+  defp content_hash(term) do
+    :crypto.hash(:sha256, canonical_json(term))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
+  defp canonical_json(%_{} = struct), do: Jason.encode_to_iodata!(struct)
+
+  defp canonical_json(%{} = map) do
+    pairs =
+      map
+      |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {k, v} -> [Jason.encode_to_iodata!(k), ?:, canonical_json(v)] end)
+
+    [?{, Enum.intersperse(pairs, ?,), ?}]
+  end
+
+  defp canonical_json(list) when is_list(list),
+    do: [?[, Enum.intersperse(Enum.map(list, &canonical_json/1), ?,), ?]]
+
+  defp canonical_json(other), do: Jason.encode_to_iodata!(other)
+
   # Echoed only when set, so every schema without it serializes as before.
   defp put_reader_writes(map, rw) when is_map(rw), do: Map.put(map, :readerWrites, rw)
   defp put_reader_writes(map, _rw), do: map
@@ -961,12 +989,28 @@ defmodule Barkpark.Content.Schema do
   generated-types banner to detect staleness).
   """
   def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset) do
-    schemas = list_schemas(dataset, opts)
+    schemas = dataset |> list_schemas(opts) |> Enum.map(&serialize_schema_for_sdk/1)
 
     %{
-      schemas: Enum.map(schemas, &serialize_schema_for_sdk/1),
-      datasetSchemaHash: schema_hash_for_dataset(dataset, opts)
+      schemas: schemas,
+      datasetSchemaHash: schema_hash_for_dataset(dataset, opts),
+      datasetSchemaContentHash: dataset_content_hash(schemas)
     }
+  end
+
+  @doc """
+  Deterministic 16-char hex digest of a dataset's schema CONTENT: the
+  `{name, schemaHash}` pairs of the served schemas, sorted by name. Served as
+  `datasetSchemaContentHash` on `GET /v1/schemas/:dataset`. Equal values on two
+  instances mean the two datasets hold the same schemas. `datasetSchemaHash`
+  stays a cheap change marker for HTTP caching and type staleness; it digests
+  row count and last write time, so it never matches across instances.
+  """
+  def dataset_content_hash(serialized_schemas) when is_list(serialized_schemas) do
+    serialized_schemas
+    |> Enum.map(&[&1.name, &1.schemaHash])
+    |> Enum.sort()
+    |> content_hash()
   end
 
   defp serialize_field(field) do

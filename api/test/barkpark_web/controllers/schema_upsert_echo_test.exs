@@ -112,8 +112,8 @@ defmodule BarkparkWeb.SchemaUpsertEchoTest do
     assert reposted["listPreview"] == show["schema"]["listPreview"]
     assert reposted["initialValues"] == show["schema"]["initialValues"]
     refute Map.has_key?(reposted, "warnings")
-    # schemaHash covers the stored raw field definitions, which the echo
-    # normalizes; every served key besides it must match.
-    assert Map.delete(reposted, "schemaHash") == Map.delete(show["schema"], "schemaHash")
+    # schemaHash digests the served content, so the round trip keeps it too
+    # (task-bf1c4f2b2b930088).
+    assert reposted == show["schema"]
   end
 end
