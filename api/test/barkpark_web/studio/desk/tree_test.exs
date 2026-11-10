@@ -467,6 +467,83 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
            ]
   end
 
+  # ── what the page asks the Studio for (PaneBuilder paths) ─────────────────
+
+  test "the Studio path names each list's node, and a tree level its parent" do
+    chain = Tree.parse("kategorier;hierarkisk-struktur;cat-1;cat-2;cat-2", twin_desk())
+
+    assert Tree.studio_path(chain, 2) == ["kategorier", "hierarkisk-struktur"]
+    assert Tree.studio_path(chain, 3) == ["kategorier", "hierarkisk-struktur", "cat-1"]
+    assert Tree.studio_path(chain, 4) == ["kategorier", "hierarkisk-struktur", "cat-1", "cat-2"]
+
+    plain = Tree.parse("utgivelser;alle-utgivelser;pub-1", twin_desk())
+    assert Tree.studio_path(plain, 2) == ["utgivelser", "alle-utgivelser"]
+    assert Tree.studio_path(Panes.parse("post;p-1"), 1) == ["post"]
+  end
+
+  test "a doc on top of a tree level is edited at the chain's path, the id twice" do
+    edit = fn splat -> splat |> Tree.parse(twin_desk()) |> Tree.edit_path(twin_desk()) end
+
+    assert edit.("kategorier;hierarkisk-struktur;cat-1;cat-1") ==
+             ["kategorier", "hierarkisk-struktur", "cat-1", "cat-1"]
+
+    assert edit.("kategorier;hierarkisk-struktur;cat-1;cat-2;cat-2") ==
+             ["kategorier", "hierarkisk-struktur", "cat-1", "cat-2", "cat-2"]
+
+    # Its split sibling is the same document.
+    assert edit.("kategorier;hierarkisk-struktur;cat-1;cat-1|,view=json") ==
+             ["kategorier", "hierarkisk-struktur", "cat-1", "cat-1"]
+
+    # Not under a tree: the desk's list of its type, as before; a singleton its node.
+    assert edit.("utgivelser;alle-utgivelser;pub-1") == ["utgivelser", "alle-utgivelser", "pub-1"]
+    assert edit.("forside") == ["forside"]
+    assert edit.("post;p-1") == ["post", "p-1"]
+  end
+
+  test "a doc of a tree's type opened from elsewhere is edited under its tree, the id twice" do
+    root = twin_desk()
+
+    assert Tree.doc_path(root, "category", "cat-9") ==
+             ["kategorier", "hierarkisk-struktur", "cat-9", "cat-9"]
+
+    assert Tree.doc_path(root, "publication", "pub-1") ==
+             ["utgivelser", "alle-utgivelser", "pub-1"]
+
+    assert Tree.doc_path(root, "nowhere", "x-1") == ["nowhere", "x-1"]
+
+    chain =
+      Tree.parse(
+        "utgivelser;alle-utgivelser;pub-1;cat-9,type=category,parentRefPath=category",
+        root
+      )
+
+    assert Tree.edit_path(chain, root) == ["kategorier", "hierarkisk-struktur", "cat-9", "cat-9"]
+  end
+
+  test "a tree list's row opens its children; the level's parent on top opens its doc" do
+    nodes = Tree.index(twin_desk())
+    tree = nodes["hierarkisk-struktur"]
+    doc = fn id -> %{kind: :doc, id: id, type: "category"} end
+
+    assert Tree.row_opens(@tree_root, tree, doc.("cat-1")) == level("cat-1")
+    assert Tree.row_opens(level("cat-1"), tree, doc.("cat-1")) == doc.("cat-1")
+    assert Tree.row_opens(level("cat-1"), tree, doc.("cat-2")) == level("cat-2")
+
+    # Any other list's rows open their documents.
+    pub = %{kind: :list, type: "publication", node: "alle-utgivelser"}
+    next = %{kind: :doc, id: "pub-1", type: "publication"}
+    assert Tree.row_opens(pub, nodes["alle-utgivelser"], next) == next
+    assert Tree.row_opens(pub, nil, next) == next
+
+    read = %{title: "Cat 1", entries: [%{title: "Cat 1", next: doc.("cat-1")}, :divider]}
+
+    assert %{entries: [%{next: %{kind: :doc}}, :divider]} =
+             Tree.tree_rows(read, level("cat-1"), tree)
+
+    assert %{entries: [%{next: %{kind: :list, tree_parent: "cat-1"}}, :divider]} =
+             Tree.tree_rows(read, @tree_root, tree)
+  end
+
   test "a row's href opens its pane right of the row's own pane and drops the rest" do
     root = Tree.normalize(desk())
     panes = Tree.parse("utgivelser;uten-omslag;pub-1", root)

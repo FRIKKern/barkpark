@@ -77,8 +77,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   @doc "Loads the pending document into the Studio's editor."
   def edit(%{assigns: %{pending: target}} = socket, target) do
     %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri, scope: scope} = socket.assigns
-    %{id: id, type: type} = pane = List.last(panes)
-    path = (pane[:node] && [pane.node]) || Tree.path_to_type(desk.root, type) ++ [id]
+    path = Tree.edit_path(panes, desk.root)
 
     {:noreply, socket} =
       %{"dataset" => dataset, "path" => path}

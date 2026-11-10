@@ -786,6 +786,216 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     end
   end
 
+  describe "a tree list drills pane by pane, as the Studio's own desk" do
+    @cat "desk_slice_cat"
+
+    # A declared desk: «Kategorier» holds a parent-child tree of categories
+    # and a groupBy of the same categories by parent (built deferred).
+    setup do
+      for {name, fields} <- [
+            {@cat,
+             [
+               %{"name" => "title", "title" => "Title", "type" => "string"},
+               %{"name" => "parent", "title" => "Parent", "type" => "reference", "to" => [@cat]}
+             ]},
+            {"deskStructure", [%{"name" => "items", "title" => "Items", "type" => "array"}]}
+          ] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{"name" => name, "title" => name, "visibility" => "public", "fields" => fields},
+            @dataset
+          )
+      end
+
+      n = System.unique_integer([:positive])
+      id = fn key -> "dsc-#{key}-#{n}" end
+
+      for {key, title, parent} <- [
+            {"a", "Alpha", nil},
+            {"b", "Bravo", nil},
+            {"a1", "Alpha one", "a"},
+            {"a2", "Alpha two", "a"},
+            {"a1x", "Alpha one x", "a1"}
+          ] do
+        content = if parent, do: %{"parent" => id.(parent)}, else: %{}
+
+        {:ok, _} =
+          Content.create_document(
+            @cat,
+            %{"doc_id" => id.(key), "title" => title, "content" => content},
+            @dataset
+          )
+
+        {:ok, _} = Content.publish_document(id.(key), @cat, @dataset)
+      end
+
+      items = [
+        %{
+          "kind" => "list",
+          "id" => "kategorier",
+          "title" => "Kategorier",
+          "items" => [
+            %{
+              "kind" => "tree",
+              "id" => "hierarki",
+              "title" => "Hierarki",
+              "type" => @cat,
+              "parent" => "content.parent",
+              "orderings" => [%{"field" => "title", "direction" => "asc"}]
+            },
+            %{
+              "kind" => "groupBy",
+              "id" => "etter-forelder",
+              "title" => "Etter forelder",
+              "type" => @cat,
+              "over" => @cat,
+              "by" => "content.parent"
+            }
+          ]
+        }
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "deskStructure",
+          %{"doc_id" => "deskStructure", "title" => "Desk", "content" => %{"items" => items}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+      {:ok, cat: id}
+    end
+
+    defp rows(view, index) do
+      view
+      |> element(~s([data-pane-index="#{index}"] .pane-body))
+      |> render()
+      |> then(
+        &Regex.scan(
+          ~r/<a[^>]*data-desk-row[^>]*>\s*<span class="pane-item-label">\s*([^<]+?)\s*</,
+          &1
+        )
+      )
+      |> Enum.map(fn [_, title] -> title end)
+    end
+
+    # A pane's read is async, and CI is slower than a laptop: poll for the rows.
+    defp await_rows(view, index, want, tries \\ 50) do
+      settle(view)
+      got = rows(view, index)
+
+      cond do
+        got == want ->
+          got
+
+        tries == 0 ->
+          got
+
+        true ->
+          Process.sleep(100)
+          await_rows(view, index, want, tries - 1)
+      end
+    end
+
+    test "a row opens its children as the next pane, its parent on top", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      tree = "#{base}/kategorier;hierarki"
+      {:ok, view, _html} = live(admin(conn), tree)
+
+      # The root level: the parentless categories.
+      assert await_rows(view, 2, ["Alpha", "Bravo"]) == ["Alpha", "Bravo"]
+
+      # A row opens a tree level, not the document.
+      alpha = ~s([data-pane-index="2"] a[data-desk-row][href="#{tree};#{cat.("a")}"])
+      assert has_element?(view, alpha <> ~s([data-desk-opens="list"]))
+      view |> element(alpha) |> render_click()
+      assert_patch(view, "#{tree};#{cat.("a")}")
+
+      # The level: the parent on top, a divider, then its children.
+      want = ["Alpha", "Alpha one", "Alpha two"]
+      assert await_rows(view, 3, want) == want
+      assert has_element?(view, ~s([data-pane-index="3"][data-pane-kind="list"] .pane-divider))
+      refute has_element?(view, ~s([data-pane-index="3"] #editor-form))
+      assert has_element?(view, ~s([data-pane-index="2"] a[aria-current="true"]), "Alpha")
+      refute has_element?(view, ~s([data-pane-index="2"] a[aria-current="true"]), "Bravo")
+
+      # The URL it printed opens the same panes from a reload.
+      {:ok, again, _html} = live(admin(conn), "#{tree};#{cat.("a")}")
+      assert await_rows(again, 3, want) == want
+    end
+
+    test "the parent on top opens the document in the editor", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      level = "#{base}/kategorier;hierarki;#{cat.("a")}"
+      {:ok, view, _html} = live(admin(conn), level)
+      assert await_rows(view, 3, ["Alpha", "Alpha one", "Alpha two"]) |> hd() == "Alpha"
+
+      top = ~s([data-pane-index="3"] a[data-desk-row][href="#{level};#{cat.("a")}"])
+      assert has_element?(view, top <> ~s([data-desk-opens="doc"]))
+      view |> element(top) |> render_click()
+      assert_patch(view, "#{level};#{cat.("a")}")
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="4"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 4, "Alpha")
+      assert has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha")
+    end
+
+    test "a child drills one level deeper, and its own top opens it", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      level = "#{base}/kategorier;hierarki;#{cat.("a")}"
+      {:ok, view, _html} = live(admin(conn), level)
+      await_rows(view, 3, ["Alpha", "Alpha one", "Alpha two"])
+
+      child = ~s([data-pane-index="3"] a[data-desk-row][href="#{level};#{cat.("a1")}"])
+      view |> element(child) |> render_click()
+      assert_patch(view, "#{level};#{cat.("a1")}")
+
+      assert await_rows(view, 4, ["Alpha one", "Alpha one x"]) == ["Alpha one", "Alpha one x"]
+      assert has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha one")
+      refute has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha two")
+
+      deep = "#{level};#{cat.("a1")};#{cat.("a1")}"
+      {:ok, view, _html} = live(admin(conn), deep)
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="5"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 5, "Alpha one")
+    end
+
+    test "a deferred groupBy's menu shows its groups, and a group lists its docs", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      menu = "#{base}/kategorier;etter-forelder"
+      {:ok, view, _html} = live(admin(conn), menu)
+      settle(view)
+
+      groups = rows(view, 2)
+      assert "Alpha" in groups and "Alpha one" in groups
+
+      # A group's id is `<index in its list>-<the over doc's id>` (Structure).
+      group = ~s([data-pane-index="2"] a[data-desk-row][href="#{menu};1-#{cat.("a1")}"])
+      assert has_element?(view, group <> ~s([data-desk-opens="list"]), "Alpha one")
+      view |> element(group) |> render_click()
+      assert await_rows(view, 3, ["Alpha one x"]) == ["Alpha one x"]
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="3"] a[data-desk-row][href$=";#{cat.("a1x")}"])
+             )
+    end
+  end
+
   test "someone who is not a workspace admin lands on the Studio", %{conn: conn, base: base} do
     studio = String.replace_suffix(base, "/_desk", "")
 

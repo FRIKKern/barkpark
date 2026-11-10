@@ -75,6 +75,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     scope = ScopeHelpers.scope_opts(socket)
     desk = desk(socket.assigns.desk, dataset, scope)
     panes = Tree.parse(splat, desk.root)
+    desk = expand_open(desk, panes, dataset, scope)
 
     views =
       for {pane, index} <- Enum.with_index(panes) do
@@ -275,6 +276,34 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> Tree.normalize()
 
     %{dataset: dataset, root: root, nodes: Tree.index(root)}
+  end
+
+  # A groupBy is built deferred, with no groups: the menu that opens it builds
+  # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them
+  # for the visit, so its groups' lists find their nodes too.
+  defp expand_open(desk, panes, dataset, scope) do
+    Enum.reduce(panes, desk, fn
+      %{missing: true}, desk ->
+        desk
+
+      %{kind: :menu, node: id}, desk ->
+        case desk.nodes[id] do
+          %{deferred: {:group_by, _item, _idx}} = node ->
+            open =
+              node
+              |> Structure.expand(dataset, scope)
+              |> StructureCopy.localize()
+              |> Tree.normalize()
+
+            %{desk | nodes: Map.merge(desk.nodes, Tree.index(open))}
+
+          _ ->
+            desk
+        end
+
+      _pane, desk ->
+        desk
+    end)
   end
 
   defp node_of(pane, desk), do: Tree.node_of(pane, desk.root, desk.nodes)
