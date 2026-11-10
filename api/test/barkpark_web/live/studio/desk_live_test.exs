@@ -144,14 +144,23 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
       assert String.valid?(html), bad
       assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"]), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+
+      # Not the last document of the chain: a read-only pane, which queries.
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad};y,type=#{@type_name}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
       assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "x"), bad
-      refute has_element?(view, ~s([role="alert"])), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
     end
 
     # A link that decodes twice to text reads as it always did.
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};x%2541")
     settle(view)
-    assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "“xA”")
+    assert has_element?(view, ~s([data-pane-index="2"]), "xA")
 
     # The hover path takes its href from the browser: the same bytes, once encoded.
     view
