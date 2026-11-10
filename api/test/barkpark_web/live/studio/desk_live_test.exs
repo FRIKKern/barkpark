@@ -277,6 +277,34 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
   end
 
+  test "someone else's save shows in the open document and its list row, with no click", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+
+    {:ok, _doc} =
+      Content.upsert_document(
+        @type_name,
+        %{"doc_id" => a, "title" => "Alpha renamed", "content" => %{"summary" => "Now changed"}},
+        @dataset
+      )
+
+    # The broadcast is in the page's mailbox once this call returns; fire the
+    # refresh the page would have run a moment later.
+    :sys.get_state(view.pid)
+    send(view.pid, :desk_refresh)
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha renamed")
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
+    # The row it replaced stays put: Beta is still there, read with the same list.
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Beta note")
+  end
+
   describe "a list draws the Studio's own rows" do
     @big "desk_slice_big"
 
