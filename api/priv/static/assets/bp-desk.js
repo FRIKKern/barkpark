@@ -13,6 +13,10 @@
 //   * LAYOUT — panes that do not fit collapse to 51 px strips, by the rule the
 //              TanStack Studio uses (Sanity's own, see collapsed() below), from
 //              the width the browser measures. A click on a strip opens it.
+//   * NARROW — below 600 px the desk shows one pane, the last, and its close
+//              link reads as Back (Sanity's and the TanStack Studio's rule).
+//   * RESIZE — the right edge of an open pane drags to widen or narrow it,
+//              never under its 320 px minimum.
 //   * KEYS   — in a list, ArrowDown / ArrowUp move from row to row and Home /
 //              End jump to the first / last (Sanity's list keys). Enter is the
 //              link's own. A row that had the focus when it was followed gets
@@ -73,6 +77,37 @@
     );
   }
 
+  // Below this width the desk shows one pane (Sanity: the pane layout's
+  // minimum; barkpark-studio app/src/lib/layout.ts NARROW).
+  var NARROW = 600;
+  var PANE_MIN = 320;
+  var EDGE = 6;
+
+  // One pane on screen: every other pane is hidden, and the pane's own close
+  // link (the URL without it) moves to the front and reads as Back.
+  function narrowRules(last) {
+    var all = "#desk-panes > [data-pane-index]";
+    var pane = '#desk-panes > [data-pane-index="' + last + '"]';
+    return (
+      all + " { display: none; }\n" +
+      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n" +
+      pane + " .dk-close { order: -1; padding-left: 0; }\n" +
+      pane + ' .dk-close::before { content: "\\2190"; }\n' +
+      pane + " .dk-close > span { display: none; }\n"
+    );
+  }
+
+  // A pane the editor dragged to a width of their own, and the edge to drag.
+  function widthRules(index, px) {
+    var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
+    return pane + " { width: " + px + "px; min-width: " + px + "px; flex: 0 0 " + px + "px; }\n";
+  }
+
+  var EDGE_RULES =
+    "#desk-panes > [data-pane-index] { position: relative; }\n" +
+    '#desk-panes > [data-pane-index]:not([data-pane-collapsed]):not(:last-child)::after { content: ""; position: absolute; top: 0; bottom: 0; right: -3px; width: ' +
+    EDGE + "px; cursor: col-resize; z-index: 3; }\n";
+
   function styleSheet(doc) {
     var el = doc.getElementById("bp-desk-layout");
     if (!el) {
@@ -85,7 +120,8 @@
 
   // Lay the panes out for the width they have. `focus` is the index of a pane
   // the editor opened from its strip (null: the last pane).
-  function layout(root, focus) {
+  function layout(root, focus, widths) {
+    widths = widths || {};
     var shown = panes(root).filter(function (el) {
       return !el.hasAttribute("data-desk-leaving");
     });
@@ -97,8 +133,20 @@
     });
     // No width yet (the desk is not laid out): nothing collapses.
     var width = root.clientWidth;
-    var flags = width > 0 ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
+    var narrow = width > 0 && width < NARROW && shown.length > 0;
+    var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = "";
+
+    if (narrow) {
+      root.setAttribute("data-narrow", "");
+      css += narrowRules(shown[shown.length - 1].getAttribute("data-pane-index"));
+    } else {
+      root.removeAttribute("data-narrow");
+      css += EDGE_RULES;
+      shown.forEach(function (el, i) {
+        if (!flags[i] && widths[el.id]) css += widthRules(el.getAttribute("data-pane-index"), widths[el.id]);
+      });
+    }
 
     shown.forEach(function (el, i) {
       if (flags[i]) {
@@ -249,11 +297,44 @@
         hook._layout();
       };
 
+      // Widths the editor dragged, by pane id: they last as long as the pane.
+      hook._widths = {};
+      hook._drag = null;
+
+      hook._onPointerDown = function (e) {
+        if (e.button !== 0 || root.hasAttribute("data-narrow")) return;
+        var pane = e.target.closest ? e.target.closest("[data-pane-index]") : null;
+        if (!pane || pane.parentNode !== root || pane.hasAttribute("data-pane-collapsed")) return;
+        if (pane === root.lastElementChild) return;
+        var box = pane.getBoundingClientRect();
+        if (e.clientX < box.right - EDGE) return;
+        e.preventDefault();
+        hook._drag = { id: pane.id, x: e.clientX, width: box.width };
+        window.addEventListener("pointermove", hook._onPointerMove);
+        window.addEventListener("pointerup", hook._onPointerUp);
+      };
+      hook._onPointerMove = function (e) {
+        var drag = hook._drag;
+        if (!drag) return;
+        hook._widths[drag.id] = Math.max(PANE_MIN, Math.round(drag.width + e.clientX - drag.x));
+        hook._layout();
+      };
+      hook._onPointerUp = function () {
+        hook._drag = null;
+        window.removeEventListener("pointermove", hook._onPointerMove);
+        window.removeEventListener("pointerup", hook._onPointerUp);
+        // Forget panes that are gone.
+        Object.keys(hook._widths).forEach(function (id) {
+          if (!root.ownerDocument.getElementById(id)) delete hook._widths[id];
+        });
+      };
+      root.addEventListener("pointerdown", hook._onPointerDown);
+
       // A strip the editor opened keeps the focus until the URL changes.
       hook._focus = null;
       hook._layout = function () {
         if (hook._focus && hook._focus.path !== window.location.pathname) hook._focus = null;
-        return layout(root, hook._focus ? hook._focus.index : null);
+        return layout(root, hook._focus ? hook._focus.index : null, hook._widths);
       };
       hook._queueLayout = function () {
         if (hook._raf) return;
@@ -368,6 +449,10 @@
       this._marks.disconnect();
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
+      root.removeEventListener("pointerdown", this._onPointerDown);
+      window.removeEventListener("pointermove", this._onPointerMove);
+      window.removeEventListener("pointerup", this._onPointerUp);
+      root.removeAttribute("data-narrow");
       root.removeEventListener("click", this._openStrip, true);
       root.removeEventListener("keydown", this._openStrip, true);
       window.removeEventListener("resize", this._queueLayout);

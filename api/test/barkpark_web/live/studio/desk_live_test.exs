@@ -54,11 +54,15 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     Plug.Test.init_test_session(conn, %{"api_token" => raw})
   end
 
+  # A pane's read runs in its own task; a list asks the Studio's pane builder,
+  # which takes longer than render_async's default 100 ms on a busy machine.
+  defp settle(view), do: render_async(view, 5_000)
+
   defp admin(conn), do: sign_in(conn, ["read", "write", "admin"])
 
   test "the root URL draws the desk root alone, its rows links", %{conn: conn, base: base} do
     {:ok, view, _html} = live(admin(conn), base)
-    render_async(view)
+    settle(view)
 
     assert has_element?(
              view,
@@ -72,7 +76,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
   test "a deep link draws root, list and document", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-    render_async(view)
+    settle(view)
 
     assert has_element?(view, ~s([data-pane-index="0"][data-pane-kind="types"]))
     assert has_element?(view, ~s([data-pane-index="1"][data-pane-kind="list"]))
@@ -95,13 +99,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     b: b
   } do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-    render_async(view)
+    settle(view)
 
     beta = ~s([data-pane-index="1"] a[data-desk-row][href="#{base}/#{@type_name};#{b}"])
     assert has_element?(view, beta, "Beta note")
 
     view |> element(beta) |> render_click()
-    render_async(view)
+    settle(view)
     assert_patch(view, "#{base}/#{@type_name};#{b}")
 
     assert has_element?(view, ~s([data-pane-index="1"] a[aria-current="true"]), "Beta note")
@@ -110,10 +114,10 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
   test "closing a pane goes to the URL without it", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-    render_async(view)
+    settle(view)
 
     view |> element(~s([data-pane-index="2"] a.dk-close)) |> render_click()
-    render_async(view)
+    settle(view)
     assert_patch(view, "#{base}/#{@type_name}")
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
@@ -137,12 +141,12 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     base: base
   } do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};no-such-doc")
-    render_async(view)
+    settle(view)
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]))
     assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "no-such-doc")
 
     {:ok, view, _html} = live(admin(conn), "#{base}/no_such_type")
-    render_async(view)
+    settle(view)
     assert has_element?(view, ~s([data-pane-index="1"] .dk-note), "no_such_type")
   end
 
@@ -168,7 +172,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       b: b
     } do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-      render_async(view)
+      settle(view)
 
       # One connected mount: the list once, the document once.
       assert_received {:pane_load, :list}
@@ -179,7 +183,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{base}/#{@type_name};#{b}"]))
       |> render_click()
 
-      render_async(view)
+      settle(view)
 
       assert_received {:pane_load, :doc}
       refute_received {:pane_load, _}
@@ -193,20 +197,20 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       b: b
     } do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-      render_async(view)
+      settle(view)
       assert_received {:pane_load, :list}
       assert_received {:pane_load, :doc}
 
       # What bp-desk.js sends when the pointer settles on Beta's row.
       beta = "#{base}/#{@type_name};#{b}"
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
-      render_async(view)
+      settle(view)
       assert_received {:pane_load, :doc}
 
       # Hovering it again reads nothing; nor does a link that is not the desk's.
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => "/elsewhere"})
-      render_async(view)
+      settle(view)
       refute_received {:pane_load, _}
 
       # The click: the pane arrives with its data in the patch itself.
@@ -216,7 +220,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
       assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
       refute has_element?(view, "[aria-busy]")
-      render_async(view)
+      settle(view)
       refute_received {:pane_load, _}
 
       # The page draws again while that read is still kept (the next hover's
@@ -224,7 +228,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       # time and must take it in its stride. This killed the page in a browser.
       alpha = "#{base}/#{@type_name};#{a}"
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => alpha})
-      render_async(view)
+      settle(view)
       assert_received {:pane_load, :doc}
       assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
     end
@@ -252,7 +256,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
         send(task, :go)
       end
 
-      render_async(view)
+      settle(view)
       refute has_element?(view, "[aria-busy]")
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
       assert page_title(view) =~ "Alpha note"
@@ -270,7 +274,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     end)
 
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
-    render_async(view)
+    settle(view)
 
     assert has_element?(view, ~s([data-pane-index="2"] [role="alert"] button[phx-click="retry"]))
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha note")
@@ -278,13 +282,282 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     # Retry reads again; with the fault gone the document shows.
     Application.delete_env(:barkpark, PaneComponent)
     view |> element(~s([data-pane-index="2"] button[phx-click="retry"])) |> render_click()
-    render_async(view)
+    settle(view)
     assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
   end
 
   defp swap_reader(reader) do
     Application.put_env(:barkpark, PaneComponent, reader: reader)
     on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
+  end
+
+  test "someone else's save shows in the open document and its list row, with no click", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+
+    {:ok, _doc} =
+      Content.upsert_document(
+        @type_name,
+        %{"doc_id" => a, "title" => "Alpha renamed", "content" => %{"summary" => "Now changed"}},
+        @dataset
+      )
+
+    # Wait until the page has heard of the save (the broadcast is not always
+    # in its mailbox when the write returns), then fire the refresh it would
+    # have run a moment later.
+    heard? = fn -> MapSet.size(:sys.get_state(view.pid).socket.assigns.stale) > 0 end
+
+    assert Enum.any?(1..200, fn _ -> heard?.() or (Process.sleep(10) && false) end),
+           "the page never heard of the save"
+
+    send(view.pid, :desk_refresh)
+
+    # The refresh is a message, and so is the pane's own re-read behind it:
+    # `settle/1` right here can find nothing running yet and return at once
+    # (it did on CI). Wait for the new value itself.
+    shown? = fn ->
+      settle(view)
+      has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    end
+
+    assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
+           "the open document never showed the saved value"
+
+    assert has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha renamed")
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
+    # The row it replaced stays put: Beta is still there, read with the same list.
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Beta note")
+  end
+
+  describe "a list draws the Studio's own rows" do
+    @big "desk_slice_big"
+
+    setup do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => @big,
+            "title" => "Desk slice big",
+            "visibility" => "public",
+            "list_preview" => %{"subtitle" => "kicker"},
+            "desk" => %{
+              "orderings" => [%{"field" => "title", "direction" => "asc"}],
+              "sortOrderings" => [
+                %{
+                  "name" => "titleDesc",
+                  "title" => "Title, Z first",
+                  "by" => [%{"field" => "title", "direction" => "desc"}]
+                }
+              ]
+            },
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "kicker", "title" => "Kicker", "type" => "string"}
+            ]
+          },
+          @dataset
+        )
+
+      n = System.unique_integer([:positive])
+
+      for i <- 1..130 do
+        num = String.pad_leading(to_string(i), 3, "0")
+
+        {:ok, _doc} =
+          Content.create_document(
+            @big,
+            %{
+              "doc_id" => "dsb-#{n}-#{num}",
+              "title" => "Big #{num}",
+              "content" => %{"kicker" => "Kicker #{num}"}
+            },
+            @dataset
+          )
+      end
+
+      :ok
+    end
+
+    defp row_titles(view) do
+      view
+      |> render()
+      |> then(&Regex.scan(~r/Big (\d{3})/, &1))
+      |> Enum.map(fn [_, num] -> num end)
+      |> Enum.uniq()
+    end
+
+    test "subtitle, draft mark, declared order, and more than one page", %{conn: conn, base: base} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@big}")
+      settle(view)
+
+      list = ~s([data-pane-kind="list"])
+      # The schema's list preview subtitle, and the draft mark of an unpublished row.
+      assert has_element?(view, list <> " a[data-desk-row] .dk-row-sub", "Kicker 001")
+      assert has_element?(view, list <> " a[data-desk-row] .dk-draft")
+
+      # The declared order (title ascending), one page of 100.
+      titles = row_titles(view)
+      assert length(titles) == 100
+      assert titles == Enum.sort(titles)
+      assert hd(titles) == "001"
+
+      # More than one page: the rest is one press away.
+      view |> element(list <> " button.dk-more") |> render_click()
+      settle(view)
+      assert length(row_titles(view)) == 130
+      assert has_element?(view, list <> " a[data-desk-row]", "Big 130")
+      refute has_element?(view, list <> " button.dk-more")
+    end
+
+    test "the sort menu changes the order for this list", %{conn: conn, base: base} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@big}")
+      settle(view)
+
+      view
+      |> element(~s([data-pane-kind="list"] form.dk-sort))
+      |> render_change(%{"sort" => "titleDesc"})
+
+      settle(view)
+      assert hd(row_titles(view)) == "130"
+    end
+  end
+
+  describe "references open the next pane" do
+    @ref_type "desk_slice_linked"
+
+    setup %{a: a, b: b} do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => @ref_type,
+            "title" => "Desk slice linked",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "note", "title" => "Note", "type" => "reference", "to" => [@type_name]},
+              %{
+                "name" => "more",
+                "title" => "More",
+                "type" => "arrayOf",
+                "of" => [%{"type" => "reference", "to" => [%{"type" => @type_name}]}]
+              }
+            ]
+          },
+          @dataset
+        )
+
+      id = "dsl-#{System.unique_integer([:positive])}"
+
+      {:ok, _doc} =
+        Content.create_document(
+          @ref_type,
+          %{
+            "doc_id" => id,
+            "title" => "Linked one",
+            "content" => %{
+              "note" => %{"_ref" => a, "_type" => "reference"},
+              "more" => [%{"_ref" => b, "_type" => "reference"}, a, "dsn-gone"]
+            }
+          },
+          @dataset
+        )
+
+      {:ok, linked: id}
+    end
+
+    test "a reference is a link that opens its target beside the document", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked}")
+      settle(view)
+
+      to_a = "#{base}/#{@ref_type};#{linked};#{a},type=#{@type_name},parentRefPath=note"
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_a}"]),
+               "Alpha note"
+             )
+
+      # An array of references: one link each, in stored order; a bare id reads too.
+      to_b = "#{base}/#{@ref_type};#{linked};#{b},type=#{@type_name},parentRefPath=more"
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_b}"]),
+               "Beta note"
+             )
+
+      # A target that is gone keeps its id and is not a link.
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-ref-missing), "dsn-gone")
+
+      view |> element(~s(a[data-desk-ref][href="#{to_a}"])) |> render_click()
+      assert_patch(view, to_a)
+      settle(view)
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="3"][data-pane-kind="doc"] dd),
+               "About Alpha note"
+             )
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][aria-current="true"]),
+               "Alpha note"
+             )
+
+      # The document it was opened from stays, and was not read again.
+      assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Linked one")
+    end
+
+    test "a followed document with no type= has its type looked up", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked};#{a}")
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+    end
+
+    test "a chain eight panes deep comes back from its URL", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a,
+      b: b
+    } do
+      hop = fn id, path -> "#{id},type=#{@type_name},parentRefPath=#{path}" end
+      back = "#{linked},type=#{@ref_type},parentRefPath=x"
+
+      chain =
+        [linked, hop.(a, "note"), back, hop.(b, "more"), back, hop.(a, "note")]
+        |> Enum.join(";")
+
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{chain}")
+      settle(view)
+
+      # Root + list + six documents.
+      for i <- 0..7, do: assert(has_element?(view, ~s([data-pane-index="#{i}"])))
+      refute has_element?(view, ~s([data-pane-index="8"]))
+      assert has_element?(view, ~s([data-pane-index="7"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="6"] .pane-header-title), "Linked one")
+
+      # Closing the fourth pane prints the chain up to it, params intact.
+      view |> element(~s([data-pane-index="4"] a.dk-close)) |> render_click()
+      assert_patch(view, "#{base}/#{@ref_type};#{linked};#{hop.(a, "note")}")
+    end
   end
 
   test "someone who is not a workspace admin lands on the Studio", %{conn: conn, base: base} do
