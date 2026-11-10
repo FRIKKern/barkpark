@@ -16,6 +16,8 @@
 //              the width the browser measures. A click on a strip opens it.
 //   * NARROW — below 600 px the desk shows one pane, the last, and its close
 //              link reads as Back (Sanity's and the TanStack Studio's rule).
+//              The same when the last pane cannot have its minimum width
+//              beside the strips of all the others.
 //   * RESIZE — the right edge of an open pane drags to widen or narrow it,
 //              never under its 320 px minimum.
 //   * KEYS   — in a list, ArrowDown / ArrowUp move from row to row and Home /
@@ -97,6 +99,7 @@
     return (
       all + " { display: none; }\n" +
       pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n" +
+      pane + " > .pane-header { justify-content: flex-start; gap: 8px; }\n" +
       pane + " .dk-close { order: -1; padding-left: 0; }\n" +
       pane + ' .dk-close::before { content: "\\2190"; }\n' +
       pane + " .dk-close > span { display: none; }\n"
@@ -108,6 +111,12 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return pane + " { width: " + px + "px; min-width: " + px + "px; flex: 0 0 " + px + "px; }\n";
   }
+
+  // The Studio shell hides every pane but one in its phone bucket (under 640
+  // px, and up to 672 while the window widens). The desk lays its own panes
+  // out from 600 px up, so there they are shown again; without this the desk
+  // is blank from 600 to 639 px.
+  var PHONE_RULES = 'html[data-width-bucket="phone"] #desk-panes > [data-pane-index]:not([data-desk-leaving]) { display: flex; }\n';
 
   var EDGE_RULES =
     "#desk-panes > [data-pane-index] { position: relative; }\n" +
@@ -139,16 +148,20 @@
     });
     // No width yet (the desk is not laid out): nothing collapses.
     var width = root.clientWidth;
-    var narrow = width > 0 && width < NARROW && shown.length > 0;
+    // One pane: under the narrow width, or when even with every other pane a
+    // strip the last one would be cut (a document needs 600 px: with two
+    // strips that is 702).
+    var floor = (MIN[kinds[kinds.length - 1]] || MIN.list) + (kinds.length - 1) * STRIP;
+    var narrow = width > 0 && shown.length > 0 && (width < NARROW || floor > width);
     var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = "";
 
     if (narrow) {
-      root.setAttribute("data-narrow", "");
+      if (!root.hasAttribute("data-narrow")) root.setAttribute("data-narrow", "");
       css += narrowRules(shown[shown.length - 1].getAttribute("data-pane-index"));
     } else {
       root.removeAttribute("data-narrow");
-      css += EDGE_RULES;
+      css += EDGE_RULES + PHONE_RULES;
       shown.forEach(function (el, i) {
         if (!flags[i] && widths[el.id]) css += widthRules(el.getAttribute("data-pane-index"), widths[el.id]);
       });
@@ -495,11 +508,15 @@
       hook._onIntent = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || row.getAttribute("aria-current") === "true") return;
+        // A finger does not hover: its pointerover is the tap itself.
+        if (e.pointerType === "touch") return;
         var href = row.getAttribute("href");
         if (!href || hook._warmed[href]) return;
         window.clearTimeout(hook._warmTimer);
         hook._warmTimer = window.setTimeout(function () {
           if (!row.isConnected || !row.matches(":hover, :focus")) return;
+          // Followed in the meantime (a quick click, a tap): the pane is being read already.
+          if (row.getAttribute("aria-current") === "true") return;
           hook._warmed[href] = true;
           window.setTimeout(function () {
             delete hook._warmed[href];
@@ -521,7 +538,7 @@
       hook._panes = new window.MutationObserver(hook._layout);
       hook._panes.observe(root, { childList: true });
       hook._marks = new window.MutationObserver(hook._layout);
-      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed"] });
+      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow"] });
       hook._layout();
 
       root.addEventListener("click", hook._onClick);
