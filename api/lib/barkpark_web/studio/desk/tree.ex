@@ -9,11 +9,19 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
   segment that is no desk node (a type name from an old link) reads as a
   plain type list, so those links keep working.
 
-  Left out of the slice, as the TanStack Studio leaves them out of its own
-  desk: plugin links and plugin lists. Also left out for now: drilling a
-  parent-child tree list (it opens as a flat list) and `groupBy` nodes
-  whose children are built on demand (they have none here, so they go with
-  the other empty lists).
+  In a parent-child tree list (a node with `:tree`), an id opens that row's
+  children: a list pane with the tree's node and `:tree_parent` set to the
+  id. The same id again opens the row's document (Sanity's
+  `buildCategoryTree`: the parent on top, its children below). The pane
+  only says what to list; the page reads the children.
+
+  A `groupBy` built with `defer_group_by: true` has no children until a
+  pane opens it (`Barkpark.Structure.expand/3`). It stays on the desk as a
+  menu, and a segment under it that names one of its groups (`<idx>-<key>`)
+  opens a list of the grouped type with that group as its node.
+
+  Left out, as the TanStack Studio leaves them out of its own desk: plugin
+  links and plugin lists.
   """
 
   alias Barkpark.Structure.Node
@@ -21,14 +29,17 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
 
   @shown [:list, :divider, :document, :document_type_list]
 
-  @doc "The tree as the slice shows it: only node types it can open, no empty lists."
+  @doc """
+  The tree as the slice shows it: only node types it can open, no empty
+  lists. A deferred `groupBy` is not empty: its children come when opened.
+  """
   @spec normalize(struct()) :: struct()
   def normalize(%Node{} = node) do
     items =
       (node.items || [])
       |> Enum.filter(&(&1.type in @shown))
       |> Enum.map(fn item -> if item.type == :list, do: normalize(item), else: item end)
-      |> Enum.reject(&(&1.type == :list and &1.items == []))
+      |> Enum.reject(&(&1.type == :list and &1.items == [] and is_nil(&1.deferred)))
 
     %{node | items: items}
   end
@@ -129,15 +140,53 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
       nil ->
         [%{kind: :menu, node: segment_id(seg), missing: true}]
 
+      %Node{type: :list, deferred: {:group_by, item, idx}} = child ->
+        [%{kind: :menu, node: child.id} | group(rest, item, idx)]
+
       %Node{type: :list} = child ->
         [%{kind: :menu, node: child.id} | descend(rest, child)]
 
       %Node{type: :document} = child ->
         singleton(segs, child)
 
+      %Node{type: :document_type_list, tree: %{"parent" => _}} = child ->
+        list = %{kind: :list, type: child.type_name || "", node: child.id}
+        [list | tree_levels(rest, list)]
+
       %Node{type: :document_type_list} = child ->
         type = child.type_name || ""
         [%{kind: :list, type: type, node: child.id} | Panes.parse_doc_segments(rest, type)]
+    end
+  end
+
+  # A tree list: an id other than the open level's parent opens that row's
+  # children; the parent's own id again opens its document, and documents
+  # follow from there.
+  defp tree_levels([], _list), do: []
+
+  defp tree_levels([seg | rest] = segs, list) do
+    id = segment_id(seg)
+
+    if id == list[:tree_parent] do
+      Panes.parse_doc_segments(segs, list.type)
+    else
+      level = Map.put(list, :tree_parent, id)
+      [level | tree_levels(rest, level)]
+    end
+  end
+
+  # A deferred groupBy's groups are type lists with ids `<idx>-<key>`
+  # (`Barkpark.Structure`); any other id opens nothing, as an unknown row.
+  defp group([], _item, _idx), do: []
+
+  defp group([seg | rest], item, idx) do
+    id = segment_id(seg)
+    type = item["type"]
+
+    if is_binary(type) and String.starts_with?(id, "#{idx}-") do
+      [%{kind: :list, type: type, node: id} | Panes.parse_doc_segments(rest, type)]
+    else
+      []
     end
   end
 
