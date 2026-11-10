@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Structure
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
+  alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Tree
   alias Phoenix.LiveView.AsyncResult
 
@@ -27,7 +28,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   @impl true
   def update(assigns, socket) do
-    socket = assign(socket, Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
+    socket =
+      socket
+      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
+      |> assign_new(:limit, fn -> Rows.page() end)
+      |> assign_new(:sort, fn -> nil end)
+
     key = data_key(assigns.pane, assigns.dataset, assigns.node)
     same? = socket.assigns[:data_key] == key
     # `loading` is nil once the read has landed, so `&&`, not `and`.
@@ -66,6 +72,13 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def handle_event("retry", _params, socket), do: {:noreply, load(socket)}
 
+  # A list's own controls. They are this pane's state, not the URL's.
+  def handle_event("more", _params, socket),
+    do: {:noreply, socket |> assign(:limit, socket.assigns.limit + Rows.page()) |> load()}
+
+  def handle_event("sort", %{"sort" => name}, socket),
+    do: {:noreply, socket |> assign(:sort, if(name == "", do: nil, else: name)) |> load()}
+
   @impl true
   def handle_async(:load, {:ok, data}, socket), do: {:noreply, adopt(socket, data)}
 
@@ -101,7 +114,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
         </.link>
       </div>
       <div class="pane-body">
-        <div :if={@data.loading} class="dk-skeleton" aria-hidden="true">
+        <div :if={@data.loading && !@data.ok?} class="dk-skeleton" aria-hidden="true">
           <div :for={_ <- 1..6} class="pane-item"><span class="dk-bone"></span></div>
         </div>
         <div :if={@data.failed} class="dk-note" role="alert">
@@ -111,6 +124,24 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           </button>
         </div>
         <%= if @data.ok? do %>
+          <form
+            :if={(@data.result[:sorts] || []) != []}
+            class="dk-sort"
+            phx-change="sort"
+            phx-target={@myself}
+          >
+            <label for={@id <> "-sort"}>{gettext("Sort by")}</label>
+            <select id={@id <> "-sort"} name="sort" class="form-input">
+              <option value="">{gettext("Default")}</option>
+              <option
+                :for={sort <- @data.result.sorts}
+                value={sort.name}
+                selected={sort.name == @data.result[:sort]}
+              >
+                {sort.title}
+              </option>
+            </select>
+          </form>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
           <%= for entry <- @data.result[:entries] || [] do %>
             <div :if={entry == :divider} class="pane-divider"></div>
@@ -125,12 +156,29 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               data-desk-row
               data-desk-opens={entry.next.kind}
             >
-              <span class="pane-item-label">{entry.title}</span>
+              <span class="pane-item-label">
+                {entry.title}
+                <span :if={entry[:sub]} class="dk-row-sub">{entry.sub}</span>
+              </span>
+              <span :if={entry[:draft]} class="dk-draft" title={gettext("Draft")}>
+                <span aria-hidden="true">○</span>
+                <span class="sr-only">{gettext("Draft")}</span>
+              </span>
               <span :if={entry.next.kind != :doc} class="pane-item-chevron" aria-hidden="true">
                 ›
               </span>
             </.link>
           <% end %>
+          <button
+            :if={@data.result[:more?]}
+            type="button"
+            class="btn dk-more"
+            phx-click="more"
+            phx-target={@myself}
+            disabled={@data.loading}
+          >
+            {gettext("Show more")}
+          </button>
           <dl :if={@data.result[:fields]} class="dk-fields">
             <div :for={field <- @data.result.fields}>
               <dt>{field.title}</dt>
@@ -196,11 +244,27 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp load(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
+    %{panes: panes, index: index, limit: limit, sort: sort} = socket.assigns
+    pane = with_query(pane, panes, index, limit, sort)
 
+    # A list asked for more rows or another order keeps its rows on screen.
     socket
-    |> assign(:data, AsyncResult.loading())
+    |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
     |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
   end
+
+  @doc """
+  A list pane together with what it is asked for (`Rows.query/4`); any other
+  pane as it is. The read needs the query; the URL grammar never sees it.
+  """
+  @spec with_query(Panes.pane(), [Panes.pane()], non_neg_integer(), pos_integer(), term()) ::
+          map()
+  def with_query(pane, panes, index, limit \\ Rows.page(), sort \\ nil)
+
+  def with_query(%{kind: :list} = pane, panes, index, limit, sort),
+    do: Map.put(pane, :query, Rows.query(panes, index, limit, sort))
+
+  def with_query(pane, _panes, _index, _limit, _sort), do: pane
 
   # Test seam: `config :barkpark, #{inspect(__MODULE__)}, reader: fun` swaps the
   # read, so a test can hold it or fail it. Unset everywhere else.
@@ -215,8 +279,21 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   @doc false
-  def read(%{kind: :list, type: type}, node, dataset, scope, provisional) do
-    case Content.resolve_schema(type, dataset, scope) do
+  def read(%{kind: :list, type: type} = pane, node, dataset, scope, provisional) do
+    rows = pane[:query] && Rows.read(type, pane.query, dataset, scope)
+
+    case rows || Content.resolve_schema(type, dataset, scope) do
+      %{entries: entries} ->
+        note =
+          cond do
+            is_binary(rows.refused) -> rows.refused
+            rows.refused -> gettext("This list's filter could not be read.")
+            entries == [] -> gettext("No documents here yet.")
+            true -> nil
+          end
+
+        rows |> Map.put(:note, note) |> Map.put(:title, rows.title || provisional)
+
       {:ok, schema} ->
         title = if node, do: provisional, else: schema.title || type
         Map.put(list(schema, node, dataset, scope), :title, title)

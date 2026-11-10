@@ -92,8 +92,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
-         pane =
-           href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root) |> List.last(),
+         chain = href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root),
+         pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
          key = PaneComponent.data_key(pane, dataset, node),
@@ -172,6 +172,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
       .dk [data-desk-leaving] { display: none; }
+      .dk .dk-row-sub { display: block; font-weight: 400; font-size: var(--text-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; }
+      .dk .dk-draft { color: var(--fg-muted); font-size: var(--text-xs); }
+      .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
+      .dk .dk-more { margin: 12px 16px; }
+      .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--fg); text-decoration: none; }
       .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
