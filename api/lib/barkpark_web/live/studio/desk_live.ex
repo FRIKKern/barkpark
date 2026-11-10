@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), panes: [], desk: nil, warm: %{})
+      |> assign(:titles, %{})
 
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
@@ -69,6 +70,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
         }
       end
 
+    # A pane that stays does not read again, so the title it read is kept here.
+    titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
+    last = List.last(views)
+
     {:noreply,
      assign(socket,
        dataset: dataset,
@@ -77,7 +82,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
        chain: panes,
        panes: views,
        base: Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset),
-       page_title: views |> List.last() |> Map.fetch!(:title)
+       titles: titles,
+       page_title: titles[last.id] || last.title
      )}
   end
 
@@ -146,10 +152,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   # A pane's read landed: the tab title follows the last pane's real title.
   @impl true
-  def handle_info({:desk_pane_title, index, title}, socket) do
-    if index == length(socket.assigns.panes) - 1 and is_binary(title),
-      do: {:noreply, assign(socket, :page_title, title)},
-      else: {:noreply, socket}
+  def handle_info({:desk_pane_title, index, title}, socket) when is_binary(title) do
+    case Enum.at(socket.assigns.panes, index) do
+      nil ->
+        {:noreply, socket}
+
+      view ->
+        socket = assign(socket, :titles, Map.put(socket.assigns.titles, view.id, title))
+
+        if index == length(socket.assigns.panes) - 1,
+          do: {:noreply, assign(socket, :page_title, title)},
+          else: {:noreply, socket}
+    end
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}

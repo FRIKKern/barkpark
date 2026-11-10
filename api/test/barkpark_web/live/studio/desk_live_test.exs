@@ -118,6 +118,20 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
 
+  test "closing a pane keeps the tab title the pane now last had read", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
+    assert page_title(view) =~ "Alpha note"
+
+    view |> element(~s([data-pane-index="2"] a.dk-close)) |> render_click()
+    render_async(view)
+    assert page_title(view) =~ "Desk slice notes"
+  end
+
   test "a missing document and an unknown type say so in their own pane", %{
     conn: conn,
     base: base
