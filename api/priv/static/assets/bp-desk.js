@@ -158,7 +158,10 @@
         }
       } else if (el.hasAttribute("data-pane-collapsed")) {
         el.removeAttribute("data-pane-collapsed");
-        el.removeAttribute("tabindex");
+        // A strip opened by keyboard has the focus. With no tabindex it could
+        // not hold it and the browser would hand the focus to <body>.
+        if (root.ownerDocument.activeElement === el) el.setAttribute("tabindex", "-1");
+        else el.removeAttribute("tabindex");
         el.removeAttribute("role");
       }
     });
