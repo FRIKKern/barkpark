@@ -8,13 +8,14 @@
 // ledger rows that read it honestly at L3 still fold unrestated. Their run file
 // is immutable and is read here, never written.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DATED_GENERATED_ARTIFACTS, GENERATED_ARTIFACT_PATTERNS, deriveLevel } from "../level.mjs";
 import { admitRecipe, foldLedger, restateLevel, writeLedgerRun } from "../ledger.mjs";
 import { admitFact } from "../record.mjs";
+import { selectLeads } from "../leads.mjs";
 
 const SURFACE = "api/assets/paper-surface/paper-surface.css";
 const READ = `grep -n -- '--paper-bg:' ${SURFACE}`;
@@ -89,6 +90,48 @@ test("the four 2026-07-31 ledger rows still pass unrestated, read from their imm
     assert.deepEqual([restated.derived_level, restated.level_restated], ["L3", false], `row ${i}: ${stored.rerun}`);
     // And without the date, the same command would be read as made now.
     assert.equal(deriveLevel(stored.rerun), "L4", `row ${i} undated`);
+  }
+});
+
+test("leads shows the four 2026-07-31 rows at L3, unrestated, through the real fold", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-dated-leads-"));
+  try {
+    copyFileSync(OLD_RUN, join(dir, "grip-20260731T010541Z-e8469656713b08f8.json"));
+    const leads = selectLeads(foldLedger(dir, { now: "2026-11-10T00:00:00Z" }), SURFACE);
+    const rows = leads.rows.filter((r) => r.subject === SURFACE);
+    assert.equal(rows.length, 4);
+    for (const r of rows) {
+      assert.deepEqual([r.derived_level, r.stored_level, r.level_restated], ["L3", "L3", false], r.rerun);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Each sink's since is its commit's UTC committer time. Pinned here, with no git
+// call, so moving any since (or commit) turns this red. Checked against git when
+// written (2026-11-10), with, for each commit:
+//   TZ=UTC git show -s --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ <commit>
+const SINCE_TABLE = [
+  ["api/assets/paper-surface/paper-surface.css", "2026-11-08T18:47:20Z", "3e096b476c79"],
+  ["api/assets/paper-surface/code-tokens.css", "2026-11-08T18:47:20Z", "3e096b476c79"],
+  ["api/priv/static/assets/bp-paper-editor-shell.css", "2026-11-08T18:47:20Z", "3e096b476c79"],
+  ["api/priv/static/assets/bp-paper-mermaid.js", "2026-11-08T18:47:20Z", "3e096b476c79"],
+  ["api/priv/static/assets/bp-paper-editor.bundle.js", "2026-05-24T10:59:22Z", "215b05ee6e2d"],
+  ["api/priv/static/assets/bp-paper-editor.css", "2026-06-23T22:30:20Z", "e60f8546c337"],
+  ["web/public/bp-paper-editor.bundle.js", "2026-06-23T23:07:05Z", "c06033f5bf10"],
+  ["web/public/assets/bp-paper-editor.css", "2026-06-23T23:07:05Z", "c06033f5bf10"],
+  ["api/priv/static/assets/bp-paper-code.js", "2026-09-21T00:16:51Z", "03ecdcd5505d"],
+  ["api/priv/static/assets/bp-paper-surface.css", "2026-10-09T18:31:22Z", "52137dada0da"],
+  ["api/assets/paper-editor/host-profile/surface.json", "2026-11-02T17:51:07Z", "770113f04c5c"],
+];
+
+test("each dated sink keeps the since and commit git gave it", () => {
+  assert.equal(DATED_GENERATED_ARTIFACTS.length, SINCE_TABLE.length);
+  for (const [sink, since, commit] of SINCE_TABLE) {
+    const hits = DATED_GENERATED_ARTIFACTS.filter((e) => e.pattern.test(sink));
+    assert.equal(hits.length, 1, sink);
+    assert.deepEqual([hits[0].since, hits[0].commit], [since, commit], sink);
   }
 });
 
