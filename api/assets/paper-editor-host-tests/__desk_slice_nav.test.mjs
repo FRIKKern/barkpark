@@ -51,7 +51,7 @@ const click = (el, init = {}) =>
   el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init }));
 const q = (sel) => window.document.querySelector(sel);
 const rowTo = (href) => q(`a[href="${BASE}/${href}"]`);
-const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-leaving"));
+const shown = (el) => [...el.children].filter((p) => p.hasAttribute("data-pane-index") && !p.hasAttribute("data-desk-leaving"));
 
 // ── A click on another document: marked, framed, the old document hidden ────
 {

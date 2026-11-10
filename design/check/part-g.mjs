@@ -29,11 +29,16 @@ const failedBeforeG = failed;
 //
 // The roster is now read off the EMITTER: a CSS/HTML surface acquires theme
 // identity by calling themeBlocks() in its builder, so the set of builders that
-// call it IS the set of themed surfaces. Scan emit.mjs for those call sites,
+// call it IS the set of themed surfaces. Scan the emitter for those call sites,
 // resolve each to its enclosing function name, and match against `a.build.name`.
 // A surface that starts calling themeBlocks enrols itself; one that STOPS calling
 // it drops out of the derived roster and is caught by the floor below.
-const emitSource = readFileSync(join(here, "emit.mjs"), "utf8");
+// The emitter's code lives in the design/emit/*.mjs modules emit.mjs imports;
+// they are read in its import order (the order the code had in one file), then
+// emit.mjs itself.
+const emitEntry = readFileSync(join(here, "emit.mjs"), "utf8");
+const emitModules = [...new Set([...emitEntry.matchAll(/from "\.\/(emit\/[a-z0-9-]+\.mjs)"/g)].map((m) => m[1]))];
+const emitSource = [...emitModules.map((m) => readFileSync(join(here, m), "utf8")), emitEntry].join("\n");
 const THEMED_BUILDERS = new Set();
 {
   let fn = null;

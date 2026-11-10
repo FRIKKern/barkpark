@@ -297,7 +297,5 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{dataset: dataset, root: root, nodes: Tree.index(root)}
   end
 
-  defp node_of(%{kind: :types}, desk), do: desk.root
-  defp node_of(%{kind: :doc}, _desk), do: nil
-  defp node_of(pane, desk), do: pane[:node] && desk.nodes[pane.node]
+  defp node_of(pane, desk), do: Tree.node_of(pane, desk.root, desk.nodes)
 end
