@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
+  alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive
@@ -86,6 +87,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     base = Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset)
     target = target(panes, dataset)
     kept? = target != nil and target == socket.assigns.editing
+    # Following a hit (or any link) puts the search away.
+    socket = assign(socket, desk_search: "", desk_search_hits: [])
 
     socket =
       socket
@@ -351,11 +354,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
       .dk .dk-edit-close { position: absolute; top: 8px; right: 8px; z-index: 2; }
+      .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
+      .dk-search form { max-width: 420px; }
+      .dk-search-hits { position: absolute; z-index: 5; left: 16px; top: 100%; width: 420px; max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--fg); text-decoration: none; }
       .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
       .dk .dk-ref-missing { color: var(--fg-muted); }
     </style>
+    <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
+    <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
     <div
       class="pane-layout dk"
       id="desk-panes"
@@ -419,6 +427,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         scope={@scope}
       />
       <% end %>
+    </div>
     </div>
     """
   end

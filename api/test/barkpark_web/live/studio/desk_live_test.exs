@@ -383,6 +383,38 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     end
   end
 
+  test "search finds a document and its hit opens it as panes", %{conn: conn, base: base, b: b} do
+    {:ok, view, _html} = live(admin(conn), base)
+    settle(view)
+    refute has_element?(view, "a[data-desk-hit]")
+
+    view |> form("#desk-search-form") |> render_change(%{"value" => "Beta no"})
+
+    hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{b}"])
+    assert has_element?(view, hit, "Beta note")
+
+    href =
+      view |> element(hit) |> render() |> then(&Regex.run(~r/href="([^"]+)"/, &1)) |> List.last()
+
+    view |> element(hit) |> render_click()
+    assert_patch(view, href)
+    settle(view)
+
+    # The document is open, its list beside it, and the search is put away.
+    assert has_element?(
+             view,
+             ~s([data-pane-kind="list"] a[data-desk-row][aria-current="true"]),
+             "Beta note"
+           )
+
+    assert has_element?(view, ~s([data-pane-editing] #editor-form))
+    refute has_element?(view, "#desk-search-hits")
+
+    # Nothing found says so.
+    view |> form("#desk-search-form") |> render_change(%{"value" => "zzz-no-such-thing"})
+    assert has_element?(view, ~s(#desk-search-hits [role="status"]), "zzz-no-such-thing")
+  end
+
   describe "a list draws the Studio's own rows" do
     @big "desk_slice_big"
 
