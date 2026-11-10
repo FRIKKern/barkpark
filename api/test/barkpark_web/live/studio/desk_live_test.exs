@@ -292,9 +292,14 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
         @dataset
       )
 
-    # The broadcast is in the page's mailbox once this call returns; fire the
-    # refresh the page would have run a moment later.
-    :sys.get_state(view.pid)
+    # Wait until the page has heard of the save (the broadcast is not always
+    # in its mailbox when the write returns), then fire the refresh it would
+    # have run a moment later.
+    heard? = fn -> MapSet.size(:sys.get_state(view.pid).socket.assigns.stale) > 0 end
+
+    assert Enum.any?(1..200, fn _ -> heard?.() or (Process.sleep(10) && false) end),
+           "the page never heard of the save"
+
     send(view.pid, :desk_refresh)
     settle(view)
 
