@@ -175,7 +175,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   } do
     # The router decodes once and the pane reader once more: %25FF is the byte
     # 0xFF by then. It must not reach a query or the page as that byte.
-    for bad <- ["x%25FF", "x%25C3%2528", "x%25E2%2582", "x,path=%25FF"] do
+    # Encoded once, the router alone makes the byte: the same holds. So it
+    # does for a NUL, which is UTF-8 but which Postgres refuses as text.
+    for bad <- ~w(x%25FF x%25C3%2528 x%25E2%2582 x,path=%25FF x%FF x%C3%28 x%00 x%2500) do
       {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad}")
       settle(view)
 
