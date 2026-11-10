@@ -12,7 +12,13 @@ baseline. Put new code in a new file instead of a giant one.
 
 NEW FILES (needs --base). A product source file ADDED by this change may hold
 at most 500 lines. Files that already exist are not judged by this rule, and a
-rename is not an add. Without --base the rule is skipped and the output says so.
+rename is not an add (git's rename detection at 30% similarity). Without --base
+the rule is skipped and the output says so.
+
+A file that only LOOKS new — brought back by a revert, or moved and rewritten so
+far that git no longer pairs it with its old path — gets a `not-new` row in the
+baseline with a reason. That row lifts the 500-line cap for that path only; the
+2,000-line rule still holds. Delete the row in a later change.
 
 WHAT COUNTS AS A PRODUCT SOURCE FILE. A git-tracked file with one of the
 extensions in SOURCE_EXT that is not a test (see is_test) and is not named on
@@ -101,33 +107,36 @@ def lines_at(root, rev, path):
 
 def added_sources(root, base):
     """-> product source paths this change adds (in the tree, not at BASE)."""
-    out = git(root, "diff", "--name-only", "-z", "-M", "--diff-filter=A", base)
+    out = git(root, "diff", "--name-only", "-z", "-M30%", "--diff-filter=A", base)
     return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p and is_source(p)]
 
 
 def read_baseline(root, rel=BASELINE):
-    """-> ({path: count}, {path: reason}). Raises Refusal on any unreadable row."""
+    """-> ({path: count}, {exempt path: reason}, {not-new path: reason}).
+
+    Raises Refusal on any unreadable row."""
     try:
         with open(os.path.join(root, rel), encoding="utf-8") as f:
             rows = f.read().splitlines()
     except FileNotFoundError:
         raise Refusal("baseline not found at %s" % rel)
-    counts, exempt = {}, {}
+    counts, exempt, not_new = {}, {}, {}
     for i, row in enumerate(rows, 1):
         row = row.strip()
         if not row or row.startswith("#"):
             continue
-        if row.startswith("exempt "):
-            path, sep, reason = row[len("exempt "):].partition(" :: ")
+        kind = row.split(" ", 1)[0]
+        if kind in ("exempt", "not-new"):
+            path, sep, reason = row[len(kind) + 1:].partition(" :: ")
             if not sep or not path.strip() or not reason.strip():
-                raise Refusal("%s:%d: want `exempt <path> :: <reason>`" % (rel, i))
-            exempt[path.strip()] = reason.strip()
+                raise Refusal("%s:%d: want `%s <path> :: <reason>`" % (rel, i, kind))
+            (exempt if kind == "exempt" else not_new)[path.strip()] = reason.strip()
             continue
         num, _, path = row.partition(" ")
         if not num.isdigit() or not path.strip():
             raise Refusal("%s:%d: want `<lines> <path>`" % (rel, i))
         counts[path.strip()] = int(num)
-    return counts, exempt
+    return counts, exempt, not_new
 
 
 def measure(root, exempt=()):
@@ -143,7 +152,7 @@ def measure(root, exempt=()):
 
 
 def check(root, base=None, out=sys.stdout):
-    counts, exempt = read_baseline(root)
+    counts, exempt, not_new = read_baseline(root)
     if base is not None:
         git(root, "rev-parse", "--verify", "--quiet", base + "^{commit}")
     giants = measure(root, exempt)
@@ -171,10 +180,13 @@ def check(root, base=None, out=sys.stdout):
     if base is None:
         notes.append("new-file cap (%d lines) NOT checked: it needs --base" % NEW_CAP)
     else:
-        for path in sorted(added_sources(root, base)):
+        added = added_sources(root, base)
+        for path in sorted(added):
             n = lines_now(root, path)
-            if path not in exempt and n is not None and n > NEW_CAP:
+            if path not in exempt and path not in not_new and n is not None and n > NEW_CAP:
                 long_new.append("%s is new and holds %d lines (cap %d)" % (path, n, NEW_CAP))
+        for path in sorted(set(not_new) - set(added)):
+            notes.append("STALE not-new row for %s: this change does not add that file, delete the row" % path)
     for n in notes:
         print("note: " + n, file=out)
     if bad:
@@ -187,8 +199,11 @@ def check(root, base=None, out=sys.stdout):
         print("FAIL: %d new source file(s) over %d lines." % (len(long_new), NEW_CAP), file=out)
         for b in long_new:
             print("  " + b, file=out)
-        print("Fix: split the file. A generated or vendored file gets an `exempt` row with a\n"
-              "reason in %s." % BASELINE, file=out)
+        print("Fix: split the file.\n"
+              "If the file is not really new (a revert brought it back, or it was moved and\n"
+              "rewritten), add `not-new <path> :: <reason>` to %s.\n"
+              "A generated or vendored file gets an `exempt <path> :: <reason>` row there."
+              % BASELINE, file=out)
     if bad or long_new:
         return 1
     print("ok: %d files over %d lines, none grew (%d exempt rows)" % (len(giants), GIANT, len(exempt)), file=out)
@@ -286,6 +301,39 @@ def selftest():
     arm("a long file already on the base is not judged", run(n, "HEAD"), 0, "ok:")
     git(n, "mv", "lib/new.ex", "lib/moved.ex")
     arm("a rename is not an add", run(n, "HEAD"), 0, "ok:")
+
+    # a rename with a big rewrite: 900 distinct lines, 60% of them changed
+    def numbered(count, changed=0):
+        return "".join("%s %d\n" % ("new" if i < changed else "line", i) for i in range(count))
+
+    r = repo({"lib/a.ex": numbered(900)}, "")
+    git(r, "mv", "lib/a.ex", "lib/b.ex")
+    write(r, {"lib/b.ex": numbered(900, 540)})
+    git(r, "add", "-A")
+    arm("a rename with 60% of lines rewritten is not an add", run(r, "HEAD"), 0, "ok:")
+    write(r, {"lib/b.ex": numbered(900, 810)})
+    git(r, "add", "-A")
+    arm("a move rewritten past git's pairing fails and names the not-new row", run(r, "HEAD"), 1,
+        "add `not-new <path> :: <reason>`")
+    write(r, {BASELINE: "not-new lib/b.ex :: moved from lib/a.ex and rewritten\n"})
+    arm("a not-new row with a reason clears a moved file", run(r, "HEAD"), 0, "ok:")
+    write(r, {BASELINE: "not-new lib/b.ex\n"})
+    arm("a not-new row with no reason refuses", run(r, "HEAD"), 2, "not-new <path> :: <reason>")
+
+    # a revert: the file is deleted on the base and comes back
+    v = repo({"lib/back.ex": body(900)}, "")
+    os.remove(os.path.join(v, "lib/back.ex"))
+    commit(v)
+    write(v, {"lib/back.ex": body(900)})
+    git(v, "add", "-A")
+    arm("a file restored by a revert fails and names the not-new row", run(v, "HEAD"), 1,
+        "add `not-new <path> :: <reason>`")
+    write(v, {BASELINE: "not-new lib/back.ex :: restored by reverting its delete\n"})
+    arm("a not-new row with a reason clears a restored file", run(v, "HEAD"), 0, "ok:")
+    commit(v)
+    arm("a not-new row left behind is a note, not a red", run(v, "HEAD"), 0, "STALE not-new row for lib/back.ex")
+    write(v, {"lib/back.ex": body(2001)})
+    arm("a not-new row does not lift the 2,000-line rule", run(v, "HEAD"), 1, "lib/back.ex holds 2001 lines")
 
     write(d, {BASELINE: "2500 lib/big.ex\n9999 lib/gone.ex\nexempt priv/vendor.js :: vendored\n"})
     arm("a stale row is a note, not a red", run(d), 0, "STALE lib/gone.ex")
