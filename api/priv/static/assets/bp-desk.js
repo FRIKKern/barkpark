@@ -358,15 +358,33 @@
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || !plainClick(e)) return;
         hook._refocus = root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
-        if (hook._ahead) hook._settle(true);
+        // The click before this one has not landed: its answer is still to
+        // come, and is not this click's (see _onLoaded).
+        if (hook._ahead) {
+          hook._earlier += 1;
+          hook._settle(true);
+        }
         hook._ahead = paintAhead(root, row);
         if (!hook._ahead) return;
         hook._layout();
         hook._giveUp = window.setTimeout(hook._onLoaded, GIVE_UP_MS);
       };
 
-      hook._onLoaded = function () {
-        if (hook._ahead) hook._settle(new URL(hook._ahead.href).pathname === window.location.pathname);
+      // Clicks painted while an earlier one was still on its way. Each of
+      // those still gets its own page-loading-stop, with the URL not yet this
+      // click's; that is no sign this click failed, so its frame stays. The
+      // give-up timer (no event) always settles.
+      hook._earlier = 0;
+      hook._onLoaded = function (e) {
+        if (hook._ahead) {
+          var landed = new URL(hook._ahead.href).pathname === window.location.pathname;
+          if (!landed && e && hook._earlier > 0) {
+            hook._earlier -= 1;
+            return;
+          }
+          hook._settle(landed);
+        }
+        hook._earlier = 0;
         hook._giveFocusBack();
       };
 
