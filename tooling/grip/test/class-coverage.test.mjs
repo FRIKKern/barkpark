@@ -896,15 +896,15 @@ const FIRING_CONTROLS = Object.freeze({
 
   // level.mjs — the authority grammar
   "UNKNOWN-LEVEL": { file: SELF, test: "UNKNOWN-LEVEL fires on a claim that is not on the ladder, and names the ladder it is off" },
-  "LEVEL-SKIP": { file: "level.test.mjs", test: "a claim above the derived level is REJECTED with LEVEL-SKIP naming both levels" },
-  "PATHLESS-REF": { file: "level.test.mjs", test: "a path-less line reference is REJECTED with PATHLESS-REF" },
+  "LEVEL-SKIP": { file: "level-admit.test.mjs", test: "a claim above the derived level is REJECTED with LEVEL-SKIP naming both levels" },
+  "PATHLESS-REF": { file: "level-admit.test.mjs", test: "a path-less line reference is REJECTED with PATHLESS-REF" },
   "NOT-A-REF": { file: SELF, test: "NOT-A-REF fires on a non-reference, and never on a real one" },
 
   // record.mjs — write-time admission
-  "MISSING-SUBJECT": { file: "level.test.mjs", test: "admitFact rejects a subject-less or claim-less record with named reasons" },
-  "MISSING-CLAIM": { file: "level.test.mjs", test: "admitFact rejects a subject-less or claim-less record with named reasons" },
+  "MISSING-SUBJECT": { file: "level-admit.test.mjs", test: "admitFact rejects a subject-less or claim-less record with named reasons" },
+  "MISSING-CLAIM": { file: "level-admit.test.mjs", test: "admitFact rejects a subject-less or claim-less record with named reasons" },
   "BAD-DEPS": { file: "ledger.test.mjs", test: "deps must be an array of non-empty subjects (R2), and empty is honest" },
-  "INADMISSIBLE-CONTINUOUS": { file: "level.test.mjs", test: "admitFact flags a predicate-less continuous quantity INADMISSIBLE-CONTINUOUS" },
+  "INADMISSIBLE-CONTINUOUS": { file: "level-admit.test.mjs", test: "admitFact flags a predicate-less continuous quantity INADMISSIBLE-CONTINUOUS" },
 
   // mint.mjs — recipe minting
   "NO-RERUN": { file: SELF, test: "NO-QUANTITY never cries wolf: NO-SUBJECT and NO-RERUN keep their own reasons, and a real read mints" },

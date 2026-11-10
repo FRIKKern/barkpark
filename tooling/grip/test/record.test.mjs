@@ -1,7 +1,7 @@
 // record.test.mjs — the BAD-DEPS admission guard, proven by mutation.
 //
 // admitFact (record.mjs) has six rejection classes; five already carry
-// fail-before-plant coverage (level.test.mjs + adjudicate.test.mjs). BAD-DEPS
+// fail-before-plant coverage (level-admit.test.mjs + adjudicate.test.mjs). BAD-DEPS
 // was the ONE class with none: neutering the
 // `if (deps !== undefined && !Array.isArray(deps))` guard in record.mjs moved
 // the full-suite fail count NOT AT ALL. The two "BAD-DEPS" hits elsewhere are

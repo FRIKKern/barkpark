@@ -90,8 +90,8 @@ function normalizeHost(host) {
 // the authority of an honest source read — the mirror-image bug of the
 // inflation this list exists to stop, and a new bug of our own. The splice
 // targets are therefore deliberately absent below, and the near-miss tests in
-// test/level.test.mjs pin that absence so a future widening cannot silently
-// swallow them.
+// test/level-artifacts.test.mjs pin that absence so a future widening cannot
+// silently swallow them.
 //
 // REMOVED: /(^|\/)design\/(dist|out|generated|emitted)\//. It matched NOTHING
 // real — design/emit.mjs has never written into such a directory (see the two

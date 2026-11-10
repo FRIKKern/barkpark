@@ -297,7 +297,7 @@ import { admitFact } from "./record.mjs";
 ```
 
 Named ESM exports, `node:` builtins only (currently zero imports), no side
-effect on import. Tests: `node --test tooling/grip/test/level.test.mjs`.
+effect on import. Tests: `node --test tooling/grip/test/level-*.test.mjs`.
 
 ## The vacuous-green trap in `node --test` — the precise mechanism
 
