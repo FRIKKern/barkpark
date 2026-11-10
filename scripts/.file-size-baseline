@@ -8,6 +8,9 @@
 # delete its row. Raising a number needs a reason in the pull request.
 # Re-measure with: python3 scripts/file-size-ratchet.py --print-baseline
 #
+# The same check caps source files ADDED by a change at 500 lines. That rule
+# has no rows here: it reads the change, not a list.
+#
 # `exempt <path> :: <reason>` rows are for generated, vendored or mirrored
 # files only. One exact path per row.
 
