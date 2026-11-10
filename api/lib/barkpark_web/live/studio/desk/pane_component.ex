@@ -129,7 +129,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     ~H"""
     <section
       id={@id}
-      class={["pane-column", "dk-pane", @pane.kind == :doc && "dk-doc"]}
+      class={["pane-column", "dk-pane", "pane", to_string(@pane.kind), @pane.kind == :doc && "dk-doc"]}
       data-pane-index={@index}
       data-pane-kind={@pane.kind}
       aria-label={title(assigns)}
@@ -146,7 +146,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <span aria-hidden="true">×</span>
         </.link>
       </div>
-      <div class="pane-body">
+      <div class={["pane-body", @pane.kind == :list && "list-rows"]}>
         <div :if={@data.loading && !@data.ok?} class="dk-skeleton" aria-hidden="true">
           <div :for={_ <- 1..6} class="pane-item"><span class="dk-bone"></span></div>
         </div>
@@ -176,17 +176,33 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             </select>
           </form>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
-          <%= for entry <- @data.result[:entries] || [] do %>
-            <div :if={entry == :divider} class="pane-divider"></div>
-            <div :if={is_map(entry) and is_nil(entry.next)} class="pane-item">
-              <span class="pane-item-label">{entry.title}</span>
-            </div>
-            <.link
-              :if={is_map(entry) and entry.next}
-              patch={Panes.open_after(@panes, @index, entry.next, @base)}
-              class={["pane-item", selected?(@panes, @index, entry.next) && "selected"]}
-              aria-current={selected?(@panes, @index, entry.next) && "true"}
-              data-desk-row
+          <%!-- The TanStack Studio's names (ruling R1): a document list is a
+               `role="list"` named after its pane, each row a `listitem` that
+               knows its place; the link inside stays the thing with focus. --%>
+          <div
+            :if={(@data.result[:entries] || []) != []}
+            class="dk-rows"
+            role={@pane.kind == :list && "list"}
+            aria-label={@pane.kind == :list && title(assigns)}
+          >
+            <%= for {entry, pos} <- placed(@data.result.entries) do %>
+              <div :if={entry == :divider} class="pane-divider"></div>
+              <div
+                :if={is_map(entry)}
+                class="dk-row"
+                role={@pane.kind == :list && "listitem"}
+                aria-posinset={@pane.kind == :list && pos}
+              >
+                <div :if={is_nil(entry.next)} class="pane-item">
+                  <span class="pane-item-label">{entry.title}</span>
+                </div>
+                <.link
+                  :if={entry.next}
+                  patch={Panes.open_after(@panes, @index, entry.next, @base)}
+                  class={["pane-item", selected?(@panes, @index, entry.next) && "selected"]}
+                  aria-current={selected?(@panes, @index, entry.next) && "true"}
+                  data-selected={selected?(@panes, @index, entry.next)}
+                  data-desk-row
               data-desk-opens={entry.next.kind}
             >
               <span class="pane-item-label">
@@ -200,8 +216,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               <span :if={entry.next.kind != :doc} class="pane-item-chevron" aria-hidden="true">
                 ›
               </span>
-            </.link>
-          <% end %>
+                </.link>
+              </div>
+            <% end %>
+          </div>
           <button
             :if={@data.result[:more?]}
             type="button"
@@ -258,6 +276,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp ref_pane(ref, path), do: %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: path}
 
   defp selected?(panes, index, next), do: same?(Enum.at(panes, index + 1), next)
+
+  # Each row with its place among the rows (a divider has none).
+  defp placed(entries) do
+    {placed, _} =
+      Enum.map_reduce(entries, 1, fn
+        :divider, pos -> {{:divider, nil}, pos}
+        entry, pos -> {{entry, pos}, pos + 1}
+      end)
+
+    placed
+  end
 
   defp same?(%{kind: :doc, id: id}, %{kind: :doc, id: id}), do: true
   defp same?(%{kind: kind, node: node}, %{kind: kind, node: node}) when kind != :doc, do: true

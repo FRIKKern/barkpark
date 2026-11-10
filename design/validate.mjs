@@ -772,9 +772,16 @@ function vectorsOf(lit) {
   return [];
 }
 
+// The emitter's code lives in the design/emit/*.mjs modules emit.mjs imports.
+// Read them in its import order (the order the code had in one file), then
+// emit.mjs itself, so the census sees every list literal it saw before the split.
 const emitPath = join(here, "emit.mjs");
 let emitSrc = "";
-try { emitSrc = readFileSync(emitPath, "utf8"); } catch (e) {
+try {
+  const entry = readFileSync(emitPath, "utf8");
+  const modules = [...new Set([...entry.matchAll(/from "\.\/(emit\/[a-z0-9-]+\.mjs)"/g)].map((m) => m[1]))];
+  emitSrc = [...modules.map((m) => readFileSync(join(here, m), "utf8")), entry].join("\n");
+} catch (e) {
   ok(false, `${LADDER_REFUSE} — cannot read ${emitPath} (${e.message}); the cross-file ladder census would report a clean tree having compared nothing`);
 }
 const emitVecs = emitSrc ? literalsIn(emitSrc).flatMap(vectorsOf) : [];

@@ -121,6 +121,8 @@ on:
       - "cloud/test/barkpark_cloud/web/**"
       - "design/emit-fence.test.mjs"
       - "design/emit.mjs"
+      # its modules, imported and re-exported by design/emit.mjs.
+      - "design/emit/**"
       - "deploy/lib/site-deploy-common.sh"
       - "deploy/site-deploy-node.sh"
       - "internal/agent/report.go"

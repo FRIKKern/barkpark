@@ -24,14 +24,18 @@ const row = (href, title) =>
 const list = () =>
   `<section class="pane-column dk-pane" id="p1" data-pane-index="1" data-pane-kind="list"><div class="pane-header"><a class="dk-close" href="${BASE}">×</a></div><div class="pane-body">` +
   row("post;a", "Alpha") + `<div class="pane-divider"></div>` + row("post;b", "Beta") + row("post;c", "Gamma") +
-  `</div></section>`;
+  `<button type="button" class="dk-more">Show more</button></div></section>`;
 window.document.body.innerHTML =
-  `<div id="desk-panes"><section class="pane-column dk-pane" id="p0" data-pane-index="0" data-pane-kind="types"><div class="pane-body">` +
+  `<input id="desk-search-input" type="search" /><div id="desk-panes"><section class="pane-column dk-pane" id="p0" data-pane-index="0" data-pane-kind="types"><div class="pane-body">` +
   `<a href="${BASE}/post" class="pane-item selected" aria-current="true" data-desk-row data-desk-opens="list"><span class="pane-item-label">Posts</span></a>` +
   `</div></section>${list()}</div>`;
 
 const el = window.document.getElementById("desk-panes");
 Object.defineProperty(el, "clientWidth", { get: () => 1440 });
+// jsdom lays nothing out: every element in the page counts as drawn.
+window.HTMLElement.prototype.getClientRects = function () {
+  return this.isConnected ? [{}] : [];
+};
 const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
 hook.mounted();
 window.addEventListener("click", (e) => e.preventDefault());
@@ -61,11 +65,50 @@ assert.equal(focused(), "Alpha", "the first row is the top");
 key("End");
 assert.equal(focused(), "Gamma");
 
-// ── Enter, Tab and modified arrows are not the hook's ───────────────────────
+// ── Enter and modified arrows are not the hook's ────────────────────────────
 assert.ok(!key("Enter").defaultPrevented, "Enter is the link's own: it follows the href");
-assert.ok(!key("Tab").defaultPrevented);
 assert.ok(!key("ArrowUp", { altKey: true }).defaultPrevented, "Alt+Arrow is the browser's (history)");
+assert.ok(!key("ArrowUp", { shiftKey: true }).defaultPrevented, "Shift+Arrow is not a row step");
 assert.equal(focused(), "Gamma");
+
+// ── A list is one Tab stop: Tab from any row leaves the list ────────────────
+rowTo("post;a").focus();
+assert.ok(key("Tab").defaultPrevented, "Tab from a row is the hook's");
+assert.equal(focused(), "Show more", "to the first control after the rows, not to the next row");
+rowTo("post;b").focus();
+key("Tab", { shiftKey: true });
+assert.equal(window.document.activeElement, window.document.querySelector("#p1 .dk-close"), "Shift+Tab goes to the last control before the rows");
+// From the first pane's row, Tab goes on to what follows the pane: its separator.
+rowTo("post").focus();
+key("Tab");
+assert.equal(window.document.activeElement.getAttribute("role"), "separator");
+assert.equal(window.document.activeElement.previousElementSibling.id, "p0");
+// Nothing after the rows (the last pane): the focus leaves for the page, and nothing is left behind.
+window.document.querySelector(".dk-more").remove();
+rowTo("post;b").focus();
+const spans = window.document.querySelectorAll("body > span").length;
+assert.ok(key("Tab").defaultPrevented);
+assert.equal(window.document.activeElement, window.document.body, "past the last control the focus is the page's");
+assert.equal(window.document.querySelectorAll("body > span").length, spans);
+assert.ok(!(() => { window.document.querySelector(".dk-close").focus(); return key("Tab"); })().defaultPrevented, "Tab from anything but a row is the browser's");
+
+// ── Cmd+K / Ctrl+K: the search box, unless something else took the key ──────
+const box = window.document.getElementById("desk-search-input");
+rowTo("post;a").focus();
+assert.ok(key("k", { metaKey: true }).defaultPrevented);
+assert.equal(window.document.activeElement, box, "Cmd+K focuses the search box");
+rowTo("post;a").focus();
+key("K", { ctrlKey: true });
+assert.equal(window.document.activeElement, box, "Ctrl+K too");
+rowTo("post;a").focus();
+assert.ok(!key("k").defaultPrevented, "a bare k is a letter");
+assert.ok(!key("k", { metaKey: true, shiftKey: true }).defaultPrevented);
+const taken = (e) => e.preventDefault();
+el.addEventListener("keydown", taken);
+key("k", { metaKey: true });
+assert.equal(focused(), "Alpha", "a key another handler took is left alone");
+el.removeEventListener("keydown", taken);
+rowTo("post;c").focus();
 
 // A key on something that is not a row does nothing.
 window.document.querySelector(".dk-close").focus();
@@ -98,6 +141,24 @@ window.history.replaceState({}, "", `${BASE}/post;a`);
 window.dispatchEvent(new window.Event("phx:page-loading-stop"));
 assert.equal(window.document.activeElement, window.document.body);
 
+// ── A pane closed from the keyboard: the focus stays in the desk ────────────
+window.history.replaceState({}, "", `${BASE}/post`);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+const close = window.document.querySelector("#p1 .dk-close");
+close.focus();
+key("Enter");
+close.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+// The patch: the list is gone, and with it the link that had the focus.
+window.document.getElementById("p1").remove();
+window.history.replaceState({}, "", BASE);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+assert.equal(window.document.activeElement, window.document.getElementById("p0"), "the pane that is last now has the focus, not <body>");
+assert.equal(window.document.getElementById("p0").getAttribute("tabindex"), "-1");
+
 hook.destroyed();
+assert.equal(el.querySelector('[role="separator"]'), null, "destroyed() takes the separators with it");
+box.blur();
+window.document.body.dispatchEvent(new window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+assert.notEqual(window.document.activeElement, box, "and the Cmd+K listener");
 console.log("desk slice keys: ok");
 window.close();

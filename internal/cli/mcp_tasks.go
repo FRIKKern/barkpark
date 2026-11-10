@@ -339,7 +339,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
         "properties": {
           "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria. The FIRST criterion is 0." },
           "met": { "type": "boolean" },
-          "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." },
+          "evidence": { "type": "string", "description": "Short proof: PR or commit link + failing-first test." },
           "criterion": { "type": "string", "description": "REQUIRED when met is true: the criterion's exact stored wording, copied verbatim from acceptance_criteria[index].criterion. It is the off-by-one guard — without it the close is REJECTED (409 criterion_text_required); with a text that does not match the row at index it is REJECTED (409 criteria_mismatch) and nothing is written. An entry with met:false needs no text. DO NOT READ THIS VALUE BACK FROM THE ROW YOU ARE STAMPING: a confirmation derived from acceptance_criteria[criterion] matches whatever index it is paired with, BY CONSTRUCTION, so the guard returns success and discriminates nothing — the measured defeat of this flag (task-33e42f188c491bbe). Derive it INDEPENDENTLY: from a plan written before the run, or typed by the author, and check ALIGNMENT (does this evidence answer THIS criterion) rather than whether the stamp succeeded." }
         }
       }
@@ -600,7 +600,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_stamp",
 		Title:       "Stamp a criterion mid-claim",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
-		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number. criterion_text (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[criterion].criterion) is REQUIRED whenever you pass met:true — it is the off-by-one guard: WITHOUT it the stamp is REJECTED (409 criterion_text_required, nothing written), and WITH a text that does not match the row at criterion it is REJECTED (409 criteria_mismatch) instead of silently flipping a NEIGHBOURING criterion. A miss needs no text (it flips nothing). Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
+		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number. criterion_text (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[criterion].criterion) is REQUIRED whenever you pass met:true — it is the off-by-one guard: WITHOUT it the stamp is REJECTED (409 criterion_text_required, nothing written), and WITH a text that does not match the row at criterion it is REJECTED (409 criteria_mismatch) instead of silently flipping a NEIGHBOURING criterion. A miss needs no text (it flips nothing). Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (short proof — PR or commit link + failing-first test) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -633,7 +633,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "evidence": {
       "type": "string",
-      "description": "Concrete proof for met — test names, gate output, branch, commit. Required + non-empty when met is true."
+      "description": "Short proof for met — PR or commit link + failing-first test. Required + non-empty when met is true."
     },
     "miss": {
       "type": "boolean",
