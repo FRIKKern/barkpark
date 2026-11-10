@@ -267,7 +267,7 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
   end
 
   # A deferred groupBy's groups are type lists with ids `<idx>-<key>`
-  # (`Barkpark.Structure`); any other id opens nothing, as an unknown row.
+  # (`Barkpark.Structure`); any other id is not under it, a missing pane.
   defp group([], _item, _idx), do: []
 
   defp group([seg | rest], item, idx) do
@@ -277,7 +277,7 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
     if is_binary(type) and String.starts_with?(id, "#{idx}-") do
       [%{kind: :list, type: type, node: id} | Panes.parse_doc_segments(rest, type)]
     else
-      []
+      [%{kind: :menu, node: id, missing: true}]
     end
   end
 

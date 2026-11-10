@@ -460,10 +460,11 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
       assert {splat, Panes.to_splat(Tree.parse(splat, root))} == {splat, splat}
     end
 
-    # An id the group never builds opens nothing, as an unknown menu row.
+    # An id the group never builds is not under it: a pane that says so.
     assert Tree.parse("etter-kategori;cat-1", root) == [
              @types,
-             %{kind: :menu, node: "etter-kategori"}
+             %{kind: :menu, node: "etter-kategori"},
+             %{kind: :menu, node: "cat-1", missing: true}
            ]
   end
 
