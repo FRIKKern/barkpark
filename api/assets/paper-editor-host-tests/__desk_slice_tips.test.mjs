@@ -176,6 +176,16 @@ assert.equal(tip(), null, "focus from a click shows no tip");
 close.matches = own;
 await reset();
 
+// Put away by Escape, it stays away while the pointer is still on the link.
+await shown(close);
+key("Escape");
+hover(close.firstElementChild);
+tick(1000);
+assert.equal(tip(), null, "dismissed: moving over the link does not bring it back");
+away(close);
+assert.ok(await shown(close), "after leaving, the next hover shows it again");
+await reset();
+
 // ── A press, a click, a scroll hide it; a press cancels one on its way ───────
 await shown(close);
 pointer("pointerdown", close);
@@ -260,6 +270,10 @@ const sep = el.querySelector(".pane-resizer");
 assert.ok(sep, "a separator is laid out");
 at(sep, rect(400, 60, 6, 700));
 assert.equal((await shown(sep)).textContent, "Resize pane", "the separator says what it does");
+const was = tip().style.left;
+at(sep, rect(416, 60, 6, 700));
+hook._layout();
+assert.equal(parseFloat(tip().style.left), parseFloat(was) + 16, "a separator moved by the keys takes its tip along");
 await reset();
 width = 800;
 hook._layout();
@@ -289,9 +303,11 @@ assert.doesNotMatch(rule, /#[0-9a-f]{3,6}\b|rgb\(/i, "no hand-picked colour");
 
 // ── destroyed() leaves nothing behind ──────────────────────────────────────
 await shown(close);
-hover(more);
 hook.destroyed();
 assert.equal(tips().length, 0, "the tip goes with the hook");
+hook.mounted();
+hover(more);
+hook.destroyed();
 tick(1000);
 assert.equal(tips().length, 0, "and a tip on its way never lands");
 hover(close);
