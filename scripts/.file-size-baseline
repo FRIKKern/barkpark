@@ -8,6 +8,13 @@
 # delete its row. Raising a number needs a reason in the pull request.
 # Re-measure with: python3 scripts/file-size-ratchet.py --print-baseline
 #
+# The same check caps source files ADDED by a change at 500 lines. That rule
+# has no rows here: it reads the change, not a list.
+#
+# `not-new <path> :: <reason>` lifts that 500-line cap for one file that only
+# looks new: a revert brought it back, or it was moved and rewritten. Delete the
+# row in a later change.
+#
 # `exempt <path> :: <reason>` rows are for generated, vendored or mirrored
 # files only. One exact path per row.
 
@@ -67,7 +74,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2945 tooling/grip/screen.mjs
 2944 scripts/required-checks-verify.sh
 2852 cloud/lib/barkpark_cloud/notifications.ex
-2840 api/lib/barkpark_web/live/studio/studio_live/shared.ex
+2848 api/lib/barkpark_web/live/studio/studio_live/shared.ex
 2828 internal/chat/render.go
 2816 scripts/check-deployyml-filters.sh
 2809 api/lib/barkpark_web/controllers/query_controller.ex
