@@ -104,15 +104,40 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
 
   test "a segment that is not under its desk list opens a pane that says so" do
     root = Tree.normalize(desk())
+    nodes = Tree.index(root)
 
-    # The pane has no node, so it draws "This list is not on the desk."
-    assert Tree.parse("utgivelser;nope;pub-1", root) == [
-             %{kind: :types},
-             %{kind: :menu, node: "utgivelser"},
-             %{kind: :menu, node: "nope"}
-           ]
+    # "nope" is nowhere on the desk. "posts" (a type list), "settings" (a
+    # singleton), "root" and "utgivelser" itself are on it, but not under
+    # "utgivelser": the pane must not draw them there.
+    for id <- ~w(nope posts settings root utgivelser) do
+      panes = Tree.parse("utgivelser;#{id};pub-1", root)
 
-    refute Map.has_key?(Tree.index(root), "nope")
+      assert panes == [
+               %{kind: :types},
+               %{kind: :menu, node: "utgivelser"},
+               %{kind: :menu, node: id, missing: true}
+             ]
+
+      # No node, so the pane draws "This list is not on the desk." and no rows.
+      missing = List.last(panes)
+      assert Tree.node_of(missing, root, nodes) == nil, id
+      # Not the pane of the real list of that id: it shares no state with it.
+      refute Panes.pane_key(missing) == Panes.pane_key(%{kind: :menu, node: id}), id
+      # The URL keeps the segment as it was typed.
+      assert Panes.to_path(panes, "/d") == "/d/utgivelser;#{id}"
+    end
+
+    # A list that is under its parent still draws its own node.
+    [types, menu, list] = Tree.parse("utgivelser;uten-omslag", root)
+    assert Tree.node_of(types, root, nodes) == root
+    assert Tree.node_of(menu, root, nodes) == nodes["utgivelser"]
+    assert Tree.node_of(list, root, nodes) == nodes["uten-omslag"]
+
+    assert Tree.node_of(
+             %{kind: :doc, id: "site", type: "siteSettings", node: "settings"},
+             root,
+             nodes
+           ) == nil
   end
 
   test "a row's href opens its pane right of the row's own pane and drops the rest" do

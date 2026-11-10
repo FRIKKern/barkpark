@@ -93,6 +93,17 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
 
   def opens(_node), do: nil
 
+  @doc """
+  The desk node a pane draws from (`nodes` is `index/1` of `root`), or nil.
+  A document has none. Neither has a segment that was not under its list:
+  its id may name a node elsewhere on the desk, which is not this pane's.
+  """
+  @spec node_of(Panes.pane(), struct(), map()) :: struct() | nil
+  def node_of(%{kind: :types}, root, _nodes), do: root
+  def node_of(%{kind: :doc}, _root, _nodes), do: nil
+  def node_of(%{missing: true}, _root, _nodes), do: nil
+  def node_of(pane, _root, nodes), do: pane[:node] && nodes[pane.node]
+
   @doc "The panes a splat names, read against the desk `root`."
   @spec parse(String.t() | nil, struct()) :: [Panes.pane()]
   def parse(splat, %Node{} = root) do
@@ -113,10 +124,10 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
 
   defp descend([seg | rest] = segs, menu) do
     case find(menu, segment_id(seg)) do
-      # Not under this list: a pane with no node, which says so. What
+      # Not under this list: a pane marked missing, which says so. What
       # follows it in the URL has nothing to hang on and is not drawn.
       nil ->
-        [%{kind: :menu, node: segment_id(seg)}]
+        [%{kind: :menu, node: segment_id(seg), missing: true}]
 
       %Node{type: :list} = child ->
         [%{kind: :menu, node: child.id} | descend(rest, child)]
