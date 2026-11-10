@@ -26,7 +26,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   @page 100
 
+  # The page says this pane's data changed under it (someone saved): read
+  # again, keeping what is on screen until the new read lands.
   @impl true
+  def update(%{refresh: _}, socket), do: {:ok, load(socket)}
+
   def update(assigns, socket) do
     socket =
       socket

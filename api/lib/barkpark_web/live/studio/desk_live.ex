@@ -22,6 +22,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   use BarkparkWeb, :live_view
 
+  alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -29,6 +31,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
+  alias BarkparkWeb.Studio.StudioLive.Shared
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
@@ -36,6 +39,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), panes: [], desk: nil, warm: %{})
+      |> assign(topics: [], stale: MapSet.new(), refresh_timer: nil)
 
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
@@ -70,7 +74,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       end
 
     {:noreply,
-     assign(socket,
+     socket
+     |> subscribe(dataset)
+     |> assign(
        dataset: dataset,
        desk: desk,
        scope: scope,
@@ -144,8 +150,61 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
-  # A pane's read landed: the tab title follows the last pane's real title.
+  # ── live: someone else saved ───────────────────────────────────────────────
+  #
+  # Every document change in the dataset is announced on one of two topics
+  # (`Content.Broadcast`: the workspace's own, or the shared layer's). The
+  # panes that show the changed type read again, a moment later so a burst
+  # of saves is one read.
+  @refresh_after_ms 120
+
+  defp subscribe(socket, dataset) do
+    ws = socket.assigns[:current_workspace]
+
+    topics =
+      [Broadcast.global_list_topic(dataset)] ++
+        if(is_map(ws) and is_binary(ws.id),
+          do: [Broadcast.workspace_list_topic(dataset, ws.id)],
+          else: []
+        )
+
+    if connected?(socket) and topics != socket.assigns.topics do
+      Enum.each(socket.assigns.topics, &Phoenix.PubSub.unsubscribe(Barkpark.PubSub, &1))
+      Enum.each(topics, &Phoenix.PubSub.subscribe(Barkpark.PubSub, &1))
+      assign(socket, :topics, topics)
+    else
+      socket
+    end
+  end
+
   @impl true
+  def handle_info({:document_changed, %{type: type, doc_id: doc_id} = msg}, socket) do
+    if ours?(msg, socket) do
+      stale = MapSet.put(socket.assigns.stale, {type, Content.published_id(doc_id)})
+
+      timer =
+        socket.assigns.refresh_timer ||
+          Process.send_after(self(), :desk_refresh, @refresh_after_ms)
+
+      {:noreply, assign(socket, stale: stale, refresh_timer: timer)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info(:desk_refresh, socket) do
+    stale = socket.assigns.stale
+    types = MapSet.new(stale, &elem(&1, 0))
+
+    for %{pane: pane, id: id} <- socket.assigns.panes, stale?(pane, stale, types) do
+      send_update(PaneComponent, id: id, refresh: true)
+    end
+
+    # A read kept from a hover may be older than the save: drop them all.
+    {:noreply, assign(socket, stale: MapSet.new(), refresh_timer: nil, warm: %{})}
+  end
+
+  # A pane's read landed: the tab title follows the last pane's real title.
   def handle_info({:desk_pane_title, index, title}, socket) do
     if index == length(socket.assigns.panes) - 1 and is_binary(title),
       do: {:noreply, assign(socket, :page_title, title)},
@@ -153,6 +212,24 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  defp stale?(%{kind: :list, type: type}, _stale, types), do: MapSet.member?(types, type)
+
+  defp stale?(%{kind: :doc, type: type, id: id}, stale, _types),
+    do: MapSet.member?(stale, {type, id})
+
+  defp stale?(_pane, _stale, _types), do: false
+
+  # Another workspace's frame on the shared topic, or a sibling project's
+  # document with the same id, is not this desk's (as StudioLive refuses them).
+  defp ours?(msg, socket) do
+    ws = socket.assigns[:current_workspace]
+    proj = socket.assigns[:current_project]
+
+    Shared.own_tenant?(msg, is_map(ws) && ws.id) and
+      not (is_binary(msg[:project_id]) and is_map(proj) and is_binary(proj.id) and
+             msg.project_id != proj.id)
+  end
 
   @impl true
   def render(assigns) do

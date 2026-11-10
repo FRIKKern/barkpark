@@ -277,6 +277,49 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
   end
 
+  test "someone else's save shows in the open document and its list row, with no click", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+
+    {:ok, _doc} =
+      Content.upsert_document(
+        @type_name,
+        %{"doc_id" => a, "title" => "Alpha renamed", "content" => %{"summary" => "Now changed"}},
+        @dataset
+      )
+
+    # Wait until the page has heard of the save (the broadcast is not always
+    # in its mailbox when the write returns), then fire the refresh it would
+    # have run a moment later.
+    heard? = fn -> MapSet.size(:sys.get_state(view.pid).socket.assigns.stale) > 0 end
+
+    assert Enum.any?(1..200, fn _ -> heard?.() or (Process.sleep(10) && false) end),
+           "the page never heard of the save"
+
+    send(view.pid, :desk_refresh)
+
+    # The refresh is a message, and so is the pane's own re-read behind it:
+    # `settle/1` right here can find nothing running yet and return at once
+    # (it did on CI). Wait for the new value itself.
+    shown? = fn ->
+      settle(view)
+      has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    end
+
+    assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
+           "the open document never showed the saved value"
+
+    assert has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha renamed")
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
+    # The row it replaced stays put: Beta is still there, read with the same list.
+    assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Beta note")
+  end
+
   describe "a list draws the Studio's own rows" do
     @big "desk_slice_big"
 
