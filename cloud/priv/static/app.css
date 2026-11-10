@@ -1551,7 +1551,7 @@ select.form-input {
    suite is the ATTRIBUTION fence only — its own arm "fence does NOT over-fire: a
    legitimate design/tokens.json edit regenerates, exit 0, no refusal" asserts the
    opposite. What actually POLICES this family is design/check.mjs Part D
-   (check.mjs:521-527): it compares the CSS --provider-* kind set AND the Go
+   (design/check/part-d.mjs, at `wantProv`): it compares the CSS --provider-* kind set AND the Go
    GenProviderMark kind set against `PROVIDERS` and fails on either mismatch, so
    the dual emission is not optional once a kind is added. The instrument that
    met the original attempt is not recorded; the reason below is, and it stands

@@ -146,14 +146,17 @@ export async function selftest() {
   const healthy = sections(healthyRun.stdout);
   const PARTS = [...healthy.keys()];
 
-  // The injectable set comes from check.mjs itself — one hook per ok-gate. The
+  // The injectable set comes from the gate's own source — one hook per ok-gate:
+  // check.mjs, then each Part module it imports, in the order it imports them. The
   // `[A-Z0-9]+` shape deliberately does not match the `FAULT.has("<id>")` written
-  // in that file's own comment. It was `[A-Z][A-Z0-9]*` until r21d, which is to
+  // in a comment. It was `[A-Z][A-Z0-9]*` until r21d, which is to
   // say it could not see a hook on a Part whose id STARTS with a digit — and the
   // gate has exactly one, Part 0. The set of ids here must mirror PART_HEADER's
   // `[A-Za-z0-9]+`, not a narrower guess at what a Part will be called, or a hook
   // that IS present reads here as a Part that carries none.
-  const source = readFileSync(CHECK, "utf8");
+  const runnerSource = readFileSync(CHECK, "utf8");
+  const partModules = [...runnerSource.matchAll(/await import\("\.\/(check\/part-[a-z0-9]+\.mjs)"\)/g)].map((m) => join(DESIGN_DIR, m[1]));
+  const source = [runnerSource, ...partModules.map((p) => readFileSync(p, "utf8"))].join("\n");
   const INJECTABLE = [...new Set(
     [...source.matchAll(/FAULT\.has\("([A-Z0-9][A-Z0-9]*)"\)/g)].map((m) => m[1]),
   )];

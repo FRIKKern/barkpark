@@ -104,6 +104,8 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # its Parts, one module each, run in order by check.mjs.
+      - "design/check/**"
       # the ONE Part A artifact no other glob here reaches. check.mjs Part A
       # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
       # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
@@ -511,6 +513,8 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # its Parts, one module each, run in order by check.mjs.
+      - "design/check/**"
       # the ONE Part A artifact no other glob here reaches. check.mjs Part A
       # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
       # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
