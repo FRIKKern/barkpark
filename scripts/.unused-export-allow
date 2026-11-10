@@ -1,0 +1,8 @@
+# .unused-export-allow — read by scripts/unused-export-check.py (task-00460cb8804b1b94).
+#
+# One row per public function that a change adds and that nothing in the repo
+# uses on purpose (called by hand from a console, or from outside the repo):
+#
+#   <path> <name> :: <reason>
+#
+# Every row needs a reason. Delete the row when the function gets a caller.

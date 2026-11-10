@@ -189,6 +189,8 @@ defmodule BarkparkWeb.Studio.Desk.Panes do
   @doc "A stable key for a pane, for keyed rendering."
   @spec pane_key(pane()) :: String.t()
   def pane_key(%{kind: :types}), do: "types"
+  # Not the list of that id elsewhere on the desk: it keeps none of its state.
+  def pane_key(%{kind: :menu, node: node, missing: true}), do: "missing:" <> node
   def pane_key(%{kind: :menu, node: node}), do: "menu:" <> node
 
   def pane_key(%{kind: :list} = pane),

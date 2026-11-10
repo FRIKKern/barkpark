@@ -307,17 +307,17 @@ test("web: the web driver is still enrolled against this fixture", () => {
     `IMPLEMENTATION "web" (${web.file} ${web.symbol}) IS NO LONGER ENROLLED: no executable line in it reads ${FIXTURE_REL_FROM_WEB} and iterates its cases, so the refusal contract is pinned for ${ROSTER.length - 1} of ${ROSTER.length} implementations and the web copy can relax its tie-refusal unobserved.`,
   );
 
-  // CONTROL C — the predicate discriminates between files. design/emit.mjs is an
+  // CONTROL C — the predicate discriminates between files. design/emit/vocab.mjs is an
   // implementation and does NOT enrol (it is driven from here instead), so a
   // predicate that said "yes" to everything would be caught.
-  assert.equal(enrolsCode("design/emit.mjs"), false,
-    "the enrolment predicate returned true for design/emit.mjs, which does not read the fixture — it is matching everything and proves nothing");
+  assert.equal(enrolsCode("design/emit/vocab.mjs"), false,
+    "the enrolment predicate returned true for design/emit/vocab.mjs, which does not read the fixture — it is matching everything and proves nothing");
 });
 
 // ---------------------------------------------------------------------------
 // ARM 4 — THE CENSUS. The count MOVES; a fourth copy must not arrive unenrolled.
 // Keyed on the SHAPE (the tie-refusal line), not on a name: a name-keyed sweep
-// over these two trees returns six, three of them colour ladders.
+// over these trees returns six, three of them colour ladders.
 // ---------------------------------------------------------------------------
 // Assembled from two halves so THIS file's own source does not contain the
 // literal it searches for — a census that matches itself counts one too many and
@@ -328,6 +328,8 @@ function censusFiles() {
   const hits = [];
   const roots = [
     { dir: join(repoRoot, "design"), rel: "design", exts: [".mjs"] },
+    // the emitter's modules: typeLadderFrom lives in design/emit/vocab.mjs
+    { dir: join(repoRoot, "design", "emit"), rel: "design/emit", exts: [".mjs"] },
     { dir: join(repoRoot, "web", "__tests__"), rel: "web/__tests__", exts: [".ts"] },
   ];
   for (const root of roots) {
