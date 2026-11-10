@@ -278,8 +278,11 @@ const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-
   const { hook, pushed } = mount();
   const over = new window.Event("pointerover", { bubbles: true });
   over.pointerType = "touch";
-  rowTo("author").dispatchEvent(over);
-  rowTo("author").focus = () => {};
+  // jsdom never matches :hover: say the pointer is still on the row, so only
+  // the pointer type can stop the read-ahead.
+  const row = rowTo("author");
+  row.matches = (q) => q === ":hover, :focus" || window.Element.prototype.matches.call(row, q);
+  row.dispatchEvent(over);
   await new Promise((r) => setTimeout(r, 160));
   assert.deepEqual(pushed, [], "a touch pointerover is the tap itself, not a hover");
   hook.destroyed();
