@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     dataset = params["dataset"] || socket.assigns.dataset
     # The router hands the splat over as decoded path segments; a param value
     # with a slash in it (`inspect=sanity/structure/history`) spans several.
-    splat = params |> Map.get("panes", []) |> Enum.join("/")
+    splat = params |> Map.get("panes", []) |> Enum.join("/") |> text_only()
     scope = ScopeHelpers.scope_opts(socket)
     desk = desk(socket.assigns.desk, dataset, scope)
     panes = Tree.parse(splat, desk.root)
@@ -98,7 +98,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
-         chain = href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root),
+         splat = href |> String.replace_prefix(base <> "/", "") |> text_only(),
+         chain = Tree.parse(splat, desk.root),
          pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
@@ -282,6 +283,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
       />
     </div>
     """
+  end
+
+  # The pane reader percent-decodes the splat. One whose decoded bytes are not
+  # UTF-8 text (`x%FF`) is kept as the text it spells instead: its "%" signs
+  # are escaped, so the reader hands them back as they stand. Raw bytes would
+  # fail in the database and cannot be sent to the page.
+  defp text_only(splat) do
+    if String.valid?(URI.decode(splat)), do: splat, else: String.replace(splat, "%", "%25")
   end
 
   # The tree is the same for every click in a dataset: build it once.
