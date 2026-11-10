@@ -20,13 +20,14 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
 
   use BarkparkWeb, :html
 
-  import Phoenix.LiveView, only: [connected?: 1, send_update: 2]
+  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, send_update: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.Broadcast
   alias BarkparkWeb.Presence
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.PaneComponent
+  alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -55,6 +56,9 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   def subscribe(socket, dataset), do: socket |> subscribe_lists(dataset) |> join(dataset)
 
   defp subscribe_lists(socket, dataset) do
+    socket =
+      socket |> assign_new(:desk_gone, fn -> %{} end) |> assign_new(:desk_retries, fn -> %{} end)
+
     ws = socket.assigns[:current_workspace]
 
     topics =
@@ -67,7 +71,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     if connected?(socket) and topics != socket.assigns.topics do
       Enum.each(socket.assigns.topics, &Phoenix.PubSub.unsubscribe(Barkpark.PubSub, &1))
       Enum.each(topics, &Phoenix.PubSub.subscribe(Barkpark.PubSub, &1))
-      assign(socket, :topics, topics)
+      socket |> listen() |> assign(:topics, topics)
     else
       socket
     end
@@ -284,5 +288,144 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
       [one] -> gettext("%{name} is editing", name: one)
       many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
     end
+  end
+
+  # ── a pane whose read failed, and a document someone else deleted ──────────
+  #
+  # Both are the page's to notice, so they ride one `:handle_info` hook,
+  # attached with the first subscription (a connected page only). It owns
+  # `{:desk_pane_failed, id}` (a pane's read failed: the pane sends it) and
+  # `{:desk_pane_retry, id}` (this module's own timer); it looks at, and passes
+  # on, `{:desk_pane_title, index, _}` (a pane's read landed) and
+  # `{:document_changed, msg}`. Assigns: `desk_retries` and `desk_gone`.
+
+  # J50, as Sanity's document list does it (useDocumentList.ts): a failed read
+  # tries again at once, then after 1 s, 2 s, ... ten times, then waits for Retry.
+  @retry_waits_ms for n <- 0..9, do: n * 1_000
+
+  @doc """
+  The waits before each automatic read of a failed pane, in order; after the
+  last one the pane keeps its card and Retry. A pane's read that lands starts
+  the count again. Test seam: `config :barkpark, #{inspect(__MODULE__)}, retry_waits_ms: [...]`.
+  """
+  def retry_waits_ms,
+    do: Application.get_env(:barkpark, __MODULE__, [])[:retry_waits_ms] || @retry_waits_ms
+
+  defp listen(%{assigns: %{topics: []}} = socket),
+    do: attach_hook(socket, :desk_live_refresh, :handle_info, &on_info/2)
+
+  defp listen(socket), do: socket
+
+  defp on_info({:desk_pane_failed, id}, socket), do: {:halt, failed(socket, id)}
+  defp on_info({:desk_pane_retry, id}, socket), do: {:halt, retry(socket, id)}
+  defp on_info({:desk_pane_title, index, _title}, socket), do: {:cont, landed(socket, index)}
+
+  defp on_info({:document_changed, %{type: _, doc_id: _} = msg}, socket),
+    do: {:cont, note_gone(socket, msg)}
+
+  defp on_info(_message, socket), do: {:cont, socket}
+
+  defp failed(socket, id) do
+    tries = Map.get(socket.assigns.desk_retries, id, 0)
+
+    case Enum.at(retry_waits_ms(), tries) do
+      nil ->
+        socket
+
+      wait ->
+        Process.send_after(self(), {:desk_pane_retry, id}, wait)
+        assign(socket, :desk_retries, Map.put(socket.assigns.desk_retries, id, tries + 1))
+    end
+  end
+
+  # The pane may have closed meanwhile, or become the editor's.
+  defp retry(socket, id) do
+    if Enum.any?(socket.assigns.desk_panes, &(&1.id == id and &1.index != socket.assigns.active)) do
+      send_update(PaneComponent, id: id, refresh: true)
+      socket
+    else
+      assign(socket, :desk_retries, Map.delete(socket.assigns.desk_retries, id))
+    end
+  end
+
+  defp landed(socket, index) do
+    case Enum.find(socket.assigns.desk_panes, &(&1.index == index)) do
+      %{id: id} -> assign(socket, :desk_retries, Map.delete(socket.assigns.desk_retries, id))
+      nil -> socket
+    end
+  end
+
+  # J32. A delete names one row (`drafts.x` or `x`), and discarding a draft is
+  # announced the same way while the published document stays, so a delete of
+  # a document on the desk is checked against the store. Any other change to
+  # it (a restore, someone writing it again) means it is back.
+  @gone_mutations ~w(delete discardDraft)
+
+  defp note_gone(socket, %{type: type, doc_id: doc_id} = msg) do
+    id = Content.published_id(doc_id)
+    gone = socket.assigns.desk_gone
+
+    cond do
+      not ours?(msg, socket) ->
+        socket
+
+      msg[:mutation] not in @gone_mutations ->
+        assign(socket, :desk_gone, Map.delete(gone, {type, id}))
+
+      shown?(socket.assigns.desk_panes, type, id) and missing?(socket, type, id) ->
+        title = get_in(msg, [:doc, :title])
+        title = if is_binary(title) and title != "", do: title, else: id
+        assign(socket, :desk_gone, Map.put(gone, {type, id}, title))
+
+      true ->
+        socket
+    end
+  end
+
+  defp shown?(views, type, id),
+    do: Enum.any?(views, &(match?(%{pane: %{kind: :doc, id: ^id}}, &1) and doc_type(&1, type)))
+
+  # A followed reference with no `type=` in the URL is matched by id alone.
+  defp doc_type(%{pane: pane}, type), do: pane[:untyped] || pane[:type] in [nil, type]
+
+  defp missing?(socket, type, id) do
+    %{dataset: dataset, scope: scope} = socket.assigns
+    match?({nil, _, _}, Content.fetch_doc_with_draft(type, id, dataset, scope))
+  rescue
+    # The store cannot say: the desk says nothing rather than something false.
+    _ -> false
+  end
+
+  @doc """
+  Whether `{type, id}` was deleted by someone else while it was on the desk
+  (`desk_gone`). For a caller that must not write to it, such as the editor.
+  """
+  def gone?(assigns, type, id), do: Map.has_key?(assigns[:desk_gone] || %{}, {type, id})
+
+  @doc """
+  The desk's notice for each document in the chain that someone else deleted,
+  with a link that closes its pane. Takes the page's `desk_gone`, `desk_panes`,
+  `chain` and `base` as `gone`, `panes`, `chain` and `base`.
+  """
+  def gone_notice(assigns) do
+    items =
+      for %{pane: %{kind: :doc, id: id} = pane, index: index} <- assigns.panes,
+          {{type, ^id}, title} <- assigns.gone,
+          pane[:untyped] || pane[:type] in [nil, type],
+          do: %{index: index, title: title}
+
+    assigns = assign(assigns, :items, items)
+
+    ~H"""
+    <div :if={@items != []} class="dk-gone" role="alert" data-desk-gone>
+      <p :for={item <- @items} class="dk-note" data-desk-gone-pane={item.index}>
+        {gettext("This document has been deleted.")}
+        <strong>{item.title}</strong>
+        <.link patch={Panes.close_from(@chain, item.index, @base)} class="btn">
+          {gettext("Close")}
+        </.link>
+      </p>
+    </div>
+    """
   end
 end
