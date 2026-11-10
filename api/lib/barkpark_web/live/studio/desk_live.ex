@@ -172,6 +172,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
       .dk [data-desk-leaving] { display: none; }
+      .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; }
+      .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--fg); text-decoration: none; }
+      .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
+      .dk .dk-ref-missing { color: var(--fg-muted); }
     </style>
     <div
       class="pane-layout dk"

@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Tree
   alias Phoenix.LiveView.AsyncResult
 
@@ -133,7 +134,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <dl :if={@data.result[:fields]} class="dk-fields">
             <div :for={field <- @data.result.fields}>
               <dt>{field.title}</dt>
-              <dd>{field.value}</dd>
+              <dd :if={!field[:refs]}>{field.value}</dd>
+              <dd :if={field[:refs]} class="dk-refs">
+                <span :if={field.refs == []}>—</span>
+                <%= for ref <- field.refs do %>
+                  <span :if={!ref.type} class="dk-ref-missing">{ref.title}</span>
+                  <.link
+                    :if={ref.type}
+                    patch={Panes.open_after(@panes, @index, ref_pane(ref, field.path), @base)}
+                    class="dk-ref"
+                    aria-current={selected?(@panes, @index, ref_pane(ref, field.path)) && "true"}
+                    data-desk-ref
+                  >
+                    {ref.title}
+                  </.link>
+                <% end %>
+              </dd>
             </div>
           </dl>
         <% end %>
@@ -155,6 +171,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp fallback(%{kind: :types}), do: gettext("Content")
   defp fallback(%{kind: :menu, node: id}), do: id
   defp fallback(%{kind: :list, type: type}), do: type
+
+  # A reference opens its target beside this document, as the TanStack Studio
+  # writes it: `author-ada,type=author,parentRefPath=author`.
+  defp ref_pane(ref, path), do: %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: path}
 
   defp selected?(panes, index, next), do: same?(Enum.at(panes, index + 1), next)
 
@@ -207,7 +227,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     end
   end
 
-  def read(%{kind: :doc, id: id, type: type}, _node, dataset, scope, provisional) do
+  def read(%{kind: :doc, id: id, type: type} = pane, _node, dataset, scope, provisional) do
+    # A followed document with no `type=` in the URL: its type is looked up.
+    type = (pane[:untyped] && Refs.type_of(id, dataset, scope)) || type
+
     with {:ok, schema} <- Content.resolve_schema(type, dataset, scope),
          {%{} = doc, draft?, _published?} <-
            Content.fetch_doc_with_draft(type, id, dataset, scope) do
@@ -215,7 +238,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
       %{
         title: doc_title(doc, schema),
-        fields: [%{title: gettext("Status"), value: status} | fields(doc, schema)]
+        fields: [
+          %{title: gettext("Status"), value: status} | fields(doc, schema, dataset, scope)
+        ]
       }
     else
       _ ->
@@ -261,10 +286,20 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       Content.published_id(doc.doc_id)
   end
 
-  defp fields(doc, schema) do
+  defp fields(doc, schema, dataset, scope) do
+    refs = Refs.resolve(doc, schema, dataset, scope)
+
     for %{"name" => name} = field <- schema.fields || [] do
-      value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-      %{title: field["title"] || name, value: show(value)}
+      title = field["title"] || name
+
+      case refs do
+        %{^name => targets} ->
+          %{title: title, refs: targets, path: name}
+
+        _ ->
+          value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
+          %{title: title, value: show(value)}
+      end
     end
   end
 
