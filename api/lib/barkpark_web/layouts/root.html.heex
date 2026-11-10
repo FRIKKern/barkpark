@@ -5568,6 +5568,10 @@
   <%!-- Arrow keys for the editor's group tab bar (task-9bf415c3d78b42d6), the
         same document-level listener shape. Bottom of <body> (Golden Rule #4). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-tab-keys.js")}></script>
+  <%!-- The desk slice's browser half (/papers/desk-vertical-slice): a click
+        draws the pane's frame before the server answers. Registered as
+        Hooks.Desk below. Bottom of <body> (Golden Rule #4). --%>
+  <script src={BarkparkWeb.StaticAssets.path("bp-desk.js")}></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
         delegates to `window.BarkparkDatetimeFieldHook` and waits until this
@@ -5795,6 +5799,7 @@
     // Escape — which it stops before the global interrupt listener sees it.
     if (window.BarkparkChatKeys) Hooks.ChatKeys = window.BarkparkChatKeys;
     if (window.BarkparkChatPalette) Hooks.ChatPalette = window.BarkparkChatPalette;
+    if (window.BarkparkDesk) Hooks.Desk = window.BarkparkDesk;
 
     // LocalTime — a server time in the viewer's own clock (task-7a12da688a06f880).
     // The server renders <time datetime=ISO> whose text says UTC, so a page

@@ -172,6 +172,49 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
     end
 
+    test "a hovered row is read ahead, and the click opens it with no further read", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      render_async(view)
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+
+      # What bp-desk.js sends when the pointer settles on Beta's row.
+      beta = "#{base}/#{@type_name};#{b}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      render_async(view)
+      assert_received {:pane_load, :doc}
+
+      # Hovering it again reads nothing; nor does a link that is not the desk's.
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => "/elsewhere"})
+      render_async(view)
+      refute_received {:pane_load, _}
+
+      # The click: the pane arrives with its data in the patch itself.
+      view
+      |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{beta}"]))
+      |> render_click()
+
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+      refute has_element?(view, "[aria-busy]")
+      render_async(view)
+      refute_received {:pane_load, _}
+
+      # The page draws again while that read is still kept (the next hover's
+      # read landing does it): the open pane is handed the same read a second
+      # time and must take it in its stride. This killed the page in a browser.
+      alpha = "#{base}/#{@type_name};#{a}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => alpha})
+      render_async(view)
+      assert_received {:pane_load, :doc}
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+    end
+
     test "a pane draws its frame before its read lands", %{conn: conn, base: base, a: a} do
       test = self()
 
