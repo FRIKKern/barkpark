@@ -264,5 +264,26 @@ const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-
   hook.destroyed();
 }
 
+// ── Intent is not sent for a row already followed, nor for a finger ─────────
+{
+  const { hook, pushed } = mount();
+  // A quick click: the pointer arrives and the click follows before the wait is over.
+  rowTo("post;post-b").focus();
+  click(rowTo("post;post-b"));
+  await new Promise((r) => setTimeout(r, 160));
+  assert.deepEqual(pushed, [], "the click is reading that pane already: no second read");
+  hook.destroyed();
+}
+{
+  const { hook, pushed } = mount();
+  const over = new window.Event("pointerover", { bubbles: true });
+  over.pointerType = "touch";
+  rowTo("author").dispatchEvent(over);
+  rowTo("author").focus = () => {};
+  await new Promise((r) => setTimeout(r, 160));
+  assert.deepEqual(pushed, [], "a touch pointerover is the tap itself, not a hover");
+  hook.destroyed();
+}
+
 console.log("desk slice nav: ok");
 window.close();
