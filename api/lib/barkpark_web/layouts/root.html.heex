@@ -5340,16 +5340,9 @@
   <script src={BarkparkWeb.StaticAssets.path("bp-reference-picker.js")} defer></script>
   <script src={BarkparkWeb.StaticAssets.path("bp-document-preview.js")} defer></script>
   <script src={BarkparkWeb.StaticAssets.path("bp-overflow-menu.js")} defer></script>
-  <%!-- Studio already ships the .bp-paper-surface editor CSS inline (above), so
-        opt OUT of the WC's self-injecting standalone stylesheet to avoid doubled
-        / page-globalized rules. Embedders (web) leave this unset. Runs before the
-        deferred bundle below. --%>
+  <%!-- Studio ships the .bp-paper-surface CSS inline (above): opt OUT of the WC's own stylesheet (embedders leave this unset). `async`, not `defer` (task-ca0936b4ca4a936d):
+        a deferred script holds DOMContentLoaded, and the LiveSocket connect with it. The bundle defines only <bp-paper-canvas>/<bp-paper-editor>; see bp-paper-bundle-gate. --%>
   <script nonce={assigns[:csp_nonce]}>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
-  <%!-- `async`, not `defer` (task-ca0936b4ca4a936d): a deferred script holds
-        DOMContentLoaded, and LiveSocket.connect waits for DOMContentLoaded, so
-        every page's socket waited for this 1 MB bundle. It defines only the
-        <bp-paper-canvas> and <bp-paper-editor> elements, no hook; the paper
-        hooks wait for those elements (bp-paper-bundle-gate below). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-paper-editor.bundle.js")} async></script>
   <script src={BarkparkWeb.StaticAssets.path("phoenix.js")}></script>
   <script src={BarkparkWeb.StaticAssets.path("phoenix_live_view.js")}></script>
@@ -7131,59 +7124,15 @@
       },
     };
 
-    // The Beta paper block editor's hooks — BarkparkPaperEditor,
-    // BarkparkPaperCanvas, BarkparkFieldBlockBridge, BarkparkPaperSortable and
-    // BarkparkPaperContextMenu. Defined in /assets/bp-paper-editor-hooks.js
-    // (loaded non-defer above) so the public paper reader layout can register
-    // the SAME objects instead of carrying a second copy. Guarded: a missing
-    // asset must never break the rest of the Hooks map / the LiveSocket.
-    //
-    // They and BarkparkFieldCanvas drive the <bp-paper-canvas> and
-    // <bp-paper-editor> elements of the ASYNC bp-paper-editor.bundle.js
-    // (task-ca0936b4ca4a936d), which can arrive after the socket joins. Each
-    // one's `mounted` waits until both elements are defined, or until window
-    // `load` (the bundle failed: today's behaviour). When they are defined
-    // it runs at once, as before. A callback before that is dropped, except
-    // `destroyed`, which cancels the wait.
-    // bp-paper-bundle-gate:start
-    const bpWhenPaperBundle = (() => {
-      const names = ["bp-paper-canvas", "bp-paper-editor"];
-      let ready = names.every((n) => customElements.get(n)) || document.readyState === "complete";
-      const queue = [];
-      const flush = () => {
-        if (ready) return;
-        ready = true;
-        queue.splice(0).forEach((fn) => fn());
-      };
-      if (!ready) {
-        Promise.all(names.map((n) => customElements.whenDefined(n))).then(flush);
-        window.addEventListener("load", flush, { once: true });
-      }
-      return (fn) => (ready ? fn() : queue.push(fn));
-    })();
-    const bpAfterPaperBundle = (impl) => {
-      if (!impl || typeof impl !== "object") return impl;
-      const hook = Object.assign({}, impl);
-      hook.mounted = function () {
-        this.__bpPaperLive = true;
-        bpWhenPaperBundle(() => {
-          if (!this.__bpPaperLive) return;
-          this.__bpPaperMounted = true;
-          impl.mounted?.call(this);
-        });
-      };
-      for (const name of ["beforeUpdate", "updated", "disconnected", "reconnected"]) {
-        if (impl[name]) hook[name] = function () { if (this.__bpPaperMounted) return impl[name].call(this); };
-      }
-      hook.destroyed = function () {
-        this.__bpPaperLive = false;
-        if (this.__bpPaperMounted) impl.destroyed?.call(this);
-      };
-      return hook;
-    };
-    for (const [name, impl] of Object.entries(window.BarkparkPaperEditorHooks || {})) Hooks[name] = bpAfterPaperBundle(impl);
-    Hooks.BarkparkFieldCanvas = bpAfterPaperBundle(Hooks.BarkparkFieldCanvas);
-    // bp-paper-bundle-gate:end
+    // The paper editor hooks (/assets/bp-paper-editor-hooks.js, non-defer above, the SAME objects the public reader registers) and BarkparkFieldCanvas drive the async bundle's elements, which
+    // can land after the socket joins: each `mounted` waits for both (or window `load`: the bundle failed), at once when defined; other callbacks before it are dropped, `destroyed` cancels.
+    const bpPaperEls = ["bp-paper-canvas", "bp-paper-editor"], bpPaperQ = []; let bpPaperReady = bpPaperEls.every((n) => customElements.get(n)); // bp-paper-bundle-gate:start
+    const bpPaperGo = () => { bpPaperReady = true; bpPaperQ.splice(0).forEach((fn) => fn()); };
+    if (!bpPaperReady) { Promise.all(bpPaperEls.map((n) => customElements.whenDefined(n))).then(bpPaperGo); window.addEventListener("load", bpPaperGo, { once: true }); }
+    const bpAfterPaperBundle = (impl) => !impl || typeof impl !== "object" ? impl : Object.assign({}, impl, Object.fromEntries(["beforeUpdate", "updated", "disconnected", "reconnected"].filter((k) => impl[k]).map((k) => [k, function () { if (this.__bpPaperMounted) return impl[k].call(this); }])), {
+      mounted() { this.__bpPaperLive = true; const run = () => { if (this.__bpPaperLive) { this.__bpPaperMounted = true; impl.mounted?.call(this); } }; bpPaperReady ? run() : bpPaperQ.push(run); },
+      destroyed() { this.__bpPaperLive = false; if (this.__bpPaperMounted) impl.destroyed?.call(this); } });
+    for (const [name, impl] of Object.entries(window.BarkparkPaperEditorHooks || {})) Hooks[name] = bpAfterPaperBundle(impl); Hooks.BarkparkFieldCanvas = bpAfterPaperBundle(Hooks.BarkparkFieldCanvas); // bp-paper-bundle-gate:end
 
     // BarkparkBoardDrag — drag a Projects-board card between columns to flip its
     // lifecycle through the FENCED claim/close primitives (Barkpark Projects,

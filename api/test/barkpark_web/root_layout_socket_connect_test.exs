@@ -34,9 +34,7 @@ defmodule BarkparkWeb.RootLayoutSocketConnectTest do
            "the paper hooks are merged without waiting for the bundle's elements"
 
     [gate] =
-      Regex.run(~r{// bp-paper-bundle-gate:start\n(.*?)// bp-paper-bundle-gate:end}s, src,
-        capture: :all_but_first
-      )
+      Regex.run(~r{^[^\n]*// bp-paper-bundle-gate:start\n.*// bp-paper-bundle-gate:end$}ms, src)
 
     assert gate =~ ~S|["bp-paper-canvas", "bp-paper-editor"]|
     assert gate =~ "window.BarkparkPaperEditorHooks"

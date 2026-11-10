@@ -21,9 +21,11 @@ const ROOT = path.join(__dirname, "../../lib/barkpark_web/layouts/root.html.heex
 const HOOKS = path.join(__dirname, "../../priv/static/assets/bp-paper-editor-hooks.js");
 
 const layout = fs.readFileSync(ROOT, "utf8");
-const m = layout.match(/\/\/ bp-paper-bundle-gate:start\n([\s\S]*?)\/\/ bp-paper-bundle-gate:end/);
-assert.ok(m, "root.html.heex carries the bp-paper-bundle-gate markers around the paper hook merge");
-const GATE = m[1];
+// The markers close the gate's first and last lines (the layout may not grow).
+const startAt = layout.indexOf("// bp-paper-bundle-gate:start");
+const endAt = layout.indexOf("// bp-paper-bundle-gate:end");
+assert.ok(startAt > 0 && endAt > startAt, "root.html.heex carries the bp-paper-bundle-gate markers around the paper hook merge");
+const GATE = layout.slice(layout.lastIndexOf("\n", startAt) + 1, layout.indexOf("\n", endAt) + 1);
 
 let failures = 0;
 async function check(name, fn) {
