@@ -192,7 +192,12 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
              "Beta note"
            ]
 
+    # Every word must match; a title whose words start with more of them comes
+    # first ("b" is in Alpha's "About", but only Beta's title has a b-word).
     type_in(view, "note b")
+    assert rows_become(view, ["Beta note", "Alpha note"]) == ["Beta note", "Alpha note"]
+
+    type_in(view, "note bet")
     assert rows_become(view, ["Beta note"]) == ["Beta note"]
   end
 
@@ -312,6 +317,7 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
     n: n
   } do
     view = open(conn, base)
+    assert has_element?(view, @box), "the list pane has no search box (#{@box})"
     view |> element(@form) |> render_submit(%{"q" => "zebra"})
     path = assert_patch(view, 5_000)
     assert String.ends_with?(path, ";dls-2-#{n}"), "Enter opens Gamma memo: #{path}"
