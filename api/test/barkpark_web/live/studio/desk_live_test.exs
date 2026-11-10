@@ -273,6 +273,139 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
   end
 
+  describe "references open the next pane" do
+    @ref_type "desk_slice_linked"
+
+    setup %{a: a, b: b} do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => @ref_type,
+            "title" => "Desk slice linked",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "note", "title" => "Note", "type" => "reference", "to" => [@type_name]},
+              %{
+                "name" => "more",
+                "title" => "More",
+                "type" => "arrayOf",
+                "of" => [%{"type" => "reference", "to" => [%{"type" => @type_name}]}]
+              }
+            ]
+          },
+          @dataset
+        )
+
+      id = "dsl-#{System.unique_integer([:positive])}"
+
+      {:ok, _doc} =
+        Content.create_document(
+          @ref_type,
+          %{
+            "doc_id" => id,
+            "title" => "Linked one",
+            "content" => %{
+              "note" => %{"_ref" => a, "_type" => "reference"},
+              "more" => [%{"_ref" => b, "_type" => "reference"}, a, "dsn-gone"]
+            }
+          },
+          @dataset
+        )
+
+      {:ok, linked: id}
+    end
+
+    test "a reference is a link that opens its target beside the document", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked}")
+      render_async(view)
+
+      to_a = "#{base}/#{@ref_type};#{linked};#{a},type=#{@type_name},parentRefPath=note"
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_a}"]),
+               "Alpha note"
+             )
+
+      # An array of references: one link each, in stored order; a bare id reads too.
+      to_b = "#{base}/#{@ref_type};#{linked};#{b},type=#{@type_name},parentRefPath=more"
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_b}"]),
+               "Beta note"
+             )
+
+      # A target that is gone keeps its id and is not a link.
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-ref-missing), "dsn-gone")
+
+      view |> element(~s(a[data-desk-ref][href="#{to_a}"])) |> render_click()
+      assert_patch(view, to_a)
+      render_async(view)
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="3"][data-pane-kind="doc"] dd),
+               "About Alpha note"
+             )
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="2"] a[data-desk-ref][aria-current="true"]),
+               "Alpha note"
+             )
+
+      # The document it was opened from stays, and was not read again.
+      assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Linked one")
+    end
+
+    test "a followed document with no type= has its type looked up", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked};#{a}")
+      render_async(view)
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+    end
+
+    test "a chain eight panes deep comes back from its URL", %{
+      conn: conn,
+      base: base,
+      linked: linked,
+      a: a,
+      b: b
+    } do
+      hop = fn id, path -> "#{id},type=#{@type_name},parentRefPath=#{path}" end
+      back = "#{linked},type=#{@ref_type},parentRefPath=x"
+
+      chain =
+        [linked, hop.(a, "note"), back, hop.(b, "more"), back, hop.(a, "note")]
+        |> Enum.join(";")
+
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{chain}")
+      render_async(view)
+
+      # Root + list + six documents.
+      for i <- 0..7, do: assert(has_element?(view, ~s([data-pane-index="#{i}"])))
+      refute has_element?(view, ~s([data-pane-index="8"]))
+      assert has_element?(view, ~s([data-pane-index="7"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="6"] .pane-header-title), "Linked one")
+
+      # Closing the fourth pane prints the chain up to it, params intact.
+      view |> element(~s([data-pane-index="4"] a.dk-close)) |> render_click()
+      assert_patch(view, "#{base}/#{@ref_type};#{linked};#{hop.(a, "note")}")
+    end
+  end
+
   test "someone who is not a workspace admin lands on the Studio", %{conn: conn, base: base} do
     studio = String.replace_suffix(base, "/_desk", "")
 
