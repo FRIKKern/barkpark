@@ -85,7 +85,8 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
     path
   end
 
-  # The chain after `_desk/`, as its `;`-separated panes.
+  # The chain after `_desk/`, as its `;`-separated panes. A list's own path
+  # may start with the desk menu that holds it (`content-types;<type>`).
   defp chain(base, path) do
     path |> String.replace_prefix(base <> "/", "") |> URI.decode() |> String.split(";")
   end
@@ -125,7 +126,7 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
     view = open(conn, "#{base}/#{@type_name}")
     path = press_plus(view)
 
-    assert [@type_name, new_id] = chain(base, path)
+    assert [@type_name, new_id] = chain(base, path) |> Enum.take(-2)
     assert new_id != a
 
     assert has_element?(view, @list)
@@ -136,7 +137,7 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
        %{conn: conn, base: base} do
     view = open(conn, "#{base}/#{@type_name}")
     path = press_plus(view)
-    assert [@type_name, new_id] = chain(base, path)
+    assert [@type_name, new_id] = chain(base, path) |> Enum.take(-2)
 
     view
     |> form("#editor-form")
@@ -161,7 +162,9 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
 
     path = press_plus(view)
 
-    assert [@type_name, new_id] = chain(base, path)
+    # The open document is replaced, not kept with the new one after it.
+    assert [@type_name, new_id] = chain(base, path) |> Enum.take(-2)
+    refute a in chain(base, path)
     assert new_id != a
     refute has_element?(view, ~s([data-pane-index="3"]))
   end
