@@ -1004,13 +1004,15 @@ jobs:
       # doc-budget steps above: this job reds the REQUIRED `Elixir gate` and a
       # step adds no rendered name. `--base HEAD^1` is the base sha (see the
       # checkout note), so a pull request is blamed only for growth it adds.
+      # The same run caps NEW source files at 500 lines (files this change
+      # adds; existing files are not judged).
       # PRICED: selftest ~0.5s, checked run ~1s on a loaded laptop. Reads
       # files only.
       - name: The file-size ratchet must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh file-size-ratchet-selftest -- python3 scripts/file-size-ratchet.py --selftest
 
-      - name: No source file over 2,000 lines grew
+      - name: No source file over 2,000 lines grew, no new one is over 500
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh file-size-ratchet -- python3 scripts/file-size-ratchet.py --base HEAD^1
 
