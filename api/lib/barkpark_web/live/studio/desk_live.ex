@@ -55,6 +55,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign_new(:scope_prefix, fn -> "" end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       |> assign(warm: %{})
+      |> assign(:titles, %{})
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -90,6 +91,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       end
 
     base = Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset)
+    # A pane that stays does not read again, so the title it read is kept here.
+    titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
+    last = List.last(views)
     # Following a hit (or any link) puts the search away.
     socket = assign(socket, desk_search: "", desk_search_hits: [])
 
@@ -106,7 +110,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         # `Shared.studio_path/4` prints the Studio's own navigation as desk URLs.
         desk_base: base,
         desk_uri: uri,
-        page_title: views |> List.last() |> Map.fetch!(:title)
+        titles: titles,
+        page_title: titles[last.id] || last.title
       )
 
     socket = EditorHost.follow(socket, panes, dataset)
@@ -199,10 +204,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: {:noreply, socket |> LiveRefresh.refresh() |> assign(:warm, %{})}
 
   # A pane's read landed: the tab title follows the last pane's real title.
-  def handle_info({:desk_pane_title, index, title}, socket) do
-    if index == length(socket.assigns.desk_panes) - 1 and is_binary(title),
-      do: {:noreply, assign(socket, :page_title, title)},
-      else: {:noreply, socket}
+  def handle_info({:desk_pane_title, index, title}, socket) when is_binary(title) do
+    case Enum.at(socket.assigns.desk_panes, index) do
+      nil ->
+        {:noreply, socket}
+
+      view ->
+        socket = assign(socket, :titles, Map.put(socket.assigns.titles, view.id, title))
+
+        if index == length(socket.assigns.desk_panes) - 1,
+          do: {:noreply, assign(socket, :page_title, title)},
+          else: {:noreply, socket}
+    end
   end
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
