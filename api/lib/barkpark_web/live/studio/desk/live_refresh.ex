@@ -147,7 +147,9 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
           socket
       end
     else
-      socket
+      # The first render is not in the room; `presence_session` is read by
+      # the page's render all the same.
+      assign_new(socket, :presence_session, fn -> nil end)
     end
   end
 
