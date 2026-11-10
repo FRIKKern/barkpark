@@ -84,6 +84,43 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, "#desk-panes a[phx-click]")
   end
 
+  test "the pane row has the TanStack name, and the labels bp-desk.js draws with", %{
+    conn: conn,
+    base: base
+  } do
+    {:ok, view, _html} = live(admin(conn), base)
+    settle(view)
+
+    assert has_element?(view, ~s(#desk-panes.panes[data-testid="panes"]))
+    # The placeholder goes out as written: the script fills in the title.
+    assert has_element?(view, ~s(#desk-panes[data-desk-expand="Expand %{title}"]))
+    assert has_element?(view, ~s(#desk-panes[data-desk-resize="Resize pane"]))
+  end
+
+  test "the page has one main landmark, with and without the editor", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name}")
+    settle(view)
+
+    assert has_element?(view, ~s(#desk-panes[role="main"]))
+    assert mains(view) == 1
+
+    # The Studio's editor brings a main landmark of its own.
+    view |> element(~s(a[data-desk-row][href$=";#{a}"])) |> render_click()
+    settle(view)
+
+    assert has_element?(view, "[data-pane-editing] #editor-form")
+    refute has_element?(view, ~s(#desk-panes[role="main"]))
+    assert mains(view) == 1
+  end
+
+  defp mains(view) do
+    length(Regex.scan(~r/<main[\s>]|role="main"/, render(view)))
+  end
+
   test "a deep link draws root, list and document", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
     settle(view)
@@ -130,6 +167,20 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     settle(view)
     assert_patch(view, "#{base}/#{@type_name}")
     refute has_element?(view, ~s([data-pane-index="2"]))
+  end
+
+  test "closing a pane keeps the tab title the pane now last had read", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    render_async(view)
+    assert page_title(view) =~ "Alpha note"
+
+    view |> element(~s([data-pane-index="2"] a.dk-close)) |> render_click()
+    render_async(view)
+    assert page_title(view) =~ "Desk slice notes"
   end
 
   test "a missing document and an unknown type say so in their own pane", %{
@@ -224,6 +275,37 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       settle(view)
       assert_received {:pane_load, :doc}
       assert doc_shows?(view, 2, "About Beta note")
+    end
+
+    test "a row hovered again after its kept read went stale is read again", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+      assert_received {:pane_load, :list}
+
+      beta = "#{base}/#{@type_name};#{b}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # A minute passes: the kept read is older than a pane may show.
+      :sys.replace_state(view.pid, fn state ->
+        warm =
+          Map.new(state.socket.assigns.warm, fn {key, {data, at}} ->
+            {key, {data, at - 60_000}}
+          end)
+
+        put_in(state.socket.assigns.warm, warm)
+      end)
+
+      # bp-desk.js has forgotten the row by now and asks again.
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
     end
 
     test "a pane draws its frame before its read lands", %{

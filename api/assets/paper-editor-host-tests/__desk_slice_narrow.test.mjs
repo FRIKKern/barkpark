@@ -36,6 +36,7 @@ Object.defineProperty(el, "clientWidth", { get: () => width });
 const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
 hook.mounted();
 const sheet = () => window.document.getElementById("bp-desk-layout").textContent;
+const panesOf = () => [...el.children].filter((p) => p.hasAttribute("data-pane-index"));
 
 // ── Narrow: one pane, the last, with its close link as the way back ─────────
 assert.ok(el.hasAttribute("data-narrow"), "590 px is narrow");
@@ -51,6 +52,38 @@ const move = (x) => window.dispatchEvent(new window.MouseEvent("pointermove", { 
 const up = () => window.dispatchEvent(new window.MouseEvent("pointerup", {}));
 down(el.children[1], 638); move(700); up();
 assert.doesNotMatch(sheet(), /width: \d+px; min-width: \d+px; flex: 0 0 \d{3}px/);
+
+// A patch rewrites the desk's own attributes: narrow is marked again.
+el.removeAttribute("data-narrow");
+await new Promise((r) => setTimeout(r, 0));
+assert.ok(el.hasAttribute("data-narrow"), "data-narrow comes back after a patch wiped it");
+assert.match(sheet(), /\[data-pane-index="2"\] > \.pane-header \{ justify-content: flex-start/, "Back and the title sit together at the start");
+
+// ── 600 to 701 px with a document last: still one pane ──────────────────────
+// A document needs 600 px; beside two 51 px strips that is 702. Under that
+// the document would be cut and its close link pushed off screen.
+for (const w of [600, 620, 640, 701]) {
+  width = w;
+  hook._layout();
+  assert.ok(el.hasAttribute("data-narrow"), `${w} px cannot fit the document beside two strips: one pane`);
+  assert.match(sheet(), /\[data-pane-index="2"\] \{ display: flex; width: 100%/);
+}
+width = 702;
+hook._layout();
+assert.ok(!el.hasAttribute("data-narrow"), "702 px fits: strips and the document");
+assert.deepEqual(panesOf().map((p) => p.hasAttribute("data-pane-collapsed")), [true, true, false]);
+
+// ── 600 to 639 px with lists only: the panes are laid out, never blank ──────
+// The Studio shell's phone bucket hides every pane but one there; the desk
+// shows its own again.
+const doc = panesOf()[2];
+el.removeChild(doc);
+width = 620;
+hook._layout();
+assert.ok(!el.hasAttribute("data-narrow"), "two lists fit at 620 px (a strip and a list)");
+assert.match(sheet(), /html\[data-width-bucket="phone"\] #desk-panes > \[data-pane-index\]:not\(\[data-desk-leaving\]\) \{ display: flex; \}/, "the shell's phone rule is answered");
+assert.doesNotMatch(sheet(), /#desk-panes > \[data-pane-index\] \{ display: none; \}/, "no pane is hidden");
+el.appendChild(doc);
 
 // ── Wide again: all panes, an edge to drag ──────────────────────────────────
 width = 1440;
