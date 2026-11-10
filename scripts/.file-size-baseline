@@ -1,0 +1,125 @@
+# .file-size-baseline — read by scripts/file-size-ratchet.py (task-00460cb8804b1b94).
+#
+# One row per product source file over 2,000 lines: `<lines> <path>`.
+# A file may not hold more lines than its row says. A file with no row may not
+# cross 2,000 lines. Put new code in a new file.
+#
+# When a file shrinks, lower its number. When it drops to 2,000 or under,
+# delete its row. Raising a number needs a reason in the pull request.
+# Re-measure with: python3 scripts/file-size-ratchet.py --print-baseline
+#
+# The same check caps source files ADDED by a change at 500 lines. That rule
+# has no rows here: it reads the change, not a list.
+#
+# `not-new <path> :: <reason>` lifts that 500-line cap for one file that only
+# looks new: a revert brought it back, or it was moved and rewritten. Delete the
+# row in a later change.
+#
+# `exempt <path> :: <reason>` rows are for generated, vendored or mirrored
+# files only. One exact path per row.
+
+exempt api/priv/static/assets/asciinema-player.css :: vendored third-party stylesheet (asciinema-player, see asciinema-player.LICENSE.txt)
+exempt web/public/bp-graph.js :: byte-identical mirror of api/priv/static/assets/bp-graph.js, which has a row below
+exempt templates/search-starter/public/bp-graph.js :: byte-identical mirror of api/priv/static/assets/bp-graph.js, which has a row below
+exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirror of api/priv/static/assets/bp-graph.js, which has a row below
+
+32688 cloud/priv/static/app.js
+20118 cloud/lib/barkpark_cloud/web/router.ex
+17631 scripts/pds-elixir-receipt-census.exs
+14925 cloud/priv/static/__preview__/overflow-guard.mjs
+12892 cloud/lib/barkpark_cloud/registry.ex
+8626 api/lib/barkpark_web/live/studio/chat_live.ex
+7962 cloud/priv/static/__preview__/scenarios.mjs
+7668 cloud/priv/static/__preview__/smoke.mjs
+7566 cloud/priv/static/app.css
+7565 api/lib/barkpark_web/layouts/root.html.heex
+6832 api/lib/barkpark/plugins/sheets/engine.ex
+6151 api/lib/barkpark/content/papers/block_ops.ex
+5899 scripts/studio-desk-measure.mjs
+5758 api/priv/static/assets/bp-paper-editor-hooks.js
+5461 api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex
+5229 api/lib/barkpark/plugins/capabilities.ex
+4908 internal/cli/run.go
+4841 scripts/pds-pull-proof.sh
+4805 api/lib/barkpark/cycle_fleet.ex
+4784 internal/cloudclient/client.go
+4627 internal/cli/cloud_site_cmd.go
+4611 api/lib/barkpark_web/router.ex
+4561 api/lib/barkpark_web/live/studio/studio_live/blocks.ex
+4542 deploy/site-deploy-node.sh
+4416 api/lib/barkpark/content/query.ex
+4372 tooling/studio-journey/journey.mjs
+4321 api/lib/barkpark_web/live/studio/sheet_grid.ex
+4281 deploy/site-deploy.sh
+4230 api/lib/barkpark/sites/deploy_runner.ex
+4104 api/lib/barkpark_web/controllers/tasks_controller.ex
+4039 cloud/lib/barkpark_cloud/deploy_ledger.ex
+4017 api/lib/barkpark/plugins/tasks/web/board_live.ex
+3904 cloud/priv/static/__binding_census.mjs
+3789 cloud/lib/barkpark_cloud/accounts.ex
+3768 scripts/pds-ledger-census.sh
+3761 scripts/pds-door-census.sh
+3735 api/lib/barkpark/portable_doc/render/compose.ex
+3702 cloud/priv/static/__css_check.mjs
+3660 design/emit.mjs
+3500 api/priv/static/assets/bp-graph.js
+3429 api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex
+3407 cloud/lib/barkpark_cloud/sites/deploy.ex
+3355 api/lib/barkpark_web/controllers/tasks_controller/params.ex
+3334 api/lib/barkpark_web/layouts/bulldocs.html.heex
+3252 cloud/priv/static/__preview__/breakpoint-sweep.mjs
+3229 internal/agent/report.go
+3020 api/lib/barkpark/studio_chat.ex
+2991 cloud/priv/static/__preview__/seal-predicate.mjs
+2945 tooling/grip/screen.mjs
+2944 scripts/required-checks-verify.sh
+2852 cloud/lib/barkpark_cloud/notifications.ex
+2840 api/lib/barkpark_web/live/studio/studio_live/shared.ex
+2828 internal/chat/render.go
+2816 scripts/check-deployyml-filters.sh
+2809 api/lib/barkpark_web/controllers/query_controller.ex
+2761 api/lib/barkpark/groq/document_source.ex
+2726 api/lib/barkpark/tenancy/workspace_bundle.ex
+2723 api/priv/static/assets/bp-paper-editor-shell.css
+2717 api/lib/barkpark/content/writer.ex
+2629 api/lib/barkpark/content/mutations.ex
+2629 api/lib/barkpark_web/live/studio/studio_live/components.ex
+2621 deploy/instance-deploy.sh
+2618 scripts/ci-measure.sh
+2613 internal/cli/cloud_status_cmd.go
+2599 scripts/pds-crown-launch.sh
+2573 scripts/elixir-path-escape-check.sh
+2567 api/lib/barkpark/studio_chat/provider/claude.ex
+2562 api/lib/barkpark/tenancy.ex
+2557 api/lib/barkpark/auth.ex
+2543 api/lib/barkpark/studio_chat/recorder.ex
+2540 api/priv/static/assets/bp-sheet-grid.js
+2525 api/lib/barkpark/plugins/tasks.ex
+2486 api/assets/paper-surface/paper-surface.css
+2454 scripts/chronicle-paper.py
+2440 internal/cli/cloud_support_cmd.go
+2420 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
+2394 scripts/crown-reconcile.sh
+2354 api/lib/barkpark/search/documents_retriever.ex
+2347 internal/cli/hetzner_lb_cmd.go
+2282 internal/cli/sites_cmd.go
+2222 api/lib/barkpark/tasks/close.ex
+2201 scripts/pipefail-sigpipe-scan.sh
+2200 api/lib/barkpark/portable_doc/render/walk.ex
+2190 api/lib/barkpark/portable_doc/render/data_viz.ex
+2176 internal/cli/cloud/warmpool.go
+2171 .codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py
+2169 api/lib/barkpark/plugins/sheets/session/ops.ex
+2150 api/priv/static/assets/bp-asset-explorer.js
+2135 internal/cli/cloud12_cmd.go
+2130 api/lib/barkpark/content/papers.ex
+2108 api/lib/barkpark_web/live/bulldocs_live.ex
+2093 tooling/doc-truth/verify-docs.mjs
+2091 api/config/runtime.exs
+2091 internal/taskboard/program.go
+2053 api/lib/barkpark_web/studio/pane_builder.ex
+2049 internal/apiclient/client.go
+2039 internal/cli/cloud_deploy_census_cmd.go
+2033 scripts/pds-record-parity.sh
+2020 scripts/paper_epic_repair.py
+2013 scripts/landed-mark.sh

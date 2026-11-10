@@ -1015,6 +1015,25 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh doc-budgets-discovery -- bash scripts/check-doc-budgets.sh --discovery-only
 
+      # ── giant source files may not grow (task-00460cb8804b1b94) ──────────
+      # A product source file over 2,000 lines has a row in
+      # scripts/.file-size-baseline; it may not pass its number, and no other
+      # file may cross 2,000. Here, as STEPS, for the same reason as the
+      # doc-budget steps above: this job reds the REQUIRED `Elixir gate` and a
+      # step adds no rendered name. `--base HEAD^1` is the base sha (see the
+      # checkout note), so a pull request is blamed only for growth it adds.
+      # The same run caps NEW source files at 500 lines (files this change
+      # adds; existing files are not judged).
+      # PRICED: selftest ~0.5s, checked run ~1s on a loaded laptop. Reads
+      # files only.
+      - name: The file-size ratchet must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh file-size-ratchet-selftest -- python3 scripts/file-size-ratchet.py --selftest
+
+      - name: No source file over 2,000 lines grew, no new one is over 500
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh file-size-ratchet -- python3 scripts/file-size-ratchet.py --base HEAD^1
+
       # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
       # `if: always()` and LAST, so it runs even when an instrument above it
       # reddened the job — the refusal case is precisely the one whose verdict

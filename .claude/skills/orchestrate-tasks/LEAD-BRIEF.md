@@ -109,7 +109,8 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 9. **Stamp + close** (you): take the wording FROM THE ROW into a file — `bp task get <id> -o json |
    jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt` — then `bp task stamp <id>
    lead-<lane> <epoch> --criterion N --criterion-text-file crit.txt --met --evidence "PR #… merged
-   <sha>"` per met criterion (index is ZERO-based; a merge-gate criterion needs `--merge-gated`).
+   <sha>; fails first: <test name>"` per met criterion (index is ZERO-based; a merge-gate criterion
+   needs `--merge-gated`). That one line is the whole proof; add what was NOT run, nothing else.
    NEVER pass the wording inline: a backticked code span in a double-quoted shell argument is
    COMMAND SUBSTITUTION, so your shell executes the criterion before bp ever sees it. Then
    `bp task close <id> lead-<lane> <epoch> done "<reason>" --yes` — the lifecycle word
