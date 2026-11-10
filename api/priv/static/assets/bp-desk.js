@@ -365,16 +365,17 @@
   // the tip sits beside them, level with the pointer. Always 4 px inside.
   function placeTip(tip, anchor, y) {
     var at = anchor.getBoundingClientRect();
-    var w = tip.offsetWidth;
-    var h = tip.offsetHeight;
+    var size = tip.getBoundingClientRect();
+    var w = size.width || tip.offsetWidth;
+    var h = size.height || tip.offsetHeight;
     var left = at.left + at.width / 2 - w / 2;
     var top = at.bottom + 80 >= window.innerHeight ? at.top - TIP_GAP - h : at.bottom + TIP_GAP;
     if (anchor.getAttribute("data-tip-side") === "right") {
       left = at.right + TIP_GAP;
       top = (y === null ? at.top + 16 + h / 2 : y) - h / 2;
     }
-    tip.style.left = Math.round(Math.max(TIP_GAP, Math.min(left, window.innerWidth - TIP_GAP - w))) + "px";
-    tip.style.top = Math.round(Math.max(TIP_GAP, Math.min(top, window.innerHeight - TIP_GAP - h))) + "px";
+    tip.style.left = Math.max(TIP_GAP, Math.min(left, window.innerWidth - TIP_GAP - w)) + "px";
+    tip.style.top = Math.max(TIP_GAP, Math.min(top, window.innerHeight - TIP_GAP - h)) + "px";
   }
 
   function paneOf(root, el) {
