@@ -273,8 +273,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
       settle(view)
+      # The open document is the editor's to read, so only the list read.
       assert_received {:pane_load, :list}
-      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
 
       beta = "#{base}/#{@type_name};#{b}"
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
