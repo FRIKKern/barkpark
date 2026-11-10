@@ -58,6 +58,16 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   # which takes longer than render_async's default 100 ms on a busy machine.
   defp settle(view), do: render_async(view, 5_000)
 
+  # A document pane shows `text`: as a printed field in a read-only pane, or
+  # as a field's value in the Studio's editor (the last document of a chain).
+  defp doc_shows?(view, index, text) do
+    pane = ~s([data-pane-index="#{index}"])
+
+    has_element?(view, pane <> " dd", text) or
+      has_element?(view, pane <> ~s( #editor-form [value="#{text}"])) or
+      has_element?(view, pane <> " #editor-form textarea", text)
+  end
+
   defp admin(conn), do: sign_in(conn, ["read", "write", "admin"])
 
   test "the root URL draws the desk root alone, its rows links", %{conn: conn, base: base} do
@@ -87,9 +97,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     assert has_element?(view, ~s([data-pane-index="1"] a[aria-current="true"]), "Alpha note")
     refute has_element?(view, ~s([data-pane-index="1"] a[aria-current="true"]), "Beta note")
 
-    # The document is printed, not edited.
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
-    refute has_element?(view, "#desk-panes :is(input, textarea, form)")
+    # The last document of the chain is in the Studio's own editor.
+    assert has_element?(view, ~s([data-pane-index="2"][data-pane-editing] #editor-form))
+    assert doc_shows?(view, 2, "About Alpha note")
   end
 
   test "a row's href is the pane URL, and following it patches there", %{
@@ -109,7 +119,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     assert_patch(view, "#{base}/#{@type_name};#{b}")
 
     assert has_element?(view, ~s([data-pane-index="1"] a[aria-current="true"]), "Beta note")
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+    assert doc_shows?(view, 2, "About Beta note")
   end
 
   test "closing a pane goes to the URL without it", %{conn: conn, base: base, a: a} do
@@ -159,7 +169,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};no-such-doc")
     settle(view)
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]))
-    assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "no-such-doc")
+    assert has_element?(view, ~s([data-pane-index="2"]), "no-such-doc")
 
     {:ok, view, _html} = live(admin(conn), "#{base}/no_such_type")
     settle(view)
@@ -190,9 +200,8 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
       settle(view)
 
-      # One connected mount: the list once, the document once.
+      # One connected mount: the list once. The last document is the editor's.
       assert_received {:pane_load, :list}
-      assert_received {:pane_load, :doc}
       refute_received {:pane_load, _}
 
       view
@@ -201,9 +210,8 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
       settle(view)
 
-      assert_received {:pane_load, :doc}
       refute_received {:pane_load, _}
-      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+      assert doc_shows?(view, 2, "About Beta note")
     end
 
     test "a hovered row is read ahead, and the click opens it with no further read", %{
@@ -215,7 +223,6 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
       settle(view)
       assert_received {:pane_load, :list}
-      assert_received {:pane_load, :doc}
 
       # What bp-desk.js sends when the pointer settles on Beta's row.
       beta = "#{base}/#{@type_name};#{b}"
@@ -234,7 +241,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{beta}"]))
       |> render_click()
 
-      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+      assert doc_shows?(view, 2, "About Beta note")
       refute has_element?(view, "[aria-busy]")
       settle(view)
       refute_received {:pane_load, _}
@@ -246,10 +253,15 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       view |> element("#desk-panes") |> render_hook("warm", %{"href" => alpha})
       settle(view)
       assert_received {:pane_load, :doc}
-      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+      assert doc_shows?(view, 2, "About Beta note")
     end
 
-    test "a pane draws its frame before its read lands", %{conn: conn, base: base, a: a} do
+    test "a pane draws its frame before its read lands", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
       test = self()
 
       # Hold every read until the test lets it go.
@@ -261,7 +273,8 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
         end
       end)
 
-      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      # Alpha is a read-only pane here: Beta, the last document, is the editor's.
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{two_docs(a, b)}")
 
       # The frames are there, busy, titled from the URL alone.
       assert has_element?(view, ~s([data-pane-index="1"][aria-busy="true"]))
@@ -275,21 +288,21 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       settle(view)
       refute has_element?(view, "[aria-busy]")
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
-      assert page_title(view) =~ "Alpha note"
     end
   end
 
   test "a read that fails is that pane's to show; the others stay up", %{
     conn: conn,
     base: base,
-    a: a
+    a: a,
+    b: b
   } do
     swap_reader(fn
       %{kind: :doc}, _node, _dataset, _scope, _title -> raise "the document read failed"
       pane, node, dataset, scope, title -> PaneComponent.read(pane, node, dataset, scope, title)
     end)
 
-    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{two_docs(a, b)}")
     settle(view)
 
     assert has_element?(view, ~s([data-pane-index="2"] [role="alert"] button[phx-click="retry"]))
@@ -299,8 +312,12 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     Application.delete_env(:barkpark, PaneComponent)
     view |> element(~s([data-pane-index="2"] button[phx-click="retry"])) |> render_click()
     settle(view)
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+    assert doc_shows?(view, 2, "About Alpha note")
   end
+
+  # Two documents in a chain: the first is a read-only pane, the second the editor.
+  defp two_docs(first, second),
+    do: "#{@type_name};#{first};#{second},type=#{@type_name},parentRefPath=more"
 
   defp swap_reader(reader) do
     Application.put_env(:barkpark, PaneComponent, reader: reader)
@@ -337,17 +354,63 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     # (it did on CI). Wait for the new value itself.
     shown? = fn ->
       settle(view)
-      has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+      doc_shows?(view, 2, "Now changed")
     end
 
     assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
            "the open document never showed the saved value"
 
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
-    assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha renamed")
+    assert doc_shows?(view, 2, "Now changed")
+    assert doc_shows?(view, 2, "Alpha renamed")
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
     # The row it replaced stays put: Beta is still there, read with the same list.
     assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Beta note")
+  end
+
+  describe "the active document is edited by the Studio's own editor" do
+    test "typing in the active document saves a draft", %{conn: conn, base: base, a: a} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="2"][data-pane-editing] #editor-form))
+
+      # The panes are in the page in chain order, the editor last (a browser
+      # drew it first, and the layout collapsed the wrong panes).
+      order = Regex.scan(~r/data-pane-index="(\d)"/, render(view)) |> Enum.map(&List.last/1)
+      assert order == ~w(0 1 2)
+
+      # The list beside it is still the desk's own pane.
+      assert has_element?(view, ~s([data-pane-index="1"] a[data-desk-row][aria-current="true"]))
+
+      view
+      |> form("#editor-form")
+      |> render_change(%{"doc" => %{"title" => "Alpha typed", "summary" => "Typed here"}})
+
+      {doc, draft?, _published?} = Content.fetch_doc_with_draft(@type_name, a, @dataset)
+      assert draft?
+      assert doc.title == "Alpha typed"
+      assert doc.content["summary"] == "Typed here"
+    end
+
+    test "publish goes through the Studio's own action", %{conn: conn, base: base, a: a} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Alpha to publish"}})
+      render_hook(view, "publish", %{})
+
+      {doc, draft?, published?} = Content.fetch_doc_with_draft(@type_name, a, @dataset)
+      assert published?
+      refute draft?
+      assert doc.title == "Alpha to publish"
+    end
+
+    test "another document in the chain stays a read-only pane", %{conn: conn, base: base} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name}")
+      settle(view)
+      refute has_element?(view, "[data-pane-editing]")
+      refute has_element?(view, "#editor-form")
+    end
   end
 
   describe "a list draws the Studio's own rows" do
@@ -513,18 +576,11 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
                "Beta note"
              )
 
-      # A target that is gone keeps its id and is not a link.
-      assert has_element?(view, ~s([data-pane-index="2"] .dk-ref-missing), "dsn-gone")
-
       view |> element(~s(a[data-desk-ref][href="#{to_a}"])) |> render_click()
       assert_patch(view, to_a)
       settle(view)
 
-      assert has_element?(
-               view,
-               ~s([data-pane-index="3"][data-pane-kind="doc"] dd),
-               "About Alpha note"
-             )
+      assert doc_shows?(view, 3, "About Alpha note")
 
       assert has_element?(
                view,
@@ -532,7 +588,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
                "Alpha note"
              )
 
-      # The document it was opened from stays, and was not read again.
+      # A target that is gone keeps its id and is not a link.
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-ref-missing), "dsn-gone")
+      # The document it was opened from stays, now a read-only pane.
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Linked one")
     end
 
@@ -544,7 +602,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     } do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked};#{a}")
       settle(view)
-      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+      assert doc_shows?(view, 3, "About Alpha note")
     end
 
     test "a chain eight panes deep comes back from its URL", %{
@@ -567,7 +625,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       # Root + list + six documents.
       for i <- 0..7, do: assert(has_element?(view, ~s([data-pane-index="#{i}"])))
       refute has_element?(view, ~s([data-pane-index="8"]))
-      assert has_element?(view, ~s([data-pane-index="7"] dd), "About Alpha note")
+      assert doc_shows?(view, 7, "About Alpha note")
       assert has_element?(view, ~s([data-pane-index="6"] .pane-header-title), "Linked one")
 
       # Closing the fourth pane prints the chain up to it, params intact.

@@ -34,7 +34,7 @@ An **order** is a `type:task` document routed to your worker name via `assignee`
    producing nothing. (This was observed live and is the single most important rule.)
 5. **Stamp.** Put the criterion wording in a FILE first — `bp task get <id> -o json | jq -r
    '.doc.content.acceptance_criteria[0].criterion' > crit.txt` — then `bp task stamp <id> <you>
-   <epoch> --criterion 0 --met --evidence "<what you did>" --criterion-text-file crit.txt --yes`
+   <epoch> --criterion 0 --met --evidence "<PR or commit link + failing-first test, or the artifact path>" --criterion-text-file crit.txt --yes`
    (get `<epoch>` from `bp task get`). Never pass the wording inline: it is markdown, and a
    backticked code span in a double-quoted shell argument is COMMAND SUBSTITUTION.
 6. **Close.** Re-read the epoch, then `bp task close <id> <you> <epoch> --yes`. Return to step 1.
