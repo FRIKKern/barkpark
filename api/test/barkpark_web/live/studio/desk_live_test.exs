@@ -122,6 +122,27 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
 
+  test "a URL that names a revision, a view or an inspector says what the desk shows instead", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},rev=abc123")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+
+    for param <- ["view=json", "inspect=sanity%2Fstructure%2Fhistory"] do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},#{param}")
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out])), param
+    end
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+    refute has_element?(view, "[data-desk-left-out]")
+  end
+
   test "a missing document and an unknown type say so in their own pane", %{
     conn: conn,
     base: base
