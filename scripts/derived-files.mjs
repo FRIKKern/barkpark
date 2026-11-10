@@ -74,6 +74,7 @@ export const STEPS = [
       "design/themes/**",
       "design/status-manifest.json",
       "design/emit.mjs",
+      "design/emit/**",
       "design/emit-manifest.json",
       "cloud/priv/audit-actions.json",
     ],

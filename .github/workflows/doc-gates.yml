@@ -103,6 +103,8 @@ on:
       - "design/tokens.schema.json"
       - "design/validate.mjs"
       - "design/emit.mjs"
+      # its modules, imported and re-exported by design/emit.mjs.
+      - "design/emit/**"
       - "design/check.mjs"
       # its Parts, one module each, run in order by check.mjs.
       - "design/check/**"
@@ -512,6 +514,8 @@ on:
       - "design/tokens.schema.json"
       - "design/validate.mjs"
       - "design/emit.mjs"
+      # its modules, imported and re-exported by design/emit.mjs.
+      - "design/emit/**"
       - "design/check.mjs"
       # its Parts, one module each, run in order by check.mjs.
       - "design/check/**"

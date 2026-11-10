@@ -5,7 +5,7 @@
   "implementations": [
     {
       "id": "emit",
-      "file": "design/emit.mjs",
+      "file": "design/emit/vocab.mjs",
       "symbol": "typeLadderFrom",
       "direction": "descending",
       "refuses_by": "throw",
