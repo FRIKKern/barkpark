@@ -18,8 +18,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
-  alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.ListSearch
+  alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Tree
