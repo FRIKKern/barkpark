@@ -259,6 +259,44 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       refute has_element?(view, "[aria-busy]")
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
     end
+
+    test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      swap_reader(fn
+        %{kind: :doc, id: ^b}, _node, _dataset, _scope, _title -> raise "the read-ahead failed"
+        pane, node, dataset, scope, title -> PaneComponent.read(pane, node, dataset, scope, title)
+      end)
+
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+      # The open document is the editor's to read, so only the list read.
+      assert_received {:pane_load, :list}
+      refute_received {:pane_load, _}
+
+      beta = "#{base}/#{@type_name};#{b}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # The failed read left no key behind: hovering again reads again.
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # The click is not broken by it: the document opens (the last pane is
+      # the Studio's editor, which reads for itself), with no pane read.
+      view
+      |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{beta}"]))
+      |> render_click()
+
+      settle(view)
+      refute_received {:pane_load, _}
+      assert doc_shows?(view, 2, "About Beta note")
+    end
   end
 
   test "a read that fails is that pane's to show; the others stay up", %{
