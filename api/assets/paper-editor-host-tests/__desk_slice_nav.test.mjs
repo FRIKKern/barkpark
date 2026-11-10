@@ -99,6 +99,27 @@ const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-
   hook.destroyed();
 }
 
+// ── A second click before the first lands keeps its own frame ───────────────
+{
+  const { hook } = mount();
+  click(rowTo("post;post-b"));
+  click(rowTo("author"));
+  assert.equal(q("[data-desk-skeleton]").getAttribute("data-pane-index"), "1");
+
+  // The FIRST click's patch stops loading. The URL is not the second click's
+  // yet, and that is no sign the second one failed: its frame stays.
+  window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+  assert.ok(q("[data-desk-skeleton]"), "an earlier click's answer does not undo the newer click's frame");
+  assert.equal(rowTo("author").getAttribute("aria-current"), "true");
+
+  // Its own patch stops without landing: now everything goes back.
+  window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+  assert.equal(q("[data-desk-skeleton]"), null);
+  assert.equal(q("[data-desk-leaving]"), null);
+  assert.equal(rowTo("author").getAttribute("aria-current"), null);
+  hook.destroyed();
+}
+
 // ── The open row again: its pane stays, only what is right of it closes ─────
 {
   const { hook } = mount();
