@@ -260,7 +260,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
     end
 
-    test "a read-ahead that fails is forgotten: the next hover reads, the click shows Retry", %{
+    test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{
       conn: conn,
       base: base,
       a: a,
@@ -286,20 +286,15 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       settle(view)
       assert_received {:pane_load, :doc}
 
-      # The click loads through the pane's own read, which shows its failure.
+      # The click is not broken by it: the document opens (the last pane is
+      # the Studio's editor, which reads for itself), with no pane read.
       view
       |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{beta}"]))
       |> render_click()
 
       settle(view)
-      assert_received {:pane_load, :doc}
       refute_received {:pane_load, _}
-      assert has_element?(view, ~s([data-pane-index="2"] button[phx-click="retry"]))
-
-      Application.delete_env(:barkpark, PaneComponent)
-      view |> element(~s([data-pane-index="2"] button[phx-click="retry"])) |> render_click()
-      settle(view)
-      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Beta note")
+      assert doc_shows?(view, 2, "About Beta note")
     end
   end
 
