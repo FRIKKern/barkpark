@@ -512,4 +512,43 @@ defmodule BarkparkWeb.Studio.DeskEditorStructuredTest do
 
     assert inspect(saved(ctx, "canvas", &(inspect(&1) =~ "Canvas words"))) =~ "Canvas words"
   end
+
+  # A 4x4 red PNG, built here so the test carries no fixture file.
+  defp png do
+    chunk = fn type, data ->
+      <<byte_size(data)::32>> <> type <> data <> <<:erlang.crc32(type <> data)::32>>
+    end
+
+    row = <<0>> <> :binary.copy(<<220, 30, 30>>, 4)
+
+    <<137, 80, 78, 71, 13, 10, 26, 10>> <>
+      chunk.("IHDR", <<4::32, 4::32, 8, 2, 0, 0, 0>>) <>
+      chunk.("IDAT", :zlib.compress(:binary.copy(row, 4))) <> chunk.("IEND", <<>>)
+  end
+
+  # The Studio's LiveView upload (`allow_upload(:image)` in StudioLive's mount,
+  # the legacy image-picker modal). No field opens this modal any more (the
+  # image field is <bp-media-picker>, which uploads over HTTP), so this is the
+  # only place the desk's `allow_upload` is exercised: open, upload, consume,
+  # and the saved value.
+  test "J12 LiveView upload (legacy image picker): the upload completes in the desk and the value saves",
+       ctx do
+    view = open!(ctx.conn, ctx.url)
+    render_hook(view, "open-image-picker", %{"field" => "hero"})
+    assert has_element?(view, ~s(#image-picker-dialog[role="dialog"] form#upload-form))
+
+    upload =
+      file_input(view, "#upload-form", :image, [
+        %{name: "w3t-red.png", content: png(), type: "image/png"}
+      ])
+
+    assert render_upload(upload, "w3t-red.png") =~ "image-upload-entry"
+    view |> form("#upload-form") |> render_submit()
+    refute has_element?(view, "#image-picker-dialog")
+
+    hero = saved(ctx, "hero", &(inspect(&1) =~ "w3t-red"))
+
+    assert inspect(hero) =~ "w3t-red",
+           "the uploaded file never reached the saved value: #{inspect(hero)}"
+  end
 end
