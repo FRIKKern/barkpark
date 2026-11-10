@@ -56,6 +56,12 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
         %{"name" => "title", "title" => "Title", "type" => "string"},
         %{"name" => "category", "title" => "Category", "type" => "string"},
         %{
+          "name" => "parent",
+          "title" => "Parent",
+          "type" => "reference",
+          "to" => [%{"type" => @article}]
+        },
+        %{
           "name" => "author",
           "title" => "Author",
           "type" => "reference",
@@ -129,6 +135,20 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
             "id" => "authors",
             "type" => @author,
             "title" => "People"
+          },
+          %{
+            "kind" => "tree",
+            "id" => "article-tree",
+            "type" => @article,
+            "title" => "By parent",
+            "parent" => "content.parent"
+          },
+          %{
+            "kind" => "documentTypeList",
+            "id" => "refused",
+            "type" => @article,
+            "title" => "Refused",
+            "filter" => %{"content.category" => %{"near" => "news"}}
           }
         ]
       }
@@ -156,7 +176,8 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
     {:ok, dataset: dataset, scope: scope, root: root}
   end
 
-  # The Repo queries `fun` runs in this process, as `{count, sources}`.
+  # The Repo queries `fun` runs, in this process or a task it starts, each as
+  # `{source, sql, params}`.
   defp queries(fun) do
     test = self()
     handler = "desk-list-read-cost-#{System.unique_integer([:positive])}"
@@ -166,7 +187,8 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
         handler,
         [:barkpark, :repo, :query],
         fn _event, _measure, meta, _config ->
-          if self() == test, do: send(test, {:dlrc_query, meta[:source]})
+          if self() == test or test in Process.get(:"$callers", []),
+            do: send(test, {:dlrc_query, {meta[:source], meta[:query], meta[:params]}})
         end,
         nil
       )
@@ -183,14 +205,28 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
 
   defp drain(acc) do
     receive do
-      {:dlrc_query, source} -> drain([source | acc])
+      {:dlrc_query, query} -> drain([query | acc])
     after
       0 -> Enum.reverse(acc)
     end
   end
 
-  # One list pane of the URL `splat`, read as the pane reads it, beside the
-  # rows `PaneBuilder.build/3` gives for the same path.
+  # The desk tree's own queries: what `PaneBuilder.build/3` reads before it
+  # reaches the list (schema catalog, the declared desk document, plugin
+  # enablement, the type census).
+  defp tree_queries(%{dataset: dataset, scope: scope}) do
+    {_tree, tree} =
+      queries(fn ->
+        dataset |> Structure.build([defer_group_by: true] ++ scope) |> StructureCopy.localize()
+      end)
+
+    assert tree != [], "building the desk tree must read something"
+    tree
+  end
+
+  # One list pane of the URL `splat`, read as the pane reads it with the node
+  # the page holds, beside the same list read by `PaneBuilder.build/3` for
+  # its path (no node). Both with their queries.
   defp both(%{dataset: dataset, scope: scope, root: root}, splat, limit, sort \\ nil) do
     chain = Tree.parse(splat, root)
     index = length(chain) - 1
@@ -199,9 +235,24 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
     node = Tree.index(root)[pane.node]
     assert node, "the page holds the node of #{splat}"
 
-    {read, sources} = queries(fn -> PaneComponent.read_pane(pane, node, dataset, scope) end)
-    built = Rows.read(pane.type, pane.query, dataset, scope)
-    {read, built, sources}
+    {read, read_q} = queries(fn -> PaneComponent.read_pane(pane, node, dataset, scope) end)
+    {built, built_q} = queries(fn -> Rows.read(pane.type, pane.query, dataset, scope) end)
+    assert built, "the old path must find #{splat}"
+    {read, read_q, built, built_q}
+  end
+
+  # The read with a node runs none of the tree's queries, and exactly the
+  # old path's queries without them.
+  defp assert_no_tree_read(splat, read_q, built_q, tree_q) do
+    in_tree = Enum.filter(read_q, &(&1 in tree_q))
+
+    assert in_tree == [],
+           "#{splat}: a list read with the page's node ran #{length(read_q)} queries, " <>
+             "#{length(in_tree)} of them the desk tree's: #{inspect(Enum.map(in_tree, &elem(&1, 0)))}"
+
+    assert Enum.sort(read_q) == Enum.sort(built_q -- tree_q),
+           "#{splat}: the read ran #{length(read_q)} queries, the old path " <>
+             "#{length(built_q)} of which #{length(tree_q)} build the tree"
   end
 
   defp shape(rows) do
@@ -210,36 +261,48 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
     |> Map.put(:entries, Enum.map(rows.entries, &Map.take(&1, [:title, :sub, :draft, :next])))
   end
 
-  # The list's own reads: its schema, its page, the documents its row preview
-  # names. The tree reads the schema catalog, the declared desk document, the
-  # plugin enablement and the type census on top of those.
-  @ceiling 6
+  test "a top-level list reads no desk tree, and its rows are the built rows", ctx do
+    tree_q = tree_queries(ctx)
+    {read, read_q, built, built_q} = both(ctx, "articles", 100)
 
-  test "a top-level list reads only its own rows, and they are the built rows", ctx do
-    {read, built, sources} = both(ctx, "articles", 100)
-
-    assert length(sources) <= @ceiling,
-           "one list read ran #{length(sources)} queries (ceiling #{@ceiling}): #{inspect(sources)}"
-
+    assert_no_tree_read("articles", read_q, built_q, tree_q)
     assert shape(read) == shape(built)
     assert length(read.entries) == 100
     assert read.more? == true
+    assert read.title == "All"
     assert hd(read.entries).title == "Article 001"
     assert hd(read.entries).sub == "Author 2"
   end
 
-  test "a list two menus deep, filtered and sorted, reads only its own rows", ctx do
-    {read, built, sources} = both(ctx, "editorial;sections;news", 1000, "titleDesc")
+  test "a filtered list two menus deep, with a sort picked, reads no desk tree", ctx do
+    tree_q = tree_queries(ctx)
+    {read, read_q, built, built_q} = both(ctx, "editorial;sections;news", 1000, "titleDesc")
 
-    assert length(sources) <= @ceiling,
-           "one list read ran #{length(sources)} queries (ceiling #{@ceiling}): #{inspect(sources)}"
-
+    assert_no_tree_read("editorial;sections;news", read_q, built_q, tree_q)
     assert shape(read) == shape(built)
     assert length(read.entries) == 65
     assert read.more? == false
     assert read.sort == "titleDesc"
     assert hd(read.entries).title == "Article 130"
     assert read.title == "News"
+  end
+
+  test "a declared order, another type, a tree root and a refused filter read as built", ctx do
+    tree_q = tree_queries(ctx)
+
+    for {splat, limit, check} <- [
+          {"editorial;sections;news", 100,
+           &(&1.sort == nil and hd(&1.entries).title == "Article 130")},
+          {"editorial;authors", 100, &(&1.title == "People" and length(&1.entries) == 3)},
+          {"editorial;article-tree", 100, &(length(&1.entries) == 100 and &1.more? == true)},
+          {"editorial;refused", 100, &(is_binary(&1.refused) and &1.entries == [])}
+        ] do
+      {read, read_q, built, built_q} = both(ctx, splat, limit)
+
+      assert_no_tree_read(splat, read_q, built_q, tree_q)
+      assert shape(read) == shape(built), "#{splat}: the rows differ from the built rows"
+      assert check.(read), "#{splat}: #{inspect(Map.delete(shape(read), :entries))}"
+    end
   end
 
   test "a type name from an old link, with no node, still reads by its path", ctx do
