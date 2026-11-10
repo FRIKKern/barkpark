@@ -73,6 +73,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         }
       end
 
+    views = Enum.map(views, &Map.put(&1, :follows, leader(&1, views)))
+
     {:noreply,
      socket
      |> subscribe(dataset)
@@ -274,6 +276,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         pane={view.pane}
         index={view.index}
         node={view.node}
+        follows={view.follows}
         warm={warm(@warm, view.key)}
         panes={@chain}
         base={@base}
@@ -296,6 +299,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     %{dataset: dataset, root: root, nodes: Tree.index(root)}
   end
+
+  # The earlier pane that reads the same document (a split sibling's first):
+  # the later one shows that read instead of making its own.
+  defp leader(%{pane: %{kind: :doc}, key: key, index: index}, views),
+    do: Enum.find_value(views, &((&1.key == key and &1.index < index) && &1.id))
+
+  defp leader(_view, _views), do: nil
 
   defp node_of(%{kind: :types}, desk), do: desk.root
   defp node_of(%{kind: :doc}, _desk), do: nil

@@ -31,10 +31,26 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def update(%{refresh: _}, socket), do: {:ok, load(socket)}
 
+  # A pane with this pane's key (a split sibling) asks for its read rather
+  # than reading too: answered now, or when the read under way lands.
+  def update(%{share_with: id}, socket) do
+    socket = assign(socket, :sharers, [id | socket.assigns.sharers])
+    {:ok, if(socket.assigns.data.loading, do: socket, else: share(socket))}
+  end
+
+  def update(%{shared: {key, data}}, socket) do
+    cond do
+      key != socket.assigns.data_key -> {:ok, socket}
+      data.failed -> {:ok, assign(socket, :data, data)}
+      true -> {:ok, adopt(socket, data.result)}
+    end
+  end
+
   def update(assigns, socket) do
     socket =
       socket
-      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
+      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node follows)a))
+      |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
       |> assign_new(:sort, fn -> nil end)
 
@@ -74,7 +90,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   @impl true
-  def handle_event("retry", _params, socket), do: {:noreply, load(socket)}
+  def handle_event("retry", _params, socket), do: {:noreply, read_async(socket)}
 
   # A list's own controls. They are this pane's state, not the URL's.
   def handle_event("more", _params, socket),
@@ -86,13 +102,21 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def handle_async(:load, {:ok, data}, socket), do: {:noreply, adopt(socket, data)}
 
-  def handle_async(:load, {:exit, reason}, socket),
-    do: {:noreply, assign(socket, :data, AsyncResult.failed(socket.assigns.data, reason))}
+  def handle_async(:load, {:exit, reason}, socket) do
+    data = AsyncResult.failed(socket.assigns.data, reason)
+    {:noreply, socket |> assign(:data, data) |> share()}
+  end
 
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.index, data.title})
-    assign(socket, :data, AsyncResult.ok(data))
+    socket |> assign(:data, AsyncResult.ok(data)) |> share()
+  end
+
+  # Hand this pane's read, landed or failed, to the panes that asked for it.
+  defp share(%{assigns: %{sharers: sharers, data_key: key, data: data}} = socket) do
+    for id <- sharers, do: send_update(__MODULE__, id: id, shared: {key, data})
+    assign(socket, :sharers, [])
   end
 
   @impl true
@@ -246,7 +270,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     assign(socket, :data, AsyncResult.ok(data))
   end
 
-  defp load(socket) do
+  # An earlier pane reads the same thing: ask it, so the two cost one read.
+  defp load(%{assigns: %{follows: leader}} = socket) when is_binary(leader) do
+    send_update(__MODULE__, id: leader, share_with: socket.assigns.id)
+    assign(socket, :data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
+  end
+
+  defp load(socket), do: read_async(socket)
+
+  defp read_async(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
     %{panes: panes, index: index, limit: limit, sort: sort} = socket.assigns
     pane = with_query(pane, panes, index, limit, sort)

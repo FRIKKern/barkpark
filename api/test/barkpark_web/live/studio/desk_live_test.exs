@@ -247,6 +247,24 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
       assert page_title(view) =~ "Alpha note"
     end
+
+    test "a document split in two is read once, and both panes show it", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}|,view=json")
+      settle(view)
+
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+      refute has_element?(view, "[aria-busy]")
+      assert page_title(view) =~ "Alpha note"
+    end
   end
 
   test "a read that fails is that pane's to show; the others stay up", %{
