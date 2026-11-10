@@ -100,6 +100,9 @@ assert.equal(separators()[0].getAttribute("aria-valuemin"), "320");
 assert.equal(separators()[0].getAttribute("aria-valuenow"), "320");
 assert.equal(separators()[0].getAttribute("tabindex"), "0");
 // ArrowRight widens the pane on its left by 16 px, ArrowLeft narrows it, never under 320.
+// (1200 px: the same strips, and room to widen.)
+width = 1200;
+hook._layout();
 const arrow = (key) => {
   const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
   separators()[0].dispatchEvent(event);
@@ -113,6 +116,26 @@ arrow("ArrowLeft"); arrow("ArrowLeft"); arrow("ArrowLeft");
 assert.match(sheet(), /\[data-pane-index="2"\][^{]*\{ width: 320px;/, "never under 320 px");
 assert.equal(separators()[0].getAttribute("aria-valuenow"), "320");
 assert.ok(!arrow("ArrowDown").defaultPrevented, "other keys are not the separator's");
+// Nor so wide that another pane is pushed off screen: of 1200 px two strips
+// take 102 and the document needs 600, which leaves 498 for this one.
+assert.equal(separators()[0].getAttribute("aria-valuemax"), "498", "the most the pane can be");
+for (let i = 0; i < 30; i++) arrow("ArrowRight");
+assert.equal(separators()[0].getAttribute("aria-valuenow"), "498", "never past its maximum");
+for (let i = 0; i < 30; i++) arrow("ArrowLeft");
+assert.equal(separators()[0].getAttribute("aria-valuenow"), "320");
+// A patch that re-draws the panes drops the separators. The focused one comes
+// back in the same place, with the focus.
+separators()[0].focus();
+assert.equal(window.document.activeElement, separators()[0]);
+const dropped = separators()[0];
+el.removeChild(dropped);
+assert.equal(window.document.activeElement, window.document.body, "the focus went with it");
+await tick();
+assert.notEqual(separators()[0], dropped, "a new separator is in its place");
+assert.equal(window.document.activeElement, separators()[0], "and has the focus again");
+separators()[0].blur();
+width = 1024;
+hook._layout();
 
 // A click on a strip opens it; the URL does not move.
 panesOf()[1].querySelector(".pane-header-title").dispatchEvent(
@@ -131,11 +154,23 @@ panesOf()[0].dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", b
 assert.equal(strips()[0], F, "Enter opens the focused strip");
 assert.equal(window.document.activeElement, panesOf()[0], "the opened pane has the focus");
 assert.equal(panesOf()[0].getAttribute("tabindex"), "-1", "without becoming a Tab stop");
-// A patch rewrites the pane's attributes and the focus falls to <body>: it comes back.
-panesOf()[0].removeAttribute("tabindex");
-panesOf()[0].blur();
-await new Promise((r) => setTimeout(r, 0));
-assert.equal(window.document.activeElement, panesOf()[0], "the focus is kept through a patch");
+// A patch rewrites the pane's attributes and the focus falls to <body>: it
+// comes back. jsdom leaves the focus on an element that lost its tabindex (a
+// browser does not), so the page is told the focus is on <body>.
+{
+  const held = panesOf()[0];
+  await tick(); // the open's own changes are seen first: only the patch below is under test
+  let focused = 0;
+  const focus = held.focus.bind(held);
+  held.focus = (o) => { focused++; focus(o); };
+  Object.defineProperty(window.document, "activeElement", { configurable: true, get: () => window.document.body });
+  held.removeAttribute("tabindex");
+  await new Promise((r) => setTimeout(r, 0));
+  delete window.document.activeElement;
+  delete held.focus;
+  assert.equal(held.getAttribute("tabindex"), "-1", "the pane can hold the focus again after a patch");
+  assert.ok(focused >= 1, "and is given it back");
+}
 
 // A LiveView patch rewrites a pane's attributes: the layout comes back.
 const before = strips();

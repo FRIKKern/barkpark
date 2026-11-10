@@ -150,6 +150,19 @@
     if (el.getAttribute(name) !== value) el.setAttribute(name, value);
   }
 
+  // A pane is never narrower than its minimum, nor wider than the desk less
+  // what the other panes need (a strip its 51 px, an open pane the width it
+  // was given or its minimum): widening one never pushes another off screen.
+  function clampWidth(root, pane, px, widths) {
+    var rest = 0;
+    panes(root).forEach(function (el) {
+      if (el === pane || el.hasAttribute("data-desk-leaving")) return;
+      rest += el.hasAttribute("data-pane-collapsed") ? STRIP : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
+    });
+    var room = root.clientWidth ? Math.max(PANE_MIN, root.clientWidth - rest) : Infinity;
+    return Math.max(PANE_MIN, Math.min(Math.round(px), room));
+  }
+
   // One separator after each open pane but the last; none anywhere else. A
   // LiveView patch that re-draws the panes drops them, and the next layout
   // puts them back.
@@ -165,7 +178,8 @@
       }
       var now = widths[pane.id] || Math.round(pane.getBoundingClientRect().width) || PANE_MIN;
       set(next, "aria-valuenow", String(now));
-      set(next, "aria-valuemax", String(Math.max(now, root.clientWidth)));
+      var max = clampWidth(root, pane, Infinity, widths);
+      set(next, "aria-valuemax", String(max === Infinity ? now : Math.max(now, max)));
     });
   }
 
@@ -510,13 +524,15 @@
         if (!step || !pane || !pane.id || e.altKey || e.metaKey || e.ctrlKey) return;
         e.preventDefault();
         var from = hook._widths[pane.id] || pane.getBoundingClientRect().width || PANE_MIN;
-        hook._widths[pane.id] = Math.max(PANE_MIN, Math.round(from + step));
+        hook._widths[pane.id] = clampWidth(root, pane, from + step, hook._widths);
         hook._layout();
       };
       hook._onPointerMove = function (e) {
         var drag = hook._drag;
         if (!drag) return;
-        hook._widths[drag.id] = Math.max(PANE_MIN, Math.round(drag.width + e.clientX - drag.x));
+        var dragged = root.ownerDocument.getElementById(drag.id);
+        if (!dragged) return;
+        hook._widths[drag.id] = clampWidth(root, dragged, drag.width + e.clientX - drag.x, hook._widths);
         hook._layout();
       };
       hook._onPointerUp = function () {
@@ -538,6 +554,7 @@
         if (hook._focus && hook._focus.path !== window.location.pathname) hook._focus = null;
         var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
         if (hook._keepHeld) hook._keepHeld();
+        if (hook._keepSeparator) hook._keepSeparator();
         return flags;
       };
       hook._queueLayout = function () {
@@ -588,8 +605,21 @@
         if (pane.getAttribute("tabindex") === null) pane.setAttribute("tabindex", "-1");
         pane.focus({ preventScroll: true });
       };
+      // A patch that re-draws the panes drops the separators, and the focused
+      // one with them: the one put back in its place takes the focus again.
+      hook._sep = null;
+      hook._keepSeparator = function () {
+        var doc = root.ownerDocument;
+        if (!hook._sep || (doc.activeElement && doc.activeElement !== doc.body)) return;
+        var pane = doc.getElementById(hook._sep);
+        var next = pane && pane.parentNode === root ? pane.nextElementSibling : null;
+        if (next && next.classList.contains(RESIZER)) next.focus({ preventScroll: true });
+        else hook._sep = null;
+      };
       // The editor moved the focus, or pressed somewhere: the pane lets go.
       hook._letGo = function (e) {
+        var on = e.target && e.target.classList && e.target.classList.contains(RESIZER) && e.target.parentNode === root;
+        hook._sep = on && e.target.previousElementSibling ? e.target.previousElementSibling.id : null;
         var held = hook._held;
         if (!held) return;
         var own = e.type === "focusin" && e.target.parentNode === root && e.target.getAttribute("data-pane-index") === held.index;
@@ -660,7 +690,8 @@
           hook._holdPane(left[left.length - 1]);
         }
       };
-      // Whether the focus was in the desk when a link in it was followed.
+      // Whether the focus was on a link of the desk when it was followed (a
+      // mouse click focuses the link too).
       hook._path = window.location.pathname;
       hook._wasInside = false;
       hook._noteFocus = function (e) {
