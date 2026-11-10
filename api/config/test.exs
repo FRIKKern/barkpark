@@ -62,6 +62,7 @@ config :barkpark, Barkpark.Repo,
   username: System.get_env("BARKPARK_TEST_DB_USER", "postgres"),
   password: System.get_env("BARKPARK_TEST_DB_PASS", "postgres"),
   hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
+  port: String.to_integer(System.get_env("W4_DB_PORT", "5432")),
   database: "barkpark_test#{test_db_partition.suffix}",
   pool: Ecto.Adapters.SQL.Sandbox,
   # Flat, generous, env-overridable pool — was `System.schedulers_online() * 2`.

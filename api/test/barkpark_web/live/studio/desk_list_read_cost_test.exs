@@ -166,7 +166,7 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
         handler,
         [:barkpark, :repo, :query],
         fn _event, _measure, meta, _config ->
-          if self() == test, do: send(test, {:dlrc_query, meta[:source]})
+          if self() == test, do: send(test, {:dlrc_query, {meta[:source], meta[:params]}})
         end,
         nil
       )
@@ -200,8 +200,11 @@ defmodule BarkparkWeb.Studio.DeskListReadCostTest do
     assert node, "the page holds the node of #{splat}"
 
     {read, sources} = queries(fn -> PaneComponent.read_pane(pane, node, dataset, scope) end)
-    built = Rows.read(pane.type, pane.query, dataset, scope)
-    {read, built, sources}
+    {built, built_sources} = queries(fn -> Rows.read(pane.type, pane.query, dataset, scope) end)
+    IO.inspect({length(sources), length(built_sources)}, label: "W4 read vs built")
+    IO.inspect(Enum.map(built_sources, fn {s, p} -> {s, Enum.take(List.wrap(p), 3)} end), label: "W4 built", limit: :infinity, printable_limit: 80)
+    IO.inspect(Enum.map(sources, fn {s, p} -> {s, Enum.take(List.wrap(p), 3)} end), label: "W4 read", limit: :infinity, printable_limit: 80)
+    {read, built, Enum.map(sources, &elem(&1, 0))}
   end
 
   defp shape(rows) do
