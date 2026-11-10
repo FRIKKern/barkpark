@@ -543,6 +543,24 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh blocking-name-census -- python3 scripts/blocking-name-census.py
 
+      # ── a change may not add a public function nothing uses ──────────────
+      # (task-00460cb8804b1b94) scripts/unused-export-check.py reads the
+      # change (`--base HEAD^1`, the base sha — see the checkout note): every
+      # Elixir `def` added under api/lib or cloud/lib and every Go top-level
+      # exported func added under internal/ or cmd/ must have its name on some
+      # other line of the tree. A text check, no compile; functions already on
+      # the base are never judged, so there is no baseline. Here, as STEPS, so
+      # it reds the REQUIRED `Elixir gate` and adds no rendered name.
+      # PRICED: selftest ~1s; checked run under 1s for a typical change, 2.2s
+      # for 24 added functions, on a loaded laptop.
+      - name: The unused-export check must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh unused-export-check-selftest -- python3 scripts/unused-export-check.py --selftest
+
+      - name: No added public function is unused
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh unused-export-check -- python3 scripts/unused-export-check.py --base HEAD^1
+
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main
       # ad7f16319 with each ratchet's own `--match`, a head touching only

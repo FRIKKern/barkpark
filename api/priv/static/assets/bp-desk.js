@@ -16,12 +16,18 @@
 //              the width the browser measures. A click on a strip opens it.
 //   * NARROW — below 600 px the desk shows one pane, the last, and its close
 //              link reads as Back (Sanity's and the TanStack Studio's rule).
-//   * RESIZE — the right edge of an open pane drags to widen or narrow it,
-//              never under its 320 px minimum.
+//              The same when the last pane cannot have its minimum width
+//              beside the strips of all the others.
+//   * RESIZE — a separator after each open pane drags to widen or narrow it,
+//              never under its 320 px minimum; ArrowLeft / ArrowRight on it
+//              move it 16 px (the TanStack Studio's PaneResizer).
 //   * KEYS   — in a list, ArrowDown / ArrowUp move from row to row and Home /
 //              End jump to the first / last (Sanity's list keys). Enter is the
-//              link's own. A row that had the focus when it was followed gets
-//              it back if the patch dropped it.
+//              link's own. A list is one Tab stop: Tab from a row leaves the
+//              list. A row that had the focus when it was followed gets it
+//              back if the patch dropped it; a pane that opened from its strip
+//              or took the place of a closed one gets the focus itself.
+//              Cmd+K / Ctrl+K go to the search box.
 //
 // Nothing here decides where a link goes: the href is the server's, and a
 // modifier click (new tab, new window) is left to the browser untouched.
@@ -78,8 +84,10 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
       pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
-      pane + " > .pane-body, " + pane + " .dk-close { display: none; }\n" +
-      pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n"
+      pane + " > :not(.pane-header), " + pane + " .dk-close { display: none; }\n" +
+      pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
+      // The editor pane has no header of its own: its strip reads its title.
+      pane + '[data-pane-editing]::before { content: attr(data-desk-name); display: block; padding: 16px 0; margin: 0 auto; writing-mode: vertical-rl; font-weight: 600; font-size: var(--text-sm); white-space: nowrap; }\n'
     );
   }
 
@@ -97,6 +105,7 @@
     return (
       all + " { display: none; }\n" +
       pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n" +
+      pane + " > .pane-header { justify-content: flex-start; gap: 8px; }\n" +
       pane + " .dk-close { order: -1; padding-left: 0; }\n" +
       pane + ' .dk-close::before { content: "\\2190"; }\n' +
       pane + " .dk-close > span { display: none; }\n"
@@ -109,10 +118,90 @@
     return pane + " { width: " + px + "px; min-width: " + px + "px; flex: 0 0 " + px + "px; }\n";
   }
 
+  // The Studio shell hides every pane but one in its phone bucket (under 640
+  // px, and up to 672 while the window widens). The desk lays its own panes
+  // out from 600 px up, so there they are shown again; without this the desk
+  // is blank from 600 to 639 px.
+  var PHONE_RULES = 'html[data-width-bucket="phone"] #desk-panes > [data-pane-index]:not([data-desk-leaving]) { display: flex; }\n';
+
+  // The separator: no room of its own (it lies over the two pane edges).
+  var RESIZER = "pane-resizer";
+  var STEP = 16;
   var EDGE_RULES =
-    "#desk-panes > [data-pane-index] { position: relative; }\n" +
-    '#desk-panes > [data-pane-index]:not([data-pane-collapsed]):not(:last-child)::after { content: ""; position: absolute; top: 0; bottom: 0; right: -3px; width: ' +
-    EDGE + "px; cursor: col-resize; z-index: 3; }\n";
+    "#desk-panes > ." + RESIZER + " { position: relative; z-index: 3; flex: 0 0 " + EDGE + "px; width: " + EDGE + "px; margin: 0 -" + EDGE / 2 +
+    "px; cursor: col-resize; touch-action: none; }\n" +
+    "#desk-panes > ." + RESIZER + ":focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }\n" +
+    // A pane that holds the focus itself (opened from its strip, or in place of a closed one).
+    "#desk-panes > [data-pane-index]:focus:not(:focus-visible) { outline: none; }\n" +
+    "#desk-panes > [data-pane-index]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }\n";
+
+  function resizer(doc, label) {
+    var el = doc.createElement("div");
+    el.className = RESIZER;
+    el.setAttribute("role", "separator");
+    el.setAttribute("aria-orientation", "vertical");
+    el.setAttribute("aria-label", label);
+    el.setAttribute("aria-valuemin", String(PANE_MIN));
+    el.setAttribute("tabindex", "0");
+    return el;
+  }
+
+  function set(el, name, value) {
+    if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+  }
+
+  // A pane is never narrower than its minimum, nor wider than the desk less
+  // what the other panes need (a strip its 51 px, an open pane the width it
+  // was given or its minimum): widening one never pushes another off screen.
+  function clampWidth(root, pane, px, widths) {
+    var rest = 0;
+    panes(root).forEach(function (el) {
+      if (el === pane || el.hasAttribute("data-desk-leaving")) return;
+      rest += el.hasAttribute("data-pane-collapsed") ? STRIP : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
+    });
+    var room = root.clientWidth ? Math.max(PANE_MIN, root.clientWidth - rest) : Infinity;
+    return Math.max(PANE_MIN, Math.min(Math.round(px), room));
+  }
+
+  // One separator after each open pane but the last; none anywhere else. A
+  // LiveView patch that re-draws the panes drops them, and the next layout
+  // puts them back.
+  function placeResizers(root, open, widths) {
+    Array.prototype.slice.call(root.children).forEach(function (el) {
+      if (el.classList.contains(RESIZER) && open.indexOf(el.previousElementSibling) < 0) root.removeChild(el);
+    });
+    open.forEach(function (pane) {
+      var next = pane.nextElementSibling;
+      if (!next || !next.classList.contains(RESIZER)) {
+        next = resizer(root.ownerDocument, root.getAttribute("data-desk-resize") || "Resize pane");
+        root.insertBefore(next, pane.nextSibling);
+      }
+      var now = widths[pane.id] || Math.round(pane.getBoundingClientRect().width) || PANE_MIN;
+      set(next, "aria-valuenow", String(now));
+      var max = clampWidth(root, pane, Infinity, widths);
+      set(next, "aria-valuemax", String(max === Infinity ? now : Math.max(now, max)));
+    });
+  }
+
+  // A strip says what a press on it does; the name the server gave the pane
+  // is kept beside it and put back when the pane opens.
+  function nameStrip(root, el, strip) {
+    var kept = el.getAttribute("data-desk-name");
+    if (strip) {
+      if (kept === null) {
+        var title = el.querySelector(".pane-header-title");
+        kept = el.getAttribute("aria-label") || (title ? title.textContent.trim() : "");
+        el.setAttribute("data-desk-name", kept);
+      }
+      set(el, "aria-label", (root.getAttribute("data-desk-expand") || "Expand %{title}").replace("%{title}", kept));
+      set(el, "aria-expanded", "false");
+    } else if (kept !== null) {
+      if (kept) el.setAttribute("aria-label", kept);
+      else el.removeAttribute("aria-label");
+      el.removeAttribute("data-desk-name");
+      el.removeAttribute("aria-expanded");
+    }
+  }
 
   function styleSheet(doc) {
     var el = doc.getElementById("bp-desk-layout");
@@ -139,16 +228,20 @@
     });
     // No width yet (the desk is not laid out): nothing collapses.
     var width = root.clientWidth;
-    var narrow = width > 0 && width < NARROW && shown.length > 0;
+    // One pane: under the narrow width, or when even with every other pane a
+    // strip the last one would be cut (a document needs 600 px: with two
+    // strips that is 702).
+    var floor = (MIN[kinds[kinds.length - 1]] || MIN.list) + (kinds.length - 1) * STRIP;
+    var narrow = width > 0 && shown.length > 0 && (width < NARROW || floor > width);
     var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = "";
 
     if (narrow) {
-      root.setAttribute("data-narrow", "");
+      if (!root.hasAttribute("data-narrow")) root.setAttribute("data-narrow", "");
       css += narrowRules(shown[shown.length - 1].getAttribute("data-pane-index"));
     } else {
       root.removeAttribute("data-narrow");
-      css += EDGE_RULES;
+      css += EDGE_RULES + PHONE_RULES;
       shown.forEach(function (el, i) {
         if (!flags[i] && widths[el.id]) css += widthRules(el.getAttribute("data-pane-index"), widths[el.id]);
       });
@@ -170,7 +263,18 @@
         else el.removeAttribute("tabindex");
         el.removeAttribute("role");
       }
+      nameStrip(root, el, flags[i]);
     });
+
+    placeResizers(
+      root,
+      narrow
+        ? []
+        : shown.filter(function (el, i) {
+            return !flags[i] && i < shown.length - 1;
+          }),
+      widths
+    );
 
     var sheet = styleSheet(root.ownerDocument);
     if (sheet.textContent !== css) sheet.textContent = css;
@@ -209,8 +313,9 @@
   // An empty pane, shaped like the one the server draws while its read runs.
   function skeleton(doc, index, kind, title) {
     var pane = doc.createElement("section");
-    pane.className = "pane-column dk-pane" + (kind === "doc" ? " dk-doc" : "");
+    pane.className = "pane-column dk-pane pane " + (kind || "list") + (kind === "doc" ? " dk-doc" : "");
     pane.setAttribute("data-desk-skeleton", "");
+    if (title) pane.setAttribute("aria-label", title);
     pane.setAttribute("data-pane-index", String(index));
     pane.setAttribute("data-pane-kind", kind || "list");
     pane.setAttribute("aria-busy", "true");
@@ -352,6 +457,33 @@
     }
   }
 
+  var TABBABLE =
+    'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // A list is one Tab stop (Sanity's, as the TanStack Studio ports it): Tab
+  // from a row goes to the first control after the pane's rows, Shift+Tab to
+  // the last one before them. Past the last control the focus leaves for the
+  // page, and the next Tab starts at its top.
+  function leaveList(e, pane) {
+    var doc = pane.ownerDocument;
+    var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
+    var edge = e.shiftKey ? rows[0] : rows[rows.length - 1];
+    var all = Array.prototype.filter.call(doc.querySelectorAll(TABBABLE), function (el) {
+      return el.tabIndex >= 0 && el.getClientRects().length && rows.indexOf(el) < 0;
+    });
+    var after = function (el) {
+      return !!(edge.compareDocumentPosition(el) & 4);
+    };
+    var to = e.shiftKey ? all.filter(function (el) { return !after(el); }).pop() : all.filter(after)[0];
+    e.preventDefault();
+    if (to) return to.focus();
+    var end = doc.createElement("span");
+    end.tabIndex = -1;
+    doc.body.appendChild(end);
+    end.focus({ preventScroll: true });
+    doc.body.removeChild(end);
+  }
+
   // For the host test: the rule itself, with no page around it.
   window.BarkparkDeskLayout = { collapsed: collapsed, layout: layout };
 
@@ -375,39 +507,55 @@
       hook._drag = null;
 
       hook._onPointerDown = function (e) {
-        if (e.button !== 0 || root.hasAttribute("data-narrow")) return;
-        var pane = e.target.closest ? e.target.closest("[data-pane-index]") : null;
-        if (!pane || pane.parentNode !== root || pane.hasAttribute("data-pane-collapsed")) return;
-        if (pane === root.lastElementChild) return;
-        var box = pane.getBoundingClientRect();
-        if (e.clientX < box.right - EDGE) return;
+        var handle = e.target.closest ? e.target.closest("." + RESIZER) : null;
+        var pane = handle && handle.parentNode === root ? handle.previousElementSibling : null;
+        if (e.button !== 0 || !pane || !pane.id) return;
         e.preventDefault();
-        hook._drag = { id: pane.id, x: e.clientX, width: box.width };
+        hook._drag = { id: pane.id, x: e.clientX, width: pane.getBoundingClientRect().width };
         window.addEventListener("pointermove", hook._onPointerMove);
         window.addEventListener("pointerup", hook._onPointerUp);
+        window.addEventListener("pointercancel", hook._onPointerUp);
+      };
+      // ArrowLeft / ArrowRight on the separator: 16 px a press.
+      hook._onResizeKey = function (e) {
+        var handle = e.target.classList && e.target.classList.contains(RESIZER) ? e.target : null;
+        var step = { ArrowLeft: -STEP, ArrowRight: STEP }[e.key];
+        var pane = handle && handle.previousElementSibling;
+        if (!step || !pane || !pane.id || e.altKey || e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        var from = hook._widths[pane.id] || pane.getBoundingClientRect().width || PANE_MIN;
+        hook._widths[pane.id] = clampWidth(root, pane, from + step, hook._widths);
+        hook._layout();
       };
       hook._onPointerMove = function (e) {
         var drag = hook._drag;
         if (!drag) return;
-        hook._widths[drag.id] = Math.max(PANE_MIN, Math.round(drag.width + e.clientX - drag.x));
+        var dragged = root.ownerDocument.getElementById(drag.id);
+        if (!dragged) return;
+        hook._widths[drag.id] = clampWidth(root, dragged, drag.width + e.clientX - drag.x, hook._widths);
         hook._layout();
       };
       hook._onPointerUp = function () {
         hook._drag = null;
         window.removeEventListener("pointermove", hook._onPointerMove);
         window.removeEventListener("pointerup", hook._onPointerUp);
+        window.removeEventListener("pointercancel", hook._onPointerUp);
         // Forget panes that are gone.
         Object.keys(hook._widths).forEach(function (id) {
           if (!root.ownerDocument.getElementById(id)) delete hook._widths[id];
         });
       };
       root.addEventListener("pointerdown", hook._onPointerDown);
+      root.addEventListener("keydown", hook._onResizeKey);
 
       // A strip the editor opened keeps the focus until the URL changes.
       hook._focus = null;
       hook._layout = function () {
         if (hook._focus && hook._focus.path !== window.location.pathname) hook._focus = null;
-        return layout(root, hook._focus ? hook._focus.index : null, hook._widths);
+        var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
+        if (hook._keepHeld) hook._keepHeld();
+        if (hook._keepSeparator) hook._keepSeparator();
+        return flags;
       };
       hook._queueLayout = function () {
         if (hook._raf) return;
@@ -425,6 +573,57 @@
         e.stopPropagation();
         hook._focus = { path: window.location.pathname, index: Number(pane.getAttribute("data-pane-index")) };
         hook._layout();
+        // The strip was the focus (a button); the pane it became takes it.
+        hook._holdPane(pane);
+      };
+
+      // The focus on a pane itself, kept through the patches that rewrite its
+      // attributes, until the editor moves it or the URL changes.
+      hook._held = null;
+      hook._holdPane = function (pane) {
+        if (!pane) return;
+        hook._held = { path: window.location.pathname, index: pane.getAttribute("data-pane-index") };
+        if (pane.getAttribute("tabindex") === null) pane.setAttribute("tabindex", "-1");
+        pane.focus({ preventScroll: true });
+      };
+      hook._keepHeld = function () {
+        var held = hook._held;
+        var doc = root.ownerDocument;
+        if (!held) return;
+        if (held.path !== window.location.pathname) {
+          hook._held = null;
+          return;
+        }
+        var pane = panes(root).filter(function (el) {
+          return el.getAttribute("data-pane-index") === held.index && !el.hasAttribute("data-desk-leaving");
+        })[0];
+        if (doc.activeElement && doc.activeElement !== doc.body) {
+          if (doc.activeElement !== pane) hook._held = null;
+          return;
+        }
+        if (!pane) return;
+        if (pane.getAttribute("tabindex") === null) pane.setAttribute("tabindex", "-1");
+        pane.focus({ preventScroll: true });
+      };
+      // A patch that re-draws the panes drops the separators, and the focused
+      // one with them: the one put back in its place takes the focus again.
+      hook._sep = null;
+      hook._keepSeparator = function () {
+        var doc = root.ownerDocument;
+        if (!hook._sep || (doc.activeElement && doc.activeElement !== doc.body)) return;
+        var pane = doc.getElementById(hook._sep);
+        var next = pane && pane.parentNode === root ? pane.nextElementSibling : null;
+        if (next && next.classList.contains(RESIZER)) next.focus({ preventScroll: true });
+        else hook._sep = null;
+      };
+      // The editor moved the focus, or pressed somewhere: the pane lets go.
+      hook._letGo = function (e) {
+        var on = e.target && e.target.classList && e.target.classList.contains(RESIZER) && e.target.parentNode === root;
+        hook._sep = on && e.target.previousElementSibling ? e.target.previousElementSibling.id : null;
+        var held = hook._held;
+        if (!held) return;
+        var own = e.type === "focusin" && e.target.parentNode === root && e.target.getAttribute("data-pane-index") === held.index;
+        if (!own) hook._held = null;
       };
 
       hook._onClick = function (e) {
@@ -470,20 +669,45 @@
         var href = hook._refocus;
         hook._refocus = null;
         var doc = root.ownerDocument;
-        if (!href || (doc.activeElement && doc.activeElement !== doc.body)) return;
-        var again = Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
-          return a.getAttribute("href") === href;
-        })[0];
-        if (again) again.focus({ preventScroll: true });
+        var moved = hook._path !== window.location.pathname;
+        hook._path = window.location.pathname;
+        var inside = hook._wasInside;
+        hook._wasInside = false;
+        if (doc.activeElement && doc.activeElement !== doc.body) return;
+        var again =
+          href &&
+          Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
+            return a.getAttribute("href") === href;
+          })[0];
+        if (again) return again.focus({ preventScroll: true });
+        // The focused control went with its pane (a close link, a reference in
+        // a pane that closed): the last pane takes the focus, so the keyboard
+        // stays in the desk. Only when the keyboard had it there before.
+        if (moved && inside) {
+          var left = panes(root).filter(function (el) {
+            return !el.hasAttribute("data-desk-leaving");
+          });
+          hook._holdPane(left[left.length - 1]);
+        }
+      };
+      // Whether the focus was on a link of the desk when it was followed (a
+      // mouse click focuses the link too).
+      hook._path = window.location.pathname;
+      hook._wasInside = false;
+      hook._noteFocus = function (e) {
+        var link = e.target.closest ? e.target.closest("a[href]") : null;
+        if (e.type === "keydown" && e.key !== "Enter") return;
+        hook._wasInside = !!link && root.ownerDocument.activeElement === link;
       };
 
       hook._onKey = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
-        var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
-        if (step === undefined) return;
         var pane = paneOf(root, row);
         if (!pane) return;
+        if (e.key === "Tab") return leaveList(e, pane);
+        var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+        if (step === undefined || e.shiftKey) return;
         var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
         var to = Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step));
         e.preventDefault();
@@ -495,17 +719,31 @@
       hook._onIntent = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || row.getAttribute("aria-current") === "true") return;
+        // A finger does not hover: its pointerover is the tap itself.
+        if (e.pointerType === "touch") return;
         var href = row.getAttribute("href");
         if (!href || hook._warmed[href]) return;
         window.clearTimeout(hook._warmTimer);
         hook._warmTimer = window.setTimeout(function () {
           if (!row.isConnected || !row.matches(":hover, :focus")) return;
+          // Followed in the meantime (a quick click, a tap): the pane is being read already.
+          if (row.getAttribute("aria-current") === "true") return;
           hook._warmed[href] = true;
           window.setTimeout(function () {
             delete hook._warmed[href];
           }, WARM_FORGET_MS);
           hook.pushEvent("warm", { href: href });
         }, WARM_DELAY_MS);
+      };
+
+      // Cmd+K / Ctrl+K: the search box, unless something else took the key.
+      hook._onSearchKey = function (e) {
+        if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
+        var box = root.ownerDocument.getElementById("desk-search-input");
+        if (!box) return;
+        e.preventDefault();
+        box.focus();
+        if (box.select) box.select();
       };
 
       // Capture: a click on a strip opens the strip, and is not a row click.
@@ -520,13 +758,24 @@
       // attributes: lay out again whenever either happens.
       hook._panes = new window.MutationObserver(hook._layout);
       hook._panes.observe(root, { childList: true });
-      hook._marks = new window.MutationObserver(hook._layout);
-      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed"] });
+      hook._marks = new window.MutationObserver(function (changes) {
+        // The desk's own marks only: the editor inside a pane changes its own.
+        var ours = changes.some(function (change) {
+          return change.target === root || change.target.parentNode === root;
+        });
+        if (ours) hook._layout();
+      });
+      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow", "tabindex"] });
       hook._layout();
 
+      root.addEventListener("click", hook._noteFocus, true);
+      root.addEventListener("keydown", hook._noteFocus, true);
+      root.ownerDocument.addEventListener("focusin", hook._letGo);
+      root.ownerDocument.addEventListener("pointerdown", hook._letGo, true);
       root.addEventListener("click", hook._onClick);
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
+      root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
       root.addEventListener("keydown", hook._onKey);
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
@@ -551,7 +800,17 @@
       root.removeEventListener("keydown", this._openStrip, true);
       window.removeEventListener("resize", this._queueLayout);
       root.removeEventListener("click", this._onClick);
+      root.removeEventListener("click", this._noteFocus, true);
+      root.removeEventListener("keydown", this._noteFocus, true);
+      root.ownerDocument.removeEventListener("focusin", this._letGo);
+      root.ownerDocument.removeEventListener("pointerdown", this._letGo, true);
+      root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
+      root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      window.removeEventListener("pointercancel", this._onPointerUp);
+      Array.prototype.slice.call(root.children).forEach(function (el) {
+        if (el.classList.contains(RESIZER)) root.removeChild(el);
+      });
       root.removeEventListener("keydown", this._onKey);
       root.removeEventListener("pointerover", this._onIntent);
       root.removeEventListener("focusin", this._onIntent);

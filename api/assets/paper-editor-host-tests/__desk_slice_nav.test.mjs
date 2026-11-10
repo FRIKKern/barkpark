@@ -51,7 +51,7 @@ const click = (el, init = {}) =>
   el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init }));
 const q = (sel) => window.document.querySelector(sel);
 const rowTo = (href) => q(`a[href="${BASE}/${href}"]`);
-const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-leaving"));
+const shown = (el) => [...el.children].filter((p) => p.hasAttribute("data-pane-index") && !p.hasAttribute("data-desk-leaving"));
 
 // ── A click on another document: marked, framed, the old document hidden ────
 {
@@ -261,6 +261,30 @@ const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-
   rowTo("post;post-b").focus();
   await new Promise((r) => setTimeout(r, 160));
   assert.equal(pushed.length, 1, "the open row is never warmed, and a warmed row is not asked for twice");
+  hook.destroyed();
+}
+
+// ── Intent is not sent for a row already followed, nor for a finger ─────────
+{
+  const { hook, pushed } = mount();
+  // A quick click: the pointer arrives and the click follows before the wait is over.
+  rowTo("post;post-b").focus();
+  click(rowTo("post;post-b"));
+  await new Promise((r) => setTimeout(r, 160));
+  assert.deepEqual(pushed, [], "the click is reading that pane already: no second read");
+  hook.destroyed();
+}
+{
+  const { hook, pushed } = mount();
+  const over = new window.Event("pointerover", { bubbles: true });
+  over.pointerType = "touch";
+  // jsdom never matches :hover: say the pointer is still on the row, so only
+  // the pointer type can stop the read-ahead.
+  const row = rowTo("author");
+  row.matches = (q) => q === ":hover, :focus" || window.Element.prototype.matches.call(row, q);
+  row.dispatchEvent(over);
+  await new Promise((r) => setTimeout(r, 160));
+  assert.deepEqual(pushed, [], "a touch pointerover is the tap itself, not a hover");
   hook.destroyed();
 }
 
