@@ -6796,7 +6796,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp task_work_prompt(task_id) do
     """
     Work Barkpark task #{task_id}.
-    Claim it first as your $BARKPARK_WORKER_ID worker (`bp task claim #{task_id} "$BARKPARK_WORKER_ID"`) and read the brief + acceptance criteria off the claim response. Then do the work. Discipline: stamp each criterion with concrete evidence the moment it is met (`bp task stamp`); pulse a now-line at phase boundaries (`bp task pulse` — pulse BUMPS the claim epoch, re-read it from the response); close with the final epoch only when every criterion is stamped. If you get blocked, stamp `--miss` with an honest note and tell me what you need.
+    Claim it first as your $BARKPARK_WORKER_ID worker (`bp task claim #{task_id} "$BARKPARK_WORKER_ID"`) and read the brief + acceptance criteria off the claim response. Then do the work. Discipline: stamp each criterion with short evidence the moment it is met (`bp task stamp`: the PR or commit link plus the test that fails on the old code); pulse a now-line at phase boundaries (`bp task pulse` — pulse BUMPS the claim epoch, re-read it from the response); close with the final epoch only when every criterion is stamped. If you get blocked, stamp `--miss` with an honest note and tell me what you need.
     """
   end
 
