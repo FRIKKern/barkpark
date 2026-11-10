@@ -7,7 +7,8 @@
 //
 //   * CLICK  — the row is marked current and an empty pane frame is drawn at
 //              once; panes the click closes are hidden. No network in that
-//              path. The server's patch then replaces the frame.
+//              path. The server's patch then replaces the frame. A reference
+//              link and a search hit are answered the same way.
 //   * INTENT — hovering or focusing a row asks the server to read the pane it
 //              opens ("warm"), so the click that follows opens it with data.
 //   * LAYOUT — panes that do not fit collapse to 51 px strips, by the rule the
@@ -30,6 +31,11 @@
   "use strict";
 
   var ROW = "a[data-desk-row]";
+  // The other links that open panes: a reference in a document (it opens the
+  // target as the next pane) and a search hit (it opens a whole chain).
+  var REF = "a[data-desk-ref]";
+  var HIT = "a[data-desk-hit]";
+  var OPENER = ROW + ", " + REF;
   var WARM_DELAY_MS = 80;
   var WARM_FORGET_MS = 30000;
   var GIVE_UP_MS = 10000;
@@ -158,7 +164,10 @@
         }
       } else if (el.hasAttribute("data-pane-collapsed")) {
         el.removeAttribute("data-pane-collapsed");
-        el.removeAttribute("tabindex");
+        // A strip opened by keyboard has the focus. With no tabindex it could
+        // not hold it and the browser would hand the focus to <body>.
+        if (root.ownerDocument.activeElement === el) el.setAttribute("tabindex", "-1");
+        else el.removeAttribute("tabindex");
         el.removeAttribute("role");
       }
     });
@@ -192,7 +201,7 @@
   }
 
   function setCurrent(row, on) {
-    row.classList.toggle("selected", on);
+    if (row.matches(ROW)) row.classList.toggle("selected", on);
     if (on) row.setAttribute("aria-current", "true");
     else row.removeAttribute("aria-current");
   }
@@ -241,7 +250,7 @@
 
     var index = Number(pane.getAttribute("data-pane-index"));
     var wasCurrent = row.getAttribute("aria-current") === "true";
-    var previous = pane.querySelector(ROW + '[aria-current="true"]');
+    var previous = pane.querySelector(ROW + '[aria-current="true"], ' + REF + '[aria-current="true"]');
 
     if (previous && previous !== row) setCurrent(previous, false);
     setCurrent(row, true);
@@ -256,24 +265,88 @@
       el.setAttribute("data-desk-leaving", "");
     });
 
-    var frame = null;
+    var frames = [];
     if (!wasCurrent) {
-      var label = row.querySelector(".pane-item-label");
-      frame = skeleton(root.ownerDocument, index + 1, row.getAttribute("data-desk-opens"), (label || row).textContent.trim());
-      root.insertBefore(frame, pane.nextSibling);
+      // A reference always opens a document; a row says what it opens.
+      var kind = row.getAttribute("data-desk-opens") || "doc";
+      frames.push(skeleton(root.ownerDocument, index + 1, kind, label(row)));
+      root.insertBefore(frames[0], pane.nextSibling);
     }
 
-    return { row: row, previous: previous, wasCurrent: wasCurrent, leaving: leaving, frame: frame, href: row.href };
+    return { row: row, previous: previous, wasCurrent: wasCurrent, leaving: leaving, frames: frames, href: row.href };
+  }
+
+  function label(link) {
+    var own = link.querySelector(".pane-item-label");
+    // The label's own text: a second line under it (the type) is not the title.
+    var first = own && own.firstChild && own.firstChild.nodeType === 3 ? own.firstChild.textContent.trim() : "";
+    return first || (own || link).textContent.trim();
+  }
+
+  // The pane chain a desk URL names, one entry per pane after the first.
+  function chainOf(href) {
+    try {
+      var path = decodeURI(new URL(href, window.location.href).pathname);
+      var at = path.indexOf("/_desk/");
+      return at < 0 ? [] : path.slice(at + 7).split(";");
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  // A search hit opens a whole chain: the panes it shares with the page stay,
+  // the rest leave, and one frame is drawn for each pane still to come (the
+  // last is the document, titled from the hit).
+  function paintAheadHit(root, hit) {
+    var to = chainOf(hit.href);
+    var from = chainOf(window.location.href);
+    if (!to || !from || !to.length || samePage(hit)) return null;
+
+    var same = 0;
+    while (same < to.length && same < from.length && to[same] === from[same]) same++;
+
+    var all = panes(root);
+    var leaving = all.filter(function (el) {
+      return Number(el.getAttribute("data-pane-index")) > same;
+    });
+    var kept = all.filter(function (el) {
+      return Number(el.getAttribute("data-pane-index")) <= same;
+    });
+    if (!kept.length) return null;
+    leaving.forEach(function (el) {
+      el.setAttribute("data-desk-leaving", "");
+    });
+
+    var frames = [];
+    var after = kept[kept.length - 1];
+    for (var i = same + 1; i <= to.length; i++) {
+      var last = i === to.length;
+      var frame = skeleton(root.ownerDocument, i, last ? "doc" : "list", last ? label(hit) : "");
+      root.insertBefore(frame, after.nextSibling);
+      after = frame;
+      frames.push(frame);
+    }
+
+    // The hits are put away with the click, as the server does on the patch.
+    var box = hit.closest("#desk-search-hits");
+    if (box) {
+      box.setAttribute("data-desk-leaving", "");
+      leaving.push(box);
+    }
+
+    return { row: null, previous: null, wasCurrent: true, leaving: leaving, frames: frames, href: hit.href };
   }
 
   // The patch landed (the server's panes are in), or it never did.
   function settle(ahead, landed) {
     if (!ahead) return;
-    if (ahead.frame && ahead.frame.parentNode) ahead.frame.parentNode.removeChild(ahead.frame);
+    ahead.frames.forEach(function (frame) {
+      if (frame.parentNode) frame.parentNode.removeChild(frame);
+    });
     ahead.leaving.forEach(function (el) {
       el.removeAttribute("data-desk-leaving");
     });
-    if (!landed) {
+    if (!landed && ahead.row) {
       if (!ahead.wasCurrent && ahead.row.isConnected) setCurrent(ahead.row, false);
       if (ahead.previous && ahead.previous.isConnected) setCurrent(ahead.previous, true);
     }
@@ -355,16 +428,17 @@
       };
 
       hook._onClick = function (e) {
-        var row = e.target.closest ? e.target.closest(ROW) : null;
-        if (!row || !root.contains(row) || !plainClick(e)) return;
-        hook._refocus = root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
+        var hit = e.currentTarget !== root;
+        var row = e.target.closest ? e.target.closest(hit ? HIT : OPENER) : null;
+        if (!row || root.contains(row) === hit || !plainClick(e)) return;
+        hook._refocus = !hit && root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         // The click before this one has not landed: its answer is still to
         // come, and is not this click's (see _onLoaded).
         if (hook._ahead) {
           hook._earlier += 1;
           hook._settle(true);
         }
-        hook._ahead = paintAhead(root, row);
+        hook._ahead = hit ? paintAheadHit(root, row) : paintAhead(root, row);
         if (!hook._ahead) return;
         hook._layout();
         hook._giveUp = window.setTimeout(hook._onLoaded, GIVE_UP_MS);
@@ -397,7 +471,7 @@
         hook._refocus = null;
         var doc = root.ownerDocument;
         if (!href || (doc.activeElement && doc.activeElement !== doc.body)) return;
-        var again = Array.prototype.filter.call(root.querySelectorAll(ROW), function (a) {
+        var again = Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
           return a.getAttribute("href") === href;
         })[0];
         if (again) again.focus({ preventScroll: true });
@@ -451,6 +525,8 @@
       hook._layout();
 
       root.addEventListener("click", hook._onClick);
+      // The search box sits beside the panes, not in them.
+      root.ownerDocument.addEventListener("click", hook._onClick);
       root.addEventListener("keydown", hook._onKey);
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
@@ -475,6 +551,7 @@
       root.removeEventListener("keydown", this._openStrip, true);
       window.removeEventListener("resize", this._queueLayout);
       root.removeEventListener("click", this._onClick);
+      root.ownerDocument.removeEventListener("click", this._onClick);
       root.removeEventListener("keydown", this._onKey);
       root.removeEventListener("pointerover", this._onIntent);
       root.removeEventListener("focusin", this._onIntent);
