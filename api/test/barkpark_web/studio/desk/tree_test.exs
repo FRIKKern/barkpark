@@ -102,6 +102,19 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
     assert Tree.parse("post;post-01", root) == Panes.parse("post;post-01")
   end
 
+  test "a segment that is not under its desk list opens a pane that says so" do
+    root = Tree.normalize(desk())
+
+    # The pane has no node, so it draws "This list is not on the desk."
+    assert Tree.parse("utgivelser;nope;pub-1", root) == [
+             %{kind: :types},
+             %{kind: :menu, node: "utgivelser"},
+             %{kind: :menu, node: "nope"}
+           ]
+
+    refute Map.has_key?(Tree.index(root), "nope")
+  end
+
   test "a row's href opens its pane right of the row's own pane and drops the rest" do
     root = Tree.normalize(desk())
     panes = Tree.parse("utgivelser;uten-omslag;pub-1", root)

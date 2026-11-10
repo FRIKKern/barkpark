@@ -92,8 +92,10 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
 
   defp descend([seg | rest] = segs, menu) do
     case find(menu, segment_id(seg)) do
+      # Not under this list: a pane with no node, which says so. What
+      # follows it in the URL has nothing to hang on and is not drawn.
       nil ->
-        []
+        [%{kind: :menu, node: segment_id(seg)}]
 
       %Node{type: :list} = child ->
         [%{kind: :menu, node: child.id} | descend(rest, child)]
