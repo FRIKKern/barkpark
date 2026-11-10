@@ -164,6 +164,16 @@ defmodule BarkparkWeb.Studio.DeskEditorPaperTest do
            "open-backlink patched to #{to}: the source paper's pane was dropped"
   end
 
+  # BROKEN in the desk (D04): the Studio's "New <type>" (+) sits in its own
+  # list pane's header, which the desk never draws (`ours/1` assigns
+  # `panes: []`); the desk's list pane has no create control, so no new paper
+  # (or any document) can be started from the desk.
+  @tag :desk_editor_red
+  test "D04: a new paper can be started from the desk", ctx do
+    view = open_paper(ctx)
+    assert has_element?(view, ~s([phx-click="new-document"][phx-value-type="paper"]))
+  end
+
   test "D11: another session's caret reaches the desk pane", ctx do
     alice = open_paper(ctx, admin(ctx.conn, "w4-caret-alice"))
     bob = open_paper(ctx, admin(build_conn(), "w4-caret-bob"))
