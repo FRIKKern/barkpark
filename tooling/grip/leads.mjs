@@ -358,7 +358,7 @@ export function selectLeads(folded, query, { census = null, cmd = false, provena
       // the `??` keeps a fold that predates that change working unchanged.
       const stored = recipe?.stored_level ?? recipe?.derived_level ?? null;
       // RE-DERIVED HERE, EVERY TIME. Never trusted from storage.
-      const derived = deriveLevel(rerun);
+      const derived = deriveLevel(rerun, { observedAt: recipe?.observed_at });
       // BINDING: imported from binding.mjs, never a second regex here (D73/D74).
       // All four consumer-facing fields come off this ONE verdict — the class,
       // the scope, the anchor it was decided on, and the exit-mask finding.

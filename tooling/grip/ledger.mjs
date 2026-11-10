@@ -311,7 +311,7 @@ export function admitRecipe(input = {}, options = {}) {
   // value is a claim, and the derivation is its ceiling (D2).
   let level = null;
   if (typeof rerun === "string" && rerun.trim() !== "") {
-    const derived = deriveLevel(rerun);
+    const derived = deriveLevel(rerun, { observedAt: observed_at });
     level = derived;
     if (derived_level !== undefined) {
       const ceiling = checkCeiling(derived_level, derived);
@@ -547,7 +547,7 @@ export function restateLevel(row) {
   let derived = null;
   let fallback = null;
   try {
-    const level = deriveLevel(row?.rerun);
+    const level = deriveLevel(row?.rerun, { observedAt: row?.observed_at });
     if (typeof level === "string" && level.trim() !== "") derived = level.trim();
     else fallback = `deriveLevel returned ${JSON.stringify(level)} for this command — the STORED level is being reported instead`;
   } catch (err) {
