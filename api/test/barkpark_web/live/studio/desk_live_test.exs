@@ -259,6 +259,44 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       refute has_element?(view, "[aria-busy]")
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
     end
+
+    test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      swap_reader(fn
+        %{kind: :doc, id: ^b}, _node, _dataset, _scope, _title -> raise "the read-ahead failed"
+        pane, node, dataset, scope, title -> PaneComponent.read(pane, node, dataset, scope, title)
+      end)
+
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+      # The open document is the editor's to read, so only the list read.
+      assert_received {:pane_load, :list}
+      refute_received {:pane_load, _}
+
+      beta = "#{base}/#{@type_name};#{b}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # The failed read left no key behind: hovering again reads again.
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # The click is not broken by it: the document opens (the last pane is
+      # the Studio's editor, which reads for itself), with no pane read.
+      view
+      |> element(~s([data-pane-index="1"] a[data-desk-row][href="#{beta}"]))
+      |> render_click()
+
+      settle(view)
+      refute_received {:pane_load, _}
+      assert doc_shows?(view, 2, "About Beta note")
+    end
   end
 
   test "a read that fails is that pane's to show; the others stay up", %{
@@ -375,12 +413,74 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert doc.title == "Alpha to publish"
     end
 
+    test "a remote save during unsaved typing raises the conflict banner, and keeps the typing",
+         %{
+           conn: conn,
+           base: base,
+           a: a
+         } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Mine, unsaved"}})
+
+      {:ok, _doc} =
+        Content.upsert_document(
+          @type_name,
+          %{"doc_id" => a, "title" => "Theirs", "content" => %{"summary" => "Theirs"}},
+          @dataset
+        )
+
+      conflicted? = fn -> :sys.get_state(view.pid).socket.assigns.doc_conflict == true end
+
+      assert Enum.any?(1..200, fn _ -> conflicted?.() or (Process.sleep(10) && false) end),
+             "the editor never raised the conflict"
+
+      html = render(view)
+      assert html =~ "Updated by another user"
+      # The buffer is not overwritten by the remote value.
+      assert has_element?(view, ~s(#editor-form [value="Mine, unsaved"]))
+      refute has_element?(view, ~s(#editor-form [value="Theirs"]))
+    end
+
     test "another document in the chain stays a read-only pane", %{conn: conn, base: base} do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name}")
       settle(view)
       refute has_element?(view, "[data-pane-editing]")
       refute has_element?(view, "#editor-form")
     end
+  end
+
+  test "search finds a document and its hit opens it as panes", %{conn: conn, base: base, b: b} do
+    {:ok, view, _html} = live(admin(conn), base)
+    settle(view)
+    refute has_element?(view, "a[data-desk-hit]")
+
+    view |> form("#desk-search-form") |> render_change(%{"value" => "Beta no"})
+
+    hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{b}"])
+    assert has_element?(view, hit, "Beta note")
+
+    href =
+      view |> element(hit) |> render() |> then(&Regex.run(~r/href="([^"]+)"/, &1)) |> List.last()
+
+    view |> element(hit) |> render_click()
+    assert_patch(view, href)
+    settle(view)
+
+    # The document is open, its list beside it, and the search is put away.
+    assert has_element?(
+             view,
+             ~s([data-pane-kind="list"] a[data-desk-row][aria-current="true"]),
+             "Beta note"
+           )
+
+    assert has_element?(view, ~s([data-pane-editing] #editor-form))
+    refute has_element?(view, "#desk-search-hits")
+
+    # Nothing found says so.
+    view |> form("#desk-search-form") |> render_change(%{"value" => "zzz-no-such-thing"})
+    assert has_element?(view, ~s(#desk-search-hits [role="status"]), "zzz-no-such-thing")
   end
 
   describe "a list draws the Studio's own rows" do
