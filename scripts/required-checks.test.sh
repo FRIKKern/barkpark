@@ -2815,7 +2815,12 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # engine-release.yml Windows jobs (task-efbf914de2e8ab25): workflow_dispatch
         # with windows=also, so these names render on no PR head and no push.
         --expect-unrendered "build (win32-x64)"
-        --expect-unrendered "App shape boot (win32-x64)")
+        --expect-unrendered "App shape boot (win32-x64)"
+        # grip-suite.yml (task-ef9409a3123f1bc2): push-to-main (paths-filtered),
+        # nightly and workflow_dispatch only, so its name renders on main and on a
+        # PR head only after a hand dispatch; the row lands after the frozen
+        # fixture pair. DERIVED by scripts/required-checks-ack-derive.sh.
+        --expect-unrendered "tooling/grip full node --test suite")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
