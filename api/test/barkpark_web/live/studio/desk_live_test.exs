@@ -983,8 +983,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       groups = rows(view, 2)
       assert "Alpha" in groups and "Alpha one" in groups
 
-      # A group's id is `<index in its list>-<the over doc's id>` (Structure).
-      group = ~s([data-pane-index="2"] a[data-desk-row][href="#{menu};1-#{cat.("a1")}"])
+      # A group's id is `<the groupBy's place in the desk>-<the over doc's id>`:
+      # the second item of the first desk item (`Structure`).
+      group = ~s([data-pane-index="2"] a[data-desk-row][href="#{menu};desk-0-1-#{cat.("a1")}"])
       assert has_element?(view, group <> ~s([data-desk-opens="list"]), "Alpha one")
       view |> element(group) |> render_click()
       assert await_rows(view, 3, ["Alpha one x"]) == ["Alpha one x"]
