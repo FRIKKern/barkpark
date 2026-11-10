@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.DeskEditorRefsTest do
               "name" => "authors",
               "title" => "Authors",
               "type" => "arrayOf",
-              "of" => [%{"type" => "reference", "to" => [%{"type" => author}]}]
+              "of" => %{"type" => "reference", "to" => [%{"type" => author}]}
             }
           ]
         },
@@ -182,11 +182,13 @@ defmodule BarkparkWeb.Studio.DeskEditorRefsTest do
     refute has_element?(view, ~s([data-pane-index="2"][data-pane-editing]))
   end
 
-  # J08/J23: in a browser the parent pane stays a skeleton (aria-busy, no
-  # fields) after a strip link opens the next pane: its PaneComponent was
-  # first drawn with `hold` (no read), and when it comes back with the same
-  # id and data_key, `update/2` takes the `same?` branch and never reads.
-  @tag :desk_editor_red
+  # J08: in a BROWSER the parent pane stays a skeleton (aria-busy, title =
+  # raw id, no fields; measured at 1, 4 and 10 s) after a strip link opens the
+  # next pane (tmp/editing-w2/p4-parent-skeleton.mjs). This LiveViewTest is
+  # GREEN: the test client mounts the pane's component afresh and it reads.
+  # Suspected cause: `PaneComponent.update/2` keeps a pane first drawn with
+  # `hold` (loading, no read) when it comes back with the same id and
+  # data_key (the `same?` branch). Kept as the server-side pin.
   test "the parent pane reads its document after a strip link opens the next pane", c do
     {:ok, view, _html} = live(admin(c.conn), "#{c.base}/#{c.post};#{c.one}")
     settle(view)
@@ -235,8 +237,7 @@ defmodule BarkparkWeb.Studio.DeskEditorRefsTest do
   defp strip(view) do
     view
     |> render()
-    |> Floki.parse_document!()
-    |> Floki.find("nav.dk-edit-refs a[data-desk-ref]")
-    |> Enum.map(&Floki.text/1)
+    |> then(&Regex.scan(~r/<a[^>]*data-desk-ref[^>]*>\s*([^<]*?)\s*<\/a>/, &1))
+    |> Enum.map(&List.last/1)
   end
 end

@@ -69,6 +69,15 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
         @dataset
       )
 
+    # Published, as in the browser seed; the guards read `content_edges`,
+    # which a test write does not derive, so the one edge is added by hand.
+    for {type, id} <- [{author, ada}, {author, lone}, {post, one}] do
+      {:ok, _} = Content.publish_document(id, type, @dataset)
+    end
+
+    {:ok, _} =
+      Content.add_edge(one, ada, "references", dataset: @dataset, plugin_source: nil)
+
     {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
     base = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_desk"
 
@@ -115,7 +124,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
 
     assert has_element?(view, "#delete-modal-dialog[role=dialog]")
     assert has_element?(view, "#delete-modal-dialog .delete-ref-title", "Post One")
-    assert has_element?(view, "#delete-modal-dialog .delete-ref-meta", "#{c.post} / author")
+    assert has_element?(view, "#delete-modal-dialog .delete-ref-meta", c.post)
     assert has_element?(view, "#delete-modal-dialog [data-modal-focus]", "Cancel")
 
     view |> element("#delete-modal-dialog button[data-modal-focus]") |> render_click()
