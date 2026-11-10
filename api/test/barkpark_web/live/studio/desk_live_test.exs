@@ -226,6 +226,37 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert doc_shows?(view, 2, "About Beta note")
     end
 
+    test "a row hovered again after its kept read went stale is read again", %{
+      conn: conn,
+      base: base,
+      a: a,
+      b: b
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+      assert_received {:pane_load, :list}
+
+      beta = "#{base}/#{@type_name};#{b}"
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+
+      # A minute passes: the kept read is older than a pane may show.
+      :sys.replace_state(view.pid, fn state ->
+        warm =
+          Map.new(state.socket.assigns.warm, fn {key, {data, at}} ->
+            {key, {data, at - 60_000}}
+          end)
+
+        put_in(state.socket.assigns.warm, warm)
+      end)
+
+      # bp-desk.js has forgotten the row by now and asks again.
+      view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+      settle(view)
+      assert_received {:pane_load, :doc}
+    end
+
     test "a pane draws its frame before its read lands", %{
       conn: conn,
       base: base,

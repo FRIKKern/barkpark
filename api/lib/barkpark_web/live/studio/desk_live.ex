@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
          key = PaneComponent.data_key(pane, dataset, node),
-         false <- Map.has_key?(warm, key) do
+         false <- kept?(warm[key]) do
       socket =
         socket
         |> assign(:warm, Map.put(warm, key, :reading))
@@ -173,6 +173,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_async({:warm, key}, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
+
+  # A read still running, or one a pane may still show: no need to read again.
+  defp kept?(nil), do: false
+  defp kept?(entry), do: fresh?(entry, System.monotonic_time(:millisecond))
 
   defp fresh?(:reading, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
