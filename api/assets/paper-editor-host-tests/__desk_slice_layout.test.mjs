@@ -92,8 +92,14 @@ assert.deepEqual(strips(), [T, F, T, F], "the clicked strip is open, the list ga
 assert.equal(window.location.pathname, URL_PATH, "opening a strip is not navigation");
 
 // Enter on a focused strip does the same.
+el.children[0].focus();
 el.children[0].dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 assert.equal(strips()[0], F, "Enter opens the focused strip");
+// The opened pane keeps the focus: a browser moves the focus to <body> when
+// the focused element loses its tabindex (jsdom does not, so pin the attribute).
+assert.equal(window.document.activeElement, el.children[0], "the opened pane has the focus");
+assert.equal(el.children[0].getAttribute("tabindex"), "-1", "and can still hold it");
+assert.equal(el.children[0].hasAttribute("role"), false, "but is a button no more");
 
 // A LiveView patch rewrites a pane's attributes: the layout comes back.
 const before = strips();
