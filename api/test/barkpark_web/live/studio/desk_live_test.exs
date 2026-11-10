@@ -84,6 +84,43 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, "#desk-panes a[phx-click]")
   end
 
+  test "the pane row has the TanStack name, and the labels bp-desk.js draws with", %{
+    conn: conn,
+    base: base
+  } do
+    {:ok, view, _html} = live(admin(conn), base)
+    settle(view)
+
+    assert has_element?(view, ~s(#desk-panes.panes[data-testid="panes"]))
+    # The placeholder goes out as written: the script fills in the title.
+    assert has_element?(view, ~s(#desk-panes[data-desk-expand="Expand %{title}"]))
+    assert has_element?(view, ~s(#desk-panes[data-desk-resize="Resize pane"]))
+  end
+
+  test "the page has one main landmark, with and without the editor", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name}")
+    settle(view)
+
+    assert has_element?(view, ~s(#desk-panes[role="main"]))
+    assert mains(view) == 1
+
+    # The Studio's editor brings a main landmark of its own.
+    view |> element(~s(a[data-desk-row][href$=";#{a}"])) |> render_click()
+    settle(view)
+
+    assert has_element?(view, "[data-pane-editing] #editor-form")
+    refute has_element?(view, ~s(#desk-panes[role="main"]))
+    assert mains(view) == 1
+  end
+
+  defp mains(view) do
+    length(Regex.scan(~r/<main[\s>]|role="main"/, render(view)))
+  end
+
   test "a deep link draws root, list and document", %{conn: conn, base: base, a: a} do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
     settle(view)

@@ -209,11 +209,17 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
+    <%!-- `panes` is the TanStack Studio's name for this element. It is the
+          page's main landmark until the Studio's editor, which brings its
+          own, is hosted in it. The two labels are `bp-desk.js`'s: it names
+          the strips and the dividers it draws, and fills in the title. --%>
     <div
-      class="pane-layout dk"
+      class="pane-layout panes dk"
       id="desk-panes"
       data-testid="panes"
-      role="main"
+      role={if is_nil(@active), do: "main"}
+      data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
+      data-desk-resize={gettext("Resize pane")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
