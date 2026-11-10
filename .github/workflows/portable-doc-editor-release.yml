@@ -20,6 +20,10 @@ jobs:
     defaults:
       run:
         working-directory: api/assets/paper-editor
+    # The publish job has no checkout, so it takes the tarball name from here.
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tarball: ${{ steps.release.outputs.tarball }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -28,14 +32,29 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11.18.0
       - run: npm ci
-      - name: Verify the exact release tarball and dry-run publish
+      # The version is whatever package.json says, but only an alpha of 0.1.0:
+      # this package is never 1.0, and it only ever goes out on the alpha tag.
+      # pack:check then refuses a version the release record already holds
+      # with other bytes (scripts/releases.json).
+      - name: Read the release version from package.json
+        id: release
         run: |
-          test "$(node -p 'require("./package.json").name')" = '@portable-doc/editor'
-          test "$(node -p 'require("./package.json").version')" = '0.1.0-alpha.1'
+          name=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          tag=$(node -p 'require("./package.json").publishConfig?.tag ?? "alpha"')
+          [[ "$name" == '@portable-doc/editor' ]] || { echo "::error::package name is $name, not @portable-doc/editor"; exit 1; }
+          [[ "$version" =~ ^0\.1\.0-alpha\.[0-9]+$ ]] || { echo "::error::version $version is not 0.1.0-alpha.N"; exit 1; }
+          [[ "$tag" == alpha ]] || { echo "::error::publishConfig.tag is $tag, not alpha"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tarball=portable-doc-editor-$version.tgz" >> "$GITHUB_OUTPUT"
+      - name: Verify the exact release tarball and dry-run publish
+        env:
+          TARBALL: ${{ steps.release.outputs.tarball }}
+        run: |
           npm run pack:check -- "$RUNNER_TEMP/editor-release"
           cd "$RUNNER_TEMP/editor-release"
-          sha256sum portable-doc-editor-0.1.0-alpha.1.tgz > SHA256SUMS
-          npm publish portable-doc-editor-0.1.0-alpha.1.tgz --access public --tag alpha --dry-run
+          sha256sum "$TARBALL" > SHA256SUMS
+          npm publish "$TARBALL" --access public --tag alpha --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: portable-doc-editor
@@ -63,8 +82,9 @@ jobs:
         env:
           PUBLISH_ENABLED: ${{ vars.PORTABLE_DOC_EDITOR_PUBLISH_ENABLED }}
           APPROVED_SHA256: ${{ inputs.approved_sha256 }}
+          TARBALL: ${{ needs.pack.outputs.tarball }}
         run: |
           test "$PUBLISH_ENABLED" = true
           sha256sum --check SHA256SUMS
-          printf '%s  %s\n' "$APPROVED_SHA256" portable-doc-editor-0.1.0-alpha.1.tgz | sha256sum --check --strict
-          npm publish portable-doc-editor-0.1.0-alpha.1.tgz --access public --tag alpha --provenance
+          printf '%s  %s\n' "$APPROVED_SHA256" "$TARBALL" | sha256sum --check --strict
+          npm publish "$TARBALL" --access public --tag alpha --provenance
