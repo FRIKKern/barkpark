@@ -165,8 +165,38 @@ export const GENERATED_ARTIFACT_PATTERNS = Object.freeze([
   /(^|\/)tooling\/[^/\s]+\/(?:batch-count|review-count|issues-stale|taxonomy-input)\.txt$/,
 ]);
 
-function isGeneratedArtifactPath(token) {
-  return GENERATED_ARTIFACT_PATTERNS.some((re) => re.test(token));
+// DATED ENTRIES — files that were hand-written source first and are generated now.
+// A flat entry above would restate the honest L3 reads made back then, and those
+// ledger rows can never be rewritten. So each entry carries `since`, the UTC
+// committer date of the first commit at which a tracked script names the path as
+// an output, and the entry names that commit. A read observed at or after `since`
+// derives L4; one observed before is left to the rules below. A read with no
+// usable instant counts as made now (the stricter L4). Instants are compared as
+// plain strings, like ledger.mjs, so no date builtin is used.
+// Members: the 11 sinks of api/assets/paper-editor/scripts/sync-barkpark.mjs.
+const dated = (pattern, since, commit) => Object.freeze({ pattern, since, commit });
+export const DATED_GENERATED_ARTIFACTS = Object.freeze([
+  // 3e096b47 (#25417) added sync-barkpark.mjs. Nothing wrote these four before it.
+  dated(/(^|\/)api\/assets\/paper-surface\/paper-surface\.css$/, "2026-11-08T18:47:20Z", "3e096b476c79"),
+  dated(/(^|\/)api\/assets\/paper-surface\/code-tokens\.css$/, "2026-11-08T18:47:20Z", "3e096b476c79"),
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-editor-shell\.css$/, "2026-11-08T18:47:20Z", "3e096b476c79"),
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-mermaid\.js$/, "2026-11-08T18:47:20Z", "3e096b476c79"),
+  // Build outputs from the commit that first added them (package.json build/build:web).
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-editor\.bundle\.js$/, "2026-05-24T10:59:22Z", "215b05ee6e2d"),
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-editor\.css$/, "2026-06-23T22:30:20Z", "e60f8546c337"),
+  dated(/(^|\/)web\/public\/bp-paper-editor\.bundle\.js$/, "2026-06-23T23:07:05Z", "c06033f5bf10"),
+  dated(/(^|\/)web\/public\/assets\/bp-paper-editor\.css$/, "2026-06-23T23:07:05Z", "c06033f5bf10"),
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-code\.js$/, "2026-09-21T00:16:51Z", "03ecdcd5505d"),
+  dated(/(^|\/)api\/priv\/static\/assets\/bp-paper-surface\.css$/, "2026-10-09T18:31:22Z", "52137dada0da"),
+  // scripts/surface.mjs came in the same commit as the file and writes it.
+  dated(/(^|\/)api\/assets\/paper-editor\/host-profile\/surface\.json$/, "2026-11-02T17:51:07Z", "770113f04c5c"),
+]);
+const UTC_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+function isGeneratedArtifactPath(token, observedAt) {
+  if (GENERATED_ARTIFACT_PATTERNS.some((re) => re.test(token))) return true;
+  const at = typeof observedAt === "string" && UTC_SECONDS.test(observedAt.trim()) ? observedAt.trim().slice(0, 19) : null;
+  return DATED_GENERATED_ARTIFACTS.some((e) => e.pattern.test(token) && (at === null || at >= e.since.slice(0, 19)));
 }
 
 // --- command-shape predicates ------------------------------------------------
@@ -544,7 +574,7 @@ const READER_HEADS = new Set(["cat", "head", "tail", "less", "more", "jq", "grep
 
 // The level of ONE segment of a compound, or null when the segment classifies
 // nothing (a `cd`, a loop keyword, an unknown head).
-function segmentLevel(text, maskText = text) {
+function segmentLevel(text, maskText = text, observedAt) {
   const command = trimSegment(text);
   if (command === "") return null;
   // Mention-immunity: the blessed remote tokens are read from the QUOTE-MASKED
@@ -592,7 +622,7 @@ function segmentLevel(text, maskText = text) {
 
   // L4 — the read's TARGET is a known generated artifact. Checked before the
   // generic L3 family: `cat docs/openapi.json` is an artifact read, not source.
-  if (READER_HEADS.has(head) && rest.some((t) => isGeneratedArtifactPath(t.replace(/^['"]|['"]$/g, "")))) {
+  if (READER_HEADS.has(head) && rest.some((t) => isGeneratedArtifactPath(t.replace(/^['"]|['"]$/g, ""), observedAt))) {
     return "L4";
   }
 
@@ -608,7 +638,9 @@ function segmentLevel(text, maskText = text) {
 //
 // PURE over the command string alone. It never receives — and must never be
 // handed — the evidence prose, the claim, or any narrative field. Unknown
-// shapes DEMOTE to L6 (D3); nothing here throws on honest input.
+// shapes DEMOTE to L6 (D3); nothing here throws on honest input. The one other
+// input is the row's `observed_at` instant, and it only decides whether a
+// DATED_GENERATED_ARTIFACTS entry applies yet.
 //
 // A COMPOUND IS WALKED, NOT SNIFFED AT THE HEAD. Every unquoted segment is
 // levelled on its own and the STRONGEST wins, because the derived level is a
@@ -618,7 +650,7 @@ function segmentLevel(text, maskText = text) {
 // ZERO false demotions of honest L1/L2 commands. What keeps strongest-wins from
 // becoming a promotion engine is the parseability floor above: unrunnable prose
 // never reaches the walk at all.
-export function deriveLevel(rerun) {
+export function deriveLevel(rerun, { observedAt } = {}) {
   if (typeof rerun !== "string" || rerun.trim() === "") return "L6";
   const command = rerun.trim();
   const mask = maskQuoted(command);
@@ -630,7 +662,7 @@ export function deriveLevel(rerun) {
   let best = null;
   let sawArtifactRead = false;
   for (const segment of splitSegments(command, mask)) {
-    const level = segmentLevel(segment.raw, segment.mask);
+    const level = segmentLevel(segment.raw, segment.mask, observedAt);
     if (level === null) continue;
     if (level === "L4") { sawArtifactRead = true; continue; }
     if (best === null || LEVELS[level] < LEVELS[best]) best = level;

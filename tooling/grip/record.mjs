@@ -57,7 +57,7 @@ export function admitFact(input = {}) {
 
   // Level: derived from the rerun command ALONE (the evidence prose is not an
   // input — by construction, not by discipline).
-  const derived = deriveLevel(rerun);
+  const derived = deriveLevel(rerun, { observedAt: observed_at });
   let admittedLevel = derived;
   if (level !== undefined) {
     const ceiling = checkCeiling(level, derived);

@@ -1,0 +1,113 @@
+// Dated generated artifacts — tooling/grip/level.mjs DATED_GENERATED_ARTIFACTS.
+//
+//   node --test tooling/grip/test/level-dated.test.mjs
+//
+// api/assets/paper-surface/paper-surface.css was hand-written until 3e096b47
+// (2026-11-08); sync-barkpark writes it now. A read of it observed after that
+// derives L4, the same read observed before derives L3, and the four 2026-07-31
+// ledger rows that read it honestly at L3 still fold unrestated. Their run file
+// is immutable and is read here, never written.
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { DATED_GENERATED_ARTIFACTS, GENERATED_ARTIFACT_PATTERNS, deriveLevel } from "../level.mjs";
+import { admitRecipe, foldLedger, restateLevel, writeLedgerRun } from "../ledger.mjs";
+import { admitFact } from "../record.mjs";
+
+const SURFACE = "api/assets/paper-surface/paper-surface.css";
+const READ = `grep -n -- '--paper-bg:' ${SURFACE}`;
+const AFTER = "2026-11-09T09:00:00Z";
+const BEFORE = "2026-11-01T09:00:00Z";
+const OLD_RUN = new URL("../ledger/grip-20260731T010541Z-e8469656713b08f8.json", import.meta.url);
+
+const row = (observed_at, over = {}) => ({
+  subject: SURFACE,
+  quantity: `paper-bg line, read ${observed_at.slice(0, 10)}`,
+  rerun: READ,
+  deps: [SURFACE],
+  observed_at,
+  ...over,
+});
+
+test("a new read of the raw surface observed after 2026-11-08 derives L4; the same read before derives L3", () => {
+  assert.equal(deriveLevel(READ, { observedAt: AFTER }), "L4");
+  assert.equal(deriveLevel(READ, { observedAt: BEFORE }), "L3");
+  // The edge is the commit instant itself, to the second.
+  assert.equal(deriveLevel(READ, { observedAt: "2026-11-08T18:47:19Z" }), "L3");
+  assert.equal(deriveLevel(READ, { observedAt: "2026-11-08T18:47:20Z" }), "L4");
+  assert.equal(deriveLevel(READ, { observedAt: "2026-11-08T18:47:19.999Z" }), "L3", "a fraction never crosses since");
+});
+
+test("a read with no usable instant counts as made now, so it takes the stricter L4", () => {
+  for (const observedAt of [undefined, null, "", "yesterday", "2026-07-31", "2026-07-31T03:05:41+02:00"]) {
+    assert.equal(deriveLevel(READ, { observedAt }), "L4", JSON.stringify(observedAt));
+  }
+  assert.equal(deriveLevel(READ), "L4", "a call with no options is a read made now");
+});
+
+test("the write path admits the old read at L3 and refuses an L3 claim on the new one", () => {
+  const before = admitRecipe(row(BEFORE, { derived_level: "L3" }));
+  assert.equal(before.ok, true, JSON.stringify(before.rejections));
+  assert.equal(before.recipe.derived_level, "L3");
+
+  const after = admitRecipe(row(AFTER, { derived_level: "L3" }));
+  assert.equal(after.ok, false);
+  assert.ok(after.rejections.some((r) => r.reason === "LEVEL-SKIP" && r.derived === "L4"), JSON.stringify(after.rejections));
+  assert.equal(admitRecipe(row(AFTER)).recipe.derived_level, "L4");
+});
+
+test("the fact seam levels by observed_at too", () => {
+  const fact = (observed_at) => admitFact({ subject: SURFACE, claim: "the surface defines --paper-bg", rerun: READ, observed_at });
+  assert.equal(fact(BEFORE).fact.level, "L3");
+  assert.equal(fact(AFTER).fact.level, "L4");
+});
+
+test("the fold re-derives each planted row at its own instant and restates neither", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-dated-"));
+  try {
+    const now = "2026-11-10T00:00:00Z";
+    const written = writeLedgerRun({ run_id: "dated-sinks", recipes: [row(BEFORE), row(AFTER)], dir, now });
+    assert.equal(written.ok, true, JSON.stringify(written.rejections));
+    const fold = foldLedger(dir, { now });
+    const levels = fold.entries.flatMap((e) => e.recipes ?? [e]).map((r) => [r.observed_at, r.derived_level]).sort();
+    assert.deepEqual(levels, [[BEFORE, "L3"], [AFTER, "L4"]]);
+    assert.deepEqual([fold.level_restatements.up.length, fold.level_restatements.down.length], [0, 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the four 2026-07-31 ledger rows still pass unrestated, read from their immutable run file", () => {
+  const rows = JSON.parse(readFileSync(OLD_RUN, "utf8")).recipes.slice(0, 4);
+  assert.equal(rows.length, 4);
+  for (const [i, stored] of rows.entries()) {
+    assert.equal(stored.subject, SURFACE, `row ${i}`);
+    assert.equal(stored.observed_at, "2026-07-31T01:05:41Z", `row ${i}`);
+    const restated = restateLevel(stored);
+    assert.deepEqual([restated.derived_level, restated.level_restated], ["L3", false], `row ${i}: ${stored.rerun}`);
+    // And without the date, the same command would be read as made now.
+    assert.equal(deriveLevel(stored.rerun), "L4", `row ${i} undated`);
+  }
+});
+
+test("every sync-barkpark sink has a dated entry, and no dated path is also on the flat list", () => {
+  const source = readFileSync(new URL("../../../api/assets/paper-editor/scripts/sync-barkpark.mjs", import.meta.url), "utf8");
+  const sinks = [...source.matchAll(/"((?:api|web)\/[^"]+\.(?:css|js|json))"/g)].map((m) => m[1]);
+  assert.equal(new Set(sinks).size, 11, `sync-barkpark names 11 sinks: ${sinks.join(" ")}`);
+  for (const sink of sinks) {
+    const hits = DATED_GENERATED_ARTIFACTS.filter((e) => e.pattern.test(sink));
+    assert.equal(hits.length, 1, `${sink} needs exactly one dated entry`);
+    assert.equal(GENERATED_ARTIFACT_PATTERNS.some((re) => re.test(sink)), false, `${sink} must not also be flat`);
+  }
+  for (const entry of DATED_GENERATED_ARTIFACTS) {
+    assert.match(entry.since, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.match(entry.commit, /^[0-9a-f]{12}$/);
+  }
+});
+
+test("sources stay L3: the fragments sync-barkpark assembles the surface from are not artifacts", () => {
+  const fragment = "api/assets/paper-editor/src/paper-surface/00-foundation-type.css";
+  assert.equal(deriveLevel(`cat ${fragment}`, { observedAt: AFTER }), "L3");
+});
