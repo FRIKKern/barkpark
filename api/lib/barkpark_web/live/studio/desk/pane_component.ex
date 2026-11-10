@@ -82,8 +82,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_event("retry", _params, socket), do: {:noreply, load(socket)}
 
   # A list's own controls. They are this pane's state, not the URL's.
-  def handle_event("more", _params, socket),
-    do: {:noreply, socket |> assign(:limit, socket.assigns.limit + Rows.page()) |> load()}
+  def handle_event("more", _params, socket) do
+    if socket.assigns.data.loading || socket.assigns.limit >= 2000,
+      do: {:noreply, socket},
+      else: {:noreply, socket |> assign(:limit, min(socket.assigns.limit + Rows.page(), 2000)) |> load()}
+  end
 
   def handle_event("sort", %{"sort" => name}, socket),
     do: {:noreply, socket |> assign(:sort, if(name == "", do: nil, else: name)) |> load()}
@@ -152,6 +155,13 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             </select>
           </form>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
+          <div
+            id={@id <> "-rows"}
+            class="dk-rows"
+            phx-viewport-bottom={more?(assigns) && "more"}
+            data-desk-more={more?(assigns)}
+            phx-target={@myself}
+          >
           <%= for entry <- @data.result[:entries] || [] do %>
             <div :if={entry == :divider} class="pane-divider"></div>
             <div :if={is_map(entry) and is_nil(entry.next)} class="pane-item">
@@ -162,6 +172,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               patch={Panes.open_after(@panes, @index, entry.next, @base)}
               class={["pane-item", selected?(@panes, @index, entry.next) && "selected"]}
               aria-current={selected?(@panes, @index, entry.next) && "true"}
+              id={entry.next[:id] && @id <> "-r-" <> entry.next.id}
               data-desk-row
               data-desk-opens={entry.next.kind}
             >
@@ -178,8 +189,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </span>
             </.link>
           <% end %>
+          </div>
+          <p :if={@data.result[:more?] && @limit >= 2000} class="dk-note">
+            Displaying a maximum of 2000 documents
+          </p>
           <button
-            :if={@data.result[:more?]}
+            :if={false && @data.result[:more?]}
             type="button"
             class="btn dk-more"
             phx-click="more"
@@ -214,6 +229,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     </section>
     """
   end
+
+  defp more?(assigns), do: assigns.data.result[:more?] == true && assigns.limit < 2000
 
   # The title before the read lands: what the URL and the tree already say.
   defp title(%{data: %AsyncResult{ok?: true, result: %{title: title}}}), do: title

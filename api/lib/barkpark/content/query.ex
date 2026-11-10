@@ -32,7 +32,7 @@ defmodule Barkpark.Content.Query do
 
   # The public page bounds, named so `list_documents/3`, `list_documents_page/3`
   # and the HTTP layer that echoes them back cannot drift apart.
-  @max_limit 1000
+  @max_limit 2000
 
   # Whole-corpus bound for `collect_corpus_documents/3` — the in-memory fold
   # read behind the drafts graph. Twenty times the `@max_limit` page, matching
