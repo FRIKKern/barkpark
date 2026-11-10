@@ -144,6 +144,111 @@ const shown = (el) => [...el.children].filter((p) => !p.hasAttribute("data-desk-
   hook.destroyed();
 }
 
+// ── A reference link: the document it opens is framed like a row's ──────────
+// A reference is a link inside a document pane; before this it
+// waited for the server.
+{
+  const ref = (href, title, current) =>
+    `<a href="${BASE}/${href}" class="dk-ref"${current ? ' aria-current="true"' : ""} data-desk-ref>${title}</a>`;
+  const mountRefs = () => {
+    window.document.body.innerHTML =
+      `<div id="desk-panes">` +
+      pane(0, "types", row("post", "Posts", "list", true)) +
+      pane(1, "list", row("post;post-a", "Alpha", "doc", true)) +
+      pane(2, "doc", ref("post;post-a;author-x", "Ada", true) + ref("post;post-a;author-y", "Grace", false)) +
+      pane(3, "doc", "") +
+      `</div>`;
+    const el = window.document.getElementById("desk-panes");
+    const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent: () => {} });
+    window.history.replaceState({}, "", `${BASE}/post;post-a;author-x`);
+    hook.mounted();
+    return { el, hook };
+  };
+
+  const { el, hook } = mountRefs();
+  click(rowTo("post;post-a;author-y"));
+  const frame = q("[data-desk-skeleton]");
+  assert.ok(frame, "a reference click draws its pane with no server answer");
+  assert.equal(frame.getAttribute("data-pane-index"), "3");
+  assert.equal(frame.getAttribute("data-pane-kind"), "doc", "a reference opens a document");
+  assert.equal(frame.querySelector(".pane-header-title").textContent, "Grace");
+  assert.ok(q("#p3").hasAttribute("data-desk-leaving"), "the document it replaces is hidden");
+  assert.equal(rowTo("post;post-a;author-y").getAttribute("aria-current"), "true");
+  assert.ok(!rowTo("post;post-a;author-y").classList.contains("selected"), "a reference is not a list row");
+  assert.equal(rowTo("post;post-a;author-x").getAttribute("aria-current"), null);
+  assert.deepEqual(shown(el).map((p) => p.getAttribute("data-pane-index")), ["0", "1", "2", "3"]);
+
+  // It never lands: the reference that is open is current again.
+  window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+  assert.equal(q("[data-desk-skeleton]"), null);
+  assert.equal(q("[data-desk-leaving]"), null);
+  assert.equal(rowTo("post;post-a;author-x").getAttribute("aria-current"), "true");
+  assert.equal(rowTo("post;post-a;author-y").getAttribute("aria-current"), null);
+  hook.destroyed();
+  window.history.replaceState({}, "", `${BASE}/post;post-a`);
+}
+
+// ── A search hit: one frame for each pane of its chain still to come ────────
+{
+  const hits = (links) => `<div class="dk-search"><div id="desk-search-hits">${links}</div></div>`;
+  const hit = (href, title, type) =>
+    `<a href="${BASE}/${href}" class="pane-item" data-desk-hit><span class="pane-item-label">${title}<span class="dk-row-sub">${type}</span></span></a>`;
+  const mountHits = () => {
+    const mounted = mount();
+    window.document.body.insertAdjacentHTML(
+      "afterbegin",
+      hits(hit("author;author-x", "Ada", "Author") + hit("post;post-b", "Beta", "Post") + hit("post;post-a", "Alpha", "Post")),
+    );
+    return mounted;
+  };
+
+  // Another list's document: the list and the document are both framed.
+  {
+    const { el, hook } = mountHits();
+    click(rowTo("author;author-x"));
+    const frames = [...window.document.querySelectorAll("[data-desk-skeleton]")];
+    assert.deepEqual(frames.map((f) => [f.getAttribute("data-pane-index"), f.getAttribute("data-pane-kind")]), [["1", "list"], ["2", "doc"]]);
+    assert.equal(frames[1].querySelector(".pane-header-title").textContent, "Ada", "titled from the hit, without its type line");
+    assert.ok(q("#p1").hasAttribute("data-desk-leaving") && q("#p2").hasAttribute("data-desk-leaving"));
+    assert.deepEqual(shown(el).map((p) => p.getAttribute("data-pane-index")), ["0", "1", "2"], "in chain order");
+    assert.ok(q("#desk-search-hits").hasAttribute("data-desk-leaving"), "the hits are put away with the click");
+
+    // Never lands: the panes and the hits come back.
+    window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+    assert.equal(q("[data-desk-skeleton]"), null);
+    assert.equal(q("[data-desk-leaving]"), null);
+    hook.destroyed();
+  }
+
+  // A document of the list that is open: the list stays, only the document is framed.
+  {
+    const { hook } = mountHits();
+    click(rowTo("post;post-b"));
+    const frames = [...window.document.querySelectorAll("[data-desk-skeleton]")];
+    assert.deepEqual(frames.map((f) => f.getAttribute("data-pane-index")), ["2"]);
+    assert.ok(!q("#p1").hasAttribute("data-desk-leaving"), "the list both chains share stays");
+    assert.ok(q("#p2").hasAttribute("data-desk-leaving"));
+    window.history.replaceState({}, "", `${BASE}/post;post-b`);
+    window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+    assert.equal(q("[data-desk-skeleton]"), null);
+    window.history.replaceState({}, "", `${BASE}/post;post-a`);
+    hook.destroyed();
+  }
+
+  // The page's own document, and a modifier click: nothing is drawn.
+  {
+    const { hook } = mountHits();
+    click(rowTo("post;post-a"));
+    click(rowTo("author;author-x"), { metaKey: true });
+    assert.equal(q("[data-desk-skeleton]"), null);
+    assert.equal(q("[data-desk-leaving]"), null);
+    hook.destroyed();
+    // After the hook is gone, a hit click is the browser's again.
+    click(rowTo("author;author-x"));
+    assert.equal(q("[data-desk-skeleton]"), null, "destroyed() takes the document listener with it");
+  }
+}
+
 // ── Intent: focusing a row asks the server to read ahead, once ──────────────
 {
   const { hook, pushed } = mount();
