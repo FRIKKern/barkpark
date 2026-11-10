@@ -285,6 +285,13 @@ assert.equal((await shown(strip)).textContent, "Expand Content", "a strip says i
 const right = tip();
 assert.ok(parseFloat(right.style.left) >= 51 + 4 && parseFloat(right.style.top) >= 4, "beside the strip, inside the window");
 await reset();
+// Reached by the keyboard and opened with Enter: the strip's tip goes with the strip.
+strip.focus();
+tick(400);
+assert.equal(tip()?.textContent, "Expand Content", "keyboard focus on a strip shows its tip");
+strip.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+await settle();
+assert.equal(tip(), null, "Enter opened the strip: its tip is gone");
 width = 1440;
 hook._layout();
 await settle();

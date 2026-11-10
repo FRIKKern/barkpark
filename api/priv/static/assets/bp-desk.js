@@ -651,9 +651,12 @@
         var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
-        // A shown tip follows its control (a separator moved by the keys).
-        var tipEl = hook._tip && hook._tip.anchor && !hook._tip.timer ? root.ownerDocument.getElementById(TIP_ID) : null;
-        if (tipEl) placeTip(tipEl, hook._tip.anchor, hook._tip.y);
+        // A strip that opened is no control: its tip goes. Any other shown tip
+        // follows its control (a separator moved by the keys).
+        var tip = hook._tip && hook._tip.anchor ? hook._tip : null;
+        var tipEl = tip && !tip.timer ? root.ownerDocument.getElementById(TIP_ID) : null;
+        if (tip && !tip.anchor.getAttribute("data-tip")) hook._hideTip();
+        else if (tipEl) placeTip(tipEl, tip.anchor, tip.y);
         return flags;
       };
       hook._queueLayout = function () {
