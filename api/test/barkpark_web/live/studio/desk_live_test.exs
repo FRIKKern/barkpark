@@ -301,7 +301,17 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
            "the page never heard of the save"
 
     send(view.pid, :desk_refresh)
-    settle(view)
+
+    # The refresh is a message, and so is the pane's own re-read behind it:
+    # `settle/1` right here can find nothing running yet and return at once
+    # (it did on CI). Wait for the new value itself.
+    shown? = fn ->
+      settle(view)
+      has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
+    end
+
+    assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
+           "the open document never showed the saved value"
 
     assert has_element?(view, ~s([data-pane-index="2"] dd), "Now changed")
     assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha renamed")
