@@ -1,0 +1,82 @@
+// __desk_slice_narrow.test.mjs — the desk slice in a narrow window, and pane
+// resize (task-03fac17d0c33cd32, /papers/desk-vertical-slice).
+//
+// Below 600 px the desk shows one pane, the last, whose close link (the URL
+// without it) reads as Back: the TanStack Studio's NARROW rule. Above it, the
+// right edge of an open pane drags to resize it, never under 320 px.
+//
+// Runs the TRACKED static asset api/priv/static/assets/bp-desk.js under jsdom.
+//
+// Run: node ../paper-editor-host-tests/__desk_slice_narrow.test.mjs
+import assert from "node:assert/strict";
+import { JSDOM } from "./jsdom.mjs";
+
+const BASE = "/w/a/p/b/d/production/studio/_desk";
+const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
+  url: `http://localhost${BASE}/post;post-a`,
+});
+const { window } = dom;
+globalThis.window = window;
+globalThis.document = window.document;
+await import("../../priv/static/assets/bp-desk.js");
+
+const KINDS = ["types", "list", "doc"];
+const pane = (index, kind) =>
+  `<section class="pane-column dk-pane" id="p${index}" data-pane-index="${index}" data-pane-kind="${kind}"><div class="pane-header"><span class="pane-header-title">Pane ${index}</span>` +
+  (index > 0 ? `<a class="dk-close" href="${BASE}${index === 2 ? "/post" : ""}"><span>×</span></a>` : "") +
+  `</div><div class="pane-body"></div></section>`;
+window.document.body.innerHTML = `<div id="desk-panes">${KINDS.map((k, i) => pane(i, k)).join("")}</div>`;
+const el = window.document.getElementById("desk-panes");
+let width = 590;
+Object.defineProperty(el, "clientWidth", { get: () => width });
+// jsdom lays nothing out: give each pane a box, 320 px wide, side by side.
+[...el.children].forEach((p, i) => {
+  p.getBoundingClientRect = () => ({ left: i * 320, right: (i + 1) * 320, width: 320, top: 0, bottom: 800, height: 800 });
+});
+const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
+hook.mounted();
+const sheet = () => window.document.getElementById("bp-desk-layout").textContent;
+
+// ── Narrow: one pane, the last, with its close link as the way back ─────────
+assert.ok(el.hasAttribute("data-narrow"), "590 px is narrow");
+assert.match(sheet(), /#desk-panes > \[data-pane-index\] \{ display: none; \}/, "every pane is hidden…");
+assert.match(sheet(), /\[data-pane-index="2"\] \{ display: flex; width: 100%/, "…but the last");
+assert.match(sheet(), /\[data-pane-index="2"\] \.dk-close \{ order: -1/, "its close link leads the header");
+assert.equal(el.querySelector('[data-pane-index="2"] .dk-close').getAttribute("href"), `${BASE}/post`, "and goes to the URL without the pane");
+assert.equal(el.querySelectorAll("[data-pane-collapsed]").length, 0, "nothing is a strip when narrow");
+
+// A drag does nothing when narrow.
+const down = (target, x) => target.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: x }));
+const move = (x) => window.dispatchEvent(new window.MouseEvent("pointermove", { clientX: x }));
+const up = () => window.dispatchEvent(new window.MouseEvent("pointerup", {}));
+down(el.children[1], 638); move(700); up();
+assert.doesNotMatch(sheet(), /width: \d+px; min-width: \d+px; flex: 0 0 \d{3}px/);
+
+// ── Wide again: all panes, an edge to drag ──────────────────────────────────
+width = 1440;
+hook._layout();
+assert.ok(!el.hasAttribute("data-narrow"));
+assert.doesNotMatch(sheet(), /display: none/);
+assert.match(sheet(), /cursor: col-resize/, "an open pane that is not the last has an edge to drag");
+
+// A press in the middle of a pane is not a drag.
+down(el.children[1], 480); move(600); up();
+assert.doesNotMatch(sheet(), /\[data-pane-index="1"\][^{]*\{ width:/);
+
+// A press on the right edge is: 80 px right widens the list to 400.
+down(el.children[1], 638); move(718);
+assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 400px; min-width: 400px; flex: 0 0 400px; \}/);
+// Dragged far left it stops at the minimum.
+move(100); up();
+assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 320px;/, "never under 320 px");
+// After the release the pointer no longer resizes.
+move(900);
+assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 320px;/);
+
+// The last pane has no edge of its own.
+down(el.children[2], 958); move(1100); up();
+assert.doesNotMatch(sheet(), /\[data-pane-index="2"\][^{]*\{ width:/);
+
+hook.destroyed();
+console.log("desk slice narrow: ok");
+window.close();
