@@ -68,6 +68,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       same? ->
         {:ok, socket}
 
+      # The page is about to put the Studio's editor here: draw the frame and
+      # leave the read to it.
+      assigns[:hold] ->
+        {:ok, socket |> assign(:data_key, key) |> assign(:data, AsyncResult.loading())}
+
       true ->
         {:ok, socket |> assign(:data_key, key) |> load()}
     end
