@@ -1605,7 +1605,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def studio_path(socket, path, dataset, opts \\ []) do
-    (socket.assigns[:scope_prefix] || "") <> Paths.studio_path_for(path, dataset, opts)
+    case socket.assigns do
+      # The desk slice (`DeskLive`) hosts this editor: a Studio path is the
+      # same desk nodes, printed in the desk's pane grammar.
+      %{desk_base: base, dataset: ^dataset} when is_binary(base) ->
+        Enum.join([base | List.wrap((path != [] && Enum.join(path, ";")) || [])], "/")
+
+      _ ->
+        (socket.assigns[:scope_prefix] || "") <> Paths.studio_path_for(path, dataset, opts)
+    end
   end
 
   @doc false

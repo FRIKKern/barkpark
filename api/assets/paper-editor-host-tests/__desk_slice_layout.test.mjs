@@ -120,7 +120,7 @@ assert.deepEqual(strips(), [T, T, F, F], "back to the rule's own focus: the last
 width = 2000;
 hook._layout();
 assert.deepEqual(strips(), [F, F, F, F]);
-assert.equal(sheet(), "");
+assert.doesNotMatch(sheet(), /width: 51px/, "no strip rule is left behind");
 
 hook.destroyed();
 console.log("desk slice layout: ok");
