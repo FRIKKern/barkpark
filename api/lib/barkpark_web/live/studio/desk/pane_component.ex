@@ -230,7 +230,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # not draw. Said in the pane, so the current document is not taken for an
   # old revision. From the URL, not the read: panes that differ only in these
   # share one read.
-  defp left_out(%{kind: :doc} = pane) do
+  @doc false
+  def left_out(%{kind: :doc} = pane) do
     Enum.filter(
       [
         pane[:rev] &&
@@ -244,7 +245,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     )
   end
 
-  defp left_out(_pane), do: []
+  def left_out(_pane), do: []
 
   defp fallback(%{kind: :types}), do: gettext("Content")
   defp fallback(%{kind: :menu, node: id}), do: id

@@ -135,12 +135,22 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   test "a URL that names a revision, a view or an inspector says what the desk shows instead", %{
     conn: conn,
     base: base,
-    a: a
+    a: a,
+    b: b
   } do
+    # The last document of the chain: the editor, on the current document.
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},rev=abc123")
     settle(view)
     assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+    assert doc_shows?(view, 2, "About Alpha note")
+
+    # A document further left: a read-only pane.
+    chain = "#{@type_name};#{a},rev=abc123;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert doc_shows?(view, 2, "About Alpha note")
+    refute has_element?(view, ~s([data-pane-index="3"] [data-desk-left-out]))
 
     for param <- ["view=json", "inspect=sanity%2Fstructure%2Fhistory"] do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},#{param}")

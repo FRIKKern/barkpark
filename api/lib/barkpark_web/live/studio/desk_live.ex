@@ -385,6 +385,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
         >
           <span aria-hidden="true">×</span>
         </a>
+        <%!-- The editor opens the current document, whatever the URL asked for. --%>
+        <p :for={note <- PaneComponent.left_out(view.pane)} class="dk-note" data-desk-left-out>
+          {note}
+        </p>
         <nav :if={@active_refs != []} class="dk-edit-refs dk-refs" aria-label={gettext("References")}>
           <.link
             :for={ref <- @active_refs}
