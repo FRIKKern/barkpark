@@ -250,8 +250,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp desk_pane(_params, _chain), do: nil
 
   @doc """
-  The pane that edits: a close link, the document's references, and the
-  Studio's editor. Takes the page's own assigns, because the Studio's shell
+  The pane that edits: a header row with the close link, the document's
+  references, and the Studio's editor. Takes the page's own assigns, because the Studio's shell
   reads them.
   """
   def pane(assigns, view) do
@@ -260,21 +260,27 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     ~H"""
     <section
       id={@view.id}
-      class="pane-column dk-pane dk-doc dk-edit"
+      class="pane-column dk-pane pane doc dk-doc dk-edit"
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
       aria-label={@page_title}
     >
-      <a
-        href={Panes.close_from(@chain, @view.index, @base)}
-        data-phx-link="patch"
-        data-phx-link-state="push"
-        class="dk-close dk-edit-close"
-        aria-label={gettext("Close %{title}", title: @page_title)}
-      >
-        <span aria-hidden="true">×</span>
-      </a>
+      <%!-- The same header row the read-only panes have, so the close link
+            covers none of the Studio's toolbar and the narrow layout's Back
+            (`bp-desk.js`) finds it. --%>
+      <div class="pane-header">
+        <span class="pane-header-title">{@page_title}</span>
+        <a
+          href={Panes.close_from(@chain, @view.index, @base)}
+          data-phx-link="patch"
+          data-phx-link-state="push"
+          class="dk-close"
+          aria-label={gettext("Close %{title}", title: @page_title)}
+        >
+          <span aria-hidden="true">×</span>
+        </a>
+      </div>
       <nav :if={@active_refs != []} class="dk-edit-refs dk-refs" aria-label={gettext("References")}>
         <.link
           :for={ref <- @active_refs}
@@ -292,7 +298,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           {ref.title}
         </.link>
       </nav>
-      {Components.studio_live_shell(assigns)}
+      <%!-- `pane-body` and `doc-form` are the names the TanStack specs know
+            the document's form region by. --%>
+      <div class="pane-body doc-form dk-edit-body" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden">
+        {Components.studio_live_shell(assigns)}
+      </div>
     </section>
     """
   end
