@@ -153,7 +153,11 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          node --test tooling/research-coverage/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/rc-suite.log"
+          # The tally below is read from TAP, so ask for TAP. Without the flag the
+          # reporter is Node's default: TAP into a pipe on Node 20 and 22, but
+          # `ℹ fail 0` on Node 24, which the awk cannot read (grip-suite.yml went
+          # red that way, task-e5475575932849d6). The flag pins it on any Node.
+          node --test --test-reporter=tap tooling/research-coverage/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/rc-suite.log"
           run_rc=${PIPESTATUS[0]}
 
           fail=$(awk -F'# fail ' '/^# fail /{print $2}' "$RUNNER_TEMP/rc-suite.log")
