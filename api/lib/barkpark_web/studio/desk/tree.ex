@@ -57,6 +57,27 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
   defp walk(node, acc),
     do: Enum.reduce(node.items || [], Map.put(acc, node.id, node), &walk/2)
 
+  @doc """
+  The desk path (node ids, root left out) to the first list of `type`, or
+  `[type]` when the desk lists it nowhere: the path the Studio's own desk
+  gives a document of that type.
+  """
+  @spec path_to_type(struct(), String.t()) :: [String.t()]
+  def path_to_type(%Node{} = root, type), do: find_type(root.items || [], type) || [type]
+
+  defp find_type(items, type) do
+    Enum.find_value(items, fn
+      %Node{type: :document_type_list, type_name: ^type, id: id} ->
+        [id]
+
+      %Node{type: :list, id: id, items: items} ->
+        (sub = find_type(items || [], type)) && [id | sub]
+
+      _ ->
+        nil
+    end)
+  end
+
   @doc "The pane a row opens, or nil for a row that opens nothing."
   @spec opens(struct()) :: Panes.pane() | nil
   def opens(%Node{type: :list, id: id}), do: %{kind: :menu, node: id}

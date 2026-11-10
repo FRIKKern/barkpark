@@ -273,12 +273,16 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The measured set is ELEVEN sites in the LiveView/component tree (the two
+    # The measured set is TWELVE sites in the LiveView/component tree (the two
     # remaining tree-wide sends are `:after_join` in the channels, which are
     # not LiveView seams). `{:drop_focus_query, …}` is the one that writes
     # nothing: a URL patch after a desk search hit (task-4e10550394f87112).
     # `{:desk_pane_title, …}` writes nothing either: a desk-slice pane tells
-    # its read-only page the tab title (task-34d4249de9d1b654). The two `paper_op` sites deliberately cover the
+    # its read-only page the tab title (task-34d4249de9d1b654).
+    # `{:desk_edit, …}` is the desk slice asking itself to load the Studio's
+    # editor for the last document, one message after the pane's frame went
+    # out; the writes that follow are the Studio's own guarded handlers
+    # (task-017dd7504c5c553a). The two `paper_op` sites deliberately cover the
     # ordinary op and its save-ack-correlated variant; both terminate on the
     # same guarded parent chokepoint. Pinning the set means a NEW in-process
     # sender — the exact event that turned `paper_op` from "safe by
@@ -288,6 +292,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_title,"},
+               {"live/studio/desk_live.ex", "{:desk_edit,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/studio_live.ex", "{:drop_focus_query,"},
