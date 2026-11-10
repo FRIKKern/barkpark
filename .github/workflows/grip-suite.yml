@@ -189,7 +189,12 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          node --test tooling/grip/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/grip-suite.log"
+          # The tally below is read from TAP, so ask for TAP. Without the flag the
+          # reporter is Node's default, and that changed under this job: Node 20 and
+          # 22 print TAP when stdout is a pipe, Node 24 (ubuntu-26.04's) prints
+          # `ℹ fail 0`, so the awk found nothing and every run went red with tests
+          # passing (task-e5475575932849d6). The flag pins the format on any Node.
+          node --test --test-reporter=tap tooling/grip/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/grip-suite.log"
           run_rc=${PIPESTATUS[0]}
 
           fail=$(awk -F'# fail ' '/^# fail /{print $2}' "$RUNNER_TEMP/grip-suite.log")
