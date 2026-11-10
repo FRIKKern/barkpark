@@ -375,6 +375,36 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert doc.title == "Alpha to publish"
     end
 
+    test "a remote save during unsaved typing raises the conflict banner, and keeps the typing",
+         %{
+           conn: conn,
+           base: base,
+           a: a
+         } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Mine, unsaved"}})
+
+      {:ok, _doc} =
+        Content.upsert_document(
+          @type_name,
+          %{"doc_id" => a, "title" => "Theirs", "content" => %{"summary" => "Theirs"}},
+          @dataset
+        )
+
+      conflicted? = fn -> :sys.get_state(view.pid).socket.assigns.doc_conflict == true end
+
+      assert Enum.any?(1..200, fn _ -> conflicted?.() or (Process.sleep(10) && false) end),
+             "the editor never raised the conflict"
+
+      html = render(view)
+      assert html =~ "Updated by another user"
+      # The buffer is not overwritten by the remote value.
+      assert has_element?(view, ~s(#editor-form [value="Mine, unsaved"]))
+      refute has_element?(view, ~s(#editor-form [value="Theirs"]))
+    end
+
     test "another document in the chain stays a read-only pane", %{conn: conn, base: base} do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name}")
       settle(view)
