@@ -161,16 +161,23 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # announces the field title on focus. nil when the field has no single
   # labelable control (`FieldInputs.label_target/3`).
   attr :for, :string, default: nil
+  # R19b: in the desk an image field is a `<fieldset class="field">` with a
+  # `<legend>`, as Sanity draws an object field (TanStack `Fields.tsx`).
+  attr :fieldset, :boolean, default: false
   slot :inner_block, required: true
 
   def editor_field(assigns) do
     ~H"""
-    <div class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
-      <label class="editor-field-label" for={@for}>
+    <.dynamic_tag tag_name={if @fieldset, do: "fieldset", else: "div"} class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
+      <%= if @fieldset do %><legend class="editor-field-label">
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
-      </label>
+      </legend><% else %><label class="editor-field-label" for={@for}>
+        <%= @label %>
+        <%= if @required do %><span class="field-required">*</span><% end %>
+        <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
+      </label><% end %>
       <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
@@ -184,9 +191,27 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%= if @warnings != [] do %>
         <div class="field-warnings" role="note"><%= Enum.join(@warnings, ", ") %></div>
       <% end %>
-    </div>
+    </.dynamic_tag>
     """
   end
+
+  @doc """
+  The prefix of a field input's `id` (the label's `for` follows it). In the
+  desk (`DeskLive`, the only host with a `:desk_base`) it is empty, so an
+  input is named by its bare field path (`id="title"`), as Sanity's Studio
+  names it and its specs find it (TanStack `Fields.tsx`); the desk edits
+  one document at a time, so the ids cannot meet. Everywhere else it is
+  `doc-field-<doc>-`.
+  """
+  @spec field_id_prefix(term(), map() | nil) :: String.t()
+  def field_id_prefix(doc_key, parent_assigns) do
+    if desk?(parent_assigns),
+      do: "",
+      else: "doc-field-" <> Barkpark.Content.DraftId.published_id(to_string(doc_key)) <> "-"
+  end
+
+  defp desk?(%{desk_base: base}) when is_binary(base), do: true
+  defp desk?(_assigns), do: false
 
   @doc false
   # Extract the ONIX element name from a field. Handles both atom-keyed
@@ -449,7 +474,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
            label any more ("Kort-layout select" read as a label leak); Sanity
            never surfaces a field's type to the author. --%>
-      <% label_prefix = "doc-field-" <> Barkpark.Content.DraftId.published_id(to_string(@doc_key)) <> "-" %>
+      <% label_prefix = field_id_prefix(@doc_key, @parent_assigns) %>
       <% body_in_blocks? = classic_body_in_blocks?(@field, @parent_assigns) %>
       <.editor_field
         label={@field["title"] || field_name}
@@ -459,6 +484,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         warnings={warnings}
         onix_element={onix_element(@field)}
         description={field_description(@field)}
+        fieldset={type == "image" and desk?(@parent_assigns)}
       >
         <%= if body_in_blocks? do %>
           <div class="bp-classic-body-blocks" data-test-id="classic-body-in-blocks" role="note">
@@ -904,9 +930,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
                 warnings={Map.get(@validation_warnings, "title", [])}
-                for={"doc-field-" <> Barkpark.Content.DraftId.published_id(@editor_doc.doc_id) <> "-title"}
+                for={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"}
               >
-                <input type="text" id={"doc-field-" <> Barkpark.Content.DraftId.published_id(@editor_doc.doc_id) <> "-title"} name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+                <input type="text" id={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"} name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </.editor_field>
               <%= if @editor_schema do %>
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),

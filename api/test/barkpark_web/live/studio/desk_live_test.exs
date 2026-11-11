@@ -269,7 +269,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   } do
     # Every row of the editor pane has an id, so a live patch moves none of
     # them: a note with no holder made it re-append the editor's body.
-    holder = ~s([data-pane-index="2"] > [id="desk-pane-2-doc:#{a}-notes"])
+    holder = ~s([data-pane-index="2"] > [id="desk-pane-2-doc:#{a}-editor-notes"])
 
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
     settle(view)
@@ -287,6 +287,34 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
     # Every row of the pane after its header has an id.
     refute has_element?(view, ~s{[data-pane-index="2"] > :not(.pane-header):not([id])})
+  end
+
+  # Row 5. A document opens as a read-only pane on hold, then becomes the
+  # editor. When the editor's section took the pane's id, the browser patched
+  # one into the other in place and kept the pane's component alive; Back to
+  # that document then drew it as an empty section until the editor came.
+  test "the editor's section never takes a pane component's id, through Back and Forward", %{
+    conn: conn,
+    base: base,
+    a: a,
+    b: b
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+
+    for doc <- [b, a, b] do
+      render_patch(view, "#{base}/#{@type_name};#{doc}")
+      settle(view)
+
+      pane_ids = Enum.map(:sys.get_state(view.pid).socket.assigns.desk_panes, & &1.id)
+      assert "desk-pane-2-doc:#{doc}" in pane_ids, "precondition: #{inspect(pane_ids)}"
+
+      assert has_element?(view, ~s([data-pane-editing][id="desk-pane-2-doc:#{doc}-editor"])),
+             "the editor for #{doc} is not in its own section"
+
+      refute has_element?(view, ~s([data-pane-editing][id="desk-pane-2-doc:#{doc}"])),
+             "the editor took the id of the pane's component"
+    end
   end
 
   test "closing a pane keeps the tab title the pane now last had read", %{
