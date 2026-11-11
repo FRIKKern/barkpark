@@ -320,6 +320,12 @@ defmodule Barkpark.StudioChat.Runtime do
   def close(provider, runtime_ref), do: adapter(provider).close(runtime_ref)
 
   @doc "Run an optional provider initialization handshake."
+  # A registered host has no in-process provider to handshake with: the host
+  # runs the CLI itself. The Claude adapter's `initialize/1` is `is_pid`-guarded,
+  # so handing it the RemoteRef raised in `Recorder.init/1`, and every first turn
+  # on a registered host answered 503 (task-ff4074ff3f85fcfb).
+  def initialize(_provider, %RemoteRef{}), do: :ok
+
   def initialize(provider, runtime_ref),
     do: optional_call(adapter(provider), :initialize, [runtime_ref])
 

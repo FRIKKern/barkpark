@@ -298,7 +298,6 @@ defmodule BarkparkWeb.ChatController do
           conn |> put_status(:accepted) |> json(%{accepted: true})
 
         {:error, reason} ->
-          Logger.warning("chat transport: send failed: #{inspect(reason)}")
           send_failure_response(conn, reason)
       end
     else
@@ -1201,10 +1200,12 @@ defmodule BarkparkWeb.ChatController do
   # term over an explicit ALLOWLIST, then answer with the fixed public code.
   # NEVER interpolate the reason into the wire message — `safe_command`'s rescue
   # leg returns raw exception structs, and echoing one is an information leak
-  # (the server-side Logger line above already carries the full term). Public
+  # (the server-side Logger line below carries the term). Public
   # (`@doc false`) so every allowlist leg is assertable without arranging the
   # matching runtime failure live — the exit-reason-mapping seam convention.
   def send_failure_response(conn, reason) do
+    Logger.warning("chat transport: send failed: #{inspect(loggable_reason(reason))}")
+
     case classify_send_failure(reason) do
       :capacity ->
         # Transient by definition — say when to come back (mirrors the
@@ -1244,8 +1245,13 @@ defmodule BarkparkWeb.ChatController do
   defp classify_send_failure(:no_port), do: :unavailable
   defp classify_send_failure({:app_server_exit, _}), do: :unavailable
   defp classify_send_failure(:runtime_session_missing), do: :unavailable
+  # The registered host is enrolled but has not heartbeated within the window.
+  defp classify_send_failure(:host_offline), do: :unavailable
 
   # Unsupported: the provider/operation combination can never succeed as asked.
+  # `:host_not_found`: the session's registered host is revoked, never finished
+  # enrolling, or belongs to another workspace — retrying cannot bring it back.
+  defp classify_send_failure(:host_not_found), do: :unsupported
   defp classify_send_failure({:provider_not_ready, _}), do: :unsupported
   defp classify_send_failure({:provider_protocol_incompatible, _}), do: :unsupported
   defp classify_send_failure({:unsupported_runtime_operation, _}), do: :unsupported
@@ -1254,6 +1260,18 @@ defmodule BarkparkWeb.ChatController do
   # Opaque fallback: any term outside the allowlist stays a generic transient
   # 503 — unknown ≠ permanent, and the term itself never reaches the wire.
   defp classify_send_failure(_), do: :unavailable
+
+  # A Recorder that raised in `init/1` comes back as `{reason, stacktrace}`, and
+  # the top frame of a FunctionClauseError carries the call's ARGUMENTS — on
+  # the registered-host path a RemoteRef holding the minted task token's row.
+  # Log the reason and every frame by arity; never the arguments.
+  defp loggable_reason({reason, [{_m, _f, _a, _l} | _] = stack}),
+    do: {reason, Enum.map(stack, &frame_without_args/1)}
+
+  defp loggable_reason(reason), do: reason
+
+  defp frame_without_args({m, f, args, loc}) when is_list(args), do: {m, f, length(args), loc}
+  defp frame_without_args(frame), do: frame
 
   # Append the caller's turn as an organic `role:"user"` row so the Session's
   # replayable history carries the human side (the LiveView composer persists its
