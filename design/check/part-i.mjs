@@ -4,7 +4,6 @@
 
 import { attribute, lostLines, regionDigest } from "../emit.mjs";
 import { fail, failed, FAULT } from "./state.mjs";
-import { want } from "./part-b.mjs";
 
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
 // Part A above is the fence's REPORTING half; `run()` in emit.mjs is its

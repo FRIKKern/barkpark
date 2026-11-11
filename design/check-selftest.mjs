@@ -168,7 +168,7 @@ export async function selftest() {
   console.log(`design/check.mjs --selftest: coverage — ${PARTS.length} Part(s) in the gate's own output, ${covered.length} exercised here.`);
   console.log(`  exercised: ${covered.join(", ") || "(none)"}`);
   if (uncovered.length) {
-    console.log(`  UNCOVERED — no \`FAULT.has("<id>")\` hook in design/check.mjs, so this selftest cannot ask whether`);
+    console.log(`  UNCOVERED — no \`FAULT.has("<id>")\` hook in design/check.mjs or design/check/part-*.mjs, so this selftest cannot ask whether`);
     console.log(`  their gate can still fail. A mutation to one of these exits 0 and is INVISIBLE here:`);
     for (const p of uncovered) console.log(`    Part ${p} — NOT exercised by --selftest`);
   } else {
