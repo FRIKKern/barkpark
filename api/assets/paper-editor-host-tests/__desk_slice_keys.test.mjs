@@ -155,6 +155,58 @@ window.dispatchEvent(new window.Event("phx:page-loading-stop"));
 assert.equal(window.document.activeElement, window.document.getElementById("p0"), "the pane that is last now has the focus, not <body>");
 assert.equal(window.document.getElementById("p0").getAttribute("tabindex"), "-1");
 
+// ── Publish by Enter: the answer takes the button away, the "…" beside it gets the focus ──
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const menuButton = (id) => `<div class="dk-doc-menu"><button type="button" id="${id}" aria-haspopup="menu">…</button></div>`;
+el.insertAdjacentHTML(
+  "beforeend",
+  `<section class="pane-column dk-pane" id="p2" data-pane-index="2" data-pane-kind="doc" data-pane-editing>` +
+    `<div class="pane-header">${menuButton("p2-actions-button")}</div>` +
+    `<bp-overflow-menu><button type="button" id="pub">Publish</button></bp-overflow-menu>` +
+    `<div class="dk-edit-footer">${menuButton("p2-footer-actions-button")}</div></section>`,
+);
+const publishButton = () => window.document.getElementById("pub");
+const footer = () => window.document.getElementById("p2-footer-actions-button");
+const answer = () => publishButton().replaceWith(Object.assign(window.document.createElement("button"), { id: "pub", textContent: "Unpublish" }));
+// The patch keeps the element and makes it Unpublish: the focus stayed on it,
+// and a second Enter unpublished.
+publishButton().focus();
+key("Enter");
+publishButton().setAttribute("aria-label", "Unpublish");
+publishButton().textContent = "Unpublish";
+await tick();
+assert.equal(window.document.activeElement, footer(), "Publish became Unpublish: the last \"…\" in the pane has the focus");
+publishButton().removeAttribute("aria-label");
+publishButton().textContent = "Publish";
+// The answer takes the button away.
+publishButton().focus();
+key("Enter");
+answer();
+await tick();
+assert.equal(window.document.activeElement, footer(), "Publish went away: the last \"…\" in the pane has the focus, not <body>");
+publishButton().textContent = "Publish";
+// A button the answer disables, the same.
+publishButton().focus();
+key("Enter");
+publishButton().disabled = true;
+await tick();
+assert.equal(window.document.activeElement, footer(), "a disabled Publish hands the focus on too");
+publishButton().disabled = false;
+// A focus moved meanwhile stays where it went.
+publishButton().focus();
+key("Enter");
+window.document.getElementById("p2-actions-button").focus();
+answer();
+await tick();
+assert.equal(window.document.activeElement.id, "p2-actions-button", "a focus placed elsewhere is not taken away");
+// A key that presses nothing moves nothing.
+publishButton().focus();
+key("a");
+answer();
+await tick();
+assert.equal(window.document.activeElement, window.document.body, "only Enter or Space counts as a press");
+window.document.getElementById("p2").remove();
+
 hook.destroyed();
 assert.equal(el.querySelector('[role="separator"]'), null, "destroyed() takes the separators with it");
 box.blur();
