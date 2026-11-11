@@ -13326,3 +13326,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Split pane right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Close split pane"
+msgstr ""

@@ -13328,3 +13328,13 @@ msgstr "Opprett nytt dokument"
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
 msgstr "Vis dokumenthandlinger"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Split pane right"
+msgstr "Del ruten til høyre"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Close split pane"
+msgstr "Lukk delt rute"
