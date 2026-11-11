@@ -13313,3 +13313,8 @@ msgstr "Sorter etter opprettet"
 #, elixir-autogen, elixir-format
 msgid "Displaying a maximum of %{count} documents"
 msgstr "Viser maksimalt %{count} dokumenter"
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Show document actions"
+msgstr "Vis dokumenthandlinger"
