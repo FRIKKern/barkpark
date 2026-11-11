@@ -111,9 +111,9 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
           class="icon-btn search-clear"
           aria-label={gettext("Clear search")}
           phx-click={
-            JS.set_attribute({"value", ""}, to: "#" <> @input)
+            JS.set_attribute({"value", ""}, to: by_id(@input))
             |> JS.push("list-search-clear", target: @myself)
-            |> JS.focus(to: "#" <> @input)
+            |> JS.focus(to: by_id(@input))
           }
         >
           <span aria-hidden="true">×</span>
@@ -122,6 +122,13 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
     </div>
     """
   end
+
+  @doc """
+  A selector for the element with this id. A pane's id holds a `:` (its pane
+  key, `list:post`), which a `#id` selector cannot spell.
+  """
+  @spec by_id(String.t()) :: String.t()
+  def by_id(id), do: ~s([id="#{String.replace(id, ~S("), ~S(\"))}"])
 
   @doc """
   The box's events. `reload` is the pane's own read (`load/1`), run when the

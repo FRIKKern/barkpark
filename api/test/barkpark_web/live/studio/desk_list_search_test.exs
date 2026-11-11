@@ -258,8 +258,15 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
     # and the focus goes back into the box.
     [js] = view |> doc() |> LazyHTML.query(clear) |> LazyHTML.attribute("phx-click")
     assert has_element?(view, clear <> ~s([type="reset"]))
-    input = "#" <> box_attr(view, "id")
-    assert js =~ ~s(["focus",{"to":"#{input}"}]), "Clear search puts the focus back in the box"
+    # By an attribute selector: a pane's id holds a `:`, which `#id` cannot spell.
+    input = ~s([id="#{box_attr(view, "id")}"])
+    ops = Jason.decode!(js)
+
+    assert ["focus", %{"to" => input}] in ops,
+           "Clear search puts the focus back in the box: #{js}"
+
+    assert ["set_attr", %{"attr" => ["value", ""], "to" => input}] in ops,
+           "Clear search empties the box's reset value: #{js}"
 
     view |> element(clear) |> render_click()
 
