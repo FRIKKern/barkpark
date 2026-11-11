@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     * `BarkparkWeb.Studio.Desk.EditorHost`  the active document's editor
     * `BarkparkWeb.Studio.Desk.LiveRefresh` someone else saved
+    * `BarkparkWeb.Studio.Desk.PaneActions` split, close split, focus mode
     * `BarkparkWeb.Studio.Desk.Style`       the desk's CSS
   """
 
@@ -36,6 +37,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.LiveRefresh
+  alias BarkparkWeb.Studio.Desk.PaneActions
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Search
@@ -56,6 +58,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      |> assign(desk_focus: nil, focus_key: nil)
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -114,7 +117,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
         page_title: titles[last.id] || last.title
       )
 
-    socket = EditorHost.follow(socket, panes, dataset)
+    socket =
+      socket
+      |> keep_focus(panes)
+      |> EditorHost.follow(panes, dataset)
 
     # The pane's frame goes out with this patch; the editor follows in the
     # next message, so a click is answered before the document is loaded.
@@ -154,6 +160,20 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
+
+  # J26: the focus mode button of document pane `index` (`PaneActions`).
+  # Pressed again it leaves; another document pane's takes over.
+  def handle_event("desk-focus", %{"index" => index}, socket) do
+    %{chain: chain, desk_focus: focus} = socket.assigns
+
+    focus =
+      case index(index, chain) do
+        ^focus -> nil
+        index -> index
+      end
+
+    {:noreply, assign(socket, :desk_focus, focus)}
+  end
 
   # Everything else is the editor's: the Studio's own handlers.
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
@@ -220,8 +240,52 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
+  # ── focus mode (J26) ───────────────────────────────────────────────────────
+
+  # As the TanStack Studio's `Structure.tsx`: focus mode lasts while the panes
+  # do. A focused field (`path=`) is not a change of panes; anything else
+  # (another document, a split, a pane closed) shows the navigation again.
+  defp keep_focus(socket, panes) do
+    key = panes |> Enum.map(&Map.delete(&1, :path)) |> Panes.to_splat()
+    %{desk_focus: focus, focus_key: was} = socket.assigns
+    focus = if focus && key == was && doc?(Enum.at(panes, focus)), do: focus
+    assign(socket, desk_focus: focus, focus_key: key)
+  end
+
+  # A document pane of the chain, or nil.
+  defp index(index, chain) do
+    case Integer.parse(to_string(index)) do
+      {i, ""} when i > 0 -> if doc?(Enum.at(chain, i)), do: i
+      _ -> nil
+    end
+  end
+
+  defp doc?(%{kind: :doc}), do: true
+  defp doc?(_pane), do: false
+
+  @doc """
+  What a document pane needs to draw focus mode (`PaneActions.doc/1`): nil,
+  or the focused index and a crumb for each pane it hides, which goes to
+  that pane's URL with the panes right of it closed.
+  """
+  def focus_view(%{desk_focus: nil}), do: nil
+
+  def focus_view(%{desk_focus: index, desk_panes: views, chain: chain, base: base} = assigns) do
+    crumbs =
+      for view <- Enum.take(views, index) do
+        %{
+          title: assigns.titles[view.id] || view.title,
+          href: Panes.close_from(chain, view.index + 1, base)
+        }
+      end
+
+    %{index: index, crumbs: crumbs}
+  end
+
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :desk_focus_view, focus_view(assigns))
+
     ~H"""
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
@@ -234,6 +298,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       class="pane-layout panes dk"
       id="desk-panes"
       data-testid="panes"
+      data-focus-mode={@desk_focus != nil}
       role={if is_nil(@active), do: "main"}
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
@@ -242,22 +307,26 @@ defmodule BarkparkWeb.Studio.DeskLive do
     >
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
+      <%!-- Focus mode puts every pane but its document away. --%>
       <%= for view <- @desk_panes do %>
-      {if view.index == @active, do: EditorHost.pane(assigns, view)}
-      <.live_component
-        :if={view.index != @active}
-        module={PaneComponent}
-        id={view.id}
-        pane={view.pane}
-        index={view.index}
-        node={view.node}
-        hold={view.index == length(@desk_panes) - 1 and @pending != nil}
-        warm={warm(@warm, view.key)}
-        panes={@chain}
-        base={@base}
-        dataset={@dataset}
-        scope={@scope}
-      />
+      <PaneActions.put_away hidden={@desk_focus not in [nil, view.index]}>
+        {if view.index == @active, do: EditorHost.pane(assigns, view)}
+        <.live_component
+          :if={view.index != @active}
+          module={PaneComponent}
+          id={view.id}
+          pane={view.pane}
+          index={view.index}
+          node={view.node}
+          hold={view.index == length(@desk_panes) - 1 and @pending != nil}
+          warm={warm(@warm, view.key)}
+          panes={@chain}
+          base={@base}
+          dataset={@dataset}
+          scope={@scope}
+          focus={@desk_focus_view}
+        />
+      </PaneActions.put_away>
       <% end %>
     </div>
     </div>

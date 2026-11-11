@@ -34,7 +34,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def update(assigns, socket) do
     socket =
       socket
-      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
+      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node focus)a))
       |> assign_new(:limit, fn -> Rows.page() end)
       |> assign_new(:sort, fn -> nil end)
 
@@ -113,6 +113,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     >
       <div class="pane-header">
         <span class="pane-header-title">{title(assigns)}</span>
+        <BarkparkWeb.Studio.Desk.PaneActions.doc :if={@pane.kind == :doc} chain={@panes} index={@index} base={@base} focus={assigns[:focus]} />
         <.link
           :if={@index > 0}
           patch={Panes.close_from(@panes, @index, @base)}

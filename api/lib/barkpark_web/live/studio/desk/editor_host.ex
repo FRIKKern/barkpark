@@ -275,6 +275,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       >
         <span aria-hidden="true">×</span>
       </a>
+      <BarkparkWeb.Studio.Desk.PaneActions.doc chain={@chain} index={@view.index} base={@base} focus={@desk_focus_view} />
       <nav :if={@active_refs != []} class="dk-edit-refs dk-refs" aria-label={gettext("References")}>
         <.link
           :for={ref <- @active_refs}

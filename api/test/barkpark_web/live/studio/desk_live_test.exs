@@ -786,6 +786,164 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     end
   end
 
+  # J26: the TanStack Studio's names, so its own e2e specs find them.
+  describe "split pane and focus mode" do
+    @split "Split pane right"
+    @close_split "Close split pane"
+    @enter "Enter focus mode (hide navigation)"
+    @exit "Exit focus mode (show navigation)"
+
+    defp button(index, label), do: ~s([data-pane-index="#{index}"] button[aria-label="#{label}"])
+
+    # A pane drawn on the desk, not put away by focus mode.
+    defp shown?(view, index),
+      do: has_element?(view, ~s(#desk-panes > [data-pane-index="#{index}"]))
+
+    # No patch went out: the URL is the one the test is on.
+    defp refute_patch(view) do
+      assert_raise ArgumentError, ~r/but got none/, fn -> assert_patch(view, 50) end
+    end
+
+    test "split right prints the |, URL and draws two panes of one document", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      split = ~s([data-pane-index="2"] a[aria-label="#{@split}"])
+      assert has_element?(view, split <> ~s([href="#{base}/#{@type_name};#{a}|,"]))
+      refute has_element?(view, button(2, @close_split))
+
+      view |> element(split) |> render_click()
+      assert_patch(view, "#{base}/#{@type_name};#{a}|,")
+      settle(view)
+
+      # The read-only pane on the left, the editor on the right: one document.
+      assert has_element?(view, ~s(#desk-panes > [data-pane-index="2"][data-pane-kind="doc"]))
+      assert has_element?(view, ~s(#desk-panes > [data-pane-index="3"][data-pane-editing]))
+      refute has_element?(view, ~s([data-pane-index="4"]))
+      assert doc_shows?(view, 2, "About Alpha note")
+      assert doc_shows?(view, 3, "About Alpha note")
+
+      # Two panes of one document still have an id each.
+      ids =
+        Regex.scan(~r/<section[^>]* id="(desk-pane-[^"]+)"/, render(view),
+          capture: :all_but_first
+        )
+
+      assert length(ids) == 4
+      assert ids == Enum.uniq(ids)
+
+      # Both sides offer to close their split; the right one splits again.
+      assert has_element?(view, button(2, @close_split))
+      assert has_element?(view, button(3, @close_split))
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="3"] a[aria-label="#{@split}"][href="#{base}/#{@type_name};#{a}|,|,"])
+             )
+    end
+
+    test "close split goes back to the one pane", %{conn: conn, base: base, a: a} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}|,")
+      settle(view)
+
+      view |> element(button(3, @close_split)) |> render_click()
+      assert_patch(view, "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="2"][data-pane-editing]))
+      refute has_element?(view, ~s([data-pane-index="3"]))
+      refute has_element?(view, button(2, @close_split))
+    end
+
+    test "focus mode hides the other panes, keeps the URL, and its button brings them back", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+      refute has_element?(view, "#desk-panes[data-focus-mode]")
+      refute has_element?(view, button(2, @exit))
+
+      view |> element(button(2, @enter)) |> render_click()
+      refute_patch(view)
+
+      assert has_element?(view, "#desk-panes.panes[data-focus-mode]")
+      refute shown?(view, 0)
+      refute shown?(view, 1)
+      assert shown?(view, 2)
+      # Put away, not closed: the list is kept as it was read.
+      assert has_element?(view, ~s(#desk-panes [hidden] [data-pane-index="1"] a[data-desk-row]))
+
+      # The title line is a breadcrumb: a button for each pane it hides.
+      crumbs = ~s([data-pane-index="2"] nav.focus-crumbs button)
+      assert has_element?(view, crumbs, "Desk slice notes")
+      assert length(Regex.scan(~r/class="[^"]*\bcrumb\b/, render(view))) == 2
+
+      # The one way out takes the keyboard focus, and brings the panes back.
+      exit = button(2, @exit) <> ~s([aria-pressed="true"])
+      assert has_element?(view, exit)
+      refute has_element?(view, button(2, @enter))
+
+      view |> element(exit) |> render_click()
+      refute_patch(view)
+      refute has_element?(view, "#desk-panes[data-focus-mode]")
+      assert shown?(view, 0) and shown?(view, 1) and shown?(view, 2)
+      refute has_element?(view, "nav.focus-crumbs")
+    end
+
+    test "a breadcrumb leaves focus mode for its pane's URL, the document closed", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      view |> element(button(2, @enter)) |> render_click()
+      crumb = ~s([data-pane-index="2"] nav.focus-crumbs button)
+      view |> element(crumb, "Desk slice notes") |> render_click()
+      assert_patch(view, "#{base}/#{@type_name}")
+      settle(view)
+
+      refute has_element?(view, "#desk-panes[data-focus-mode]")
+      assert shown?(view, 0) and shown?(view, 1)
+      refute has_element?(view, ~s([data-pane-index="2"]))
+    end
+
+    test "another document's URL leaves focus mode", %{conn: conn, base: base, a: a, b: b} do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+      settle(view)
+
+      view |> element(button(2, @enter)) |> render_click()
+      assert has_element?(view, "#desk-panes[data-focus-mode]")
+
+      render_patch(view, "#{base}/#{@type_name};#{b}")
+      settle(view)
+      refute has_element?(view, "#desk-panes[data-focus-mode]")
+      assert shown?(view, 1)
+    end
+
+    test "a split side in focus mode is alone, its sibling put away", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}|,")
+      settle(view)
+
+      view |> element(button(2, @enter)) |> render_click()
+      assert shown?(view, 2)
+      refute shown?(view, 3)
+      assert has_element?(view, ~s(#desk-panes [hidden] [data-pane-index="3"][data-pane-editing]))
+      assert has_element?(view, button(2, @exit))
+    end
+  end
+
   test "someone who is not a workspace admin lands on the Studio", %{conn: conn, base: base} do
     studio = String.replace_suffix(base, "/_desk", "")
 
