@@ -111,7 +111,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     rescue
       error in [DBConnection.ConnectionError, Postgrex.Error] ->
         Logger.warning(
-          "desk: the editor could not read #{type}/#{id}: #{Exception.message(error)}"
+          "desk: the editor could not read #{inspect(target)}: #{Exception.message(error)}"
         )
 
         {:noreply, assign(socket, active: length(panes) - 1, editing: nil, edit_failed: true)}
