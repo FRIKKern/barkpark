@@ -40,12 +40,23 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
 
+  defmodule NotFound do
+    @moduledoc "Raised for a desk URL that names nothing: its dataset segment is not text."
+    defexception message: "no such dataset", plug_status: 404
+  end
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
+    # A dataset segment with a byte the database refuses as text names no
+    # dataset. Refused here, before the first read and before any redirect
+    # that would carry it.
+    Text.text?(dataset) || raise NotFound
+
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
     {:ok, socket} = EditorHost.mount(params, session, socket)
@@ -68,10 +79,17 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    # A live patch to such a dataset segment goes back to the desk it left.
+    if Text.text?(params["dataset"] || socket.assigns.dataset),
+      do: follow(params, uri, socket),
+      else: {:noreply, redirect(socket, to: socket.assigns.base)}
+  end
+
+  defp follow(params, uri, socket) do
     dataset = params["dataset"] || socket.assigns.dataset
     # The router hands the splat over as decoded path segments; a param value
     # with a slash in it (`inspect=sanity/structure/history`) spans several.
-    splat = params |> Map.get("panes", []) |> Enum.join("/") |> text_only()
+    splat = params |> Map.get("panes", []) |> Enum.join("/") |> Text.text_only()
     scope = ScopeHelpers.scope_opts(socket)
     desk = desk(socket.assigns.desk, dataset, scope)
     panes = Tree.parse(splat, desk.root)
@@ -127,7 +145,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
-  # and for a few panes only; a pane never shows a read older than that.
+  # and for a few panes only; a pane never shows a read older than that. The
+  # while is counted from the hover, as `bp-desk.js` counts when it forgets
+  # the row: counted from the landing, a slow read would refuse the next hover.
   @warm_ttl_ms 30_000
   @warm_cap 8
 
@@ -136,21 +156,28 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
-         splat = href |> String.replace_prefix(base <> "/", "") |> text_only(),
+         splat = href |> String.replace_prefix(base <> "/", "") |> Text.text_only(),
          chain = Tree.parse(splat, desk.root),
          pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
-         key = PaneComponent.data_key(pane, dataset, node),
-         false <- kept?(warm[key]) do
-      socket =
-        socket
-        |> assign(:warm, Map.put(warm, key, :reading))
-        |> start_async({:warm, key}, fn ->
-          PaneComponent.read_pane(pane, node, dataset, scope, :warm)
-        end)
+         key = PaneComponent.data_key(pane, dataset, node) do
+      now = System.monotonic_time(:millisecond)
+      hovered = assign(socket, :warm, Map.put(warm, key, {:reading, now}))
 
-      {:noreply, socket}
+      cond do
+        # Still out: nothing to read, but the row was hovered again just now.
+        reading?(warm[key]) ->
+          {:noreply, hovered}
+
+        # A read a pane may still show: no need to read again.
+        warm[key] && fresh?(warm[key], now) ->
+          {:noreply, socket}
+
+        true ->
+          read = fn -> PaneComponent.read_pane(pane, node, dataset, scope, :warm) end
+          {:noreply, start_async(hovered, {:warm, key}, read)}
+      end
     else
       _ -> {:noreply, socket}
     end
@@ -165,33 +192,38 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_async({:warm, key}, {:ok, data}, socket) do
     now = System.monotonic_time(:millisecond)
 
-    warm =
-      socket.assigns.warm
-      |> Map.put(key, {data, now})
-      |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
-      |> Enum.sort_by(
-        fn {_key, entry} -> if entry == :reading, do: now, else: elem(entry, 1) end,
-        :desc
-      )
-      |> Enum.take(@warm_cap)
-      |> Map.new()
+    case socket.assigns.warm[key] do
+      {:reading, hovered} ->
+        warm =
+          socket.assigns.warm
+          |> Map.put(key, {data, hovered})
+          |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
+          |> Enum.sort_by(
+            fn {_key, entry} -> if reading?(entry), do: now, else: elem(entry, 1) end,
+            :desc
+          )
+          |> Enum.take(@warm_cap)
+          |> Map.new()
 
-    {:noreply, assign(socket, :warm, warm)}
+        {:noreply, assign(socket, :warm, warm)}
+
+      # Dropped while it was out (someone saved): it may be older than the save.
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def handle_async({:warm, key}, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
 
-  # A read still running, or one a pane may still show: no need to read again.
-  defp kept?(nil), do: false
-  defp kept?(entry), do: fresh?(entry, System.monotonic_time(:millisecond))
-
-  defp fresh?(:reading, _now), do: true
+  defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
+
+  defp reading?(entry), do: match?({:reading, _hovered}, entry)
 
   defp warm(warm, key) do
     case warm[key] do
-      {data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
+      {%{} = data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
       _ -> nil
     end
   end
@@ -207,15 +239,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: {:noreply, socket |> LiveRefresh.refresh() |> assign(:warm, %{})}
 
   # A pane's read landed: the tab title follows the last pane's real title.
-  def handle_info({:desk_pane_title, index, title}, socket) when is_binary(title) do
-    case Enum.at(socket.assigns.desk_panes, index) do
+  # The pane is named by its id, not its place: a title that lands after a
+  # click replaced its pane is no longer anyone's.
+  def handle_info({:desk_pane_title, id, title}, socket) when is_binary(title) do
+    panes = socket.assigns.desk_panes
+
+    case Enum.find(panes, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
 
       view ->
-        socket = assign(socket, :titles, Map.put(socket.assigns.titles, view.id, title))
+        socket = assign(socket, :titles, Map.put(socket.assigns.titles, id, title))
 
-        if index == length(socket.assigns.desk_panes) - 1,
+        if view.index == length(panes) - 1,
           do: {:noreply, assign(socket, :page_title, title)},
           else: {:noreply, socket}
     end
@@ -267,25 +303,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </div>
     """
   end
-
-  # The pane reader percent-decodes the splat. One whose decoded bytes are not
-  # text the database takes (`x%FF` is not UTF-8; `x%00` is a NUL, which
-  # Postgres refuses the same way) is kept as the text it spells instead: its
-  # "%" signs are escaped, so the reader hands them back as they stand. Such
-  # bytes would fail in the database and cannot be sent to the page. The
-  # router has decoded once already, so the splat itself may carry such a
-  # byte: it is spelled back as its escape first.
-  defp text_only(splat) do
-    splat = if text?(splat), do: splat, else: spell(splat)
-    if text?(URI.decode(splat)), do: splat, else: String.replace(splat, "%", "%25")
-  end
-
-  defp text?(binary), do: String.valid?(binary) and not String.contains?(binary, <<0>>)
-
-  defp spell(<<0, rest::binary>>), do: "%00" <> spell(rest)
-  defp spell(<<char::utf8, rest::binary>>), do: <<char::utf8>> <> spell(rest)
-  defp spell(<<byte, rest::binary>>), do: "%" <> Base.encode16(<<byte>>) <> spell(rest)
-  defp spell(<<>>), do: ""
 
   # The tree is the same for every click in a dataset: build it once.
   defp desk(%{dataset: dataset} = desk, dataset, _scope), do: desk
