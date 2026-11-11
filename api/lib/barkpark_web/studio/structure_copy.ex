@@ -69,8 +69,6 @@ defmodule BarkparkWeb.Studio.StructureCopy do
 
   defp walk(other, _owned), do: other
 
-  # The root's fallback when the desk document names none (`Structure`).
-  defp title(%{id: "root", title: "Structure"}, _owned), do: gettext("Structure")
   defp title(%{id: "content-types"}, _owned), do: gettext("Content")
   defp title(%{id: "plugins"}, _owned), do: gettext("Plugins")
   defp title(%{id: "rest"}, _owned), do: gettext("…Rest")
