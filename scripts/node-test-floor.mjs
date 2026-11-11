@@ -48,7 +48,7 @@
 //      (`# tests` minus `# skipped`), refuses any file whose executed count is
 //      zero, and prints the skipped tally rather than swallowing it.
 //      NOT "any skip fails": a platform-conditional `t.skip()` guarding one
-//      control among many (tooling/grip/test/class-coverage.test.mjs's
+//      control among many (tooling/grip/test/class-coverage-controls.test.mjs's
 //      running-as-root arm) is a legitimate shape, and a file carrying one
 //      still has executed tests. The rule is per FILE, on ZERO.
 //      The `ran N tests` number in the summary line is the EXECUTED count —
