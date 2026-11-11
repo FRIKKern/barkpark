@@ -208,15 +208,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: {:noreply, socket |> LiveRefresh.refresh() |> assign(:warm, %{})}
 
   # A pane's read landed: the tab title follows the last pane's real title.
-  def handle_info({:desk_pane_title, index, title}, socket) when is_binary(title) do
-    case Enum.at(socket.assigns.desk_panes, index) do
+  # The pane is named by its id, not its place: a title that lands after a
+  # click replaced its pane is no longer anyone's.
+  def handle_info({:desk_pane_title, id, title}, socket) when is_binary(title) do
+    panes = socket.assigns.desk_panes
+
+    case Enum.find(panes, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
 
       view ->
-        socket = assign(socket, :titles, Map.put(socket.assigns.titles, view.id, title))
+        socket = assign(socket, :titles, Map.put(socket.assigns.titles, id, title))
 
-        if index == length(socket.assigns.desk_panes) - 1,
+        if view.index == length(panes) - 1,
           do: {:noreply, assign(socket, :page_title, title)},
           else: {:noreply, socket}
     end
