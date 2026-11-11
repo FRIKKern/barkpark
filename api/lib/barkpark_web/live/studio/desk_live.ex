@@ -127,7 +127,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
-  # and for a few panes only; a pane never shows a read older than that.
+  # and for a few panes only; a pane never shows a read older than that. The
+  # while is counted from the hover, as `bp-desk.js` counts when it forgets
+  # the row: counted from the landing, a slow read would refuse the next hover.
   @warm_ttl_ms 30_000
   @warm_cap 8
 
@@ -145,7 +147,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
          false <- kept?(warm[key]) do
       socket =
         socket
-        |> assign(:warm, Map.put(warm, key, :reading))
+        |> assign(:warm, Map.put(warm, key, {:reading, System.monotonic_time(:millisecond)}))
         |> start_async({:warm, key}, fn ->
           PaneComponent.read_pane(pane, node, dataset, scope, :warm)
         end)
@@ -165,12 +167,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_async({:warm, key}, {:ok, data}, socket) do
     now = System.monotonic_time(:millisecond)
 
+    hovered =
+      case socket.assigns.warm[key] do
+        {:reading, at} -> at
+        _ -> now
+      end
+
     warm =
       socket.assigns.warm
-      |> Map.put(key, {data, now})
+      |> Map.put(key, {data, hovered})
       |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
       |> Enum.sort_by(
-        fn {_key, entry} -> if entry == :reading, do: now, else: elem(entry, 1) end,
+        fn {_key, entry} -> if reading?(entry), do: now, else: elem(entry, 1) end,
         :desc
       )
       |> Enum.take(@warm_cap)
@@ -186,12 +194,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
   defp kept?(nil), do: false
   defp kept?(entry), do: fresh?(entry, System.monotonic_time(:millisecond))
 
-  defp fresh?(:reading, _now), do: true
+  defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
+
+  defp reading?(entry), do: match?({:reading, _hovered}, entry)
 
   defp warm(warm, key) do
     case warm[key] do
-      {data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
+      {%{} = data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
       _ -> nil
     end
   end
