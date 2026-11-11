@@ -66,6 +66,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
+      # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
+      |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
       |> LiveRefresh.init()
@@ -273,6 +275,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
+    <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
           own, is hosted in it. The two labels are `bp-desk.js`'s: it names

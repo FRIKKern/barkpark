@@ -126,6 +126,6 @@ defmodule BarkparkWeb.Studio.StudioTabTitleTest do
     refute root =~ "<title>Barkpark Studio</title>"
 
     assert root =~
-             ~s(<.live_title default="Studio" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>)
+             ~s(<.live_title default="Studio" suffix={assigns[:title_suffix] || " · Barkpark"}>{assigns[:page_title]}</.live_title>)
   end
 end
