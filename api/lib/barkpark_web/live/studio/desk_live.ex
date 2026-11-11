@@ -71,7 +71,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     dataset = params["dataset"] || socket.assigns.dataset
     # The router hands the splat over as decoded path segments; a param value
     # with a slash in it (`inspect=sanity/structure/history`) spans several.
-    splat = params |> Map.get("panes", []) |> Enum.join("/")
+    splat = params |> Map.get("panes", []) |> Enum.join("/") |> text_only()
     scope = ScopeHelpers.scope_opts(socket)
     desk = desk(socket.assigns.desk, dataset, scope)
     panes = Tree.parse(splat, desk.root)
@@ -134,7 +134,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
-         chain = href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root),
+         splat = href |> String.replace_prefix(base <> "/", "") |> text_only(),
+         chain = Tree.parse(splat, desk.root),
          pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
@@ -263,6 +264,25 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </div>
     """
   end
+
+  # The pane reader percent-decodes the splat. One whose decoded bytes are not
+  # text the database takes (`x%FF` is not UTF-8; `x%00` is a NUL, which
+  # Postgres refuses the same way) is kept as the text it spells instead: its
+  # "%" signs are escaped, so the reader hands them back as they stand. Such
+  # bytes would fail in the database and cannot be sent to the page. The
+  # router has decoded once already, so the splat itself may carry such a
+  # byte: it is spelled back as its escape first.
+  defp text_only(splat) do
+    splat = if text?(splat), do: splat, else: spell(splat)
+    if text?(URI.decode(splat)), do: splat, else: String.replace(splat, "%", "%25")
+  end
+
+  defp text?(binary), do: String.valid?(binary) and not String.contains?(binary, <<0>>)
+
+  defp spell(<<0, rest::binary>>), do: "%00" <> spell(rest)
+  defp spell(<<char::utf8, rest::binary>>), do: <<char::utf8>> <> spell(rest)
+  defp spell(<<byte, rest::binary>>), do: "%" <> Base.encode16(<<byte>>) <> spell(rest)
+  defp spell(<<>>), do: ""
 
   # The tree is the same for every click in a dataset: build it once.
   defp desk(%{dataset: dataset} = desk, dataset, _scope), do: desk
