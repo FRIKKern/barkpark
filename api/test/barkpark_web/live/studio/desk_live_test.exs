@@ -200,6 +200,47 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, "[data-desk-left-out]")
   end
 
+  test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
+    conn: conn,
+    base: base
+  } do
+    # The router decodes once and the pane reader once more: %25FF is the byte
+    # 0xFF by then. It must not reach a query or the page as that byte.
+    # Encoded once, the router alone makes the byte: the same holds. So it
+    # does for a NUL, which is UTF-8 but which Postgres refuses as text.
+    for bad <- ~w(x%25FF x%25C3%2528 x%25E2%2582 x,path=%25FF x%FF x%C3%28 x%00 x%2500) do
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"]), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+
+      # Not the last document of the chain: a read-only pane, which queries.
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad};y,type=#{@type_name}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+    end
+
+    # A link that decodes twice to text reads as it always did.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};x%2541")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"]), "xA")
+
+    # The hover path takes its href from the browser: the same bytes, once encoded.
+    view
+    |> element("#desk-panes")
+    |> render_hook("warm", %{"href" => "#{base}/#{@type_name};x%FF"})
+
+    settle(view)
+    assert String.valid?(render(view))
+  end
+
   test "closing a pane keeps the tab title the pane now last had read", %{
     conn: conn,
     base: base,
