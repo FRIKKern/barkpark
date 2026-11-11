@@ -290,7 +290,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
       <%= for view <- @desk_panes do %>
-      {if view.index == @active, do: EditorHost.pane(assigns, view)}
+      <%!-- The editor's section has an id of its own. On the pane's id the
+            patch turned the pane into the editor in place, so the browser
+            never let the pane's component go; a Back to that document then
+            drew the component as an empty section until the editor came
+            (row 5). --%>
+      {if view.index == @active, do: EditorHost.pane(assigns, %{view | id: view.id <> "-editor"})}
       <.live_component
         :if={view.index != @active}
         module={PaneComponent}
