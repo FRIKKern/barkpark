@@ -213,7 +213,11 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
       more?: list[:has_more] == true,
       sorts: list[:sort_options],
       sort: list[:active_sort],
-      refused: list[:filter_error]
+      refused: list[:filter_error],
+      # The list's "Create new" (J18), as the Studio's "+": not for a type
+      # whose desk block says `authorCreatable: false`.
+      creatable: list[:author_creatable] != false,
+      type_title: list[:type_title]
     }
   end
 
