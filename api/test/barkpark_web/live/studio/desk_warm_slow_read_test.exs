@@ -89,6 +89,14 @@ defmodule BarkparkWeb.Studio.DeskWarmSlowReadTest do
 
     # bp-desk.js forgot the row 30 s after the hover, so it asks again.
     view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
-    assert_receive {:reading, _task}, 1_000
+    assert_receive {:reading, task}, 1_000
+
+    # Hovered once more while that read is out: no second read, and the read
+    # is kept from this hover on, so the hover after it lands reads nothing.
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+    send(task, :go)
+    render_async(view, 5_000)
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+    refute_receive {:reading, _task}, 200
   end
 end

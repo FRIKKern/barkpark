@@ -143,16 +143,23 @@ defmodule BarkparkWeb.Studio.DeskLive do
          pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
          node = node_of(pane, desk),
-         key = PaneComponent.data_key(pane, dataset, node),
-         false <- kept?(warm[key]) do
-      socket =
-        socket
-        |> assign(:warm, Map.put(warm, key, {:reading, System.monotonic_time(:millisecond)}))
-        |> start_async({:warm, key}, fn ->
-          PaneComponent.read_pane(pane, node, dataset, scope, :warm)
-        end)
+         key = PaneComponent.data_key(pane, dataset, node) do
+      now = System.monotonic_time(:millisecond)
+      hovered = assign(socket, :warm, Map.put(warm, key, {:reading, now}))
 
-      {:noreply, socket}
+      cond do
+        # Still out: nothing to read, but the row was hovered again just now.
+        reading?(warm[key]) ->
+          {:noreply, hovered}
+
+        # A read a pane may still show: no need to read again.
+        warm[key] && fresh?(warm[key], now) ->
+          {:noreply, socket}
+
+        true ->
+          read = fn -> PaneComponent.read_pane(pane, node, dataset, scope, :warm) end
+          {:noreply, start_async(hovered, {:warm, key}, read)}
+      end
     else
       _ -> {:noreply, socket}
     end
@@ -167,32 +174,29 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_async({:warm, key}, {:ok, data}, socket) do
     now = System.monotonic_time(:millisecond)
 
-    hovered =
-      case socket.assigns.warm[key] do
-        {:reading, at} -> at
-        _ -> now
-      end
+    case socket.assigns.warm[key] do
+      {:reading, hovered} ->
+        warm =
+          socket.assigns.warm
+          |> Map.put(key, {data, hovered})
+          |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
+          |> Enum.sort_by(
+            fn {_key, entry} -> if reading?(entry), do: now, else: elem(entry, 1) end,
+            :desc
+          )
+          |> Enum.take(@warm_cap)
+          |> Map.new()
 
-    warm =
-      socket.assigns.warm
-      |> Map.put(key, {data, hovered})
-      |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
-      |> Enum.sort_by(
-        fn {_key, entry} -> if reading?(entry), do: now, else: elem(entry, 1) end,
-        :desc
-      )
-      |> Enum.take(@warm_cap)
-      |> Map.new()
+        {:noreply, assign(socket, :warm, warm)}
 
-    {:noreply, assign(socket, :warm, warm)}
+      # Dropped while it was out (someone saved): it may be older than the save.
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def handle_async({:warm, key}, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
-
-  # A read still running, or one a pane may still show: no need to read again.
-  defp kept?(nil), do: false
-  defp kept?(entry), do: fresh?(entry, System.monotonic_time(:millisecond))
 
   defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
