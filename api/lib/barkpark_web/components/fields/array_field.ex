@@ -328,6 +328,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           </li>
         <% end %>
       </ol>
+      <%!-- In the desk the button is named "Add item", the name Sanity's
+            Studio gives it (string-arrays J34); the "+" is decoration. --%>
       <button
         type="button"
         class="bp-array-btn bp-array-btn-add"
@@ -337,7 +339,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-field={@field.name}
         phx-value-path={@path}
         disabled={@readonly}
-      >+ <%= gettext("Add") %></button>
+      ><%= if @id_base do %><span aria-hidden="true">+ </span><%= gettext("Add item") %><% else %>+ <%= gettext("Add") %><% end %></button>
     </fieldset>
     """
   end
