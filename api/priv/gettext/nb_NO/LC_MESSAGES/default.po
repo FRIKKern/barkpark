@@ -13308,3 +13308,13 @@ msgstr "Sorter etter sist redigert"
 #, elixir-autogen, elixir-format
 msgid "Sort by Created"
 msgstr "Sorter etter opprettet"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new %{type}"
+msgstr "Opprett ny %{type}"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new document"
+msgstr "Opprett nytt dokument"

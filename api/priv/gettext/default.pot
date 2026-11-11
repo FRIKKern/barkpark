@@ -13303,3 +13303,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Sort by Created"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new %{type}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new document"
+msgstr ""
