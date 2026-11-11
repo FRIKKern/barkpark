@@ -328,6 +328,32 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
         <span class="pane-header-title">{@page_title}</span>
+        <%!-- Sanity's "Split pane right": the same document again, beside
+              this pane in its group (`Panes.split_right/3`). The desk edits
+              the last pane, so the editor moves to the new one and this pane
+              shows the document read-only. --%>
+        <.link
+          :if={!@edit_failed and !gone?(assigns)}
+          patch={Panes.split_right(@chain, @view.index, @base)}
+          class="dk-split icon-btn"
+          aria-label={gettext("Split pane right")}
+          data-tip={gettext("Split pane right")}
+        >
+          <BarkparkWeb.Icons.icon name="columns" size={14} />
+        </.link>
+        <%!-- In a split, "Close split pane" drops just this pane
+              (`Panes.close_split/3`); the close link drops it and the panes
+              to its right. --%>
+        <.link
+          :if={Panes.split?(@chain, @view.index)}
+          patch={Panes.close_split(@chain, @view.index, @base)}
+          class="dk-split icon-btn"
+          aria-label={gettext("Close split pane")}
+          data-tip={gettext("Close split pane")}
+          data-desk-close-split
+        >
+          <BarkparkWeb.Icons.icon name="x" size={14} />
+        </.link>
         <%!-- The document's actions, none over a document that could not be
               read or was deleted. --%>
         <DocMenu.menu
