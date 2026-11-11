@@ -99,4 +99,61 @@ defmodule BarkparkWeb.Studio.DeskWarmSlowReadTest do
     view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
     refute_receive {:reading, _task}, 200
   end
+
+  test "a hover's read that was out when someone saved is never kept",
+       %{conn: conn, base: base, a: a, b: b} do
+    test = self()
+
+    # Each read of Beta says which one it is and waits to be let go.
+    Application.put_env(:barkpark, PaneComponent,
+      reader: fn
+        %{kind: :doc, id: ^b}, _node, _dataset, _scope, _title ->
+          send(test, {:reading, self()})
+
+          receive do
+            {:go, title} -> %{title: title}
+          end
+
+        pane, node, dataset, scope, title ->
+          PaneComponent.read(pane, node, dataset, scope, title)
+      end
+    )
+
+    on_exit(fn -> Application.delete_env(:barkpark, PaneComponent) end)
+
+    {:ok, view, _html} = live(conn, "#{base}/#{@type_name};#{a}")
+    render_async(view, 5_000)
+
+    kept = fn ->
+      for {_key, {%{title: title}, _at}} <- :sys.get_state(view.pid).socket.assigns.warm,
+          do: title
+    end
+
+    beta = "#{base}/#{@type_name};#{b}"
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+    assert_receive {:reading, before_save}, 5_000
+
+    # Someone saves: the page drops what it kept. The row is hovered again
+    # and read again; then the read from before the save lands.
+    send(view.pid, :desk_refresh)
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+    assert_receive {:reading, after_save}, 5_000
+    ref = Process.monitor(before_save)
+    send(before_save, {:go, "before the save"})
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
+    assert kept.() == [], "the read from before the save is not kept"
+
+    send(after_save, {:go, "after the save"})
+    render_async(view, 5_000)
+    assert kept.() == ["after the save"]
+
+    # With no second hover the old read is dropped just the same.
+    send(view.pid, :desk_refresh)
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => beta})
+    assert_receive {:reading, lone}, 5_000
+    send(view.pid, :desk_refresh)
+    send(lone, {:go, "before the second save"})
+    render_async(view, 5_000)
+    assert kept.() == []
+  end
 end
