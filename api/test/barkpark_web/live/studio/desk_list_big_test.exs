@@ -153,6 +153,8 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
     view = open(conn, "#{base}/#{@type_name}")
     assert await_rows(view, 100) == 100
     refute has_element?(view, "[data-pane-index=\"1\"] .dk-list-max")
+    # Room below the last row while there are more, so a fast wheel scrolls on.
+    assert has_element?(view, ~s([data-pane-index="1"] .dk-list-more[aria-hidden="true"]))
 
     for want <- 200..2_000//100 do
       scroll_to_bottom(view)
@@ -171,6 +173,8 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
              ~s([data-pane-index="1"] .dk-list-max),
              "Displaying a maximum of 2000 documents"
            )
+
+    refute has_element?(view, ~s([data-pane-index="1"] .dk-list-more))
 
     # At the most it holds, a scroll to the bottom reads nothing more.
     scroll_to_bottom(view)
@@ -192,5 +196,6 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
     Process.sleep(100)
     assert await_rows(view, 150) == 150
     refute has_element?(view, "[data-pane-index=\"1\"] .dk-list-max")
+    refute has_element?(view, ~s([data-pane-index="1"] .dk-list-more))
   end
 end

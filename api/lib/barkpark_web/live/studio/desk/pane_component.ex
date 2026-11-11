@@ -313,6 +313,18 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </div>
             <% end %>
           </div>
+          <%!-- Room below the last row while there are more. LiveView's scroll
+               hook asks for more once the last row is wholly inside the pane,
+               which it never is flush with the pane's bottom; and a pane
+               scrolled to its very end hands a fast wheel to the page, so the
+               rows read below would never be scrolled to. --%>
+          <div
+            :if={@pane.kind == :list && @data.result[:more?] == true && !capped?(assigns)}
+            class="dk-list-more"
+            aria-hidden="true"
+            style="height: 480px"
+          >
+          </div>
           <%!-- As the TanStack Studio's list (and Sanity's): it holds 2,000;
                its search reaches the rest. --%>
           <p :if={capped?(assigns)} class="dk-note dk-list-max" role="status">
