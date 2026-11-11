@@ -650,6 +650,13 @@
       hook._layout = function () {
         if (hook._focus && hook._focus.path !== window.location.pathname) hook._focus = null;
         var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
+        // A focused strip the layout itself opened (the window widened) was
+        // lent a tabindex there: the pane holds it as an opened strip does,
+        // so it is taken back when the focus leaves.
+        var lent = root.ownerDocument.activeElement;
+        if (!hook._held && lent && lent.parentNode === root && lent.getAttribute("tabindex") === "-1" && lent.hasAttribute("data-pane-index") && !lent.hasAttribute("data-pane-collapsed")) {
+          hook._held = { path: window.location.pathname, index: lent.getAttribute("data-pane-index") };
+        }
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
         // A strip that opened is no control: its tip goes. Any other shown tip
