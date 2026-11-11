@@ -319,7 +319,8 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     scope =
       case conn.path_params["project_slug"] do
         slug when is_binary(slug) ->
-          case Tenancy.get_project(workspace.slug, slug) do
+          # A slug that is not text names no project: no read (22021).
+          case Text.text?(slug) && Tenancy.get_project(workspace.slug, slug) do
             %{id: pid} -> Map.put(scope, :project_id, pid)
             _ -> scope
           end

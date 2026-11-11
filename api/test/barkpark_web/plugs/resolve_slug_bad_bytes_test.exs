@@ -1,8 +1,10 @@
 defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
   @moduledoc """
   task-c79c4a8cbbc38a58: a workspace or project slug that Postgres refuses as
-  text (not UTF-8, or a NUL) names nothing. It gets the answer an unknown slug
-  gets on that route and never reaches a query (it raised Postgrex 22021).
+  text (not UTF-8, or a NUL) names nothing. In ResolveWorkspace, ResolveProject
+  and LiveScope it gets the answer an unknown slug gets on that route, where
+  it raised Postgrex 22021. The answers are what is compared here; a read
+  with such bytes would raise.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -15,8 +17,8 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
   # the segment once.
   @bad ~w(default%FF default%00 %00 %C3%28 %E2%82 %C0%AF a%FFb%00c)
 
-  # Every route family that takes the slug: the Studio, the bare workspace
-  # URL, the scoped API.
+  # Routes of three families that take the slug: the Studio, the bare
+  # workspace URL, the scoped API. Not every `/w/` route.
   defp routes(ws, proj) do
     [
       "/w/#{ws}/p/#{proj}/d/production/studio",
@@ -64,6 +66,35 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
 
     conn = get(admin(conn), "/w/default/p/default%00/v1/data/query/production/post")
     assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
+  end
+
+  # ResolveWorkspace reads the project itself for a signed-in account that is
+  # not a member, to weigh its grants, before ResolveProject runs.
+  test "a project slug that is not text is not read for a signed-in non-member" do
+    ws = Barkpark.TenancyFixtures.create_workspace!()
+
+    {:ok, user} =
+      Barkpark.Accounts.register_user(%{
+        email: "slug-#{System.unique_integer([:positive])}@example.com",
+        password: "correct horse battery staple"
+      })
+
+    answer = fn project_slug ->
+      params = %{"workspace_slug" => ws.slug, "project_slug" => project_slug}
+
+      conn =
+        %{build_conn() | path_params: params, params: params}
+        |> Plug.Conn.assign(:current_user, user)
+        |> BarkparkWeb.Plugs.ResolveWorkspace.call(BarkparkWeb.Plugs.ResolveWorkspace.init([]))
+
+      {conn.halted, conn.status}
+    end
+
+    for bad <- [<<"default", 0xFF>>, <<"default", 0>>, <<0>>, <<0xC3, 0x28>>, <<0xC0, 0xAF>>] do
+      assert answer.(bad) == answer.("no-such-proj"), inspect(bad)
+    end
+
+    assert {true, 403} = answer.("no-such-proj")
   end
 
   test "a live patch to such a slug is denied as one to an unknown slug is", %{conn: conn} do
