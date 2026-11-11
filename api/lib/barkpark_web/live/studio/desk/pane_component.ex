@@ -164,7 +164,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
     do: {:noreply, assign(socket, :in_flight, false)}
 
+  # The page reads a failed pane again by itself (`LiveRefresh`, J50).
   def handle_async(:load, {:exit, reason}, socket) do
+    send(self(), {:desk_pane_failed, socket.assigns.id})
     data = AsyncResult.failed(socket.assigns.data, reason)
     {:noreply, socket |> assign(:data, data) |> share() |> landed()}
   end
