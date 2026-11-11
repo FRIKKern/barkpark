@@ -13288,3 +13288,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open document actions"
+msgstr ""

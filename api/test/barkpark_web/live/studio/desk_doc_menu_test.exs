@@ -5,6 +5,11 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
   "Document actions") and pick Publish, Unpublish, History, Duplicate or
   Delete from a menu. The desk had no such button, so 8 specs stopped there.
   Each item sends the Studio's own event; the Studio decides which exist.
+
+  R24: Sanity's pane footer has the same actions behind "Open document
+  actions" (`DocumentPane`); the specs click it by that exact name, or as the
+  LAST "Document actions" button. The desk draws it below the editor. The
+  old Studio has neither.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -16,7 +21,10 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
   @dataset "production"
   @button ~s([data-pane-editing] .pane-header button[aria-label="Show document actions"][aria-haspopup="menu"][popovertarget])
-  @menu ~s([data-pane-editing] [role="menu"][popover])
+  @menu ~s([data-pane-editing] .pane-header [role="menu"][popover])
+  @footer ~s([data-pane-editing] .dk-edit-footer)
+  @footer_button ~s(#{@footer} button[aria-label="Open document actions"][aria-haspopup="menu"][popovertarget])
+  @footer_menu ~s(#{@footer} [role="menu"][popover])
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -55,8 +63,8 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
   defp eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
 
-  defp items(view) do
-    html = view |> element(@menu) |> render()
+  defp items(view, menu \\ @menu) do
+    html = view |> element(menu) |> render()
     for [_, label] <- Regex.scan(~r/role="menuitem"[^>]*>\s*([^<]+?)\s*</, html), do: label
   end
 
@@ -98,5 +106,50 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
     assert eventually(fn -> has_element?(view, "[data-desk-edit-gone]") end)
     refute has_element?(view, @button)
+    refute has_element?(view, @footer)
+  end
+
+  test "the edit pane's footer has an Open document actions button with the same items", c do
+    view = open(c, c.type, c.id)
+
+    assert has_element?(view, @footer_button)
+    # Not a header icon button: J57 counts only those.
+    refute has_element?(view, ~s(#{@footer_button}.icon-btn))
+
+    menu_id =
+      view
+      |> element(@footer_menu)
+      |> render()
+      |> then(&Regex.run(~r/id="([^"]+)"/, &1))
+      |> List.last()
+
+    assert has_element?(view, ~s(#{@footer_button}[popovertarget="#{menu_id}"]))
+    assert items(view, @footer_menu) == items(view)
+
+    # The specs' `getByRole('button', {name: 'Document actions'}).last()` is this one.
+    html = view |> element("[data-pane-editing]") |> render()
+    names = for [_, n] <- Regex.scan(~r/aria-label="([^"]*[Dd]ocument actions)"/, html), do: n
+    assert List.last(names) == "Open document actions", inspect(names)
+  end
+
+  test "the footer's Duplicate makes a copy too", c do
+    view = open(c, c.type, c.id)
+    count = fn -> length(Content.list_documents(c.type, @dataset, perspective: :drafts)) end
+    before = count.()
+
+    view |> element(~s(#{@footer_menu} [data-desk-doc-action="duplicate-doc"])) |> render_click()
+
+    assert eventually(fn -> count.() == before + 1 end), "no copy was made"
+  end
+
+  # Control: the old Studio's editor draws neither button.
+  test "the old Studio has no document actions menu", c do
+    {:ok, _view, html} =
+      live(c.conn, String.replace(c.base, "/_desk", "") <> "/#{c.type}/#{c.id}")
+
+    assert html =~ ~s(id="editor-form"), "the old Studio's editor did not render"
+    refute html =~ "Open document actions"
+    refute html =~ "Show document actions"
+    refute html =~ "dk-edit-footer"
   end
 end

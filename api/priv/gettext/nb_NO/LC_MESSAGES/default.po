@@ -13293,3 +13293,8 @@ msgstr "Viser maksimalt %{count} dokumenter"
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
 msgstr "Vis dokumenthandlinger"
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open document actions"
+msgstr "Åpne dokumenthandlinger"

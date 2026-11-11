@@ -31,27 +31,34 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
 
   def items(_assigns), do: []
 
-  # `icon-btn` and `data-tip` are the names Sanity's specs count header icon
-  # buttons by (previews-tips J57); no style rides them here.
-  # One edit pane is open at a time, so one anchor name will do; a pane id
-  # (`desk-pane-2-doc:post;x`) is not a CSS name.
+  # Two places draw it, with Sanity's two names: the header's "Show document
+  # actions" (DocHeaderMenu) and the footer's "Open document actions"
+  # (DocumentPane). `icon-btn` and `data-tip` are the names Sanity's specs
+  # count header icon buttons by (previews-tips J57), so only the header's
+  # carries `icon-btn`; no style rides it here. One edit pane is open at a
+  # time, so one anchor name per place will do; a pane id
+  # (`desk-pane-2-doc:post;x`) is not a CSS name. The footer's menu opens
+  # upwards.
   attr :id, :string, required: true
   attr :items, :list, required: true
+  attr :place, :atom, default: :header, values: [:header, :footer]
 
   @doc "The \"…\" button and its menu."
   def menu(assigns) do
+    assigns = assign(assigns, place(assigns.place))
+
     ~H"""
     <div :if={@items != []} class="dk-doc-menu">
       <button
         type="button"
         id={"#{@id}-button"}
-        class="dk-doc-menu-button icon-btn"
+        class={@button_class}
         popovertarget={@id}
         aria-haspopup="menu"
         aria-expanded="false"
-        aria-label={gettext("Show document actions")}
-        data-tip={gettext("Show document actions")}
-        style="anchor-name: --dk-doc-menu"
+        aria-label={@label}
+        data-tip={@label}
+        style={"anchor-name: #{@anchor}"}
       >
         <span aria-hidden="true">…</span>
       </button>
@@ -61,7 +68,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
         role="menu"
         aria-labelledby={"#{@id}-button"}
         class="dk-doc-menu-list"
-        style="position-anchor: --dk-doc-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"
+        style={"position-anchor: #{@anchor}; inset: auto; #{@at}; right: anchor(right); #{@margin}"}
       >
         <button
           :for={item <- @items}
@@ -79,4 +86,22 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
     </div>
     """
   end
+
+  defp place(:header),
+    do: %{
+      label: gettext("Show document actions"),
+      button_class: "dk-doc-menu-button icon-btn",
+      anchor: "--dk-doc-menu",
+      at: "top: anchor(bottom)",
+      margin: "margin: 4px 0 0"
+    }
+
+  defp place(:footer),
+    do: %{
+      label: gettext("Open document actions"),
+      button_class: "dk-doc-menu-button",
+      anchor: "--dk-doc-menu-footer",
+      at: "bottom: anchor(top)",
+      margin: "margin: 0 0 4px"
+    }
 end
