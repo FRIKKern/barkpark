@@ -430,6 +430,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           {Components.studio_live_shell(assigns)}
         <% end %>
       </div>
+      <%!-- Sanity's pane footer has the same actions behind its own "…"
+            ("Open document actions"); the desk draws only that button there.
+            It is the pane's last child, so its coming and going moves nothing. --%>
+      <div :if={!@edit_failed and !gone?(assigns) and DocMenu.items(assigns) != []}
+        id={"#{@view.id}-footer"}
+        class="dk-edit-footer"
+      >
+        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={DocMenu.items(assigns)} place={:footer} />
+      </div>
     </section>
     """
   end

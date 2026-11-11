@@ -34,6 +34,8 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
             f.("related", "reference", %{"refType" => type}),
             f.("body", "richText", %{"editor" => "blocks"}),
             f.("tags", "arrayOf", %{"of" => [%{"type" => "string"}]}),
+            # The rig's shape: `of` one member, not a list (the plain row list).
+            f.("highlights", "arrayOf", %{"ordered" => true, "of" => %{"type" => "string"}}),
             f.("cta", "composite", %{
               "fields" => [
                 %{"name" => "kind", "type" => "select", "options" => ["url", "internal"]},
@@ -67,6 +69,7 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
           "cta" => %{"kind" => "url", "url" => "https://x"},
           "links" => [%{"_key" => "k1", "title" => "L"}],
           "tags" => ["a"],
+          "highlights" => ["One"],
           "blurb" => %{"nob" => "Hei"}
         },
         @dataset
@@ -108,6 +111,17 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
     view = desk(c)
     assert has_element?(view, ~s(#{@form} .field ol.bp-array-rows[id="links"]))
     assert has_element?(view, ~s(#{@form} .field ol.bp-array-rows[id="tags"]))
+  end
+
+  test "a string array's add button is named Add item, the + only decoration", c do
+    view = desk(c)
+    add = ~s(#{@form} button.bp-array-btn-add[phx-value-field="highlights"])
+    html = view |> element(add) |> render()
+    assert html =~ ~s(<span aria-hidden="true">+ </span>Add item</button>)
+
+    {:ok, studio, _html} = live(c.conn, c.studio)
+    old = studio |> element(~s(button.bp-array-btn-add[phx-value-field="highlights"])) |> render()
+    assert old =~ ~s(>+ Add</button>)
   end
 
   test "image, block canvas, reference and localized text carry the path", c do
