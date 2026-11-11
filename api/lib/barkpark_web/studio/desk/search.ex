@@ -44,8 +44,9 @@ defmodule BarkparkWeb.Studio.Desk.Search do
           class="pane-item"
           data-desk-hit
         >
+          <%!-- The title is an element of its own: a spec finds a hit by it. --%>
           <span class="pane-item-label">
-            {hit.title}
+            <span class="dk-row-title">{hit.title}</span>
             <span class="dk-row-sub">{hit.type_title}</span>
           </span>
         </.link>

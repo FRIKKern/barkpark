@@ -106,7 +106,7 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
     view
     |> element(~s([data-pane-index="1"] .pane-body))
     |> render()
-    |> then(&Regex.scan(~r/<span class="pane-item-label">\s*([^<\s][^<]*?)\s*</, &1))
+    |> then(&Regex.scan(~r/<span class="dk-row-title">([^<]+?)</, &1))
     |> Enum.map(fn [_, title] -> title end)
   end
 

@@ -121,11 +121,8 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
   defp titles(view) do
     view
     |> doc()
-    |> LazyHTML.query(@rows <> " .pane-item-label")
-    |> Enum.map(fn label ->
-      label |> LazyHTML.child_nodes() |> LazyHTML.text() |> String.trim()
-    end)
-    |> Enum.map(&(&1 |> String.split("\n") |> hd() |> String.trim()))
+    |> LazyHTML.query(@rows <> " .pane-item-label .dk-row-title")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
   end
 
   defp box_attr(view, name) do
