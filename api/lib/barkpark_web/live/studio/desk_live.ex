@@ -66,6 +66,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
+      # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
+      |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
       |> LiveRefresh.init()

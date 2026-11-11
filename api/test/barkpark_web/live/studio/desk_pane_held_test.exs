@@ -59,17 +59,23 @@ defmodule BarkparkWeb.Studio.DeskPaneHeldTest do
     # Two clicks reach the page before it handles either: the document opens
     # (its pane is held for the editor), then it is split in three, so that
     # pane is the first of the split and the editor's pane is another.
-    queued = fn -> view.pid |> Process.info(:message_queue_len) |> elem(1) end
+    # The clicks in the page's queue, by name: a stray message is not one.
+    patches = fn ->
+      {:messages, queue} = Process.info(view.pid, :messages)
+      Enum.count(queue, &match?(%Phoenix.Socket.Message{event: "live_patch"}, &1))
+    end
+
     :ok = :sys.suspend(view.pid)
 
     clicks =
       for splat <- ["#{@type_name};#{a}", "#{@type_name};#{a}|,view=json|,view=json"] do
-        before = queued.()
+        before = patches.()
         click = Task.async(fn -> render_patch(view, "#{base}/#{splat}") end)
-        wait(fn -> queued.() > before end)
+        wait(fn -> patches.() == before + 1 end)
         click
       end
 
+    assert patches.() == 2, "both clicks wait in the page's queue, neither handled yet"
     :ok = :sys.resume(view.pid)
     Task.await_many(clicks)
     render_async(view, 5_000)
@@ -82,7 +88,7 @@ defmodule BarkparkWeb.Studio.DeskPaneHeldTest do
   defp wait(check, tries \\ 100) do
     cond do
       check.() -> :ok
-      tries == 0 -> flunk("the page's queue never filled")
+      tries == 0 -> flunk("the click never reached the page's queue")
       true -> Process.sleep(20) && wait(check, tries - 1)
     end
   end
