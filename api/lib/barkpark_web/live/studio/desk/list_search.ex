@@ -35,7 +35,13 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
     |> Phoenix.Component.assign_new(:q, fn -> "" end)
     |> Phoenix.Component.assign_new(:lit, fn -> 0 end)
     |> Phoenix.Component.assign_new(:open_when_drawn, fn -> false end)
+    |> Phoenix.Component.assign_new(:search_due, fn -> 0 end)
+    |> Phoenix.Component.assign_new(:reading, fn -> nil end)
   end
+
+  # How long typing must pause before the pane reads the search, as the
+  # TanStack Studio waits before it asks the server.
+  @pause_ms 150
 
   @doc "The search a pane's read is asked for: the trimmed text, or nil for none."
   @spec term(String.t() | nil) :: String.t() | nil
@@ -72,12 +78,17 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
   attr :searching, :boolean, required: true
   attr :myself, :any, required: true
 
-  @doc "The box. Its keys go to the pane (`phx-target`); the text is debounced."
+  @doc """
+  The box. Every key goes to the pane (`phx-target`) at once, with no
+  `phx-debounce`: LiveView debounces an element's events in ONE cycle, so a
+  debounced box drops the text typed just before an ArrowDown. The pane waits
+  for a pause in typing itself (`due/3`).
+  """
   def box(assigns) do
     assigns = assign(assigns, :input, assigns.id <> "-q")
 
     ~H"""
-    <div class="search dk-list-search" phx-keydown="list-search-key" phx-target={@myself}>
+    <div class="search dk-list-search">
       <form
         id={@id <> "-search"}
         phx-change="list-search"
@@ -99,7 +110,8 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
           aria-expanded={to_string(@searching)}
           aria-controls={rows_id(@id)}
           aria-activedescendant={@searching && item_id(@id, @lit)}
-          phx-debounce="150"
+          phx-keydown="list-search-key"
+          phx-target={@myself}
         />
         <%!-- A reset button: the browser empties the box itself (a focused
              input keeps its value through a patch), and LiveView sends the
@@ -136,8 +148,23 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
   """
   @spec handle(String.t(), map(), Phoenix.LiveView.Socket.t(), (term() -> term())) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
-  def handle("list-search", %{"q" => q}, socket, reload) when is_binary(q),
-    do: {:noreply, put_query(socket, q, false, reload)}
+  # Typing: the text is the pane's at once (Enter reads it), the search is
+  # read once typing pauses.
+  def handle("list-search", %{"q" => q}, socket, _reload) when is_binary(q) do
+    if term(q) == term(socket.assigns.q) do
+      {:noreply, assign(socket, q: q, open_when_drawn: false)}
+    else
+      due = socket.assigns.search_due + 1
+
+      Phoenix.LiveView.send_update_after(
+        socket.assigns.myself,
+        %{list_search_due: due},
+        @pause_ms
+      )
+
+      {:noreply, assign(socket, q: q, lit: 0, open_when_drawn: false, search_due: due)}
+    end
+  end
 
   def handle("list-search-clear", _params, socket, reload),
     do: {:noreply, put_query(socket, "", false, reload)}
@@ -163,6 +190,18 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
 
   def handle(_event, _params, socket, _reload), do: {:noreply, socket}
 
+  @doc """
+  Typing paused (`send_update_after/3` from a `list-search` change): read the
+  search, unless a later key or Enter or Clear came since.
+  """
+  @spec due(Phoenix.LiveView.Socket.t(), non_neg_integer(), (term() -> term())) ::
+          Phoenix.LiveView.Socket.t()
+  def due(socket, due, reload) do
+    if due == socket.assigns.search_due and term(socket.assigns.q) != searched(socket),
+      do: reload.(socket),
+      else: socket
+  end
+
   @doc "A read landed: keep the light on a row, and open it if Enter asked for that."
   @spec landed(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def landed(socket) do
@@ -173,16 +212,21 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
       else: socket
   end
 
+  # Enter or Clear: read now. A search typed but not yet read (its pause has
+  # not come) is read too; a later `due/3` for it finds it read.
   defp put_query(socket, q, open?, reload) do
-    before = term(socket.assigns.q)
-    socket = assign(socket, q: q, open_when_drawn: open?)
+    socket =
+      assign(socket, q: q, open_when_drawn: open?, search_due: socket.assigns.search_due + 1)
 
     cond do
-      term(q) == before and open? -> landed(socket)
-      term(q) == before -> socket
+      term(q) == searched(socket) and open? -> landed(socket)
+      term(q) == searched(socket) -> socket
       true -> socket |> assign(:lit, 0) |> reload.()
     end
   end
+
+  # The search the pane's last read asked for (in flight or landed).
+  defp searched(socket), do: socket.assigns[:reading]
 
   defp open_lit(socket) do
     %{panes: panes, index: index, base: base, lit: lit} = socket.assigns

@@ -32,6 +32,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def update(%{refresh: _}, socket), do: {:ok, load(socket)}
 
+  # Typing in the list's search box paused (`ListSearch`).
+  def update(%{list_search_due: due}, socket), do: {:ok, ListSearch.due(socket, due, &load/1)}
+
   def update(assigns, socket) do
     socket =
       socket
@@ -308,6 +311,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
     # A list asked for more rows or another order keeps its rows on screen.
     socket
+    |> assign(:reading, q || nil)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
     |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
   end

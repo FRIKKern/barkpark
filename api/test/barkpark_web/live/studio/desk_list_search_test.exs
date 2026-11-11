@@ -143,7 +143,7 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
   end
 
   defp key(view, key),
-    do: view |> element(@list <> " .dk-list-search") |> render_keydown(%{"key" => key})
+    do: view |> element(@box) |> render_keydown(%{"key" => key})
 
   # A search reads in the pane's own task: wait for the rows themselves.
   defp rows_become(view, expected) do
@@ -292,6 +292,13 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
     assert lit == pane <> "-item-0", "J24: typing lights the first result"
     # The id is on the row element around the row's link, and that row is lit.
     assert has_element?(view, ~s([id="#{lit}"].dk-row.dk-lit > a[data-desk-row]))
+
+    # LiveView fires a key binding on the event's own target only, and
+    # debounces an element's events in one cycle: the keys sit on the box,
+    # which has no phx-debounce (a debounced box drops the text typed just
+    # before an ArrowDown).
+    assert has_element?(view, @box <> ~s([phx-keydown="list-search-key"]))
+    refute has_element?(view, @box <> "[phx-debounce]")
 
     key(view, "ArrowDown")
     lit = box_attr(view, "aria-activedescendant")
