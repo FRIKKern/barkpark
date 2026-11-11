@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
 
   alias BarkparkWeb.Studio.ConnectHandoff
   alias BarkparkWeb.Studio.Desk.PaneComponent
+  alias BarkparkWeb.Studio.Desk.Rows
 
   @doc """
   Puts the first page of each list pane in `views` into the page's `warm`
@@ -43,7 +44,9 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
   end
 
   defp handoff(socket, chain, dataset, scope, lists) do
-    queries = for view <- lists, do: {view.key, query(view, chain)}
+    sorts = socket.assigns[:list_sorts] || %{}
+    lists = for view <- lists, do: Map.put(view, :sort, sorts[view.pane[:type]])
+    queries = for view <- lists, do: {view.key, with_query(view, chain).query}
     args = {:desk_first, dataset, queries, Gettext.get_locale(BarkparkWeb.Gettext)}
 
     ConnectHandoff.build(socket, scope, args, fn ->
@@ -52,12 +55,15 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
     end)
   end
 
-  defp query(view, chain), do: PaneComponent.with_query(view.pane, chain, view.index).query
+  # As the pane itself asks: its first page, in the sort the editor keeps
+  # for the type (`list_sorts`, the list menu's), else the declared order.
+  defp with_query(view, chain),
+    do: PaneComponent.with_query(view.pane, chain, view.index, Rows.page(), view.sort)
 
   # A list that fails to read is left to its pane, which says so.
   defp read(lists, chain, dataset, scope) do
     for view <- lists,
-        pane = PaneComponent.with_query(view.pane, chain, view.index),
+        pane = with_query(view, chain),
         %{} = data <- [safe_read(pane, view.node, dataset, scope)],
         into: %{},
         do: {view.key, data}
