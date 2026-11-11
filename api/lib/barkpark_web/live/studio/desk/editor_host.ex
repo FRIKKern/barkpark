@@ -11,7 +11,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   stay read-only panes.
 
   `DeskLive` keeps the callbacks and hands each one here; this module owns
-  the `active`, `editing`, `pending`, `active_refs` and `desk_nav` assigns.
+  the `active`, `editing`, `pending`, `active_refs`, `desk_ref_ids` and
+  `desk_nav` assigns.
 
   When a Studio handler navigates (delete, duplicate, discard, open a
   backlink, new document), it prints a Studio path under the desk's base
@@ -37,7 +38,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def mount(params, session, socket) do
     {:ok, socket} = StudioLive.mount(params, session, socket)
-    {:ok, assign(socket, active: nil, editing: nil, pending: nil, active_refs: [], desk_nav: nil)}
+    {:ok, socket |> assign(active: nil, editing: nil, pending: nil) |> put_away()}
   end
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
@@ -67,16 +68,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
       # A new document: the page sends itself `{:desk_edit, target}` for it.
       target ->
-        assign(socket, active: nil, editing: nil, pending: target, active_refs: [], desk_nav: nil)
+        socket |> assign(active: nil, editing: nil, pending: target) |> put_away()
 
       true ->
-        assign(socket, active: nil, editing: nil, pending: nil, active_refs: [], desk_nav: nil)
+        socket |> assign(active: nil, editing: nil, pending: nil) |> put_away()
     end
   end
 
+  # No document is handed to the Studio: no path, no reference links.
+  defp put_away(socket), do: assign(socket, active_refs: [], desk_ref_ids: nil, desk_nav: nil)
+
   @doc "Loads the pending document into the Studio's editor."
   def edit(%{assigns: %{pending: target}} = socket, target) do
-    %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri, scope: scope} = socket.assigns
+    %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri} = socket.assigns
     %{id: id, type: type} = pane = List.last(panes)
     path = (pane[:node] && [pane.node]) || Tree.path_to_type(desk.root, type) ++ [id]
 
@@ -85,27 +89,33 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> StudioLive.handle_params(uri, assign(socket, :desk_nav, path))
       |> ours(:settled)
 
-    {:noreply,
-     assign(socket,
-       active: length(panes) - 1,
-       editing: target,
-       pending: nil,
-       active_refs: refs(socket.assigns, dataset, scope)
-     )}
+    {:noreply, assign(socket, active: length(panes) - 1, editing: target, pending: nil)}
   end
 
   # The URL moved on before the editor was loaded.
   def edit(socket, _stale_target), do: {:noreply, socket}
 
   # The document's references, as links that open the next pane: the
-  # Studio's reference fields pick a target, they do not follow one.
-  defp refs(%{editor_doc: %{} = doc, editor_schema: %{} = schema}, dataset, scope) do
-    for {field, targets} <- Refs.resolve(doc, schema, dataset, scope),
-        %{type: ref_type} = ref when is_binary(ref_type) <- targets,
-        do: Map.put(ref, :path, field)
+  # Studio's reference fields pick a target, they do not follow one. The
+  # links follow what the editor holds: a pick or a clear it saved shows at
+  # once. The targets are read again (one query) only when the ids changed,
+  # so a save of any other field reads nothing.
+  defp strip(%{assigns: %{desk_nav: [_ | _], editor_doc: %{} = doc} = assigns} = socket) do
+    with %{editor_schema: %{} = schema, dataset: dataset, scope: scope} <- assigns,
+         ids = Refs.ids(doc, schema),
+         true <- ids != assigns.desk_ref_ids do
+      refs =
+        for {field, targets} <- Refs.resolve(doc, schema, dataset, scope),
+            %{type: ref_type} = ref when is_binary(ref_type) <- targets,
+            do: Map.put(ref, :path, field)
+
+      assign(socket, active_refs: refs, desk_ref_ids: ids)
+    else
+      _ -> socket
+    end
   end
 
-  defp refs(_assigns, _dataset, _scope), do: []
+  defp strip(socket), do: socket
 
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The Studio's `nav_path` says nothing about the pane a "+" was pressed in,
@@ -121,10 +131,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The Studio's panes are not drawn here; its editor is.
   defp ours(result, how \\ :reload)
-  defp ours({:noreply, socket}, how), do: {:noreply, socket |> steer(how) |> assign(:panes, [])}
+  defp ours({:noreply, socket}, how), do: {:noreply, settle(socket, how)}
+  defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
-  defp ours({:reply, reply, socket}, how),
-    do: {:reply, reply, socket |> steer(how) |> assign(:panes, [])}
+  defp settle(socket, how), do: socket |> steer(how) |> strip() |> assign(:panes, [])
 
   # ── the Studio's navigation, read against the desk's chain ────────────────
 
@@ -232,12 +242,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp reload(socket, :settled), do: socket
 
   defp reload(socket, :reload) do
-    %{dataset: dataset, desk_uri: uri, scope: scope, desk_nav: nav} = socket.assigns
+    %{dataset: dataset, desk_uri: uri, desk_nav: nav} = socket.assigns
 
     {:noreply, socket} =
       StudioLive.handle_params(%{"dataset" => dataset, "path" => nav}, uri, socket)
 
-    socket |> steer(:settled) |> assign(:active_refs, refs(socket.assigns, dataset, scope))
+    steer(socket, :settled)
   end
 
   defp desk_pane(%{"desk-pane" => index}, chain) do
@@ -250,8 +260,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp desk_pane(_params, _chain), do: nil
 
   @doc """
-  The pane that edits: a close link, the document's references, and the
-  Studio's editor. Takes the page's own assigns, because the Studio's shell
+  The pane that edits: a header row with the close link, the document's
+  references, and the Studio's editor. Takes the page's own assigns, because the Studio's shell
   reads them.
   """
   def pane(assigns, view) do
@@ -260,22 +270,36 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     ~H"""
     <section
       id={@view.id}
-      class="pane-column dk-pane dk-doc dk-edit"
+      class="pane-column dk-pane pane doc dk-doc dk-edit"
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
       aria-label={@page_title}
     >
-      <a
-        href={Panes.close_from(@chain, @view.index, @base)}
-        data-phx-link="patch"
-        data-phx-link-state="push"
-        class="dk-close dk-edit-close"
-        aria-label={gettext("Close %{title}", title: @page_title)}
+      <%!-- The same header row the read-only panes have, so the close link
+            covers none of the Studio's toolbar and the narrow layout's Back
+            (`bp-desk.js`) finds it. --%>
+      <div class="pane-header">
+        <span class="pane-header-title">{@page_title}</span>
+        <a
+          href={Panes.close_from(@chain, @view.index, @base)}
+          data-phx-link="patch"
+          data-phx-link-state="push"
+          class="dk-close"
+          aria-label={gettext("Close %{title}", title: @page_title)}
+        >
+          <span aria-hidden="true">×</span>
+        </a>
+      </div>
+      <%!-- Always in the page, shown when there is a link: a pick adds the
+            first link while the editor has the focus, and a row that came and
+            went would make the patch rebuild the editor below it. --%>
+      <nav
+        id={"#{@view.id}-refs"}
+        class="dk-edit-refs dk-refs"
+        aria-label={gettext("References")}
+        style={@active_refs == [] && "display: none"}
       >
-        <span aria-hidden="true">×</span>
-      </a>
-      <nav :if={@active_refs != []} class="dk-edit-refs dk-refs" aria-label={gettext("References")}>
         <.link
           :for={ref <- @active_refs}
           patch={
@@ -292,7 +316,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           {ref.title}
         </.link>
       </nav>
-      {Components.studio_live_shell(assigns)}
+      <%!-- `pane-body` and `doc-form` are the names the TanStack specs know
+            the document's form region by. --%>
+      <div id={"#{@view.id}-body"} class="pane-body doc-form dk-edit-body" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden">
+        {Components.studio_live_shell(assigns)}
+      </div>
     </section>
     """
   end

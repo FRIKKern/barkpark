@@ -119,4 +119,4 @@ if (FAULT.has("B")) fail("  Part B FAIL: injected fault (--selftest)");
 if (failed === failedBeforeB)
   console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + Studio (CSS var + TokensGen) + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
 
-export { studioText, want, wantGlyph };
+export { studioText };
