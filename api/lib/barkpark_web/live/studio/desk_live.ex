@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
@@ -67,6 +68,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      # Each list type's sort as this editor keeps it (`ListMenu`).
+      |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -257,6 +260,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
+  # A list's menu picked a sort: it sticks for the type, here and for this editor.
+  def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
+    :ok = ListMenu.remember(socket, socket.assigns.dataset, type, sort)
+
+    sorts =
+      if sort,
+        do: Map.put(socket.assigns.list_sorts, type, sort),
+        else: Map.delete(socket.assigns.list_sorts, type)
+
+    {:noreply, assign(socket, :list_sorts, sorts)}
+  end
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
@@ -297,6 +312,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
+        list_sort={@list_sorts[view.pane[:type]]}
+        orderings={@desk.orderings[view.pane[:type]] || []}
       />
       <% end %>
     </div>
@@ -314,7 +331,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> StructureCopy.localize()
       |> Tree.normalize()
 
-    %{dataset: dataset, root: root, nodes: Tree.index(root)}
+    # The list menus' sorts per type (`ListMenu`), read with the tree: once.
+    %{
+      dataset: dataset,
+      root: root,
+      nodes: Tree.index(root),
+      orderings: ListMenu.orderings(dataset, scope)
+    }
   end
 
   # A groupBy is built deferred, with no groups: the menu that opens it builds

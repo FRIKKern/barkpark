@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.ListSearch
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
@@ -61,10 +62,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def update(assigns, socket) do
     socket =
       socket
-      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node follows)a))
+      |> assign(
+        Map.take(assigns, ~w(id pane index panes base dataset scope node follows orderings)a)
+      )
       |> assign_new(:sharers, fn -> [] end)
+      |> assign_new(:orderings, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
-      |> assign_new(:sort, fn -> nil end)
+      # The sort this editor keeps for the type (`ListMenu`), at first.
+      |> assign_new(:sort, fn -> assigns[:list_sort] end)
       |> assign_new(:in_flight, fn -> false end)
       |> assign_new(:again, fn -> false end)
       |> assign_new(:more_out, fn -> false end)
@@ -127,8 +132,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_event("more", _params, socket),
     do: {:noreply, if(more?(socket), do: read_more(socket), else: socket)}
 
-  def handle_event("sort", %{"sort" => name}, socket),
-    do: {:noreply, socket |> assign(:sort, if(name == "", do: nil, else: name)) |> load()}
+  # A pick in the list menu (`ListMenu`); the page keeps it for the type.
+  def handle_event("sort", %{"sort" => name}, socket) do
+    sort = if name == "", do: nil, else: name
+    send(self(), {:desk_list_sort, socket.assigns.pane.type, sort})
+    {:noreply, socket |> assign(:sort, sort) |> load()}
+  end
 
   # The list's own search box (`ListSearch`): typing, its keys, Enter, Clear.
   def handle_event("list-search" <> _ = event, params, socket),
@@ -219,6 +228,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     >
       <div class="pane-header">
         <span class="pane-header-title">{title(assigns)}</span>
+        <ListMenu.menu
+          :if={@pane.kind == :list}
+          id={@id}
+          index={@index}
+          sort={@sort}
+          orderings={@orderings}
+          named={(@data.ok? && @data.result[:sorts]) || []}
+          myself={@myself}
+        />
         <.link
           :if={@index > 0}
           patch={Panes.close_from(@panes, @index, @base)}
@@ -247,24 +265,6 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           </button>
         </div>
         <%= if @data.ok? do %>
-          <form
-            :if={(@data.result[:sorts] || []) != []}
-            class="dk-sort"
-            phx-change="sort"
-            phx-target={@myself}
-          >
-            <label for={@id <> "-sort"}>{gettext("Sort by")}</label>
-            <select id={@id <> "-sort"} name="sort" class="form-input">
-              <option value="">{gettext("Default")}</option>
-              <option
-                :for={sort <- @data.result.sorts}
-                value={sort.name}
-                selected={sort.name == @data.result[:sort]}
-              >
-                {sort.title}
-              </option>
-            </select>
-          </form>
           <%!-- Not over a document that was not found: it has no current one. --%>
           <p :for={note <- (@data.result[:fields] && left_out(@pane)) || []} class="dk-note" data-desk-left-out>{note}</p>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
@@ -510,6 +510,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
       {:ok, schema} ->
         title = if node, do: provisional, else: schema.title || type
+
         Map.put(list(schema, node, dataset, scope), :title, title)
 
       _ ->
