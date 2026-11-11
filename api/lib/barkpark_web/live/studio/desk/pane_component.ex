@@ -28,9 +28,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @page 100
 
   # The page says this pane's data changed under it (someone saved): read
-  # again, keeping what is on screen until the new read lands.
+  # again, keeping what is on screen until the new read lands. A read still
+  # out is let land (a storm of saves would otherwise restart it for ever,
+  # and the pane would never fill); one more read follows it.
   @impl true
-  def update(%{refresh: _}, socket), do: {:ok, load(socket)}
+  def update(%{refresh: _}, socket) do
+    if socket.assigns[:in_flight],
+      do: {:ok, assign(socket, :again, true)},
+      else: {:ok, load(socket)}
+  end
 
   # A pane with this pane's key (a split sibling) asks for its read rather
   # than reading too: answered now, or when the read under way lands.
@@ -42,8 +48,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def update(%{shared: {key, data}}, socket) do
     cond do
       key != socket.assigns.data_key -> {:ok, socket}
-      data.failed -> {:ok, assign(socket, :data, data)}
-      true -> {:ok, adopt(socket, data.result)}
+      data.failed -> {:ok, socket |> assign(:data, data) |> landed()}
+      true -> {:ok, socket |> adopt(data.result) |> landed()}
     end
   end
 
@@ -57,6 +63,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
       |> assign_new(:sort, fn -> nil end)
+      |> assign_new(:in_flight, fn -> false end)
+      |> assign_new(:again, fn -> false end)
       |> ListSearch.init()
 
     key = data_key(assigns.pane, assigns.dataset, assigns.node)
@@ -68,7 +76,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     cond do
       # What a hover already read: the pane opens with its data.
       warm && (waiting? || not same?) ->
-        {:ok, socket |> assign(:data_key, key) |> cancel_async(:load) |> adopt(warm)}
+        socket = socket |> assign(:data_key, key) |> cancel_async(:load) |> adopt(warm)
+        {:ok, assign(socket, in_flight: false, again: false)}
+
+      # Loading with no read out and no editor coming: the pane was drawn on
+      # hold for the editor and is a read-only parent now. Nothing else
+      # would ever fill it.
+      waiting? && !socket.assigns.in_flight && !assigns[:hold] ->
+        {:ok, load(socket)}
 
       same? ->
         {:ok, socket}
@@ -115,12 +130,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   @impl true
   def handle_async(:load, {:ok, data}, socket),
-    do: {:noreply, socket |> adopt(data) |> ListSearch.landed()}
+    do: {:noreply, socket |> adopt(data) |> ListSearch.landed() |> landed()}
+
+  # Cancelled because the pane took a hover's read instead: not a failure.
+  def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
+    do: {:noreply, assign(socket, :in_flight, false)}
 
   def handle_async(:load, {:exit, reason}, socket) do
     data = AsyncResult.failed(socket.assigns.data, reason)
-    {:noreply, socket |> assign(:data, data) |> share()}
+    {:noreply, socket |> assign(:data, data) |> share() |> landed()}
   end
+
+  # A read is back. A save that came while it was out is read now.
+  defp landed(%{assigns: %{again: true}} = socket),
+    do: socket |> assign(again: false) |> load()
+
+  defp landed(socket), do: assign(socket, :in_flight, false)
 
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
@@ -350,7 +375,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # An earlier pane reads the same thing: ask it, so the two cost one read.
   defp load(%{assigns: %{follows: leader}} = socket) when is_binary(leader) do
     send_update(__MODULE__, id: leader, share_with: socket.assigns.id)
-    assign(socket, :data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
+
+    socket
+    |> assign(:in_flight, true)
+    |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
   end
 
   defp load(socket), do: read_async(socket)
@@ -366,6 +394,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     # A list asked for more rows or another order keeps its rows on screen.
     socket
     |> assign(:reading, q || nil)
+    |> assign(:in_flight, true)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
     |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
   end
