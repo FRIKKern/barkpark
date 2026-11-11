@@ -535,9 +535,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     # The refresh is a message, and so is the pane's own re-read behind it:
     # `settle/1` right here can find nothing running yet and return at once
     # (it did on CI). Wait for the new value itself.
+    # The list re-reads in its own task too: wait for its row as well (it
+    # landed after the document on a loaded machine).
     shown? = fn ->
       settle(view)
-      doc_shows?(view, 2, "Now changed")
+
+      doc_shows?(view, 2, "Now changed") and
+        has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
     end
 
     assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
