@@ -879,6 +879,67 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     end
   end
 
+  describe "a list id used in two menus" do
+    # Two menus each hold a list with the id «nyheter», of one type, each
+    # filtered its own way. The desk's flat id index keeps only one of them.
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "deskStructure",
+            "title" => "deskStructure",
+            "visibility" => "public",
+            "fields" => [%{"name" => "items", "title" => "Items", "type" => "array"}]
+          },
+          @dataset
+        )
+
+      menu = fn id, title, summary ->
+        %{
+          "kind" => "list",
+          "id" => id,
+          "title" => title,
+          "items" => [
+            %{
+              "kind" => "documentTypeList",
+              "id" => "nyheter",
+              "title" => title <> " nyheter",
+              "type" => @type_name,
+              "filter" => %{"content.summary" => %{"eq" => summary}}
+            }
+          ]
+        }
+      end
+
+      items = [
+        menu.("norsk", "Norsk", "About Alpha note"),
+        menu.("svensk", "Svensk", "About Beta note")
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "deskStructure",
+          %{"doc_id" => "deskStructure", "title" => "Desk", "content" => %{"items" => items}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+      :ok
+    end
+
+    test "each menu's list opens its own list", %{conn: conn, base: base} do
+      for {menu, title, want} <- [
+            {"norsk", "Norsk nyheter", "Alpha note"},
+            {"svensk", "Svensk nyheter", "Beta note"}
+          ] do
+        {:ok, view, _html} = live(admin(conn), "#{base}/#{menu};nyheter")
+
+        assert await_rows(view, 2, [want]) == [want], menu
+        assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), title)
+      end
+    end
+  end
+
   describe "a tree list drills pane by pane, as the Studio's own desk" do
     @cat "desk_slice_cat"
 

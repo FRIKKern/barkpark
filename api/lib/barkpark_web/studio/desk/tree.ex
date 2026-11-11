@@ -206,6 +206,44 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
   def node_of(%{missing: true}, _root, _nodes), do: nil
   def node_of(pane, _root, nodes), do: pane[:node] && nodes[pane.node]
 
+  @doc """
+  The desk node of each pane of a chain `parse/2` read, found along the
+  chain from `root`: each one under the pane before it, as `parse/2` found
+  it. A desk may use one id in two menus, and `nodes` (the flat index)
+  keeps only the last. `nodes` answers only for what the tree itself does
+  not hold: the groups of a deferred groupBy, built when it is opened.
+  """
+  @spec nodes_of([Panes.pane()], struct(), map()) :: [struct() | nil]
+  def nodes_of(panes, %Node{} = root, nodes) do
+    {found, _parent} =
+      Enum.map_reduce(panes, root, fn pane, parent ->
+        node = chain_node(pane, parent, nodes)
+        {node, node || parent}
+      end)
+
+    found
+  end
+
+  # The chain starts at the root, so the types pane's "parent" is the root.
+  defp chain_node(%{kind: :types}, root, _nodes), do: root
+  defp chain_node(%{kind: :doc}, _parent, _nodes), do: nil
+  defp chain_node(%{missing: true}, _parent, _nodes), do: nil
+
+  # A tree level names its own list again: the list is its node.
+  defp chain_node(%{node: id}, %Node{id: id} = parent, _nodes), do: parent
+
+  # A deferred groupBy has no items in the tree: opened, the page keeps it,
+  # groups and all, in `nodes`.
+  defp chain_node(%{node: id}, %Node{} = parent, nodes) when is_binary(id) do
+    case find(parent, id) do
+      nil -> nodes[id]
+      %Node{deferred: nil} = node -> node
+      %Node{} = deferred -> nodes[deferred.id] || deferred
+    end
+  end
+
+  defp chain_node(_pane, _parent, _nodes), do: nil
+
   @doc "The panes a splat names, read against the desk `root`."
   @spec parse(String.t() | nil, struct()) :: [Panes.pane()]
   def parse(splat, %Node{} = root) do
