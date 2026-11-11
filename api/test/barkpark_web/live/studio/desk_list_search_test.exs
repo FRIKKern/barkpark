@@ -174,6 +174,38 @@ defmodule BarkparkWeb.Studio.DeskListSearchTest do
     refute has_element?(view, @list <> " .list-rows input[role=combobox]")
   end
 
+  # task-b4c518d466e017f0: the bytes reached Postgres (22021) and the pane
+  # said it could not be read.
+  test "a search value the database refuses as text is no search", %{conn: conn, base: base} do
+    view = open(conn, base)
+
+    for bad <- [<<"not", 0>>, <<0>>, <<0, "not">>, :binary.copy(<<0>>, 50_000)] do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          type_in(view, bad)
+          # Longer than the pause before a typed search is read.
+          Process.sleep(400)
+          render_async(view, 5_000)
+
+          # Enter reads at once.
+          view |> element(@form) |> render_submit(%{"q" => bad})
+          render_async(view, 5_000)
+        end)
+
+      refute log =~ "22021"
+      refute has_element?(view, @list <> ~s( [role="alert"]))
+      assert length(titles(view)) == 5
+    end
+
+    # The box still searches.
+    type_in(view, "not")
+
+    assert Enum.sort(rows_become(view, ["Alpha note", "Beta note"])) == [
+             "Alpha note",
+             "Beta note"
+           ]
+  end
+
   test "typing narrows the rows key by key", %{conn: conn, base: base} do
     view = open(conn, base)
 
