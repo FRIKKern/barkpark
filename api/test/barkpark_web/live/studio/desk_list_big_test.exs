@@ -2,8 +2,8 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
   @moduledoc """
   J41: a desk list longer than a page grows as it is scrolled, as the
   TanStack Studio's (and Sanity's) list does: the last row reaching the
-  bottom reads the next 100 below the rows it holds, up to 2,000, and then
-  the list says "Displaying a maximum of 2000 documents".
+  bottom reads the rest below the rows it holds, up to 2,000, in one read,
+  and then the list says "Displaying a maximum of 2000 documents".
 
   The next page is read by offset (`:list_offsets`, ruling R9), never by
   reading the whole list again with a bigger limit, which the query layer
@@ -146,7 +146,9 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
   defp scroll_to_bottom(view),
     do: view |> element(@list <> ~s([phx-viewport-bottom="more"])) |> render_hook("more", %{})
 
-  test "scrolling to the bottom grows the list a page at a time up to 2,000, then says so", %{
+  # A page at a time took a round trip per 100 rows: on guerrilla 400 fast
+  # wheels reached about 300 rows and never the note (big-list.spec.ts:77).
+  test "the first scroll to the bottom grows the list to 2,000 in one read, then says so", %{
     conn: conn,
     base: base
   } do
@@ -156,10 +158,8 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
     # Room below the last row while there are more, so a fast wheel scrolls on.
     assert has_element?(view, ~s([data-pane-index="1"] .dk-list-more[aria-hidden="true"]))
 
-    for want <- 200..2_000//100 do
-      scroll_to_bottom(view)
-      assert await_rows(view, want) == want
-    end
+    scroll_to_bottom(view)
+    assert await_rows(view, 2_000) == 2_000
 
     # Newest first, each row once, the 2,000th the 51st oldest.
     html = view |> element(@list) |> render()

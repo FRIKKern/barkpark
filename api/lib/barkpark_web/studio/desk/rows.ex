@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   # The query layer reads at most this many rows at once (`Content.Query`).
   @chunk 1_000
 
-  @doc "The first page size, and the step a scroll to the bottom grows it by."
+  @doc "The first page size. A scroll to the bottom grows the list to `max_rows/0`."
   def page, do: @page
 
   @doc "The most rows a list holds."
