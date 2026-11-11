@@ -1027,6 +1027,57 @@
         attempt();
       };
       window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
+
+      // "Share document": an item with `data-desk-copy` puts its text on the
+      // clipboard (a path gets the page's origin in front) and the menu's
+      // toast says so, or says the copy failed. The browser's clipboard, or
+      // the old `execCommand` where it has none (a page not on https).
+      hook._onCopy = function (e) {
+        var item = e.target.closest ? e.target.closest("[data-desk-copy]") : null;
+        if (!item || !root.contains(item)) return;
+        var text = item.getAttribute("data-desk-copy");
+        if (item.hasAttribute("data-desk-copy-origin")) text = window.location.origin + text;
+        var menu = item.closest("[popover]");
+        var toast = menu && menu.parentNode.querySelector(".dk-toast");
+        var say = function (ok) {
+          if (!toast) return;
+          window.clearTimeout(hook._toastTimer);
+          // Shown first, then filled: the change is what a screen reader reads.
+          if (toast.showPopover && !toast.matches(":popover-open")) toast.showPopover();
+          toast.textContent = ok ? item.getAttribute("data-desk-copied") : menu.getAttribute("data-desk-copy-failed");
+          hook._toastTimer = window.setTimeout(function () {
+            toast.textContent = "";
+            if (toast.hidePopover && toast.matches(":popover-open")) toast.hidePopover();
+          }, 4000);
+        };
+        var fallback = function () {
+          var back = root.ownerDocument.activeElement;
+          var area = root.ownerDocument.createElement("textarea");
+          area.value = text;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          root.ownerDocument.body.appendChild(area);
+          area.select();
+          var ok = false;
+          try {
+            ok = root.ownerDocument.execCommand("copy");
+          } catch (_err) {
+            ok = false;
+          }
+          area.remove();
+          if (back && back.isConnected && back.focus) back.focus();
+          say(ok);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            say(true);
+          }, fallback);
+        } else {
+          fallback();
+        }
+      };
+      root.addEventListener("click", hook._onCopy);
     },
 
     destroyed: function () {
@@ -1076,6 +1127,8 @@
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
+      root.removeEventListener("click", this._onCopy);
+      window.clearTimeout(this._toastTimer);
     },
   };
 })();

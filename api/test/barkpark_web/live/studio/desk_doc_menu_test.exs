@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
   @dataset "production"
   @button ~s([data-pane-editing] .pane-header button[aria-label="Show document actions"][aria-haspopup="menu"][popovertarget])
-  @menu ~s([data-pane-editing] [role="menu"][popover])
+  @menu ~s([data-pane-editing] .pane-header [role="menu"][popover][id$="-editor-actions"])
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
