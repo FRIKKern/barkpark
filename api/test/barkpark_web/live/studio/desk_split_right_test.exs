@@ -3,7 +3,8 @@ defmodule BarkparkWeb.Studio.DeskSplitRightTest do
   J57: Sanity's document header has icon buttons the specs count
   (`.pane-header .icon-btn` with a tip, more than 3). "Split pane right" is
   one the desk can do for real: `Panes.split_right/3` opens the same
-  document again beside it. The desk still edits only the last pane.
+  document again beside it. The desk still edits only the last pane, the
+  split's sibling, which has "Close split pane" (`Panes.close_split/3`).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -15,6 +16,7 @@ defmodule BarkparkWeb.Studio.DeskSplitRightTest do
 
   @dataset "production"
   @split ~s([data-pane-editing] .pane-header a.icon-btn[aria-label="Split pane right"][data-tip])
+  @close_split ~s([data-pane-editing] .pane-header a.icon-btn[aria-label="Close split pane"][data-tip])
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -74,5 +76,22 @@ defmodule BarkparkWeb.Studio.DeskSplitRightTest do
     docs = view |> render() |> then(&Regex.scan(~r/data-pane-kind="doc"/, &1)) |> length()
     assert docs == 2
     assert view |> render() |> then(&Regex.scan(~r/data-pane-editing/, &1)) |> length() == 1
+  end
+
+  test "the split's sibling has Close split pane, which leaves the document once", c do
+    view = open(c)
+    refute has_element?(view, @close_split)
+
+    view |> element(@split) |> render_click()
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, @close_split) end)
+
+    view |> element(@close_split) |> render_click()
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+
+    html = render(view)
+    assert length(Regex.scan(~r/data-pane-kind="doc"/, html)) == 1
+    refute has_element?(view, @close_split)
   end
 end

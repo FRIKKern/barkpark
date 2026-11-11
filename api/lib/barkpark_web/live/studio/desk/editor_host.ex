@@ -341,6 +341,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="columns" size={14} />
         </.link>
+        <%!-- In a split, "Close split pane" drops just this pane
+              (`Panes.close_split/3`); the close link drops it and the panes
+              to its right. --%>
+        <.link
+          :if={Panes.split?(@chain, @view.index)}
+          patch={Panes.close_split(@chain, @view.index, @base)}
+          class="dk-split icon-btn"
+          aria-label={gettext("Close split pane")}
+          data-tip={gettext("Close split pane")}
+          data-desk-close-split
+        >
+          <BarkparkWeb.Icons.icon name="x" size={14} />
+        </.link>
         <%!-- The document's actions, none over a document that could not be
               read or was deleted. --%>
         <DocMenu.menu
