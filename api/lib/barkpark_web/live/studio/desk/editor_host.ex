@@ -93,6 +93,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def edit(%{assigns: %{pending: target}} = socket, target) do
     %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri} = socket.assigns
+    %{id: id, type: type} = List.last(panes)
     path = Tree.edit_path(panes, desk.root)
 
     try do
