@@ -2,7 +2,7 @@
 // design/check.mjs runs every design/check/part-*.mjs in order; this module runs
 // its Part when imported. Moved out of check.mjs with no change in behaviour.
 
-import { bumpFailed, failed, FAULT } from "./state.mjs";
+import { bumpFailed, FAULT } from "./state.mjs";
 import { atSource, ledger, readDesignSource } from "./part-e.mjs";
 import { motionBlankAll } from "./part-m.mjs";
 

@@ -3,8 +3,7 @@
 // its Part when imported. Moved out of check.mjs with no change in behaviour.
 
 import { MOTION_STEPS, MOTION_SURFACES, tokens } from "../emit.mjs";
-import { bumpFailed, failed, FAULT } from "./state.mjs";
-import { want } from "./part-b.mjs";
+import { bumpFailed, FAULT } from "./state.mjs";
 import { atSource, ledger, readDesignSource } from "./part-e.mjs";
 import { motionBlankAll, motionBlankComments } from "./part-m.mjs";
 
