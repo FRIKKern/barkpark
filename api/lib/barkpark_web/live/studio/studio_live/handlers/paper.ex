@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
@@ -1012,8 +1013,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     # The badge's word, in the viewer's language; `type` stays the id.
     type_label = PaneBuilder.type_word("paper")
 
+    # A query the database refuses as text (a NUL) finds nothing, unread.
     results =
-      Content.search_papers(q, dataset, opts)
+      if(Text.text?(q), do: Content.search_papers(q, dataset, opts), else: [])
       |> Enum.map(fn %{id: id, title: title} ->
         %{title: title, id: to_string(id), type: "paper", type_label: type_label}
       end)
@@ -1049,7 +1051,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     dataset = socket.assigns.dataset
     opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
 
-    results = Content.search_tags(q, dataset, opts)
+    results = if Text.text?(q), do: Content.search_tags(q, dataset, opts), else: []
 
     {:reply, %{results: results}, socket}
   end

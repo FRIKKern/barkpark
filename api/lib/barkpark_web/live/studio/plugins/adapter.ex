@@ -80,6 +80,10 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
     parsed = to_field_struct(raw_field)
     value = field_value(assigns, name, type)
     path = "doc[#{name}]"
+    # In the desk (the only host with a `:desk_base`) an input is named by
+    # its bare field path, `cta.kind` as Sanity's Studio names it; elsewhere
+    # nil, and the ids stay as they were.
+    id_base = if is_binary(Map.get(assigns, :desk_base)), do: name
 
     case type do
       "composite" ->
@@ -96,7 +100,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           scope_prefix: Map.get(assigns, :scope_prefix, ""),
           api_token_raw: Map.get(assigns, :api_token_raw, ""),
           # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
-          root: Map.get(assigns, :editor_form)
+          root: Map.get(assigns, :editor_form),
+          id_base: id_base
         })
 
       "arrayOf" ->
@@ -114,7 +119,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           scope_prefix: Map.get(assigns, :scope_prefix, ""),
           api_token_raw: Map.get(assigns, :api_token_raw, ""),
           # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
-          root: Map.get(assigns, :editor_form)
+          root: Map.get(assigns, :editor_form),
+          id_base: id_base
         })
 
       "codelist" ->
@@ -134,7 +140,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           errors: errors_for(assigns, name),
           on_change: @structured_on_change,
           path: path,
-          wrap_key: widget_wrap_key(assigns)
+          wrap_key: widget_wrap_key(assigns),
+          id_base: id_base
         })
     end
   end

@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
   alias Barkpark.Structure
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Rows
+  alias BarkparkWeb.Studio.Desk.Text
   alias Phoenix.LiveView.JS
 
   @doc "A list pane's starting state: no search, the first result lit."
@@ -43,9 +44,15 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
   # TanStack Studio waits before it asks the server.
   @pause_ms 150
 
-  @doc "The search a pane's read is asked for: the trimmed text, or nil for none."
+  @doc """
+  The search a pane's read is asked for: the trimmed text, or nil for none.
+  A value the database refuses as text (a NUL; bytes that are not UTF-8) is
+  no search.
+  """
   @spec term(String.t() | nil) :: String.t() | nil
-  def term(q) when is_binary(q), do: if(String.trim(q) == "", do: nil, else: String.trim(q))
+  def term(q) when is_binary(q),
+    do: if(String.trim(q) == "" or not Text.text?(q), do: nil, else: String.trim(q))
+
   def term(_q), do: nil
 
   @doc "The id of row `i` of a pane (0-based): what `aria-activedescendant` names."

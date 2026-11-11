@@ -40,6 +40,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu { margin-left: 0; }
+      .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }

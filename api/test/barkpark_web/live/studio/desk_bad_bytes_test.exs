@@ -97,4 +97,31 @@ defmodule BarkparkWeb.Studio.DeskBadBytesTest do
     view |> element("#desk-search-form") |> render_change(%{"value" => "zz-no-such-title"})
     assert has_element?(view, "#desk-search-hits [role=status]")
   end
+
+  # task-f8383ce8dd2ef270: the Studio's own events the desk page takes.
+  test "a NUL in a workspace switch, a project switch or a paper search reads nothing", %{
+    conn: conn,
+    scope: scope
+  } do
+    # The desk takes the two switches in the Studio's chrome, the Studio
+    # itself in its own handlers: both pages.
+    for url <- [desk(scope, "production"), "#{scope}/d/production/studio"],
+        {:ok, view, _html} = live(sign_in(conn, ["read", "write", "admin"]), url),
+        render_async(view, 5_000),
+        {event, params} <- [
+          {"switch-workspace", %{"workspace" => <<"default", 0>>}},
+          {"switch-workspace", %{"workspace" => <<0>>}},
+          {"switch-project", %{"project" => <<"default", 0>>}},
+          {"switch-project", %{"project" => <<0, "x">>}},
+          {"paper-wikilink-search", %{"query" => <<"al", 0>>}},
+          {"paper-wikilink-search", %{"query" => <<0>>}},
+          {"paper-tag-search", %{"query" => <<"al", 0>>}},
+          {"paper-tag-search", %{"query" => <<0, "al">>}}
+        ] do
+      html = render_hook(view, event, params)
+
+      assert String.valid?(html), "#{event} #{url}"
+      assert Process.alive?(view.pid), "#{event} #{url}"
+    end
+  end
 end

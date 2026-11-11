@@ -214,26 +214,13 @@ defmodule BarkparkWeb.Components.FieldInputs do
         vocab_json: Jason.encode!(vocab)
       )
 
+    # In the desk (`id_prefix` ""), a holder named by the field's path
+    # (`id="body"`), the element Sanity's Studio names so.
     ~H"""
-    <div
-      id={"bp-fc-wrap-#{@doc_key}-#{@n}"}
-      phx-update="ignore"
-      phx-hook="BarkparkFieldCanvas"
-      class="bp-paper-edit-canvas bp-field-canvas"
-      data-field={@n}
-      data-doc-key={@doc_key}
-      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@doc_key}"}
-      data-document-rev={@document_rev}
-      data-canvas-blocks={@blocks_json}
-      data-canvas-vocabulary={@vocab_json}
-      data-canvas-dataset={@dataset}
-      data-canvas-token={@api_token_raw}
-      data-save-strings={field_canvas_save_strings()}
-      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
-      data-test-id="field-canvas"
-    >
-      <bp-paper-canvas></bp-paper-canvas>
+    <div :if={@id_prefix == ""} id={@n}>
+      <.field_canvas {assigns} />
     </div>
+    <.field_canvas :if={@id_prefix != ""} {assigns} />
     """
   end
 
@@ -448,6 +435,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-ref-hidden-#{@n}"}
+        data-input-id={@id_prefix == "" && @n}
       ></bp-reference-picker>
     </div>
     """
@@ -476,6 +464,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div id={doc_wrap_id("bp-mp-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
+        id={@id_prefix == "" && @n}
         value={@v}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
@@ -573,6 +562,31 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <% else %>
       <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
     <% end %>
+    """
+  end
+
+  # The block canvas markup the richText `"editor" => "blocks"` clause renders.
+  defp field_canvas(assigns) do
+    ~H"""
+    <div
+      id={"bp-fc-wrap-#{@doc_key}-#{@n}"}
+      phx-update="ignore"
+      phx-hook="BarkparkFieldCanvas"
+      class="bp-paper-edit-canvas bp-field-canvas"
+      data-field={@n}
+      data-doc-key={@doc_key}
+      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@doc_key}"}
+      data-document-rev={@document_rev}
+      data-canvas-blocks={@blocks_json}
+      data-canvas-vocabulary={@vocab_json}
+      data-canvas-dataset={@dataset}
+      data-canvas-token={@api_token_raw}
+      data-save-strings={field_canvas_save_strings()}
+      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
+      data-test-id="field-canvas"
+    >
+      <bp-paper-canvas></bp-paper-canvas>
+    </div>
     """
   end
 
