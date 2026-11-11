@@ -13283,3 +13283,28 @@ msgstr "Filteret til denne listen kunne ikke leses."
 #, elixir-autogen, elixir-format
 msgid "This pane could not be read."
 msgstr "Ruten kunne ikke leses."
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "List options"
+msgstr "Listevalg"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Default sort"
+msgstr "Standard sortering"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by %{field}"
+msgstr "Sorter etter %{field}"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Last Edited"
+msgstr "Sorter etter sist redigert"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Created"
+msgstr "Sorter etter opprettet"

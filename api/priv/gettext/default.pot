@@ -13278,3 +13278,28 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This pane could not be read."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "List options"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Default sort"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by %{field}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Last Edited"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Created"
+msgstr ""
