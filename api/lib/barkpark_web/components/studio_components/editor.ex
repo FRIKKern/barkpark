@@ -162,18 +162,22 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # labelable control (`FieldInputs.label_target/3`).
   attr :for, :string, default: nil
   # R19b: in the desk an image field is a `<fieldset class="field">` with a
-  # `<legend>`, as Sanity draws an object field (TanStack `Fields.tsx:225`).
+  # `<legend>`, as Sanity draws an object field (TanStack `Fields.tsx`).
   attr :fieldset, :boolean, default: false
   slot :inner_block, required: true
 
   def editor_field(assigns) do
     ~H"""
     <.dynamic_tag tag_name={if @fieldset, do: "fieldset", else: "div"} class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
-      <.dynamic_tag tag_name={if @fieldset, do: "legend", else: "label"} rest={label_attrs(@fieldset, @for)}>
+      <%= if @fieldset do %><legend class="editor-field-label">
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
-      </.dynamic_tag>
+      </legend><% else %><label class="editor-field-label" for={@for}>
+        <%= @label %>
+        <%= if @required do %><span class="field-required">*</span><% end %>
+        <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
+      </label><% end %>
       <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
@@ -191,15 +195,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     """
   end
 
-  # A `<legend>` names its fieldset and takes no `for`.
-  defp label_attrs(true, _for), do: [class: "editor-field-label"]
-  defp label_attrs(false, for), do: [class: "editor-field-label", for: for]
-
   @doc """
   The prefix of a field input's `id` (the label's `for` follows it). In the
   desk (`DeskLive`, the only host with a `:desk_base`) it is empty, so an
   input is named by its bare field path (`id="title"`), as Sanity's Studio
-  names it and its specs find it (TanStack `Fields.tsx:497`); the desk edits
+  names it and its specs find it (TanStack `Fields.tsx`); the desk edits
   one document at a time, so the ids cannot meet. Everywhere else it is
   `doc-field-<doc>-`.
   """
