@@ -100,20 +100,40 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     end)
   end
 
+  # The shipped host binary (`cmd/barkpark-chat-host/main.go` `capabilities()`)
+  # sends `chat_runtime: %{"protocol" => "bidirectional-v2"}` beside the other
+  # two keys. Refusing it made every real enrollment and heartbeat fail
+  # (task-c02eefeb0ed7381c). It is optional, because older hosts omit it. When
+  # present it holds exactly one key, and that key's value is a protocol name
+  # from this list, so it cannot carry a secret. Both sides are pinned by
+  # `test/support/fixtures/chat_host_go_capabilities.json`.
+  @capability_keys ~w(protocol_version providers chat_runtime)
+  @chat_runtime_protocols ~w(bidirectional-v2)
+
   defp safe_capabilities?(map) when map == %{}, do: true
 
   defp safe_capabilities?(%{"protocol_version" => version, "providers" => providers} = map)
-       when is_integer(version) and version > 0 and map_size(map) == 2 and is_map(providers) do
-    Enum.all?(providers, fn
-      {provider, metadata} when provider in ["claude", "codex"] ->
-        safe_provider_metadata?(metadata)
+       when is_integer(version) and version > 0 and is_map(providers) do
+    Enum.all?(Map.keys(map), &(&1 in @capability_keys)) and
+      safe_chat_runtime?(Map.get(map, "chat_runtime")) and
+      Enum.all?(providers, fn
+        {provider, metadata} when provider in ["claude", "codex"] ->
+          safe_provider_metadata?(metadata)
 
-      _ ->
-        false
-    end)
+        _ ->
+          false
+      end)
   end
 
   defp safe_capabilities?(_), do: false
+
+  defp safe_chat_runtime?(nil), do: true
+
+  defp safe_chat_runtime?(%{"protocol" => protocol} = map)
+       when map_size(map) == 1 and protocol in @chat_runtime_protocols,
+       do: true
+
+  defp safe_chat_runtime?(_), do: false
 
   # Non-secret provider readiness the host declares over the wire. `operations`
   # and `task_hands` are protocol-readiness facts the dispatch gate
