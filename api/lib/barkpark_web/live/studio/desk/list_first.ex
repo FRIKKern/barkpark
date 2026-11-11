@@ -30,7 +30,9 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
     %{chain: chain, dataset: dataset, scope: scope} = socket.assigns
     lists = for %{pane: %{kind: :list}, follows: nil} = view <- views, do: view
 
-    if lists == [] do
+    # With no handoff (off in `:test`), the connected mount would read the
+    # lists again: the first render leaves them to it.
+    if lists == [] or not ConnectHandoff.enabled?() do
       socket
     else
       reads = handoff(socket, chain, dataset, scope, lists)
