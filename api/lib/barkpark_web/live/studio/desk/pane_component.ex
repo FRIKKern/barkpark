@@ -41,13 +41,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # A pane with this pane's key (a split sibling) asks for its read rather
   # than reading too: answered now, or when the read under way lands.
   def update(%{share_with: id}, socket) do
-    socket = assign(socket, :sharers, [id | socket.assigns.sharers])
+    socket = assign(socket, :sharers, Enum.uniq([id | socket.assigns.sharers]))
     {:ok, if(socket.assigns.data.loading, do: socket, else: share(socket))}
   end
 
   def update(%{shared: {key, data}}, socket) do
     cond do
       key != socket.assigns.data_key -> {:ok, socket}
+      # A failure is for a pane still waiting; one that has read since keeps it.
+      data.failed && !socket.assigns.in_flight -> {:ok, socket}
       data.failed -> {:ok, socket |> assign(:data, data) |> landed()}
       true -> {:ok, socket |> adopt(data.result) |> landed()}
     end
@@ -191,15 +193,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
-    send(self(), {:desk_pane_title, socket.assigns.index, data.title})
+    send(self(), {:desk_pane_title, socket.assigns.id, data.title})
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
     socket |> assign(:data, AsyncResult.ok(data)) |> share()
   end
 
   # Hand this pane's read, landed or failed, to the panes that asked for it.
+  # After a failure they stay on the list: the read that follows (Retry, or
+  # the page's own) is theirs too.
   defp share(%{assigns: %{sharers: sharers, data_key: key, data: data}} = socket) do
     for id <- sharers, do: send_update(__MODULE__, id: id, shared: {key, data})
-    assign(socket, :sharers, [])
+    if data.failed, do: socket, else: assign(socket, :sharers, [])
   end
 
   @impl true

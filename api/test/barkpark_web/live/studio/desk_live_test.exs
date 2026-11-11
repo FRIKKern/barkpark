@@ -212,6 +212,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
     assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "dsn-nobody")
     refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
+
+    # The last document of the chain: the editor's pane, which opens nothing.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};dsn-nobody,rev=abc123")
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] [role="alert"]), "dsn-nobody")
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
   end
 
   test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
