@@ -72,13 +72,20 @@ defmodule BarkparkWeb.Studio.DeskPaneSharedReadTest do
     assert has_element?(view, ~s([data-pane-index="2"] [role="alert"]))
     assert has_element?(view, ~s([data-pane-index="3"] [role="alert"]))
 
+    # One more split: pane 4 is read-only now, and asks the failed pane too.
+    split = "#{base}/#{@type_name};#{a}|,view=json|,view=json|,view=json"
+    render_patch(view, split)
+    render_async(view, 5_000)
+    assert has_element?(view, ~s([data-pane-index="4"] [role="alert"]))
+
     # The fault is gone; Retry on the pane that read.
     Application.delete_env(:barkpark, PaneComponent)
     view |> element(~s([data-pane-index="2"] button[phx-click="retry"])) |> render_click()
     render_async(view, 5_000)
 
-    assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha")
-    assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha")
-    refute has_element?(view, ~s([data-pane-index="3"] [role="alert"]))
+    for index <- 2..4 do
+      assert has_element?(view, ~s([data-pane-index="#{index}"] dd), "About Alpha")
+      refute has_element?(view, ~s([data-pane-index="#{index}"] [role="alert"]))
+    end
   end
 end

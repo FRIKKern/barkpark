@@ -41,13 +41,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # A pane with this pane's key (a split sibling) asks for its read rather
   # than reading too: answered now, or when the read under way lands.
   def update(%{share_with: id}, socket) do
-    socket = assign(socket, :sharers, [id | socket.assigns.sharers])
+    socket = assign(socket, :sharers, Enum.uniq([id | socket.assigns.sharers]))
     {:ok, if(socket.assigns.data.loading, do: socket, else: share(socket))}
   end
 
   def update(%{shared: {key, data}}, socket) do
     cond do
       key != socket.assigns.data_key -> {:ok, socket}
+      # A failure is for a pane still waiting; one that has read since keeps it.
+      data.failed && !socket.assigns.in_flight -> {:ok, socket}
       data.failed -> {:ok, socket |> assign(:data, data) |> landed()}
       true -> {:ok, socket |> adopt(data.result) |> landed()}
     end
@@ -136,12 +138,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
     do: {:noreply, assign(socket, :in_flight, false)}
 
-  # The panes that asked for this read are told it failed, and stay on the
-  # list: the read that follows (Retry, or the page's own) is theirs too.
   def handle_async(:load, {:exit, reason}, socket) do
     data = AsyncResult.failed(socket.assigns.data, reason)
-    sharers = socket.assigns.sharers
-    {:noreply, socket |> assign(:data, data) |> share() |> assign(:sharers, sharers) |> landed()}
+    {:noreply, socket |> assign(:data, data) |> share() |> landed()}
   end
 
   # A read is back. A save that came while it was out is read now.
@@ -158,9 +157,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   # Hand this pane's read, landed or failed, to the panes that asked for it.
+  # After a failure they stay on the list: the read that follows (Retry, or
+  # the page's own) is theirs too.
   defp share(%{assigns: %{sharers: sharers, data_key: key, data: data}} = socket) do
     for id <- sharers, do: send_update(__MODULE__, id: id, shared: {key, data})
-    assign(socket, :sharers, [])
+    if data.failed, do: socket, else: assign(socket, :sharers, [])
   end
 
   @impl true
