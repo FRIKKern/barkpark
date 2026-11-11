@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   require Logger
 
+  alias BarkparkWeb.Studio.Desk.DocMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
@@ -327,12 +328,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
         <span class="pane-header-title">{@page_title}</span>
+        <%!-- The document's actions, none over a document that could not be
+              read or was deleted. --%>
+        <DocMenu.menu
+          id={"#{@view.id}-actions"}
+          items={if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns)}
+        />
         <a
           href={Panes.close_from(@chain, @view.index, @base)}
           data-phx-link="patch"
           data-phx-link-state="push"
-          class="dk-close"
+          class="dk-close icon-btn"
           aria-label={gettext("Close %{title}", title: @page_title)}
+          data-tip={gettext("Close %{title}", title: @page_title)}
         >
           <span aria-hidden="true">×</span>
         </a>
