@@ -129,7 +129,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   Wrapper for a single field row in the editor body. Emits the legacy
   `<div class="editor-field">` markup with `<label class="editor-field-label">`
   containing the field title, optional `*` required indicator, and
-  optional type pill. Used by StudioLive (line 1143 + 1159) and plugin
+  optional type pill. The wrapper also carries `field`, the class Sanity's
+  Studio (and the specs) find a field by. Used by StudioLive (line 1143 + 1159) and plugin
   LVs to keep field rhythm consistent. CSS in `root.html.heex`.
 
   Attributes:
@@ -164,7 +165,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def editor_field(assigns) do
     ~H"""
-    <div class={"editor-field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
+    <div class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <label class="editor-field-label" for={@for}>
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
@@ -414,7 +415,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <%= if self_titled?(type) and not ro_display? do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
-      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
+      <div class={"editor-field field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
