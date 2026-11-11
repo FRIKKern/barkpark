@@ -171,6 +171,29 @@ assert.equal(panesOf()[0].getAttribute("tabindex"), "-1", "without becoming a Ta
   assert.equal(held.getAttribute("tabindex"), "-1", "the pane can hold the focus again after a patch");
   assert.ok(focused >= 1, "and is given it back");
 }
+// The focus moves on: the opened pane is an ordinary pane again, with no
+// tabindex of its own left behind.
+{
+  const opened = panesOf()[0];
+  const other = window.document.createElement("button");
+  panesOf()[3].appendChild(other);
+  other.focus();
+  assert.equal(window.document.activeElement, other);
+  assert.equal(opened.getAttribute("tabindex"), null, "no tabindex once the focus has left the opened pane");
+  await tick();
+  assert.equal(opened.getAttribute("tabindex"), null, "and none comes back with the next layout");
+  other.remove();
+}
+// Space opens a focused strip, as Enter does.
+{
+  const at = strips().indexOf(T);
+  panesOf()[at].focus();
+  panesOf()[at].dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+  assert.equal(strips()[at], F, "Space opens the focused strip");
+  assert.equal(window.document.activeElement, panesOf()[at], "the opened pane has the focus");
+  panesOf()[at].blur();
+  await tick();
+}
 
 // A LiveView patch rewrites a pane's attributes: the layout comes back.
 const before = strips();

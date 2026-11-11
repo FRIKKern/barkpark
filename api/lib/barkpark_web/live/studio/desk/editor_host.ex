@@ -342,7 +342,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             between the rows with ids would make the patch move the
             references and the editor below it. --%>
       <div id={"#{@view.id}-notes"}>
-        <p :for={note <- PaneComponent.left_out(@view.pane)} class="dk-note" data-desk-left-out>
+        <%!-- Not over a document the editor did not open: it has no current one. --%>
+        <p
+          :for={note <- (assigns[:editor_doc] && PaneComponent.left_out(@view.pane)) || []}
+          class="dk-note"
+          data-desk-left-out
+        >
           {note}
         </p>
       </div>
