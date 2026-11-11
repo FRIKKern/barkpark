@@ -225,4 +225,87 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
 
     assert answer.("/api/workspaces/no-such-ws/projects") == 404
   end
+
+  # Two callers read nil as something other than "no such workspace"; each
+  # refuses such a slug itself.
+
+  # Bulldocs ingest reads nil as "no workspace named" and writes to Default.
+  test "bulldocs ingest refuses a workspace or project named in bytes that are not text",
+       %{conn: conn} do
+    import Ecto.Query
+
+    post_paper = fn slug, headers, extra ->
+      blocks = [
+        %{"id" => "h-1", "type" => "heading", "level" => 1, "text" => slug},
+        %{"id" => "p-1", "type" => "paragraph", "text" => "x"}
+      ]
+
+      attrs = Barkpark.LabelFixtures.paper_attrs(%{"slug" => slug, "blocks" => blocks})
+      body = Map.merge(attrs, extra)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer barkpark-test-ingest-token")
+        |> put_req_header("content-type", "application/json")
+
+      headers
+      |> Enum.reduce(conn, fn {k, v}, acc -> put_req_header(acc, k, v) end)
+      |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
+    end
+
+    stored? = fn slug ->
+      Barkpark.Repo.exists?(
+        from d in Barkpark.Content.Document,
+          where: d.type == "paper" and d.doc_id in ^[slug, "drafts.#{slug}"]
+      )
+    end
+
+    named = [
+      {[{"x-barkpark-workspace", <<"default", 0xFF>>}], %{}},
+      {[{"x-barkpark-workspace", <<"default", 0>>}], %{}},
+      {[{"x-barkpark-workspace", "default"}, {"x-barkpark-project", <<"default", 0xFF>>}], %{}},
+      {[], %{"workspace" => <<"default", 0>>}},
+      {[], %{"workspace" => "default", "project" => <<0>>}}
+    ]
+
+    for {{headers, extra}, n} <- Enum.with_index(named) do
+      slug = "slug-bad-bytes-ingest-#{n}"
+      conn = post_paper.(slug, headers, extra)
+
+      assert %{"error" => %{"code" => "invalid_text"}} = json_response(conn, 422)
+
+      refute stored?.(slug), inspect({headers, extra})
+    end
+
+    assert json_response(post_paper.("slug-bad-bytes-ingest-ok", [], %{}), 200)
+    assert stored?.("slug-bad-bytes-ingest-ok")
+  end
+
+  # The two token mints try the value as a workspace id when no slug matches,
+  # and an id may be given as its 16 raw bytes.
+  test "a token mint does not take bytes that are not text as a workspace id", %{conn: conn} do
+    id = <<0, "abcdefghijklmno">>
+    {:ok, uuid} = Ecto.UUID.cast(id)
+
+    Barkpark.Repo.query!(
+      "INSERT INTO workspaces (id, slug, name, inserted_at, updated_at) " <>
+        "VALUES ($1, 'slug-bad-bytes-raw-id', 'x', now(), now())",
+      [id]
+    )
+
+    conn =
+      conn
+      |> put_req_header("authorization", "Bearer " <> admin_token())
+      |> put_req_header("content-type", "application/json")
+
+    mint = fn path, workspace ->
+      body = %{"email" => "slug-bad-bytes@example.com", "workspace" => workspace}
+      post(conn, path, Jason.encode!(body)).status
+    end
+
+    for path <- ["/v1/auth/studio-tokens", "/v1/auth/app-tokens"] do
+      assert mint.(path, id) == mint.(path, "no-such-ws"), path
+      assert mint.(path, uuid) == 201, path
+    end
+  end
 end
