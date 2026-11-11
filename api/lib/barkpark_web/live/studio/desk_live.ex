@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.LiveRefresh
+  alias BarkparkWeb.Studio.Desk.ListFirst
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Search
@@ -134,6 +135,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         page_title: titles[last.id] || last.title
       )
 
+    # The lists' first pages: read in the first render, handed to the
+    # connected mount (ruling R12).
+    socket = ListFirst.warm(socket, views)
     socket = EditorHost.follow(socket, panes, dataset)
 
     # The pane's frame goes out with this patch; the editor follows in the
