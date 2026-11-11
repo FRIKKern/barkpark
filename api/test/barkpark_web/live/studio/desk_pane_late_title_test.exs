@@ -84,15 +84,19 @@ defmodule BarkparkWeb.Studio.DeskPaneLateTitleTest do
 
     # The page is busy while the click and Alpha's read both arrive: the read
     # lands first, so its title is said after the click put Beta at index 2.
-    queued = fn -> view.pid |> Process.info(:message_queue_len) |> elem(1) end
+    # The clicks in the page's queue, by name: a stray message is not one.
+    patches = fn ->
+      {:messages, queue} = Process.info(view.pid, :messages)
+      Enum.count(queue, &match?(%Phoenix.Socket.Message{event: "live_patch"}, &1))
+    end
+
     :ok = :sys.suspend(view.pid)
-    before = queued.()
     click = Task.async(fn -> render_patch(view, "#{base}/#{@type_name};#{b}") end)
-    wait(fn -> queued.() > before end)
+    wait(fn -> patches.() == 1 end)
     ref = Process.monitor(task)
     send(task, :go)
     assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
-    wait(fn -> queued.() > before + 1 end)
+    assert patches.() == 1, "the click waits in the page's queue while the read lands"
     :ok = :sys.resume(view.pid)
     Task.await(click)
     render_async(view, 5_000)
@@ -103,7 +107,7 @@ defmodule BarkparkWeb.Studio.DeskPaneLateTitleTest do
   defp wait(check, tries \\ 100) do
     cond do
       check.() -> :ok
-      tries == 0 -> flunk("the page's queue never filled")
+      tries == 0 -> flunk("the click never reached the page's queue")
       true -> Process.sleep(20) && wait(check, tries - 1)
     end
   end
