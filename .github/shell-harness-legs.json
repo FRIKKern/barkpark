@@ -1768,5 +1768,29 @@
         "env": {}
       }
     ]
+  },
+  {
+    "slug": "ci-apt-dns-fallback",
+    "name": "ci-apt-dns-fallback.sh resolver matrix",
+    "timeout": 5,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "ci-apt-dns-fallback.sh syntax check",
+        "run": "bash -n scripts/ci-apt-dns-fallback.sh",
+        "env": {}
+      },
+      {
+        "name": "ci-apt-dns-fallback.test.sh syntax check",
+        "run": "bash -n scripts/ci-apt-dns-fallback.test.sh",
+        "env": {}
+      },
+      {
+        "name": "resolver matrix (temp resolver file, no network, no sudo)",
+        "run": "bash scripts/ci-apt-dns-fallback.test.sh",
+        "env": {}
+      }
+    ]
   }
 ]
