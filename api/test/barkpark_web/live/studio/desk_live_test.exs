@@ -200,6 +200,20 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, "[data-desk-left-out]")
   end
 
+  test "a pane for a document that was not found shows no revision note", %{
+    conn: conn,
+    base: base,
+    b: b
+  } do
+    # A read-only pane (not the last document) for an id that does not exist.
+    chain = "#{@type_name};dsn-nobody,rev=abc123,view=json;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "dsn-nobody")
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
+  end
+
   test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
     conn: conn,
     base: base
