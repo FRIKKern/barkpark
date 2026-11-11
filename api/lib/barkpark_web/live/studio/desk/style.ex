@@ -44,6 +44,25 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-toast { inset: auto; left: 50%; bottom: 56px; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: 8px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); font-size: var(--text-sm); }
       .dk .dk-edit-footer { display: flex; justify-content: flex-end; padding: 4px 8px; border-top: 1px solid var(--border-subtle); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
+      .dk .dk-inspect { margin: auto; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-card); color: var(--fg); }
+      .dk .dk-inspect[open] { display: flex; flex-direction: column; }
+      .dk .dk-inspect::backdrop { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+      .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; }
+      .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-inspect-close { border: 0; background: none; color: var(--fg-muted); font: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+      .dk .dk-inspect-close:hover { background: var(--bg-accent); color: var(--fg); }
+      .dk .dk-inspect-tabs { display: flex; gap: 4px; padding: 0 16px 8px; border-bottom: 1px solid var(--border-subtle); }
+      .dk .dk-inspect-tabs [role="tab"] { border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--text-sm); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+      .dk .dk-inspect-tabs [role="tab"][aria-selected="true"] { background: var(--bg-accent); color: var(--fg); }
+      .dk .dk-inspect-close:focus-visible, .dk .dk-inspect-tabs [role="tab"]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-inspect-panel { overflow: auto; padding: 12px 16px 16px; font-size: var(--text-sm); }
+      .dk .dk-inspect-panel pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+      .dk .dk-inspect-tree { list-style: none; margin: 0; padding: 0; }
+      .dk .dk-inspect-tree .dk-inspect-tree { padding-left: 16px; }
+      .dk .dk-inspect-tree li { padding: 2px 0; overflow-wrap: anywhere; }
+      .dk .dk-inspect-key { font-weight: 600; margin-right: 6px; }
+      .dk .dk-inspect-count { color: var(--fg-muted); }
+      .dk .dk-inspect-tree summary { cursor: pointer; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -81,6 +100,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-list [role="menuitem"] { min-height: 44px; }
+        .dk .dk-inspect-close, .dk .dk-inspect-tabs [role="tab"] { min-width: 44px; min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }
     </style>

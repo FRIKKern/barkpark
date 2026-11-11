@@ -13363,3 +13363,23 @@ msgstr "Dokument-URL-en er kopiert til utklippstavlen"
 #, elixir-autogen, elixir-format
 msgid "Could not copy to the clipboard"
 msgstr "Kunne ikke kopiere til utklippstavlen"
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspecting %{title}"
+msgstr "Inspiserer %{title}"
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspect views"
+msgstr "Inspeksjonsvisninger"
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Parsed"
+msgstr "Behandlet"
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Raw JSON"
+msgstr "Rå JSON"

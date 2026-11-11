@@ -1126,6 +1126,54 @@
         }
       };
       root.addEventListener("click", hook._onCopy);
+
+      // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I in the edit
+      // pane asks the page for it (by the key's place: Alt changes the letter
+      // on a Mac); it opens as a modal when it is mounted. Escape or its close
+      // button closes it, which tells the page, and the browser gives the
+      // focus back to where it was. Its two tabs switch here, by click or
+      // the arrow keys.
+      hook._onInspectKey = function (e) {
+        if (!e.ctrlKey || !e.altKey || e.metaKey || e.shiftKey || e.code !== "KeyI") return;
+        if (!e.target.closest || !e.target.closest("[data-pane-editing]")) return;
+        e.preventDefault();
+        hook.pushEvent("desk-inspect", { open: true });
+      };
+      hook._onShowModal = function (e) {
+        var dialog = e.target;
+        if (dialog.matches && dialog.matches("dialog[data-desk-inspect]") && !dialog.open) dialog.showModal();
+      };
+      hook._onInspectClose = function (e) {
+        if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook.pushEvent("desk-inspect", { open: false });
+      };
+      hook._inspectTab = function (tab) {
+        var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
+        tabs.forEach(function (t) {
+          var on = t === tab;
+          t.setAttribute("aria-selected", on ? "true" : "false");
+          if (on) t.removeAttribute("tabindex");
+          else t.setAttribute("tabindex", "-1");
+          var panel = root.ownerDocument.getElementById(t.getAttribute("aria-controls"));
+          if (panel) panel.hidden = !on;
+        });
+        tab.focus();
+      };
+      hook._onInspectTab = function (e) {
+        var tab = e.target.closest ? e.target.closest("[data-desk-inspect-tab]") : null;
+        if (!tab) return;
+        if (e.type === "click") return hook._inspectTab(tab);
+        var step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+        if (!step) return;
+        e.preventDefault();
+        var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
+        hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
+      };
+      root.addEventListener("keydown", hook._onInspectKey);
+      root.addEventListener("desk:show-modal", hook._onShowModal);
+      // `close` does not bubble: caught on the way down.
+      root.addEventListener("close", hook._onInspectClose, true);
+      root.addEventListener("click", hook._onInspectTab);
+      root.addEventListener("keydown", hook._onInspectTab);
     },
 
     destroyed: function () {
@@ -1179,6 +1227,11 @@
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       root.removeEventListener("click", this._onCopy);
+      root.removeEventListener("keydown", this._onInspectKey);
+      root.removeEventListener("desk:show-modal", this._onShowModal);
+      root.removeEventListener("close", this._onInspectClose, true);
+      root.removeEventListener("click", this._onInspectTab);
+      root.removeEventListener("keydown", this._onInspectTab);
       window.clearTimeout(this._toastTimer);
     },
   };
