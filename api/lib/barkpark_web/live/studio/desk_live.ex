@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -70,6 +71,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      # Each list type's sort as this editor keeps it (`ListMenu`).
+      |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -267,6 +270,20 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
+  # A list's menu picked a sort: it sticks for the type, here and for this editor.
+  def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
+    # Only a sort the type offers is kept (the pane checked it too).
+    sort = ListMenu.pick(sort, (socket.assigns.desk.menus[type] || %{sorts: []}).sorts)
+    :ok = ListMenu.remember(socket, socket.assigns.dataset, type, sort)
+
+    sorts =
+      if sort,
+        do: Map.put(socket.assigns.list_sorts, type, sort),
+        else: Map.delete(socket.assigns.list_sorts, type)
+
+    {:noreply, assign(socket, :list_sorts, sorts)}
+  end
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
@@ -313,6 +330,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
+        list_sort={ListMenu.pick(@list_sorts[view.pane[:type]], menu(@desk, view).sorts)}
+        orderings={menu(@desk, view).orderings}
+        sorts={menu(@desk, view).sorts}
       />
       <% end %>
     </div>
@@ -331,8 +351,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> root_title()
       |> Tree.normalize()
 
-    %{dataset: dataset, root: root, nodes: Tree.index(root)}
+    # The list menus' sorts per type (`ListMenu`), read with the tree: once.
+    %{
+      dataset: dataset,
+      root: root,
+      nodes: Tree.index(root),
+      menus: ListMenu.menus(dataset, scope)
+    }
   end
+
+  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its

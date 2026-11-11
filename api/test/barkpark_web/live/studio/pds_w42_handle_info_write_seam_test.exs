@@ -273,10 +273,14 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The measured set is THIRTEEN sites in the LiveView/component tree (the two
+    # The measured set is FOURTEEN sites in the LiveView/component tree (the two
     # remaining tree-wide sends are `:after_join` in the channels, which are
     # not LiveView seams). `{:drop_focus_query, …}` is the one that writes
     # nothing: a URL patch after a desk search hit (task-4e10550394f87112).
+    # `{:desk_list_sort, …}` writes no content: a desk list's menu tells its
+    # page the sort the editor picked, and the page keeps it in that editor's
+    # own `studio.lists` pref (`UserPrefs`), as the TanStack Studio does; the
+    # desk is workspace-admin-only (J25 J55).
     # `{:desk_pane_title, …}` writes nothing either: a desk-slice pane tells
     # its read-only page the tab title (task-34d4249de9d1b654).
     # `{:desk_pane_failed, …}` writes nothing: a pane whose read failed tells
@@ -293,6 +297,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       assert send_self_sites() == [
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
+               {"live/studio/desk/pane_component.ex", "{:desk_list_sort,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_failed,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_title,"},
                {"live/studio/desk_live.ex", "{:desk_edit,"},
