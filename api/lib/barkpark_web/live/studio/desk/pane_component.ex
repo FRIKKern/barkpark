@@ -347,7 +347,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       do: ListSearch.read(type, q, node, dataset, scope, provisional)
 
   def read(%{kind: :list, type: type} = pane, node, dataset, scope, provisional) do
-    rows = pane[:query] && Rows.read(type, pane.query, dataset, scope)
+    rows = pane[:query] && Rows.read(type, pane.query, dataset, scope, node)
 
     case rows || Content.resolve_schema(type, dataset, scope) do
       %{entries: entries} ->

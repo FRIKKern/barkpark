@@ -4,10 +4,15 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   same filter, order, sort menu, page size and row preview (title, subtitle,
   draft mark).
 
-  They come from `BarkparkWeb.Studio.PaneBuilder.build/3`, the one place
-  that knows all of that, asked for the list alone. Nothing is copied from
-  it, so the two desks cannot drift. The cost is that it builds its tree
-  again for this read; the read runs in the pane's own task.
+  They come from `BarkparkWeb.Studio.PaneBuilder`, the one place that knows
+  all of that. Nothing is copied from it, so the two desks cannot drift.
+
+  The page already holds the desk tree, so a list it names by its node is
+  read by PaneBuilder's own list branch (`PaneBuilder.walk_path/7` on that
+  node alone): no tree is built for the read. A list with no node (a type
+  name from an old link) asks `PaneBuilder.build/3` for the whole path and
+  takes the last pane, which builds the tree again; the read runs in the
+  pane's own task either way.
   """
 
   alias BarkparkWeb.Studio.Desk.Panes
@@ -35,31 +40,64 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
 
   @doc """
   The rows of the `type` list a `query/4` names, or nil when the Studio's
-  desk has no such list at that path.
+  desk has no such list at that path. `node` is the list's desk node when
+  the page holds it (`BarkparkWeb.Studio.Desk.Tree`); with it the read
+  builds no tree.
   """
-  @spec read(String.t(), map(), String.t(), keyword()) :: map() | nil
-  def read(type, %{path: path, limit: limit, sort: sort}, dataset, scope) do
-    opts = [
+  @spec read(String.t(), map(), String.t(), keyword(), struct() | nil) :: map() | nil
+  def read(type, query, dataset, scope, node \\ nil)
+
+  # Only when the path ends AT the node: a path that goes on past it (a level
+  # inside the list) is not the node's own list, and is read by its path below.
+  def read(
+        type,
+        %{path: path} = query,
+        dataset,
+        scope,
+        %{type: :document_type_list, type_name: type, id: id} = node
+      ) do
+    if List.last(path) == id do
+      opts = opts(type, query, scope)
+
+      case PaneBuilder.walk_path([id], 0, %{items: [node]}, [], nil, dataset, opts) do
+        {[list], _editor} -> rows(list, type)
+        _ -> nil
+      end
+    else
+      read(type, query, dataset, scope, nil)
+    end
+  end
+
+  def read(type, %{path: path} = query, dataset, scope, _node) do
+    with {[_ | _] = panes, _editor} <- PaneBuilder.build(dataset, path, opts(type, query, scope)),
+         %{} = rows <- rows(List.last(panes), type) do
+      rows
+    else
+      _ -> nil
+    end
+  end
+
+  defp opts(type, %{limit: limit, sort: sort}, scope) do
+    [
       scope: scope,
       scope_prefix: "",
       list_limits: %{type => limit},
       list_sorts: if(sort, do: %{type => sort}, else: %{})
     ]
-
-    with {[_ | _] = panes, _editor} <- PaneBuilder.build(dataset, path, opts),
-         %{role: :list, type_name: ^type} = list <- List.last(panes) do
-      %{
-        title: list.title,
-        entries: for(%{type: :doc} = item <- list.items, do: entry(item, type)),
-        more?: list.has_more == true,
-        sorts: list.sort_options,
-        sort: list.active_sort,
-        refused: list.filter_error
-      }
-    else
-      _ -> nil
-    end
   end
+
+  defp rows(%{role: :list, type_name: type} = list, type) do
+    %{
+      title: list.title,
+      entries: for(%{type: :doc} = item <- list.items, do: entry(item, type)),
+      more?: list.has_more == true,
+      sorts: list.sort_options,
+      sort: list.active_sort,
+      refused: list.filter_error
+    }
+  end
+
+  defp rows(_pane, _type), do: nil
 
   defp entry(item, type) do
     %{
