@@ -93,7 +93,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def edit(%{assigns: %{pending: target}} = socket, target) do
     %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri} = socket.assigns
-    %{id: id, type: type} = List.last(panes)
     path = Tree.edit_path(panes, desk.root)
 
     try do
@@ -324,10 +323,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           <span aria-hidden="true">×</span>
         </a>
       </div>
-      <%!-- The editor opens the current document, whatever the URL asked for. --%>
-      <p :for={note <- PaneComponent.left_out(@view.pane)} class="dk-note" data-desk-left-out>
-        {note}
-      </p>
+      <%!-- The editor opens the current document, whatever the URL asked for.
+            The holder is always in the page: a note that came and went
+            between the rows with ids would make the patch move the
+            references and the editor below it. --%>
+      <div id={"#{@view.id}-notes"}>
+        <p :for={note <- PaneComponent.left_out(@view.pane)} class="dk-note" data-desk-left-out>
+          {note}
+        </p>
+      </div>
       <%!-- Always in the page, shown when there is a link: a pick adds the
             first link while the editor has the focus, and a row that came and
             went would make the patch rebuild the editor below it. --%>
