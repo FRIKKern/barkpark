@@ -21,7 +21,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readAuthoredCss } from "../api/assets/paper-editor/src/__css_source_graph.mjs";
 import { assembledText } from "../api/assets/paper-editor/scripts/source-assets.mjs";
-import { failed } from "./check/state.mjs";
+import { failed, fail } from "./check/state.mjs";
 
 // ── --selftest: this tripwire's negative half ────────────────────────────────
 // This gate ran for its whole life with nothing exercising it, and produced two
@@ -76,6 +76,24 @@ await import("./check/part-p.mjs");
 await import("./check/part-q.mjs");
 await import("./check/part-r.mjs");
 const { unattributedSeen } = partA;
+
+// ── every Part module on disk is one this file ran ───────────────────────────
+// The import list above is kept by hand, and a module it leaves out never runs:
+// a new design/check/part-*.mjs with its hook but no import line left this gate
+// PASSING and --selftest green, and nothing named it. So the list is read back
+// from this file's own source, the lines design/check-selftest.mjs reads to find
+// the hooks, and compared with the directory. A module on disk that is
+// not imported reds the gate by name. The other direction, an import with no
+// module, needs nothing here: the import itself throws ERR_MODULE_NOT_FOUND,
+// naming the file.
+{
+  const self = fileURLToPath(import.meta.url);
+  // Anchored to a whole statement line, so a commented-out import does not count.
+  const imported = [...readFileSync(self, "utf8").matchAll(/^(?:const \w+ = )?await import\("\.\/check\/(part-[a-z0-9]+\.mjs)"\);$/gm)].map((m) => m[1]);
+  for (const f of readdirSync(join(dirname(self), "check")).filter((f) => /^part-.*\.mjs$/.test(f) && !imported.includes(f)).sort()) {
+    fail(`  design/check.mjs FAIL: design/check/${f} is a Part module this file never imports, so it never ran — add its import line above, in run order.`);
+  }
+}
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {
