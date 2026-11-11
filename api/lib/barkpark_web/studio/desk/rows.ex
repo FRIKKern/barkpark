@@ -20,18 +20,32 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   alias BarkparkWeb.Studio.PaneBuilder
 
   @page 100
+  # The most rows a list holds, as the TanStack Studio's (and Sanity's) list:
+  # past it the list says so and its search reaches the rest.
+  @max_rows 2_000
+  # The query layer reads at most this many rows at once (`Content.Query`).
+  @chunk 1_000
 
-  @doc "The first page size, and the step \"Show more\" grows it by."
+  @doc "The first page size, and the step a scroll to the bottom grows it by."
   def page, do: @page
+
+  @doc "The most rows a list holds."
+  def max_rows, do: @max_rows
 
   @doc """
   What the list at `index` in `panes` is asked for: the desk path that
-  leads to it, how many rows, and the sort the editor picked (nil = the
-  declared order).
+  leads to it, how many rows from which, and the sort the editor picked
+  (nil = the declared order).
   """
-  @spec query([Panes.pane()], non_neg_integer(), pos_integer(), String.t() | nil) :: map()
-  def query(panes, index, limit \\ @page, sort \\ nil) do
-    %{path: Tree.studio_path(panes, index), limit: limit, sort: sort}
+  @spec query(
+          [Panes.pane()],
+          non_neg_integer(),
+          pos_integer(),
+          String.t() | nil,
+          non_neg_integer()
+        ) :: map()
+  def query(panes, index, limit \\ @page, sort \\ nil, offset \\ 0) do
+    %{path: Tree.studio_path(panes, index), limit: limit, sort: sort, offset: offset}
   end
 
   @doc """
@@ -42,6 +56,27 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   """
   @spec read(String.t(), map(), String.t(), keyword(), struct() | nil) :: map() | nil
   def read(type, query, dataset, scope, node \\ nil)
+
+  # More rows than the query layer reads at once (a list scrolled past 1,000,
+  # read again after a save): its pages one after the other.
+  def read(type, %{limit: limit} = query, dataset, scope, node) when limit > @chunk do
+    offset = Map.get(query, :offset, 0)
+    first = read(type, %{query | limit: @chunk}, dataset, scope, node)
+
+    with %{more?: true} <- first,
+         %{} = rest <-
+           read(
+             type,
+             Map.merge(query, %{limit: limit - @chunk, offset: offset + @chunk}),
+             dataset,
+             scope,
+             node
+           ) do
+      %{first | entries: first.entries ++ rest.entries, more?: rest.more?}
+    else
+      _ -> first
+    end
+  end
 
   # Only when the path ends AT the node: a path that goes on past it (a level
   # inside the list) is not the node's own list, and is read by its path below.
@@ -73,11 +108,12 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
     end
   end
 
-  defp opts(type, %{limit: limit, sort: sort}, scope) do
+  defp opts(type, %{limit: limit, sort: sort} = query, scope) do
     [
       scope: scope,
       scope_prefix: "",
       list_limits: %{type => limit},
+      list_offsets: %{type => Map.get(query, :offset, 0)},
       list_sorts: if(sort, do: %{type => sort}, else: %{})
     ]
   end

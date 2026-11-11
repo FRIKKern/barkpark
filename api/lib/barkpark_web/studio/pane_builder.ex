@@ -1449,12 +1449,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # whole content.
   defp list_page_preflighted(type_name, dataset, list_opts, opts, schema) do
     limit = opts |> Keyword.get(:list_limits, %{}) |> Map.get(type_name, @desk_page)
+    offset = opts |> Keyword.get(:list_offsets, %{}) |> Map.get(type_name, 0)
 
     case filter_refusal(list_opts) do
       nil ->
         page_opts =
           list_opts
           |> Keyword.put(:limit, limit)
+          |> Keyword.put(:offset, offset)
           |> Keyword.put(:content_keys, row_content_keys(schema))
 
         {docs, has_more} = Content.list_documents_page(type_name, dataset, page_opts)
