@@ -51,6 +51,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # dialog routes them to its own buffer (task-19392d1e6fc661e6).
   attr :on_reorder, :string, default: "array_op"
   attr :target, :any, default: nil
+  # This object's bare field path (`cta`), in the desk only: a subfield's
+  # input is then `id="cta.kind"`, as Sanity's Studio names it. nil keeps
+  # the `f-…` ids.
+  attr :id_base, :string, default: nil
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -71,6 +75,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:root, nil)
       |> Map.put_new(:on_reorder, "array_op")
       |> Map.put_new(:target, nil)
+      |> Map.put_new(:id_base, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -85,7 +90,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -95,7 +100,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base}
           />
         </details>
       <% true -> %>
@@ -106,7 +111,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base}
           />
         </fieldset>
     <% end %>
@@ -141,6 +146,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :root, :map, default: nil
   attr :on_reorder, :string, default: "array_op"
   attr :target, :any, default: nil
+  attr :id_base, :string, default: nil
 
   defp composite_body(assigns) do
     ~H"""
@@ -163,7 +169,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       </div>
       <%= for sub <- @subfields, Visibility.visible?(sub, @root || @value, @value) do %>
         <div class="bp-subfield" data-subfield-name={sub.name} data-group={subfield_group(sub)}>
-          <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
+          <label class="bp-field-label" for={sub_id(assigns, sub.name)}>
             <%= title_for(sub) %>
           </label>
           <p :if={description_for(sub)} class="bp-field-description"><%= description_for(sub) %></p>
@@ -204,7 +210,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
     if Barkpark.Content.PortableText.value?(value) and
          Barkpark.Content.RichTextFormat.format(Map.get(sub, :raw) || %{}) != :portable_doc do
-      input_id = input_id(assigns.path, assigns.field.name, sub.name)
+      input_id = sub_id(assigns, sub.name)
       owner_key = get_value(assigns.value, "_key", nil)
 
       rich_text_subfield_input(%{
@@ -284,7 +290,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
       root: Map.get(assigns, :root),
       on_reorder: Map.get(assigns, :on_reorder) || "array_op",
-      target: Map.get(assigns, :target)
+      target: Map.get(assigns, :target),
+      id_base: child_id_base(assigns, sub.name)
     }
 
     composite_field(sub_assigns)
@@ -305,7 +312,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
       root: Map.get(assigns, :root),
       on_reorder: Map.get(assigns, :on_reorder) || "array_op",
-      target: Map.get(assigns, :target)
+      target: Map.get(assigns, :target),
+      id_base: child_id_base(assigns, sub.name)
     }
 
     ArrayField.array_field(sub_assigns)
@@ -332,7 +340,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       errors: nested_errors(assigns.errors, sub.name),
       on_change: assigns.on_change,
       path: child_path(assigns.path, sub.name),
-      readonly: assigns.readonly
+      readonly: assigns.readonly,
+      id_base: child_id_base(assigns, sub.name)
     }
 
     LocalizedTextField.localized_text_field(sub_assigns)
@@ -344,7 +353,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      input_id: sub_id(assigns, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly,
       options: select_options(sub)
@@ -362,7 +371,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      input_id: sub_id(assigns, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly,
       rows: text_rows(sub)
@@ -383,7 +392,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
     leaf_assigns = %{
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      input_id: sub_id(assigns, sub.name),
       value: value,
       # The same picker options as a top-level image field, so an `alt`
       # declared as a subfield shows its box here too.
@@ -416,7 +425,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         value:
           BarkparkWeb.Components.FieldInputs.reference_id(get_value(assigns.value, sub.name, "")),
         input_name: child_path(assigns.path, sub.name),
-        input_id: input_id(assigns.path, assigns.field.name, sub.name),
+        input_id: sub_id(assigns, sub.name),
         on_change: assigns.on_change,
         readonly: assigns.readonly
       })
@@ -435,7 +444,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         ref_filter: ref_filter,
         ref_filter_params: ref_filter_params,
         input_name: child_path(assigns.path, sub.name),
-        input_id: input_id(assigns.path, assigns.field.name, sub.name),
+        input_id: sub_id(assigns, sub.name),
         value: value,
         ref_type: Enum.join(types, ","),
         dataset: Map.get(assigns, :dataset) || "production",
@@ -452,7 +461,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, ""),
       input_name: child_path(assigns.path, sub.name),
-      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      input_id: sub_id(assigns, sub.name),
       on_change: assigns.on_change,
       readonly: assigns.readonly
     }
@@ -819,6 +828,16 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # row-unique: `[0]`, `[1]`, …) and sanitise non-id chars (`.`, `[`, `]`) to
   # `-`. With an empty path (a top-level composite) this is byte-equivalent to
   # the old `"f-<field>-<sub>"` shape, so non-array composites are unchanged.
+  # A subfield's input id: its bare path in the desk (`cta.kind`), else the
+  # `f-…` id built from the form path.
+  defp sub_id(%{id_base: base}, child) when is_binary(base), do: base <> "." <> to_string(child)
+  defp sub_id(assigns, child), do: input_id(assigns.path, assigns.field.name, child)
+
+  defp child_id_base(%{id_base: base}, child) when is_binary(base),
+    do: base <> "." <> to_string(child)
+
+  defp child_id_base(_assigns, _child), do: nil
+
   defp input_id(path, parent, child) do
     prefix =
       case to_string(path || "") do
