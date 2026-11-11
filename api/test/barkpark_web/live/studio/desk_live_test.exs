@@ -1109,7 +1109,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       |> render()
       |> then(
         &Regex.scan(
-          ~r/<a[^>]*data-desk-row[^>]*>\s*<span class="pane-item-label">\s*([^<]+?)\s*</,
+          ~r/<a[^>]*data-desk-row[^>]*>\s*<span class="pane-item-label">\s*<span class="dk-row-title">([^<]+?)</,
           &1
         )
       )
