@@ -44,6 +44,7 @@ defmodule BarkparkWeb.LiveScope do
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ReturnTo
 
   # The {workspace_slug, project_slug, dataset} triple `resolve_and_authorize/2`
@@ -115,7 +116,9 @@ defmodule BarkparkWeb.LiveScope do
          %{"workspace_slug" => ws_slug, "project_slug" => proj_slug} = params
        )
        when is_binary(ws_slug) and is_binary(proj_slug) do
-    with %{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
+    # A slug the database refuses as text names nothing: denied before a read.
+    with true <- Text.text?(ws_slug) and Text.text?(proj_slug),
+         %{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          %{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
          {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]),
          :ok <- refuse_off_binding(socket.assigns[:api_token], params["dataset"]),

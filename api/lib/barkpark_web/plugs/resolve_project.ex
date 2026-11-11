@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Plugs.ResolveProject do
   import Plug.Conn
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.Text
 
   def init(opts), do: opts
 
@@ -21,7 +22,10 @@ defmodule BarkparkWeb.Plugs.ResolveProject do
     ws_slug = conn.path_params["workspace_slug"]
     project_slug = conn.path_params["project_slug"]
 
-    case ws_slug && project_slug && Tenancy.get_project(ws_slug, project_slug) do
+    # A slug the database refuses as text (not UTF-8, or a NUL) names no
+    # project: the unknown-slug answer, without the read (22021).
+    case ws_slug && project_slug && Text.text?(project_slug) &&
+           Tenancy.get_project(ws_slug, project_slug) do
       %Tenancy.Project{} = project ->
         assign(conn, :current_project, project)
 

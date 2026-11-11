@@ -67,6 +67,7 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.StudioLocale
 
@@ -94,7 +95,9 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   def call(conn, opts) do
     slug = conn.path_params["workspace_slug"]
 
-    case slug && Tenancy.get_workspace_by_slug(slug) do
+    # A slug the database refuses as text (not UTF-8, or a NUL) names no
+    # workspace: the unknown-slug answer, without the read (22021).
+    case slug && Text.text?(slug) && Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         conn
         |> authorize(workspace, opts)
