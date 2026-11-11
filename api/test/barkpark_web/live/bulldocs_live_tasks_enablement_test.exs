@@ -139,10 +139,33 @@ defmodule BarkparkWeb.BulldocsLiveTasksEnablementTest do
     assert html =~ "Chip here"
     assert html =~ "criteria unavailable"
     assert html =~ "task-list — tasks unavailable"
-    refute html =~ "1/2"
+    # A criteria count renders as text; match text only, so a random CSP
+    # nonce attribute (`nonce="r1/2Es…"`) cannot trip this.
+    refute page_text(html) =~ "1/2"
     # The chip still names its target, but no task-list row renders.
     assert html =~ ~s(data-taskchip="#{title}")
     refute html =~ ~s(class="bp-trow__t")
+  end
+
+  defp page_text(html), do: html |> LazyHTML.from_document() |> LazyHTML.text()
+
+  # A Tasks-OFF page whose script nonce holds "1/2", plus optional extra body.
+  defp placeholder_page(extra) do
+    ~s(<html><head><script nonce="r1/2EsRDPMUYxRS6MwdcrMeC"></script></head><body>) <>
+      ~s(<p>Chip here <span data-taskchip="T">criteria unavailable</span></p>) <>
+      ~s(<div>task-list — tasks unavailable</div>#{extra}</body></html>)
+  end
+
+  test "assert_placeholders!/2 ignores a nonce that holds 1/2" do
+    assert_placeholders!(placeholder_page(""), "T")
+  end
+
+  test "assert_placeholders!/2 still fails on a rendered 1/2 criteria count" do
+    badge = ~s(<span class="bp-task-chip__badge">○ open · 1/2</span>)
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_placeholders!(placeholder_page(badge), "T")
+    end
   end
 
   test "A (Tasks ON) renders criteria + rows; B (Tasks OFF) renders the placeholders", ctx do
