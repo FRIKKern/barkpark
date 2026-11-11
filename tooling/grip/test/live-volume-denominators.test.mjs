@@ -33,7 +33,7 @@
 //     through by carrying its own snapshot, which is the thing a reader needed.
 //   * NOTHING IS WHITELISTED BY FILE. A module added tomorrow is scanned by the
 //     same glob, because a hand-listed file set measures the author's memory
-//     rather than the tree (the lesson class-coverage.test.mjs records).
+//     rather than the tree (the lesson class-coverage-tripwire.test.mjs records).
 //
 // WHAT THIS DOES NOT MEASURE — declared, not implied:
 //   * IT IS A SHAPE SCAN, NOT A FACT CHECK. A sentence that names a sha proves
