@@ -689,19 +689,30 @@
         if (pane.getAttribute("tabindex") === null) pane.setAttribute("tabindex", "-1");
         pane.focus({ preventScroll: true });
       };
+      // The pane lets go: the tabindex it was lent to hold the focus goes
+      // with it, so an open pane is not left a focus target of its own.
+      hook._release = function () {
+        var held = hook._held;
+        hook._held = null;
+        if (!held) return;
+        panes(root).forEach(function (el) {
+          var lent = el.getAttribute("data-pane-index") === held.index && el.getAttribute("tabindex") === "-1";
+          if (lent && !el.hasAttribute("data-pane-collapsed")) el.removeAttribute("tabindex");
+        });
+      };
       hook._keepHeld = function () {
         var held = hook._held;
         var doc = root.ownerDocument;
         if (!held) return;
         if (held.path !== window.location.pathname) {
-          hook._held = null;
+          hook._release();
           return;
         }
         var pane = panes(root).filter(function (el) {
           return el.getAttribute("data-pane-index") === held.index && !el.hasAttribute("data-desk-leaving");
         })[0];
         if (doc.activeElement && doc.activeElement !== doc.body) {
-          if (doc.activeElement !== pane) hook._held = null;
+          if (doc.activeElement !== pane) hook._release();
           return;
         }
         if (!pane) return;
@@ -726,7 +737,7 @@
         var held = hook._held;
         if (!held) return;
         var own = e.type === "focusin" && e.target.parentNode === root && e.target.getAttribute("data-pane-index") === held.index;
-        if (!own) hook._held = null;
+        if (!own) hook._release();
       };
 
       hook._onClick = function (e) {
