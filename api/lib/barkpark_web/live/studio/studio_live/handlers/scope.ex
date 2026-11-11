@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   require Logger
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -182,7 +183,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   #
   # Pinned by studio_live_switch_workspace_oracle_test.exs.
   def switch_workspace(%{"workspace" => slug}, socket) do
-    case Tenancy.get_workspace_by_slug(slug) do
+    # A slug the database refuses as text (a NUL) names no workspace: the
+    # same refusal, without the read.
+    case text_slug?(slug) && Tenancy.get_workspace_by_slug(slug) do
+      false ->
+        {:noreply, refuse_workspace_switch(socket)}
+
       nil ->
         {:noreply, refuse_workspace_switch(socket)}
 
@@ -214,11 +220,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   defp refuse_workspace_switch(socket),
     do: put_flash(socket, :error, @switch_workspace_refusal)
 
+  defp text_slug?(slug), do: is_binary(slug) and Text.text?(slug)
+
   def switch_project(%{"project" => slug}, socket) do
     ws = socket.assigns[:current_workspace]
 
     with %{} = ws <- ws,
          true <- Shared.can_reach_workspace?(socket, ws),
+         true <- text_slug?(slug),
          %{} = project <- Tenancy.get_project(ws.slug, slug) do
       {:noreply,
        socket

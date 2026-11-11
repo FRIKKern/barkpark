@@ -113,6 +113,7 @@ defmodule BarkparkWeb.StudioChrome do
 
   alias Barkpark.{Content, Tenancy}
   alias BarkparkWeb.Studio.Caps
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -488,8 +489,11 @@ defmodule BarkparkWeb.StudioChrome do
   # Same hard tenant boundary as StudioLive's switch handler: a principal
   # may switch only into a membership workspace; the anonymous/dev session
   # may "switch" only to the workspace already on the socket.
+  #
+  # A slug the database refuses as text (a NUL) names nothing: no read.
   defp nav_to_workspace(socket, slug) do
-    with %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(slug),
+    with true <- is_binary(slug) and Text.text?(slug),
+         %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(slug),
          true <- can_reach?(socket, ws),
          %{} = project <- project_for(ws) do
       push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
@@ -503,6 +507,7 @@ defmodule BarkparkWeb.StudioChrome do
   defp nav_to_project(socket, slug) do
     with %{slug: ws_slug} = ws when is_binary(ws_slug) <- socket.assigns[:current_workspace],
          true <- can_reach?(socket, ws),
+         true <- is_binary(slug) and Text.text?(slug),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, slug) do
       push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
     else
