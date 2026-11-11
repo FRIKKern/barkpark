@@ -178,7 +178,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
           {:noreply, socket}
 
         true ->
-          read = fn -> PaneComponent.read_pane(pane, node, dataset, scope, :warm) end
+          read =
+            PaneComponent.in_locale(fn ->
+              PaneComponent.read_pane(pane, node, dataset, scope, :warm)
+            end)
+
           {:noreply, start_async(hovered, {:warm, key}, read)}
       end
     else

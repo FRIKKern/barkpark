@@ -202,7 +202,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
     socket
     |> assign(:more_out, true)
-    |> start_async(:more, fn -> read_pane(pane, node, dataset, scope) end)
+    |> start_async(:more, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
   end
 
   # A read is back. A save that came while it was out is read now.
@@ -471,7 +471,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     |> assign(:reading, q || nil)
     |> assign(:in_flight, true)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
-    |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
+    |> start_async(:load, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
+  end
+
+  @doc """
+  `read` as a task body that renders in this process's Gettext locale. A
+  task has none of its own, so a read's notes came out English in an nb-NO
+  workspace. Call it in the LiveView's process, where the locale is put.
+  """
+  @spec in_locale((-> result)) :: (-> result) when result: term()
+  def in_locale(read) do
+    locale = Gettext.get_locale(BarkparkWeb.Gettext)
+
+    fn ->
+      Gettext.put_locale(BarkparkWeb.Gettext, locale)
+      read.()
+    end
   end
 
   @doc """
