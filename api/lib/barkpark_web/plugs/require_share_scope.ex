@@ -110,6 +110,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
 
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.Text
 
   @default_dataset "production"
 
@@ -262,6 +263,8 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
          # unsafe HTTP method, so this guard stays exactly as strict as it was.
          true <- conn.method in @safe_read_methods,
          {:ok, link} <- Barkpark.Sharing.Links.resolve(raw),
+         # A slug the database refuses as text names no scope: no read (22021).
+         true <- text_or_absent?(ws_slug) and text_or_absent?(project_slug),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, project_slug),
          true <- link.workspace_id == workspace.id,
@@ -280,6 +283,8 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       _ -> conn
     end
   end
+
+  defp text_or_absent?(slug), do: not is_binary(slug) or Text.text?(slug)
 
   # An item grant is confined to the ONE resource it is bound to
   # (`Links.binds_route_resource?/2`). `query_controller`'s `?expand=`

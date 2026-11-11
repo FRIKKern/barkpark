@@ -68,6 +68,34 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
     assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
   end
 
+  # RequireShareScope runs before ResolveWorkspace and reads both slugs once
+  # a `?share=` token is a live link, whatever scope the link is for.
+  test "a slug that is not text is not read for the holder of a live share link", %{conn: conn} do
+    {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    {:ok, {raw, _link}} =
+      Barkpark.Sharing.Links.create(%{
+        workspace_id: ws.id,
+        project_id: proj.id,
+        dataset: "production",
+        kind: "doc",
+        ref_type: "post",
+        ref_id: "slug-bad-bytes",
+        access: "read"
+      })
+
+    share = &(&1 <> "?share=" <> raw)
+
+    for bad <- @bad,
+        {bad_routes, unknown_routes} <- [
+          {routes(bad, "default"), routes("no-such-ws", "default")},
+          {routes("default", bad), routes("default", "no-such-proj")}
+        ],
+        {url, unknown} <- Enum.zip(bad_routes, unknown_routes) do
+      assert answer(conn, share.(url)) == answer(conn, share.(unknown)), url
+    end
+  end
+
   # ResolveWorkspace reads the project itself for a signed-in account that is
   # not a member, to weigh its grants, before ResolveProject runs.
   test "a project slug that is not text is not read for a signed-in non-member", %{conn: conn} do
