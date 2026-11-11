@@ -4,7 +4,6 @@
 
 import { ARTIFACTS, glyphOf, hslToHex, INST_ORDER, INST_ROLE_CSS, instRoleChannels, PROVIDERS, tokens } from "../emit.mjs";
 import { fail, failed, FAULT } from "./state.mjs";
-import { wantGlyph } from "./part-b.mjs";
 
 // ── Part D: cloud-console family parity (charter azure-hetzner Decision 7) ────
 // The instanceLifecycle + provider-identity families are DUAL-emitted: the SPA
