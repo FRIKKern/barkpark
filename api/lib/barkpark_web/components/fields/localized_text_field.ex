@@ -49,6 +49,9 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   # Studio form generation), so switching documents remounts them instead of
   # posting the previous document's text (task-1a8a3e408d787608).
   attr :wrap_key, :string, default: ""
+  # This field's bare path (`blurb`), in the desk only: a language's input
+  # is then `id="blurb.nob"`, as Sanity's Studio names it. nil keeps `f-…`.
+  attr :id_base, :string, default: nil
 
   def localized_text_field(assigns) do
     assigns =
@@ -59,6 +62,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:wrap_key, "")
+      |> Map.put_new(:id_base, nil)
 
     field = assigns.field
     value_map = assigns.value || %{}
@@ -108,7 +112,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
 
       <%= for lang <- @languages do %>
         <div class="bp-localized-row" data-lang={lang}>
-          <label class="bp-field-label" for={"#{@base_id}-#{lang}"}>
+          <label class="bp-field-label" for={lang_id(@id_base, @base_id, lang)}>
             <%= lang %><%= if @warning && @warning.primary == lang,
               do: " " <> gettext("(primary, missing)") %>
           </label>
@@ -116,7 +120,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
             <div id={"bp-rt-wrap-#{@field.name}-#{lang}" <> if(@wrap_key == "", do: "", else: "-" <> @wrap_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
               <input
                 type="hidden"
-                id={"#{@base_id}-#{lang}"}
+                id={lang_id(@id_base, @base_id, lang)}
                 name={input_name(@base_path, lang)}
                 value={Map.get(@value_map, lang, "")}
                 phx-debounce="500"
@@ -126,7 +130,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
                     is named here: "<field> (<lang>)" (task-05710d91d03d7fc9). --%>
               <bp-rich-text-editor
                 value={Map.get(@value_map, lang, "")}
-                data-bridge-target={"#{@base_id}-#{lang}"}
+                data-bridge-target={lang_id(@id_base, @base_id, lang)}
                 data-lang={lang}
                 data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
                 data-label={"#{@title} (#{lang})"}
@@ -136,7 +140,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
           <% else %>
             <textarea
               class={textarea_class(@format)}
-              id={"#{@base_id}-#{lang}"}
+              id={lang_id(@id_base, @base_id, lang)}
               name={input_name(@base_path, lang)}
               phx-change={@on_change}
               disabled={@readonly}
@@ -187,4 +191,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
     |> String.split(" ", trim: true)
     |> Enum.map_join(" ", &String.capitalize/1)
   end
+
+  defp lang_id(id_base, _base_id, lang) when is_binary(id_base), do: "#{id_base}.#{lang}"
+  defp lang_id(_id_base, base_id, lang), do: "#{base_id}-#{lang}"
 end
