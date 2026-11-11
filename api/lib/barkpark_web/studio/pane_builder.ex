@@ -537,17 +537,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.1 — the declared sort: a desk group's own
         # `orderings` win, else the schema's `desk.orderings` (Sanity's
         # `orderings`, first entry = default). Absent → today's order.
-        #
         # task-fa57815041bead3d — a sort the author picked in the list's sort
         # menu (one of `desk.sortOrderings`) wins over that default for this
-        # list only. Picking nothing leaves the default as it is.
+        # list only; an order picked in the desk's list menu (`:list_orders`) wins over both.
         sort_options = sort_options(schema)
 
         active_sort =
           find_sort(sort_options, opts |> Keyword.get(:list_sorts, %{}) |> Map.get(type_name))
 
         list_opts =
-          case active_sort || desk_order(active_group, schema, Map.get(node, :orderings)) do
+          case opts[:list_orders][type_name] || active_sort ||
+                 desk_order(active_group, schema, Map.get(node, :orderings)) do
             %{order: order} -> Keyword.put(list_opts, :order, order)
             [] -> list_opts
             order -> Keyword.put(list_opts, :order, order)

@@ -824,9 +824,10 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@big}")
       settle(view)
 
+      # A `desk.sortOrderings` entry is in the list's "…" menu (`ListMenu`).
       view
-      |> element(~s([data-pane-kind="list"] form.dk-sort))
-      |> render_change(%{"sort" => "titleDesc"})
+      |> element(~s([data-pane-kind="list"] [role="menuitemradio"]), "Sort by Title, Z first")
+      |> render_click()
 
       settle(view)
       assert hd(row_titles(view)) == "130"

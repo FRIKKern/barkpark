@@ -13284,6 +13284,31 @@ msgstr "Filteret til denne listen kunne ikke leses."
 msgid "This pane could not be read."
 msgstr "Ruten kunne ikke leses."
 
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "List options"
+msgstr "Listevalg"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Default sort"
+msgstr "Standard sortering"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by %{field}"
+msgstr "Sorter etter %{field}"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Last Edited"
+msgstr "Sorter etter sist redigert"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Created"
+msgstr "Sorter etter opprettet"
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "Displaying a maximum of %{count} documents"
@@ -13293,3 +13318,13 @@ msgstr "Viser maksimalt %{count} dokumenter"
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
 msgstr "Vis dokumenthandlinger"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Split pane right"
+msgstr "Del ruten til høyre"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Close split pane"
+msgstr "Lukk delt rute"

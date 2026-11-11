@@ -15,6 +15,9 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   pane's own task either way.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
+  alias Barkpark.Content.TitleDerivation
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.PaneBuilder
@@ -109,13 +112,95 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   end
 
   defp opts(type, %{limit: limit, sort: sort} = query, scope) do
+    order = order(sort)
+
     [
       scope: scope,
       scope_prefix: "",
       list_limits: %{type => limit},
       list_offsets: %{type => Map.get(query, :offset, 0)},
-      list_sorts: if(sort, do: %{type => sort}, else: %{})
+      # A name is one of the type's `desk.sortOrderings`; anything else the
+      # list menu picked is an order of its own.
+      list_sorts: if(sort && is_nil(order), do: %{type => sort}, else: %{}),
+      list_orders: if(order, do: %{type => order}, else: %{})
     ]
+  end
+
+  @doc """
+  A list sort as the TanStack Studio keeps it (`app/src/lib/list-prefs.ts`),
+  as a `Content.Query` order: `"title"`, `"updated"`, `"created"`, or an
+  order expression such as `"rating:desc,title:asc"`. Nil for nil and for a
+  name (a `desk.sortOrderings` entry, which PaneBuilder applies itself), and
+  for anything it cannot read.
+  """
+  @spec order(String.t() | nil) :: term()
+  def order("title"), do: [{:field, "title", :asc}]
+  def order("updated"), do: :updated_at_desc
+  def order("created"), do: :created_at_desc
+
+  def order(expr) when is_binary(expr) do
+    specs = expr |> String.split(",") |> Enum.map(&spec/1)
+    if specs != [] and Enum.all?(specs), do: specs
+  end
+
+  def order(_sort), do: nil
+
+  defp spec(part) do
+    case String.split(part, ":") do
+      [field, dir] when dir in ["asc", "desc"] ->
+        if field =~ ~r/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/,
+          do: {:field, field, String.to_existing_atom(dir)}
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  The "Sort by …" choices a type's list menu starts with, as the TanStack
+  Studio offers them (`ListMenu` in its Structure.tsx): the schema's own
+  `desk.orderings`, each as an order expression, or when it declares none
+  its title field, as `"title"`.
+  """
+  @spec orderings(map() | nil) :: [%{title: String.t(), sort: String.t()}]
+  def orderings(schema) do
+    desk = (schema && (Map.get(schema, :desk) || Map.get(schema, "desk"))) || %{}
+    declared = if is_map(desk), do: List.wrap(desk["orderings"] || desk[:orderings]), else: []
+
+    case Enum.flat_map(declared, &ordering/1) do
+      [] -> [%{title: title_field_title(schema), sort: "title"}]
+      some -> some
+    end
+  end
+
+  # `{name, title, field, direction}` or `{name, title, by: [{field, direction}]}`.
+  defp ordering(%{} = o) do
+    by = o["by"] || [%{"field" => o["field"], "direction" => o["direction"] || "asc"}]
+
+    with [_ | _] <- by,
+         parts = Enum.map(by, &"#{&1["field"]}:#{&1["direction"] || "asc"}"),
+         sort = Enum.join(parts, ","),
+         [_ | _] <- order(sort) do
+      field = hd(by)["field"]
+      [%{title: o["title"] || start_case(field), sort: sort}]
+    else
+      _ -> []
+    end
+  end
+
+  defp ordering(_o), do: []
+
+  defp start_case(field) do
+    {first, rest} = field |> String.replace(~r/([a-z])([A-Z])/, "\\1 \\2") |> String.split_at(1)
+    String.upcase(first) <> rest
+  end
+
+  # The field a row's title comes from, by its title ("Name" for authors).
+  defp title_field_title(schema) do
+    name = TitleDerivation.preview_title_field(schema) || "title"
+    fields = (schema && (Map.get(schema, :fields) || Map.get(schema, "fields"))) || []
+    field = Enum.find(fields, &(&1["name"] == name))
+    (field && field["title"]) || gettext("Title")
   end
 
   defp rows(%{role: :list, type_name: type} = list, type) do

@@ -13279,6 +13279,31 @@ msgstr ""
 msgid "This pane could not be read."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "List options"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Default sort"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by %{field}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Last Edited"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Created"
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "Displaying a maximum of %{count} documents"
@@ -13287,4 +13312,14 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/doc_menu.ex
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Split pane right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Close split pane"
 msgstr ""
