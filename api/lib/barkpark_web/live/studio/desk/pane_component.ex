@@ -193,6 +193,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </option>
             </select>
           </form>
+          <p :for={note <- left_out(@pane)} class="dk-note" data-desk-left-out>{note}</p>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
           <%!-- The TanStack Studio's names (ruling R1): a document list is a
                `role="list"` named after its pane, each row a `listitem` that
@@ -287,6 +288,27 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def provisional_title(%{kind: :doc, id: id}, _node), do: id
   def provisional_title(pane, %{} = node), do: node.pane_title || node.title || fallback(pane)
   def provisional_title(pane, nil), do: fallback(pane)
+
+  # What a link from the TanStack Studio or Sanity asks for that this desk does
+  # not draw. Said in the pane, so the current document is not taken for an
+  # old revision. From the URL, not the read: panes that differ only in these
+  # share one read.
+  @doc false
+  def left_out(%{kind: :doc} = pane) do
+    Enum.filter(
+      [
+        pane[:rev] &&
+          gettext("This is the current document. Revision “%{rev}” is not shown here.",
+            rev: pane.rev
+          ),
+        (pane[:view] || pane[:inspect]) &&
+          gettext("Other views and inspectors are not shown here.")
+      ],
+      & &1
+    )
+  end
+
+  def left_out(_pane), do: []
 
   defp fallback(%{kind: :types}), do: gettext("Content")
   defp fallback(%{kind: :menu, node: id}), do: id

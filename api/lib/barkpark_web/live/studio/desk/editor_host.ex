@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   import Phoenix.LiveView, only: [push_navigate: 2, push_patch: 2]
 
+  alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Tree
@@ -291,6 +292,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           <span aria-hidden="true">×</span>
         </a>
       </div>
+      <%!-- The editor opens the current document, whatever the URL asked for. --%>
+      <p :for={note <- PaneComponent.left_out(@view.pane)} class="dk-note" data-desk-left-out>
+        {note}
+      </p>
       <%!-- Always in the page, shown when there is a link: a pick adds the
             first link while the editor has the focus, and a row that came and
             went would make the patch rebuild the editor below it. --%>
