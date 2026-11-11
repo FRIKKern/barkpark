@@ -18,12 +18,18 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   module owns the `topics`, `stale`, `refresh_timer`, `refresh_gap` and `last_read_ms` assigns.
   """
 
-  import Phoenix.Component, only: [assign: 2, assign: 3]
+  use BarkparkWeb, :html
+
   import Phoenix.LiveView, only: [connected?: 1, send_update: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.Broadcast
+  alias BarkparkWeb.Presence
+  alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.PaneComponent
+  alias BarkparkWeb.Studio.Desk.Tree
+  alias BarkparkWeb.Studio.PresenceState
+  alias BarkparkWeb.Studio.StudioLive.Paths
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @refresh_after_ms 120
@@ -42,8 +48,13 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     )
   end
 
-  @doc "Listens to the dataset's two list topics, and stops listening to the last dataset's."
-  def subscribe(socket, dataset) do
+  @doc """
+  Listens to the dataset's two list topics and joins its presence room, and
+  leaves the last dataset's.
+  """
+  def subscribe(socket, dataset), do: socket |> subscribe_lists(dataset) |> join(dataset)
+
+  defp subscribe_lists(socket, dataset) do
     ws = socket.assigns[:current_workspace]
 
     topics =
@@ -126,5 +137,152 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     Shared.own_tenant?(msg, is_map(ws) && ws.id) and
       not (is_binary(msg[:project_id]) and is_map(proj) and is_binary(proj.id) and
              msg.project_id != proj.id)
+  end
+
+  # ── Presence ─────────────────────────────────────────────────────────────
+  #
+  # The hosted editor (`StudioLive`) joins the presence room and tracks its
+  # document only when it loads one, so a desk showing lists only was in
+  # nobody's room, and closing the document pane left its document tracked.
+  # The page joins the room itself, as the Studio's own desk does: on the
+  # first URL (and a new dataset) it is tracked browsing; the editor then
+  # tracks the document it loads; a URL with no document to edit tracks it
+  # browsing again. The room, the meta and `presence_diff` are the Studio's
+  # (`Shared.track_presence/1`, `Lifecycle.presence_diff/2`), so the navbar's
+  # "who's online" and the editor's dots read the same `presences`.
+
+  defp join(socket, dataset) do
+    user_id = socket.assigns[:user_id]
+
+    if connected?(socket) and is_binary(user_id) do
+      topic =
+        PresenceState.topic(
+          id(socket.assigns[:current_workspace]),
+          id(socket.assigns[:current_project]),
+          dataset
+        )
+
+      old = socket.assigns[:presence_topic]
+
+      cond do
+        topic != old ->
+          if old do
+            Presence.untrack(self(), old, user_id)
+            Phoenix.PubSub.unsubscribe(Barkpark.PubSub, old)
+          end
+
+          Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+          browse(socket, topic, user_id, dataset)
+
+        leaves_document?(socket, dataset) ->
+          browse(socket, topic, user_id, dataset)
+
+        true ->
+          socket
+      end
+    else
+      # The first render is not in the room; `presence_session` is read by
+      # the page's render all the same.
+      assign_new(socket, :presence_session, fn -> nil end)
+    end
+  end
+
+  # Tracked on no document: the Studio's meta with `doc_id` and `type` nil.
+  defp browse(socket, topic, user_id, dataset) do
+    meta = %{
+      doc_id: nil,
+      type: nil,
+      dataset: dataset,
+      project_id: id(socket.assigns[:current_project]),
+      name: socket.assigns[:user_name],
+      color: socket.assigns[:user_color],
+      joined_at: System.system_time(:second),
+      session_id: socket.id
+    }
+
+    case Presence.track(self(), topic, user_id, meta) do
+      {:ok, _ref} ->
+        :ok
+
+      {:error, {:already_tracked, _pid, _topic, _key}} ->
+        Presence.update(self(), topic, user_id, meta)
+    end
+
+    assign(socket,
+      presence_topic: topic,
+      presence_session: socket.id,
+      presences: PresenceState.list(topic)
+    )
+  end
+
+  # The editor is on a document and the URL being handled edits none (its
+  # last pane closed, a list or menu took its place). `subscribe/2` runs
+  # before the page assigns the new chain, so the chain is read from the URL
+  # the chrome's `:handle_params` hook just put in `current_path`.
+  defp leaves_document?(socket, dataset) do
+    socket.assigns[:editing] != nil and
+      case chain(socket, dataset) do
+        {:ok, chain} -> EditorHost.target(chain, dataset) == nil
+        :unknown -> false
+      end
+  end
+
+  defp chain(socket, dataset) do
+    base = Paths.studio_path(socket.assigns[:scope_prefix], ["_desk"], dataset)
+
+    with %{root: root} <- socket.assigns[:desk],
+         path when is_binary(path) <- socket.assigns[:current_path],
+         {:ok, splat} <- splat(path, base) do
+      {:ok, Tree.parse(splat, root)}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp splat(base, base), do: {:ok, ""}
+
+  defp splat(path, base) do
+    if String.starts_with?(path, base <> "/"),
+      do: {:ok, path |> String.replace_prefix(base <> "/", "") |> URI.decode()},
+      else: :unknown
+  end
+
+  defp id(%{id: id}) when is_binary(id), do: id
+  defp id(_), do: nil
+
+  @doc """
+  The other people on each document of `dataset`, by published id: what a
+  list row marks. `session` (the page's `presence_session`) is left out.
+  """
+  def on_rows(presences, dataset, session) do
+    presences
+    |> Enum.filter(
+      &(is_binary(&1[:doc_id]) and &1[:dataset] == dataset and &1[:session_id] != session)
+    )
+    |> Enum.group_by(& &1.doc_id)
+  end
+
+  @doc "A list row's mark: one dot per other person who has its document open."
+  attr :people, :list, default: []
+
+  def row_mark(assigns) do
+    ~H"""
+    <span
+      :if={@people != []}
+      class="dk-row-presence"
+      style="display: inline-flex; align-items: center; margin-left: auto"
+      role="img"
+      aria-label={label(@people)}
+    >
+      <span :for={p <- @people} class="presence-dot-sm" style={"background: #{p.color}"}></span>
+    </span>
+    """
+  end
+
+  defp label(people) do
+    case Enum.map(people, &(&1[:name] || gettext("User"))) do
+      [one] -> gettext("%{name} is editing", name: one)
+      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
+    end
   end
 end
