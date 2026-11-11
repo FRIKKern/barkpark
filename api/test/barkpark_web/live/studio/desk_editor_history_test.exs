@@ -219,7 +219,10 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
       {:ok, view, _} = live(ctx.conn, "#{ctx.base}/#{ctx.post_type};#{ctx.post}")
       settle(view)
 
-      view |> element(~s([data-pane-editing] button[phx-click="show-history"])) |> render_click()
+      view
+      |> element(~s{[data-pane-editing] button[phx-click="show-history"]:not([role="menuitem"])})
+      |> render_click()
+
       assert has_element?(view, "[data-pane-editing] #history-modal-dialog[role=dialog]")
 
       # The oldest revision is the first published state.
@@ -239,7 +242,11 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
     test "Escape closes the history dialog", ctx do
       {:ok, view, _} = live(ctx.conn, "#{ctx.base}/#{ctx.post_type};#{ctx.post}")
       settle(view)
-      view |> element(~s([data-pane-editing] button[phx-click="show-history"])) |> render_click()
+
+      view
+      |> element(~s{[data-pane-editing] button[phx-click="show-history"]:not([role="menuitem"])})
+      |> render_click()
+
       assert has_element?(view, "#history-modal-dialog")
       render_keydown(view, "close-history", %{"key" => "Escape"})
       refute has_element?(view, "#history-modal-dialog")
