@@ -68,6 +68,8 @@ defmodule BarkparkWeb.Studio.StructureCopyTest do
     localized =
       Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn -> StructureCopy.localize(tree()) end)
 
+    # The root keeps "Structure" here: the old Studio makes its pane's id
+    # from the title (`pane-structure`). The desk translates it itself.
     assert titles(localized) == [
              "Structure",
              "Regneark",
