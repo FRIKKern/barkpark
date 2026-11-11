@@ -275,7 +275,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-kind="doc"
       data-pane-editing
       aria-label={@page_title}
+      style="position: static"
     >
+      <%!-- Not positioned (the desk's sheet says `relative` for `.dk-edit`,
+            from when the close link floated): the Studio draws its dialogs'
+            backdrop `position: absolute; inset: 0` inside its shell and means
+            the page. A positioned pane boxed the backdrop in: the other panes
+            stayed bright and clickable under an open dialog. --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>

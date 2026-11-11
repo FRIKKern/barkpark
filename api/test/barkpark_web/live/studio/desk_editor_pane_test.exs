@@ -63,6 +63,35 @@ defmodule BarkparkWeb.Studio.DeskEditorPaneTest do
     assert has_element?(view, "section.pane.doc > .pane-body.doc-form #editor-form")
   end
 
+  # Measured in a browser: "Open another" and the object dialog dimmed the
+  # edit pane only (backdrop box [640,101,1440,856] of a 1440x900 page), and
+  # the panes to its left stayed clickable. The Studio's `.modal-backdrop` is
+  # `position: absolute; inset: 0` and means the page, so no ancestor the desk
+  # adds may be positioned. LiveViewTest has no layout: this reads the two
+  # places that can position the pane.
+  test "a dialog the Studio draws in the edit pane is not boxed in by the pane", %{view: view} do
+    view
+    |> element(~s([data-pane-editing] [data-test-id="open-secondary-picker"]))
+    |> render_click()
+
+    assert has_element?(view, "section[data-pane-editing] .modal-backdrop [role=dialog]")
+
+    css = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
+
+    sheet_positions? =
+      case Regex.run(~r/\.dk \.dk-edit\s*\{([^}]*)\}/, css) do
+        [_, body] -> body =~ ~r/position:\s*(relative|absolute|fixed|sticky)/
+        nil -> false
+      end
+
+    pane_says_static? =
+      has_element?(view, ~s(section[data-pane-editing][style*="position: static"]))
+
+    assert pane_says_static? or not sheet_positions?,
+           "the desk's sheet positions .dk-edit and the pane does not undo it: " <>
+             "the Studio's backdrop covers the pane, not the page"
+  end
+
   test "the close link is in the pane's own header row, above the editor", ctx do
     pane = "section[data-pane-editing]"
     close = "#{pane} > .pane-header > a.dk-close"
