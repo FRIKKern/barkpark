@@ -68,8 +68,10 @@ defmodule BarkparkWeb.Studio.StructureCopyTest do
     localized =
       Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn -> StructureCopy.localize(tree()) end)
 
+    # The root's "Structure" is Barkpark's fallback when the desk document
+    # names none, so it is Barkpark's word too.
     assert titles(localized) == [
-             "Structure",
+             "Struktur",
              "Regneark",
              "Forfatter",
              # An authored type that happens to share a plugin title is data.
