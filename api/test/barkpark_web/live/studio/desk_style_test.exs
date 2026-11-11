@@ -32,6 +32,10 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     refute body =~ "--border-subtle"
   end
 
+  test "a note wraps a long unbroken value (a rev of 200 characters) inside its pane" do
+    assert rule(@css, ".dk .dk-note") =~ "overflow-wrap: anywhere"
+  end
+
   test "skeleton bones and pane separators are --border, visible in dark" do
     assert rule(@css, ".dk .dk-bone") =~ "background: var(--border)"
     assert rule(@css, ".dk .dk-pane") =~ "border-right-color: var(--border)"
