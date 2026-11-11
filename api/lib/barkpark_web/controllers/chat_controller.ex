@@ -91,6 +91,7 @@ defmodule BarkparkWeb.ChatController do
   }
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ChatSendFailure
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
 
@@ -298,7 +299,6 @@ defmodule BarkparkWeb.ChatController do
           conn |> put_status(:accepted) |> json(%{accepted: true})
 
         {:error, reason} ->
-          Logger.warning("chat transport: send failed: #{inspect(reason)}")
           send_failure_response(conn, reason)
       end
     else
@@ -1201,11 +1201,14 @@ defmodule BarkparkWeb.ChatController do
   # term over an explicit ALLOWLIST, then answer with the fixed public code.
   # NEVER interpolate the reason into the wire message — `safe_command`'s rescue
   # leg returns raw exception structs, and echoing one is an information leak
-  # (the server-side Logger line above already carries the full term). Public
+  # (the server-side Logger line below carries the term). Public
   # (`@doc false`) so every allowlist leg is assertable without arranging the
   # matching runtime failure live — the exit-reason-mapping seam convention.
+  # The allowlist itself lives in `ChatSendFailure.classify/1`.
   def send_failure_response(conn, reason) do
-    case classify_send_failure(reason) do
+    Logger.warning("chat transport: send failed: #{inspect(ChatSendFailure.loggable(reason))}")
+
+    case ChatSendFailure.classify(reason) do
       :capacity ->
         # Transient by definition — say when to come back (mirrors the
         # rate-limit plugs' Retry-After convention).
@@ -1231,29 +1234,6 @@ defmodule BarkparkWeb.ChatController do
         )
     end
   end
-
-  # Capacity: admission refused the spawn — the runtime pool is full or two
-  # spawns raced the registration; both clear on their own.
-  defp classify_send_failure({:managed_runtime_capacity, _}), do: :capacity
-  defp classify_send_failure(:admission_registration_conflict), do: :capacity
-
-  # Unavailable: the runtime is not there right now (dead GenServer, closed or
-  # absent port, dead app-server, the {:ok, nil} guard above) — retryable.
-  defp classify_send_failure({:not_running, _}), do: :unavailable
-  defp classify_send_failure(:port_closed), do: :unavailable
-  defp classify_send_failure(:no_port), do: :unavailable
-  defp classify_send_failure({:app_server_exit, _}), do: :unavailable
-  defp classify_send_failure(:runtime_session_missing), do: :unavailable
-
-  # Unsupported: the provider/operation combination can never succeed as asked.
-  defp classify_send_failure({:provider_not_ready, _}), do: :unsupported
-  defp classify_send_failure({:provider_protocol_incompatible, _}), do: :unsupported
-  defp classify_send_failure({:unsupported_runtime_operation, _}), do: :unsupported
-  defp classify_send_failure({:missing_runtime_contract, _}), do: :unsupported
-
-  # Opaque fallback: any term outside the allowlist stays a generic transient
-  # 503 — unknown ≠ permanent, and the term itself never reaches the wire.
-  defp classify_send_failure(_), do: :unavailable
 
   # Append the caller's turn as an organic `role:"user"` row so the Session's
   # replayable history carries the human side (the LiveView composer persists its

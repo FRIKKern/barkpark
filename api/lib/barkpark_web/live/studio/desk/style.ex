@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
       .dk a.pane-item:hover { color: var(--fg); }
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-      .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); }
+      .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
       .dk .dk-fields { padding: 24px 32px; margin: 0; display: grid; gap: 20px; max-width: 72ch; }
       .dk .dk-fields dt { font-size: var(--text-xs); color: var(--fg-muted); margin-bottom: 4px; }
       .dk .dk-fields dd { margin: 0; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
