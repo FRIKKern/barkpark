@@ -79,12 +79,10 @@
       });
     })();
   </script>
-  <%!-- The LiveViews assign page_title ("Media Library", "Workspace Settings", …);
-        a static <title> threw it away, so every Studio tab read the same. The
-        default carries NO site name: live_title appends the suffix to it too
-        (same pattern as sheets.html.heex / bulldocs.html.heex). --%>
-  <%!-- A page may name its own suffix (`title_suffix`): the desk slice reads
-        "X | Barkpark" as the TanStack Studio's tab does (ruling R23). --%>
+  <%!-- The LiveViews assign page_title ("Media Library", …); a static <title>
+        threw it away, so every Studio tab read the same. The default carries NO
+        site name: live_title appends the suffix to it too (as sheets/bulldocs
+        do). A page may set `title_suffix`: the desk reads "X | Barkpark". --%>
   <.live_title default="Studio" suffix={assigns[:title_suffix] || " · Barkpark"}>{assigns[:page_title]}</.live_title>
   <style>
     /* ── Inter — self-hosted chrome font (variable woff2 in priv/static/fonts/,
