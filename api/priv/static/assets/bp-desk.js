@@ -28,6 +28,12 @@
 //              back if the patch dropped it; a pane that opened from its strip
 //              or took the place of a closed one gets the focus itself.
 //              Cmd+K / Ctrl+K go to the search box.
+//   * TIPS   — a close link, a strip and the separator say what they do in a
+//              small label, 400 ms after the pointer rests on them or the
+//              keyboard reaches them (the TanStack Studio's Tip.tsx). It
+//              goes on leave, blur, Escape, a press, a scroll, and with its
+//              control or the URL. Anything in the desk marked data-tip="…"
+//              (and data-tip-keys="Ctrl+K") gets one too, with no script.
 //
 // Nothing here decides where a link goes: the href is the server's, and a
 // modifier click (new tab, new window) is left to the browser untouched.
@@ -143,6 +149,8 @@
     el.setAttribute("aria-label", label);
     el.setAttribute("aria-valuemin", String(PANE_MIN));
     el.setAttribute("tabindex", "0");
+    el.setAttribute("data-tip", label);
+    el.setAttribute("data-tip-side", "right");
     return el;
   }
 
@@ -195,7 +203,12 @@
       }
       set(el, "aria-label", (root.getAttribute("data-desk-expand") || "Expand %{title}").replace("%{title}", kept));
       set(el, "aria-expanded", "false");
+      set(el, "data-tip", el.getAttribute("aria-label"));
+      set(el, "data-tip-side", "right");
     } else if (kept !== null) {
+      // An open pane is no control: a row in it must not show the strip's tip.
+      el.removeAttribute("data-tip");
+      el.removeAttribute("data-tip-side");
       if (kept) el.setAttribute("aria-label", kept);
       else el.removeAttribute("aria-label");
       el.removeAttribute("data-desk-name");
@@ -234,7 +247,7 @@
     var floor = (MIN[kinds[kinds.length - 1]] || MIN.list) + (kinds.length - 1) * STRIP;
     var narrow = width > 0 && shown.length > 0 && (width < NARROW || floor > width);
     var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
-    var css = "";
+    var css = TIP_RULES;
 
     if (narrow) {
       if (!root.hasAttribute("data-narrow")) root.setAttribute("data-narrow", "");
@@ -279,6 +292,90 @@
     var sheet = styleSheet(root.ownerDocument);
     if (sheet.textContent !== css) sheet.textContent = css;
     return flags;
+  }
+
+  // The tip: the words in the popover colours, a hairline and a shadow, as the
+  // shell's own popovers. It is never in the way of the pointer.
+  var TIP_ID = "bp-desk-tip";
+  var TIP_DELAY_MS = 400;
+  var TIP_GAP = 4;
+  var TIPPED = "[data-tip], a.dk-close";
+  var TIP_RULES =
+    "#" + TIP_ID + ".hover-tip { position: fixed; z-index: 300; display: flex; max-width: 280px; padding: 3px 8px; border-radius: 3px; " +
+    "background: var(--bg-popover, var(--bg)); color: var(--fg); box-shadow: 0 0 0 1px var(--border), 0 2px 8px hsl(var(--bp-shadow-hsl) / 0.2); " +
+    "font-size: 13px; line-height: 19px; pointer-events: none; white-space: nowrap; }\n" +
+    "#" + TIP_ID + " .tip-line { display: flex; align-items: center; gap: 8px; }\n" +
+    "#" + TIP_ID + " .keys { display: inline-flex; gap: 2px; }\n" +
+    "#" + TIP_ID + " kbd { height: 15px; font: inherit; font-size: 10px; line-height: 15px; font-weight: 600; padding: 0 4px; border-radius: 3px; " +
+    "box-shadow: inset 0 0 0 1px var(--border); color: var(--fg-muted); }\n" +
+    "@media (forced-colors: active) { #" + TIP_ID + " { outline: 1px solid CanvasText; } }\n";
+
+  // The control a tip belongs to. A close link names itself in aria-label:
+  // its tip reads the same words.
+  function tipAnchor(root, target) {
+    var el = target && target.closest ? target.closest(TIPPED) : null;
+    if (!el || !root.contains(el)) return null;
+    if (!el.hasAttribute("data-tip") && el.getAttribute("aria-label")) el.setAttribute("data-tip", el.getAttribute("aria-label"));
+    return el.getAttribute("data-tip") ? el : null;
+  }
+
+  // The tip's id on the control's aria-describedby, beside any of its own.
+  function describe(anchor, on) {
+    var ids = (anchor.getAttribute("aria-describedby") || "").split(/\s+/).filter(function (id) {
+      return id && id !== TIP_ID;
+    });
+    if (on) ids.push(TIP_ID);
+    if (ids.length) set(anchor, "aria-describedby", ids.join(" "));
+    else anchor.removeAttribute("aria-describedby");
+  }
+
+  function drawTip(doc, anchor, y) {
+    var tip = doc.getElementById(TIP_ID) || doc.createElement("span");
+    var text = anchor.getAttribute("data-tip");
+    var keys = anchor.getAttribute("data-tip-keys");
+    var line = doc.createElement("span");
+    tip.id = TIP_ID;
+    tip.className = "hover-tip";
+    tip.setAttribute("role", "tooltip");
+    tip.textContent = "";
+    tip.style.position = "fixed";
+    line.className = "tip-line";
+    line.appendChild(doc.createTextNode(text));
+    if (keys) {
+      var caps = doc.createElement("span");
+      caps.className = "keys";
+      keys.split("+").forEach(function (k) {
+        var kbd = doc.createElement("kbd");
+        kbd.textContent = k;
+        caps.appendChild(kbd);
+      });
+      line.appendChild(caps);
+    }
+    tip.appendChild(line);
+    doc.body.appendChild(tip);
+    placeTip(tip, anchor, y);
+    // A tip that only says the control's name is not read a second time
+    // (Tip.tsx's IconTips); one that says more describes it.
+    var name = anchor.getAttribute("aria-label") || anchor.textContent.trim();
+    if (keys || text !== name) describe(anchor, true);
+  }
+
+  // 4 px under the control and centred on it, over it near the bottom of the
+  // window (Sanity's). A strip and the separator run the pane's height: there
+  // the tip sits beside them, level with the pointer. Always 4 px inside.
+  function placeTip(tip, anchor, y) {
+    var at = anchor.getBoundingClientRect();
+    var size = tip.getBoundingClientRect();
+    var w = size.width || tip.offsetWidth;
+    var h = size.height || tip.offsetHeight;
+    var left = at.left + at.width / 2 - w / 2;
+    var top = at.bottom + 80 >= window.innerHeight ? at.top - TIP_GAP - h : at.bottom + TIP_GAP;
+    if (anchor.getAttribute("data-tip-side") === "right") {
+      left = at.right + TIP_GAP;
+      top = (y === null ? at.top + 16 + h / 2 : y) - h / 2;
+    }
+    tip.style.left = Math.max(TIP_GAP, Math.min(left, window.innerWidth - TIP_GAP - w)) + "px";
+    tip.style.top = Math.max(TIP_GAP, Math.min(top, window.innerHeight - TIP_GAP - h)) + "px";
   }
 
   function paneOf(root, el) {
@@ -555,6 +652,12 @@
         var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
+        // A strip that opened is no control: its tip goes. Any other shown tip
+        // follows its control (a separator moved by the keys).
+        var tip = hook._tip && hook._tip.anchor ? hook._tip : null;
+        var tipEl = tip && !tip.timer ? root.ownerDocument.getElementById(TIP_ID) : null;
+        if (tip && !tip.anchor.getAttribute("data-tip")) hook._hideTip();
+        else if (tipEl) placeTip(tipEl, tip.anchor, tip.y);
         return flags;
       };
       hook._queueLayout = function () {
@@ -791,6 +894,69 @@
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
       window.addEventListener("phx:page-loading-stop", hook._onLoaded);
+
+      // TIPS. `quiet` is a control whose tip was put away (Escape, a press):
+      // it stays away until the pointer or the focus leaves that control.
+      hook._tip = { anchor: null, timer: 0, path: null, y: null, quiet: null };
+      hook._hideTip = function (quiet) {
+        var tip = hook._tip;
+        window.clearTimeout(tip.timer);
+        tip.timer = 0;
+        hook._tipGone.disconnect();
+        if (tip.anchor) describe(tip.anchor, false);
+        tip.quiet = quiet ? tip.anchor : null;
+        tip.anchor = null;
+        var el = root.ownerDocument.getElementById(TIP_ID);
+        if (el) el.parentNode.removeChild(el);
+      };
+      hook._showTip = function (e) {
+        // A finger does not hover: its pointerover is the tap itself.
+        if (e.pointerType === "touch") return;
+        var tip = hook._tip;
+        var anchor = tipAnchor(root, e.target);
+        if (!anchor || anchor === tip.anchor || anchor === tip.quiet) return;
+        // The focus a click gives is not keyboard focus (Tip.tsx).
+        if (e.type === "focusin" && !anchor.matches(":focus-visible")) return;
+        hook._hideTip();
+        tip.anchor = anchor;
+        tip.path = window.location.pathname;
+        tip.y = e.type === "focusin" ? null : e.clientY;
+        tip.timer = window.setTimeout(function () {
+          tip.timer = 0;
+          if (!anchor.isConnected || tip.path !== window.location.pathname) return hook._hideTip();
+          drawTip(root.ownerDocument, anchor, tip.y);
+          hook._tipGone.observe(root, { childList: true, subtree: true });
+        }, TIP_DELAY_MS);
+      };
+      // The pointer or the focus left the control (not for one of its own parts).
+      hook._leaveTip = function (e) {
+        var tip = hook._tip;
+        var from = tip.anchor || tip.quiet;
+        if (!from || !from.contains(e.target) || (e.relatedTarget && from.contains(e.relatedTarget))) return;
+        if (tip.anchor === from) hook._hideTip();
+        tip.quiet = null;
+      };
+      hook._putTipAway = function (e) {
+        if (e.type === "keydown" && e.key !== "Escape") return;
+        if (hook._tip.anchor || e.type !== "keydown") hook._hideTip(true);
+      };
+      // The control left the page (its pane closed), or the URL moved on.
+      hook._tipGone = new window.MutationObserver(function () {
+        if (hook._tip.anchor && !hook._tip.anchor.isConnected) hook._hideTip();
+      });
+      hook._tipUrl = function () {
+        if (hook._tip.anchor && hook._tip.path !== window.location.pathname) hook._hideTip();
+      };
+      root.addEventListener("pointerover", hook._showTip);
+      root.addEventListener("focusin", hook._showTip);
+      root.addEventListener("pointerout", hook._leaveTip);
+      root.addEventListener("focusout", hook._leaveTip);
+      root.ownerDocument.addEventListener("keydown", hook._putTipAway);
+      root.ownerDocument.addEventListener("pointerdown", hook._putTipAway, true);
+      root.ownerDocument.addEventListener("click", hook._putTipAway, true);
+      window.addEventListener("scroll", hook._putTipAway, true);
+      window.addEventListener("popstate", hook._tipUrl);
+      window.addEventListener("phx:page-loading-stop", hook._tipUrl);
     },
 
     destroyed: function () {
@@ -826,6 +992,17 @@
       root.removeEventListener("pointerover", this._onIntent);
       root.removeEventListener("focusin", this._onIntent);
       window.removeEventListener("phx:page-loading-stop", this._onLoaded);
+      this._hideTip();
+      root.removeEventListener("pointerover", this._showTip);
+      root.removeEventListener("focusin", this._showTip);
+      root.removeEventListener("pointerout", this._leaveTip);
+      root.removeEventListener("focusout", this._leaveTip);
+      root.ownerDocument.removeEventListener("keydown", this._putTipAway);
+      root.ownerDocument.removeEventListener("pointerdown", this._putTipAway, true);
+      root.ownerDocument.removeEventListener("click", this._putTipAway, true);
+      window.removeEventListener("scroll", this._putTipAway, true);
+      window.removeEventListener("popstate", this._tipUrl);
+      window.removeEventListener("phx:page-loading-stop", this._tipUrl);
     },
   };
 })();
