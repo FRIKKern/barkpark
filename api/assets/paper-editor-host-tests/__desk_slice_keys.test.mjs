@@ -207,7 +207,7 @@ await tick();
 assert.equal(window.document.activeElement, window.document.body, "only Enter or Space counts as a press");
 
 // ── J41: ArrowDown past the last row while the list reads more is kept ───────
-// (big-list.spec.ts:182: 110 steps from row 1 of 100 end on row 111.)
+// (big-list.spec.ts, the ArrowDown walk: 110 steps from row 1 of 100 end on row 111.)
 const item = (n) => `<div role="listitem" aria-posinset="${n}">${row(`big;b${n}`, `Big ${n}`)}</div>`;
 const big = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => item(from + i)).join("");
 el.insertAdjacentHTML("beforeend", `<section class="pane-column dk-pane" id="p3" data-pane-index="1" data-pane-kind="list"><div class="pane-body"><div role="list">${big(1, 3)}</div><div class="dk-list-more" aria-hidden="true"></div></div></section>`);
@@ -226,6 +226,22 @@ key("ArrowDown");
 bigList.insertAdjacentHTML("beforeend", big(11, 12));
 await tick();
 assert.equal(focused(), "Big 10", "no room for more: the last row is the end");
+// A held key owes at most 50 steps, however long it is held.
+bigList.insertAdjacentHTML("afterend", `<div class="dk-list-more" aria-hidden="true"></div>`);
+rowTo("big;b12").focus();
+for (let i = 0; i < 80; i++) key("ArrowDown");
+bigList.insertAdjacentHTML("beforeend", big(13, 200));
+await tick();
+assert.equal(focused(), "Big 62", "80 presses at the end owe 50 steps, not 80");
+// The focus leaving the row drops what it owed, even when it comes back.
+rowTo("big;b200").focus();
+key("ArrowDown");
+key("ArrowDown");
+rowTo("big;b1").focus();
+rowTo("big;b200").focus();
+bigList.insertAdjacentHTML("beforeend", big(201, 210));
+await tick();
+assert.equal(focused(), "Big 200", "steps owed before the focus left are not taken");
 window.document.getElementById("p3").remove();
 window.document.getElementById("p2").remove();
 

@@ -147,7 +147,7 @@ defmodule BarkparkWeb.Studio.DeskListBigTest do
     do: view |> element(@list <> ~s([phx-viewport-bottom="more"])) |> render_hook("more", %{})
 
   # A page at a time took a round trip per 100 rows: on guerrilla 400 fast
-  # wheels reached about 300 rows and never the note (big-list.spec.ts:77).
+  # wheels reached about 300 rows and never the note (big-list.spec.ts, the 2,000 note).
   test "the first scroll to the bottom grows the list to 2,000 in one read, then says so", %{
     conn: conn,
     base: base

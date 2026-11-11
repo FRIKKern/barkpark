@@ -884,9 +884,14 @@
         to.focus({ preventScroll: true });
         if (to.scrollIntoView) to.scrollIntoView({ block: "nearest" });
       };
+      // A held key owes no more than this; the focus leaving the row owes none.
+      var OWED_MAX = 50;
       hook._owed = null;
       hook._forgive = function () {
-        if (hook._owed) hook._owed.watch.disconnect();
+        if (hook._owed) {
+          hook._owed.watch.disconnect();
+          hook._owed.row.removeEventListener("focusout", hook._forgive);
+        }
         hook._owed = null;
       };
       hook._owe = function (row) {
@@ -902,9 +907,10 @@
             if (root.ownerDocument.activeElement === owed.row) hook._step(rows[Math.min(rows.length - 1, at + owed.steps)]);
           });
           watch.observe(list, { childList: true });
+          row.addEventListener("focusout", hook._forgive);
           hook._owed = { row: row, steps: 0, watch: watch };
         }
-        hook._owed.steps += 1;
+        hook._owed.steps = Math.min(OWED_MAX, hook._owed.steps + 1);
       };
 
       hook._onIntent = function (e) {
