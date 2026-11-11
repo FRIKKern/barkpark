@@ -6,9 +6,8 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesGoneTest do
 
   The second person is this test process writing through `Barkpark.Content`,
   as an API write from another editor would. The page notes the document in
-  `desk_gone`; `LiveRefresh.gone_notice/1` is what it shows for it. Until the
-  page renders that notice (desk_live.ex), the notice is rendered here from
-  the page's own assigns.
+  `desk_gone` and shows `LiveRefresh.gone_notice/1` for it; the notice is
+  read from the page's own HTML.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -16,7 +15,6 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesGoneTest do
 
   alias Barkpark.Auth
   alias Barkpark.Content
-  alias BarkparkWeb.Studio.Desk.LiveRefresh
 
   @dataset "production"
   @type_name "desk_gone_note"
@@ -88,15 +86,11 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesGoneTest do
     assigns(view)[:desk_gone] || %{}
   end
 
+  # What the page shows: its notice, or "" when it shows none.
   defp notice(view) do
-    a = assigns(view)
-
-    render_component(&LiveRefresh.gone_notice/1,
-      gone: a.desk_gone,
-      panes: a.desk_panes,
-      chain: a.chain,
-      base: a.base
-    )
+    if has_element?(view, "[data-desk-gone]"),
+      do: view |> element("[data-desk-gone]") |> render(),
+      else: ""
   end
 
   test "the open document deleted by someone else: the desk says so, with Close", %{

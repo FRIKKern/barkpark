@@ -70,6 +70,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # new" (J18) runs the Studio's `new-document` with no editor open yet.
       |> assign_new(:nav_path, fn -> [] end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
+      # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
+      |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
       # Each list type's sort as this editor keeps it (`ListMenu`).
@@ -293,6 +295,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
+    <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
           own, is hosted in it. The two labels are `bp-desk.js`'s: it names
@@ -310,7 +313,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
       <%= for view <- @desk_panes do %>
-      {if view.index == @active, do: EditorHost.pane(assigns, view)}
+      <%!-- The editor's section has an id of its own. On the pane's id the
+            patch turned the pane into the editor in place, so the browser
+            never let the pane's component go; a Back to that document then
+            drew the component as an empty section until the editor came
+            (row 5). --%>
+      {if view.index == @active, do: EditorHost.pane(assigns, %{view | id: view.id <> "-editor"})}
       <.live_component
         :if={view.index != @active}
         module={PaneComponent}

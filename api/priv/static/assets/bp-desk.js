@@ -51,6 +51,13 @@
   var WARM_DELAY_MS = 80;
   var WARM_FORGET_MS = 30000;
   var GIVE_UP_MS = 10000;
+  // The edit pane's "…" document-actions buttons (header, footer), and how
+  // long a pressed document action waits for its answer to move the focus.
+  var DOC_MENU_BUTTON = 'button[aria-haspopup="menu"][id$="-actions-button"]';
+  var PRESS_MS = 30000;
+  function actionOf(btn) {
+    return (btn.getAttribute("phx-click") || "") + "|" + (btn.getAttribute("aria-label") || btn.textContent.trim());
+  }
 
   // Which panes collapse to strips. Sanity's own algorithm
   // (structure/components/pane/paneLayoutController.ts, _notifyObservers), as
@@ -650,6 +657,13 @@
       hook._layout = function () {
         if (hook._focus && hook._focus.path !== window.location.pathname) hook._focus = null;
         var flags = layout(root, hook._focus ? hook._focus.index : null, hook._widths);
+        // A focused strip the layout itself opened (the window widened) was
+        // lent a tabindex there: the pane holds it as an opened strip does,
+        // so it is taken back when the focus leaves.
+        var lent = root.ownerDocument.activeElement;
+        if (!hook._held && lent && lent.parentNode === root && lent.getAttribute("tabindex") === "-1" && lent.hasAttribute("data-pane-index") && !lent.hasAttribute("data-pane-collapsed")) {
+          hook._held = { path: window.location.pathname, index: lent.getAttribute("data-pane-index") };
+        }
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
         // A strip that opened is no control: its tip goes. Any other shown tip
@@ -814,6 +828,39 @@
         hook._wasInside = !!link && root.ownerDocument.activeElement === link;
       };
 
+      // A document action pressed from the keyboard that the answer takes
+      // away, disables or turns into another (the patch makes Publish the
+      // Unpublish button, focus and all: a second Enter unpublished) hands
+      // the focus to the edit pane's last "…", the one Sanity puts beside
+      // Publish. Anything that took the focus meanwhile keeps it.
+      hook._pressed = null;
+      hook._notePress = function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        var doc = root.ownerDocument;
+        var btn = e.target.closest ? e.target.closest("[data-pane-editing] bp-overflow-menu button") : null;
+        if (!btn || !root.contains(btn) || doc.activeElement !== btn) return;
+        hook._pressed = { btn: btn, pane: btn.closest("[data-pane-editing]"), was: actionOf(btn) };
+        window.clearTimeout(hook._pressTimer);
+        hook._pressTimer = window.setTimeout(function () {
+          hook._pressed = null;
+          hook._pressWatch.disconnect();
+        }, PRESS_MS);
+        hook._pressWatch.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "aria-label", "phx-click"] });
+      };
+      hook._keepPressed = function () {
+        var p = hook._pressed;
+        var doc = root.ownerDocument;
+        var at = doc.activeElement;
+        if (p && at && at !== doc.body && at !== p.btn) p = null;
+        if (p && p.btn.isConnected && !p.btn.disabled && actionOf(p.btn) === p.was) return;
+        hook._pressed = null;
+        hook._pressWatch.disconnect();
+        if (!p) return;
+        var menus = p.pane.isConnected ? p.pane.querySelectorAll(DOC_MENU_BUTTON) : [];
+        if (menus.length) menus[menus.length - 1].focus({ preventScroll: true });
+      };
+      hook._pressWatch = new window.MutationObserver(hook._keepPressed);
+
       hook._onKey = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -911,6 +958,7 @@
 
       root.addEventListener("click", hook._noteFocus, true);
       root.addEventListener("keydown", hook._noteFocus, true);
+      root.addEventListener("keydown", hook._notePress, true);
       root.ownerDocument.addEventListener("focusin", hook._letGo);
       root.ownerDocument.addEventListener("pointerdown", hook._letGo, true);
       root.addEventListener("click", hook._onClick);
@@ -987,6 +1035,46 @@
       window.addEventListener("scroll", hook._putTipAway, true);
       window.addEventListener("popstate", hook._tipUrl);
       window.addEventListener("phx:page-loading-stop", hook._tipUrl);
+
+      // A NEW DOCUMENT'S FIRST FIELD. The desk names a field's input by its
+      // bare path (`id="title"`), where the page's `bpFocusNewDoc`
+      // (root.html.heex) looks for `doc-field-<id>-…`. After a "+" create the
+      // new document's first field takes the focus here, on the same terms:
+      // wait up to 4 s for its editor, skip hidden, read-only and disabled
+      // fields, and stop at the user's first key or press.
+      hook._focusNewDoc = function (e) {
+        var id = e.detail && e.detail.id;
+        if (!id) return;
+        var doc = root.ownerDocument;
+        var stop = Date.now() + 4000;
+        var interrupted = false;
+        var interrupt = function () {
+          interrupted = true;
+        };
+        var done = function () {
+          doc.removeEventListener("keydown", interrupt, true);
+          doc.removeEventListener("pointerdown", interrupt, true);
+        };
+        doc.addEventListener("keydown", interrupt, true);
+        doc.addEventListener("pointerdown", interrupt, true);
+        var attempt = function () {
+          if (interrupted || !root.isConnected) return done();
+          var pane = root.querySelector("[data-pane-editing]");
+          var mine = pane && (pane.id.slice(-id.length - 1) === ":" + id || pane.id.slice(-id.length - 1) === ";" + id);
+          var fields = mine ? pane.querySelectorAll("#editor-form .field input, #editor-form .field textarea, #editor-form .field select") : [];
+          var field = Array.prototype.find.call(fields, function (el) {
+            return el.type !== "hidden" && !el.disabled && !el.readOnly && !el.closest("[hidden]");
+          });
+          if (field) {
+            field.focus();
+            return done();
+          }
+          if (Date.now() < stop) window.setTimeout(attempt, 100);
+          else done();
+        };
+        attempt();
+      };
+      window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
     },
 
     destroyed: function () {
@@ -1009,6 +1097,9 @@
       root.removeEventListener("click", this._onClick);
       root.removeEventListener("click", this._noteFocus, true);
       root.removeEventListener("keydown", this._noteFocus, true);
+      root.removeEventListener("keydown", this._notePress, true);
+      window.clearTimeout(this._pressTimer);
+      this._pressWatch.disconnect();
       root.ownerDocument.removeEventListener("focusin", this._letGo);
       root.ownerDocument.removeEventListener("pointerdown", this._letGo, true);
       root.removeEventListener("keydown", this._onResizeKey);
@@ -1035,6 +1126,7 @@
       window.removeEventListener("scroll", this._putTipAway, true);
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
+      window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
     },
   };
 })();

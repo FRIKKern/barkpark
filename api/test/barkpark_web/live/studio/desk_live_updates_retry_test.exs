@@ -7,10 +7,8 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesRetryTest do
 
   The fault is the exception a real outage raises in a pane's read, through
   the reader seam (`config :barkpark, PaneComponent, reader: fun`). The page
-  learns of a failed read from the pane's `{:desk_pane_failed, id}`. Until
-  `PaneComponent.handle_async(:load, {:exit, _}, _)` sends it, the failing
-  reader here sends it for the pane, from the read's own task, just before
-  the read raises: the same message, in the same order, the pane will send.
+  learns of a failed read from the pane's `{:desk_pane_failed, id}`, which
+  `PaneComponent.handle_async(:load, {:exit, _}, _)` sends.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -20,7 +18,6 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesRetryTest do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
-  alias BarkparkWeb.Studio.Desk.Panes
 
   @dataset "production"
   @type_name "desk_retry_note"
@@ -90,10 +87,6 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesRetryTest do
           Agent.update(stamps, &[now | &1])
 
           if :counters.get(down, 1) == 1 do
-            # The pane's own message (see the moduledoc), then the outage.
-            [page | _] = Process.get(:"$callers")
-            send(page, {:desk_pane_failed, "desk-pane-2-" <> Panes.pane_key(pane)})
-
             raise DBConnection.ConnectionError,
                   "connection not available and request was dropped from queue after 2000ms"
           else

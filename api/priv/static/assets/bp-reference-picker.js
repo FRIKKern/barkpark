@@ -242,6 +242,10 @@ class BpReferencePicker extends HTMLElement {
     // after it (the Paper canvas field node view).
     const fieldLabel = this.getAttribute("data-field-label");
     if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
+    // A host that names a field's input by its path (the desk: `related`,
+    // as Sanity's Studio does) hands that id to the search box.
+    const inputId = this.getAttribute("data-input-id");
+    if (inputId) input.id = inputId;
     // The search box is not a field of the document. Its input and change
     // events stop here: bubbling to the editor form, each keystroke posted
     // phx-change="autosave" and wrote a draft (task-32d983d47299e137). Only a

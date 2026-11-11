@@ -118,6 +118,7 @@ defmodule BarkparkWeb.LiveScope do
     with %{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          %{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
          {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]),
+         :ok <- refuse_off_binding(socket.assigns[:api_token], params["dataset"]),
          :ok <- refuse_if_archived(ws) do
       socket =
         socket
@@ -133,11 +134,27 @@ defmodule BarkparkWeb.LiveScope do
       {:ok, maybe_attach_readonly_gate(socket, grade)}
     else
       :archived -> deny_archived(socket)
+      # Reached only after admission, so only a seated token learns this; the
+      # plug's 403 for the same refusal already names the binding.
+      :forbidden_dataset -> deny(socket, "This token is bound to another dataset")
       _ -> deny(socket)
     end
   end
 
   defp resolve_and_authorize(socket, _params), do: deny(socket)
+
+  # The socket twin of ResolveWorkspace's `refuse_off_binding`
+  # (task-37c54570e2e2a278). That plug runs for the page load only, so a live
+  # patch, `switch-dataset` or a live navigation to another dataset is refused
+  # here: a token minted with an explicit `dataset` stays on it. Same rule as
+  # `BarkparkWeb.Plugs.RequireToken.dataset_off_binding?/2`, read from the
+  # URL's `:dataset` segment; a URL naming no dataset is not refused. After
+  # admission, like the plug.
+  defp refuse_off_binding(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: bound}, dataset)
+       when is_binary(dataset) and dataset != bound,
+       do: :forbidden_dataset
+
+  defp refuse_off_binding(_token, _dataset), do: :ok
 
   # The socket twin of ResolveWorkspace's `refuse_if_archived` (task-55474a106554e65a).
   # That plug runs only on the HTTP request, so a push_navigate into an
@@ -528,10 +545,10 @@ defmodule BarkparkWeb.LiveScope do
 
   defp assign_grant_scope(socket, _grade), do: socket
 
-  defp deny(socket) do
+  defp deny(socket, message \\ "Not authorized for that workspace") do
     {:halt,
      socket
-     |> put_flash(:error, "Not authorized for that workspace")
+     |> put_flash(:error, message)
      |> redirect(to: login_target(socket))}
   end
 
