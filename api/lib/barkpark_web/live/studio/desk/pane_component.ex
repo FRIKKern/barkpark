@@ -149,7 +149,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
-    send(self(), {:desk_pane_title, socket.assigns.index, data.title})
+    send(self(), {:desk_pane_title, socket.assigns.id, data.title})
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
     socket |> assign(:data, AsyncResult.ok(data)) |> share()
   end
