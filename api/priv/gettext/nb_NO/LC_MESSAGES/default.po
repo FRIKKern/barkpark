@@ -13283,3 +13283,8 @@ msgstr "Filteret til denne listen kunne ikke leses."
 #, elixir-autogen, elixir-format
 msgid "This pane could not be read."
 msgstr "Ruten kunne ikke leses."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Displaying a maximum of %{count} documents"
+msgstr "Viser maksimalt %{count} dokumenter"
