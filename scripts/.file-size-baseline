@@ -61,7 +61,6 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 3761 scripts/pds-door-census.sh
 3735 api/lib/barkpark/portable_doc/render/compose.ex
 3702 cloud/priv/static/__css_check.mjs
-3660 design/emit.mjs
 3500 api/priv/static/assets/bp-graph.js
 3429 api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex
 3407 cloud/lib/barkpark_cloud/sites/deploy.ex
