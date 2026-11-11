@@ -14,7 +14,10 @@
 // NAMES any Part carrying no hook as uncovered.
 // A Part added later is therefore covered by adding its hook in its own module, never by
 // editing the selftest, and a Part whose author forgets the hook is named in the
-// output instead of passing in silence. Every hook prints the same shape,
+// output instead of passing in silence. A Part module design/check.mjs does not
+// import never runs, so no scan of the imports can see it; check.mjs compares
+// design/check/part-*.mjs on disk with its import lines and reds on that module,
+// by name. Every hook prints the same shape,
 // `  Part <id> FAIL: injected fault (--selftest)`, because the selftest derives
 // that line from the id to prove the fault LANDED before it judges anything.
 // Part A's hook says more: Part A prints a per-ARTIFACT ok line and gates no
