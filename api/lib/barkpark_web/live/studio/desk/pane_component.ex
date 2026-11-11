@@ -219,7 +219,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </option>
             </select>
           </form>
-          <p :for={note <- left_out(@pane)} class="dk-note" data-desk-left-out>{note}</p>
+          <%!-- Not over a document that was not found: it has no current one. --%>
+          <p :for={note <- (@data.result[:fields] && left_out(@pane)) || []} class="dk-note" data-desk-left-out>{note}</p>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
           <%!-- The TanStack Studio's names (ruling R1): a document list is a
                `role="list"` named after its pane, each row a `listitem` that
