@@ -136,9 +136,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
     do: {:noreply, assign(socket, :in_flight, false)}
 
+  # The panes that asked for this read are told it failed, and stay on the
+  # list: the read that follows (Retry, or the page's own) is theirs too.
   def handle_async(:load, {:exit, reason}, socket) do
     data = AsyncResult.failed(socket.assigns.data, reason)
-    {:noreply, socket |> assign(:data, data) |> share() |> landed()}
+    sharers = socket.assigns.sharers
+    {:noreply, socket |> assign(:data, data) |> share() |> assign(:sharers, sharers) |> landed()}
   end
 
   # A read is back. A save that came while it was out is read now.
