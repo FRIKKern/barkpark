@@ -200,6 +200,20 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, "[data-desk-left-out]")
   end
 
+  test "a pane for a document that was not found shows no revision note", %{
+    conn: conn,
+    base: base,
+    b: b
+  } do
+    # A read-only pane (not the last document) for an id that does not exist.
+    chain = "#{@type_name};dsn-nobody,rev=abc123,view=json;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "dsn-nobody")
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
+  end
+
   test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
     conn: conn,
     base: base
@@ -239,6 +253,33 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
     settle(view)
     assert String.valid?(render(view))
+  end
+
+  test "the editor's notes sit in a holder that stays when a note comes or goes", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    # Every row of the editor pane has an id, so a live patch moves none of
+    # them: a note with no holder made it re-append the editor's body.
+    holder = ~s([data-pane-index="2"] > [id="desk-pane-2-doc:#{a}-notes"])
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+    assert has_element?(view, holder)
+    refute has_element?(view, holder <> " [data-desk-left-out]")
+
+    render_patch(view, "#{base}/#{@type_name};#{a},rev=abc123")
+    settle(view)
+    assert has_element?(view, holder <> " [data-desk-left-out]", "abc123")
+
+    render_patch(view, "#{base}/#{@type_name};#{a}")
+    settle(view)
+    assert has_element?(view, holder)
+    refute has_element?(view, "[data-desk-left-out]")
+
+    # Every row of the pane after its header has an id.
+    refute has_element?(view, ~s{[data-pane-index="2"] > :not(.pane-header):not([id])})
   end
 
   test "closing a pane keeps the tab title the pane now last had read", %{
