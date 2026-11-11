@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.Desk.PanesTest do
     "/structure/post;post-26|,view=json",
     "/structure/post;post-01;author-alan,type=author,parentRefPath=author",
     "/structure/post;post-01;author-alan,type=author,parentRefPath=author|,",
+    "/structure/post;post-26|,;author-ada,type=author,parentRefPath=author",
     "/structure/post;post-22,path=excerpt",
     "/structure/post;post-22,path=seo.metaTitle",
     "/structure/post;post-22;author-ada,type=author,parentRefPath=author,path=bio",
@@ -28,6 +29,145 @@ defmodule BarkparkWeb.Studio.Desk.PanesTest do
     for "/structure/" <> splat <- @urls do
       panes = Panes.parse(splat)
       assert Panes.parse(Panes.to_splat(panes)) == panes
+    end
+  end
+
+  # Each URL of panes.test.ts with the panes parsePanes gives it. The
+  # TypeScript leaves unset keys `undefined`; here they are left out.
+  @types %{kind: :types}
+  @post %{kind: :list, type: "post"}
+  @author %{type: "author", parent_ref_path: "author"}
+
+  @parsed [
+    {"post;post-26", [@types, @post, %{kind: :doc, id: "post-26", type: "post"}]},
+    {"post;post-26|,",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-26", type: "post"},
+       %{kind: :doc, id: "post-26", type: "post", sibling: true}
+     ]},
+    {"post;post-26|,view=json",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-26", type: "post"},
+       %{kind: :doc, id: "post-26", type: "post", sibling: true, view: "json"}
+     ]},
+    {"post;post-01;author-alan,type=author,parentRefPath=author",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-01", type: "post"},
+       Map.merge(@author, %{kind: :doc, id: "author-alan"})
+     ]},
+    {"post;post-01;author-alan,type=author,parentRefPath=author|,",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-01", type: "post"},
+       Map.merge(@author, %{kind: :doc, id: "author-alan"}),
+       Map.merge(@author, %{kind: :doc, id: "author-alan", sibling: true})
+     ]},
+    {"post;post-26|,;author-ada,type=author,parentRefPath=author",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-26", type: "post"},
+       %{kind: :doc, id: "post-26", type: "post", sibling: true},
+       Map.merge(@author, %{kind: :doc, id: "author-ada"})
+     ]},
+    {"post;post-22,path=excerpt",
+     [@types, @post, %{kind: :doc, id: "post-22", type: "post", path: "excerpt"}]},
+    {"post;post-22,path=seo.metaTitle",
+     [@types, @post, %{kind: :doc, id: "post-22", type: "post", path: "seo.metaTitle"}]},
+    {"post;post-22;author-ada,type=author,parentRefPath=author,path=bio",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-22", type: "post"},
+       Map.merge(@author, %{kind: :doc, id: "author-ada", path: "bio"})
+     ]},
+    {~s(post;post-03,path=links[_key=="l1"].title),
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-03", type: "post", path: ~s(links[_key=="l1"].title)}
+     ]},
+    {"post;post-03,path=links%5B_key%3D%3D%22l1%22%5D.title",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-03", type: "post", path: ~s(links[_key=="l1"].title)}
+     ]},
+    {"post;post-01,inspect=sanity/structure/validation",
+     [@types, @post, %{kind: :doc, id: "post-01", type: "post", inspect: "validation"}]},
+    {"post;post-01,inspect=sanity/comments",
+     [@types, @post, %{kind: :doc, id: "post-01", type: "post", inspect: "comments"}]},
+    {"post;post-01,since=@lastPublished,changesInspectorTab=review,inspect=sanity/structure/history",
+     [@types, @post, %{kind: :doc, id: "post-01", type: "post", inspect: "review"}]},
+    {"post;post-01,changesInspectorTab=history,inspect=sanity/structure/history",
+     [@types, @post, %{kind: :doc, id: "post-01", type: "post", inspect: "history"}]},
+    {"post;post-01,inspect=sanity%2Fstructure%2Fincoming-references",
+     [
+       @types,
+       @post,
+       %{
+         kind: :doc,
+         id: "post-01",
+         type: "post",
+         inspect: "sanity/structure/incoming-references"
+       }
+     ]},
+    {"post;post-01;author-alan",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-01", type: "post"},
+       %{kind: :doc, id: "author-alan", type: "post", untyped: true}
+     ]},
+    {"post;post-01;author-alan,type=author",
+     [
+       @types,
+       @post,
+       %{kind: :doc, id: "post-01", type: "post"},
+       %{kind: :doc, id: "author-alan", type: "author"}
+     ]},
+    {"post;n1,template=post-by-author,eyJhdXRob3JJZCI6ImF1dGhvci1hZGEifQ",
+     [
+       @types,
+       @post,
+       %{
+         kind: :doc,
+         id: "n1",
+         type: "post",
+         template: "post-by-author",
+         template_params: %{"authorId" => "author-ada"}
+       }
+     ]},
+    {"category;n2,template=category",
+     [
+       @types,
+       %{kind: :list, type: "category"},
+       %{kind: :doc, id: "n2", type: "category", template: "category"}
+     ]}
+  ]
+
+  test "each URL of panes.test.ts opens the same panes as parsePanes" do
+    for {splat, panes} <- @parsed do
+      assert {splat, Panes.parse(splat)} == {splat, panes}
+    end
+  end
+
+  test "rev= opens an old revision in the doc's place and prints back" do
+    assert [_, _, %{rev: "r-7"}] = Panes.parse("post;post-01,rev=r-7")
+
+    for url <- [
+          "/structure/post;post-01,rev=r-7",
+          "/structure/post;post-01,view=json,rev=r-7,path=title",
+          "/structure/post;post-01,changesInspectorTab=history,inspect=sanity%2Fstructure%2Fhistory,rev=r-7"
+        ] do
+      assert round_trip(url) == url
     end
   end
 

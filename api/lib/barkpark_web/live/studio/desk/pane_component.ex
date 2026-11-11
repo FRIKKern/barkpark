@@ -150,6 +150,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.index, data.title})
+    data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
     socket |> assign(:data, AsyncResult.ok(data)) |> share()
   end
 
@@ -357,7 +358,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   defp same?(%{kind: :doc, id: id}, %{kind: :doc, id: id}), do: true
-  defp same?(%{kind: kind, node: node}, %{kind: kind, node: node}) when kind != :doc, do: true
+
+  defp same?(%{kind: kind, node: node} = open, %{kind: kind, node: node} = next)
+       when kind != :doc,
+       do: open[:tree_parent] == next[:tree_parent]
+
   defp same?(_open, _next), do: false
 
   # ── reading ────────────────────────────────────────────────────────────────
