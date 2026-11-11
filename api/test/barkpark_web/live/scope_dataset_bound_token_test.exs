@@ -84,6 +84,17 @@ defmodule BarkparkWeb.Live.ScopeDatasetBoundTokenTest do
       assert_refused(render_patch(view, "#{base}/#{@other}/studio"))
     end
 
+    test "the refusal names the dataset binding, not the workspace", ctx do
+      {:ok, view, _} = live(bound_conn(ctx.conn, ctx.ws), "#{ctx.base}/#{@own}/studio")
+
+      assert {:error, {:redirect, %{flash: flash}}} =
+               render_patch(view, "#{ctx.base}/#{@other}/studio")
+
+      # A LiveView redirect carries its flash as a signed token.
+      flash = Phoenix.LiveView.Utils.verify_flash(BarkparkWeb.Endpoint, flash)
+      assert flash["error"] == "This token is bound to another dataset"
+    end
+
     test "is refused switch-dataset to the other dataset", %{conn: conn, ws: ws, base: base} do
       {:ok, view, _} = live(bound_conn(conn, ws), "#{base}/#{@own}/studio")
 
