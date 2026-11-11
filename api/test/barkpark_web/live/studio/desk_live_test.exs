@@ -971,6 +971,30 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert doc_shows?(view, 5, "Alpha one")
     end
 
+    test "a search hit for a tree list's type opens the document, not a tree level", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      {:ok, view, _html} = live(admin(conn), base)
+      settle(view)
+
+      view |> form("#desk-search-form") |> render_change(%{"value" => "Alpha one x"})
+
+      # Under a tree an id alone opens a level; the id twice opens the doc.
+      doc = "#{base}/kategorier;hierarki;#{cat.("a1x")};#{cat.("a1x")}"
+      hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{cat.("a1x")}"])
+      assert has_element?(view, hit, "Alpha one x")
+      assert has_element?(view, ~s(#desk-search-hits a[data-desk-hit][href="#{doc}"]))
+
+      view |> element(hit) |> render_click()
+      assert_patch(view, doc)
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="4"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 4, "Alpha one x")
+    end
+
     test "a deferred groupBy's menu shows its groups, and a group lists its docs", %{
       conn: conn,
       base: base,
