@@ -51,6 +51,13 @@
   var WARM_DELAY_MS = 80;
   var WARM_FORGET_MS = 30000;
   var GIVE_UP_MS = 10000;
+  // The edit pane's "…" document-actions buttons (header, footer), and how
+  // long a pressed document action waits for its answer to move the focus.
+  var DOC_MENU_BUTTON = 'button[aria-haspopup="menu"][id$="-actions-button"]';
+  var PRESS_MS = 30000;
+  function actionOf(btn) {
+    return (btn.getAttribute("phx-click") || "") + "|" + (btn.getAttribute("aria-label") || btn.textContent.trim());
+  }
 
   // Which panes collapse to strips. Sanity's own algorithm
   // (structure/components/pane/paneLayoutController.ts, _notifyObservers), as
@@ -814,6 +821,39 @@
         hook._wasInside = !!link && root.ownerDocument.activeElement === link;
       };
 
+      // A document action pressed from the keyboard that the answer takes
+      // away, disables or turns into another (the patch makes Publish the
+      // Unpublish button, focus and all: a second Enter unpublished) hands
+      // the focus to the edit pane's last "…", the one Sanity puts beside
+      // Publish. Anything that took the focus meanwhile keeps it.
+      hook._pressed = null;
+      hook._notePress = function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        var doc = root.ownerDocument;
+        var btn = e.target.closest ? e.target.closest("[data-pane-editing] bp-overflow-menu button") : null;
+        if (!btn || !root.contains(btn) || doc.activeElement !== btn) return;
+        hook._pressed = { btn: btn, pane: btn.closest("[data-pane-editing]"), was: actionOf(btn) };
+        window.clearTimeout(hook._pressTimer);
+        hook._pressTimer = window.setTimeout(function () {
+          hook._pressed = null;
+          hook._pressWatch.disconnect();
+        }, PRESS_MS);
+        hook._pressWatch.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "aria-label", "phx-click"] });
+      };
+      hook._keepPressed = function () {
+        var p = hook._pressed;
+        var doc = root.ownerDocument;
+        var at = doc.activeElement;
+        if (p && at && at !== doc.body && at !== p.btn) p = null;
+        if (p && p.btn.isConnected && !p.btn.disabled && actionOf(p.btn) === p.was) return;
+        hook._pressed = null;
+        hook._pressWatch.disconnect();
+        if (!p) return;
+        var menus = p.pane.isConnected ? p.pane.querySelectorAll(DOC_MENU_BUTTON) : [];
+        if (menus.length) menus[menus.length - 1].focus({ preventScroll: true });
+      };
+      hook._pressWatch = new window.MutationObserver(hook._keepPressed);
+
       hook._onKey = function (e) {
         var row = e.target.closest ? e.target.closest(ROW) : null;
         if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -911,6 +951,7 @@
 
       root.addEventListener("click", hook._noteFocus, true);
       root.addEventListener("keydown", hook._noteFocus, true);
+      root.addEventListener("keydown", hook._notePress, true);
       root.ownerDocument.addEventListener("focusin", hook._letGo);
       root.ownerDocument.addEventListener("pointerdown", hook._letGo, true);
       root.addEventListener("click", hook._onClick);
@@ -1049,6 +1090,9 @@
       root.removeEventListener("click", this._onClick);
       root.removeEventListener("click", this._noteFocus, true);
       root.removeEventListener("keydown", this._noteFocus, true);
+      root.removeEventListener("keydown", this._notePress, true);
+      window.clearTimeout(this._pressTimer);
+      this._pressWatch.disconnect();
       root.ownerDocument.removeEventListener("focusin", this._letGo);
       root.ownerDocument.removeEventListener("pointerdown", this._letGo, true);
       root.removeEventListener("keydown", this._onResizeKey);
