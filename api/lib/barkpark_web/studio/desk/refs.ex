@@ -31,6 +31,32 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   defp kind(_field), do: nil
 
   @doc """
+  The document types the reference fields of `schema` can point at (their
+  `to`), or `:any` when one of them names none. A document of another type
+  is never among its references, so a save of one changes nothing it shows.
+  """
+  @spec target_types(map()) :: MapSet.t(String.t()) | :any
+  def target_types(schema) do
+    refs =
+      for %{"type" => type} = field <- Map.get(schema, :fields) || [],
+          ref <- if(type == "reference", do: [field], else: of_refs(field)),
+          do: ref["to"] |> List.wrap() |> Enum.map(&to_name/1)
+
+    if Enum.any?(refs, &(&1 == [] or nil in &1)),
+      do: :any,
+      else: refs |> List.flatten() |> MapSet.new()
+  end
+
+  defp of_refs(%{"type" => type, "of" => of}) when type in ["arrayOf", "array"],
+    do: for(%{"type" => "reference"} = ref <- List.wrap(of), do: ref)
+
+  defp of_refs(_field), do: []
+
+  defp to_name(name) when is_binary(name) and name != "", do: name
+  defp to_name(%{"type" => name}) when is_binary(name) and name != "", do: name
+  defp to_name(_to), do: nil
+
+  @doc """
   The targets of every reference field of `doc`, by field name, in stored
   order. A target that cannot be read (deleted, or outside the caller's
   scope) keeps its id and has no type.

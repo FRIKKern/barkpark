@@ -142,6 +142,36 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
            ) == nil
   end
 
+  test "a list id used in two menus: each pane draws the node under its own menu" do
+    list = fn filter ->
+      %Node{id: "nyheter", type: :document_type_list, type_name: "post", filter: filter}
+    end
+
+    root =
+      %Node{
+        id: "root",
+        type: :list,
+        items: [
+          %Node{id: "norsk", type: :list, title: "Norsk", items: [list.("lang=nb")]},
+          %Node{id: "svensk", type: :list, title: "Svensk", items: [list.("lang=sv")]}
+        ]
+      }
+      |> Tree.normalize()
+
+    # The flat index keeps one of the two; the chain knows which it means.
+    nodes = Tree.index(root)
+
+    for {menu, filter} <- [{"norsk", "lang=nb"}, {"svensk", "lang=sv"}] do
+      panes = Tree.parse("#{menu};nyheter;post-1", root)
+      [types, open_menu, open_list, doc] = Tree.nodes_of(panes, root, nodes)
+
+      assert types == root
+      assert open_menu.id == menu
+      assert open_list.filter == filter, menu
+      assert doc == nil
+    end
+  end
+
   # ── desk.test.ts in the TanStack Studio (barkpark-studio) ─────────────────
   #
   # Its fixture, the Agency twin cut down, as `Barkpark.Structure.build/2`

@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   require Logger
 
+  alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
@@ -144,19 +145,32 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp strip(socket), do: socket
 
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
-  # The Studio's `nav_path` says nothing about the pane a "+" was pressed in,
-  # so a new document is placed by the event (and an optional `desk-pane`).
   # The card's Retry, when the document could not be read: read it again.
   def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
     do: edit(socket, socket.assigns.pending)
 
   def handle_event("desk-edit-retry", _params, socket), do: {:noreply, socket}
 
+  # The Studio's `nav_path` says nothing about the pane a "+" was pressed in,
+  # so a new document is placed by the event (and an optional `desk-pane`).
   def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
     do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
 
-  def handle_event(event, params, socket),
-    do: event |> StudioLive.handle_event(params, socket) |> ours()
+  # The Studio's events that write the open document from its form.
+  @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
+
+  # The open document was deleted by someone else (J32): a save of the form
+  # would write it back as a draft. The pane drops the form (`pane/2`); a
+  # save still in flight from it is dropped here.
+  def handle_event(event, params, socket) do
+    if event in @form_writes and gone?(socket.assigns),
+      do: {:noreply, socket},
+      else: event |> StudioLive.handle_event(params, socket) |> ours()
+  end
+
+  # Whether the document in the editor was deleted while it was on the desk.
+  defp gone?(%{editing: {_dataset, type, id}} = assigns), do: LiveRefresh.gone?(assigns, type, id)
+  defp gone?(_assigns), do: false
 
   @doc "A message the page does not own is the editor's."
   def handle_info(message, socket), do: message |> StudioLive.handle_info(socket) |> ours()
@@ -373,7 +387,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             {gettext("Retry")}
           </button>
         </div>
-        <%= if !@edit_failed do %>
+        <%!-- Deleted by someone else: no form is left to write it back. The
+              page's notice (`LiveRefresh.gone_notice/1`) says it too. --%>
+        <div :if={!@edit_failed and gone?(assigns)} class="dk-note" role="main" data-desk-edit-gone>
+          <p>{gettext("This document has been deleted.")}</p>
+        </div>
+        <%= if !@edit_failed and !gone?(assigns) do %>
           {Components.studio_live_shell(assigns)}
         <% end %>
       </div>

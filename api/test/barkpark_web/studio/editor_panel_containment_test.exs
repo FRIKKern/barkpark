@@ -252,7 +252,13 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     bp-paper-editor.bundle.js
     bp-overflow-menu.js
     bp-media-picker.js
+    bp-desk.js
   )
+
+  # A file that portals through its anchor's own document (`doc` is
+  # `anchor.ownerDocument`, so its jsdom host tests can run it) names the
+  # exact call. bp-desk.js: the desk's hover tip, `#bp-desk-tip`.
+  @portal_calls %{"bp-desk.js" => "doc.body.appendChild(tip)"}
 
   # Properties that establish a containing block for `position: fixed`
   # descendants in EVERY engine (unlike container-type — see @moduledoc).
@@ -1103,7 +1109,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       for name <- @portaling_js do
         src = File.read!(Path.join(@static_js, name))
 
-        assert src =~ "document.body.appendChild" or src =~ "document.body.append(",
+        call = @portal_calls[name]
+
+        assert src =~ "document.body.appendChild" or src =~ "document.body.append(" or
+                 (call != nil and src =~ call),
                "#{name} emits position: fixed but never portals to document.body"
       end
     end

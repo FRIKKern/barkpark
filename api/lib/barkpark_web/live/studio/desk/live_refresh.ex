@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -100,14 +101,18 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     end
   end
 
-  @doc "`:desk_refresh` fired: every stale pane but the one being edited reads again."
+  @doc """
+  `:desk_refresh` fired: every stale pane but the one being edited reads
+  again. A document pane is stale when its own document changed, or a
+  document of a type its references can point at: it shows their titles (J23).
+  """
   def refresh(socket) do
     stale = socket.assigns.stale
     types = MapSet.new(stale, &elem(&1, 0))
 
     for %{pane: pane, id: id, index: index} <- socket.assigns.desk_panes,
         index != socket.assigns.active,
-        stale?(pane, stale, types) do
+        stale?(pane, stale, types) or refers?(pane, types, socket.assigns) do
       send_update(PaneComponent, id: id, refresh: true)
     end
 
@@ -134,6 +139,25 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     do: MapSet.member?(stale, {type, id})
 
   defp stale?(_pane, _stale, _types), do: false
+
+  # A document pane's reference fields can point at a changed type. Read from
+  # its schema, not its document: the page does not hold the pane's data.
+  defp refers?(%{kind: :doc, type: type} = pane, types, assigns) when is_binary(type) do
+    with false <- MapSet.size(types) == 0 or pane[:untyped] == true,
+         {:ok, schema} <- Content.resolve_schema(type, assigns.dataset, assigns.scope) do
+      case Refs.target_types(schema) do
+        :any -> true
+        targets -> not MapSet.disjoint?(targets, types)
+      end
+    else
+      _ -> false
+    end
+  rescue
+    # The store cannot say now: the pane still reads again on its own changes.
+    _ -> false
+  end
+
+  defp refers?(_pane, _types, _assigns), do: false
 
   # Another workspace's frame on the shared topic, or a sibling project's
   # document with the same id, is not this desk's (as StudioLive refuses them).

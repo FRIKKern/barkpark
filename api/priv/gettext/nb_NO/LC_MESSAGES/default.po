@@ -13188,3 +13188,103 @@ msgstr "Passnøkkelen kunne ikke brukes. Prøv igjen, eller logg inn på en anne
 #, elixir-autogen, elixir-format
 msgid "Using enterprise SSO? Enter your work email and continue without a password."
 msgstr "Bruker dere bedrifts-SSO? Skriv inn jobb-e-posten og fortsett uten passord."
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Close %{title}"
+msgstr "Lukk %{title}"
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Desk"
+msgstr "Skrivebord"
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expand %{title}"
+msgstr "Vis %{title}"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "No document “%{id}” of type “%{type}” was found."
+msgstr "Fant ikke dokumentet «%{id}» av typen «%{type}»."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "No documents here yet."
+msgstr "Ingen dokumenter her ennå."
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex
+#, elixir-autogen, elixir-format
+msgid "No results found"
+msgstr "Fant ingen treff"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Other views and inspectors are not shown here."
+msgstr "Andre visninger og inspektører vises ikke her."
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "References"
+msgstr "Referanser"
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Resize pane"
+msgstr "Endre størrelse på ruten"
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex
+#, elixir-autogen, elixir-format
+msgid "Search list"
+msgstr "Søk i listen"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{count}."
+msgstr "Viser de første %{count}."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by"
+msgstr "Sorter etter"
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "There is no document type named “%{type}” here."
+msgstr "Det finnes ingen dokumenttype som heter «%{type}» her."
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "This document could not be read."
+msgstr "Dokumentet kunne ikke leses."
+
+#: lib/barkpark_web/live/studio/desk/live_refresh.ex
+#, elixir-autogen, elixir-format
+msgid "This document has been deleted."
+msgstr "Dokumentet er slettet."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This is the current document. Revision “%{rev}” is not shown here."
+msgstr "Dette er dokumentet slik det er nå. Revisjon «%{rev}» vises ikke her."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This list is not on the desk."
+msgstr "Denne listen finnes ikke på skrivebordet."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This list's filter could not be read."
+msgstr "Filteret til denne listen kunne ikke leses."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This pane could not be read."
+msgstr "Ruten kunne ikke leses."
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Displaying a maximum of %{count} documents"
+msgstr "Viser maksimalt %{count} dokumenter"
