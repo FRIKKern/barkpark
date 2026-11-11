@@ -12,6 +12,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   near invisible in dark). On a touch screen (`pointer: coarse`) rows, the
   close link and reference chips are at least 44 px; a mouse layout is
   unchanged.
+
+  The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
+  backdrop `position: absolute; inset: 0` inside its shell and means the
+  page. A positioned edit pane boxed the backdrop in, so the other panes
+  stayed bright and clickable under an open dialog.
   """
 
   use Phoenix.Component
@@ -40,10 +45,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
       .dk .dk-more { margin: 12px 16px; }
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-      .dk .dk-edit { position: relative; display: flex; flex-direction: column; min-width: 600px; }
+      .dk .dk-edit { display: flex; flex-direction: column; min-width: 600px; }
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
-      .dk .dk-edit-close { position: absolute; top: 8px; right: 8px; z-index: 2; }
       .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
       .dk-search form { max-width: 420px; }
       .dk-search-hits { position: absolute; z-index: 5; left: 16px; top: 100%; width: min(420px, calc(100% - 32px)); max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; }
@@ -55,7 +59,6 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       @media (pointer: coarse) {
         .dk .pane-item { min-height: 44px; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
-        .dk .dk-edit-close { margin-right: 0; }
         .dk .dk-edit-refs { padding-right: 60px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }
