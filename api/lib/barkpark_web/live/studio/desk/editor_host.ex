@@ -110,6 +110,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
        )}
     rescue
       error in [DBConnection.ConnectionError, Postgrex.Error] ->
+        {_dataset, type, id} = target
+
         Logger.warning(
           "desk: the editor could not read #{type}/#{id}: #{Exception.message(error)}"
         )
