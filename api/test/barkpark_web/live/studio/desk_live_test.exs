@@ -583,9 +583,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     # The refresh is a message, and so is the pane's own re-read behind it:
     # `settle/1` right here can find nothing running yet and return at once
     # (it did on CI). Wait for the new value itself.
+    # The list re-reads in its own task too: wait for its row as well (it
+    # landed after the document on a loaded machine).
     shown? = fn ->
       settle(view)
-      doc_shows?(view, 2, "Now changed")
+
+      doc_shows?(view, 2, "Now changed") and
+        has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
     end
 
     assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
@@ -924,6 +928,67 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       # Closing the fourth pane prints the chain up to it, params intact.
       view |> element(~s([data-pane-index="4"] a.dk-close)) |> render_click()
       assert_patch(view, "#{base}/#{@ref_type};#{linked};#{hop.(a, "note")}")
+    end
+  end
+
+  describe "a list id used in two menus" do
+    # Two menus each hold a list with the id «nyheter», of one type, each
+    # filtered its own way. The desk's flat id index keeps only one of them.
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "deskStructure",
+            "title" => "deskStructure",
+            "visibility" => "public",
+            "fields" => [%{"name" => "items", "title" => "Items", "type" => "array"}]
+          },
+          @dataset
+        )
+
+      menu = fn id, title, summary ->
+        %{
+          "kind" => "list",
+          "id" => id,
+          "title" => title,
+          "items" => [
+            %{
+              "kind" => "documentTypeList",
+              "id" => "nyheter",
+              "title" => title <> " nyheter",
+              "type" => @type_name,
+              "filter" => %{"content.summary" => %{"eq" => summary}}
+            }
+          ]
+        }
+      end
+
+      items = [
+        menu.("norsk", "Norsk", "About Alpha note"),
+        menu.("svensk", "Svensk", "About Beta note")
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "deskStructure",
+          %{"doc_id" => "deskStructure", "title" => "Desk", "content" => %{"items" => items}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+      :ok
+    end
+
+    test "each menu's list opens its own list", %{conn: conn, base: base} do
+      for {menu, title, want} <- [
+            {"norsk", "Norsk nyheter", "Alpha note"},
+            {"svensk", "Svensk nyheter", "Beta note"}
+          ] do
+        {:ok, view, _html} = live(admin(conn), "#{base}/#{menu};nyheter")
+
+        assert await_rows(view, 2, [want]) == [want], menu
+        assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), title)
+      end
     end
   end
 

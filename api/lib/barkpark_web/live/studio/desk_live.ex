@@ -95,10 +95,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     panes = Tree.parse(splat, desk.root)
     desk = expand_open(desk, panes, dataset, scope)
 
-    views =
-      for {pane, index} <- Enum.with_index(panes) do
-        node = node_of(pane, desk)
+    nodes = Tree.nodes_of(panes, desk.root, desk.nodes)
 
+    views =
+      for {{pane, node}, index} <- panes |> Enum.zip(nodes) |> Enum.with_index() do
         %{
           id: "desk-pane-#{index}-#{Panes.pane_key(pane)}",
           pane: pane,
@@ -160,7 +160,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
          chain = Tree.parse(splat, desk.root),
          pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
          true <- pane.kind in [:list, :doc],
-         node = node_of(pane, desk),
+         node = chain |> Tree.nodes_of(desk.root, desk.nodes) |> List.last(),
          key = PaneComponent.data_key(pane, dataset, node) do
       now = System.monotonic_time(:millisecond)
       hovered = assign(socket, :warm, Map.put(warm, key, {:reading, now}))
@@ -351,6 +351,4 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: Enum.find_value(views, &((&1.key == key and &1.index < index) && &1.id))
 
   defp leader(_view, _views), do: nil
-
-  defp node_of(pane, desk), do: Tree.node_of(pane, desk.root, desk.nodes)
 end
