@@ -987,6 +987,46 @@
       window.addEventListener("scroll", hook._putTipAway, true);
       window.addEventListener("popstate", hook._tipUrl);
       window.addEventListener("phx:page-loading-stop", hook._tipUrl);
+
+      // A NEW DOCUMENT'S FIRST FIELD. The desk names a field's input by its
+      // bare path (`id="title"`), where the page's `bpFocusNewDoc`
+      // (root.html.heex) looks for `doc-field-<id>-…`. After a "+" create the
+      // new document's first field takes the focus here, on the same terms:
+      // wait up to 4 s for its editor, skip hidden, read-only and disabled
+      // fields, and stop at the user's first key or press.
+      hook._focusNewDoc = function (e) {
+        var id = e.detail && e.detail.id;
+        if (!id) return;
+        var doc = root.ownerDocument;
+        var stop = Date.now() + 4000;
+        var interrupted = false;
+        var interrupt = function () {
+          interrupted = true;
+        };
+        var done = function () {
+          doc.removeEventListener("keydown", interrupt, true);
+          doc.removeEventListener("pointerdown", interrupt, true);
+        };
+        doc.addEventListener("keydown", interrupt, true);
+        doc.addEventListener("pointerdown", interrupt, true);
+        var attempt = function () {
+          if (interrupted || !root.isConnected) return done();
+          var pane = root.querySelector("[data-pane-editing]");
+          var mine = pane && (pane.id.slice(-id.length - 1) === ":" + id || pane.id.slice(-id.length - 1) === ";" + id);
+          var fields = mine ? pane.querySelectorAll("#editor-form .field input, #editor-form .field textarea, #editor-form .field select") : [];
+          var field = Array.prototype.find.call(fields, function (el) {
+            return el.type !== "hidden" && !el.disabled && !el.readOnly && !el.closest("[hidden]");
+          });
+          if (field) {
+            field.focus();
+            return done();
+          }
+          if (Date.now() < stop) window.setTimeout(attempt, 100);
+          else done();
+        };
+        attempt();
+      };
+      window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
     },
 
     destroyed: function () {
@@ -1035,6 +1075,7 @@
       window.removeEventListener("scroll", this._putTipAway, true);
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
+      window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
     },
   };
 })();
