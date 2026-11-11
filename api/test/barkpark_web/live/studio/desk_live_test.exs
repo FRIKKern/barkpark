@@ -782,12 +782,14 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert titles == Enum.sort(titles)
       assert hd(titles) == "001"
 
-      # More than one page: the rest is one press away.
-      view |> element(list <> " button.dk-more") |> render_click()
+      # More than one page: scrolling to the last row reads the rest below it.
+      view
+      |> element(list <> " [role=list][phx-viewport-bottom=more]")
+      |> render_hook("more", %{})
+
       settle(view)
       assert length(row_titles(view)) == 130
       assert has_element?(view, list <> " a[data-desk-row]", "Big 130")
-      refute has_element?(view, list <> " button.dk-more")
     end
 
     test "the sort menu changes the order for this list", %{conn: conn, base: base} do

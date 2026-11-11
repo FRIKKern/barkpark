@@ -67,6 +67,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign_new(:sort, fn -> nil end)
       |> assign_new(:in_flight, fn -> false end)
       |> assign_new(:again, fn -> false end)
+      |> assign_new(:more_out, fn -> false end)
       |> ListSearch.init()
 
     key = data_key(assigns.pane, assigns.dataset, assigns.node)
@@ -120,8 +121,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_event("retry", _params, socket), do: {:noreply, read_async(socket)}
 
   # A list's own controls. They are this pane's state, not the URL's.
+  #
+  # The list scrolled to its last row (`phx-viewport-bottom`): the next page,
+  # read after the rows it holds and added below them, up to `Rows.max_rows/0`.
   def handle_event("more", _params, socket),
-    do: {:noreply, socket |> assign(:limit, socket.assigns.limit + Rows.page()) |> load()}
+    do: {:noreply, if(more?(socket), do: read_more(socket), else: socket)}
 
   def handle_event("sort", %{"sort" => name}, socket),
     do: {:noreply, socket |> assign(:sort, if(name == "", do: nil, else: name)) |> load()}
@@ -141,6 +145,44 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_async(:load, {:exit, reason}, socket) do
     data = AsyncResult.failed(socket.assigns.data, reason)
     {:noreply, socket |> assign(:data, data) |> share() |> landed()}
+  end
+
+  # The next page is back. A whole read started since then answers for it.
+  def handle_async(:more, {:ok, %{entries: [_ | _] = rows, more?: more?}}, socket) do
+    %{data: %AsyncResult{result: held}, limit: limit, in_flight: in_flight} = socket.assigns
+    socket = assign(socket, :more_out, false)
+
+    if in_flight do
+      {:noreply, socket}
+    else
+      data = AsyncResult.ok(%{held | entries: held.entries ++ rows, more?: more?})
+      {:noreply, assign(socket, data: data, limit: limit + length(rows))}
+    end
+  end
+
+  # Nothing more after all, a failed page, or one a whole read cancelled: the
+  # rows on screen stay, and the next scroll to the bottom asks again.
+  def handle_async(:more, _result, socket), do: {:noreply, assign(socket, :more_out, false)}
+
+  defp more?(%{assigns: %{data: data} = assigns}) do
+    data.ok? and !data.loading and !assigns.in_flight and !assigns.more_out and
+      is_nil(assigns[:reading]) and data.result[:more?] == true and
+      assigns.limit < Rows.max_rows()
+  end
+
+  # The list holds all it ever will and there are more.
+  defp capped?(%{data: data, limit: limit}),
+    do: data.result[:more?] == true and limit >= Rows.max_rows()
+
+  defp read_more(socket) do
+    %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
+    %{panes: panes, index: index, limit: held, sort: sort} = socket.assigns
+    step = min(Rows.page(), Rows.max_rows() - held)
+    pane = Map.put(pane, :query, Rows.query(panes, index, step, sort, held))
+
+    socket
+    |> assign(:more_out, true)
+    |> start_async(:more, fn -> read_pane(pane, node, dataset, scope) end)
   end
 
   # A read is back. A save that came while it was out is read now.
@@ -235,6 +277,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             class="dk-rows"
             role={@pane.kind == :list && "list"}
             aria-label={@pane.kind == :list && title(assigns)}
+            phx-viewport-bottom={@pane.kind == :list && "more"}
+            phx-target={@pane.kind == :list && @myself}
           >
             <%= for {entry, pos} <- placed(@data.result.entries) do %>
               <div :if={entry == :divider} class="pane-divider"></div>
@@ -273,16 +317,23 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </div>
             <% end %>
           </div>
-          <button
-            :if={@data.result[:more?]}
-            type="button"
-            class="btn dk-more"
-            phx-click="more"
-            phx-target={@myself}
-            disabled={@data.loading}
+          <%!-- Room below the last row while there are more. LiveView's scroll
+               hook asks for more once the last row is wholly inside the pane,
+               which it never is flush with the pane's bottom; and a pane
+               scrolled to its very end hands a fast wheel to the page, so the
+               rows read below would never be scrolled to. --%>
+          <div
+            :if={@pane.kind == :list && @data.result[:more?] == true && !capped?(assigns)}
+            class="dk-list-more"
+            aria-hidden="true"
+            style="height: 480px"
           >
-            {gettext("Show more")}
-          </button>
+          </div>
+          <%!-- As the TanStack Studio's list (and Sanity's): it holds 2,000;
+               its search reaches the rest. --%>
+          <p :if={capped?(assigns)} class="dk-note dk-list-max" role="status">
+            {gettext("Displaying a maximum of %{count} documents", count: Rows.max_rows())}
+          </p>
           <dl :if={@data.result[:fields]} class="dk-fields">
             <div :for={field <- @data.result.fields}>
               <dt>{field.title}</dt>
@@ -401,8 +452,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     q = pane.kind == :list && ListSearch.term(socket.assigns.q)
     pane = if q, do: Map.put(pane, :search, q), else: pane
 
-    # A list asked for more rows or another order keeps its rows on screen.
+    # A list asked for another order keeps its rows on screen; a page on its
+    # way below them is read with them.
     socket
+    |> cancel_async(:more)
+    |> assign(:more_out, false)
     |> assign(:reading, q || nil)
     |> assign(:in_flight, true)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
