@@ -1939,6 +1939,7 @@ jobs:
         # (task-d6a5c09e4738b83e)
         run: |
           set -u
+          bash scripts/ci-apt-dns-fallback.sh
           for i in 1 2 3; do
             if sudo apt-get update; then break; fi
             echo "apt-get update attempt ${i}/3 failed — an index this install does not use may be broken; continuing"
@@ -1948,6 +1949,7 @@ jobs:
           for i in 1 2 3; do
             if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
             echo "apt-get install libxml2-utils attempt ${i}/3 failed"
+            bash scripts/ci-apt-dns-fallback.sh --force
             sleep 10
           done
           if [ "$installed" != 1 ]; then
