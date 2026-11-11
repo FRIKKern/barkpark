@@ -132,4 +132,33 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
     assert online_others(va) == 1,
            "B closed a pane, not the desk: A shows #{online_others(va)} others online (want 1)"
   end
+
+  # What a list row will mark, read from the room's presences: the people on
+  # each document of this dataset, the page's own session left out.
+  test "a row's people: others on that document in this dataset, never yourself" do
+    presences = [
+      %{doc_id: "alpha", dataset: @dataset, session_id: "me", name: "Me", color: "#111111"},
+      %{doc_id: "alpha", dataset: @dataset, session_id: "b", name: "Bea", color: "#222222"},
+      %{doc_id: "alpha", dataset: "other", session_id: "c", name: "Cy", color: "#333333"},
+      %{doc_id: nil, dataset: @dataset, session_id: "d", name: "Dee", color: "#444444"}
+    ]
+
+    rows = BarkparkWeb.Studio.Desk.LiveRefresh.on_rows(presences, @dataset, "me")
+    names = rows |> Map.get("alpha", []) |> Enum.map(& &1.name)
+
+    assert names == ["Bea"],
+           "Alpha's row should mark Bea alone (not me, not another dataset): #{inspect(names)}"
+
+    assert Map.keys(rows) == ["alpha"],
+           "someone browsing (on no document) was put on a row: #{inspect(Map.keys(rows))}"
+
+    html =
+      render_component(&BarkparkWeb.Studio.Desk.LiveRefresh.row_mark/1, people: rows["alpha"])
+
+    assert html =~ "background: #222222", "the row mark drew no dot in Bea's colour"
+
+    assert render_component(&BarkparkWeb.Studio.Desk.LiveRefresh.row_mark/1, people: [])
+           |> String.trim() == "",
+           "a row nobody has open drew a mark"
+  end
 end
