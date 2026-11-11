@@ -1,9 +1,10 @@
 defmodule BarkparkWeb.Live.ChromeDatasetBoundDefaultTest do
   @moduledoc """
-  A Studio page whose URL names no dataset reads the dataset the chrome picks
-  for it. For a token minted with an explicit dataset that pick is the token's
-  own dataset, never the `production` default: the same rule the media
-  controller applies when a request names none.
+  A Studio page whose URL path names no dataset reads the dataset the chrome
+  picks for it. For a token minted with an explicit dataset that pick is the
+  token's own dataset: never the `production` default, and never a `?dataset=`
+  the caller adds. The same rule the media controller applies when a request
+  names none.
 
   Shown on the two scoped pages that read documents by that pick: the Tickets
   inbox and workspace Settings.
@@ -76,10 +77,35 @@ defmodule BarkparkWeb.Live.ChromeDatasetBoundDefaultTest do
       assert dataset_of(view) == @own
     end
 
-    test "naming the other dataset in the query is refused on the page load (the plug)", ctx do
+    # The plug refuses the query on a scoped page load. A socket join names
+    # its own URL and runs no plug, so the chrome must not take the query.
+    test "a socket join that adds ?dataset= stays on its own dataset", ctx do
+      conn = admin_conn(ctx.conn, ctx.ws, dataset_bound: true)
+      path = "#{ctx.base}/tickets"
+
+      assert get(conn, "#{path}?dataset=#{@default}").status == 403
+
+      # The join URL is the dead render's own; add the query to it, as a
+      # client that names its own URL on connect can.
+      dead = get(conn, path)
+      forged = %{dead | query_string: "dataset=#{@default}"}
+      {:ok, view, _} = Phoenix.LiveViewTest.__live__(forged, nil, [])
+      html = render(view)
+
+      refute html =~ @default_ticket
+      assert html =~ @own_ticket
+      assert dataset_of(view) == @own
+    end
+
+    test "the flat inbox with ?dataset= stays on its own dataset", ctx do
       conn = admin_conn(ctx.conn, ctx.ws, dataset_bound: true)
 
-      assert get(conn, "#{ctx.base}/tickets?dataset=#{@default}").status == 403
+      {:ok, view, _} = live(conn, "/studio/tickets?dataset=#{@default}")
+      html = render(view)
+
+      refute html =~ @default_ticket
+      assert html =~ @own_ticket
+      assert dataset_of(view) == @own
     end
   end
 
@@ -91,6 +117,13 @@ defmodule BarkparkWeb.Live.ChromeDatasetBoundDefaultTest do
       assert dataset_of(view) == @default
       assert html =~ @default_ticket
       refute html =~ @own_ticket
+    end
+
+    test "the flat inbox still takes ?dataset=", %{conn: conn, ws: ws} do
+      {:ok, view, _} = live(admin_conn(conn, ws, []), "/studio/tickets?dataset=#{@own}")
+
+      assert dataset_of(view) == @own
+      assert render(view) =~ @own_ticket
     end
   end
 end

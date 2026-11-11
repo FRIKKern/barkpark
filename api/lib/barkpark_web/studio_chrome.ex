@@ -132,9 +132,7 @@ defmodule BarkparkWeb.StudioChrome do
       socket
       |> assign_new(:api_token, fn -> nil end)
       |> then(fn s ->
-        assign_new(s, :dataset, fn ->
-          params["dataset"] || default_dataset(s.assigns[:api_token])
-        end)
+        assign_new(s, :dataset, fn -> chrome_dataset(s.assigns[:api_token], params) end)
       end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
@@ -201,17 +199,20 @@ defmodule BarkparkWeb.StudioChrome do
      |> attach_hook(:studio_chrome_path, :handle_params, &chrome_path/3)}
   end
 
-  # The dataset a page reads when its URL names none: a dataset-bound token's
-  # own dataset, else the `production` default. The request-level fence
-  # (`RequireToken.dataset_off_binding?/2`) compares a dataset the request
-  # NAMES, so on a dataset-less page it has nothing to compare, and the default
-  # sent a token bound elsewhere to `production` (the Tickets inbox listed its
-  # tickets). Same rule as `MediaController`'s default for a request naming none.
-  defp default_dataset(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: dataset})
-       when is_binary(dataset),
-       do: dataset
+  # The dataset the chrome hands a page. A dataset-bound token always gets its
+  # own dataset: not the `production` default when the URL names none, and not
+  # a `?dataset=` it names. The request-level fence
+  # (`RequireToken.dataset_off_binding?/2`) runs for a page load on the scoped
+  # routes only, so without this the Tickets inbox listed another dataset's
+  # tickets on a dataset-less page, on a socket join that added the query, and
+  # on the flat route. Routes with a `/d/:dataset` segment are fenced by
+  # `LiveScope` before this runs. Same rule as `MediaController`'s default for
+  # a request naming none.
+  defp chrome_dataset(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: bound}, _params)
+       when is_binary(bound),
+       do: bound
 
-  defp default_dataset(_token), do: Content.default_dataset()
+  defp chrome_dataset(_token, params), do: params["dataset"] || Content.default_dataset()
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
   #
