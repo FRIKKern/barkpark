@@ -1437,9 +1437,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # A desk list pane's page (Studio desk pagination). `list_documents/3` read a
   # 100-row page and dropped the truncation fact, so a type with 131 documents
   # showed "100" and no way past the 100th (stranger walk, 2026-10-01).
-  # `list_documents_page/3` answers `has_more` for one extra row; the page size
-  # grows per type through the `:list_limits` the LiveView threads in
-  # ("Show more"), capped by the query layer's own 1000-row limit.
+  # `list_documents_page/3` answers `has_more` for one extra row; `:list_limits` grows the page
+  # ("Show more", at most the query layer's 1000 rows) and `:list_offsets` moves its start.
   @desk_page 100
   @doc false
   def desk_page, do: @desk_page
@@ -1455,8 +1454,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       nil ->
         page_opts =
           list_opts
-          |> Keyword.put(:limit, limit)
-          |> Keyword.put(:offset, offset)
+          |> Keyword.merge(limit: limit, offset: offset)
           |> Keyword.put(:content_keys, row_content_keys(schema))
 
         {docs, has_more} = Content.list_documents_page(type_name, dataset, page_opts)
