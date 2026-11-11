@@ -195,6 +195,26 @@ assert.equal(panesOf()[0].getAttribute("tabindex"), "-1", "without becoming a Ta
   await tick();
 }
 
+// A focused strip that opens because the window widened (no press) is lent a
+// tabindex too, and gives it back the same way once the focus has left it.
+{
+  const at = strips().indexOf(T);
+  const strip = panesOf()[at];
+  strip.focus();
+  width = 2000;
+  hook._layout();
+  assert.equal(strip.hasAttribute("data-pane-collapsed"), false, "wide enough: the strip opened by itself");
+  assert.equal(strip.getAttribute("tabindex"), "-1", "it had the focus, so it can still hold it");
+  const other = window.document.createElement("button");
+  panesOf()[3].appendChild(other);
+  other.focus();
+  assert.equal(strip.getAttribute("tabindex"), null, "no tabindex once the focus has left the widened pane");
+  other.remove();
+  width = 1024;
+  hook._layout();
+  await tick();
+}
+
 // A LiveView patch rewrites a pane's attributes: the layout comes back.
 const before = strips();
 const wiped = panesOf()[before.indexOf(T)];
