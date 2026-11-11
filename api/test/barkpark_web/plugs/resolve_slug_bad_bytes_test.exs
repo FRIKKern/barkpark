@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
 
   # ResolveWorkspace reads the project itself for a signed-in account that is
   # not a member, to weigh its grants, before ResolveProject runs.
-  test "a project slug that is not text is not read for a signed-in non-member" do
+  test "a project slug that is not text is not read for a signed-in non-member", %{conn: conn} do
     ws = Barkpark.TenancyFixtures.create_workspace!()
 
     {:ok, user} =
@@ -83,7 +83,7 @@ defmodule BarkparkWeb.Plugs.ResolveSlugBadBytesTest do
       params = %{"workspace_slug" => ws.slug, "project_slug" => project_slug}
 
       conn =
-        %{build_conn() | path_params: params, params: params}
+        %{conn | path_params: params, params: params}
         |> Plug.Conn.assign(:current_user, user)
         |> BarkparkWeb.Plugs.ResolveWorkspace.call(BarkparkWeb.Plugs.ResolveWorkspace.init([]))
 
