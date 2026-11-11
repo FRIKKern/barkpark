@@ -57,7 +57,7 @@ defmodule BarkparkWeb.Studio.Desk.Search do
   @doc "The desk URL that opens a hit: the desk's own path to its type, then the document."
   @spec href(String.t(), struct(), map()) :: String.t()
   def href(base, root, %{type: type, id: id}) do
-    segments = Tree.path_to_type(root, type) ++ [id]
+    segments = Tree.doc_path(root, type, id)
 
     base <>
       "/" <> Enum.map_join(segments, ";", &URI.encode(&1, fn c -> URI.char_unreserved?(c) end))

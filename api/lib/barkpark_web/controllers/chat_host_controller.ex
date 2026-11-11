@@ -1,6 +1,8 @@
 defmodule BarkparkWeb.ChatHostController do
   use BarkparkWeb, :controller
 
+  require Logger
+
   alias Barkpark.ChatHosts
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
@@ -45,10 +47,30 @@ defmodule BarkparkWeb.ChatHostController do
   # `Phoenix.ActionClauseError` — a clause error on the ACTION — to 400).
   # `is_binary/1` here hands every wrong-TYPE token to the catch-all below, so it
   # gets the same 401 an ABSENT token already got.
+  #
+  # A changeset error means the token MATCHED a live, unexpired enrollment and
+  # the request body was refused (task-c02eefeb0ed7381c: the shipped host's
+  # capabilities shape was refused, and the 401 read as "credential revoked").
+  # Only the holder of a valid token can reach this arm, and a 201 would tell
+  # them the same, so the 422 leaks nothing to a guesser. The transaction rolled
+  # back, so the token stays unused. Every other error stays the one 401.
   def enroll(conn, %{"enrollment_token" => token} = params) when is_binary(token) do
     case ChatHosts.enroll(token, params) do
-      {:ok, result} -> conn |> put_status(:created) |> json(result)
-      {:error, _reason} -> unauthorized_enrollment(conn)
+      {:ok, result} ->
+        conn |> put_status(:created) |> json(result)
+
+      # `changeset.errors` holds messages and validation opts, never the
+      # rejected values, so a refused map that carries a secret is not logged.
+      {:error, %Ecto.Changeset{} = changeset} ->
+        Logger.warning(
+          "chat host enrollment refused: host_id=#{changeset.data.id} " <>
+            "errors=#{inspect(changeset.errors)}"
+        )
+
+        unprocessable(conn, changeset)
+
+      {:error, _reason} ->
+        unauthorized_enrollment(conn)
     end
   end
 

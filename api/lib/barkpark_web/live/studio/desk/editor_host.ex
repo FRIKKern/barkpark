@@ -25,6 +25,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   import Phoenix.LiveView, only: [push_navigate: 2, push_patch: 2]
 
+  require Logger
+
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
@@ -77,20 +79,44 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   end
 
   # No document is handed to the Studio: no path, no reference links.
-  defp put_away(socket), do: assign(socket, active_refs: [], desk_ref_ids: nil, desk_nav: nil)
+  defp put_away(socket),
+    do: assign(socket, active_refs: [], desk_ref_ids: nil, desk_nav: nil, edit_failed: false)
 
-  @doc "Loads the pending document into the Studio's editor."
+  @doc """
+  Loads the pending document into the Studio's editor.
+
+  The Studio reads it in the page process. When the database is out that read
+  raises, and an error there would take the whole page down, every pane with
+  it (J50). So a database error keeps the socket from before the read and the
+  pane says the document could not be read; the target stays `pending`, so
+  its Retry loads it again.
+  """
   def edit(%{assigns: %{pending: target}} = socket, target) do
     %{chain: panes, desk: desk, dataset: dataset, desk_uri: uri} = socket.assigns
-    %{id: id, type: type} = pane = List.last(panes)
-    path = (pane[:node] && [pane.node]) || Tree.path_to_type(desk.root, type) ++ [id]
+    %{id: id, type: type} = List.last(panes)
+    path = Tree.edit_path(panes, desk.root)
 
-    {:noreply, socket} =
-      %{"dataset" => dataset, "path" => path}
-      |> StudioLive.handle_params(uri, assign(socket, :desk_nav, path))
-      |> ours(:settled)
+    try do
+      {:noreply, loaded} =
+        %{"dataset" => dataset, "path" => path}
+        |> StudioLive.handle_params(uri, assign(socket, :desk_nav, path))
+        |> ours(:settled)
 
-    {:noreply, assign(socket, active: length(panes) - 1, editing: target, pending: nil)}
+      {:noreply,
+       assign(loaded,
+         active: length(panes) - 1,
+         editing: target,
+         pending: nil,
+         edit_failed: false
+       )}
+    rescue
+      error in [DBConnection.ConnectionError, Postgrex.Error] ->
+        Logger.warning(
+          "desk: the editor could not read #{inspect(target)}: #{Exception.message(error)}"
+        )
+
+        {:noreply, assign(socket, active: length(panes) - 1, editing: nil, edit_failed: true)}
+    end
   end
 
   # The URL moved on before the editor was loaded.
@@ -121,6 +147,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The Studio's `nav_path` says nothing about the pane a "+" was pressed in,
   # so a new document is placed by the event (and an optional `desk-pane`).
+  # The card's Retry, when the document could not be read: read it again.
+  def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
+    do: edit(socket, socket.assigns.pending)
+
+  def handle_event("desk-edit-retry", _params, socket), do: {:noreply, socket}
+
   def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
     do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
 
@@ -324,7 +356,17 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       <%!-- `pane-body` and `doc-form` are the names the TanStack specs know
             the document's form region by. --%>
       <div id={"#{@view.id}-body"} class="pane-body doc-form dk-edit-body" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden">
-        {Components.studio_live_shell(assigns)}
+        <%!-- The Studio's shell brings the page's main landmark; the card,
+              drawn in its place, is it while the shell is away. --%>
+        <div :if={@edit_failed} class="dk-note" role="main" data-desk-edit-failed>
+          <p role="alert">{gettext("This document could not be read.")}</p>
+          <button type="button" class="btn" phx-click="desk-edit-retry">
+            {gettext("Retry")}
+          </button>
+        </div>
+        <%= if !@edit_failed do %>
+          {Components.studio_live_shell(assigns)}
+        <% end %>
       </div>
     </section>
     """
