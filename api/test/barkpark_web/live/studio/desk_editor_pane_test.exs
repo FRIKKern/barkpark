@@ -64,12 +64,12 @@ defmodule BarkparkWeb.Studio.DeskEditorPaneTest do
   end
 
   # Measured in a browser on guerrilla: "Open another" dimmed the edit pane
-  # only (backdrop [640,101,1440,856] of a 1440x900 window) and the list pane
-  # to its left stayed clickable. The Studio's `.modal-backdrop` is
-  # `position: absolute; inset: 0` and means the page, so the desk's sheet
-  # must not position the edit pane. With the rule gone: [0,0,1440,900], the
-  # list under the backdrop. LiveViewTest has no layout, so this reads the
-  # dialog's markup and the sheet.
+  # only (the backdrop was the pane's own box, 800 px wide, in a 1440 px
+  # window) and the list pane to its left stayed clickable. The Studio's
+  # `.modal-backdrop` is `position: absolute; inset: 0` and means the page,
+  # so the desk's sheet must not position the edit pane. With the rule gone
+  # the backdrop is the whole window, the list under it. LiveViewTest has no
+  # layout, so this reads the dialog's markup and the sheet.
   test "a dialog the Studio draws in the edit pane is not boxed in by the pane", %{view: view} do
     view
     |> element(~s([data-pane-editing] [data-test-id="open-secondary-picker"]))
