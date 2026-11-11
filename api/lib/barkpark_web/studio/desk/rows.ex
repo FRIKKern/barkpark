@@ -47,12 +47,24 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   @spec read(String.t(), map(), String.t(), keyword(), struct() | nil) :: map() | nil
   def read(type, query, dataset, scope, node \\ nil)
 
-  def read(type, query, dataset, scope, %{type: :document_type_list, type_name: type} = node) do
-    opts = opts(type, query, scope)
+  # Only when the path ends AT the node: a path that goes on past it (a level
+  # inside the list) is not the node's own list, and is read by its path below.
+  def read(
+        type,
+        %{path: path} = query,
+        dataset,
+        scope,
+        %{type: :document_type_list, type_name: type, id: id} = node
+      ) do
+    if List.last(path) == id do
+      opts = opts(type, query, scope)
 
-    case PaneBuilder.walk_path([node.id], 0, %{items: [node]}, [], nil, dataset, opts) do
-      {[list], _editor} -> rows(list, type)
-      _ -> nil
+      case PaneBuilder.walk_path([id], 0, %{items: [node]}, [], nil, dataset, opts) do
+        {[list], _editor} -> rows(list, type)
+        _ -> nil
+      end
+    else
+      read(type, query, dataset, scope, nil)
     end
   end
 
