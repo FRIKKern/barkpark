@@ -19,6 +19,14 @@ before="$(cat "$conf")"
 run --force; check "exits 0 when forced" "$?" "0"
 check "a second call writes nothing more" "$(cat "$conf")" "$before"
 
+printf 'nameserver 1.1.1.1 # already here\n' >"$conf"
+run --force; check "a 1.1.1.1 line with a trailing comment counts as present" "$(grep -c '1\.1\.1\.1' "$conf")" "1"
+
+printf 'nameserver\t168.63.129.16\ndomain x.internal\n' >"$conf"
+run --force
+check "a tab-separated nameserver line is kept" "$(grep -c '168.63.129.16' "$conf")" "1"
+check "a domain line is kept" "$(grep -c '^domain x.internal$' "$conf")" "1"
+
 conf="/nonexistent-dir/resolv.conf"
 run --force; check "exits 0 when the file cannot be written" "$?" "0"
 

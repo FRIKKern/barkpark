@@ -25,12 +25,12 @@ if [ "${1:-}" != "--force" ] && getent hosts "$host" >/dev/null 2>&1; then
   echo "ci-apt-dns-fallback: $host resolves; the runner's resolver is left as it is"
   exit 0
 fi
-if grep -q '^nameserver 1\.1\.1\.1$' "$conf" 2>/dev/null; then
+if grep -Eq '^nameserver[[:space:]]+1\.1\.1\.1([[:space:]]|$)' "$conf" 2>/dev/null; then
   echo "ci-apt-dns-fallback: public resolvers are already in $conf"
   exit 0
 fi
 echo "::warning::the runner's resolver does not answer for $host; this job now also asks 1.1.1.1 and 8.8.8.8"
-old="$(grep -E '^(nameserver|search|options) ' "$conf" 2>/dev/null || true)"
+old="$(grep -E '^(nameserver|search|domain|options)[[:space:]]' "$conf" 2>/dev/null || true)"
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n%s\n' "$old" | $sudo_cmd tee "$conf" >/dev/null ||
   echo "ci-apt-dns-fallback: could not write $conf; the install runs on the runner's resolver"
 if getent hosts "$host" >/dev/null 2>&1; then
