@@ -3,7 +3,7 @@
 // its Part when imported. Moved out of check.mjs with no change in behaviour.
 
 import { SECTION_KEYS, SECTION_UNITS, tokens } from "../emit.mjs";
-import { bumpFailed, failed, FAULT } from "./state.mjs";
+import { bumpFailed, FAULT } from "./state.mjs";
 import { RAW_SURFACE_PATH, readDesignSource } from "./part-e.mjs";
 
 // ── Part L: the SECTION BOUNDARY reaches a real consumer, on BOTH surfaces ───

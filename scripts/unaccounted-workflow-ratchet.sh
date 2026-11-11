@@ -69,7 +69,11 @@
 # first moves at 8d94b7a00 (#20042, the absent-context census fires on producer
 # completion): `absent-context-census.yml` left the list because that PR gave its
 # job name a status in the spec. Good news, recorded here so the ratchet holds it.
-BASELINE=20
+#
+# 20 -> 19, 2026-11-10 (task-ef9409a3123f1bc2). Re-measured: count=20 with
+# origin/main's spec (06751097e), count=19 with this commit's. `grip-suite.yml` left
+# the list because this commit gives its job name an .exclusions row.
+BASELINE=19
 
 set -uo pipefail
 

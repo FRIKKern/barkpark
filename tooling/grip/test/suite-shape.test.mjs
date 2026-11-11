@@ -42,14 +42,14 @@
 //     total: the realistic accident is one file emptied by a bad merge, not a
 //     self-consistent gutting of twenty.
 //   * IT MEASURES PRESENCE, NOT STRENGTH. An assertion that cannot fail counts
-//     here exactly like one that can. class-coverage.test.mjs makes the same
+//     here exactly like one that can. class-coverage-tripwire.test.mjs makes the same
 //     declaration about mention-vs-control and it is the same bound.
 //
 // THE SPELLING TRAP THIS FILE HAD TO AVOID, because the first draft of the
 // counter fell straight into it: mint.test.mjs imports `{ ok, strictEqual,
 // deepStrictEqual }` from node:assert/strict and never writes the string
 // `assert.` once, so an `assert\.` scan rates the repo's 38-test mint suite at
-// ZERO assertions — the identical single-spelling defect class-coverage.test.mjs
+// ZERO assertions — the identical single-spelling defect class-coverage-tripwire.test.mjs
 // documents for its own hyphen-only scan. So the aliases are derived FROM EACH
 // FILE'S OWN IMPORT STATEMENT rather than guessed, and part (C) below is a
 // control proving the counter reports a gutted file.

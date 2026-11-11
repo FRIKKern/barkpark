@@ -169,6 +169,78 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
 
+  test "a URL that names a revision, a view or an inspector says what the desk shows instead", %{
+    conn: conn,
+    base: base,
+    a: a,
+    b: b
+  } do
+    # The last document of the chain: the editor, on the current document.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},rev=abc123")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert doc_shows?(view, 2, "About Alpha note")
+
+    # A document further left: a read-only pane.
+    chain = "#{@type_name};#{a},rev=abc123;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert doc_shows?(view, 2, "About Alpha note")
+    refute has_element?(view, ~s([data-pane-index="3"] [data-desk-left-out]))
+
+    for param <- ["view=json", "inspect=sanity%2Fstructure%2Fhistory"] do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},#{param}")
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out])), param
+    end
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+    refute has_element?(view, "[data-desk-left-out]")
+  end
+
+  test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
+    conn: conn,
+    base: base
+  } do
+    # The router decodes once and the pane reader once more: %25FF is the byte
+    # 0xFF by then. It must not reach a query or the page as that byte.
+    # Encoded once, the router alone makes the byte: the same holds. So it
+    # does for a NUL, which is UTF-8 but which Postgres refuses as text.
+    for bad <- ~w(x%25FF x%25C3%2528 x%25E2%2582 x,path=%25FF x%FF x%C3%28 x%00 x%2500) do
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"]), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+
+      # Not the last document of the chain: a read-only pane, which queries.
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad};y,type=#{@type_name}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+    end
+
+    # A link that decodes twice to text reads as it always did.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};x%2541")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"]), "xA")
+
+    # The hover path takes its href from the browser: the same bytes, once encoded.
+    view
+    |> element("#desk-panes")
+    |> render_hook("warm", %{"href" => "#{base}/#{@type_name};x%FF"})
+
+    settle(view)
+    assert String.valid?(render(view))
+  end
+
   test "closing a pane keeps the tab title the pane now last had read", %{
     conn: conn,
     base: base,
@@ -340,6 +412,27 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       settle(view)
       refute has_element?(view, "[aria-busy]")
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
+    end
+
+    test "a document split in three is read once for its two read-only panes", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      # Panes 2 and 3 show the document read-only; pane 4, the last, is the editor.
+      {:ok, view, _html} =
+        live(admin(conn), "#{base}/#{@type_name};#{a}|,view=json|,view=json")
+
+      settle(view)
+
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+      refute has_element?(view, ~s([data-pane-index="2"][aria-busy]))
+      refute has_element?(view, ~s([data-pane-index="3"][aria-busy]))
     end
 
     test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{

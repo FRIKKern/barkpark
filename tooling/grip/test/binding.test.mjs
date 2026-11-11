@@ -613,7 +613,7 @@ test("classifyAll over the 652-proof corpus classifies every real command and RE
   //      which is exactly why lowering it must be a deliberate edit: whoever
   //      lowers it re-derives the published figure at their sha, names the rule
   //      that earned it, and updates every place the old figure is quoted
-  //      (binding.mjs's header and class-coverage.test.mjs both carry it).
+  //      (binding.mjs's header and class-coverage-{tripwire,controls}.test.mjs carry it).
   const ELSE_BRANCH_FLOOR = 31;
   const ELSE_BRANCH_CEILING = 31;
   assert.ok(

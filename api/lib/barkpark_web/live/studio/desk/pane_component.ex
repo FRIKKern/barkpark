@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
+  alias BarkparkWeb.Studio.Desk.ListSearch
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Rows
@@ -31,12 +32,32 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   @impl true
   def update(%{refresh: _}, socket), do: {:ok, load(socket)}
 
+  # A pane with this pane's key (a split sibling) asks for its read rather
+  # than reading too: answered now, or when the read under way lands.
+  def update(%{share_with: id}, socket) do
+    socket = assign(socket, :sharers, [id | socket.assigns.sharers])
+    {:ok, if(socket.assigns.data.loading, do: socket, else: share(socket))}
+  end
+
+  def update(%{shared: {key, data}}, socket) do
+    cond do
+      key != socket.assigns.data_key -> {:ok, socket}
+      data.failed -> {:ok, assign(socket, :data, data)}
+      true -> {:ok, adopt(socket, data.result)}
+    end
+  end
+
+  # Typing in the list's search box paused (`ListSearch`).
+  def update(%{list_search_due: due}, socket), do: {:ok, ListSearch.due(socket, due, &load/1)}
+
   def update(assigns, socket) do
     socket =
       socket
-      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node)a))
+      |> assign(Map.take(assigns, ~w(id pane index panes base dataset scope node follows)a))
+      |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
       |> assign_new(:sort, fn -> nil end)
+      |> ListSearch.init()
 
     key = data_key(assigns.pane, assigns.dataset, assigns.node)
     same? = socket.assigns[:data_key] == key
@@ -79,7 +100,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   @impl true
-  def handle_event("retry", _params, socket), do: {:noreply, load(socket)}
+  def handle_event("retry", _params, socket), do: {:noreply, read_async(socket)}
 
   # A list's own controls. They are this pane's state, not the URL's.
   def handle_event("more", _params, socket),
@@ -88,17 +109,30 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def handle_event("sort", %{"sort" => name}, socket),
     do: {:noreply, socket |> assign(:sort, if(name == "", do: nil, else: name)) |> load()}
 
-  @impl true
-  def handle_async(:load, {:ok, data}, socket), do: {:noreply, adopt(socket, data)}
+  # The list's own search box (`ListSearch`): typing, its keys, Enter, Clear.
+  def handle_event("list-search" <> _ = event, params, socket),
+    do: ListSearch.handle(event, params, socket, &load/1)
 
-  def handle_async(:load, {:exit, reason}, socket),
-    do: {:noreply, assign(socket, :data, AsyncResult.failed(socket.assigns.data, reason))}
+  @impl true
+  def handle_async(:load, {:ok, data}, socket),
+    do: {:noreply, socket |> adopt(data) |> ListSearch.landed()}
+
+  def handle_async(:load, {:exit, reason}, socket) do
+    data = AsyncResult.failed(socket.assigns.data, reason)
+    {:noreply, socket |> assign(:data, data) |> share()}
+  end
 
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.index, data.title})
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
-    assign(socket, :data, AsyncResult.ok(data))
+    socket |> assign(:data, AsyncResult.ok(data)) |> share()
+  end
+
+  # Hand this pane's read, landed or failed, to the panes that asked for it.
+  defp share(%{assigns: %{sharers: sharers, data_key: key, data: data}} = socket) do
+    for id <- sharers, do: send_update(__MODULE__, id: id, shared: {key, data})
+    assign(socket, :sharers, [])
   end
 
   @impl true
@@ -123,6 +157,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <span aria-hidden="true">×</span>
         </.link>
       </div>
+      <ListSearch.box
+        :if={@pane.kind == :list}
+        id={@id}
+        q={@q}
+        lit={@lit}
+        searching={ListSearch.searching?(assigns)}
+        myself={@myself}
+      />
       <div class={["pane-body", @pane.kind == :list && "list-rows"]}>
         <div :if={@data.loading && !@data.ok?} class="dk-skeleton" aria-hidden="true">
           <div :for={_ <- 1..6} class="pane-item"><span class="dk-bone"></span></div>
@@ -152,12 +194,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </option>
             </select>
           </form>
+          <p :for={note <- left_out(@pane)} class="dk-note" data-desk-left-out>{note}</p>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
           <%!-- The TanStack Studio's names (ruling R1): a document list is a
                `role="list"` named after its pane, each row a `listitem` that
                knows its place; the link inside stays the thing with focus. --%>
           <div
             :if={(@data.result[:entries] || []) != []}
+            id={@pane.kind == :list && ListSearch.rows_id(@id)}
             class="dk-rows"
             role={@pane.kind == :list && "list"}
             aria-label={@pane.kind == :list && title(assigns)}
@@ -166,7 +210,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               <div :if={entry == :divider} class="pane-divider"></div>
               <div
                 :if={is_map(entry)}
-                class="dk-row"
+                id={@pane.kind == :list && ListSearch.item_id(@id, pos - 1)}
+                class={["dk-row", ListSearch.lit?(assigns, pos - 1) && "dk-lit"]}
+                data-lit={ListSearch.lit?(assigns, pos - 1)}
                 role={@pane.kind == :list && "listitem"}
                 aria-posinset={@pane.kind == :list && pos}
               >
@@ -244,6 +290,27 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   def provisional_title(pane, %{} = node), do: node.pane_title || node.title || fallback(pane)
   def provisional_title(pane, nil), do: fallback(pane)
 
+  # What a link from the TanStack Studio or Sanity asks for that this desk does
+  # not draw. Said in the pane, so the current document is not taken for an
+  # old revision. From the URL, not the read: panes that differ only in these
+  # share one read.
+  @doc false
+  def left_out(%{kind: :doc} = pane) do
+    Enum.filter(
+      [
+        pane[:rev] &&
+          gettext("This is the current document. Revision “%{rev}” is not shown here.",
+            rev: pane.rev
+          ),
+        (pane[:view] || pane[:inspect]) &&
+          gettext("Other views and inspectors are not shown here.")
+      ],
+      & &1
+    )
+  end
+
+  def left_out(_pane), do: []
+
   defp fallback(%{kind: :types}), do: gettext("Content")
   defp fallback(%{kind: :menu, node: id}), do: id
   defp fallback(%{kind: :list, type: type}), do: type
@@ -285,13 +352,25 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     assign(socket, :data, AsyncResult.ok(data))
   end
 
-  defp load(socket) do
+  # An earlier pane reads the same thing: ask it, so the two cost one read.
+  defp load(%{assigns: %{follows: leader}} = socket) when is_binary(leader) do
+    send_update(__MODULE__, id: leader, share_with: socket.assigns.id)
+    assign(socket, :data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
+  end
+
+  defp load(socket), do: read_async(socket)
+
+  defp read_async(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
     %{panes: panes, index: index, limit: limit, sort: sort} = socket.assigns
     pane = with_query(pane, panes, index, limit, sort)
+    # A list being searched reads the search instead of its rows.
+    q = pane.kind == :list && ListSearch.term(socket.assigns.q)
+    pane = if q, do: Map.put(pane, :search, q), else: pane
 
     # A list asked for more rows or another order keeps its rows on screen.
     socket
+    |> assign(:reading, q || nil)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
     |> start_async(:load, fn -> read_pane(pane, node, dataset, scope) end)
   end
@@ -322,8 +401,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   @doc false
+  def read(%{kind: :list, type: type, search: q}, node, dataset, scope, provisional)
+      when is_binary(q),
+      do: ListSearch.read(type, q, node, dataset, scope, provisional)
+
   def read(%{kind: :list, type: type} = pane, node, dataset, scope, provisional) do
-    rows = pane[:query] && Rows.read(type, pane.query, dataset, scope)
+    rows = pane[:query] && Rows.read(type, pane.query, dataset, scope, node)
 
     case rows || Content.resolve_schema(type, dataset, scope) do
       %{entries: entries} ->

@@ -915,6 +915,10 @@
     {
       "context": "publish",
       "reason": "S4 PATHS-FILTERED: chronicle-paper.yml job `publish` (bare job id, no name:) runs only on schedule or dispatch and is SKIPPED on every PR where it renders; a required context that never concludes on a PR would block forever. It publishes Chronicle papers and gates nothing (task-26d47d28df1391cd)."
+    },
+    {
+      "context": "tooling/grip full node --test suite",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: grip-suite.yml job `grip-suite` has no `pull_request:` arm. It runs on push to main (paths-filtered to tooling/grip/**), a nightly cron and workflow_dispatch only, so this name never renders on a normal PR head, and a required context that never renders reports 'expected' forever (D18). It runs tooling/grip's node --test suite and is advisory: a red files an issue through scripts/file-ci-failure-issue.sh. It renders on a PR head only when someone dispatches the workflow on that branch by hand, as on 906dc5b3 (#25504, run 42769422661), which left the name unaccounted on #25505 (job 129692111806). ADDED BY HAND 2026-11-10 (task-ef9409a3123f1bc2); acknowledged with `--expect-unrendered` in scripts/required-checks.test.sh's ACK_EX."
     }
   ]
 }
