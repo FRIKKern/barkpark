@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Desk.Text
 
   @limit 20
   @min_query 2
@@ -27,9 +28,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
 
   A query under #{@min_query} characters assigns the text but NO hits: a
   one-letter ILIKE matches most of the corpus and the round trip is wasted.
+
+  A value the database refuses as text (a NUL; bytes that are not UTF-8) is no
+  search: it clears the box instead of reaching a query.
   """
   def search(%{"value" => value}, socket) when is_binary(value) do
-    {:noreply, assign(socket, desk_search: value, desk_search_hits: hits(value, socket))}
+    if Text.text?(value),
+      do: {:noreply, assign(socket, desk_search: value, desk_search_hits: hits(value, socket))},
+      else: clear(socket)
   end
 
   def search(_params, socket), do: {:noreply, socket}

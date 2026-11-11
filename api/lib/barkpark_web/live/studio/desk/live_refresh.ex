@@ -299,7 +299,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   # attached with the first subscription (a connected page only). It owns
   # `{:desk_pane_failed, id}` (a pane's read failed: the pane sends it) and
   # `{:desk_pane_retry, id}` (this module's own timer); it looks at, and passes
-  # on, `{:desk_pane_title, index, _}` (a pane's read landed) and
+  # on, `{:desk_pane_title, id, _}` (a pane's read landed) and
   # `{:document_changed, msg}`. Assigns: `desk_retries` and `desk_gone`.
 
   # J50, as Sanity's document list does it (useDocumentList.ts): a failed read
@@ -321,7 +321,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
 
   defp on_info({:desk_pane_failed, id}, socket), do: {:halt, failed(socket, id)}
   defp on_info({:desk_pane_retry, id}, socket), do: {:halt, retry(socket, id)}
-  defp on_info({:desk_pane_title, index, _title}, socket), do: {:cont, landed(socket, index)}
+  defp on_info({:desk_pane_title, id, _title}, socket), do: {:cont, landed(socket, id)}
 
   defp on_info({:document_changed, %{type: _, doc_id: _} = msg}, socket),
     do: {:cont, note_gone(socket, msg)}
@@ -351,12 +351,8 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     end
   end
 
-  defp landed(socket, index) do
-    case Enum.find(socket.assigns.desk_panes, &(&1.index == index)) do
-      %{id: id} -> assign(socket, :desk_retries, Map.delete(socket.assigns.desk_retries, id))
-      nil -> socket
-    end
-  end
+  defp landed(socket, id),
+    do: assign(socket, :desk_retries, Map.delete(socket.assigns.desk_retries, id))
 
   # J32. A delete names one row (`drafts.x` or `x`), and discarding a draft is
   # announced the same way while the published document stays, so a delete of
