@@ -37,19 +37,27 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   """
   @spec resolve(map(), map(), String.t(), keyword()) :: %{optional(String.t()) => [target()]}
   def resolve(doc, schema, dataset, scope) do
-    content = Map.get(doc, :content) || %{}
-
-    ids_by_field =
-      for {name, kind} <- fields(schema), into: %{} do
-        values = if kind == :one, do: [content[name]], else: List.wrap(content[name])
-        {name, values |> Enum.map(&ref_id/1) |> Enum.reject(&is_nil/1)}
-      end
+    ids_by_field = ids(doc, schema)
 
     found = lookup(ids_by_field |> Map.values() |> List.flatten() |> Enum.uniq(), dataset, scope)
 
     Map.new(ids_by_field, fn {name, ids} ->
       {name, Enum.map(ids, &target(&1, found[&1]))}
     end)
+  end
+
+  @doc """
+  The ids every reference field of `doc` holds, by field name, in stored
+  order. Read from the document alone: no query.
+  """
+  @spec ids(map(), map()) :: %{optional(String.t()) => [String.t()]}
+  def ids(doc, schema) do
+    content = Map.get(doc, :content) || %{}
+
+    for {name, kind} <- fields(schema), into: %{} do
+      values = if kind == :one, do: [content[name]], else: List.wrap(content[name])
+      {name, values |> Enum.map(&ref_id/1) |> Enum.reject(&is_nil/1)}
+    end
   end
 
   @doc "The type of the document `id`, whatever it is, or nil when it cannot be read."
