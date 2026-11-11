@@ -262,6 +262,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   # A list's menu picked a sort: it sticks for the type, here and for this editor.
   def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
+    # Only a sort the type offers is kept (the pane checked it too).
+    sort = ListMenu.pick(sort, (socket.assigns.desk.menus[type] || %{sorts: []}).sorts)
     :ok = ListMenu.remember(socket, socket.assigns.dataset, type, sort)
 
     sorts =
@@ -312,8 +314,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
-        list_sort={@list_sorts[view.pane[:type]]}
-        orderings={@desk.orderings[view.pane[:type]] || []}
+        list_sort={ListMenu.pick(@list_sorts[view.pane[:type]], menu(@desk, view).sorts)}
+        orderings={menu(@desk, view).orderings}
+        sorts={menu(@desk, view).sorts}
       />
       <% end %>
     </div>
@@ -336,9 +339,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
       dataset: dataset,
       root: root,
       nodes: Tree.index(root),
-      orderings: ListMenu.orderings(dataset, scope)
+      menus: ListMenu.menus(dataset, scope)
     }
   end
+
+  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
 
   # A groupBy is built deferred, with no groups: the menu that opens it builds
   # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them

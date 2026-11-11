@@ -19,7 +19,9 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   use BarkparkWeb, :html
 
   alias Barkpark.Content
+  alias Barkpark.Content.TitleDerivation
   alias Barkpark.UserPrefs
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.ScopeHelpers
 
@@ -108,16 +110,39 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   end
 
   @doc """
-  Each type's own sorts for its list menu (`Rows.orderings/1`), read once
-  with the desk tree, as the TanStack Studio holds its schemas: a list's
-  read pays nothing for its menu.
+  Each type's list menu, read once with the desk tree, as the TanStack
+  Studio holds its schemas: a list's read pays nothing for its menu.
+  `orderings` are the type's own (`Rows.orderings/1`); `sorts` every sort a
+  pick or a kept pref may name for the type (`pick/2`).
   """
-  @spec orderings(String.t(), keyword()) :: %{String.t() => [map()]}
-  def orderings(dataset, scope) do
+  @spec menus(String.t(), keyword()) :: %{
+          String.t() => %{orderings: [map()], sorts: [String.t()]}
+        }
+  def menus(dataset, scope) do
     for schema <- Content.list_schemas(dataset, scope), into: %{} do
-      {schema.name, Rows.orderings(schema)}
+      orderings = Rows.orderings(schema)
+      title = TitleDerivation.preview_title_field(schema) || "title"
+
+      sorts =
+        Enum.map(orderings, & &1.sort) ++
+          Enum.map(PaneBuilder.sort_options(schema), & &1.name) ++
+          ["#{title}:asc", "#{title}:desc", "updated", "created"]
+
+      {schema.name, %{orderings: orderings, sorts: Enum.uniq(sorts)}}
     end
   end
+
+  @doc """
+  `sort` when the type offers it (`menus/2`'s `sorts`), else nil: the
+  default order. A pick comes from the page and a pref is data the editor
+  can write, so neither reaches the query unless it is one of these
+  (ruling R20).
+  """
+  @spec pick(String.t() | nil, [String.t()]) :: String.t() | nil
+  def pick(sort, sorts) when is_binary(sort) and is_list(sorts),
+    do: if(sort in sorts, do: sort)
+
+  def pick(_sort, _sorts), do: nil
 
   @doc "The sorts this editor keeps for `dataset`'s lists: `%{type => sort}`."
   @spec prefs(Phoenix.LiveView.Socket.t(), String.t()) :: %{String.t() => String.t()}

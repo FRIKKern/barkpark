@@ -14,7 +14,9 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias Barkpark.UserPrefs
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.Rows
+  alias BarkparkWeb.Studio.PaneBuilder
 
   @dataset "production"
   @post "dlm_post"
@@ -205,6 +207,65 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
            }
   end
 
+  test "a pick the type does not offer is ignored: the order stays, nothing is kept", %{
+    conn: conn,
+    base: base,
+    ws: ws,
+    user: user
+  } do
+    view = open(sign_in(conn, user), "#{base}/#{@post}")
+    assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
+
+    # What a page could push for a field the type does not sort by.
+    view
+    |> element(~s([data-pane-index="1"] [role="menu"] [role="menuitemradio"]), "Sort by Created")
+    |> render_click(%{"sort" => "secret_field:asc"})
+
+    Process.sleep(100)
+    assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
+    refute has_element?(view, ~s([role="menuitemradio"][aria-checked="true"]))
+    assert UserPrefs.get(user.id, ws.id, @dataset, "studio.lists") == nil
+  end
+
+  test "a kept sort the type does not offer reads in the default order", %{
+    conn: conn,
+    base: base,
+    ws: ws,
+    user: user
+  } do
+    {:ok, _} =
+      UserPrefs.put(user.id, ws.id, @dataset, "studio.lists", %{
+        @post => %{"sort" => "secret_field:asc"}
+      })
+
+    view = open(sign_in(conn, user), "#{base}/#{@post}")
+    assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
+    refute has_element?(view, ~s([role="menuitemradio"][aria-checked="true"]))
+  end
+
+  describe "the :list_orders seam (R20)" do
+    defp built(opts) do
+      {_ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: Tenancy.get_default_workspace().id, project_id: proj.id]
+
+      {panes, _editor} =
+        PaneBuilder.build(@dataset, [@post], [scope: scope, scope_prefix: ""] ++ opts)
+
+      list = List.last(panes)
+      {for(%{type: :doc} = item <- list.items, do: item.title), Map.delete(list, :items)}
+    end
+
+    test "with the key absent or empty the list pane is the same" do
+      assert {["Alpha", "Beta", "Gamma"], _} = built([])
+      assert built([]) == built(list_orders: %{})
+      assert built([]) == built(list_orders: %{"another_type" => :created_at_desc})
+    end
+
+    test "an order in it wins over the type's declared order" do
+      assert {["Beta", "Alpha", "Gamma"], _} = built(list_orders: %{@post => :created_at_desc})
+    end
+  end
+
   test "a sort reads as a Content order, and nothing it cannot read" do
     assert Rows.order("title") == [{:field, "title", :asc}]
     assert Rows.order("updated") == :updated_at_desc
@@ -212,6 +273,11 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
 
     assert Rows.order("rating:desc,author.name:asc") ==
              [{:field, "rating", :desc}, {:field, "author.name", :asc}]
+
+    sorts = ["rating:desc", "title:asc", "updated"]
+    assert ListMenu.pick("updated", sorts) == "updated"
+    assert ListMenu.pick("secret_field:asc", sorts) == nil
+    assert ListMenu.pick(nil, sorts) == nil
 
     for junk <- [
           nil,

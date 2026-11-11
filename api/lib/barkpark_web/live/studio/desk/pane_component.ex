@@ -63,10 +63,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     socket =
       socket
       |> assign(
-        Map.take(assigns, ~w(id pane index panes base dataset scope node follows orderings)a)
+        Map.take(
+          assigns,
+          ~w(id pane index panes base dataset scope node follows orderings sorts)a
+        )
       )
       |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:orderings, fn -> [] end)
+      |> assign_new(:sorts, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
       # The sort this editor keeps for the type (`ListMenu`), at first.
       |> assign_new(:sort, fn -> assigns[:list_sort] end)
@@ -133,10 +137,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     do: {:noreply, if(more?(socket), do: read_more(socket), else: socket)}
 
   # A pick in the list menu (`ListMenu`); the page keeps it for the type.
-  def handle_event("sort", %{"sort" => name}, socket) do
-    sort = if name == "", do: nil, else: name
-    send(self(), {:desk_list_sort, socket.assigns.pane.type, sort})
-    {:noreply, socket |> assign(:sort, sort) |> load()}
+  # "" is Default sort; anything else must be one the type offers, or the
+  # pick is ignored: nothing read, nothing kept.
+  def handle_event("sort", %{"sort" => name}, socket) when is_binary(name) do
+    sort = if name != "", do: ListMenu.pick(name, socket.assigns.sorts)
+
+    if name != "" and is_nil(sort) do
+      {:noreply, socket}
+    else
+      send(self(), {:desk_list_sort, socket.assigns.pane.type, sort})
+      {:noreply, socket |> assign(:sort, sort) |> load()}
+    end
   end
 
   # The list's own search box (`ListSearch`): typing, its keys, Enter, Clear.
