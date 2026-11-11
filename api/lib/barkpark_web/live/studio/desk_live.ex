@@ -68,6 +68,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      |> assign(:desk_inspect, false)
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -115,8 +116,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # A pane that stays does not read again, so the title it read is kept here.
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
-    # Following a hit (or any link) puts the search away.
-    socket = assign(socket, desk_search: "", desk_search_hits: [])
+    # Following a hit (or any link) puts the search and the Inspect dialog away.
+    socket = assign(socket, desk_search: "", desk_search_hits: [], desk_inspect: false)
 
     socket =
       socket
@@ -194,6 +195,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("warm", _params, socket), do: {:noreply, socket}
 
   # Everything else is the editor's: the Studio's own handlers.
+  # Ctrl+Alt+I in the edit pane, and the dialog's close (`bp-desk.js`). Only
+  # over a document the editor holds: the dialog renders that one.
+  def handle_event("desk-inspect", %{"open" => open}, socket),
+    do:
+      {:noreply,
+       assign(socket, :desk_inspect, open == true and is_map(socket.assigns[:editor_doc]))}
+
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
   @impl true
