@@ -45,8 +45,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
 
+  defmodule NotFound do
+    @moduledoc "Raised for a desk URL that names nothing: its dataset segment is not text."
+    defexception message: "no such dataset", plug_status: 404
+  end
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
+    # A dataset segment with a byte the database refuses as text names no
+    # dataset. Refused here, before the first read and before any redirect
+    # that would carry it.
+    Text.text?(dataset) || raise NotFound
+
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
     {:ok, socket} = EditorHost.mount(params, session, socket)
@@ -69,6 +79,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    # A live patch to such a dataset segment goes back to the desk it left.
+    if Text.text?(params["dataset"] || socket.assigns.dataset),
+      do: follow(params, uri, socket),
+      else: {:noreply, redirect(socket, to: socket.assigns.base)}
+  end
+
+  defp follow(params, uri, socket) do
     dataset = params["dataset"] || socket.assigns.dataset
     # The router hands the splat over as decoded path segments; a param value
     # with a slash in it (`inspect=sanity/structure/history`) spans several.
