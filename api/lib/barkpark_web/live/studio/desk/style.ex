@@ -35,6 +35,14 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-fields dd { margin: 0; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
       .dk .dk-close:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-doc-menu { margin-left: auto; }
+      .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+      .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
+      .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-doc-menu-list { min-width: 180px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }
+      .dk .dk-doc-menu-list [role="menuitem"] { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+      .dk .dk-doc-menu-list [role="menuitem"]:hover, .dk .dk-doc-menu-list [role="menuitem"]:focus { background: var(--bg-accent); outline: none; }
+      .dk .dk-doc-menu-list [role="menuitem"][data-desk-doc-action="delete-doc"] { color: var(--destructive); }
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
@@ -47,6 +55,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       .dk .dk-edit { display: flex; flex-direction: column; min-width: 600px; }
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
+      .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
+      .dk fieldset.editor-field > legend { padding: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
       .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
       .dk-search form { max-width: 420px; }
@@ -60,6 +70,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .pane-item { min-height: 44px; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
         .dk .dk-edit-refs { padding-right: 60px; }
+        .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
+        .dk .dk-doc-menu-list [role="menuitem"] { min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }
     </style>

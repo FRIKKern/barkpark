@@ -15,9 +15,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   Two surgical injection points are added without changing rendered
   DOM under default usage:
 
-    * `id_prefix` (default `""`): when non-empty, emits `id="<prefix><name>"`
-      on the leaf control; when empty, the `id` attribute is omitted entirely
-      (Phoenix drops `id={nil}`), matching the legacy DOM exactly.
+    * `id_prefix` (default `nil`): when given, emits `id="<prefix><name>"`
+      on the leaf control (`""` gives the bare name, as the desk asks); when
+      nil, the `id` attribute is omitted entirely (Phoenix drops `id={nil}`),
+      matching the legacy DOM exactly.
     * `dataset` (default `"production"`): plumbed through to the
       `bp-reference-picker` Web Component as a `dataset` attribute so the
       WC's typeahead query hits the right dataset. Legacy hard-coded
@@ -75,7 +76,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
   attr :scope_prefix, :string, default: ""
-  attr :id_prefix, :string, default: ""
+  attr :id_prefix, :string, default: nil
   attr :api_token_raw, :string, default: ""
   # The document types an internal link in a Portable Text body may point at
   # (`Shared.internal_link_types/3`). Empty: the link row takes an address only.
@@ -173,7 +174,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         </label>
       <% end %>
     </div>
-    <select :if={not @radio} id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
+    <select :if={not @radio} id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
       <option :if={@show_placeholder} value="" selected disabled={@required}><%= gettext("Select…") %></option>
       <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
@@ -273,7 +274,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
     ~H"""
-    <textarea id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" rows={@rows} phx-debounce="500"><%= @v %></textarea>
+    <textarea id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" rows={@rows} phx-debounce="500"><%= @v %></textarea>
     """
   end
 
@@ -295,7 +296,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <label class="form-switch">
       <input type="hidden" name={"doc[#{@n}]"} value="false" />
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
+      <input id={@id_prefix && @id_prefix <> @n} type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
       <span class="form-switch-track" aria-hidden="true"></span>
       <%!-- Both words ship and CSS `:checked` shows the true one, so the word
             follows a click before any re-render, in the Studio language
@@ -322,7 +323,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
-      <input type="hidden" id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
+      <input type="hidden" id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
       <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
         <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
       </span>
@@ -340,7 +341,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-label={@field["title"] || @n} phx-debounce="300" />
+    <input id={@id_prefix && @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-label={@field["title"] || @n} phx-debounce="300" />
     """
   end
 
@@ -382,7 +383,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-color-wrap-#{@n}"} phx-hook="BarkparkColorField" style="display:flex;align-items:center;gap:10px;">
       <input type="hidden" data-color-value name={"doc[#{@n}]"} value={@hidden_v} phx-debounce="300" />
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="color" value={@picker_v} data-color-unset={to_string(not @has_value)} style={@picker_style} />
+      <input id={@id_prefix && @id_prefix <> @n} type="color" value={@picker_v} data-color-unset={to_string(not @has_value)} style={@picker_style} />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @label %></span>
       <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;"><%= gettext("Clear") %></button>
     </div>
@@ -504,7 +505,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
       <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
     </div>
     """
@@ -568,9 +569,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <%= if @numeric do %>
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" phx-debounce="500" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" phx-debounce="500" />
     <% else %>
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
     <% end %>
     """
   end
@@ -782,7 +783,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   """
   @spec label_target(map(), map(), String.t()) :: String.t() | nil
   def label_target(%{"type" => t, "name" => name} = field, form, prefix)
-      when is_binary(name) and is_binary(prefix) and prefix != "" do
+      when is_binary(name) and is_binary(prefix) do
     value = Map.get(form || %{}, name)
 
     cond do

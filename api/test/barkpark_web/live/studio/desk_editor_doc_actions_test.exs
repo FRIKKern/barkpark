@@ -117,7 +117,9 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "delete of a referenced doc opens the guard listing where it is used", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.ada)}")
 
-    view |> element(~s([data-pane-editing] button[phx-click="delete-doc"])) |> render_click()
+    view
+    |> element(~s{[data-pane-editing] button[phx-click="delete-doc"]:not([role="menuitem"])})
+    |> render_click()
 
     assert has_element?(view, "#delete-modal-dialog[role=dialog]")
     assert has_element?(view, "#delete-modal-dialog .delete-ref-title", "Post One")
@@ -167,7 +169,9 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "unpublishing a referenced doc opens the guard listing its referencers", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.ada)}")
 
-    view |> element(~s([data-pane-editing] button[phx-click="unpublish"])) |> render_click()
+    view
+    |> element(~s{[data-pane-editing] button[phx-click="unpublish"]:not([role="menuitem"])})
+    |> render_click()
 
     assert has_element?(view, "#unpublish-guard-dialog[role=dialog]")
 
