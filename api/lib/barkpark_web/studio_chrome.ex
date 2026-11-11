@@ -131,7 +131,11 @@ defmodule BarkparkWeb.StudioChrome do
     socket =
       socket
       |> assign_new(:api_token, fn -> nil end)
-      |> assign_new(:dataset, fn -> params["dataset"] || Content.default_dataset() end)
+      |> then(fn s ->
+        assign_new(s, :dataset, fn ->
+          params["dataset"] || default_dataset(s.assigns[:api_token])
+        end)
+      end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
       # ORDER IS THE FIX (task-e656670726427b96): derive the principal's OWN
@@ -196,6 +200,18 @@ defmodule BarkparkWeb.StudioChrome do
      |> attach_hook(:studio_chrome_nav, :handle_event, &chrome_event/3)
      |> attach_hook(:studio_chrome_path, :handle_params, &chrome_path/3)}
   end
+
+  # The dataset a page reads when its URL names none: a dataset-bound token's
+  # own dataset, else the `production` default. The request-level fence
+  # (`RequireToken.dataset_off_binding?/2`) compares a dataset the request
+  # NAMES, so on a dataset-less page it has nothing to compare, and the default
+  # sent a token bound elsewhere to `production` (the Tickets inbox listed its
+  # tickets). Same rule as `MediaController`'s default for a request naming none.
+  defp default_dataset(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: dataset})
+       when is_binary(dataset),
+       do: dataset
+
+  defp default_dataset(_token), do: Content.default_dataset()
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
   #
