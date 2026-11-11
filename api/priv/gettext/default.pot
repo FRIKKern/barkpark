@@ -13303,3 +13303,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Sort by Created"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Displaying a maximum of %{count} documents"
+msgstr ""
