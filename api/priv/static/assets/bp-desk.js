@@ -850,6 +850,33 @@
         }, WARM_DELAY_MS);
       };
 
+      // The edit pane's "…" menu (a popover): opened, its first item has the
+      // focus and the button says it is expanded; the arrows move between the
+      // items; Tab leaves it closed. Escape and a click outside are the
+      // popover's own, and both give the focus back to the button.
+      hook._onDocMenu = function (e) {
+        var menu = e.target;
+        if (!menu.matches || !menu.matches(".dk-doc-menu-list[popover]")) return;
+        var open = e.newState === "open";
+        var button = root.ownerDocument.getElementById(menu.id + "-button");
+        if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+        var first = menu.querySelector('[role="menuitem"]:not([disabled])');
+        if (open && first) first.focus();
+      };
+      hook._onDocMenuKey = function (e) {
+        var menu = e.target.closest ? e.target.closest(".dk-doc-menu-list[popover]") : null;
+        if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === "Tab") return menu.hidePopover();
+        var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+        if (step === undefined) return;
+        var items = Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]:not([disabled])'));
+        if (!items.length) return;
+        e.preventDefault();
+        var at = items.indexOf(root.ownerDocument.activeElement);
+        var to = Math.abs(step) === Infinity ? (step < 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+        items[to].focus();
+      };
+
       // Cmd+K / Ctrl+K: the search box, unless something else took the key.
       hook._onSearchKey = function (e) {
         if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
@@ -891,6 +918,9 @@
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
       root.addEventListener("keydown", hook._onKey);
+      // `toggle` does not bubble: caught on the way down.
+      root.addEventListener("toggle", hook._onDocMenu, true);
+      root.addEventListener("keydown", hook._onDocMenuKey);
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
       window.addEventListener("phx:page-loading-stop", hook._onLoaded);
@@ -989,6 +1019,8 @@
         if (el.classList.contains(RESIZER)) root.removeChild(el);
       });
       root.removeEventListener("keydown", this._onKey);
+      root.removeEventListener("toggle", this._onDocMenu, true);
+      root.removeEventListener("keydown", this._onDocMenuKey);
       root.removeEventListener("pointerover", this._onIntent);
       root.removeEventListener("focusin", this._onIntent);
       window.removeEventListener("phx:page-loading-stop", this._onLoaded);

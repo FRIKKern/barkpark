@@ -13286,3 +13286,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Displaying a maximum of %{count} documents"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Show document actions"
+msgstr ""
