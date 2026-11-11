@@ -90,6 +90,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         }
       end
 
+    views = Enum.map(views, &Map.put(&1, :follows, leader(&1, views)))
     base = Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset)
     # A pane that stays does not read again, so the title it read is kept here.
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
@@ -252,6 +253,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         pane={view.pane}
         index={view.index}
         node={view.node}
+        follows={view.follows}
         hold={view.index == length(@desk_panes) - 1 and @pending != nil}
         warm={warm(@warm, view.key)}
         panes={@chain}
@@ -296,6 +298,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     %{dataset: dataset, root: root, nodes: Tree.index(root)}
   end
+
+  # The earlier pane that reads the same document (a split sibling's first):
+  # the later one shows that read instead of making its own.
+  defp leader(%{pane: %{kind: :doc}, key: key, index: index}, views),
+    do: Enum.find_value(views, &((&1.key == key and &1.index < index) && &1.id))
+
+  defp leader(_view, _views), do: nil
 
   defp node_of(pane, desk), do: Tree.node_of(pane, desk.root, desk.nodes)
 end

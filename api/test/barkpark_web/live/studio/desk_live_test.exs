@@ -414,6 +414,27 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
     end
 
+    test "a document split in three is read once for its two read-only panes", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      # Panes 2 and 3 show the document read-only; pane 4, the last, is the editor.
+      {:ok, view, _html} =
+        live(admin(conn), "#{base}/#{@type_name};#{a}|,view=json|,view=json")
+
+      settle(view)
+
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+      refute has_element?(view, ~s([data-pane-index="2"][aria-busy]))
+      refute has_element?(view, ~s([data-pane-index="3"][aria-busy]))
+    end
+
     test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{
       conn: conn,
       base: base,
