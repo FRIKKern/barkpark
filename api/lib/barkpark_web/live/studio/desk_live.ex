@@ -320,10 +320,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
       dataset
       |> Structure.build([defer_group_by: true] ++ scope)
       |> StructureCopy.localize()
+      |> root_title()
       |> Tree.normalize()
 
     %{dataset: dataset, root: root, nodes: Tree.index(root)}
   end
+
+  # The root's fallback title, when the desk document names none, is
+  # Barkpark's word. Only the desk translates it: the old Studio makes its
+  # pane's id from the title (`pane-structure`), so `StructureCopy` keeps it.
+  defp root_title(%{id: "root", title: "Structure"} = root),
+    do: Map.put(root, :title, gettext("Structure"))
+
+  defp root_title(root), do: root
 
   # A groupBy is built deferred, with no groups: the menu that opens it builds
   # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them
