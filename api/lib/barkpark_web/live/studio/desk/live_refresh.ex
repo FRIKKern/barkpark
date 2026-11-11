@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   always followed by one read.
 
   `DeskLive` keeps the `handle_info/2` clauses and hands each one here; this
-  module owns the `topics`, `stale`, `refresh_timer`, `refresh_gap` and `refreshed_at` assigns.
+  module owns the `topics`, `stale`, `refresh_timer`, `refresh_gap` and `last_read_ms` assigns.
   """
 
   import Phoenix.Component, only: [assign: 2, assign: 3]
@@ -38,7 +38,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
       stale: MapSet.new(),
       refresh_timer: nil,
       refresh_gap: @refresh_after_ms,
-      refreshed_at: nil
+      last_read_ms: nil
     )
   end
 
@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
       if socket.assigns.refresh_timer do
         assign(socket, :stale, stale)
       else
-        gap = gap(socket.assigns.refresh_gap, socket.assigns.refreshed_at)
+        gap = gap(socket.assigns.refresh_gap, socket.assigns.last_read_ms)
         timer = Process.send_after(self(), :desk_refresh, gap)
         assign(socket, stale: stale, refresh_timer: timer, refresh_gap: gap)
       end
@@ -96,19 +96,19 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     assign(socket,
       stale: MapSet.new(),
       refresh_timer: nil,
-      refreshed_at: System.monotonic_time(:millisecond)
+      last_read_ms: System.monotonic_time(:millisecond)
     )
   end
 
   # The wait before the next read: twice the last one when this change came
   # right behind a read, the short one otherwise.
-  defp gap(last, refreshed_at) when is_integer(refreshed_at) do
-    if System.monotonic_time(:millisecond) - refreshed_at < @storm_within_ms,
+  defp gap(last, last_read_ms) when is_integer(last_read_ms) do
+    if System.monotonic_time(:millisecond) - last_read_ms < @storm_within_ms,
       do: min(last * 2, @refresh_max_ms),
       else: @refresh_after_ms
   end
 
-  defp gap(_last, _refreshed_at), do: @refresh_after_ms
+  defp gap(_last, _last_read_ms), do: @refresh_after_ms
 
   defp stale?(%{kind: :list, type: type}, _stale, types), do: MapSet.member?(types, type)
 
