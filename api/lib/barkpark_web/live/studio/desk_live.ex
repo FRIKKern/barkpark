@@ -37,6 +37,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
+  alias BarkparkWeb.Studio.Desk.ListFirst
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Search
@@ -137,6 +138,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         page_title: titles[last.id] || last.title
       )
 
+    # The lists' first pages: read in the first render, handed to the
+    # connected mount (ruling R12).
+    socket = ListFirst.warm(socket, views)
     socket = EditorHost.follow(socket, panes, dataset)
 
     # The pane's frame goes out with this patch; the editor follows in the
@@ -336,6 +340,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       dataset
       |> Structure.build([defer_group_by: true] ++ scope)
       |> StructureCopy.localize()
+      |> root_title()
       |> Tree.normalize()
 
     # The list menus' sorts per type (`ListMenu`), read with the tree: once.
@@ -348,6 +353,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+
+  # The root's fallback title, when the desk document names none, is
+  # Barkpark's word. Only the desk translates it: the old Studio makes its
+  # pane's id from the title (`pane-structure`), so `StructureCopy` keeps it.
+  defp root_title(%{id: "root", title: "Structure"} = root),
+    do: Map.put(root, :title, gettext("Structure"))
+
+  defp root_title(root), do: root
 
   # A groupBy is built deferred, with no groups: the menu that opens it builds
   # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them

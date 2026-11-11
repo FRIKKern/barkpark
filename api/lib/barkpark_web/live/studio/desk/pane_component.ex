@@ -117,9 +117,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   @doc """
   One pane's read, as the pane itself runs it. `DeskLive` runs it ahead of a
-  click when a row is hovered (`source: :warm`).
+  click when a row is hovered (`source: :warm`), and a list's first page in
+  the page's first render (`source: :first`, `ListFirst`).
   """
-  @spec read_pane(Panes.pane(), struct() | nil, String.t(), keyword(), :pane | :warm) :: map()
+  @spec read_pane(Panes.pane(), struct() | nil, String.t(), keyword(), :pane | :warm | :first) ::
+          map()
   def read_pane(pane, node, dataset, scope, source \\ :pane) do
     meta = %{kind: pane.kind, key: data_key(pane, dataset, node), source: source}
     :telemetry.execute([:barkpark, :desk, :pane_load], %{count: 1}, meta)
