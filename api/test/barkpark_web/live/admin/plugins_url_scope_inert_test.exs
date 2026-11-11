@@ -15,18 +15,21 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Auth, Tenancy}
+  alias Barkpark.{Auth, Content, Tenancy}
 
   @own "bound-own"
   @other "bound-other"
   @foreign_name "FOREIGN-WORKSPACE-NAME"
   @foreign_project "foreign-second-project"
   @foreign_dataset "foreign-only-dataset"
+  @other_type "OnlyInTheOtherDataset"
+  @foreign_type "OnlyInTheForeignWorkspace"
 
   setup %{conn: conn} do
     home = create_workspace!("plugins-home-#{System.unique_integer([:positive])}")
     home_proj = create_project!(home, "default")
     for ds <- [@own, @other], do: {:ok, _} = Tenancy.get_or_create_dataset(home_proj, ds)
+    seed_type!(home, home_proj, @other, @other_type)
 
     {:ok, foreign} =
       Tenancy.create_workspace(%{
@@ -34,7 +37,11 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
         name: @foreign_name
       })
 
-    create_project!(foreign, "default")
+    # The URLs below name this project and dataset, and they hold a type and a
+    # document, so a page that read them would have something to show.
+    foreign_proj = create_project!(foreign, "default")
+    {:ok, _} = Tenancy.get_or_create_dataset(foreign_proj, @own)
+    seed_type!(foreign, foreign_proj, @own, @foreign_type)
     second = create_project!(foreign, @foreign_project)
     {:ok, _} = Tenancy.get_or_create_dataset(second, @foreign_dataset)
 
@@ -47,6 +54,19 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
       )
 
     {:ok, conn: init_test_session(conn, %{"api_token" => raw}), home: home, foreign: foreign}
+  end
+
+  # A type and one document of it, in one dataset only.
+  defp seed_type!(ws, proj, dataset, title) do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "marker", "title" => title, "visibility" => "public", "fields" => []},
+        dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    create_document_in!(ws, proj, "marker", %{"title" => title}, dataset)
   end
 
   defp plugins(ws_slug, dataset), do: "/w/#{ws_slug}/p/default/d/#{dataset}/studio/_plugins"
@@ -73,6 +93,7 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
 
     assert render(other) =~ "plugins-admin"
     assert page(own, [@own]) == page(other, [@other])
+    refute render(other) =~ @other_type
     assert workspace_of(other).id == ctx.home.id
   end
 
@@ -89,7 +110,7 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
     opened = render_click(view, "scope-menu-toggle", %{})
     assert opened != html
 
-    for secret <- [@foreign_name, @foreign_project, @foreign_dataset],
+    for secret <- [@foreign_name, @foreign_project, @foreign_dataset, @foreign_type],
         do: refute(opened =~ secret)
 
     assert without(render_click(home_view, "scope-menu-toggle", %{}), [ctx.home.slug]) ==
@@ -116,6 +137,6 @@ defmodule BarkparkWeb.Admin.PluginsUrlScopeInertTest do
     assert page(own, [ctx.home.slug, @own]) ==
              page(view, [ctx.foreign.slug, ctx.home.slug, @other])
 
-    refute render(view) =~ @foreign_name
+    for secret <- [@foreign_name, @foreign_type, @other_type], do: refute(render(view) =~ secret)
   end
 end
