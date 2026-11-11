@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.DeskListNamesTest do
   end
 
   # The specs find a row and a search hit by its title alone
-  # (`getByText('Fixture post 12', {exact: true})`, keyboard.spec.ts:59). With
+  # (`getByText('Fixture post 12', {exact: true})` in keyboard.spec.ts). With
   # the subtitle in the same element as a bare title the element read
   # "Fixture post 12 Post", and no element was the title.
   test "a row's and a search hit's title is an element of its own, beside its subtitle", %{
