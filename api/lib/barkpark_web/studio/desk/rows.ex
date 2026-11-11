@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   """
 
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.PaneBuilder
 
   @page 100
@@ -30,12 +31,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   """
   @spec query([Panes.pane()], non_neg_integer(), pos_integer(), String.t() | nil) :: map()
   def query(panes, index, limit \\ @page, sort \\ nil) do
-    path =
-      panes
-      |> Enum.slice(1..index//1)
-      |> Enum.map(fn pane -> pane[:node] || pane[:type] end)
-
-    %{path: path, limit: limit, sort: sort}
+    %{path: Tree.studio_path(panes, index), limit: limit, sort: sort}
   end
 
   @doc """
@@ -89,15 +85,20 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   defp rows(%{role: :list, type_name: type} = list, type) do
     %{
       title: list.title,
-      entries: for(%{type: :doc} = item <- list.items, do: entry(item, type)),
-      more?: list.has_more == true,
-      sorts: list.sort_options,
-      sort: list.active_sort,
-      refused: list.filter_error
+      # A tree level is its parent, a divider, then its children; it has
+      # no more, no sorts.
+      entries:
+        for(%{type: t} = item when t in [:doc, :divider] <- list.items, do: entry(item, type)),
+      more?: list[:has_more] == true,
+      sorts: list[:sort_options],
+      sort: list[:active_sort],
+      refused: list[:filter_error]
     }
   end
 
   defp rows(_pane, _type), do: nil
+
+  defp entry(%{type: :divider}, _type), do: :divider
 
   defp entry(item, type) do
     %{
