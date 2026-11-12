@@ -132,7 +132,9 @@ defmodule BarkparkWeb.StudioChrome do
     socket =
       socket
       |> assign_new(:api_token, fn -> nil end)
-      |> assign_new(:dataset, fn -> params["dataset"] || Content.default_dataset() end)
+      |> then(fn s ->
+        assign_new(s, :dataset, fn -> chrome_dataset(s.assigns[:api_token], params) end)
+      end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
       # ORDER IS THE FIX (task-e656670726427b96): derive the principal's OWN
@@ -197,6 +199,21 @@ defmodule BarkparkWeb.StudioChrome do
      |> attach_hook(:studio_chrome_nav, :handle_event, &chrome_event/3)
      |> attach_hook(:studio_chrome_path, :handle_params, &chrome_path/3)}
   end
+
+  # The dataset the chrome hands a page. A dataset-bound token always gets its
+  # own dataset: not the `production` default when the URL names none, and not
+  # a `?dataset=` it names. The request-level fence
+  # (`RequireToken.dataset_off_binding?/2`) runs for a page load on the scoped
+  # routes only, so without this the Tickets inbox listed another dataset's
+  # tickets on a dataset-less page, on a socket join that added the query, and
+  # on the flat route. Routes with a `/d/:dataset` segment are fenced by
+  # `LiveScope` before this runs. Same rule as `MediaController`'s default for
+  # a request naming none.
+  defp chrome_dataset(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: bound}, _params)
+       when is_binary(bound),
+       do: bound
+
+  defp chrome_dataset(_token, params), do: params["dataset"] || Content.default_dataset()
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
   #
