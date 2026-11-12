@@ -90,6 +90,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       .dk .dk-edit { display: flex; flex-direction: column; min-width: 600px; }
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
+      .dk .dk-edit[data-desk-document] .editor-meta { display: none; }
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
