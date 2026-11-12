@@ -213,7 +213,14 @@ defmodule BarkparkWeb.StudioChrome do
        when is_binary(bound),
        do: bound
 
-  defp chrome_dataset(_token, params), do: params["dataset"] || Content.default_dataset()
+  # `?dataset[]=x` and `?dataset[a]=x` arrive as a list and a map. Neither is a
+  # dataset name, so they count as absent.
+  defp chrome_dataset(_token, params) do
+    case params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> Content.default_dataset()
+    end
+  end
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
   #
