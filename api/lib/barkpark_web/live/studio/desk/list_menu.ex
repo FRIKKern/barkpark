@@ -45,6 +45,8 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       title={gettext("Show more")}
       aria-haspopup="menu"
       popovertarget={@menu_id}
+      id={"#{@menu_id}-button"}
+      aria-expanded="false"
       style={"anchor-name: --dk-list-menu-#{@index}"}
     >
       <span aria-hidden="true">…</span>
