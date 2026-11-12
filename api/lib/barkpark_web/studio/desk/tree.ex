@@ -32,17 +32,49 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
   @doc """
   The tree as the slice shows it: only node types it can open, no empty
   lists. A deferred `groupBy` is not empty: its children come when opened.
+
+  A list at the root that holds only singletons (Barkpark's "Settings",
+  `Barkpark.Structure`) is drawn in place, as the TanStack Studio's root
+  draws its singletons (B13): its title a divider that keeps the list's id,
+  its documents rows.
   """
   @spec normalize(struct()) :: struct()
-  def normalize(%Node{} = node) do
+  def normalize(%Node{} = root), do: root |> trim() |> inline_singletons()
+
+  defp trim(%Node{} = node) do
     items =
       (node.items || [])
       |> Enum.filter(&(&1.type in @shown))
-      |> Enum.map(fn item -> if item.type == :list, do: normalize(item), else: item end)
+      |> Enum.map(fn item -> if item.type == :list, do: trim(item), else: item end)
       |> Enum.reject(&(&1.type == :list and &1.items == [] and is_nil(&1.deferred)))
 
     %{node | items: items}
   end
+
+  defp inline_singletons(%Node{items: items} = root) do
+    items =
+      Enum.flat_map(items, fn
+        %Node{type: :list, items: [_ | _] = docs} = list ->
+          if Enum.all?(docs, &singleton?/1),
+            do: [%Node{id: list.id, type: :divider, title: list.title} | docs],
+            else: [list]
+
+        item ->
+          [item]
+      end)
+
+    %{root | items: items}
+  end
+
+  # One document whose id is its type (`Barkpark.Structure`'s singletons).
+  defp singleton?(%Node{type: :document, doc_id: nil, id: id, type_name: id}) when is_binary(id),
+    do: true
+
+  defp singleton?(_node), do: false
+
+  # A list drawn in place keeps its id on its divider (`inline_singletons/1`).
+  defp inlined?(%Node{items: items}, id),
+    do: Enum.any?(items || [], &(&1.type == :divider and &1.id == id and is_binary(&1.title)))
 
   @doc """
   The rows a node's pane lists: hidden types go, and so do the dividers
@@ -53,9 +85,23 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
     node.items
     |> Enum.reject(& &1.desk_hidden)
     |> Enum.reduce([], fn
-      %{type: :divider}, [] -> []
-      %{type: :divider}, [%{type: :divider} | _] = acc -> acc
-      item, acc -> [item | acc]
+      # A titled divider heads what follows it, at the top too.
+      %{type: :divider, title: t} = titled, [] when is_binary(t) ->
+        [titled]
+
+      %{type: :divider}, [] ->
+        []
+
+      # A titled divider takes the place of a plain one right before it.
+      %{type: :divider, title: t} = titled, [%{type: :divider, title: nil} | acc]
+      when is_binary(t) ->
+        [titled | acc]
+
+      %{type: :divider}, [%{type: :divider} | _] = acc ->
+        acc
+
+      item, acc ->
+        [item | acc]
     end)
     |> Enum.drop_while(&(&1.type == :divider))
     |> Enum.reverse()
@@ -253,10 +299,13 @@ defmodule BarkparkWeb.Studio.Desk.Tree do
       [] ->
         [%{kind: :types}]
 
-      [first | _] ->
-        if find(root, segment_id(first)),
-          do: [%{kind: :types} | descend(segs, root)],
-          else: Panes.parse(splat)
+      [first | rest] ->
+        cond do
+          find(root, segment_id(first)) -> [%{kind: :types} | descend(segs, root)]
+          # An old link through a list now drawn in place: step over it.
+          inlined?(root, segment_id(first)) -> [%{kind: :types} | descend(rest, root)]
+          true -> Panes.parse(splat)
+        end
     end
   end
 

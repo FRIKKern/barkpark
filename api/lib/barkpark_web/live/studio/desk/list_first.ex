@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
   """
 
   alias BarkparkWeb.Studio.ConnectHandoff
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Rows
 
@@ -45,7 +46,11 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
 
   defp handoff(socket, chain, dataset, scope, lists) do
     sorts = socket.assigns[:list_sorts] || %{}
-    lists = for view <- lists, do: Map.put(view, :sort, sorts[view.pane[:type]])
+    menus = socket.assigns.desk.menus
+
+    lists =
+      for view <- lists, do: Map.put(view, :sort, ListMenu.kept(sorts, menus, view.pane[:type]))
+
     queries = for view <- lists, do: {view.key, with_query(view, chain).query}
     args = {:desk_first, dataset, queries, Gettext.get_locale(BarkparkWeb.Gettext)}
 
@@ -56,7 +61,8 @@ defmodule BarkparkWeb.Studio.Desk.ListFirst do
   end
 
   # As the pane itself asks: its first page, in the sort the editor keeps
-  # for the type (`list_sorts`, the list menu's), else the declared order.
+  # for the type when the type offers it (`ListMenu.kept/3`), else the
+  # declared order.
   defp with_query(view, chain),
     do: PaneComponent.with_query(view.pane, chain, view.index, Rows.page(), view.sort)
 

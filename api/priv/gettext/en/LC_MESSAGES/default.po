@@ -13372,6 +13372,26 @@ msgstr ""
 msgid "Could not copy to the clipboard"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspecting %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspect views"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Parsed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Raw JSON"
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/focus_mode.ex
 #, elixir-autogen, elixir-format
 msgid "Exit focus mode (show navigation)"

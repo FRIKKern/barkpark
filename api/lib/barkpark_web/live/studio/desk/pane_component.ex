@@ -244,6 +244,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       class={["pane-column", "dk-pane", "pane", to_string(@pane.kind), @pane.kind == :doc && "dk-doc"]}
       data-pane-index={@index}
       data-pane-kind={@pane.kind}
+      data-pane={@pane.kind == :types && "types"}
       aria-label={title(assigns)}
       aria-busy={@data.loading && "true"}
     >
@@ -319,6 +320,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           >
             <%= for {entry, pos} <- placed(@data.result.entries) do %>
               <div :if={entry == :divider} class="pane-divider"></div>
+              <%!-- A titled divider, as the TanStack root's "Settings": no row,
+                   so no Tab or arrow stop. --%>
+              <div :if={match?({:divider, _}, entry)} class="desk-divider">{elem(entry, 1)}</div>
               <div
                 :if={is_map(entry)}
                 id={@pane.kind == :list && ListSearch.item_id(@id, pos - 1)}
@@ -349,7 +353,13 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                 <span aria-hidden="true">○</span>
                 <span class="sr-only">{gettext("Draft")}</span>
               </span>
-              <span :if={entry.next.kind != :doc} class="pane-item-chevron" aria-hidden="true">
+              <%!-- A singleton on the root opens its document as a pane, so it
+                   has the chevron too, as the TanStack root's. --%>
+              <span
+                :if={entry.next.kind != :doc or @pane.kind == :types}
+                class="pane-item-chevron"
+                aria-hidden="true"
+              >
                 ›
               </span>
                 </.link>
@@ -446,6 +456,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     {placed, _} =
       Enum.map_reduce(entries, 1, fn
         :divider, pos -> {{:divider, nil}, pos}
+        {:divider, _title} = divider, pos -> {{divider, nil}, pos}
         entry, pos -> {{entry, pos}, pos + 1}
       end)
 
@@ -536,9 +547,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp node_entries(node) do
     for item <- Tree.rows(node) do
-      if item.type == :divider,
-        do: :divider,
-        else: %{title: item.title || item.id, next: Tree.opens(item)}
+      case item do
+        %{type: :divider, title: title} when is_binary(title) -> {:divider, title}
+        %{type: :divider} -> :divider
+        _ -> %{title: item.title || item.id, next: Tree.opens(item)}
+      end
     end
   end
 

@@ -9,10 +9,12 @@ defmodule BarkparkWeb.Studio.DeskListFirstTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.Accounts
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.UserPrefs
   alias BarkparkWeb.Studio.ConnectHandoff
 
   @dataset "production"
@@ -77,7 +79,8 @@ defmodule BarkparkWeb.Studio.DeskListFirstTest do
     {:ok,
      conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}),
      path: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_desk/#{@type_name}",
-     scope: scope}
+     scope: scope,
+     ws: ws}
   end
 
   @row ~s([data-pane-index="1"] a[data-desk-row])
@@ -146,5 +149,39 @@ defmodule BarkparkWeb.Studio.DeskListFirstTest do
     assert_received {:handoff, :stale}
     assert has_element?(view, @row, "Gamma written meanwhile")
     assert list_reads() == [:first, :pane]
+  end
+
+  # The list menu offers a type with no orderings its title (either way),
+  # Last Edited and Created (R20): an order by the id is none of them.
+  test "a kept sort the type does not offer is not read in the first render", %{
+    conn: conn,
+    path: path,
+    ws: ws
+  } do
+    {:ok, user} =
+      Accounts.register_user(%{
+        email: "dlf-#{System.unique_integer([:positive])}@example.com",
+        password: "correct-horse-battery"
+      })
+
+    {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "admin", "user")
+    raw = "dlf-own-" <> Ecto.UUID.generate()
+
+    {:ok, _token} =
+      Auth.create_token(raw, "dlf", @dataset, ["read", "write", "admin"], ws.id,
+        owner_user_id: user.id
+      )
+
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+
+    default = conn |> get(path) |> html_response(200) |> rows()
+    assert length(default) == 2, inspect(default)
+    # Whichever id order the default is not (dlf-a is Alpha, dlf-b Beta).
+    sort = if default == Enum.sort(default), do: "_id:desc", else: "_id:asc"
+
+    {:ok, _} =
+      UserPrefs.put(user.id, ws.id, @dataset, "studio.lists", %{@type_name => %{"sort" => sort}})
+
+    assert conn |> get(path) |> html_response(200) |> rows() == default
   end
 end
