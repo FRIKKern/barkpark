@@ -84,6 +84,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   attr :codelist_loader, :any, default: nil
   attr :tree_loader, :any, default: nil
   attr :readonly, :boolean, default: false
+  attr :id_base, :string, default: nil
 
   def codelist_field(assigns) do
     assigns =
@@ -96,6 +97,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put_new(:codelist_loader, nil)
       |> Map.put_new(:tree_loader, nil)
       |> Map.put_new(:readonly, false)
+      |> Map.put_new(:id_base, nil)
 
     list_id = assigns.field.codelist_id || ""
     plugin_name = assigns.plugin_name
@@ -152,6 +154,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             readonly={@readonly}
             input_name={@input_name}
             tree_loader={@tree_loader}
+            desk={is_binary(@id_base)}
           />
         <% @use_combobox -> %>
           <input
