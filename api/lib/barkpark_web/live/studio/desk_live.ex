@@ -173,7 +173,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
          chain = Tree.parse(splat, desk.root),
          last = List.last(chain),
          # A list in the sort its pane will read in: the pane takes this read.
-         sort = kept_sort(desk, socket.assigns.list_sorts, last[:type]),
+         sort = ListMenu.kept(socket.assigns.list_sorts, desk.menus, last[:type]),
          pane = PaneComponent.with_query(last, chain, length(chain) - 1, Rows.page(), sort),
          true <- pane.kind in [:list, :doc],
          node = chain |> Tree.nodes_of(desk.root, desk.nodes) |> List.last(),
@@ -379,7 +379,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
-        list_sort={kept_sort(@desk, @list_sorts, view.pane[:type])}
+        list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
       />
@@ -410,10 +410,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
-
-  # The sort this editor keeps for `type`, when the type offers it (R20).
-  defp kept_sort(desk, sorts, type),
-    do: ListMenu.pick(sorts[type], (desk.menus[type] || %{sorts: []}).sorts)
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its
