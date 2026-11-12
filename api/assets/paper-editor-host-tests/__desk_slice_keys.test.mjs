@@ -245,6 +245,20 @@ assert.equal(focused(), "Big 200", "steps owed before the focus left are not tak
 window.document.getElementById("p3").remove();
 window.document.getElementById("p2").remove();
 
+// ── A document opened from the keys (a search hit's Enter, a "+") takes the
+// focus in its first field. The edit pane is the view's id plus "-editor".
+el.insertAdjacentHTML(
+  "beforeend",
+  `<section class="pane-column dk-pane" id="desk-pane-2-doc:post-12-editor" data-pane-editing>` +
+    `<form id="editor-form"><div class="field"><input type="hidden" id="_id"></div>` +
+    `<div class="field"><input id="title"></div><div class="field"><textarea id="summary"></textarea></div></form></section>`
+);
+window.document.getElementById("desk-search-input").focus();
+window.dispatchEvent(new window.CustomEvent("phx:bp:focus-new-doc", { detail: { id: "post-12" } }));
+await tick();
+assert.equal(window.document.activeElement?.id, "title", "the opened document's first field has the focus");
+window.document.getElementById("desk-pane-2-doc:post-12-editor").remove();
+
 hook.destroyed();
 assert.equal(el.querySelector('[role="separator"]'), null, "destroyed() takes the separators with it");
 box.blur();

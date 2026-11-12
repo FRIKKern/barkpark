@@ -13314,6 +13314,16 @@ msgstr "Sorter etter opprettet"
 msgid "Displaying a maximum of %{count} documents"
 msgstr "Viser maksimalt %{count} dokumenter"
 
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new %{type}"
+msgstr "Opprett ny %{type}"
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new document"
+msgstr "Opprett nytt dokument"
+
 #: lib/barkpark_web/live/studio/desk/doc_menu.ex
 #, elixir-autogen, elixir-format
 msgid "Show document actions"
