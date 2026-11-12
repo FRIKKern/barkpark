@@ -67,6 +67,18 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     refute mouse =~ "44px"
   end
 
+  # list.spec J24: the list search's lit result is filled as a row under the pointer
+  # is. The Studio's row hover is `.pane-item:hover { background: var(--bg-muted) }`
+  # (root.html.heex), so the lit row takes that same token; without the rule its
+  # `a` is transparent. A selected row keeps its own fill.
+  test "the lit search row's link has the row-hover fill (--bg-muted), not transparent" do
+    lit = rule(@css, ".dk [data-lit] > a.pane-item:not(.selected)")
+    assert lit =~ "background: var(--bg-muted)"
+
+    root = File.read!(Path.expand("../../../../lib/barkpark_web/layouts/root.html.heex", __DIR__))
+    assert root =~ ".pane-item:hover { background: var(--bg-muted);"
+  end
+
   test "the search hits popover fits a phone screen" do
     assert rule(@css, ".dk-search-hits") =~ "width: min(420px, calc(100% - 32px))"
   end

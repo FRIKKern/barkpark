@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-doc { width: auto; flex: 1 0 600px; border-right: 0; }
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
       .dk a.pane-item:hover { color: var(--fg); }
+      .dk [data-lit] > a.pane-item:not(.selected) { background: var(--bg-muted); }
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
       .dk .dk-fields { padding: 24px 32px; margin: 0; display: grid; gap: 20px; max-width: 72ch; }
@@ -39,7 +40,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-split { margin-left: auto; display: inline-flex; align-items: center; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; }
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-      .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu { margin-left: 0; }
+      .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu { margin-left: 0; }
+      .dk .dk-share-menu .dk-doc-menu-button { display: inline-flex; align-items: center; }
+      .dk .dk-toast { inset: auto; left: 50%; bottom: 56px; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: 8px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); font-size: var(--text-sm); }
       .dk .dk-edit-footer { display: flex; justify-content: flex-end; padding: 4px 8px; border-top: 1px solid var(--border-subtle); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }

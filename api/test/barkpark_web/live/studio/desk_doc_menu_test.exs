@@ -21,7 +21,7 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
   @dataset "production"
   @button ~s([data-pane-editing] .pane-header button[aria-label="Show document actions"][aria-haspopup="menu"][popovertarget])
-  @menu ~s([data-pane-editing] .pane-header [role="menu"][popover])
+  @menu ~s([data-pane-editing] .pane-header [role="menu"][popover][id$="-editor-actions"])
   @footer ~s([data-pane-editing] .dk-edit-footer)
   @footer_button ~s(#{@footer} button[aria-label="Open document actions"][aria-haspopup="menu"][popovertarget])
   @footer_menu ~s(#{@footer} [role="menu"][popover])
