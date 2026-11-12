@@ -13319,6 +13319,11 @@ msgstr "Viser maksimalt %{count} dokumenter"
 msgid "Show document actions"
 msgstr "Vis dokumenthandlinger"
 
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open document actions"
+msgstr "Åpne dokumenthandlinger"
+
 #: lib/barkpark_web/live/studio/desk/editor_host.ex
 #, elixir-autogen, elixir-format
 msgid "Split pane right"
