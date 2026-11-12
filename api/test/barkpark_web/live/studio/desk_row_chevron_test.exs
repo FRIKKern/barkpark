@@ -66,12 +66,13 @@ defmodule BarkparkWeb.Studio.DeskRowChevronTest do
     {:ok, view, _html} = live(conn, "#{base}/content-types")
     render_async(view, 5_000)
 
-    # The root: a type's list, a menu, a singleton's document.
-    for href <- ["#{base}/post", "#{base}/content-types", "#{base}/drc_prefs"] do
+    # The root: a menu, and a singleton's document. (Only rows this test's own
+    # data declares: the root's other rows depend on the dataset.)
+    for href <- ["#{base}/content-types", "#{base}/drc_prefs"] do
       assert barkpark_chevron?(chevron(view, 0, href)), href
     end
 
-    # A menu one pane in: the same glyph.
+    # A menu one pane in, a row that opens a type's list: the same glyph.
     assert barkpark_chevron?(chevron(view, 1, "#{base}/content-types;drc_note"))
 
     refute view |> element("#desk-panes") |> render() =~ "›"
