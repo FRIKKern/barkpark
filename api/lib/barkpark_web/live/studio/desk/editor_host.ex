@@ -197,11 +197,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # joins its path with ";") is read back as that Studio path and answered with
   # the desk's own URL. Anything else (a navigate, a URL with a query, a patch
   # with no document handed over) goes out as the Studio printed it.
+  #
+  # A patch to a path outside the desk (the Studio opens another dataset when
+  # the URL's does not exist) is no patch of this page: it leaves for it.
   defp steer(%{redirected: {:live, :patch, %{to: to}}} = socket, how) do
     with %{desk_base: base} when is_binary(base) <- socket.assigns,
+         {:in, true} <- {:in, to == base or String.starts_with?(to, [base <> "/", base <> "?"])},
          {:ok, asked} <- asked(to, base) do
       route(socket, asked, how)
     else
+      {:in, false} -> push_navigate(%{socket | redirected: nil}, to: to)
       _ -> socket
     end
   end
