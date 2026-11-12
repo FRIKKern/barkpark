@@ -70,17 +70,7 @@ defmodule BarkparkWeb.Studio.Desk.FocusMode do
       }
       data-tip={if @on, do: gettext("Exit focus mode"), else: gettext("Enter focus mode")}
     >
-      <%!-- Sanity's CollapseIcon and ExpandIcon. --%>
-      <svg width="14" height="14" viewBox="0 0 25 25" fill="none" stroke="currentColor"
-        stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
-        <%= if @on do %>
-          <path d="M6 14.5L10.5 14.5V19M19 10.5H14.5L14.5 6" />
-          <path d="M10.5 14.5L6 19M14.5 10.5L19 6" />
-        <% else %>
-          <path d="M14 6.5H18.5V11M11 18.5H6.5V14" />
-          <path d="M18.5 6.5L14 11M6.5 18.5L11 14" />
-        <% end %>
-      </svg>
+      <BarkparkWeb.Icons.icon name={if @on, do: "minimize-2", else: "maximize-2"} size={14} />
     </button>
     """
   end
