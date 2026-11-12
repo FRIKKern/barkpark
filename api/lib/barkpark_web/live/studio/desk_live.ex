@@ -67,6 +67,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
     socket =
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
+      # The Studio's path before any document is loaded: a list's "Create
+      # new" (J18) runs the Studio's `new-document` with no editor open yet.
+      |> assign_new(:nav_path, fn -> [] end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
       |> assign(:title_suffix, " | Barkpark")
