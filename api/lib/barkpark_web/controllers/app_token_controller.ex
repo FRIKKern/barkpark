@@ -625,9 +625,13 @@ defmodule BarkparkWeb.AppTokenController do
   defp resolve_workspace(params) do
     case params["workspace"] do
       slug_or_id when is_binary(slug_or_id) and slug_or_id != "" ->
-        case Tenancy.get_workspace_by_slug(slug_or_id) || Tenancy.get_workspace_by_id(slug_or_id) do
-          nil -> {:error, :workspace_not_found}
-          workspace -> {:ok, workspace}
+        # A slug or an id is text. 16 raw bytes also cast as an id, and those
+        # may not be: they name nothing.
+        case Tenancy.SlugText.text?(slug_or_id) &&
+               (Tenancy.get_workspace_by_slug(slug_or_id) ||
+                  Tenancy.get_workspace_by_id(slug_or_id)) do
+          %Tenancy.Workspace{} = workspace -> {:ok, workspace}
+          _ -> {:error, :workspace_not_found}
         end
 
       _ ->
