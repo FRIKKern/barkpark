@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
   require Logger
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
@@ -286,12 +287,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   # underneath it would be unreachable code (proved: the signed-in non-member
   # test below never reaches this module). `chrome_fallback/3` needs its own
   # copy only because those surfaces run without the gate.
+  #
+  # A dataset-bound token makes no workspace and no project
+  # (`ApiToken.dataset_bound?/1`). The gate asks only for write, so that is
+  # asked here, as the chrome copy does.
   def create_workspace(%{"name" => name}, socket) do
-    case principal(socket) do
-      nil ->
+    principal = principal(socket)
+
+    cond do
+      is_nil(principal) ->
         {:noreply, put_flash(socket, :error, gettext("Sign in to create a workspace"))}
 
-      principal ->
+      ApiToken.dataset_bound?(principal) ->
+        {:noreply, put_flash(socket, :error, bound_token_creates_nothing())}
+
+      true ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
           {:ok, workspace} ->
             project = Shared.initial_project(workspace)
@@ -330,6 +340,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
       is_nil(ws) ->
         {:noreply, socket}
 
+      ApiToken.dataset_bound?(principal(socket)) ->
+        {:noreply, put_flash(socket, :error, bound_token_creates_nothing())}
+
       true ->
         case Tenancy.create_project_with_dataset(ws, %{name: name}) do
           {:ok, created} ->
@@ -363,6 +376,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   # over user" drift, and a create gate that disagrees with the menu that
   # rendered it is #34 all over again).
   defp principal(socket), do: ScopeResolver.principal_from_assigns(socket.assigns)
+
+  defp bound_token_creates_nothing,
+    do: gettext("This token is bound to one dataset and cannot create a workspace or a project")
 
   # Activating the collapsed strip DESTROYS it (the <button> is replaced by the
   # expanded <div>), so the browser drops focus to <body> — measured live on the
