@@ -334,8 +334,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                   data-desk-row
               data-desk-opens={entry.next.kind}
             >
+              <%!-- The title is an element of its own, as the TanStack row's
+                   `.t`: a spec finds a row by its title alone. --%>
               <span class="pane-item-label">
-                {entry.title}
+                <span class="dk-row-title">{entry.title}</span>
                 <span :if={entry[:sub]} class="dk-row-sub">{entry.sub}</span>
               </span>
               <span :if={entry[:draft]} class="dk-draft" title={gettext("Draft")}>

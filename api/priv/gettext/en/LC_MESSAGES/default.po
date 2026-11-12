@@ -13341,3 +13341,33 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Close split pane"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Share document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document ID"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document ID copied to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document URL copied to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Could not copy to the clipboard"
+msgstr ""

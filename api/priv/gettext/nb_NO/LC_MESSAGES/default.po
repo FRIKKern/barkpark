@@ -13343,3 +13343,33 @@ msgstr "Del ruten til høyre"
 #, elixir-autogen, elixir-format
 msgid "Close split pane"
 msgstr "Lukk delt rute"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Share document"
+msgstr "Del dokument"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document ID"
+msgstr "Kopier dokument-ID"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document URL"
+msgstr "Kopier dokument-URL"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document ID copied to clipboard"
+msgstr "Dokument-ID-en er kopiert til utklippstavlen"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document URL copied to clipboard"
+msgstr "Dokument-URL-en er kopiert til utklippstavlen"
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Could not copy to the clipboard"
+msgstr "Kunne ikke kopiere til utklippstavlen"
