@@ -36,6 +36,9 @@ type activeLocalSession struct {
 	pending   map[string]chan map[string]any
 	nextID    atomic.Uint64
 	claude    *claudeTurn // the run's stream-json reader (claude_turn.go); one run per session
+	// interrupted: a Stop was sent to this run. Claude ends an interrupted turn
+	// with an error result; this is how the host tells it from a real failure.
+	interrupted bool
 }
 
 type approvalRequest struct {
@@ -569,6 +572,11 @@ func (s *activeLocalSession) controlClaude(ctx context.Context, operation string
 		_, err := s.claudeControlRequest(ctx, request)
 		return err
 	case "interrupt":
+		// Marked before the request is written: Claude's result can arrive
+		// before the control_response does.
+		s.mu.Lock()
+		s.interrupted = true
+		s.mu.Unlock()
 		_, err := s.claudeControlRequest(ctx, map[string]any{"subtype": "interrupt"})
 		return err
 	case "answer_approval":
@@ -700,8 +708,19 @@ func (s *activeLocalSession) claudeMessage(message map[string]any) []map[string]
 		s.claude = newClaudeTurn()
 	}
 	turn := s.claude
+	interrupted := s.interrupted
 	s.mu.Unlock()
-	return turn.events(message)
+	events := turn.events(message)
+	if interrupted && message["type"] == "result" {
+		// A turn the person stopped ends as stopped, not as a failure
+		// (task-bb50d873c868f411). A success result stays completed.
+		for i, event := range events {
+			if event["kind"] == "error" {
+				events[i] = map[string]any{"kind": "turn_completed", "terminal_state": "interrupted"}
+			}
+		}
+	}
+	return events
 }
 
 func (s *activeLocalSession) codexMessage(message map[string]any) (map[string]any, bool) {

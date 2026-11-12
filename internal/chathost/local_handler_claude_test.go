@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestRunClaudePublishesTerminalErrorOnPrematureExit is the regression for the
@@ -69,7 +71,126 @@ func TestClaudeTurnHelperProcess(t *testing.T) {
 	if mode == "with_result" {
 		write(map[string]any{"type": "result", "subtype": "success", "is_error": false})
 	}
+	if mode == "interrupt" || mode == "error_result" {
+		write(map[string]any{"type": "stream_event", "event": map[string]any{
+			"type": "content_block_delta", "index": 0.0,
+			"delta": map[string]any{"type": "text_delta", "text": "partial "},
+		}})
+	}
+	if mode == "interrupt" {
+		// Wait for the host's interrupt control request, acknowledge it, then end
+		// the way the real claude did on 2026-11-13: an error result.
+		for {
+			var message map[string]any
+			if err := decoder.Decode(&message); err != nil {
+				os.Exit(3)
+			}
+			request, _ := message["request"].(map[string]any)
+			if message["type"] == "control_request" && request["subtype"] == "interrupt" {
+				write(map[string]any{"type": "control_response", "response": map[string]any{
+					"subtype": "success", "request_id": message["request_id"],
+				}})
+				break
+			}
+		}
+	}
+	if mode == "interrupt" || mode == "error_result" {
+		write(claudeInterruptedResult())
+	}
 	os.Exit(0)
+}
+
+// claudeInterruptedResult is the result object the real claude sent after an
+// interrupt (task-bb50d873c868f411), byte for byte in the fields that matter.
+func claudeInterruptedResult() map[string]any {
+	return map[string]any{
+		"type": "result", "subtype": "error_during_execution", "is_error": true,
+		"errors": []any{"[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"},
+	}
+}
+
+// runClaudeHelperTurn runs one send_turn against the helper and returns every
+// event the host emitted. With interrupt, it presses Stop once text has streamed.
+func runClaudeHelperTurn(t *testing.T, mode string, interrupt bool) []map[string]any {
+	t.Helper()
+	installClaudeTurnHelper(t, mode)
+	handler := NewLocalHandler([]string{t.TempDir()})
+	sessionID := "session-" + mode
+	var mu sync.Mutex
+	var events []map[string]any
+	streamed := make(chan struct{})
+	var once sync.Once
+	done := make(chan error, 1)
+	go func() {
+		done <- handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
+			"provider": "claude", "operation": "send_turn", "session_id": sessionID,
+			"payload": map[string]any{"cwd": handler.ApprovedRoots[0], "content": "write a lot", "mode": "plan"},
+		}}, func(event map[string]any) error {
+			mu.Lock()
+			events = append(events, event)
+			mu.Unlock()
+			if event["kind"] == "text_delta" {
+				once.Do(func() { close(streamed) })
+			}
+			return nil
+		})
+	}()
+	if interrupt {
+		select {
+		case <-streamed:
+		case err := <-done:
+			t.Fatalf("turn ended before any text streamed: %v", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("no text streamed")
+		}
+		var control []map[string]any
+		if err := handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
+			"provider": "claude", "operation": "interrupt", "session_id": sessionID,
+		}}, func(event map[string]any) error { control = append(control, event); return nil }); err != nil {
+			t.Fatalf("interrupt: %v", err)
+		}
+		if len(control) != 1 || control[0]["kind"] != "control_completed" {
+			t.Fatalf("interrupt emitted %#v; want one control_completed", control)
+		}
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("send_turn Handle() = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("send_turn never ended")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return events
+}
+
+// TestRunClaudeInterruptedTurnEndsAsInterruptedNotError: Stop on a streaming
+// Claude turn. Claude answers the interrupt with an error result; before the
+// fix the host passed that on as kind "error", so a client could not tell "the
+// person pressed stop" from "the run failed" (task-bb50d873c868f411).
+func TestRunClaudeInterruptedTurnEndsAsInterruptedNotError(t *testing.T) {
+	events := runClaudeHelperTurn(t, "interrupt", true)
+	last := events[len(events)-1]
+	if last["kind"] != "turn_completed" || last["terminal_state"] != "interrupted" {
+		t.Fatalf("terminal event = %#v; want kind turn_completed, terminal_state interrupted", last)
+	}
+	for _, event := range events {
+		if event["kind"] == "error" {
+			t.Fatalf("an interrupted turn emitted an error event: %#v", event)
+		}
+	}
+}
+
+// TestRunClaudeErrorResultWithoutInterruptStaysError is the control: the same
+// error result with no Stop asked is a real failure and must stay kind error.
+func TestRunClaudeErrorResultWithoutInterruptStaysError(t *testing.T) {
+	events := runClaudeHelperTurn(t, "error_result", false)
+	last := events[len(events)-1]
+	if last["kind"] != "error" || last["terminal_state"] != "failed" {
+		t.Fatalf("terminal event = %#v; want kind error, terminal_state failed", last)
+	}
 }
 
 func installClaudeTurnHelper(t *testing.T, mode string) {
