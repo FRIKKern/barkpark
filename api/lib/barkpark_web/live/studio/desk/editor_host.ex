@@ -147,6 +147,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp strip(socket), do: socket
 
+  @doc """
+  A document the editor's references can point at changed (`LiveRefresh`):
+  the strip reads its targets again, though its ids are the same.
+  """
+  def refs_changed(socket), do: socket |> assign(:desk_ref_ids, nil) |> strip()
+
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The card's Retry, when the document could not be read: read it again.
   def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
@@ -191,11 +197,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # joins its path with ";") is read back as that Studio path and answered with
   # the desk's own URL. Anything else (a navigate, a URL with a query, a patch
   # with no document handed over) goes out as the Studio printed it.
+  #
+  # A patch to a path outside the desk (the Studio opens another dataset when
+  # the URL's does not exist) is no patch of this page: it leaves for it.
   defp steer(%{redirected: {:live, :patch, %{to: to}}} = socket, how) do
     with %{desk_base: base} when is_binary(base) <- socket.assigns,
+         {:in, true} <- {:in, to == base or String.starts_with?(to, [base <> "/", base <> "?"])},
          {:ok, asked} <- asked(to, base) do
       route(socket, asked, how)
     else
+      {:in, false} -> push_navigate(%{socket | redirected: nil}, to: to)
       _ -> socket
     end
   end
