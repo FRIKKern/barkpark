@@ -529,7 +529,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
       _ ->
         leaf_assigns = %{
-          input_id: "f-#{assigns.field.name}-#{idx}",
+          input_id: leaf_id(assigns, idx),
           input_name: row_path,
           row_value: row_value,
           row_label: row_label(assigns, idx),
@@ -833,6 +833,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     />
     """
   end
+
+  # In the desk (an `id_base`) a row's input is named by the array's path and
+  # its index, `highlights[3]` as Sanity's Studio names it; elsewhere the old id.
+  defp leaf_id(%{id_base: base}, idx) when is_binary(base), do: "#{base}[#{idx}]"
+  defp leaf_id(assigns, idx), do: "f-#{assigns.field.name}-#{idx}"
 
   # A row's own name: the fieldset legend names the group, not each input,
   # so a screen reader heard only "edit text" per row.

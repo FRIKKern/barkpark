@@ -585,4 +585,85 @@ defmodule BarkparkWeb.Studio.Desk.TreeTest do
     assert Panes.open_after(panes, 2, %{kind: :doc, id: "pub-2", type: "pub"}, "/desk") ==
              "/desk/utgivelser;uten-omslag;pub-2"
   end
+
+  # B13: Barkpark's desk puts the `singleton: true` types in a "Settings"
+  # list (`Barkpark.Structure`); the TanStack Studio's root draws them in
+  # place, under a "Settings" divider, each opening its one document.
+  describe "a root list of singletons" do
+    defp with_settings do
+      %Node{
+        id: "root",
+        type: :list,
+        items: [
+          %Node{id: "posts", type: :document_type_list, type_name: "post", title: "Posts"},
+          %Node{id: "div-4", type: :divider},
+          %Node{
+            id: "settings",
+            type: :list,
+            title: "Settings",
+            items: [
+              %Node{
+                id: "siteSettings",
+                type: :document,
+                type_name: "siteSettings",
+                title: "Site settings"
+              },
+              %Node{
+                id: "navigation",
+                type: :document,
+                type_name: "navigation",
+                title: "Navigation"
+              }
+            ]
+          },
+          %Node{id: "div-5", type: :divider},
+          %Node{
+            id: "rest",
+            type: :list,
+            title: "…Rest",
+            items: [%Node{id: "rest-tag", type: :document, type_name: "tag", title: "tag (2)"}]
+          }
+        ]
+      }
+    end
+
+    test "is drawn in place: its title a divider, its documents rows" do
+      rows = with_settings() |> Tree.normalize() |> Tree.rows()
+
+      assert Enum.map(rows, &{&1.type, &1.id, &1.title}) == [
+               {:document_type_list, "posts", "Posts"},
+               {:divider, "settings", "Settings"},
+               {:document, "siteSettings", "Site settings"},
+               {:document, "navigation", "Navigation"},
+               {:divider, "div-5", nil},
+               {:list, "rest", "…Rest"}
+             ]
+    end
+
+    test "a singleton opens by its own segment, as the TanStack Studio's" do
+      root = Tree.normalize(with_settings())
+      doc = %{kind: :doc, id: "siteSettings", type: "siteSettings", node: "siteSettings"}
+
+      assert Tree.parse("siteSettings", root) == [@types, doc]
+      assert Tree.opens(Tree.index(root)["siteSettings"]) == doc
+      assert Panes.open_after([@types], 0, doc, "/desk") == "/desk/siteSettings"
+    end
+
+    test "an old link through the list opens the same" do
+      root = Tree.normalize(with_settings())
+      doc = %{kind: :doc, id: "siteSettings", type: "siteSettings", node: "siteSettings"}
+
+      assert Tree.parse("settings;siteSettings", root) == [@types, doc]
+      assert Tree.parse("settings", root) == [@types]
+    end
+
+    test "only a list of singletons: a list holding anything else stays a list" do
+      rows = with_settings() |> Tree.normalize() |> Tree.rows() |> Enum.map(& &1.id)
+      assert "rest" in rows
+      refute "rest-tag" in rows
+
+      nested = %Node{id: "root", type: :list, items: [%Node{with_settings() | id: "inner"}]}
+      assert nested |> Tree.normalize() |> Tree.rows() |> Enum.map(& &1.id) == ["inner"]
+    end
+  end
 end

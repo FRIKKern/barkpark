@@ -144,6 +144,15 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
 
   def pick(_sort, _sorts), do: nil
 
+  @doc """
+  The sort a `type` list reads in: the one this editor keeps for it (`prefs/2`),
+  when the type offers it (`desk.menus`), else nil, the default (R20). Every
+  reader of a list asks this: the pane, a hover's read and the first render's.
+  """
+  @spec kept(%{String.t() => String.t()}, map(), String.t() | nil) :: String.t() | nil
+  def kept(sorts, menus, type),
+    do: pick(sorts[type], (menus[type] || %{sorts: []}).sorts)
+
   @doc "The sorts this editor keeps for `dataset`'s lists: `%{type => sort}`."
   @spec prefs(Phoenix.LiveView.Socket.t(), String.t()) :: %{String.t() => String.t()}
   def prefs(socket, dataset) do

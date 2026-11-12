@@ -1137,7 +1137,9 @@
         var attempt = function () {
           if (interrupted || !root.isConnected) return done();
           var pane = root.querySelector("[data-pane-editing]");
-          var mine = pane && (pane.id.slice(-id.length - 1) === ":" + id || pane.id.slice(-id.length - 1) === ";" + id);
+          // The edit pane's id is its view's plus "-editor" (`DeskLive`).
+          var tail = pane ? pane.id.replace(/-editor$/, "").slice(-id.length - 1) : "";
+          var mine = tail === ":" + id || tail === ";" + id;
           var fields = mine ? pane.querySelectorAll("#editor-form .field input, #editor-form .field textarea, #editor-form .field select") : [];
           var field = Array.prototype.find.call(fields, function (el) {
             return el.type !== "hidden" && !el.disabled && !el.readOnly && !el.closest("[hidden]");

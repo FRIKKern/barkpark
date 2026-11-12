@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
     # Following a hit (or any link) puts the search away.
-    socket = assign(socket, desk_search: "", desk_search_hits: [])
+    socket = assign(socket, desk_search: "", desk_search_hits: [], desk_search_lit: 0)
 
     socket =
       socket
@@ -173,7 +173,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
          chain = Tree.parse(splat, desk.root),
          last = List.last(chain),
          # A list in the sort its pane will read in: the pane takes this read.
-         sort = kept_sort(desk, socket.assigns.list_sorts, last[:type]),
+         sort = ListMenu.kept(socket.assigns.list_sorts, desk.menus, last[:type]),
          pane = PaneComponent.with_query(last, chain, length(chain) - 1, Rows.page(), sort),
          true <- pane.kind in [:list, :doc],
          node = chain |> Tree.nodes_of(desk.root, desk.nodes) |> List.last(),
@@ -204,6 +204,38 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
+
+  # The search box (`Search`): new hits light the first; the arrows move the
+  # light; Enter opens the lit hit, or searches what was typed if its hits
+  # are not in yet.
+  def handle_event("desk-search", params, socket) do
+    {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
+    {:noreply, assign(socket, :desk_search_lit, 0)}
+  end
+
+  def handle_event("desk-search-key", %{"key" => key}, socket)
+      when key in ["ArrowDown", "ArrowUp"] do
+    %{desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+    step = if key == "ArrowDown", do: 1, else: -1
+    {:noreply, assign(socket, :desk_search_lit, (lit + step) |> min(length(hits) - 1) |> max(0))}
+  end
+
+  def handle_event("desk-search-key", _params, socket), do: {:noreply, socket}
+
+  def handle_event("desk-search-open", %{"value" => value} = params, socket) do
+    %{desk_search: typed, desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+
+    case value == typed && Enum.at(hits, lit) do
+      # Opened from the keys: its first field takes the focus, as the
+      # TanStack Studio's (`bp-desk.js` waits for the editor).
+      %{} = hit ->
+        to = Search.href(socket.assigns.base, socket.assigns.desk.root, hit)
+        {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
+
+      _ ->
+        handle_event("desk-search", params, socket)
+    end
+  end
 
   # Everything else is the editor's: the Studio's own handlers.
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
@@ -302,7 +334,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
     ~H"""
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
-    <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
+    <Search.box
+      query={@desk_search}
+      hits={@desk_search_hits}
+      lit={@desk_search_lit}
+      root={@desk.root}
+      base={@base}
+    />
     <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
@@ -341,7 +379,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
-        list_sort={kept_sort(@desk, @list_sorts, view.pane[:type])}
+        list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
       />
@@ -372,10 +410,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
-
-  # The sort this editor keeps for `type`, when the type offers it (R20).
-  defp kept_sort(desk, sorts, type),
-    do: ListMenu.pick(sorts[type], (desk.menus[type] || %{sorts: []}).sorts)
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its
