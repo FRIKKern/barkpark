@@ -77,9 +77,12 @@ defmodule BarkparkWeb.StudioTokenController do
   end
 
   defp workspace_by_id(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Tenancy.get_workspace_by_id(uuid)
-      :error -> nil
+    # An id is text. 16 raw bytes also cast, and those may not be.
+    with true <- Tenancy.SlugText.text?(id),
+         {:ok, uuid} <- Ecto.UUID.cast(id) do
+      Tenancy.get_workspace_by_id(uuid)
+    else
+      _ -> nil
     end
   end
 

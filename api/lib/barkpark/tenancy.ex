@@ -21,7 +21,7 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.OwnedTables
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
-  alias Barkpark.Tenancy.DefaultScopeCache
+  alias Barkpark.Tenancy.{DefaultScopeCache, SlugText}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Catalog
@@ -666,10 +666,10 @@ defmodule Barkpark.Tenancy do
     end
   end
 
-  @doc "Fetch a Workspace by its slug, or nil."
+  @doc "Fetch a Workspace by its slug, or nil. A slug that is not text (`SlugText`) is nil, unread."
   @spec get_workspace_by_slug(String.t()) :: Workspace.t() | nil
   def get_workspace_by_slug(slug) when is_binary(slug) do
-    Repo.get_by(Workspace, slug: slug)
+    if SlugText.text?(slug), do: Repo.get_by(Workspace, slug: slug)
   end
 
   @doc "Fetch a Workspace by its id, or nil. `nil` or malformed id returns nil."
@@ -1362,7 +1362,7 @@ defmodule Barkpark.Tenancy do
 
   @doc """
   Fetch a Project by its Workspace slug + Project slug. Returns nil when
-  either the Workspace or the Project is absent.
+  either the Workspace or the Project is absent, or a slug is not text.
   """
   @spec get_project(String.t(), String.t()) :: Project.t() | nil
   def get_project(ws_slug, project_slug)
@@ -1373,7 +1373,7 @@ defmodule Barkpark.Tenancy do
         on: p.workspace_id == w.id,
         where: w.slug == ^ws_slug and p.slug == ^project_slug
 
-    Repo.one(query)
+    if SlugText.text?(ws_slug) and SlugText.text?(project_slug), do: Repo.one(query)
   end
 
   @doc "List all Workspaces, ordered by slug."

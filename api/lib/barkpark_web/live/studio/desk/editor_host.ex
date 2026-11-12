@@ -147,6 +147,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp strip(socket), do: socket
 
+  @doc """
+  A document the editor's references can point at changed (`LiveRefresh`):
+  the strip reads its targets again, though its ids are the same.
+  """
+  def refs_changed(socket), do: socket |> assign(:desk_ref_ids, nil) |> strip()
+
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The card's Retry, when the document could not be read: read it again.
   def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
