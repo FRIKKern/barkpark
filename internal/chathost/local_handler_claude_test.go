@@ -113,9 +113,14 @@ func claudeInterruptedResult() map[string]any {
 // event the host emitted. With interrupt, it presses Stop once text has streamed.
 func runClaudeHelperTurn(t *testing.T, mode string, interrupt bool) []map[string]any {
 	t.Helper()
+	return runClaudeHelperTurnOn(t, NewLocalHandler([]string{t.TempDir()}), "session-"+mode, mode, interrupt)
+}
+
+// runClaudeHelperTurnOn runs the turn on a given handler and session, so a test
+// can run several turns of one Barkpark session through one host.
+func runClaudeHelperTurnOn(t *testing.T, handler *LocalHandler, sessionID, mode string, interrupt bool) []map[string]any {
+	t.Helper()
 	installClaudeTurnHelper(t, mode)
-	handler := NewLocalHandler([]string{t.TempDir()})
-	sessionID := "session-" + mode
 	var mu sync.Mutex
 	var events []map[string]any
 	streamed := make(chan struct{})
@@ -180,6 +185,21 @@ func TestRunClaudeInterruptedTurnEndsAsInterruptedNotError(t *testing.T) {
 		if event["kind"] == "error" {
 			t.Fatalf("an interrupted turn emitted an error event: %#v", event)
 		}
+	}
+}
+
+// TestRunClaudeStopDoesNotLeakIntoTheNextTurn: the interrupt mark belongs to the
+// run it was sent to. Turn 1 of a session is stopped; turn 2 of the SAME session
+// on the SAME host ends with a real Claude error result and must stay kind error.
+func TestRunClaudeStopDoesNotLeakIntoTheNextTurn(t *testing.T) {
+	handler := NewLocalHandler([]string{t.TempDir()})
+	first := runClaudeHelperTurnOn(t, handler, "session-two-turns", "interrupt", true)
+	if last := first[len(first)-1]; last["kind"] != "turn_completed" || last["terminal_state"] != "interrupted" {
+		t.Fatalf("turn 1 terminal event = %#v; want turn_completed / interrupted", last)
+	}
+	second := runClaudeHelperTurnOn(t, handler, "session-two-turns", "error_result", false)
+	if last := second[len(second)-1]; last["kind"] != "error" || last["terminal_state"] != "failed" {
+		t.Fatalf("turn 2 terminal event = %#v; want error / failed (turn 1's Stop must not mark it)", last)
 	}
 }
 

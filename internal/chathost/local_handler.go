@@ -38,6 +38,8 @@ type activeLocalSession struct {
 	claude    *claudeTurn // the run's stream-json reader (claude_turn.go); one run per session
 	// interrupted: a Stop was sent to this run. Claude ends an interrupted turn
 	// with an error result; this is how the host tells it from a real failure.
+	// Never reset: this struct lives for ONE send_turn (runClaude makes it and
+	// unregisters it), so the next turn starts unmarked.
 	interrupted bool
 }
 
