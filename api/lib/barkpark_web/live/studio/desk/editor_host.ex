@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   require Logger
 
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
@@ -383,6 +384,18 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <span aria-hidden="true">×</span>
         </a>
+      </div>
+      <%!-- Sanity's Inspect dialog (Ctrl+Alt+I), in a holder that is always
+            here, as the notes' is. --%>
+      <div id={"#{@view.id}-inspect"}>
+        <InspectDialog.dialog
+          :if={assigns[:desk_inspect] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-inspect-dialog"}
+          title={@page_title}
+          doc={@editor_doc}
+          schema={assigns[:editor_schema]}
+          caller={assigns[:caller_context]}
+        />
       </div>
       <%!-- The editor opens the current document, whatever the URL asked for.
             The holder is always in the page: a note that came and went
