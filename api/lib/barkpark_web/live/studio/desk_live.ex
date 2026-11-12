@@ -40,6 +40,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.ListFirst
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
   alias BarkparkWeb.Studio.Desk.Text
@@ -168,7 +169,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     with true <- String.starts_with?(href, base <> "/"),
          splat = href |> String.replace_prefix(base <> "/", "") |> Text.text_only(),
          chain = Tree.parse(splat, desk.root),
-         pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
+         last = List.last(chain),
+         # A list in the sort its pane will read in: the pane takes this read.
+         sort = kept_sort(desk, socket.assigns.list_sorts, last[:type]),
+         pane = PaneComponent.with_query(last, chain, length(chain) - 1, Rows.page(), sort),
          true <- pane.kind in [:list, :doc],
          node = chain |> Tree.nodes_of(desk.root, desk.nodes) |> List.last(),
          key = PaneComponent.data_key(pane, dataset, node) do
@@ -289,7 +293,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
         do: Map.put(socket.assigns.list_sorts, type, sort),
         else: Map.delete(socket.assigns.list_sorts, type)
 
-    {:noreply, assign(socket, :list_sorts, sorts)}
+    # A read of the type's list kept from ahead of the pick is in the old
+    # order: the re-drawn pane would take it in place of its own sorted read.
+    warm = Map.reject(socket.assigns.warm, fn {{_pane, t, _ds, _filter}, _} -> t == type end)
+
+    {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
@@ -338,7 +346,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
         dataset={@dataset}
         scope={@scope}
-        list_sort={ListMenu.pick(@list_sorts[view.pane[:type]], menu(@desk, view).sorts)}
+        list_sort={kept_sort(@desk, @list_sorts, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
       />
@@ -369,6 +377,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+
+  # The sort this editor keeps for `type`, when the type offers it (R20).
+  defp kept_sort(desk, sorts, type),
+    do: ListMenu.pick(sorts[type], (desk.menus[type] || %{sorts: []}).sorts)
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its

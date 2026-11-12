@@ -129,7 +129,8 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   @doc """
   A list sort as the TanStack Studio keeps it (`app/src/lib/list-prefs.ts`),
   as a `Content.Query` order: `"title"`, `"updated"`, `"created"`, or an
-  order expression such as `"rating:desc,title:asc"`. Nil for nil and for a
+  order expression such as `"rating:desc,title:asc"`, its ties in creation
+  order. Nil for nil and for a
   name (a `desk.sortOrderings` entry, which PaneBuilder applies itself), and
   for anything it cannot read.
   """
@@ -140,7 +141,8 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
 
   def order(expr) when is_binary(expr) do
     specs = expr |> String.split(",") |> Enum.map(&spec/1)
-    if specs != [] and Enum.all?(specs), do: specs
+    # Ties keep creation order, as the TanStack Studio's (`,_createdAt:asc`).
+    if specs != [] and Enum.all?(specs), do: specs ++ [:created_at_asc]
   end
 
   def order(_sort), do: nil
