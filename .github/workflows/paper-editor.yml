@@ -172,6 +172,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_slice_nav.test.mjs
           node ../paper-editor-host-tests/__desk_slice_tips.test.mjs
           node ../paper-editor-host-tests/__desk_slice_discarded.test.mjs
+          node ../paper-editor-host-tests/__desk_slice_unload.test.mjs
           node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
           node ../paper-editor-host-tests/__columns_track_controls.test.mjs
           node ../paper-editor-host-tests/__contextual_history.test.mjs
