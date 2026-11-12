@@ -37,6 +37,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
       .dk .dk-close:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-doc-menu { margin-left: auto; }
+      .dk .codelist-current { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: var(--text-sm); }
+      .dk .codelist-current .codelist-label { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
       .dk .dk-split { margin-left: auto; display: inline-flex; align-items: center; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; }
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }

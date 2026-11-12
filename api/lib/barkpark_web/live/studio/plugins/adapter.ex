@@ -130,7 +130,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           errors: errors_for(assigns, name),
           on_change: "autosave",
           plugin_name: plugin,
-          path: path
+          path: path,
+          id_base: id_base
         })
 
       "localizedText" ->
