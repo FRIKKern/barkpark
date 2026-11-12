@@ -323,8 +323,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
     >
+      <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;
+            `bp-desk.js` asks before the tab closes over "Save failed". --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
