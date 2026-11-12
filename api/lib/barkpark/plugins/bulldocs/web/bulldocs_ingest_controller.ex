@@ -876,9 +876,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # THE INGEST SCOPE RULE's gate (see the moduledoc). A controller plug, not a
   # line in each action: the refusal is a property of {credential, request
   # scope} alone, so running it once at the door keeps every action body
-  # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition
-  # rather than a hope. Halts on refusal; otherwise the conn passes through and
-  # `put_scope/3` re-resolves the same (pure) decision.
+  # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition.
+  # Halts on refusal; else the conn passes and `put_scope/3` re-resolves it.
+  plug(Barkpark.Plugins.Bulldocs.Web.ScopeText)
   plug(:require_named_workspace_access)
   plug(:require_resolvable_scope when action in [:ingest, :ingest_session, :create])
 

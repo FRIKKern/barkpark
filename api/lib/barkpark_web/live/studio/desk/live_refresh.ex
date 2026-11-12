@@ -105,6 +105,8 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   `:desk_refresh` fired: every stale pane but the one being edited reads
   again. A document pane is stale when its own document changed, or a
   document of a type its references can point at: it shows their titles (J23).
+  The pane being edited keeps its form; its reference strip reads again on
+  the same rule (`EditorHost.refs_changed/1`).
   """
   def refresh(socket) do
     stale = socket.assigns.stale
@@ -116,7 +118,9 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
       send_update(PaneComponent, id: id, refresh: true)
     end
 
-    assign(socket,
+    socket
+    |> then(&if(editor_refers?(&1.assigns, types), do: EditorHost.refs_changed(&1), else: &1))
+    |> assign(
       stale: MapSet.new(),
       refresh_timer: nil,
       last_read_ms: System.monotonic_time(:millisecond)
@@ -158,6 +162,18 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   end
 
   defp refers?(_pane, _types, _assigns), do: false
+
+  # The editor's references can point at a changed type: read from the
+  # schema the editor holds.
+  defp editor_refers?(%{editor_schema: %{} = schema}, types) do
+    MapSet.size(types) > 0 and
+      case Refs.target_types(schema) do
+        :any -> true
+        targets -> not MapSet.disjoint?(targets, types)
+      end
+  end
+
+  defp editor_refers?(_assigns, _types), do: false
 
   # Another workspace's frame on the shared topic, or a sibling project's
   # document with the same id, is not this desk's (as StudioLive refuses them).

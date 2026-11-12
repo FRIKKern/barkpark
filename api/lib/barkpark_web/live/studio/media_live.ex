@@ -41,6 +41,10 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
+    # A dataset segment the database refuses as text names no dataset: a 404
+    # before the first read, as on the desk page.
+    BarkparkWeb.Studio.Desk.Text.text?(dataset) || raise BarkparkWeb.Studio.DeskLive.NotFound
+
     # `current_path` is owned by BarkparkWeb.StudioChrome's :handle_params
     # hook (the ONE producer) — never hand-set here.
     {:ok,
