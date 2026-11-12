@@ -112,6 +112,7 @@ defmodule BarkparkWeb.StudioChrome do
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
 
   alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
@@ -314,12 +315,22 @@ defmodule BarkparkWeb.StudioChrome do
   # what `/api/workspaces` gives a token creator. Only a `nil` principal — a
   # genuinely anonymous / public-demo session — still gets "Sign in", and for
   # that one it is TRUE.
+
+  # A dataset-bound token makes no project and no workspace
+  # (`ApiToken.dataset_bound?/1`): each comes with datasets of its own.
+  @bound_token_creates_nothing "This token is bound to one dataset and cannot create a workspace or a project"
+
   defp chrome_fallback("create-workspace", %{"name" => name}, socket) do
-    case principal(socket) do
-      nil ->
+    principal = principal(socket)
+
+    cond do
+      is_nil(principal) ->
         put_flash(socket, :error, "Sign in to create a workspace")
 
-      principal ->
+      ApiToken.dataset_bound?(principal) ->
+        put_flash(socket, :error, @bound_token_creates_nothing)
+
+      true ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
           {:ok, ws} ->
             case project_for(ws) do
@@ -355,6 +366,9 @@ defmodule BarkparkWeb.StudioChrome do
           :error,
           "You need write access in this workspace to create a project — ask an owner to add you"
         )
+
+      ApiToken.dataset_bound?(principal(socket)) ->
+        put_flash(socket, :error, @bound_token_creates_nothing)
 
       true ->
         case Tenancy.create_project_with_dataset(ws, %{name: name}) do
