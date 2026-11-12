@@ -13,6 +13,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   close link and reference chips are at least 44 px; a mouse layout is
   unchanged.
 
+  A titled divider (`.desk-divider`, the root's "Settings") is the TanStack
+  Studio's, as Sanity's measures at 1440: its title 11 px under the row above,
+  its line 6 px under the title and 8 px over the next row.
+
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
   page. A positioned edit pane boxed the backdrop in, so the other panes
@@ -80,6 +84,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-row-sub { display: block; font-weight: 400; font-size: var(--text-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; }
       .dk a.pane-item.selected .dk-row-sub { color: var(--fg); }
       .dk .dk-draft { color: var(--fg-muted); font-size: var(--text-xs); }
+      .dk .desk-divider { margin: 4px 12px 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--fg-muted); }
       .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
       .dk .dk-more { margin: 12px 16px; }
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

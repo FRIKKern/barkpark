@@ -124,6 +124,28 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
     assert old =~ ~s(>+ Add</button>)
   end
 
+  test "a string array's row inputs are named by path and index, a new row too", c do
+    view = desk(c)
+
+    assert has_element?(
+             view,
+             ~s(#{@form} ol[id="highlights"] input[id="highlights[0]"][value="One"])
+           )
+
+    refute has_element?(view, ~s(#{@form} [id="highlights[1]"]))
+
+    view
+    |> element(~s(#{@form} button.bp-array-btn-add[phx-value-field="highlights"]))
+    |> render_click()
+
+    assert has_element?(view, ~s(#{@form} ol[id="highlights"] input[id="highlights[1]"]))
+
+    {:ok, studio, _html} = live(c.conn, c.studio)
+    old = studio |> element("#editor-form") |> render()
+    assert old =~ ~s(id="f-highlights-0")
+    refute old =~ ~s(id="highlights[0]")
+  end
+
   test "image, block canvas, reference and localized text carry the path", c do
     view = desk(c)
     assert has_element?(view, ~s(#{@form} fieldset.field bp-media-picker[id="cover"]))
