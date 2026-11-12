@@ -100,7 +100,8 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
        field: nil,
        options: [],
        tree_loader: nil,
-       notify_id: nil
+       notify_id: nil,
+       desk: false
      )}
   end
 
@@ -125,6 +126,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       |> assign(:selected, selected)
       |> assign(:tree_loader, Map.get(assigns, :tree_loader, socket.assigns.tree_loader))
       |> assign(:notify_id, Map.get(assigns, :notify_id, socket.assigns.notify_id))
+      |> assign(:desk, Map.get(assigns, :desk, socket.assigns.desk))
       |> maybe_load_tree()
       |> auto_expand_to_selected()
 
@@ -343,11 +345,12 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       assigns
       |> assign(:visible_rows, visible_rows(assigns))
       |> assign(:empty?, assigns.loaded? and map_size(assigns.nodes_by_code) == 0)
+      |> assign(:current, current(assigns))
 
     ~H"""
     <div
       id={@id}
-      class="bp-field bp-field-codelist bp-tree-codelist"
+      class={"bp-field bp-field-codelist bp-tree-codelist" <> if(@desk, do: " codelist-tree-field", else: "")}
       data-field-type="codelist"
       data-field-name={@field && @field.name}
       data-codelist-id={"#{@plugin_name}:#{@list_id}"}
@@ -369,6 +372,14 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           value={@selected || ""}
           data-tree-selected="true"
         />
+
+        <%!-- The desk names the current code above the search, as the TanStack
+              Studio's `.codelist-current` (B05): a collapsed branch or a
+              search hides the row that marks it. --%>
+        <div :if={@current} class="codelist-current" data-unknown={@current.label == nil}>
+          <span class="bp-tree-code"><%= @current.code %></span>
+          <span :if={@current.label} class="codelist-label"><%= @current.label %></span>
+        </div>
 
         <div class="bp-tree-toolbar">
           <input
@@ -444,6 +455,29 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     </div>
     """
   end
+
+  # The desk's current-code line: the code and its label path from the root
+  # (`Fiction › Modern fiction`); a code not in the list has no label.
+  defp current(%{desk: true, selected: code, nodes_by_code: nodes})
+       when is_binary(code) and code != "" do
+    label =
+      case Map.get(nodes, code) do
+        nil ->
+          nil
+
+        node ->
+          nodes
+          |> ancestors_of(code)
+          |> Enum.reverse()
+          |> Enum.map(&nodes[&1].label)
+          |> Kernel.++([node.label])
+          |> Enum.join(" › ")
+      end
+
+    %{code: code, label: label}
+  end
+
+  defp current(_assigns), do: nil
 
   # Pre-compute row maps so HEEx change tracking stays cheap.
   defp visible_rows(assigns) do
