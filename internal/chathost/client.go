@@ -15,6 +15,43 @@ import (
 
 var ErrRevoked = errors.New("chat host credential revoked")
 
+// StatusError is a non-2xx answer from the chat host API other than the 401
+// that means ErrRevoked.
+type StatusError struct {
+	Code   int
+	Status string
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("chat host API %s: %s", e.Status, e.Body)
+}
+
+// configError marks a failure of the host's own configuration (server URL,
+// credential) that no retry can heal.
+type configError struct{ err error }
+
+func (e *configError) Error() string { return e.err.Error() }
+func (e *configError) Unwrap() error { return e.err }
+
+// Transient reports whether retrying the same call later can succeed: network
+// errors, timeouts, 5xx, 408 and 429. Revocation, any other 4xx and a bad
+// local configuration are not transient.
+func Transient(err error) bool {
+	if err == nil || errors.Is(err, ErrRevoked) {
+		return false
+	}
+	var config *configError
+	if errors.As(err, &config) {
+		return false
+	}
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code >= 500 || status.Code == http.StatusRequestTimeout || status.Code == http.StatusTooManyRequests
+	}
+	return true
+}
+
 type Client struct {
 	BaseURL               string
 	Credential            string
@@ -82,10 +119,10 @@ func (c *Client) Publish(ctx context.Context, command RemoteCommand, cursor uint
 func (c *Client) do(ctx context.Context, method, path string, authenticate bool, payload any, response any) error {
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return fmt.Errorf("parse server URL: %w", err)
+		return &configError{fmt.Errorf("parse server URL: %w", err)}
 	}
 	if err := validateServerURL(base, c.AllowInsecureLoopback); err != nil {
-		return err
+		return &configError{err}
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + path
 
@@ -107,7 +144,7 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 	}
 	if authenticate {
 		if c.Credential == "" {
-			return errors.New("missing chat host credential")
+			return &configError{errors.New("missing chat host credential")}
 		}
 		req.Header.Set("Authorization", "Host "+c.Credential)
 	}
@@ -122,14 +159,14 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 	}
 	defer resp.Body.Close()
 	if err := validateServerURL(resp.Request.URL, c.AllowInsecureLoopback); err != nil {
-		return fmt.Errorf("unsafe redirect: %w", err)
+		return &configError{fmt.Errorf("unsafe redirect: %w", err)}
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrRevoked
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("chat host API %s: %s", resp.Status, strings.TrimSpace(string(limited)))
+		return &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(limited))}
 	}
 	if response == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
