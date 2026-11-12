@@ -13259,6 +13259,11 @@ msgstr ""
 msgid "This document has been deleted."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/discarded.ex
+#, elixir-autogen, elixir-format
+msgid "The draft was discarded elsewhere. This is the published version."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "This is the current document. Revision “%{rev}” is not shown here."

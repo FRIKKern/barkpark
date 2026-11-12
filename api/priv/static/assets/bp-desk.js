@@ -970,6 +970,22 @@
         if (box.select) box.select();
       };
 
+      // The draft in the editor was discarded elsewhere (`Desk.Discarded`):
+      // the event comes after the patch that put the published version in the
+      // form. The patch leaves the focused field as typed, so it is set from
+      // the published values; then the page hears that this browser has the
+      // new form, and takes its saves again.
+      hook._onDiscarded = function (payload) {
+        var at = root.ownerDocument.activeElement;
+        var values = (payload && payload.values) || {};
+        if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
+            Object.prototype.hasOwnProperty.call(values, at.name) && at.type !== "checkbox" && at.type !== "radio") {
+          at.value = values[at.name];
+        }
+        hook.pushEvent("desk-discard-seen", {});
+      };
+      if (hook.handleEvent) hook.handleEvent("desk:discarded", hook._onDiscarded);
+
       // Capture: a click on a strip opens the strip, and is not a row click.
       root.addEventListener("click", hook._openStrip, true);
       root.addEventListener("keydown", hook._openStrip, true);

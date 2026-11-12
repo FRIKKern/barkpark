@@ -13264,6 +13264,11 @@ msgstr "Dokumentet kunne ikke leses."
 msgid "This document has been deleted."
 msgstr "Dokumentet er slettet."
 
+#: lib/barkpark_web/live/studio/desk/discarded.ex
+#, elixir-autogen, elixir-format
+msgid "The draft was discarded elsewhere. This is the published version."
+msgstr "Utkastet ble forkastet et annet sted. Dette er den publiserte versjonen."
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "This is the current document. Revision “%{rev}” is not shown here."
