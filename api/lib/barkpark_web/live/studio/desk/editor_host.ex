@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   require Logger
 
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
@@ -322,13 +323,31 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-focused={assigns[:desk_focus] == @view.index}
       aria-label={@page_title}
     >
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
-        <span class="pane-header-title">{@page_title}</span>
+        <%!-- In focus mode the title line is the panes it hides, each a way
+              back (`FocusMode`). One title element either way: a header row
+              that changed shape would move the focus mode button, and a
+              moved button loses the focus. --%>
+        <span class="pane-header-title">
+          <%= if assigns[:desk_focus] == @view.index do %>
+            <FocusMode.crumbs
+              views={@desk_panes}
+              titles={@titles}
+              index={@view.index}
+              chain={@chain}
+              base={@base}
+              title={@page_title}
+            />
+          <% else %>
+            {@page_title}
+          <% end %>
+        </span>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
@@ -342,6 +361,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="columns" size={14} />
         </.link>
+        <FocusMode.button
+          id={"#{@view.id}-focus"}
+          index={@view.index}
+          on={assigns[:desk_focus] == @view.index}
+        />
         <%!-- In a split, "Close split pane" drops just this pane
               (`Panes.close_split/3`); the close link drops it and the panes
               to its right. --%>
