@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-fields { padding: 24px 32px; margin: 0; display: grid; gap: 20px; max-width: 72ch; }
       .dk .dk-fields dt { font-size: var(--text-xs); color: var(--fg-muted); margin-bottom: 4px; }
       .dk .dk-fields dd { margin: 0; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+      .dk .dk-fields dd.dk-refs { white-space: normal; }
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
       .dk .dk-close:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-doc-menu { margin-left: auto; }
