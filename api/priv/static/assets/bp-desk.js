@@ -987,6 +987,47 @@
         if (box.select) box.select();
       };
 
+      // B11: closing the tab asks first while an edit in the editor has not
+      // reached the server: typed and not yet sent (the field's debounce),
+      // sent and not yet answered (LiveView marks the form with
+      // `data-phx-ref-loading` until the reply), or answered with a failed
+      // save (the edit pane's `data-desk-save`, the server's save token).
+      // A change LiveView sends carries the whole form as it is then, so its
+      // going out pays what was typed before it. The layout's own
+      // beforeunload still hands the focused field's change to the socket.
+      hook._typed = false;
+      var editForm = function () {
+        return root.querySelector("[data-pane-editing] form#editor-form");
+      };
+      // A field of the document only (named doc[...]): a widget's own box
+      // (the reference picker's search) never goes through the form, and
+      // would otherwise ask for ever.
+      hook._onTyped = function (e) {
+        var t = e.target;
+        var form = t && t.closest ? t.closest("form#editor-form") : null;
+        if (form && root.contains(form) && typeof t.name === "string" && t.name.indexOf("doc[") === 0) hook._typed = true;
+      };
+      hook._sending = new window.MutationObserver(function (changes) {
+        changes.forEach(function (change) {
+          if (change.target.id === "editor-form" && change.target.hasAttribute("data-phx-ref-loading")) hook._typed = false;
+        });
+      });
+      hook._sending.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-phx-ref-loading"] });
+      hook._owes = function () {
+        var form = editForm();
+        if (!form) return false;
+        var pane = form.closest("[data-pane-editing]");
+        return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
+          (!!pane && pane.getAttribute("data-desk-save") === "Save failed");
+      };
+      hook._onUnload = function (e) {
+        if (!hook._owes()) return;
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      root.addEventListener("input", hook._onTyped, true);
+      window.addEventListener("beforeunload", hook._onUnload);
+
       // Capture: a click on a strip opens the strip, and is not a row click.
       root.addEventListener("click", hook._openStrip, true);
       root.addEventListener("keydown", hook._openStrip, true);
@@ -1240,6 +1281,9 @@
       this._panes.disconnect();
       this._marks.disconnect();
       this._forgive();
+      this._sending.disconnect();
+      root.removeEventListener("input", this._onTyped, true);
+      window.removeEventListener("beforeunload", this._onUnload);
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
       root.removeEventListener("pointerdown", this._onPointerDown);
