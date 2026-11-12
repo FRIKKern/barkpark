@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Tree
+  alias BarkparkWeb.Studio.PaneBuilder
   alias Phoenix.LiveView.AsyncResult
 
   @page 100
@@ -86,8 +87,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     warm = assigns[:warm]
 
     cond do
-      # What a hover already read: the pane opens with its data.
-      warm && (waiting? || not same?) ->
+      # What a hover already read: the pane opens with its data. A pane that
+      # shows rows and reads again (a search, a sort) keeps its newer read:
+      # any hover re-draws the page and hands the old page back.
+      warm && ((waiting? && !socket.assigns.data.ok?) || not same?) ->
         socket = socket |> assign(:data_key, key) |> cancel_async(:load) |> adopt(warm)
         {:ok, assign(socket, in_flight: false, again: false)}
 
@@ -246,6 +249,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     >
       <div class="pane-header">
         <span class="pane-header-title">{title(assigns)}</span>
+        <%!-- J18: the Studio's own "+" event, which the page hands to the
+              Studio (`EditorHost`); the new document opens after this pane. --%>
+        <button
+          :if={@pane.kind == :list && @data.ok? && @data.result[:creatable]}
+          type="button"
+          class="dk-create-new"
+          phx-click="new-document"
+          phx-value-type={@pane.type}
+          phx-value-desk-pane={@index}
+          aria-label={
+            gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
+          }
+          title={gettext("Create new document")}
+        >
+          <span aria-hidden="true">+</span>
+        </button>
         <ListMenu.menu
           :if={@pane.kind == :list}
           id={@id}
@@ -546,7 +565,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       {:ok, schema} ->
         title = if node, do: provisional, else: schema.title || type
 
-        Map.put(list(schema, node, dataset, scope), :title, title)
+        list(schema, node, dataset, scope)
+        |> Map.put(:title, title)
+        |> Map.put(:creatable, PaneBuilder.author_creatable?(schema))
+        |> Map.put(:type_title, schema.title)
 
       _ ->
         note = gettext("There is no document type named “%{type}” here.", type: type)
