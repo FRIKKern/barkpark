@@ -86,8 +86,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     warm = assigns[:warm]
 
     cond do
-      # What a hover already read: the pane opens with its data.
-      warm && (waiting? || not same?) ->
+      # What a hover already read: the pane opens with its data. A pane that
+      # shows rows and reads again (a search, a sort) keeps its newer read:
+      # any hover re-draws the page and hands the old page back.
+      warm && ((waiting? && !socket.assigns.data.ok?) || not same?) ->
         socket = socket |> assign(:data_key, key) |> cancel_async(:load) |> adopt(warm)
         {:ok, assign(socket, in_flight: false, again: false)}
 
