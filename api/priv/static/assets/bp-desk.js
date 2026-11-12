@@ -872,9 +872,45 @@
         var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
         var to = Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step));
         e.preventDefault();
+        if (step !== 1 || !hook._owed || hook._owed.row !== row) hook._forgive();
+        // J41: past the last row of a list that is reading more (its
+        // `.dk-list-more` room is there), the steps are owed and taken once
+        // the rows land, as on a loaded list.
+        if (rows[to] === row && step === 1 && pane.querySelector(".dk-list-more")) return hook._owe(row);
         if (rows[to] === row) return;
-        rows[to].focus({ preventScroll: true });
-        if (rows[to].scrollIntoView) rows[to].scrollIntoView({ block: "nearest" });
+        hook._step(rows[to]);
+      };
+      hook._step = function (to) {
+        to.focus({ preventScroll: true });
+        if (to.scrollIntoView) to.scrollIntoView({ block: "nearest" });
+      };
+      // A held key owes no more than this; the focus leaving the row owes none.
+      var OWED_MAX = 50;
+      hook._owed = null;
+      hook._forgive = function () {
+        if (hook._owed) {
+          hook._owed.watch.disconnect();
+          hook._owed.row.removeEventListener("focusout", hook._forgive);
+        }
+        hook._owed = null;
+      };
+      hook._owe = function (row) {
+        var list = row.closest('[role="list"]');
+        if (!list) return;
+        if (!hook._owed) {
+          var watch = new window.MutationObserver(function () {
+            var owed = hook._owed;
+            var rows = Array.prototype.slice.call(list.querySelectorAll(ROW));
+            var at = rows.indexOf(owed.row);
+            if (at < 0 || at === rows.length - 1) return;
+            hook._forgive();
+            if (root.ownerDocument.activeElement === owed.row) hook._step(rows[Math.min(rows.length - 1, at + owed.steps)]);
+          });
+          watch.observe(list, { childList: true });
+          row.addEventListener("focusout", hook._forgive);
+          hook._owed = { row: row, steps: 0, watch: watch };
+        }
+        hook._owed.steps = Math.min(OWED_MAX, hook._owed.steps + 1);
       };
 
       hook._onIntent = function (e) {
@@ -1184,6 +1220,7 @@
       if (this._resize) this._resize.disconnect();
       this._panes.disconnect();
       this._marks.disconnect();
+      this._forgive();
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
       root.removeEventListener("pointerdown", this._onPointerDown);
