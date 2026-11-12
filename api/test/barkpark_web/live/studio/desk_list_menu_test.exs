@@ -207,6 +207,68 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
            }
   end
 
+  # A list's page read ahead of it (a hover's warm read, or the first render's
+  # `ListFirst` hand-off, which is off in :test) is kept for 30 s. The pick
+  # re-drew the page, the pane took that page while its sorted read was out,
+  # and the list stayed in the old order (list.spec.ts on guerrilla).
+  defp hover_open(view, base) do
+    view |> element("#desk-panes") |> render_hook("warm", %{"href" => "#{base}/#{@post}"})
+    render_async(view, 5_000)
+
+    render_patch(view, "#{base}/#{@post}")
+
+    render_async(view, 5_000)
+    view
+  end
+
+  test "a pick on a list opened from a read ahead of it re-reads in that order", %{
+    conn: conn,
+    base: base
+  } do
+    view = conn |> sign_in() |> open(base) |> hover_open(base)
+    assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
+
+    pick(view, "Sort by Created")
+    assert await_titles(view, ["Beta", "Alpha", "Gamma"]) == ["Beta", "Alpha", "Gamma"]
+  end
+
+  test "a list read ahead of it is read in the sort the editor keeps", %{
+    conn: conn,
+    base: base,
+    ws: ws,
+    user: user
+  } do
+    {:ok, _} =
+      UserPrefs.put(user.id, ws.id, @dataset, "studio.lists", %{@post => %{"sort" => "created"}})
+
+    view = conn |> sign_in(user) |> open(base) |> hover_open(base)
+    assert await_titles(view, ["Beta", "Alpha", "Gamma"]) == ["Beta", "Alpha", "Gamma"]
+  end
+
+  test "a type's ordering keeps ties in creation order, as the TanStack Studio's", %{
+    conn: conn,
+    base: base
+  } do
+    # Six more of the highest rating, after Alpha: the same rating, created in turn.
+    tied = for n <- 1..6, do: "Tied #{n}"
+
+    for title <- tied do
+      {:ok, _} =
+        Content.create_document(
+          @post,
+          %{"doc_id" => "dlm-t#{title}", "title" => title, "content" => %{"rating" => "3"}},
+          @dataset
+        )
+
+      Process.sleep(5)
+    end
+
+    view = open(sign_in(conn), "#{base}/#{@post}")
+    pick(view, "Sort by Rating, highest")
+    want = ["Alpha"] ++ tied ++ ["Beta", "Gamma"]
+    assert await_titles(view, want) == want
+  end
+
   test "a pick the type does not offer is ignored: the order stays, nothing is kept", %{
     conn: conn,
     base: base,
@@ -271,8 +333,9 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
     assert Rows.order("updated") == :updated_at_desc
     assert Rows.order("created") == :created_at_desc
 
+    # Ties in creation order, as the TanStack Studio's (`_createdAt:asc`).
     assert Rows.order("rating:desc,author.name:asc") ==
-             [{:field, "rating", :desc}, {:field, "author.name", :asc}]
+             [{:field, "rating", :desc}, {:field, "author.name", :asc}, :created_at_asc]
 
     sorts = ["rating:desc", "title:asc", "updated"]
     assert ListMenu.pick("updated", sorts) == "updated"
