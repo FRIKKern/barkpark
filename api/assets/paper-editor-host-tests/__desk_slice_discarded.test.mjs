@@ -77,6 +77,15 @@ handlers["desk:discarded"]({ values });
 assert.equal(outside.value, "Not the editor's");
 assert.deepEqual(pushed, [["desk-discard-seen", {}]]);
 
+// The value step throws (an odd focused element): the answer still goes, or
+// the page would drop every save until the editor navigates.
+pushed.length = 0;
+const odd = doc.getElementById("title");
+odd.focus();
+Object.defineProperty(odd, "value", { configurable: true, set() { throw new Error("odd element"); }, get() { return ""; } });
+assert.throws(() => handlers["desk:discarded"]({ values }), /odd element/);
+assert.deepEqual(pushed, [["desk-discard-seen", {}]], "the answer is sent even when the value step throws");
+
 // A hook mounted with no handleEvent (another host) does not break.
 const bare = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
 bare.mounted();

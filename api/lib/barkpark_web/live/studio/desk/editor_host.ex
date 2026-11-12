@@ -173,9 +173,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # a draft discarded elsewhere had (live.spec:48), until the browser has the
   # new one.
   def handle_event(event, params, socket) do
-    if event in @form_writes and (gone?(socket.assigns) or Discarded.drop?(socket.assigns)),
-      do: {:noreply, socket},
-      else: event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+    cond do
+      event in @form_writes and gone?(socket.assigns) ->
+        {:noreply, socket}
+
+      event in @form_writes and Discarded.drop?(socket.assigns) ->
+        {:noreply, Discarded.drop(socket)}
+
+      true ->
+        event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+    end
   end
 
   # A save from the new form: the line that said the draft was discarded goes.
@@ -414,7 +421,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           {note}
         </p>
-        <Discarded.note :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)} />
+        <Discarded.note
+          :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)}
+          dropped={Discarded.dropped?(assigns)}
+        />
       </div>
       <%!-- Always in the page, shown when there is a link: a pick adds the
             first link while the editor has the focus, and a row that came and

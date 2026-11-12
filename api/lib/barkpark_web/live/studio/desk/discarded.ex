@@ -17,12 +17,20 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   from the old form. The focused field is the one a patch does not change
   (LiveView keeps what is typed in it); the browser sets it from `values`.
 
-  Owns the `desk_discarded` assign: `%{doc: {type, id}, seen: boolean}`, or nil.
+  A dropped save is not silent: the pane's line then says the typing was not
+  saved, and one warning is logged with the document id. A reconnect mounts a
+  new LiveView process, whose assigns have no `desk_discarded`, so a browser
+  that never answered is not stuck past it.
+
+  Owns the `desk_discarded` assign:
+  `%{doc: {type, id}, seen: boolean, dropped: boolean}`, or nil.
   """
 
   use BarkparkWeb, :html
 
   import Phoenix.LiveView, only: [push_event: 3]
+
+  require Logger
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -49,7 +57,7 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
       |> Shared.rebuild_panes()
 
     socket
-    |> assign(:desk_discarded, %{doc: {type, id}, seen: false})
+    |> assign(:desk_discarded, %{doc: {type, id}, seen: false, dropped: false})
     |> push_event("desk:discarded", %{values: values(socket.assigns[:editor_form] || %{})})
   end
 
@@ -57,6 +65,21 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   def drop?(assigns) do
     match?(%{seen: false}, assigns[:desk_discarded]) and open?(assigns)
   end
+
+  @doc "A save from the old form was dropped: the line says so, logged once."
+  def drop(socket) do
+    case socket.assigns[:desk_discarded] do
+      %{dropped: false, doc: {type, id}} = d ->
+        Logger.warning("desk: a save from a discarded draft's form was dropped (#{type} #{id})")
+        assign(socket, :desk_discarded, %{d | dropped: true})
+
+      _ ->
+        socket
+    end
+  end
+
+  @doc "Whether a save from the old form was dropped."
+  def dropped?(assigns), do: match?(%{dropped: true}, assigns[:desk_discarded])
 
   @doc "The browser has the new form: what it sends now is the editor's."
   def seen(socket) do
@@ -78,10 +101,17 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   defp open?(_assigns), do: false
 
   @doc "The pane's line, shown with the published version."
+  attr :dropped, :boolean, default: false
+
   def note(assigns) do
     ~H"""
     <p class="dk-note" role="status" data-desk-discarded>
-      {gettext("The draft was discarded elsewhere. This is the published version.")}
+      {if @dropped,
+        do:
+          gettext(
+            "The draft was discarded elsewhere, so what you typed in it was not saved. This is the published version."
+          ),
+        else: gettext("The draft was discarded elsewhere. This is the published version.")}
     </p>
     """
   end

@@ -58,11 +58,12 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     {:ok, _} = Auth.create_token(raw, "desk-discard", @dataset, ["read", "write", "admin"], ws.id)
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
-    {:ok, view, _html} = live(conn, "#{base}/#{type};#{id}")
+    path = "#{base}/#{type};#{id}"
+    {:ok, view, _html} = live(conn, path)
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, @form) end)
 
-    {:ok, view: view, type: type, id: id}
+    {:ok, view: view, type: type, id: id, path: path, conn: conn}
   end
 
   defp eventually(fun) do
@@ -121,6 +122,33 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
 
     assert stored(ctx) == {"Here", false}
     assert title_shown(ctx.view, "Here")
+    # Not silent: the pane says the typing was not saved.
+    assert has_element?(ctx.view, @note, "was not saved")
+  end
+
+  test "a discard with nothing typed after it: the line does not claim lost typing", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+    refute has_element?(ctx.view, @note, "was not saved")
+  end
+
+  # A browser that never answered `desk:discarded` is not stuck: a reconnect
+  # mounts a new LiveView process, whose assigns have no `desk_discarded`.
+  test "a reconnect starts clean: the new page's saves write", %{conn: conn} = ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+
+    {:ok, again, _html} = live(conn, ctx.path)
+    render_async(again, 5_000)
+    assert eventually(fn -> has_element?(again, @form) end)
+    refute has_element?(again, @note)
+
+    render_hook(again, "autosave", %{"doc" => %{"title" => "Here, after the reconnect"}})
+    assert eventually(fn -> stored(ctx) == {"Here, after the reconnect", true} end)
   end
 
   test "once the browser has the new form, a save writes as usual", ctx do

@@ -976,13 +976,18 @@
       // the published values; then the page hears that this browser has the
       // new form, and takes its saves again.
       hook._onDiscarded = function (payload) {
-        var at = root.ownerDocument.activeElement;
-        var values = (payload && payload.values) || {};
-        if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
-            Object.prototype.hasOwnProperty.call(values, at.name) && at.type !== "checkbox" && at.type !== "radio") {
-          at.value = values[at.name];
+        // The answer goes whatever the value step does: until it arrives the
+        // page drops every save from this form.
+        try {
+          var at = root.ownerDocument.activeElement;
+          var values = (payload && payload.values) || {};
+          if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
+              Object.prototype.hasOwnProperty.call(values, at.name) && at.type !== "checkbox" && at.type !== "radio") {
+            at.value = values[at.name];
+          }
+        } finally {
+          hook.pushEvent("desk-discard-seen", {});
         }
-        hook.pushEvent("desk-discard-seen", {});
       };
       if (hook.handleEvent) hook.handleEvent("desk:discarded", hook._onDiscarded);
 
