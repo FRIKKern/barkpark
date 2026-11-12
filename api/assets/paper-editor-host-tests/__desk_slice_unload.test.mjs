@@ -1,7 +1,8 @@
 // __desk_slice_unload.test.mjs — B11 (unload-guard:35, :113): closing the tab
 // asks first while an edit in the desk's editor has not reached the server,
 // and not otherwise. An edit owes the server while it is
-//   - typed and not yet sent (the field's phx-debounce has not fired),
+//   - typed in a field of the document (an input named doc[...]) and not yet
+//     sent (the field's phx-debounce has not fired),
 //   - sent and not yet answered (LiveView marks the form with
 //     `data-phx-ref-loading` until the reply), or
 //   - answered with a failed save (the edit pane's `data-desk-save`, the
@@ -30,7 +31,8 @@ doc.body.innerHTML =
   `<section class="pane-column dk-pane dk-doc" id="p1" data-pane-index="1" data-pane-kind="doc" data-pane-editing data-desk-save="" aria-label="Post">` +
   `<div class="pane-body"><form id="editor-form" phx-change="autosave">` +
   `<input type="text" id="title" name="doc[title]" value="Here">` +
-  `<div id="w-day" phx-hook="BarkparkFieldBridge" phx-update="ignore"><input id="day" type="text"></div>` +
+  `<input type="date" id="day" name="doc[day]">` +
+  `<div id="w-author" phx-update="ignore"><input type="hidden" name="doc[author]"><input id="author" type="text"></div>` +
   `</form></div></section></div>`;
 const el = doc.getElementById("desk-panes");
 Object.defineProperty(el, "clientWidth", { get: () => 1440 });
@@ -85,14 +87,20 @@ pane().setAttribute("data-desk-save", "Saved");
 await settle();
 assert.equal(asks(), false, "saved: the tab closes");
 
-// A bridged widget (a date typed, not committed) counts like any field.
+// Another field of the document counts like any.
 type("day");
-assert.equal(asks(), true, "a typed, uncommitted date: asks");
+assert.equal(asks(), true, "a typed, unsent date: asks");
 send();
 await settle();
 answer();
 await settle();
 assert.equal(asks(), false);
+
+// A widget's own box with no field name (the reference picker's search,
+// inside phx-update="ignore"): its text never goes through the form, so it
+// is not an edit, or the tab would ask for ever (seen in a browser).
+type("author");
+assert.equal(asks(), false, "the reference picker's search box is not an edit");
 
 // Typing outside the editor's form (the search box, a list filter) owes nothing.
 type("desk-search-input");

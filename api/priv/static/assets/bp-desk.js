@@ -982,9 +982,13 @@
       var editForm = function () {
         return root.querySelector("[data-pane-editing] form#editor-form");
       };
+      // A field of the document only (named doc[...]): a widget's own box
+      // (the reference picker's search) never goes through the form, and
+      // would otherwise ask for ever.
       hook._onTyped = function (e) {
-        var form = e.target && e.target.closest ? e.target.closest("form#editor-form") : null;
-        if (form && root.contains(form)) hook._typed = true;
+        var t = e.target;
+        var form = t && t.closest ? t.closest("form#editor-form") : null;
+        if (form && root.contains(form) && typeof t.name === "string" && t.name.indexOf("doc[") === 0) hook._typed = true;
       };
       hook._sending = new window.MutationObserver(function (changes) {
         changes.forEach(function (change) {
