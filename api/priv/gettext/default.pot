@@ -13388,8 +13388,3 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Raw JSON"
 msgstr ""
-
-#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:381
-#, elixir-autogen, elixir-format
-msgid "This token is bound to one dataset and cannot create a workspace or a project"
-msgstr ""
