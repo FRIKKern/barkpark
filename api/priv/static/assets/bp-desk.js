@@ -872,9 +872,45 @@
         var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
         var to = Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step));
         e.preventDefault();
+        if (step !== 1 || !hook._owed || hook._owed.row !== row) hook._forgive();
+        // J41: past the last row of a list that is reading more (its
+        // `.dk-list-more` room is there), the steps are owed and taken once
+        // the rows land, as on a loaded list.
+        if (rows[to] === row && step === 1 && pane.querySelector(".dk-list-more")) return hook._owe(row);
         if (rows[to] === row) return;
-        rows[to].focus({ preventScroll: true });
-        if (rows[to].scrollIntoView) rows[to].scrollIntoView({ block: "nearest" });
+        hook._step(rows[to]);
+      };
+      hook._step = function (to) {
+        to.focus({ preventScroll: true });
+        if (to.scrollIntoView) to.scrollIntoView({ block: "nearest" });
+      };
+      // A held key owes no more than this; the focus leaving the row owes none.
+      var OWED_MAX = 50;
+      hook._owed = null;
+      hook._forgive = function () {
+        if (hook._owed) {
+          hook._owed.watch.disconnect();
+          hook._owed.row.removeEventListener("focusout", hook._forgive);
+        }
+        hook._owed = null;
+      };
+      hook._owe = function (row) {
+        var list = row.closest('[role="list"]');
+        if (!list) return;
+        if (!hook._owed) {
+          var watch = new window.MutationObserver(function () {
+            var owed = hook._owed;
+            var rows = Array.prototype.slice.call(list.querySelectorAll(ROW));
+            var at = rows.indexOf(owed.row);
+            if (at < 0 || at === rows.length - 1) return;
+            hook._forgive();
+            if (root.ownerDocument.activeElement === owed.row) hook._step(rows[Math.min(rows.length - 1, at + owed.steps)]);
+          });
+          watch.observe(list, { childList: true });
+          row.addEventListener("focusout", hook._forgive);
+          hook._owed = { row: row, steps: 0, watch: watch };
+        }
+        hook._owed.steps = Math.min(OWED_MAX, hook._owed.steps + 1);
       };
 
       hook._onIntent = function (e) {
@@ -1075,6 +1111,57 @@
         attempt();
       };
       window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
+
+      // "Share document": an item with `data-desk-copy` puts its text on the
+      // clipboard (a path gets the page's origin in front) and the menu's
+      // toast says so, or says the copy failed. The browser's clipboard, or
+      // the old `execCommand` where it has none (a page not on https).
+      hook._onCopy = function (e) {
+        var item = e.target.closest ? e.target.closest("[data-desk-copy]") : null;
+        if (!item || !root.contains(item)) return;
+        var text = item.getAttribute("data-desk-copy");
+        if (item.hasAttribute("data-desk-copy-origin")) text = window.location.origin + text;
+        var menu = item.closest("[popover]");
+        var toast = menu && menu.parentNode.querySelector(".dk-toast");
+        var say = function (ok) {
+          if (!toast) return;
+          window.clearTimeout(hook._toastTimer);
+          // Shown first, then filled: the change is what a screen reader reads.
+          if (toast.showPopover && !toast.matches(":popover-open")) toast.showPopover();
+          toast.textContent = ok ? item.getAttribute("data-desk-copied") : menu.getAttribute("data-desk-copy-failed");
+          hook._toastTimer = window.setTimeout(function () {
+            toast.textContent = "";
+            if (toast.hidePopover && toast.matches(":popover-open")) toast.hidePopover();
+          }, 4000);
+        };
+        var fallback = function () {
+          var back = root.ownerDocument.activeElement;
+          var area = root.ownerDocument.createElement("textarea");
+          area.value = text;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          root.ownerDocument.body.appendChild(area);
+          area.select();
+          var ok = false;
+          try {
+            ok = root.ownerDocument.execCommand("copy");
+          } catch (_err) {
+            ok = false;
+          }
+          area.remove();
+          if (back && back.isConnected && back.focus) back.focus();
+          say(ok);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            say(true);
+          }, fallback);
+        } else {
+          fallback();
+        }
+      };
+      root.addEventListener("click", hook._onCopy);
     },
 
     destroyed: function () {
@@ -1085,6 +1172,7 @@
       if (this._resize) this._resize.disconnect();
       this._panes.disconnect();
       this._marks.disconnect();
+      this._forgive();
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
       root.removeEventListener("pointerdown", this._onPointerDown);
@@ -1127,6 +1215,8 @@
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
+      root.removeEventListener("click", this._onCopy);
+      window.clearTimeout(this._toastTimer);
     },
   };
 })();

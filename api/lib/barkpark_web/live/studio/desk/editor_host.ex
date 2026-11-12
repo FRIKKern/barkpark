@@ -32,6 +32,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
+  alias BarkparkWeb.Studio.Desk.ShareMenu
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
@@ -354,6 +355,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="x" size={14} />
         </.link>
+        <%!-- Sanity's "Share document": copy its ID or its URL. --%>
+        <ShareMenu.menu
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-share"}
+          doc={@editor_doc}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+        />
         <%!-- The document's actions, none over a document that could not be
               read or was deleted. --%>
         <DocMenu.menu
