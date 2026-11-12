@@ -134,8 +134,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   # A list's own controls. They are this pane's state, not the URL's.
   #
-  # The list scrolled to its last row (`phx-viewport-bottom`): the next page,
-  # read after the rows it holds and added below them, up to `Rows.max_rows/0`.
+  # The list scrolled to its last row (`phx-viewport-bottom`): the rest, read
+  # after the rows it holds and added below them, up to `Rows.max_rows/0`.
   def handle_event("more", _params, socket),
     do: {:noreply, if(more?(socket), do: read_more(socket), else: socket)}
 
@@ -199,10 +199,13 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp capped?(%{data: data, limit: limit}),
     do: data.result[:more?] == true and limit >= Rows.max_rows()
 
+  # The rest up to the most in one read, as the TanStack Studio's list grows
+  # (`setLimit(LIST_MAX)`): a page a read was a round trip per 100 rows, and a
+  # fast scroll on guerrilla reached about 300 rows, never the end.
   defp read_more(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
     %{panes: panes, index: index, limit: held, sort: sort} = socket.assigns
-    step = min(Rows.page(), Rows.max_rows() - held)
+    step = Rows.max_rows() - held
     pane = Map.put(pane, :query, Rows.query(panes, index, step, sort, held))
 
     socket
