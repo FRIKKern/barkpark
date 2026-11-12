@@ -255,16 +255,16 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
         <button
           :if={@pane.kind == :list && @data.ok? && @data.result[:creatable]}
           type="button"
-          class="dk-create-new"
+          class="dk-create-new dk-doc-menu-button icon-btn"
           phx-click="new-document"
           phx-value-type={@pane.type}
           phx-value-desk-pane={@index}
           aria-label={
             gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
           }
-          title={gettext("Create new document")}
+          data-tip={gettext("Create new document")}
         >
-          <span aria-hidden="true">+</span>
+          <BarkparkWeb.Icons.icon name="plus" size={14} />
         </button>
         <ListMenu.menu
           :if={@pane.kind == :list}
