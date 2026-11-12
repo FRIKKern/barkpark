@@ -4,6 +4,11 @@ defmodule BarkparkWeb.Studio.Desk.Search do
   (`StudioLive.Handlers.DeskSearch`, reached through the events `DeskLive`
   passes on): same read, same tenant, owner and grant guards. This draws
   the box and its hits, each a link that opens the document as panes.
+
+  The box is a combobox over its hits, as the TanStack Studio's: the focus
+  stays in the box, the hits are options in a listbox, one is lit
+  (`aria-activedescendant`); ArrowDown and ArrowUp move the light
+  (`DeskLive`), Enter opens the lit hit.
   """
 
   use BarkparkWeb, :html
@@ -12,13 +17,14 @@ defmodule BarkparkWeb.Studio.Desk.Search do
 
   attr :query, :string, default: ""
   attr :hits, :list, default: []
+  attr :lit, :integer, default: 0
   attr :root, :any, required: true
   attr :base, :string, required: true
 
   def box(assigns) do
     ~H"""
     <div class="dk-search" role="search">
-      <form phx-change="desk-search" phx-submit="desk-search" id="desk-search-form">
+      <form phx-change="desk-search" phx-submit="desk-search-open" id="desk-search-form">
         <label for="desk-search-input" class="sr-only">{gettext("Search documents")}</label>
         <input
           id="desk-search-input"
@@ -29,6 +35,12 @@ defmodule BarkparkWeb.Studio.Desk.Search do
           placeholder={gettext("Search documents")}
           autocomplete="off"
           phx-debounce="150"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={to_string(@hits != [])}
+          aria-controls="desk-search-options"
+          aria-activedescendant={@hits != [] && option_id(@lit)}
+          phx-keydown="desk-search-key"
         />
       </form>
       <div :if={String.trim(@query) != ""} class="dk-search-hits" id="desk-search-hits">
@@ -38,22 +50,31 @@ defmodule BarkparkWeb.Studio.Desk.Search do
         <p :if={String.length(String.trim(@query)) >= 2 and @hits == []} class="dk-note" role="status">
           {gettext("No documents match “%{query}”", query: String.trim(@query))}
         </p>
-        <.link
-          :for={hit <- @hits}
-          patch={href(@base, @root, hit)}
-          class="pane-item"
-          data-desk-hit
-        >
-          <%!-- The title is an element of its own: a spec finds a hit by it. --%>
-          <span class="pane-item-label">
-            <span class="dk-row-title">{hit.title}</span>
-            <span class="dk-row-sub">{hit.type_title}</span>
-          </span>
-        </.link>
+        <div :if={@hits != []} id="desk-search-options" role="listbox" aria-label={gettext("Search documents")}>
+          <.link
+            :for={{hit, i} <- Enum.with_index(@hits)}
+            patch={href(@base, @root, hit)}
+            id={option_id(i)}
+            class="pane-item"
+            role="option"
+            aria-selected={to_string(i == @lit)}
+            data-desk-hit
+          >
+            <%!-- The title is an element of its own: a spec finds a hit by it. --%>
+            <span class="pane-item-label">
+              <span class="dk-row-title">{hit.title}</span>
+              <span class="dk-row-sub">{hit.type_title}</span>
+            </span>
+          </.link>
+        </div>
       </div>
     </div>
     """
   end
+
+  @doc "The element id of hit `i`, the one `aria-activedescendant` names when it is lit."
+  @spec option_id(non_neg_integer()) :: String.t()
+  def option_id(i), do: "desk-search-hit-#{i}"
 
   @doc "The desk URL that opens a hit: the desk's own path to its type, then the document."
   @spec href(String.t(), struct(), map()) :: String.t()
