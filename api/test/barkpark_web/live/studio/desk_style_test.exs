@@ -190,6 +190,75 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
              ".dk .pane-item-chevron, .dk .pane-item:hover .pane-item-chevron, .dk .pane-item.selected .pane-item-chevron { opacity: 0.5; color: inherit;"
   end
 
+  # LOOKS A3: TanStack's pane header (styles.css `.pane-header`, `.icon-btn`):
+  # 49 px for a list or type pane, no bottom line, a 13/19 w600 title in
+  # --fg-header, 25 px icon buttons; the list's "×" is out of sight on a wide
+  # desk (TanStack has none) until Tab reaches it, and stays as the narrow
+  # desk's back arrow.
+  test "a list pane's header is TanStack's: 49 px, no line, w600 title, 25 px buttons" do
+    head = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header")
+    assert head =~ "height: 49px"
+    assert head =~ "padding: 0 12px 0 20px"
+    assert head =~ "border-bottom: 0"
+
+    title = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header .pane-header-title")
+
+    assert title =~
+             "font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg-header)"
+
+    btn = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn")
+    assert btn =~ "width: 25px; height: 25px"
+    assert btn =~ "color: var(--dk-icon-muted)"
+
+    # Out of sight but in the tab order: Tab reaches it and shows it, Enter closes.
+    close =
+      rule(
+        @css,
+        ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible)"
+      )
+
+    assert close =~ "clip-path: inset(50%)"
+    refute close =~ "display: none"
+  end
+
+  test "the list search is borderless, with the magnifier inside at the left" do
+    assert rule(@css, ".dk .dk-list-search") =~ "margin: -1px 12px 7px"
+
+    assert rule(@css, ".dk .dk-list-search .search-icon") =~
+             "position: absolute; left: 2px; top: 2px"
+
+    input = rule(@css, ".dk .dk-list-search input")
+    assert input =~ "border: 0"
+    assert input =~ "background: none"
+    assert input =~ "padding: 3px 8px 3px 29px"
+    assert rule(@css, ".dk .dk-list-search input::placeholder") =~ "var(--dk-placeholder)"
+  end
+
+  # LOOKS A4: TanStack's `.pane.list, .pane.types` (styles.css): they share
+  # the room from 321 to 351 px each, the line inside; a width the editor
+  # dragged lifts the cap, as TanStack's resize does.
+  test "a list or type pane flexes from 321 to 351 px; a document pane keeps its own" do
+    pane = rule(@css, ".dk .dk-pane")
+    assert pane =~ "box-sizing: border-box; flex: 1 1 0"
+    assert pane =~ "min-width: 321px; max-width: 351px"
+    assert rule(@css, ".dk .dk-doc") =~ "min-width: 320px; max-width: none; flex: 1 1 600px"
+
+    js = File.read!(Path.expand("../../../../priv/static/assets/bp-desk.js", __DIR__))
+    assert js =~ ~s(min-width: " + px + "px; max-width: none; flex: 0 0 " + px)
+    assert js =~ "width: 100%; min-width: 0; max-width: none; flex: 1 1 auto;"
+  end
+
+  # The build line under the desk is the old Studio's; TanStack has none. The
+  # desk's own sheet hides it, so every other Studio page keeps it.
+  test "the desk hides the Studio's build footer, only where a desk is" do
+    assert rule(@css, ".studio-shell:has(.dk) > .studio-footer") =~ "display: none"
+  end
+
+  test "a plain divider is TanStack's hr: inset 12 px, one --dk-border line" do
+    assert rule(@css, ".dk .pane-divider") =~
+             "margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border)"
+  end
+
   # The desk's own look is TanStack's measured values, declared once as
   # `--dk-*` on `.dk` (light) and `html[data-theme="dark"] .dk`, inside the
   # literal gate's skip region; every other rule uses var(--…) only.
