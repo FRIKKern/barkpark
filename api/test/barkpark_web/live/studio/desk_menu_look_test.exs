@@ -44,7 +44,12 @@ defmodule BarkparkWeb.Studio.Desk.MenuLookTest do
             {"Duplicate", "duplicate-doc"},
             {"Delete", "delete-doc"}
           ],
-          do: %{label: label, event: event}
+          do: %{label: label, name: event, event: event}
+
+    # A schema's own link action is a link in the same look.
+    items = [
+      %{label: "Open preview", name: "preview", event: nil, href: "/preview/post-01"} | items
+    ]
 
     render_component(&DocMenu.menu/1, id: "desk-pane-2-actions", items: items, place: :header)
   end
@@ -99,7 +104,8 @@ defmodule BarkparkWeb.Studio.Desk.MenuLookTest do
 
   test "the document menu: each action with its glyph, Delete in red under a line" do
     html = doc_menu()
-    assert labels(html) == ["Unpublish", "History", "Duplicate", "Delete"]
+    assert labels(html) == ["Open preview", "Unpublish", "History", "Duplicate", "Delete"]
+    assert html =~ ~r/<a href="\/preview\/post-01" class="dk-menu-item\s*"[^>]*role="menuitem"/
 
     assert html =~
              ~r/<hr class="dk-menu-sep"\/?>\s*<button[^>]*class="dk-menu-item danger"[^>]*data-desk-doc-action="delete-doc"/

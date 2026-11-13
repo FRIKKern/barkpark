@@ -110,7 +110,7 @@ assert.doesNotMatch(sheet(), /\[data-pane-index="1"\][^{]*\{ width:/);
 // A press on the separator after it is: 80 px right widens the list to 400.
 assert.equal(edge(1).getAttribute("role"), "separator");
 down(edge(1), 638); move(718);
-assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 400px; min-width: 400px; flex: 0 0 400px; \}/);
+assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 400px; min-width: 400px; max-width: none; flex: 0 0 400px; \}/);
 // Dragged far left it stops at the minimum.
 move(100); up();
 assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 320px;/, "never under 320 px");
