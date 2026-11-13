@@ -242,7 +242,13 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # block can reach it and the D33 carve-out does not apply. The overlay is a
     # full-viewport scrim (inset: 0) that must cover the whole page, which is
     # why it is fixed rather than absolute.
-    "live/studio/chat_live.ex" => 1
+    "live/studio/chat_live.ex" => 1,
+    # The desk's Inspect layer (`.dk-inspect-layer`): fixed over the whole
+    # window below 600 px, and where the browser has no anchor positioning
+    # (`@supports not`). EditorHost draws it as the first child of the edit
+    # pane's `.dk-edit-body`, a SIBLING of the Studio shell that holds the
+    # `.editor-panel`, never under it, so no panel containing block reaches it.
+    "live/studio/desk/style.ex" => 2
   }
 
   # Shipped studio JS that emits `position: fixed` from script. Each MUST portal

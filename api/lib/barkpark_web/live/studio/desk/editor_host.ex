@@ -499,18 +499,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           <span aria-hidden="true">×</span>
         </a>
       </div>
-      <%!-- Sanity's Inspect dialog (Ctrl+Alt+I), in a holder that is always
-            here, as the notes' is. --%>
-      <div id={"#{@view.id}-inspect"}>
-        <InspectDialog.dialog
-          :if={assigns[:desk_inspect] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
-          id={"#{@view.id}-inspect-dialog"}
-          title={@page_title}
-          doc={@editor_doc}
-          schema={assigns[:editor_schema]}
-          caller={assigns[:caller_context]}
-        />
-      </div>
       <%!-- The editor opens the current document, whatever the URL asked for.
             The holder is always in the page: a note that came and went
             between the rows with ids would make the patch move the
@@ -576,6 +564,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       <%!-- `pane-body` and `doc-form` are the names the TanStack specs know
             the document's form region by. --%>
       <div id={"#{@view.id}-body"} class="pane-body doc-form dk-edit-body" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden">
+        <%!-- Sanity's Inspect (Ctrl+Alt+I), TanStack's place for it: a layer
+              over this pane's form only, under its header and over its
+              footer (`InspectDialog`). The holder is always here, as the
+              notes' is. --%>
+        <div id={"#{@view.id}-inspect"} class="dk-inspect-layer" data-desk-inspect-layer>
+          <InspectDialog.dialog
+            :if={assigns[:desk_inspect] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+            id={"#{@view.id}-inspect-dialog"}
+            title={@page_title}
+            doc={@editor_doc}
+            schema={assigns[:editor_schema]}
+            caller={assigns[:caller_context]}
+          />
+        </div>
         <%!-- The Studio's shell brings the page's main landmark; the card,
               drawn in its place, is it while the shell is away. --%>
         <div :if={@edit_failed} class="dk-note" role="main" data-desk-edit-failed>

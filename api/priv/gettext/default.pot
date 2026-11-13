@@ -10773,6 +10773,11 @@ msgstr ""
 msgid "read-only — the .scaffy source of truth; edit in the repo"
 msgstr ""
 
+#: lib/barkpark_web/components/fields/codelist_field.ex:197
+#, elixir-autogen, elixir-format
+msgid "%{code} (not in list)"
+msgstr ""
+
 #: lib/barkpark_web/components/fields/codelist_field.ex:181
 #: lib/barkpark_web/components/fields/composite_field.ex:563
 #, elixir-autogen, elixir-format

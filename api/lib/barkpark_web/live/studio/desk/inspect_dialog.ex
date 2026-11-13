@@ -10,9 +10,16 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   (`editor_doc`) through `Content.Envelope.render/3`, with the page's own
   caller, so a field this caller may not read is not shown here either.
 
-  A modal `<dialog>`: `bp-desk.js` opens it when it is mounted. Its content
-  is what the document was when it opened (`phx-update="ignore"`, which also
-  keeps the browser's `open` on it).
+  A `<dialog>` in the edit pane, where TanStack's is (`.inspect-backdrop`):
+  it dims that pane's form only, under the pane's header and over its
+  footer, the card 12 px in, so the navbar and the other panes stay as they
+  are (`EditorHost` draws it in the pane body's `.dk-inspect-layer`).
+  `bp-desk.js` opens it when it is mounted, not as a modal, which would lift
+  it over the whole page. It keeps a modal's keys itself, as TanStack's
+  `DialogBox`: the focus starts on its close button, Tab stays inside it,
+  and Escape or a press on the dim area closes it and gives the focus back
+  to where it was. Its content is what the document was when it opened
+  (`phx-update="ignore"`, which also keeps the browser's `open` on it).
 
   It looks as the TanStack Studio's (barkpark-studio `InspectDialog`,
   `JsonTree`; LOOKS C3): a card, the title in italics, and Parsed as its
