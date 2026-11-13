@@ -84,6 +84,38 @@ defmodule BarkparkWeb.BoundDatasetDefaultTest do
     end
   end
 
+  # `prime` and `claim` passed no dataset on to `Tasks`, so they spanned every
+  # dataset of the workspace even after the fill (the rest of
+  # task-732a5ad258adddf2).
+  describe "prime and claim" do
+    test "a dataset-bound token primes and claims only its own dataset", %{ws: ws, tasks: tasks} do
+      {conn, _} = bearer(ws, dataset_bound: true)
+
+      primed = conn |> get("/v1/tasks/prime") |> response(200)
+      assert primed =~ "TASK-IN-#{@own}"
+      refute primed =~ "TASK-IN-#{@prod}"
+
+      # Two claims: the first takes its own task, the second finds nothing.
+      # The production task is never taken.
+      for _ <- 1..2 do
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/tasks/claim", Jason.encode!(%{worker_id: "bound-worker"}))
+        |> response(200)
+      end
+
+      assert lifecycle(tasks[@own]) == "in_progress"
+      assert lifecycle(tasks[@prod]) == "open"
+    end
+
+    test "an unbound token still primes both (control)", %{ws: ws} do
+      {conn, _} = bearer(ws, [])
+
+      primed = conn |> get("/v1/tasks/prime") |> response(200)
+      assert primed =~ "TASK-IN-#{@own}" and primed =~ "TASK-IN-#{@prod}"
+    end
+  end
+
   describe "what a bound token may name" do
     test "another dataset, or a dataset that is not a string, is refused", %{ws: ws} do
       {conn, _} = bearer(ws, dataset_bound: true)
