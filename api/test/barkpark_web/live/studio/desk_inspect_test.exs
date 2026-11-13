@@ -93,16 +93,41 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
 
     assert has_element?(view, ~s(#{@dialog} .inspect-body > [role="tabpanel"][hidden] pre))
 
-    # Parsed: the system keys first, the id among them; a nested object folded.
+    # Parsed: the system keys first, the id among them; a nested object a branch.
     parsed = view |> element(~s{#{@dialog} [role="tabpanel"]:not([hidden])}) |> render()
     assert parsed =~ c.id
-    assert parsed =~ ~r/<summary>\s*<span class="dk-inspect-key">meta<\/span>/
+    assert parsed =~ ~r/<summary><span class="dk-inspect-key">meta:<\/span>/
 
     # Raw JSON: the API's envelope, pretty. The editor holds the draft.
     raw = view |> element(~s(#{@dialog} [role="tabpanel"][hidden])) |> render()
     assert raw =~ ~r/<code>\{\n  &quot;_id&quot;: &quot;drafts\.#{c.id}&quot;,\n/
     assert raw =~ "&quot;_publishedId&quot;: &quot;#{c.id}&quot;"
     assert raw =~ "&quot;tag&quot;: &quot;deep&quot;"
+  end
+
+  # LOOKS C3 (audit screen 10): TanStack's Inspect. The title in italics;
+  # Parsed opens with what the document holds ("{…} N properties"), every
+  # object open, each key "key:" and each value typed for its syntax colour,
+  # a string unquoted.
+  test "Parsed is TanStack's JSON tree: italic title, counts, typed values, all open", c do
+    view = open(c)
+    inspect_open(view)
+
+    assert view |> element("#{@dialog} h2") |> render() =~ "Inspecting <em>Looked at</em>"
+    parsed = view |> element(~s{#{@dialog} [role="tabpanel"]:not([hidden])}) |> render()
+
+    assert parsed =~
+             ~r/<details open="">\s*<summary><span class="dk-inspect-count">\{…\} \d+ properties<\/span><\/summary>/
+
+    assert parsed =~
+             ~r/<details open="">\s*<summary><span class="dk-inspect-key">meta:<\/span>\s*<span class="dk-inspect-count">\{…\} 1 property<\/span>/
+
+    assert parsed =~
+             ~r/<span class="dk-inspect-key">tag:<\/span><span class="dk-inspect-value" data-type="string">deep<\/span>/
+
+    assert parsed =~ ~r/<span class="dk-inspect-value" data-type="boolean">true<\/span>/
+    refute parsed =~ "&quot;deep&quot;"
+    refute parsed =~ ~r/<details>/
   end
 
   test "desk-inspect with open false closes it", c do
