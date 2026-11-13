@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Plugs.OptionalToken do
 
   import Plug.Conn
   alias Barkpark.Auth
+  alias BarkparkWeb.Plugs.BoundDataset
   alias BarkparkWeb.Plugs.RequireToken
 
   def init(opts), do: opts
@@ -91,15 +92,16 @@ defmodule BarkparkWeb.Plugs.OptionalToken do
     else
       case Auth.verify_token(raw_token) do
         {:ok, token} ->
-          cond do
-            RequireToken.share_token_off_surface?(conn, token) ->
-              RequireToken.deny(conn, {:error, :forbidden})
+          if RequireToken.share_token_off_surface?(conn, token) do
+            RequireToken.deny(conn, {:error, :forbidden})
+          else
+            case BoundDataset.resolve(conn, token) do
+              {:ok, conn} ->
+                assign(conn, :api_token, token)
 
-            RequireToken.dataset_off_binding?(conn, token) ->
-              RequireToken.deny(conn, {:error, :forbidden_dataset})
-
-            true ->
-              assign(conn, :api_token, token)
+              {:error, :forbidden_dataset} ->
+                RequireToken.deny(conn, {:error, :forbidden_dataset})
+            end
           end
 
         # Presented but unverifiable — revoked, expired, or never existed. The
