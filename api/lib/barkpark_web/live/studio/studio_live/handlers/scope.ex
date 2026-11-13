@@ -144,6 +144,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
     end
   end
 
+  # The desk's All fields tab sends "": no group, every field.
+  def select_group(%{"group" => ""}, socket), do: {:noreply, assign(socket, nav_group: nil)}
+
   def select_group(%{"group" => name}, socket) do
     {:noreply, assign(socket, nav_group: name)}
   end
