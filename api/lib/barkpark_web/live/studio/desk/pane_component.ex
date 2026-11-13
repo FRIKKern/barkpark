@@ -638,15 +638,25 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # dividers a structure declares (Sanity's S.divider()). `Barkpark.Structure`
   # joins its host groups and plugin tiers with positional dividers it makes
   # up itself (`div-<n>`); the desk leaves those out and keeps every declared
-  # one, titled or not.
-  defp node_entries(node) do
-    for item <- Tree.rows(node), not synthesized_divider?(item) do
-      case item do
-        %{type: :divider, title: title} when is_binary(title) -> {:divider, title}
-        %{type: :divider} -> :divider
-        _ -> %{title: item.title || item.id, next: Tree.opens(item)}
-      end
-    end
+  # one, titled or not. One made-up divider stays: the one that closes a
+  # titled section (Sanity's Settings: its title, its singletons, then a
+  # plain line before the next row).
+  @doc false
+  def node_entries(node) do
+    node
+    |> Tree.rows()
+    |> Enum.map_reduce(false, fn
+      %{type: :divider, title: title}, _in_titled when is_binary(title) ->
+        {{:divider, title}, true}
+
+      %{type: :divider} = item, in_titled ->
+        {if(in_titled or not synthesized_divider?(item), do: :divider), false}
+
+      item, in_titled ->
+        {%{title: item.title || item.id, next: Tree.opens(item)}, in_titled}
+    end)
+    |> elem(0)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp synthesized_divider?(%{type: :divider, title: nil, id: "div-" <> n}),

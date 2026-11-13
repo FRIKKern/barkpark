@@ -303,6 +303,14 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
 
   # The build line under the desk is the old Studio's; TanStack has none. The
   # desk's own sheet hides it, so every other Studio page keeps it.
+  # Rig run n (J41): the rows' sr-only status words are position: absolute.
+  # With no positioned ancestor they escaped every overflow, so the page itself
+  # grew as tall as the list (106,000 px at 2,000 rows) and a wheel scrolled
+  # the page, never bringing the list's end (its 2,000 note) into view.
+  test "the rows are the containing block for what a row positions" do
+    assert rule(@css, ".dk .dk-rows") =~ "position: relative"
+  end
+
   test "the desk hides the Studio's build footer, only where a desk is" do
     assert rule(@css, ".studio-shell:has(.dk) > .studio-footer") =~ "display: none"
   end
