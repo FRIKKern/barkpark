@@ -156,9 +156,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       # NOT fire the surrounding form's `phx-change`. So when a host wires
       # `:notify_id`, push the picked code to the LiveView process; the host
       # (StudioLive) routes it to that LiveComponent via `send_update/3`,
-      # which persists the value (the paper editor's patch-block path). Without
-      # `:notify_id` the component is a self-contained picker whose value is
-      # read by an explicit form submit — unchanged from before.
+      # which persists the value (the paper editor's patch-block path). In the
+      # document editor's form, the LiveView saves the pick (see
+      # `maybe_notify_select/2`).
       maybe_notify_select(socket, code)
       {:noreply, assign(socket, selected: code)}
     end
@@ -174,7 +174,19 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
   # Push the picked code to the LiveView process when a host wired `:notify_id`
   # (the dom id of the LiveComponent to update). The LiveView's handle_info
-  # routes it via `send_update/3`. No-op when no host is listening.
+  # routes it via `send_update/3`.
+  #
+  # With no `:notify_id`, a tree inside the document editor's form (its input
+  # is named `doc[…]`) tells the LiveView which input took which code, and the
+  # editor saves it like any other field change (task-0f806691db0e06dd): the
+  # re-rendered hidden input alone fires no `phx-change`, so the pick was lost
+  # unless another field's change submitted the form later. Any other host
+  # (`input_name` not under `doc[`) is a self-contained picker, as before.
+  defp maybe_notify_select(%{assigns: %{notify_id: nil, input_name: "doc[" <> _ = name}}, code) do
+    send(self(), {:tree_codelist_pick, %{name: name, value: code}})
+    :ok
+  end
+
   defp maybe_notify_select(%{assigns: %{notify_id: nil}}, _code), do: :ok
 
   defp maybe_notify_select(%{assigns: %{notify_id: notify_id}}, code) do

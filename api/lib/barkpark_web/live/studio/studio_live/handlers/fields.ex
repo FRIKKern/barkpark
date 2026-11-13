@@ -290,6 +290,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   @doc """
+  A pick in a tree codelist of the document editor saves like any other field
+  change (task-0f806691db0e06dd). `TreeCodelistField` sends the input name
+  (`doc[subject]`, or a nested `doc[a][0].b`) and the code: the re-rendered
+  hidden input alone fires no `phx-change`. The code goes into the editor
+  buffer at that path and the buffer is saved, as a reference pick does
+  (`Refs.select_ref/2`); `Shared.do_autosave/3` asks the write questions.
+  """
+  def tree_codelist_pick(%{name: name, value: code}, socket)
+      when is_binary(name) and is_binary(code) do
+    case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
+      {%{}, [_ | _] = path} ->
+        form = StudioLive.Path.put_value_at(base_form(socket), path, code)
+        socket = assign(socket, editor_form: form)
+        {:noreply, mark_dirty(Shared.do_autosave(socket, form, :tree_codelist_pick))}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def tree_codelist_pick(_msg, socket), do: {:noreply, socket}
+
+  @doc """
   The slug Generate derives from a title: Latin letters with accents or
   ligatures TRANSLITERATED before `Tenancy.slugify/1` keeps only `[a-z0-9]`.
 

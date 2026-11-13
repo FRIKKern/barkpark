@@ -61,19 +61,28 @@ await new Promise((r) => setTimeout(r, 0));
 assert.ok(el.hasAttribute("data-narrow"), "data-narrow comes back after a patch wiped it");
 assert.match(sheet(), /\[data-pane-index="2"\] > \.pane-header \{ justify-content: flex-start/, "Back and the title sit together at the start");
 
-// ── 600 to 701 px with a document last: still one pane ──────────────────────
-// A document needs 600 px; beside two 51 px strips that is 702. Under that
-// the document would be cut and its close link pushed off screen.
-for (const w of [600, 620, 640, 701]) {
+// ── The TanStack Studio's panes at five widths (scorecard row 7) ─────────────
+// From 600 px up a document beside the strips takes what is left, under its
+// 600 px too, as TanStack's: at 640 two strips and a 538 px document, not the
+// document alone. The want is TanStack's own rule (barkpark-studio
+// app/src/lib/layout.ts `collapsed` and NARROW) run for the same panes:
+// "s" a strip, "o" open, "narrow" one pane.
+const shapeAt = (w) => {
   width = w;
   hook._layout();
-  assert.ok(el.hasAttribute("data-narrow"), `${w} px cannot fit the document beside two strips: one pane`);
-  assert.match(sheet(), /\[data-pane-index="2"\] \{ display: flex; width: 100%/);
-}
-width = 702;
-hook._layout();
-assert.ok(!el.hasAttribute("data-narrow"), "702 px fits: strips and the document");
-assert.deepEqual(panesOf().map((p) => p.hasAttribute("data-pane-collapsed")), [true, true, false]);
+  if (el.hasAttribute("data-narrow")) return "narrow";
+  return panesOf().map((p) => (p.hasAttribute("data-pane-collapsed") ? "s" : "o")).join("");
+};
+const TANSTACK = { 500: "narrow", 640: "sso", 768: "sso", 1000: "soo", 1440: "ooo" };
+for (const [w, want] of Object.entries(TANSTACK)) assert.equal(shapeAt(Number(w)), want, `post;post-01 at ${w} px`);
+for (const w of [600, 620, 701]) assert.equal(shapeAt(w), "sso", `${w} px: two strips and the document`);
+// The document beside a reference: four panes.
+el.insertAdjacentHTML("beforeend", pane(3, "doc"));
+panesOf()[3].getBoundingClientRect = () => ({ left: 960, right: 1280, width: 320, top: 0, bottom: 800, height: 800 });
+const TANSTACK4 = { 500: "narrow", 640: "ssso", 768: "ssso", 1000: "ssso", 1440: "ssoo" };
+for (const [w, want] of Object.entries(TANSTACK4)) assert.equal(shapeAt(Number(w)), want, `post;post-01;author at ${w} px`);
+panesOf()[3].remove();
+shapeAt(702);
 
 // ── 600 to 639 px with lists only: the panes are laid out, never blank ──────
 // The Studio shell's phone bucket hides every pane but one there; the desk

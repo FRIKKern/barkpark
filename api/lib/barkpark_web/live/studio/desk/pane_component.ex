@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
+  alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.ListSearch
@@ -487,7 +488,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           gettext("This is the current document. Revision “%{rev}” is not shown here.",
             rev: pane.rev
           ),
-        (pane[:view] || pane[:inspect]) &&
+        # `inspect=on` is the Inspect dialog, which the desk draws.
+        (pane[:view] || pane[:inspect] not in [nil, "on"]) &&
           gettext("Other views and inspectors are not shown here.")
       ],
       & &1
@@ -715,19 +717,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
         _ ->
           value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-          %{title: title, value: show(value)}
+          %{title: title, value: FieldText.show(value)}
       end
     end
-  end
-
-  defp show(nil), do: "—"
-  defp show(""), do: "—"
-  defp show(value) when is_binary(value), do: value
-  defp show(value) when is_number(value) or is_boolean(value), do: to_string(value)
-
-  defp show(value) do
-    json = Jason.encode!(value, pretty: true)
-    if String.length(json) > 600, do: String.slice(json, 0, 600) <> " …", else: json
   end
 
   defp presence(value) when is_binary(value),
