@@ -219,12 +219,14 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
 
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
   # JSON in a mono that starts with ui-monospace, a long value on one line.
+  # LOOKS C3: the whole body is TanStack's mono (Parsed too); pre takes it.
   test "Inspect has one scroller, its body; Raw JSON is mono, unwrapped" do
     assert rule(@css, ".dk .dk-inspect-body") =~ "overflow: auto"
     assert rule(@css, ".dk .dk-inspect-body") =~ "min-height: 0"
+    assert rule(@css, ".dk .dk-inspect-body") =~ "font-family: ui-monospace,"
     refute rule(@css, ".dk .dk-inspect-panel") =~ "overflow"
     pre = rule(@css, ".dk .dk-inspect-panel pre")
-    assert pre =~ "font-family: var(--paper-font-mono, ui-monospace,"
+    assert pre =~ "font: inherit"
     assert pre =~ ~r/white-space: pre;/
     assert rule(@css, ".dk .dk-inspect-panel pre code") =~ "font: inherit"
   end
