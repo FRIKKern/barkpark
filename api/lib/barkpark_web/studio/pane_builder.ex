@@ -1338,19 +1338,19 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # The documents a page of rows references through its preview specs: ONE
   # scoped read per reference depth, so `parent.parent.title` costs two reads
   # for the whole page, not one per row. The published row wins; a draft-only
-  # target still names itself.
+  # target still names itself. `prefer_draft_targets: true` (the desk, as
+  # Sanity's list) puts the draft first: an author being renamed shows the
+  # new name in the posts' rows.
   defp preview_targets(docs, specs, dataset, opts) do
     rows = Enum.map(docs, &{specs, preview_root(&1)})
 
-    PreviewText.targets(rows, fn ids ->
-      found =
-        Content.get_documents_by_ids(
-          ids ++ Enum.map(ids, &("drafts." <> &1)),
-          dataset,
-          scope(opts)
-        )
+    keys =
+      if opts[:prefer_draft_targets], do: &["drafts." <> &1, &1], else: &[&1, "drafts." <> &1]
 
-      for id <- ids, target = found[id] || found["drafts." <> id], into: %{} do
+    PreviewText.targets(rows, fn ids ->
+      found = Content.get_documents_by_ids(Enum.flat_map(ids, keys), dataset, scope(opts))
+
+      for id <- ids, target = Enum.find_value(keys.(id), &found[&1]), into: %{} do
         {id, preview_root(target)}
       end
     end)

@@ -122,7 +122,10 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
       # A name is one of the type's `desk.sortOrderings`; anything else the
       # list menu picked is an order of its own.
       list_sorts: if(sort && is_nil(order), do: %{type => sort}, else: %{}),
-      list_orders: if(order, do: %{type => order}, else: %{})
+      list_orders: if(order, do: %{type => order}, else: %{}),
+      # A row's preview read through a reference shows the target's draft
+      # when it has one, as Sanity's list does (J23).
+      prefer_draft_targets: true
     ]
   end
 
