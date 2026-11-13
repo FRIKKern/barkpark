@@ -429,39 +429,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :ops?, :boolean, default: true
 
   def studio_tabs(assigns) do
-    # `:workspace_id` threads the current workspace into the resolver ctx so
-    # the top-menu surfacing collector can skip per-workspace-disabled plugins
-    # (ssp-w1-plugin-enablement). Nil on an unscoped surface → no filtering.
-    ctx = %{
-      dataset: assigns.dataset,
-      current_path: assigns[:current_path],
-      scope_prefix: assigns[:scope_prefix] || "",
-      workspace_id: assigns[:workspace_id]
-    }
-
-    baseline =
-      default_top_menu_entries(
-        assigns.dataset,
-        assigns[:scope_prefix] || "",
-        assigns[:admin?] == true,
-        assigns[:current_path]
-      )
-
-    tabs =
-      try do
-        Barkpark.Plugins.Registry.collect_top_menu_entries(baseline: baseline, ctx: ctx)
-      rescue
-        _ -> baseline
-      catch
-        _, _ -> baseline
-      end
-
-    tabs =
-      if assigns[:ops?] == false,
-        do: Enum.reject(tabs, &BarkparkWeb.LiveAuth.ops_gated_path?(&1[:path])),
-        else: tabs
-
-    assigns = assign(assigns, :tabs, tabs)
+    assigns = assign(assigns, :tabs, top_menu_tabs(assigns))
 
     ~H"""
     <div class="studio-bar-tabs" role="navigation" aria-label={gettext("Studio sections")}>
@@ -518,6 +486,50 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   end
 
   @doc """
+  The top-menu tabs the viewer sees, as `studio_tabs/1` draws them: the host's
+  built-ins as the baseline, every plugin's entries through the registry, and
+  without the ops-gated ones for a viewer who lacks ops access. The desk's
+  navbar (`BarkparkWeb.Studio.Desk.Navbar`) lays out this same list, so both
+  bars carry the same tabs.
+  """
+  @spec top_menu_tabs(map()) :: [map()]
+  def top_menu_tabs(assigns) do
+    # `:workspace_id` threads the current workspace into the resolver ctx so
+    # the top-menu surfacing collector can skip per-workspace-disabled plugins
+    # (ssp-w1-plugin-enablement). Nil on an unscoped surface → no filtering.
+    ctx = %{
+      dataset: assigns.dataset,
+      current_path: assigns[:current_path],
+      scope_prefix: assigns[:scope_prefix] || "",
+      workspace_id: assigns[:workspace_id]
+    }
+
+    baseline =
+      default_top_menu_entries(
+        assigns.dataset,
+        assigns[:scope_prefix] || "",
+        assigns[:admin?] == true,
+        assigns[:current_path]
+      )
+
+    tabs =
+      try do
+        Barkpark.Plugins.Registry.collect_top_menu_entries(baseline: baseline, ctx: ctx)
+      rescue
+        _ -> baseline
+      catch
+        _, _ -> baseline
+      end
+
+    tabs =
+      if assigns[:ops?] == false,
+        do: Enum.reject(tabs, &BarkparkWeb.LiveAuth.ops_gated_path?(&1[:path])),
+        else: tabs
+
+    tabs
+  end
+
+  @doc """
   A top-menu tab's name in the viewer's Studio language. Tab labels are DATA
   (the host's built-ins below and every plugin's `top_menu_entries/0`), kept
   English so nav-parity checks compare one vocabulary; the name is translated
@@ -542,11 +554,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # A disabled tab's reason in the viewer's language. The registry sends the
   # enabling workspace as data (`enabled_in`, task-aa4f50a406951fae) beside its
   # English `reason` sentence; the sentence is the fallback for an entry that
-  # carries no `enabled_in`.
-  defp disabled_reason(%{enabled_in: workspace}) when is_binary(workspace) and workspace != "",
+  # carries no `enabled_in`. Public for the desk's navbar, which draws the same
+  # disabled tab in its overflow.
+  @doc false
+  def disabled_reason(%{enabled_in: workspace}) when is_binary(workspace) and workspace != "",
     do: gettext("Disabled in this workspace — enabled in %{workspace}", workspace: workspace)
 
-  defp disabled_reason(tab), do: tab[:reason] || gettext("Disabled in this workspace")
+  def disabled_reason(tab), do: tab[:reason] || gettext("Disabled in this workspace")
 
   @doc """
   The canonical Studio nav model: the host's built-in top-menu tabs in

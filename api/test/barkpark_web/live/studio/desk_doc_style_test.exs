@@ -92,7 +92,8 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
   end
 
   # LOOKS PR 4. TanStack steps the title by its `.doc-column` (the pane), not by
-  # the 600 px form inside it (styles.css :660, :1215): at 1440 it is 33 px.
+  # the 600 px form inside it (barkpark-studio's stylesheet, the `.doc-column`
+  # title rules): at 1440 it is 33 px.
   test "the title steps by the pane, not by the 600 px column", c do
     {:ok, view, _html} = live(c.conn, c.desk)
     html = render(view)

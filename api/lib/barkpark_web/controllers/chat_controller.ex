@@ -422,7 +422,12 @@ defmodule BarkparkWeb.ChatController do
   `/approval` stays the allow/deny hot path with no map-shaped surface at all, so
   the question validation cannot become a hole in the tool-approval boundary.
 
-  The 404 leg is the whole authorization story and it is ONE oracle: a missing
+  An answer resumes the turn exactly as an `/approval` allow does, so a managed
+  turn on the instance host is refused with the same 403
+  `host_execution_not_permitted` for a principal that is not an instance
+  principal (`HostExecutionGate.authorize_turn/2`).
+
+  Past that gate, the 404 leg is the rest of the authorization and it is ONE oracle: a missing
   session, another tenant's session (`fetch_scoped`), a request_id that names an
   approval or plan row rather than a question, and a question already answered
   (stale / double answer) are all indistinguishable `nil`s. A second POST
@@ -435,6 +440,9 @@ defmodule BarkparkWeb.ChatController do
 
     with {:ok, {request_id, raw_answers}} <- validate_answer(body),
          %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         # An answer is an ALLOW: it lets a host turn act, so it passes the same
+         # gate as /approval allow (task-b03e470c315a6664).
+         :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
          %StudioChat.Message{} = row <- QuestionAnswer.fetch_pending_question(id, request_id),
          server_input = (row.metadata || %{})["input"] || %{},
          {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
@@ -456,6 +464,7 @@ defmodule BarkparkWeb.ChatController do
       send_resp(conn, :no_content, "")
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
   end

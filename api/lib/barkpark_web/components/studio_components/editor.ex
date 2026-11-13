@@ -923,6 +923,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-auto-recover="ignore"
               id="editor-form"
             >
+              <%!-- Per field, the number of the last remote value this page
+                    showed (bp-array-focus.js; `RemoteValues`). --%>
+              <input type="hidden" name="_bp_seen" id={"bp-seen-" <> Barkpark.Content.published_id(@editor_doc.doc_id)} value="{}" phx-update="ignore" />
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
