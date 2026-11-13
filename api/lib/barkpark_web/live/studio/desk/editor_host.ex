@@ -530,6 +530,17 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           {note}
         </p>
+        <%!-- Why Beta is not offered (duplicate block ids, blocks it cannot
+              edit safely). The Studio says it in its toolbar row, which the
+              desk hides (`Desk.Style`). --%>
+        <p
+          :if={!@edit_failed and !gone?(assigns) and assigns[:editor_blocks_identity_error]}
+          class="dk-note"
+          role="alert"
+          data-desk-identity-error
+        >
+          {Components.beta_identity_error_message(@editor_blocks_identity_error)}
+        </p>
         <Discarded.note
           :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)}
           dropped={Discarded.dropped?(assigns)}

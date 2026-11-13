@@ -2420,13 +2420,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   defp status_word("published"), do: gettext("published")
   defp status_word(status), do: status
 
-  defp beta_identity_error_message({:malformed_block_authority, _path}) do
+  def beta_identity_error_message({:malformed_block_authority, _path}) do
     gettext(
       "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
     )
   end
 
-  defp beta_identity_error_message(_reason) do
+  def beta_identity_error_message(_reason) do
     gettext(
       "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
     )
