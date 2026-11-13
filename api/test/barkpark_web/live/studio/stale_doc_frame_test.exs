@@ -71,10 +71,22 @@ defmodule BarkparkWeb.Studio.StaleDocFrameTest do
     :sys.get_state(view.pid).socket.assigns.editor_form |> Map.take(["title", "day"])
   end
 
-  defp send_post(view, target, changes) do
+  # `seen` is `_bp_seen` as bp-array-focus.js keeps it (`RemoteValues`).
+  defp send_post(view, target, changes, seen \\ %{}) do
     view
     |> element("#editor-form")
-    |> render_change(%{"_target" => ["doc", target], "doc" => Map.merge(form_of(view), changes)})
+    |> render_change(%{
+      "_target" => ["doc", target],
+      "doc" => Map.merge(form_of(view), changes),
+      "_bp_seen" => Jason.encode!(seen)
+    })
+  end
+
+  # The number of the value a push told the page, for `_bp_seen`.
+  defp told_seq(view, name) do
+    render(view)
+    assert_push_event(view, "bp:form-remote-values", %{seqs: %{^name => [_was, new]}})
+    new
   end
 
   defp stored(c) do
@@ -143,6 +155,33 @@ defmodule BarkparkWeb.Studio.StaleDocFrameTest do
 
         refute_push_event(a, "bp:form-remote-values", %{
           values: %{"doc[title]" => %{value: "Q Fixture post"}}
+        })
+      end
+
+      test "both type at once from a value A was told: both pages end on the merged text", c do
+        url = if unquote(surface) == :desk, do: c.desk, else: c.url
+        a = open(c, url)
+        b = open(c, url)
+
+        send_post(b, "title", %{"title" => "Fixture post 1"})
+        seen = told_seq(a, "doc[title]")
+
+        hold_frames_from(a)
+        send_post(b, "title", %{"title" => "Q Fixture post 1"})
+        frames = held_frames()
+
+        send_post(a, "title", %{"title" => "Fixture post 1 z"}, %{"doc[title]" => seen})
+        assert stored(c)["title"] == "Q Fixture post 1 z"
+
+        Enum.each(frames, &send(a.pid, &1))
+        render(a)
+        render(b)
+
+        assert form_of(a)["title"] == "Q Fixture post 1 z"
+        assert form_of(b)["title"] == "Q Fixture post 1 z"
+
+        refute_push_event(a, "bp:form-remote-values", %{
+          values: %{"doc[title]" => %{value: "Q Fixture post 1"}}
         })
       end
 
