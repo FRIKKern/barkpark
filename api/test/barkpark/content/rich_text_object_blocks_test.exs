@@ -60,6 +60,18 @@ defmodule Barkpark.Content.RichTextObjectBlocksTest do
       assert Enum.any?(msgs, &(&1 =~ "/body/1/text" and &1 =~ "Required"))
     end
 
+    # task-400a66c6ebd31026 made a field's out-of-list value a warning; a
+    # block keeps its own error and is not also warned.
+    test "a block's tone outside options.list is an error only, not also a warning" do
+      body = [para("hi"), callout(%{"tone" => "loud", "text" => "Note"})]
+
+      %{errors: errors, warnings: warnings} =
+        Validation.check_findings(%{"body" => body}, "t", @schema)
+
+      assert Enum.map(errors, &{&1.path, &1.code}) == [{"/body/1/tone", :not_in_list}]
+      refute Enum.any?(warnings, &(&1.code == :not_in_list))
+    end
+
     # task-839f9bebf5628c03 — found LIVE: barkpark-studio's PATCH on a
     # published post, through the real "editor":"blocks" write path,
     # produced ZERO findings for this exact out-of-vocabulary block. Root

@@ -523,11 +523,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # pane's id from the title (`pane-structure`), so `StructureCopy` keeps it.
   # The TanStack Studio titles its root "Content" when no desk is declared
   # (a declared desk's own title otherwise); Barkpark.Structure's default is
-  # "Structure".
-  defp root_title(%{id: "root", title: "Structure"} = root),
-    do: Map.put(root, :title, gettext("Content"))
+  # "Structure". Two panes must not share a title (the strips, the headings
+  # and the close links name them), so when a root row is itself titled
+  # "Content" (Barkpark.Structure's content-types group) the root keeps
+  # "Structure", in the viewer's language.
+  @doc false
+  def root_title(%{id: "root", title: "Structure"} = root) do
+    content = gettext("Content")
+    taken? = Enum.any?(root.items || [], &(Map.get(&1, :title) in [content, "Content"]))
+    Map.put(root, :title, if(taken?, do: gettext("Structure"), else: content))
+  end
 
-  defp root_title(root), do: root
+  def root_title(root), do: root
 
   # A groupBy is built deferred, with no groups: the menu that opens it builds
   # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them
