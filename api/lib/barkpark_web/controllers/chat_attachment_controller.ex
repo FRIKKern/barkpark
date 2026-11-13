@@ -28,6 +28,12 @@ defmodule BarkparkWeb.ChatAttachmentController do
     * a **plain data-plane token** (`read`/`write`, no `admin`, no `chat`) —
       `RequireChatAccess` halts 403 before the controller is entered at all.
 
+  One more reader exists, and it does not use these routes: a registered chat
+  host, whose `Host` credential is refused here (401). It reads through
+  `GET /v1/chat-host/leases/:lease_id/attachments/:attachment_id`
+  (`BarkparkWeb.ChatHostAttachmentController`), only for the session of a live
+  lease it holds, with the same not-found oracle and the same JSON envelope.
+
   ## Wire contract
 
       POST /v1/chat/sessions/:id/attachments   {"data": "<base64>"}   -> 201
