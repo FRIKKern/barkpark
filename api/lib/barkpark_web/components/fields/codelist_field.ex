@@ -213,12 +213,14 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   # so an id built from the field's name alone (`f-subject`) repeated in each
   # row, and two rows of a tree codelist raised `found duplicate ID
   # "tree-f-subject"` (task-f9f7a9acd3608ca4). A top-level field keeps
-  # `f-<name>`; `doc[subjects][1]` gives `f-subjects-1`.
+  # `f-<name>`; `doc[subjects][1]` gives `f-subjects-1`. A composite's child
+  # is `parent.child` (CompositeField's `child_path/2`), so dotted segments
+  # count too: `doc[meta].a` gives `f-meta-a`, `doc[rows][0].a` `f-rows-0-a`.
   defp input_id(name, path) do
     segments =
-      ~r/\[([^\]]*)\]/
+      ~r/\[([^\]]*)\]|\.([^.\[]+)/
       |> Regex.scan(path || "", capture: :all_but_first)
-      |> Enum.map(fn [seg] -> String.replace(seg, ~r/[^A-Za-z0-9_-]/, "_") end)
+      |> Enum.map(fn segs -> segs |> Enum.join() |> String.replace(~r/[^A-Za-z0-9_-]/, "_") end)
 
     case segments do
       [] -> "f-#{name}"

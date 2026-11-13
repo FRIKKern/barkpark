@@ -83,7 +83,8 @@ defmodule BarkparkWeb.Studio.TreeCodelistArrayRowsTest do
      conn: conn,
      studio: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio",
      type: type,
-     doc_id: doc_id}
+     doc_id: doc_id,
+     list_id: list_id}
   end
 
   defp stored_subjects(c) do
@@ -128,5 +129,78 @@ defmodule BarkparkWeb.Studio.TreeCodelistArrayRowsTest do
     pick(view, "[data-pane-editing]", 1, "FB007")
 
     assert stored_subjects(c) == ["FB001", "FB007"]
+  end
+
+  # #25887 review: a composite's children are `parent.child`, with no
+  # brackets, so ids from bracket segments alone gave two tree codelists in one
+  # composite the same id, and the editor raised.
+  test "composites: every tree codelist gets its own id; top-level ids stay as they were",
+       c do
+    small = "onixedit:tree-rows-small-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Codelists.register(@plugin, small, %{
+        issue: "1",
+        name: "Small",
+        values: [%{code: "A", translations: [%{language: "eng", label: "A"}]}]
+      })
+
+    tree = fn name ->
+      %{"name" => name, "title" => name, "type" => "codelist", "codelistId" => c.list_id}
+    end
+
+    type = c.type <> "_c"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => "TR composites",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "kind", "title" => "Kind", "type" => "codelist", "codelistId" => small},
+            tree.("subject"),
+            %{
+              "name" => "meta",
+              "title" => "Meta",
+              "type" => "composite",
+              "fields" => [tree.("a"), tree.("b")]
+            },
+            %{
+              "name" => "rows",
+              "title" => "Rows",
+              "type" => "arrayOf",
+              "of" => %{
+                "type" => "composite",
+                "title" => "Row",
+                "fields" => [tree.("a"), tree.("b")]
+              }
+            }
+          ]
+        },
+        @dataset
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        type,
+        %{
+          "doc_id" => c.doc_id <> "-c",
+          "title" => "Composite one",
+          "content" => %{
+            "meta" => %{"a" => "FB001", "b" => "FB002"},
+            "rows" => [%{"a" => "FB003", "b" => "FB004"}, %{"a" => "FB005", "b" => "FB006"}]
+          }
+        },
+        @dataset
+      )
+
+    {:ok, view, _html} = live(c.conn, "#{c.studio}/#{type}/#{c.doc_id}-c")
+
+    for id <-
+          ~w(f-kind tree-f-subject tree-f-meta-a tree-f-meta-b tree-f-rows-0-a tree-f-rows-0-b tree-f-rows-1-a tree-f-rows-1-b) do
+      assert has_element?(view, "#editor-form ##{id}"), "no ##{id}"
+    end
   end
 end
