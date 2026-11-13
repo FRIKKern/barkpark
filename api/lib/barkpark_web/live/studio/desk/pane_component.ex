@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
   alias BarkparkWeb.PreviewDay
+  alias BarkparkWeb.Studio.Desk.DocFooter
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -464,18 +465,29 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                 <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
                       as its day in the workspace's time zone. --%>
                 <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
+                <%!-- An empty reference field is an empty box; each reference is
+                      TanStack's card (`.ref-box`, as the edit pane's): the type's
+                      tile, the title, the type under it. --%>
                 <dd :if={field[:refs]} class="dk-refs">
-                  <span :if={field.refs == []} class="dk-ref-none">—</span>
+                  <span :if={field.refs == []} class="dk-ref-none"></span>
                   <%= for ref <- field.refs do %>
                     <span :if={!ref.type} class="dk-ref-missing">{ref.title}</span>
                     <.link
                       :if={ref.type}
                       patch={Panes.open_after(@panes, @index, ref_pane(ref, field.path), @base)}
-                      class="dk-ref"
+                      class="dk-ref ref-box ref-row"
                       aria-current={selected?(@panes, @index, ref_pane(ref, field.path)) && "true"}
                       data-desk-ref
                     >
-                      {ref.title}
+                      <span class="preview">
+                        <span class="dk-media" aria-hidden="true">
+                          <BarkparkWeb.Icons.desk_icon name={ref[:icon] || "document"} size={21} />
+                        </span>
+                        <span class="text">
+                          <span class="t">{ref.title}</span>
+                          <span :if={ref[:type_title]} class="s">{ref.type_title}</span>
+                        </span>
+                      </span>
                     </.link>
                   <% end %>
                 </dd>
@@ -483,6 +495,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             </dl>
           </div>
         <% end %>
+      </div>
+      <%!-- The edit pane's footer words (`DocFooter`), with no Publish: this
+            document is read here, not edited. --%>
+      <div
+        :if={@pane.kind == :doc && @data.ok? && is_map(@data.result[:edited])}
+        class="dk-edit-footer dk-ro-footer"
+        data-desk-ro-footer
+      >
+        <span class="dk-footer-status" data-desk-footer-status>
+          {DocFooter.status(%{editor_doc: @data.result.edited, editor_is_draft: @data.result.draft?})}
+        </span>
       </div>
     </section>
     """
@@ -732,6 +755,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
         kind: schema.title || schema.name,
         draft?: draft?,
         published?: published?,
+        # What the footer says: "Edited 5m ago" or "Last published 2h ago".
+        edited: %{updated_at: doc.updated_at, status: Map.get(doc, :status)},
         fields: fields(doc, schema, dataset, scope)
       }
     else
@@ -790,7 +815,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
         _ ->
           value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-          %{title: title, value: FieldText.show(value, field)}
+          %{title: title, value: FieldText.value(value, field)}
       end
     end
   end

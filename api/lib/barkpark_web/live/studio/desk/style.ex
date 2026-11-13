@@ -122,6 +122,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-fields dd.dk-refs { display: grid; gap: 8px; min-height: 0; padding: 0; background: none; box-shadow: none; white-space: normal; }
       .dk .dk-fields .dk-refs > * { box-sizing: border-box; display: block; min-width: 0; min-height: 35px; margin: 0; padding: 6px 12px; border: 0; border-radius: 3px; background: var(--dk-field-fill); box-shadow: inset 0 0 0 1px var(--dk-field-ring); color: var(--dk-field-fg); font-size: 15px; line-height: 23px; overflow-wrap: anywhere; text-decoration: none; }
       .dk .dk-fields .dk-refs > .dk-ref-missing, .dk .dk-fields .dk-refs > .dk-ref-none { color: var(--dk-muted); }
+      .dk .dk-fields .dk-refs > .ref-box { display: flex; align-items: center; gap: 4px; padding: 5px; }
+      .dk .dk-fields .ref-box > .preview { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 49px; padding: 5px 8px; border-radius: 3px; font-size: 13px; line-height: 19px; color: var(--dk-fg); }
+      .dk .dk-fields .ref-box .text { flex: 1; min-width: 0; margin-right: 20px; display: flex; flex-direction: column; }
+      .dk .dk-fields .ref-box .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-fields .ref-box .s { margin-top: -2px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-fields a.dk-ref:hover { background: var(--dk-field-fill); box-shadow: inset 0 0 0 1px var(--dk-field-hover-ring); }
       .dk .dk-fields a.dk-ref[aria-current] { background: var(--dk-row-chain-bg); color: var(--dk-row-chain-fg); }
       .dk .dk-fields a.dk-ref:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
