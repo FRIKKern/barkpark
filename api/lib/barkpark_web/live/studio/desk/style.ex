@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; flex: 1 0 600px; border-right: 0; }
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
+      .dk h2.pane-header-title { margin: 0; }
       .dk a.pane-item:hover { color: var(--fg); }
       .dk [data-lit] > a.pane-item:not(.selected) { background: var(--bg-muted); }
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
