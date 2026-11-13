@@ -108,6 +108,18 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk-search-hits") =~ "width: min(420px, calc(100% - 32px))"
   end
 
+  # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
+  # JSON in a mono that starts with ui-monospace, a long value on one line.
+  test "Inspect has one scroller, its body; Raw JSON is mono, unwrapped" do
+    assert rule(@css, ".dk .dk-inspect-body") =~ "overflow: auto"
+    assert rule(@css, ".dk .dk-inspect-body") =~ "min-height: 0"
+    refute rule(@css, ".dk .dk-inspect-panel") =~ "overflow"
+    pre = rule(@css, ".dk .dk-inspect-panel pre")
+    assert pre =~ "font-family: var(--paper-font-mono, ui-monospace,"
+    assert pre =~ ~r/white-space: pre;/
+    assert rule(@css, ".dk .dk-inspect-panel pre code") =~ "font: inherit"
+  end
+
   test "the sheet uses design tokens only, no literal colours" do
     refute @css =~ ~r/#[0-9a-fA-F]{3,8}\b/
     refute @css =~ ~r/\b(rgb|rgba|hsl|hsla)\(/

@@ -1,0 +1,21 @@
+{
+  "protocol_version": 1,
+  "chat_runtime": {"protocol": "bidirectional-v2"},
+  "providers": {
+    "claude": {
+      "installed": true,
+      "auth_ready": true,
+      "operations": ["send_turn", "steer", "interrupt", "answer_approval", "close"],
+      "task_hands": true,
+      "version": "2.1.0 (Claude Code)",
+      "attachments": ["image/png", "image/jpeg", "image/gif", "image/webp"]
+    },
+    "codex": {
+      "installed": true,
+      "auth_ready": false,
+      "operations": ["send_turn", "steer", "interrupt", "answer_approval", "close"],
+      "task_hands": true,
+      "version": "codex-cli 0.149.0"
+    }
+  }
+}

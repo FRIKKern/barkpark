@@ -108,11 +108,14 @@ jobs:
         run: mix deps.get
 
       - name: Install libxml2-utils for ONIX XSD validation
+        # A runner whose resolver cannot find the Ubuntu archive gets public
+        # resolvers first (scripts/ci-apt-dns-fallback.sh, #25730).
         # Copied from elixir-nightly.yml: the refresh may fail (retried, then
         # tolerated); the install is retried and is the decision; the binary is
         # asserted so an absent package still reds loudly.
         run: |
           set -u
+          bash scripts/ci-apt-dns-fallback.sh
           for i in 1 2 3; do
             if sudo apt-get update; then break; fi
             echo "apt-get update attempt ${i}/3 failed — an index this install does not use may be broken; continuing"
@@ -122,6 +125,7 @@ jobs:
           for i in 1 2 3; do
             if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
             echo "apt-get install libxml2-utils attempt ${i}/3 failed"
+            bash scripts/ci-apt-dns-fallback.sh --force
             sleep 10
           done
           if [ "$installed" != 1 ]; then
@@ -133,6 +137,7 @@ jobs:
             exit 1
           fi
           xmllint --version 2>&1
+        working-directory: ${{ github.workspace }}
 
       # Not --warnings-as-errors: the blocking gate owns warnings, and a warning
       # must not stop the one run that measures core without the owned tables.
