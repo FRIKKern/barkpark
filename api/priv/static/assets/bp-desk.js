@@ -1332,6 +1332,39 @@
         e.preventDefault();
         hook.pushEvent("desk-inspect", { open: true });
       };
+      // Sanity's document shortcuts, from inside the edit pane only
+      // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
+      // delete. Each presses the document menu's own item (`DocMenu`), so a key
+      // does only what the menu offers: a singleton has no Delete, a document
+      // with no draft no Publish. Typing still in the focused field's debounce
+      // goes first: LiveView sends a debounced field on blur, and the socket
+      // keeps order, so the publish carries it. Typing in a published
+      // document makes the draft that Publish appears for: the key then waits
+      // (3 s at most) for the save's answer to bring it. The focus stays.
+      hook._docKeys = { KeyP: "publish", KeyD: "delete-doc" };
+      hook._onDocKey = function (e) {
+        var action = e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && hook._docKeys[e.code];
+        if (!action || !e.target.closest) return;
+        var pane = e.target.closest("[data-pane-editing]");
+        if (!pane) return;
+        var item = function () {
+          return pane.isConnected ? pane.querySelector('[data-desk-doc-action="' + action + '"]') : null;
+        };
+        var owes = action === "publish" && hook._owes();
+        if (!item() && !owes) return;
+        e.preventDefault();
+        var at = root.ownerDocument.activeElement;
+        if (at && at.form && pane.contains(at)) at.dispatchEvent(new root.ownerDocument.defaultView.FocusEvent("blur"));
+        if (item()) return item().click();
+        var tries = 0;
+        var later = function () {
+          var form = editForm();
+          var busy = hook._typed || (form && form.hasAttribute("data-phx-ref-loading"));
+          if (!busy && item()) return item().click();
+          if (++tries < 40) setTimeout(later, 75);
+        };
+        setTimeout(later, 75);
+      };
       hook._onShowModal = function (e) {
         var dialog = e.target;
         if (dialog.matches && dialog.matches("dialog[data-desk-inspect]") && !dialog.open) dialog.showModal();
@@ -1362,6 +1395,7 @@
         hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
       };
       root.addEventListener("keydown", hook._onInspectKey);
+      root.addEventListener("keydown", hook._onDocKey);
       root.addEventListener("desk:show-modal", hook._onShowModal);
       // `close` does not bubble: caught on the way down.
       root.addEventListener("close", hook._onInspectClose, true);
@@ -1427,6 +1461,7 @@
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       root.removeEventListener("click", this._onCopy);
       root.removeEventListener("keydown", this._onInspectKey);
+      root.removeEventListener("keydown", this._onDocKey);
       root.removeEventListener("desk:show-modal", this._onShowModal);
       root.removeEventListener("close", this._onInspectClose, true);
       root.removeEventListener("click", this._onInspectTab);
