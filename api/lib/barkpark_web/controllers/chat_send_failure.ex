@@ -6,6 +6,7 @@ defmodule BarkparkWeb.ChatSendFailure do
   ALLOWLIST into a class; `public_error/1` gives each class its fixed status,
   public code and message, which `ChatController.send_failure_response/2`
   answers with. `loggable/1` is the term the server log may carry.
+  `studio_text/1` is the Studio chat's wording for the same failures.
   """
 
   @type class :: :capacity | :unavailable | :unsupported | :host_cannot_receive_attachments
@@ -65,6 +66,24 @@ defmodule BarkparkWeb.ChatSendFailure do
     do:
       {422, "host_cannot_receive_attachments",
        "this session's chat host cannot receive attachments of this type — update barkpark-chat-host, or send the text alone"}
+
+  @doc """
+  The Studio chat's system line for a user turn that never reached the model.
+
+  Honest line (charter D24): the port write failed or the session had already
+  gone. The words are restored to the composer, so this is a "try again", not a
+  "your message is lost". A registered host that does not advertise the
+  attachments capability did not drop: retrying with the same images fails the
+  same way, so say what will work.
+  """
+  @spec studio_text(term()) :: String.t()
+  def studio_text({:host_cannot_receive_attachments, _provider}),
+    do:
+      "This session's chat host can't receive images yet. Update barkpark-chat-host, or send the words alone."
+
+  def studio_text(_reason),
+    do:
+      "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   @doc """
   The failure term with every stack frame's arguments replaced by their arity.
