@@ -236,7 +236,10 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   defp entry(item, type) do
     %{
       title: text(item.title) || item.id,
-      sub: text(item[:meta]) || text(item[:updated]),
+      # The schema's list preview subtitle, or none: the TanStack row shows
+      # the title alone where the schema names no subtitle (LOOKS C4), not
+      # the Studio's "Updated 6h ago".
+      sub: text(item[:meta]),
       draft: item[:is_draft] == true,
       # The row's tile, as the TanStack Studio's preview media: the image its
       # list preview names, else the type's icon (the document icon for none).
