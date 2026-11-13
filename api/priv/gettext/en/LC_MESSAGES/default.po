@@ -10180,6 +10180,11 @@ msgstr ""
 msgid "Create cancelled: %{reason}"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:51
+#, elixir-autogen, elixir-format
+msgid "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:105
 #, elixir-autogen, elixir-format
 msgid "Delete cancelled: %{reason}"

@@ -34,6 +34,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   @create_retry_window_ms 30_000
 
   def new_document(%{"type" => type} = params, socket) do
+    # A type whose desk block says `authorCreatable: false` shows no "+"; a
+    # hand-pushed event is refused here too (task-631d6ea85517e668).
+    case Content.resolve_schema(type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      {:ok, schema} ->
+        if BarkparkWeb.Studio.PaneBuilder.author_creatable?(schema),
+          do: author_new_document(type, params, socket),
+          else: {:noreply, put_flash(socket, :error, not_creatable(schema, type))}
+
+      _ ->
+        author_new_document(type, params, socket)
+    end
+  end
+
+  defp not_creatable(schema, type) do
+    gettext(
+      "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form.",
+      type: Map.get(schema, :title) || type
+    )
+  end
+
+  defp author_new_document(type, params, socket) do
     preset = pane_preset(params, socket)
 
     case retry_of_recent_create(socket, type, preset) do
