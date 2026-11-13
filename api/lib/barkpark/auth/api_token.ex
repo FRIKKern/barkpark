@@ -109,6 +109,18 @@ defmodule Barkpark.Auth.ApiToken do
 
   @type t :: %__MODULE__{}
 
+  @doc """
+  True for a token minted with an explicit dataset. Such a token is held to
+  that one dataset, so it may not make a project or a workspace: each comes
+  with datasets of its own, and the request that makes one names no dataset
+  for the request-level fence to compare.
+  """
+  @spec dataset_bound?(term()) :: boolean()
+  def dataset_bound?(%__MODULE__{dataset_bound: true, dataset: bound}) when is_binary(bound),
+    do: true
+
+  def dataset_bound?(_principal), do: false
+
   @doc "Hash a raw token string for storage/lookup."
   def hash_token(raw_token) do
     :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
