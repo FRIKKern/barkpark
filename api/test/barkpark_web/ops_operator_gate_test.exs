@@ -25,7 +25,8 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
     "/admin/onixedit/bokbasen",
     "/admin/github",
     "/admin/fleet",
-    "/admin/onixedit/staleness"
+    "/admin/onixedit/staleness",
+    "/admin/pulse"
   ]
 
   setup do
@@ -161,6 +162,20 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
         assert {:ok, _view, _html} =
                  live(session(raw), "/w/#{ws_a.slug}/p/#{proj_a.slug}/admin" <> console)
       end
+    end
+  end
+
+  # Pulse has no workspace to clamp to, so its scoped mount is the operator's
+  # too (task-198c3d82d9158d17).
+  describe "Pulse, scoped" do
+    test "a tenant's ops token is turned away; the Default operator opens it",
+         %{ws_a: ws_a, proj_a: proj_a, default_id: d} do
+      {tenant, _} = token!(["read", "write", "ops"], ws_a.id)
+      path = "/w/#{ws_a.slug}/p/#{proj_a.slug}/admin/pulse"
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(session(tenant), path)
+
+      {operator, _} = token!(["read", "write", "ops"], d)
+      assert {:ok, _view, _html} = live(session(operator), "/admin/pulse")
     end
   end
 
