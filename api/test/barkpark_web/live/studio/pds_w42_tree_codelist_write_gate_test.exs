@@ -200,7 +200,7 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   # before it:
   #
   #   G1  `send(self(), {:tree_codelist_change, …})`
-  #         tree_codelist_field.ex:179 (`maybe_notify_select/2`), during handle_EVENT
+  #         tree_codelist_field.ex (`maybe_notify_select/2`, the notify_id clause), during handle_EVENT
   #   G2  `send(pid, {:phoenix, :send_update, …})`
   #         Channel.send_update/3 — what `send_update/3` in
   #         `Lifecycle.tree_codelist_change/2` compiles to — during G1's handle_INFO

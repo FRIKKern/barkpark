@@ -26,10 +26,35 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     after_media
   end
 
+  # Scorecard row 7: at 640 px the TanStack Studio shows two strips and a
+  # 538 px document. The desk's document pane and the Studio editor inside it
+  # give way below 600 px as the editor does in the phone bucket (measured:
+  # with the 560 px floor back the editor ran 22 px past the window).
+  test "a document beside the strips can be narrower than 600 px and is not cut" do
+    assert rule(@css, ".dk .dk-doc") =~ "flex: 1 1 600px"
+    assert rule(@css, ".dk .dk-edit") =~ "min-width: 0"
+    assert rule(@css, ".dk .dk-edit .editor-panel") =~ "min-width: 0"
+
+    assert @css =~
+             ".dk .dk-edit .editor-panel .bp-paper-surface, .dk .dk-edit .editor-panel .editor-body, .dk .dk-edit .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) { min-inline-size: 0; }"
+  end
+
   test "a reference chip's resting border is --fg-dim (3:1 in both themes), not --border-subtle" do
     body = rule(@css, ".dk .dk-ref")
     assert body =~ "var(--fg-dim)"
     refute body =~ "--border-subtle"
+  end
+
+  test "a read-only pane's reference chips do not keep the template's line breaks" do
+    # The field's dd is pre-wrap (a multi-line value keeps its lines); in the
+    # chips' dd that drew each chip as a 68 px box with its title pushed right.
+    assert rule(@css, ".dk .dk-fields dd") =~ "white-space: pre-wrap"
+    assert rule(@css, ".dk .dk-fields dd.dk-refs") =~ "white-space: normal"
+  end
+
+  test "reference chips are the desk's small text, in the edit strip as in a read-only pane" do
+    # The edit strip is not in a dd, so it took the page's 16 px.
+    assert rule(@css, ".dk .dk-refs") =~ "font-size: var(--text-sm)"
   end
 
   test "a note wraps a long unbroken value (a rev of 200 characters) inside its pane" do
