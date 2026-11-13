@@ -88,4 +88,58 @@ assert.equal(lit().active, "desk-search-hit-1");
 // Other keys are the box's own.
 assert.ok(!key("a").defaultPrevented);
 
+// ── The search is a dialog (LOOKS A4) ───────────────────────────────────────
+// jsdom draws no dialogs: open/close are the attribute, as a browser keeps it.
+const proto = window.HTMLDialogElement.prototype;
+if (!proto.showModal) proto.showModal = function () { this.setAttribute("open", ""); };
+if (!proto.close || !("open" in proto)) {
+  proto.close = function () { this.removeAttribute("open"); };
+  Object.defineProperty(proto, "open", { get() { return this.hasAttribute("open"); }, configurable: true });
+}
+const dialog = window.document.createElement("dialog");
+dialog.id = "dk-search-dialog";
+dialog.appendChild(window.document.querySelector(".dk-search"));
+window.document.body.prepend(dialog);
+const opener = window.document.createElement("button");
+opener.setAttribute("data-desk-search-open", "");
+window.document.body.prepend(opener);
+const bodyKey = (k, mods = {}) => {
+  const e = new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods });
+  window.document.body.dispatchEvent(e);
+  return e;
+};
+window.document.body.focus();
+
+// "/" outside a text field opens it with the box focused.
+assert.ok(bodyKey("/").defaultPrevented, '"/" opens the search');
+assert.ok(dialog.open, "the dialog is open");
+assert.equal(window.document.activeElement, $("desk-search-input"));
+// "/" typed in the box is a character.
+assert.ok(!key("/").defaultPrevented, '"/" in the box is the box\'s');
+// A submitted search (Enter) puts the dialog away.
+$("desk-search-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+assert.ok(!dialog.open, "Enter's form closes the dialog");
+
+// The navbar's button opens it.
+opener.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(dialog.open, "the search button opens the dialog");
+// A hit puts it away. (The page's link is not followed here: jsdom has no
+// navigation; the window hears the click last, after the desk's handlers.)
+window.addEventListener("click", (e) => e.preventDefault());
+$("desk-search-hit-0").dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(!dialog.open, "a hit closes the dialog");
+
+// Escape in the box puts it away (a search field's own Escape only empties it).
+opener.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(dialog.open);
+assert.ok(key("Escape").defaultPrevented, "Escape is the dialog's");
+assert.ok(!dialog.open, "Escape closes the dialog");
+
+// Cmd+K opens it too; a bare letter does not.
+window.document.body.focus();
+assert.ok(!bodyKey("k").defaultPrevented);
+assert.ok(!dialog.open);
+assert.ok(bodyKey("k", { metaKey: true }).defaultPrevented);
+assert.ok(dialog.open, "Cmd+K opens the dialog");
+
 console.log("ok — __desk_search_light");

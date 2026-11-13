@@ -143,8 +143,12 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-row > a.pane-item:hover:not(.selected)") =~ "var(--dk-card-hover)"
   end
 
-  test "the search hits popover fits a phone screen" do
-    assert rule(@css, ".dk-search-hits") =~ "width: min(420px, calc(100% - 32px))"
+  # LOOKS A4: the search is a dialog as TanStack's, 800 px at 12vh and never
+  # wider than the screen less 16 px a side; its hits sit inside it.
+  test "the search dialog fits a phone screen, its hits inside it" do
+    assert rule(@css, ".dk-search-dialog") =~ "width: min(800px, calc(100vw - 32px))"
+    assert rule(@css, ".dk-search-dialog") =~ "margin: 12vh auto auto"
+    assert rule(@css, ".dk-search-hits") =~ "position: static; width: auto"
   end
 
   # Feel walk 2: the popover drew as the browser's default buttons in a black
