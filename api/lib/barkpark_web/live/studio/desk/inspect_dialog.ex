@@ -74,11 +74,14 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
           {gettext("Raw JSON")}
         </button>
       </div>
-      <div id={"#{@id}-parsed"} role="tabpanel" aria-labelledby={"#{@id}-tab-parsed"} class="dk-inspect-panel">
-        <.tree entries={@entries} />
-      </div>
-      <div id={"#{@id}-raw"} role="tabpanel" aria-labelledby={"#{@id}-tab-raw"} class="dk-inspect-panel" hidden>
-        <pre><code>{Jason.encode!(ordered(@entries), pretty: true)}</code></pre>
+      <%!-- The one scroller (focus:165): the dialog fits the window, the body scrolls. --%>
+      <div class="dk-inspect-body inspect-body">
+        <div id={"#{@id}-parsed"} role="tabpanel" aria-labelledby={"#{@id}-tab-parsed"} class="dk-inspect-panel">
+          <.tree entries={@entries} />
+        </div>
+        <div id={"#{@id}-raw"} role="tabpanel" aria-labelledby={"#{@id}-tab-raw"} class="dk-inspect-panel" hidden>
+          <pre><code>{Jason.encode!(ordered(@entries), pretty: true)}</code></pre>
+        </div>
       </div>
     </dialog>
     """
