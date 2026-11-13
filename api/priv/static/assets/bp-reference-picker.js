@@ -12,7 +12,10 @@
 // draft-only docs (tasks especially) are pickable.
 //
 // Selected state renders a Sanity-style pill (.ref-selected) with the
-// referenced doc's title and a Remove button. The hidden input value
+// referenced doc's title and a Remove button. In the desk's edit pane it is
+// the TanStack Studio's card instead (.ref-box.ref-row): the type's tile,
+// the title and the type, and one "Reference actions" menu with Clear and
+// Replace (barkpark-studio RefInput.tsx). The hidden input value
 // is always the CANONICAL doc id string (a picked draft stores its id
 // without the `drafts.` prefix — Sanity `_ref` semantics; matches v1
 // reference-field persistence model) — no JSON, no `_ref`/`_type`
@@ -22,6 +25,24 @@
 // caught by BarkparkFieldBridge on the wrapper div.
 //
 // Contract: docs/studio/web-components.md
+
+// TanStack's icons (barkpark-studio components/icons.tsx: Ellipsis, Trash,
+// SyncIcon), drawn at 25 px.
+const BP_REF_SVG = '<svg width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg">';
+const BP_REF_ICONS = {
+  ellipsis:
+    BP_REF_SVG +
+    '<path d="M6.5 11C7.33 11 8 11.67 8 12.5C8 13.33 7.33 14 6.5 14C5.67 14 5 13.33 5 12.5C5 11.67 5.67 11 6.5 11Z" fill="currentColor"/>' +
+    '<path d="M12.5 11C13.33 11 14 11.67 14 12.5C14 13.33 13.33 14 12.5 14C11.67 14 11 13.33 11 12.5C11 11.67 11.67 11 12.5 11Z" fill="currentColor"/>' +
+    '<path d="M18.5 11C19.33 11 20 11.67 20 12.5C20 13.33 19.33 14 18.5 14C17.67 14 17 13.33 17 12.5C17 11.67 17.67 11 18.5 11Z" fill="currentColor"/></svg>',
+  trash:
+    BP_REF_SVG +
+    '<path d="M5 6.5H20M10 6.5V4.5C10 3.95 10.45 3.5 11 3.5H14C14.55 3.5 15 3.95 15 4.5V6.5M12.5 9V17M15.5 9L15 17M9.5 9L10 17M18.5 6.5L17.57 18.58C17.53 19.1 17.1 19.5 16.57 19.5H8.43C7.9 19.5 7.47 19.1 7.43 18.58L6.5 6.5H18.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+  sync:
+    BP_REF_SVG +
+    '<path d="M13.5 4.5H12.5C8.08 4.5 4.5 8.08 4.5 12.5C4.5 15.66 6.34 18.4 9 19.7M11.5 20.5H12.5C16.92 20.5 20.5 16.92 20.5 12.5C20.5 9.34 18.66 6.6 16 5.3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<path d="M14 17.56L11.5 20.5L14.5 23.06M11 7.44L13.5 4.5L10.5 1.94" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+};
 
 function bpRefEsc(s) {
   return String(s || "")
@@ -84,6 +105,8 @@ class BpReferencePicker extends HTMLElement {
     this._searchIntel.clientId = typeof BpSearchIntel === "undefined"
       ? null
       : BpSearchIntel.clientId("documents", this._dataset);
+    // The desk's edit pane draws the picked value as TanStack's card.
+    this._box = !!(this.closest && this.closest(".dk-edit"));
     this._render();
     if (this._value) this._loadSelectedTitle();
   }
@@ -107,7 +130,8 @@ class BpReferencePicker extends HTMLElement {
   _render() {
     this.replaceChildren();
     if (this._value) {
-      this._renderSelected();
+      if (this._box) this._renderBox();
+      else this._renderSelected();
     } else {
       this._renderSearch();
     }
@@ -156,6 +180,122 @@ class BpReferencePicker extends HTMLElement {
     pill.appendChild(actions);
     wrap.appendChild(pill);
     this.appendChild(wrap);
+  }
+
+  // TanStack's reference card (RefInput.tsx, RefMenu): a preview row (the
+  // type's tile, the title, the type under it) and a "…" button whose menu
+  // holds Clear and Replace. Replace is Change (the old pick comes back on
+  // Cancel or Escape); Clear is Remove. The menu button stands where Change
+  // stood, so a pick or a cancelled Replace lands the focus on it.
+  _renderBox() {
+    const box = document.createElement("div");
+    box.className = "ref-field ref-box ref-row";
+    box.tabIndex = -1;
+
+    const preview = document.createElement("div");
+    preview.className = "ref-preview preview";
+    const media = document.createElement("span");
+    media.className = "dk-media";
+    media.setAttribute("aria-hidden", "true");
+    media.innerHTML = this._typeIconSvg(this._selectedType || this._refTypes[0] || "") || "";
+    const text = document.createElement("span");
+    text.className = "text";
+    const title = document.createElement("span");
+    title.className = "ref-selected-title t";
+    title.textContent = this._selectedTitle || this._value;
+    const type = document.createElement("span");
+    type.className = "ref-selected-type s";
+    type.textContent = this._typeLabel();
+    text.append(title, type);
+    preview.append(media, text);
+
+    const wrap = document.createElement("div");
+    wrap.className = "menu-wrap";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-btn";
+    button.setAttribute("aria-label", this._t("reference_actions", "Reference actions"));
+    button.setAttribute("aria-haspopup", "menu");
+    button.setAttribute("aria-expanded", "false");
+    button.innerHTML = BP_REF_ICONS.ellipsis;
+
+    const menu = document.createElement("div");
+    menu.className = "dk-menu ref-menu";
+    menu.setAttribute("role", "menu");
+    menu.tabIndex = -1;
+    menu.hidden = true;
+    const item = (label, icon, run, cls) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dk-menu-item" + (cls ? " " + cls : "");
+      b.setAttribute("role", "menuitem");
+      b.tabIndex = -1;
+      b.innerHTML = '<span class="dk-menu-icon" aria-hidden="true">' + icon + "</span>";
+      b.append(label);
+      b.addEventListener("click", () => {
+        close(false);
+        run();
+      });
+      return b;
+    };
+    menu.append(
+      item(this._t("clear", "Clear"), BP_REF_ICONS.trash, () => this._clear(), "danger"),
+      item(this._t("replace", "Replace"), BP_REF_ICONS.sync, () => this._switchToSearch())
+    );
+
+    const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const outside = (e) => {
+      if (!wrap.contains(e.target)) close(false);
+    };
+    const open = (first) => {
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      document.addEventListener("mousedown", outside);
+      // As TanStack's: a click focuses the menu (no item lit); a key the first item.
+      (first ? items()[0] : menu).focus();
+    };
+    const close = (refocus) => {
+      if (menu.hidden) return;
+      menu.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+      document.removeEventListener("mousedown", outside);
+      if (refocus) button.focus();
+    };
+    button.addEventListener("click", (e) => (menu.hidden ? open(e.detail === 0) : close(true)));
+    button.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" && menu.hidden) {
+        // Not on to the menu's own arrow keys below: it would move past the first item.
+        e.preventDefault();
+        e.stopPropagation();
+        open(true);
+      }
+    });
+    wrap.addEventListener("keydown", (e) => {
+      if (menu.hidden) return;
+      const list = items();
+      const at = list.indexOf(document.activeElement);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close(true);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        list[(at + 1) % list.length].focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        list[(at - 1 + list.length) % list.length].focus();
+      } else if (e.key === "Tab") {
+        close(false);
+      }
+    });
+    wrap.addEventListener("focusout", (e) => {
+      if (!wrap.contains(e.relatedTarget)) close(false);
+    });
+    wrap.append(button, menu);
+
+    box.append(preview, wrap);
+    this.appendChild(box);
+    this._changeButton = button;
   }
 
   // One declared type reads as before; several read as the PICKED type
@@ -219,6 +359,8 @@ class BpReferencePicker extends HTMLElement {
     }
     title.textContent = this._selectedTitle || this._value;
     type.textContent = this._typeLabel();
+    const media = this._box && this.querySelector(".ref-box .dk-media");
+    if (media) media.innerHTML = this._typeIconSvg(this._selectedType || this._refTypes[0] || "") || "";
   }
 
   _renderSearch() {
