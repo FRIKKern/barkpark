@@ -208,10 +208,14 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
       nil ->
         {:error, :unauthorized}
 
+      # `OptionalSessionToken` does not run the dataset fence either, so a
+      # dataset-bound token naming another dataset is refused here, by the
+      # same predicate `RequireToken` uses.
       %ApiToken{} = tok ->
-        if RequireToken.share_token_off_surface?(conn, tok),
-          do: {:error, :forbidden},
-          else: {:ok, tok}
+        if RequireToken.share_token_off_surface?(conn, tok) or
+             RequireToken.dataset_off_binding?(conn, tok),
+           do: {:error, :forbidden},
+           else: {:ok, tok}
 
       tok ->
         {:ok, tok}
