@@ -80,9 +80,9 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
     {:ok, _} = Auth.create_token(raw, "tu-editors", @dataset, ~w(read write admin), ws_id)
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
-    prior = Application.get_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, [HaltOnFail])
-    on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+    prior = Barkpark.PluginEnv.capture()
+    Barkpark.PluginEnv.put!([HaltOnFail])
+    on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
     url = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/#{type}/#{doc_id}"
     {:ok, conn: conn, url: url, type: type, doc_id: doc_id}
@@ -145,6 +145,23 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
 
     assert stored(c) == {"Fixture post A2", "First B-ok"}
     refute banner?(b)
+  end
+
+  # #25946 review: B's failed post carried the title B showed before A's save
+  # reached it. Only the typed field is kept, so B's next landed save does not
+  # write the old title over A's.
+  test "a failed post that carried an old title does not put it back", c do
+    a = open(c)
+    b = open(c)
+    stale = %{"title" => shown(b, "title"), "excerpt" => shown(b, "excerpt")}
+
+    type_in(a, "title", " A2")
+    render(b)
+    post_form(b, "excerpt", Map.put(stale, "excerpt", "First FAIL"))
+    assert shown(b, "title") == "Fixture post A2"
+
+    post_form(b, "excerpt", %{"title" => shown(b, "title"), "excerpt" => "First ok"})
+    assert stored(c) == {"Fixture post A2", "First ok"}
   end
 
   test "a slug generate that did not land is kept over A's save, with the earlier typing", c do

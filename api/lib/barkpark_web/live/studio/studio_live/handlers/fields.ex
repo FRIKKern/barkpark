@@ -283,7 +283,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       t when is_binary(t) and t != "" ->
         posted = %{field => document_slug(t)}
         saved = Shared.do_autosave(socket, posted, :slug_derive)
-        {:noreply, saved |> keep_unsaved_values(posted) |> settle_dirty([field])}
+        {:noreply, saved |> keep_unsaved_values(posted, [field]) |> settle_dirty([field])}
 
       _ ->
         {:noreply, socket}
@@ -357,7 +357,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case fold_dot_paths(params, socket) do
       %{"doc" => doc} ->
         saved = Shared.do_autosave(socket, doc, :change)
-        {:noreply, saved |> keep_unsaved_values(doc) |> settle_dirty(target_key(params))}
+        keys = target_key(params)
+        {:noreply, saved |> keep_unsaved_values(doc, keys) |> settle_dirty(keys)}
 
       _ ->
         {:noreply, socket}
@@ -722,13 +723,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
-  # A save that did not land leaves what was posted in the form buffer, so a
-  # remote save that keeps the unsaved fields keeps the typing, not the value
-  # from before it (#25880 review). Same shape as a landed save's buffer
-  # (`Forms.coerce_params/2`).
-  defp keep_unsaved_values(socket, posted) do
+  # A save that did not land leaves the typed field's posted value in the form
+  # buffer, so a remote save that keeps the unsaved field keeps the typing, not
+  # the value from before it (#25880 review). Only `keys`, the field typed in:
+  # every other posted value is what the browser showed, which can be older
+  # than what the server already took from the other editor (#25946 review).
+  # Same shape as a landed save's buffer (`Forms.coerce_params/2`).
+  defp keep_unsaved_values(socket, posted, keys) do
     if socket.assigns[:save_status] in ["Save failed", "Save cancelled"] do
-      posted = Barkpark.Content.Forms.coerce_params(posted, socket.assigns[:editor_schema])
+      posted =
+        posted
+        |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
+        |> Map.take(keys)
+
       assign(socket, editor_form: Map.merge(socket.assigns[:editor_form] || %{}, posted))
     else
       socket
