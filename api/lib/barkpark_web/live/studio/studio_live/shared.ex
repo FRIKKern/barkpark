@@ -1757,7 +1757,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     old_schema = socket.assigns[:editor_schema]
 
     nav_group =
-      resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema,
+      BarkparkWeb.Studio.StudioLive.NavGroup.resolve(
+        socket.assigns[:nav_group],
+        old_schema,
+        new_schema,
         desk?: is_binary(socket.assigns[:desk_base])
       )
 
@@ -2433,43 +2436,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       errors: BarkparkWeb.StudioLocale.localize_findings(errs),
       warnings: BarkparkWeb.StudioLocale.localize_findings(warns)
     }
-  end
-
-  @doc false
-  # The Studio opens a schema on its first group. The desk opens it as the
-  # TanStack Studio and Sanity do: on the group marked `default: true`, else
-  # on All fields (nil), and keeps All fields while the schema stays.
-  def resolve_nav_group(current, old, new_schema, opts \\ [])
-  def resolve_nav_group(_current, _old, nil, _opts), do: nil
-
-  def resolve_nav_group(current, old, new_schema, opts) do
-    same? = old != nil and schema_id(new_schema) == schema_id(old)
-
-    cond do
-      opts[:desk?] == true and same? -> current
-      opts[:desk?] == true -> default_group_name(new_schema)
-      same? and current != nil -> current
-      true -> first_group_name(new_schema)
-    end
-  end
-
-  defp default_group_name(schema) do
-    Enum.find_value(BarkparkWeb.StudioComponents.schema_groups(schema), fn
-      %{"default" => true, "name" => name} -> name
-      _ -> nil
-    end)
-  end
-
-  @doc false
-  def schema_id(nil), do: nil
-  def schema_id(schema), do: Map.get(schema, :name) || Map.get(schema, "name")
-
-  @doc false
-  def first_group_name(schema) do
-    case BarkparkWeb.StudioComponents.schema_groups(schema) do
-      [%{"name" => name} | _] -> name
-      _ -> nil
-    end
   end
 
   @doc false
