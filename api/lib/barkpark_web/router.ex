@@ -2977,6 +2977,15 @@ defmodule BarkparkWeb.Router do
     post("/rotate", ChatHostController, :rotate)
     get("/commands", ChatHostController, :commands)
     post("/events", ChatHostController, :event)
+
+    # The host reads an attachment through the lease it is serving, never by
+    # session id: the controller takes the session from a live lease this host
+    # holds, and every miss is one 404 body (chat-host-attachments-plan T3).
+    get(
+      "/leases/:lease_id/attachments/:attachment_id",
+      ChatHostAttachmentController,
+      :show
+    )
   end
 
   # Authoritative external state report (herd-s6, charter D78h/D79h): the
