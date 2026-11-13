@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # that would carry it.
     # Nor does one longer than any name can be (the Studio's tabs would
     # compile it into a pattern: Regex.CompileError at 100,000 bytes).
-    (Text.text?(dataset) and byte_size(dataset) <= @dataset_max) || raise NotFound
+    named?(dataset) || raise NotFound
 
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
@@ -107,7 +107,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_params(params, uri, socket) do
     cond do
       # A live patch to such a dataset segment goes back to the desk it left.
-      not Text.text?(params["dataset"] || socket.assigns.dataset) ->
+      # So does one to a dataset longer than any name can be.
+      not named?(params["dataset"] || socket.assigns.dataset) ->
         {:noreply, redirect(socket, to: socket.assigns.base)}
 
       # So does one to a pane splat past the cap; a first request for one
@@ -123,6 +124,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # Joined as `follow/3` joins it, so it takes what that takes.
+  defp named?(dataset), do: Text.text?(dataset) and byte_size(dataset) <= @dataset_max
+
   defp splat_bytes(params), do: params |> Map.get("panes", []) |> Enum.join("/") |> byte_size()
 
   defp follow(params, uri, socket) do
