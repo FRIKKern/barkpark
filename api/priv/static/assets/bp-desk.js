@@ -249,11 +249,10 @@
     });
     // No width yet (the desk is not laid out): nothing collapses.
     var width = root.clientWidth;
-    // One pane: under the narrow width, or when even with every other pane a
-    // strip the last one would be cut (a document needs 600 px: with two
-    // strips that is 702).
-    var floor = (MIN[kinds[kinds.length - 1]] || MIN.list) + (kinds.length - 1) * STRIP;
-    var narrow = width > 0 && shown.length > 0 && (width < NARROW || floor > width);
+    // One pane under the narrow width, as the TanStack Studio. Above it a
+    // document beside the strips takes what is left, under its 600 px too
+    // (640 px: two strips and a 538 px document); the sheet lets it shrink.
+    var narrow = width > 0 && shown.length > 0 && width < NARROW;
     var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = TIP_RULES;
 
