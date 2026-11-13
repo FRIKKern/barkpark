@@ -10,7 +10,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
     TanStack's is. A pressed button goes grey, so the focus moves to the "…"
-    beside it, as TanStack's does.
+    beside it, as TanStack's does. Found by its id as an attribute: a pane
+    id (`desk-pane-2-doc:post;x`) is no CSS id selector.
 
   The words are drawn when the pane renders, so "5m ago" moves on with the
   next change, not with the clock.
@@ -41,10 +42,10 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       id={"#{@id}-publish"}
       class="dk-publish"
       disabled={is_nil(@publish)}
-      phx-click={JS.push("publish") |> JS.focus(to: "##{@menu_button}")}
+      phx-click={JS.push("publish") |> JS.focus(to: ~s([id="#{@menu_button}"]))}
       data-desk-publish
     >
-      <BarkparkWeb.Icons.icon name="send" size={17} />
+      <BarkparkWeb.Icons.icon name="send" size={21} />
       {(@publish && @publish.label) || gettext("Publish")}
     </button>
     """
