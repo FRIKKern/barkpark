@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Shared}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -71,7 +72,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `Handlers.Fields.settle_dirty/2`). The browser keeps the value of the input
   # that has the focus, so typing that has not been posted yet survives, and
   # `editor_doc` stays this tab's base, so a post of a value this tab never
-  # changed keeps the remote one (`Forms.upsert_draft/6`).
+  # changed keeps the remote one (`Forms.upsert_draft/6`). `RemoteValues`
+  # tells the focused input of the new value (task-e6ef964ac2e41d5a).
   #
   # With unsaved local edits (`editor_dirty`), raise the `doc_conflict` banner.
   # The fields named in `editor_unsaved_keys` keep their local value and the
@@ -107,7 +109,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           Shared.widget_values_changed?(schema, socket.assigns[:editor_form], updated_form)
 
         {:noreply,
-         assign(socket,
+         socket
+         |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
+         |> assign(
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
@@ -131,7 +135,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         |> Map.merge(Map.take(local, MapSet.to_list(keys)))
 
       changed? = Shared.widget_values_changed?(schema, local, form)
-      assign(socket, editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
+
+      socket
+      |> RemoteValues.push(local, form)
+      |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
     end
   end
 
@@ -335,8 +342,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       socket.assigns[:editor_dirty] ->
         {:noreply, socket}
 
+      # The rebuild may reach the form before `doc_updated` does; whichever
+      # reloads it tells the page what changed.
       true ->
-        {:noreply, Shared.rebuild_panes(socket)}
+        old_form = socket.assigns[:editor_form] || %{}
+        rebuilt = Shared.rebuild_panes(socket)
+        {:noreply, RemoteValues.push(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
     end
   end
 

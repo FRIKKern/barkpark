@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.DeskListRefPreviewTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Desk.LiveRefresh
 
   @dataset "production"
   @list ~s([data-pane-index="1"])
@@ -132,6 +133,51 @@ defmodule BarkparkWeb.Studio.DeskListRefPreviewTest do
                not has_element?(view, "#{@list} .dk-row-sub", "Ada Lovelace")
            end),
            "the list: " <> list(view)
+  end
+
+  # Every schema the desk shows was read with its tree: deciding which panes
+  # a burst of saves elsewhere touches asks the store for no schema. (The
+  # editor's reference strip still reads its targets' schemas for their
+  # titles; that is `Refs.resolve/4`, not the decision.)
+  test "the refresh decides from the desk's own schemas: N frames, 0 schema reads", c do
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.post};lr-post-#{c.n}-1")
+    assert poll(view, fn -> has_element?(view, "#{@list} .dk-row-sub", "Ada Lovelace") end)
+
+    handler = "desk-schema-reads-#{c.n}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, meta, {test, pid} ->
+        if self() == pid and meta[:source] == "schema_definitions" do
+          {:current_stacktrace, stack} = Process.info(self(), :current_stacktrace)
+          if Enum.any?(stack, &(elem(&1, 0) == LiveRefresh)), do: send(test, :refresh_read)
+        end
+      end,
+      {self(), view.pid}
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {:ok, _} =
+      Content.upsert_document(
+        c.author,
+        %{"doc_id" => c.ada, "content" => %{"name" => "Ada Byron"}},
+        @dataset
+      )
+
+    for _ <- 1..5 do
+      send(view.pid, {:document_changed, %{type: c.author, doc_id: c.ada}})
+      Process.sleep(300)
+      render_async(view, 5_000)
+    end
+
+    # The list did follow the rename: the refresh ran and said yes.
+    assert poll(view, fn -> has_element?(view, "#{@list} .dk-row-sub", "Ada Byron") end),
+           "the list: " <> list(view)
+
+    :telemetry.detach(handler)
+    refute_received :refresh_read
   end
 
   test "a list row's subtitle shows the referenced document's draft, as Sanity's list", c do

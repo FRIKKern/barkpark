@@ -146,40 +146,41 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
 
   defp stale?(_pane, _stale, _types), do: false
 
-  # A document pane's reference fields can point at a changed type. Read from
-  # its schema, not its document: the page does not hold the pane's data.
-  defp refers?(%{kind: :doc, type: type} = pane, types, assigns) when is_binary(type) do
-    with false <- MapSet.size(types) == 0 or pane[:untyped] == true,
-         {:ok, schema} <- Content.resolve_schema(type, assigns.dataset, assigns.scope) do
-      case Refs.target_types(schema) do
-        :any -> true
-        targets -> not MapSet.disjoint?(targets, types)
-      end
-    else
-      _ -> false
+  @doc """
+  Per document type, the types its panes show through a reference: `:doc`,
+  a document pane's reference fields (it shows their titles); `:list`, what
+  a list row's preview reads (`author.name`). `:any` when a reference names
+  no type. Read once with the desk's tree, so a refresh asks the store for
+  no schema.
+  """
+  @spec targets(String.t(), keyword()) :: %{
+          String.t() => %{doc: MapSet.t() | :any, list: MapSet.t() | :any}
+        }
+  def targets(dataset, scope) do
+    for schema <- Content.list_schemas(dataset, scope), into: %{} do
+      {schema.name, %{doc: Refs.target_types(schema), list: Refs.preview_target_types(schema)}}
     end
-  rescue
-    # The store cannot say now: the pane still reads again on its own changes.
-    _ -> false
   end
 
-  # A list's rows show what their previews read through a reference (an
-  # author's name under each post): a change of that type changes them (J23).
-  defp refers?(%{kind: :list, type: type}, types, assigns) when is_binary(type) do
-    with false <- MapSet.size(types) == 0,
-         {:ok, schema} <- Content.resolve_schema(type, assigns.dataset, assigns.scope) do
-      case Refs.preview_target_types(schema) do
-        :any -> true
-        targets -> not MapSet.disjoint?(targets, types)
-      end
-    else
+  # A document pane's reference fields, or a list's row previews, can point at
+  # a changed type (J23). Read from the targets the desk read with its tree:
+  # the page does not hold the pane's data, and a burst of saves elsewhere
+  # costs no schema read.
+  defp refers?(%{kind: kind, type: type} = pane, types, assigns)
+       when kind in [:doc, :list] and is_binary(type) do
+    targets = (MapSet.size(types) > 0 and pane[:untyped] != true) && desk_targets(assigns, type)
+
+    case targets && targets[kind] do
+      :any -> true
+      %MapSet{} = targets -> not MapSet.disjoint?(targets, types)
       _ -> false
     end
-  rescue
-    _ -> false
   end
 
   defp refers?(_pane, _types, _assigns), do: false
+
+  defp desk_targets(%{desk: %{targets: %{} = targets}}, type), do: targets[type]
+  defp desk_targets(_assigns, _type), do: nil
 
   # The editor's references can point at a changed type: read from the
   # schema the editor holds.

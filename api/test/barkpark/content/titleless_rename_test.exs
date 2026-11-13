@@ -280,6 +280,59 @@ defmodule Barkpark.Content.TitlelessRenameTest do
 
       assert column("author-rd") == "D2"
     end
+
+    # task-ce23f03c4f03c335 (#25942 review): the envelope a client fetched may
+    # be the DRAFT twin, which carries the draft's title, not the published one.
+    defp direct_publish(from_id, to_id, changes) do
+      {:ok, doc} = Content.get_document(from_id, "author", @dataset)
+
+      envelope =
+        doc
+        |> Barkpark.Content.Envelope.render()
+        |> Map.drop(["_rev"])
+        |> Map.put("_id", to_id)
+        |> Map.merge(changes)
+
+      {:ok, _} =
+        Mutations.apply_mutations([%{"createOrReplace" => envelope, "publish" => true}], @dataset)
+    end
+
+    defp published_with_renamed_draft(id) do
+      author(id, "X1")
+      {:ok, _} = Content.publish_document(id, "author", @dataset)
+
+      {:ok, _} =
+        Mutations.apply_mutations(
+          [%{"patch" => %{"id" => id, "type" => "author", "set" => %{"name" => "X2"}}}],
+          @dataset
+        )
+
+      assert column("drafts." <> id) == "X2"
+    end
+
+    test "a fetched DRAFT sent to the published id with \"publish\": true and a new name moves the column" do
+      published_with_renamed_draft("author-dx")
+
+      direct_publish("drafts.author-dx", "author-dx", %{"name" => "X3"})
+
+      assert column("author-dx") == "X3"
+    end
+
+    test "with a draft twin, a fetched PUBLISHED envelope and a new name still moves the column" do
+      published_with_renamed_draft("author-dp")
+
+      direct_publish("author-dp", "author-dp", %{"name" => "X3"})
+
+      assert column("author-dp") == "X3"
+    end
+
+    test "with a draft twin, a title of the client's own stays" do
+      published_with_renamed_draft("author-do")
+
+      direct_publish("drafts.author-do", "author-do", %{"name" => "X3", "title" => "Mine"})
+
+      assert column("author-do") == "Mine"
+    end
   end
 
   describe "a name set blank or unset shows what a new author with no name shows" do
