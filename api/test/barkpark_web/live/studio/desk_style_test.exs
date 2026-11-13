@@ -39,6 +39,11 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-fields dd.dk-refs") =~ "white-space: normal"
   end
 
+  test "reference chips are the desk's small text, in the edit strip as in a read-only pane" do
+    # The edit strip is not in a dd, so it took the page's 16 px.
+    assert rule(@css, ".dk .dk-refs") =~ "font-size: var(--text-sm)"
+  end
+
   test "a note wraps a long unbroken value (a rev of 200 characters) inside its pane" do
     assert rule(@css, ".dk .dk-note") =~ "overflow-wrap: anywhere"
   end
