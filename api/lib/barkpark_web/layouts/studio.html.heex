@@ -59,6 +59,23 @@
             />
           <% end %>
         <% end %>
+        <%!-- The desk's search (LOOKS A4): a dialog the desk draws, opened
+              here, by Cmd+K and by "/" (bp-desk.js), as the TanStack
+              Studio's navbar search. Only the desk (the one host with a
+              `:desk_base`) has it; every other page is unchanged. --%>
+        <button
+          :if={is_binary(assigns[:desk_base])}
+          type="button"
+          class="btn btn-ghost btn-sm"
+          data-desk-search-open
+          aria-haspopup="dialog"
+          aria-controls="dk-search-dialog"
+          aria-keyshortcuts="Meta+K Control+K /"
+          title={gettext("Search documents")}
+          aria-label={gettext("Search documents")}
+        >
+          <span class="bp-action-icon" aria-hidden="true"><.icon name="search" size={16} /></span>
+        </button>
       </div>
     </:brand>
     <:tabs :if={assigns[:dataset]}>

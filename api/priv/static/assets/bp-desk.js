@@ -579,6 +579,31 @@
     };
   }
 
+  // The search is a dialog, as the TanStack Studio's (LOOKS A4): the navbar's
+  // search button, Cmd+K / Ctrl+K and "/" open it with the box focused; a hit
+  // or Enter puts it away. A box with no dialog round it is only focused.
+  function openSearch(doc) {
+    var box = doc.getElementById("desk-search-input");
+    if (!box) return false;
+    var dialog = box.closest ? box.closest("dialog") : null;
+    if (dialog && !dialog.open && dialog.showModal) dialog.showModal();
+    box.focus();
+    if (box.select) box.select();
+    return true;
+  }
+
+  function closeSearch(el) {
+    var dialog = el && el.closest ? el.closest("dialog") : null;
+    if (dialog && dialog.open && dialog.close) dialog.close();
+  }
+
+  // A key typed into something that takes text is that thing's.
+  function typing(el) {
+    if (!el || !el.tagName) return false;
+    var tag = el.tagName.toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable === true;
+  }
+
   // Which hits these are: a patch with other hits starts the light again.
   function hitsKey(parts) {
     return parts.options
@@ -873,6 +898,8 @@
         var hit = e.currentTarget !== root;
         var row = e.target.closest ? e.target.closest(hit ? HIT : OPENER) : null;
         if (!row || root.contains(row) === hit || !plainClick(e)) return;
+        // A hit puts the search dialog away, whatever the panes do next.
+        if (hit) closeSearch(row);
         hook._refocus = !hit && root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         // The click before this one has not landed: its answer is still to
         // come, and is not this click's (see _onLoaded).
@@ -1130,11 +1157,22 @@
         });
       }
 
-      // Cmd+K / Ctrl+K: the search box, unless something else took the key.
+      // Cmd+K / Ctrl+K, and "/" outside a text field: the search dialog,
+      // unless something else took the key.
       // In the box, ArrowDown and ArrowUp move the lit hit, and Enter's form
       // carries it.
       hook._onSearchKey = function (e) {
         var inBox = e.target && e.target.id === "desk-search-input";
+        // Escape in the box puts the dialog away, as TanStack's; the browser's
+        // own Escape on a search field would only empty it first.
+        if (inBox && e.key === "Escape" && !e.defaultPrevented) {
+          var open = e.target.closest ? e.target.closest("dialog[open]") : null;
+          if (open) {
+            e.preventDefault();
+            closeSearch(e.target);
+          }
+          return;
+        }
         if (inBox && !e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter")) {
           var parts = searchParts(root.ownerDocument);
           if (!parts.options.length) return;
@@ -1149,12 +1187,22 @@
           light(parts, hook._search.at);
           return;
         }
-        if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
-        var box = root.ownerDocument.getElementById("desk-search-input");
-        if (!box) return;
-        e.preventDefault();
-        box.focus();
-        if (box.select) box.select();
+        if (e.defaultPrevented || e.altKey) return;
+        var slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !typing(e.target);
+        var cmdK = (e.metaKey || e.ctrlKey) && !e.shiftKey && String(e.key).toLowerCase() === "k";
+        if (!slash && !cmdK) return;
+        if (openSearch(root.ownerDocument)) e.preventDefault();
+      };
+
+      // The navbar's search button opens the dialog; the search's own form,
+      // sent with Enter, puts it away (the server opens the hit).
+      hook._onSearchOpen = function (e) {
+        var opener = e.target && e.target.closest ? e.target.closest("[data-desk-search-open]") : null;
+        if (!opener || !plainClick(e)) return;
+        if (openSearch(root.ownerDocument)) e.preventDefault();
+      };
+      hook._onSearchSent = function (e) {
+        if (e.target && e.target.id === "desk-search-form") closeSearch(e.target);
       };
 
       // The draft in the editor was discarded elsewhere (`Desk.Discarded`):
@@ -1257,6 +1305,8 @@
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
+      root.ownerDocument.addEventListener("click", hook._onSearchOpen);
+      root.ownerDocument.addEventListener("submit", hook._onSearchSent);
       root.ownerDocument.addEventListener("keydown", hook._onEnterList);
       root.addEventListener("keydown", hook._onKey);
       // `toggle` does not bubble: caught on the way down.
@@ -1557,6 +1607,8 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      root.ownerDocument.removeEventListener("click", this._onSearchOpen);
+      root.ownerDocument.removeEventListener("submit", this._onSearchSent);
       root.ownerDocument.removeEventListener("keydown", this._onEnterList);
       if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);

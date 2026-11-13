@@ -37,8 +37,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
     <style>
       /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
          measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
-      .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; }
-      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #556bfc; }
+      .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; --dk-shadow: rgba(0, 0, 0, 0.12); }
+      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #556bfc; --dk-shadow: rgba(0, 0, 0, 0.5); }
+      /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
+      .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
+      html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
       /* studio-literal-check: skip-end */
       .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; min-width: 320px; max-width: none; flex: 1 1 600px; border-right: 0; }
@@ -164,9 +167,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
-      .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
-      .dk-search form { max-width: 420px; }
-      .dk-search-hits { position: absolute; z-index: 5; left: 16px; top: 100%; width: min(420px, calc(100% - 32px)); max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; }
+      .dk-search-dialog { box-sizing: border-box; width: min(800px, calc(100vw - 32px)); max-height: 76vh; margin: 12vh auto auto; padding: 0; border: 0; border-radius: 6px; background: var(--bg-card); color: var(--fg); box-shadow: 0 0 0 1px var(--dk-border), 0 8px 24px var(--dk-shadow); overflow: hidden; }
+      .dk-search { position: relative; padding: 8px 12px; background: var(--bg-card); }
+      .dk-search form { max-width: none; }
+      .dk-search-hits { position: static; width: auto; max-height: 60vh; margin: 8px -12px -8px; padding: 4px 0; overflow-y: auto; background: var(--bg-card); border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; }
       .dk-search-hits a[aria-selected="true"] { background: var(--bg-muted); }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; font-size: var(--text-sm); }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--fg-dim); border-radius: 6px; color: var(--fg); text-decoration: none; }
