@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
+  alias BarkparkWeb.PreviewDay
   alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
@@ -417,7 +418,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <dl :if={@data.result[:fields]} class="dk-fields">
             <div :for={field <- @data.result.fields}>
               <dt>{field.title}</dt>
-              <dd :if={!field[:refs]}>{field.value}</dd>
+              <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
+                    as its day in the workspace's time zone. --%>
+              <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
               <dd :if={field[:refs]} class="dk-refs">
                 <span :if={field.refs == []}>—</span>
                 <%= for ref <- field.refs do %>
@@ -717,7 +720,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
         _ ->
           value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-          %{title: title, value: FieldText.show(value)}
+          %{title: title, value: FieldText.show(value, field)}
       end
     end
   end
