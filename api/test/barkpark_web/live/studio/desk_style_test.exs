@@ -148,26 +148,30 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
   end
 
   # Feel walk 2: the popover drew as the browser's default buttons in a black
-  # box, as no rule named its classes. TanStack's: a card, an uppercase
-  # label, padded rows and a check on the current sort.
-  test "the List options popover is a card like the document menu, with its label and a check" do
-    assert @css =~
-             ".dk .dk-list-menu { min-width: 220px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }"
-
-    assert @css =~ ~r/\.dk \.dk-list-menu \.menu-label \{[^}]*text-transform: uppercase/
-
-    assert @css =~
-             ~r/\.dk \.dk-list-menu \[role="menuitemradio"\] \{[^}]*border: 0; background: none;/
+  # box, as no rule named its classes. Now the desk's one menu look (LOOKS C1,
+  # `desk_menu_look_test.exs`): an uppercase label, padded rows and a check on
+  # the current sort.
+  test "the List options popover is the desk's menu, with its label and a check" do
+    assert rule(@css, ".dk .dk-menu .dk-menu-label") =~ "text-transform: uppercase"
+    assert rule(@css, ".dk .dk-menu-item") =~ "border: 0; border-radius: 3px; background: none;"
 
     assert @css =~
-             ~s(.dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓";)
+             ~s(.dk .dk-menu-item[aria-checked="true"]::after { content: "✓";)
   end
 
   # A choice already in use ("Default sort" while it is) is faint and lights
   # nothing on hover, as the TanStack Studio's list menu.
   test "a List options choice already in use is faint and has no hover" do
     assert @css =~
-             ~s|.dk .dk-list-menu [role="menuitemradio"][aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--fg) 14%, var(--bg-card)); }|
+             ~s|.dk .dk-menu-item[aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--dk-menu-fg) 14%, var(--dk-bg)); }|
+
+    lit =
+      rule(
+        @css,
+        ".dk :is(.dk-menu .dk-menu-item:hover, .dk-menu:not(:hover) .dk-menu-item:focus-visible):not(:disabled, [aria-disabled=\"true\"])"
+      )
+
+    assert lit =~ "background: var(--dk-selected)"
   end
 
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw

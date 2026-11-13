@@ -9,14 +9,16 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   sends the Studio's own event to the page, which hands it to the editor
   (`EditorHost`): nothing here writes, and the Studio's toolbar is untouched.
 
-  The menu is an HTML popover, as the list's "List options" is: Enter or a
-  click opens it, Escape or a click outside closes it and the focus goes back
-  to the button. `bp-desk.js` focuses the first item on open, keeps
+  It is drawn in the desk's one menu look (`Desk.Menu`), each action with
+  its glyph, Delete in red under a line. The menu is an HTML popover, as the
+  list's "List options" is: Enter or a click opens it, Escape or a click
+  outside closes it and the focus goes back to the button. `bp-desk.js` focuses the first item on open, keeps
   `aria-expanded` on the button and moves the focus with the arrow keys.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.StudioLive.DocActions
 
   # The Studio events this menu may send (grant R21); every other action
@@ -81,25 +83,35 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
         popover
         role="menu"
         aria-labelledby={"#{@id}-button"}
-        class="dk-doc-menu-list"
+        class="dk-doc-menu-list dk-menu"
         style={"position-anchor: #{@anchor}; inset: auto; #{@at}; right: anchor(right); #{@margin}"}
       >
-        <button
-          :for={item <- @items}
-          type="button"
-          role="menuitem"
-          tabindex="-1"
-          popovertarget={@id}
-          popovertargetaction="hide"
-          phx-click={item.event}
-          data-desk-doc-action={item.event}
-        >
-          {item.label}
-        </button>
+        <%= for {item, at} <- Enum.with_index(@items) do %>
+          <Menu.separator :if={at > 0 and item.event == "delete-doc"} />
+          <Menu.item
+            role="menuitem"
+            tabindex="-1"
+            icon={icon(item.event)}
+            danger={item.event == "delete-doc"}
+            popovertarget={@id}
+            popovertargetaction="hide"
+            phx-click={item.event}
+            data-desk-doc-action={item.event}
+          >{item.label}</Menu.item>
+        <% end %>
       </div>
     </div>
     """
   end
+
+  # Each action's glyph, as the TanStack Studio's menus draw them (Sanity's
+  # names; Barkpark's own glyph wins where it has one, `desk_icon/1`).
+  defp icon("publish"), do: "publish"
+  defp icon("unpublish"), do: "unpublish"
+  defp icon("show-history"), do: "restore"
+  defp icon("discard-draft"), do: "reset"
+  defp icon("duplicate-doc"), do: "copy"
+  defp icon("delete-doc"), do: "trash"
 
   defp place(:header),
     do: %{
