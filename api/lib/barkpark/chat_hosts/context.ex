@@ -440,6 +440,49 @@ defmodule Barkpark.ChatHosts do
   end
 
   @doc """
+  The live lease `host` holds under the raw, caller-supplied `lease_id`, or nil.
+
+  This is the fence for the host-scoped attachment read
+  (`/papers/chat-host-attachments-plan`): the host names the lease it is
+  serving, never a session, and the session is taken from the row this returns.
+  A lease answers only when every term holds:
+
+    * `lease_id` casts to a UUID (raw input never reaches the query uncast);
+    * it is THIS host's lease (`host_id`), stamped with this host's workspace;
+    * it is live: status `leased` or `running`, unrevoked and unexpired, the
+      same terms as `live_fence_subquery/1`;
+    * its session exists and is owned by this host's workspace. The lease row's
+      `workspace_id` is a copy written at lease time; the session's owner is
+      the tenancy truth, so both must agree.
+
+  Every miss is the same nil, so a caller cannot tell another host's lease from
+  an ended one or from an id that never existed.
+  """
+  def live_lease_for_host(host, lease_id, now \\ DateTime.utc_now())
+
+  def live_lease_for_host(%RegisteredHost{id: host_id, workspace_id: workspace_id}, lease_id, now)
+      when is_binary(host_id) and is_binary(workspace_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, lease_id} ->
+        from(l in ExecutionLease,
+          join: s in Barkpark.StudioChat.Session,
+          on: s.id == l.session_id,
+          where: l.id == ^lease_id,
+          where: l.host_id == ^host_id and l.workspace_id == ^workspace_id,
+          where: s.owner_workspace_id == ^workspace_id,
+          where: l.status in ["leased", "running"],
+          where: is_nil(l.revoked_at) and l.expires_at > ^now
+        )
+        |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  def live_lease_for_host(_host, _lease_id, _now), do: nil
+
+  @doc """
   The session's current live report fence, or nil (herd-s6). The Recorder's
   hand-back check calls this when its fence timer fires: a still-live lease
   (the host heartbeat extends `expires_at`) re-arms the suspension; nil means

@@ -63,9 +63,13 @@ import (
 // share, so the two can never describe different syntax.
 const tokenCreateUsage = "bp [-w <workspace>] [-p <project>] token create <label>|--label <label> --permissions public-read|read|write|admin[,…] [--dataset <dataset>] [--expires-in <90d|24h|…> | --no-expiry]"
 
-// tokenCreateArgs is the parsed command line. dataset defaults to the resolved
-// context's dataset rather than a literal, so `bp -d staging token create …`
-// binds the token to staging without the caller repeating himself.
+// tokenCreateArgs is the parsed command line. dataset is set only when the
+// operator typed -d/--dataset: the write/admin mint (/v1/tokens/elevated) binds
+// a token to a dataset whenever the body names one (dataset_bound), so a
+// dataset from the saved context or a default must not reach the body.
+// `bp -d staging token create x --permissions write` binds the token to
+// staging; with no flag it works on every dataset of the workspace. The
+// read-tier mint (/v1/tokens) records the dataset but does not bind today.
 type tokenCreateArgs struct {
 	label       string
 	permissions []string
@@ -97,7 +101,9 @@ func tokenMintBody(args tokenCreateArgs, now time.Time) ([]byte, error) {
 	body := map[string]any{
 		"label":       args.label,
 		"permissions": args.permissions,
-		"dataset":     args.dataset,
+	}
+	if args.dataset != "" {
+		body["dataset"] = args.dataset
 	}
 	switch {
 	case args.noExpiry:
@@ -135,7 +141,13 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 		return exitOK
 	}
 
-	args, err := parseTokenCreateArgs(tail, ctx.Dataset)
+	// Only a typed -d/--dataset binds (see tokenCreateArgs). parseGlobals eats
+	// the flag wherever it sits, so g.datasetSet is the one place that knows.
+	typedDataset := ""
+	if g.datasetSet {
+		typedDataset = ctx.Dataset
+	}
+	args, err := parseTokenCreateArgs(tail, typedDataset)
 	if err != nil {
 		return usageErrf(out, func() { printTokenCreateHelp(out) }, "%v", err)
 	}
@@ -251,9 +263,10 @@ func parseTokenMintReceipt(body []byte) (tokenMintReceipt, error) {
 
 // parseTokenCreateArgs reads `<label> --permissions a,b [--dataset d]`, in the
 // long-flag spellings bp accepts elsewhere (`--flag value` and `--flag=value`,
-// single dash tolerated). defaultDataset is the resolved context's dataset.
-func parseTokenCreateArgs(tail []string, defaultDataset string) (tokenCreateArgs, error) {
-	out := tokenCreateArgs{dataset: defaultDataset}
+// single dash tolerated). typedDataset is the -d/--dataset the operator typed,
+// "" when he typed none.
+func parseTokenCreateArgs(tail []string, typedDataset string) (tokenCreateArgs, error) {
+	out := tokenCreateArgs{dataset: strings.TrimSpace(typedDataset)}
 	var permsSet bool
 
 	for i := 0; i < len(tail); i++ {
@@ -320,9 +333,6 @@ func parseTokenCreateArgs(tail []string, defaultDataset string) (tokenCreateArgs
 	if out.noExpiry && out.expiresIn > 0 {
 		return out, fmt.Errorf("--expires-in and --no-expiry contradict each other — give one (usage: %s)", tokenCreateUsage)
 	}
-	if strings.TrimSpace(out.dataset) == "" {
-		out.dataset = "production"
-	}
 	return out, nil
 }
 
@@ -381,6 +391,10 @@ func printTokenCreateHelp(out *writer) {
 	out.errf("                admin seat in the workspace may ask, and never for more than it holds")
 	out.errf("                (403 admin_required / permission_escalation otherwise). Audited.")
 	out.errf("")
+	out.errf("  --dataset <d>     write/admin: bind the token to that ONE dataset; every other")
+	out.errf("                    dataset answers 403, and a bound token cannot create a workspace")
+	out.errf("                    or project. Without it the token works on every dataset of the")
+	out.errf("                    workspace. A read or public-read token is NOT bound by it today.")
 	out.errf("  --expires-in <d>  lifetime: 90s, 30m, 24h or 90d (max 365d). Default: the server's.")
 	out.errf("  --no-expiry       never expires; an audited opt-out that needs an admin caller.")
 	out.errf("")

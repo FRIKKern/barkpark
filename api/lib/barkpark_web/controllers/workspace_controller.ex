@@ -113,7 +113,7 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
-  # A dataset-bound token makes no project and no workspace
+  # A dataset-bound token makes no project, no workspace and no import
   # (`ApiToken.dataset_bound?/1`). On the project route it is asked after the
   # seat check, so a caller with no seat gets the answer it got before.
   defp refuse_dataset_bound(token) do
@@ -795,15 +795,19 @@ defmodule BarkparkWeb.WorkspaceController do
   and for a malformed request (`into_project` missing, or `mode=merge`).
   """
   def import(conn, %{"workspace_slug" => slug} = params) do
-    case {params["mode"] || "clean", Map.has_key?(params, "into_dataset")} do
-      {"clean", true} ->
-        remap_import(conn, slug, params)
+    # An import makes a dataset, or a whole workspace. A dataset-bound token
+    # makes neither, and is refused before the body is read.
+    with :ok <- refuse_dataset_bound(conn.assigns[:api_token]) do
+      case {params["mode"] || "clean", Map.has_key?(params, "into_dataset")} do
+        {"clean", true} ->
+          remap_import(conn, slug, params)
 
-      {"merge", true} ->
-        remap_request_invalid(conn, "into_dataset imports only in mode=clean")
+        {"merge", true} ->
+          remap_request_invalid(conn, "into_dataset imports only in mode=clean")
 
-      {mode, false} ->
-        plain_import(conn, mode)
+        {mode, false} ->
+          plain_import(conn, mode)
+      end
     end
   end
 
