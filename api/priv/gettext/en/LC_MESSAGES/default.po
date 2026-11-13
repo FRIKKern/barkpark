@@ -8999,6 +8999,11 @@ msgstr ""
 msgid "More actions"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/navbar.ex:49
+#, elixir-autogen, elixir-format
+msgid "More sections"
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:821
 #, elixir-autogen, elixir-format
 msgid "%{count} docs"
