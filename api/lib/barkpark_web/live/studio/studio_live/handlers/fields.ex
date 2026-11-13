@@ -281,8 +281,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case value do
       t when is_binary(t) and t != "" ->
-        {:noreply,
-         settle_dirty(Shared.do_autosave(socket, %{field => document_slug(t)}, :slug_derive))}
+        posted = %{field => document_slug(t)}
+        saved = Shared.do_autosave(socket, posted, :slug_derive)
+        {:noreply, saved |> keep_unsaved_values(posted) |> settle_dirty([field])}
 
       _ ->
         {:noreply, socket}
@@ -303,7 +304,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       {%{}, [_ | _] = path} ->
         form = StudioLive.Path.put_value_at(base_form(socket), path, code)
         socket = assign(socket, editor_form: form)
-        {:noreply, settle_dirty(Shared.do_autosave(socket, form, :tree_codelist_pick))}
+        saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
+        {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
       _ ->
         {:noreply, socket}
@@ -354,7 +356,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case fold_dot_paths(params, socket) do
       %{"doc" => doc} ->
-        {:noreply, settle_dirty(Shared.do_autosave(socket, doc, :change), target_key(params))}
+        saved = Shared.do_autosave(socket, doc, :change)
+        {:noreply, saved |> keep_unsaved_values(doc) |> settle_dirty(target_key(params))}
 
       _ ->
         {:noreply, socket}
@@ -703,9 +706,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # A save that did not land keeps the buffer dirty and remembers the field
   # typed in (`editor_unsaved_keys`), so a remote save keeps that field and
   # takes the others. Also reset on navigation, explicit save and Reload.
+  #
+  # A landed save also takes down the "Updated by another user" banner: what
+  # it said was kept is now saved (#25880 review).
   defp settle_dirty(socket, keys \\ []) do
     if socket.assigns[:save_status] == "Saved" do
-      assign(socket, editor_dirty: false, editor_unsaved_keys: MapSet.new())
+      assign(socket, editor_dirty: false, editor_unsaved_keys: MapSet.new(), doc_conflict: false)
     else
       unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 
@@ -713,6 +719,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         editor_dirty: true,
         editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
       )
+    end
+  end
+
+  # A save that did not land leaves what was posted in the form buffer, so a
+  # remote save that keeps the unsaved fields keeps the typing, not the value
+  # from before it (#25880 review). Same shape as a landed save's buffer
+  # (`Forms.coerce_params/2`).
+  defp keep_unsaved_values(socket, posted) do
+    if socket.assigns[:save_status] in ["Save failed", "Save cancelled"] do
+      posted = Barkpark.Content.Forms.coerce_params(posted, socket.assigns[:editor_schema])
+      assign(socket, editor_form: Map.merge(socket.assigns[:editor_form] || %{}, posted))
+    else
+      socket
     end
   end
 
