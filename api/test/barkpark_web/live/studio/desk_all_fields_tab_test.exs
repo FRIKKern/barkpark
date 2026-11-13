@@ -142,4 +142,21 @@ defmodule BarkparkWeb.Studio.DeskAllFieldsTabTest do
     assert has_element?(view, ~s(#bp-group-tab-content[aria-selected="true"]))
     refute has_element?(view, ~s(#editor-form [name="doc[slug]"]))
   end
+
+  # Control: a crafted select-group "" on the old Studio is what it is on
+  # main: nav_group "", no group matches, no field shows. Only the desk reads
+  # "" as All fields.
+  test "the old Studio reads a select-group \"\" as main does", c do
+    {type, id} = doc!(c)
+    {:ok, view, _html} = live(c.conn, "#{c.scope}/#{type}/#{id}")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "#editor-form") end)
+
+    render_click(view, "select-group", %{"group" => ""})
+
+    assert :sys.get_state(view.pid).socket.assigns.nav_group == ""
+
+    for f <- ~w(title body slug note),
+        do: refute(has_element?(view, ~s(#editor-form [name="doc[#{f}]"])))
+  end
 end
