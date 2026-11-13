@@ -142,24 +142,62 @@ await check("a hook outside the paper editor is left as it was", async () => {
   assert.equal(typeof window.Hooks.Desk.mounted, "function");
 });
 
-await check("every hook the real bp-paper-editor-hooks.js defines is gated", async () => {
-  const dom = new JSDOM(`<!doctype html><html><body></body></html>`, { runScripts: "outside-only", url: "http://localhost/" });
+// Every hook in the real map is either gated (it lives next to the bundle's
+// elements) or named here as left alone. A new hook fails this until someone
+// decides which: gating a hook that classic fields use loses their edits.
+const GATED = [
+  "BarkparkPaperAutoSize", "BarkparkPaperEditToggle", "BarkparkTerminalBoundary",
+  "BarkparkPaperEditor", "BarkparkPaperCanvas", "BarkparkFieldBlockBridge",
+  "BarkparkFigureImageBridge", "BarkparkPaperSortable", "BarkparkPaperContextMenu",
+  "BarkparkPaperPaintedCopy",
+];
+const NOT_GATED = ["BarkparkFieldBridge"];
+
+function realPage(body = "") {
+  const dom = new JSDOM(`<!doctype html><html><body>${body}</body></html>`, { runScripts: "outside-only", url: "http://localhost/" });
   const { window } = dom;
   Object.defineProperty(window.document, "readyState", { configurable: true, get: () => "loading" });
   window.eval(fs.readFileSync(HOOKS, "utf8"));
   const real = window.BarkparkPaperEditorHooks;
-  const names = Object.keys(real);
-  assert.ok(names.includes("BarkparkPaperCanvas") && names.includes("BarkparkPaperEditor"), `hook map: ${names.join(", ")}`);
   window.Hooks = { BarkparkFieldCanvas: { mounted() {} } };
   window.eval("var Hooks = window.Hooks;\n" + GATE);
-  for (const name of names) {
-    assert.equal(typeof real[name], "object", `${name} is an object definition`);
+  return { window, real };
+}
+
+await check("the real hook map: each paper hook is gated, BarkparkFieldBridge is not", async () => {
+  const { window, real } = realPage();
+  const names = Object.keys(real);
+  assert.deepEqual([...names].sort(), [...GATED, ...NOT_GATED].sort(), "every hook in bp-paper-editor-hooks.js is classified as gated or not");
+  for (const name of GATED) {
     assert.notEqual(window.Hooks[name], real[name], `${name} is wrapped`);
     for (const key of Object.keys(real[name])) {
       assert.ok(key in window.Hooks[name], `${name}.${key} survives the wrap`);
     }
   }
+  for (const name of NOT_GATED) assert.equal(window.Hooks[name], real[name], `${name} is the hook itself, not wrapped`);
   assert.notEqual(window.Hooks.BarkparkFieldCanvas.mounted.toString(), "mounted() {}", "BarkparkFieldCanvas is wrapped");
+});
+
+await check("a classic field's bp-change before the bundle reaches its hidden input", async () => {
+  const { window } = realPage(`
+    <form id="f" phx-change="autosave">
+      <div id="wrap" phx-update="ignore" phx-hook="BarkparkFieldBridge">
+        <input type="hidden" id="bp-mp-ref-hidden-cover" name="doc[cover]" value="" phx-debounce="500" />
+        <bp-media-picker id="picker" data-bridge-target="bp-mp-ref-hidden-cover"></bp-media-picker>
+      </div>
+    </form>`);
+  assert.equal(window.customElements.get("bp-paper-canvas"), undefined, "the paper bundle has not run");
+  const el = window.document.getElementById("wrap");
+  const hook = Object.assign({ el, handleEvent() {}, removeHandleEvent() {}, pushEvent() {}, pushEventTo() {} }, window.Hooks.BarkparkFieldBridge);
+  hook.mounted();
+  const input = window.document.getElementById("bp-mp-ref-hidden-cover");
+  let inputs = 0;
+  input.addEventListener("input", () => inputs++);
+  window.document.getElementById("picker").dispatchEvent(
+    new window.CustomEvent("bp-change", { bubbles: true, detail: { value: "media-42" } }));
+  assert.equal(input.value, "media-42", "the hidden input carries the edit");
+  assert.equal(inputs, 1, "an input event fires, so phx-change autosave runs");
+  hook.destroyed?.();
 });
 
 if (failures) {

@@ -7124,15 +7124,15 @@
       },
     };
 
-    // The paper editor hooks (/assets/bp-paper-editor-hooks.js, non-defer above, the SAME objects the public reader registers) and BarkparkFieldCanvas drive the async bundle's elements, which
-    // can land after the socket joins: each `mounted` waits for both (or window `load`: the bundle failed), at once when defined; other callbacks before it are dropped, `destroyed` cancels.
+    // The paper editor hooks (/assets/bp-paper-editor-hooks.js, non-defer above, the SAME objects the public reader registers). The ones named at bp-paper-bundle-gate:end live next to the async bundle's elements, which can land after the socket joins: each `mounted` waits for both
+    // (or window `load`: the bundle failed), at once when defined; other callbacks before it are dropped, `destroyed` cancels. BarkparkFieldBridge is NOT gated: classic fields' bp-change → hidden input must listen from the join, or an early edit is never saved.
     const bpPaperEls = ["bp-paper-canvas", "bp-paper-editor"], bpPaperQ = []; let bpPaperReady = bpPaperEls.every((n) => customElements.get(n)); // bp-paper-bundle-gate:start
     const bpPaperGo = () => { bpPaperReady = true; bpPaperQ.splice(0).forEach((fn) => fn()); };
     if (!bpPaperReady) { Promise.all(bpPaperEls.map((n) => customElements.whenDefined(n))).then(bpPaperGo); window.addEventListener("load", bpPaperGo, { once: true }); }
     const bpAfterPaperBundle = (impl) => !impl || typeof impl !== "object" ? impl : Object.assign({}, impl, Object.fromEntries(["beforeUpdate", "updated", "disconnected", "reconnected"].filter((k) => impl[k]).map((k) => [k, function () { if (this.__bpPaperMounted) return impl[k].call(this); }])), {
       mounted() { this.__bpPaperLive = true; const run = () => { if (this.__bpPaperLive) { this.__bpPaperMounted = true; impl.mounted?.call(this); } }; bpPaperReady ? run() : bpPaperQ.push(run); },
       destroyed() { this.__bpPaperLive = false; if (this.__bpPaperMounted) impl.destroyed?.call(this); } });
-    for (const [name, impl] of Object.entries(window.BarkparkPaperEditorHooks || {})) Hooks[name] = bpAfterPaperBundle(impl); Hooks.BarkparkFieldCanvas = bpAfterPaperBundle(Hooks.BarkparkFieldCanvas); // bp-paper-bundle-gate:end
+    Object.assign(Hooks, window.BarkparkPaperEditorHooks || {}); for (const name of ["BarkparkPaperAutoSize", "BarkparkPaperEditToggle", "BarkparkTerminalBoundary", "BarkparkPaperEditor", "BarkparkPaperCanvas", "BarkparkFieldBlockBridge", "BarkparkFigureImageBridge", "BarkparkPaperSortable", "BarkparkPaperContextMenu", "BarkparkPaperPaintedCopy", "BarkparkFieldCanvas"]) if (Hooks[name]) Hooks[name] = bpAfterPaperBundle(Hooks[name]); // bp-paper-bundle-gate:end
 
     // BarkparkBoardDrag — drag a Projects-board card between columns to flip its
     // lifecycle through the FENCED claim/close primitives (Barkpark Projects,

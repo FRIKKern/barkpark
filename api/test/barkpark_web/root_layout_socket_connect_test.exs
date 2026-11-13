@@ -29,16 +29,26 @@ defmodule BarkparkWeb.RootLayoutSocketConnectTest do
     refute tag =~ ~r/\sdefer[\s>]/, "the bundle tag still defers: #{tag}"
   end
 
-  test "the paper hooks are merged through the bundle gate, not as they are", %{src: src} do
-    refute src =~ "Object.assign(Hooks, window.BarkparkPaperEditorHooks",
-           "the paper hooks are merged without waiting for the bundle's elements"
-
+  test "the paper hooks are merged inside the bundle gate, which names the ones it holds",
+       %{src: src} do
     [gate] =
       Regex.run(~r{^[^\n]*// bp-paper-bundle-gate:start\n.*// bp-paper-bundle-gate:end$}ms, src)
 
+    [before_gate, _] = String.split(src, gate, parts: 2)
+
+    refute before_gate =~ "Object.assign(Hooks, window.BarkparkPaperEditorHooks",
+           "the paper hooks are merged before the gate can wrap them"
+
     assert gate =~ ~S|["bp-paper-canvas", "bp-paper-editor"]|
-    assert gate =~ "window.BarkparkPaperEditorHooks"
-    assert gate =~ "Hooks.BarkparkFieldCanvas = bpAfterPaperBundle(Hooks.BarkparkFieldCanvas)"
+    assert gate =~ "Object.assign(Hooks, window.BarkparkPaperEditorHooks || {})"
+
+    for name <- ~w(BarkparkPaperEditor BarkparkPaperCanvas BarkparkFieldCanvas) do
+      assert gate =~ ~s|"#{name}"|, "#{name} is not held for the bundle"
+    end
+
+    # Classic rich-text, media and reference fields mirror bp-change into a
+    # hidden input through this hook: held for the bundle, an early edit is lost.
+    refute gate =~ ~S|"BarkparkFieldBridge"|, "BarkparkFieldBridge is held for the bundle"
   end
 
   test "the gate runs after every hook it wraps is defined and before the socket is built",
