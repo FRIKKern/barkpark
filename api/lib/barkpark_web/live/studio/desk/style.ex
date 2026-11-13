@@ -40,7 +40,12 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   (`:focus-visible`): a click opens a menu with nothing lit.
 
   Inspect (`.dk-inspect`) is TanStack's card: radius 6, the popover shadow,
-  the page dimmed by its backdrop, its tree in a monospace with its syntax
+  in TanStack's place (`.inspect-backdrop`): a dim layer over the edit
+  pane's form only, the card 12 px in, centred while short; below 600 px it
+  takes the whole window. The layer is anchored to the form
+  (`anchor-name: --dk-edit-body`), not boxed in by it: the form stays
+  unpositioned, for the reason below. A browser with no anchor positioning
+  gets the card centred on the page instead (`@supports not`). Its tree in a monospace with its syntax
   colours (styles.css `--syntax-*`), light and dark. Its search box is
   TanStack's `.inspect-search`: the UI font at 15 px, a ringed input with
   the magnifier inside.
@@ -158,9 +163,16 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit-footer .dk-doc-menu-button { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-foot-icon); font-size: 17px; line-height: 1; cursor: pointer; }
       .dk .dk-edit-footer .dk-doc-menu-button:hover { background: var(--dk-foot-hover); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
-      .dk .dk-inspect { margin: auto; width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      .dk .dk-edit-body { anchor-name: --dk-edit-body; }
+      .dk .dk-inspect-layer { position: absolute; position-anchor: --dk-edit-body; top: anchor(top); right: anchor(right); bottom: anchor(bottom); left: anchor(left); z-index: 60; box-sizing: border-box; display: grid; place-items: center stretch; grid-template-rows: minmax(0, 1fr); padding: 12px; background: var(--dk-backdrop); }
+      .dk .dk-inspect-layer:not(:has(> dialog[open])) { display: none; }
+      @media (max-width: 599px) { .dk .dk-inspect-layer { position: fixed; inset: 0; } }
+      .dk .dk-inspect { position: static; margin: 0; width: auto; max-height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      /* No anchor positioning (Safari before 26, Firefox before 147, Firefox ESR 140): the
+         card as it was before it moved into the pane, centred on the page over a dimmed
+         window, so it is never drawn unplaced. */
+      @supports not (anchor-name: --x) { .dk .dk-inspect-layer { position: fixed; inset: 0; place-items: center; padding: 16px; } .dk .dk-inspect { width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); } }
       .dk .dk-inspect[open] { display: flex; flex-direction: column; }
-      .dk .dk-inspect::backdrop { background: var(--dk-backdrop); }
       .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0 20px; }
       .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-inspect-head h2 em { font-style: italic; }
