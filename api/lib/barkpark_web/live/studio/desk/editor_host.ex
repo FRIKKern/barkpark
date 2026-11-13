@@ -580,14 +580,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           {Components.studio_live_shell(assigns)}
         <% end %>
       </div>
-      <%!-- Sanity's pane footer has the same actions behind its own "…"
-            ("Open document actions"); the desk draws only that button there.
-            It is the pane's last child, so its coming and going moves nothing. --%>
-      <div :if={!@edit_failed and !gone?(assigns) and DocMenu.items(assigns) != []}
-        id={"#{@view.id}-footer"}
-        class="dk-edit-footer"
-      >
-        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={DocMenu.items(assigns)} place={:footer} />
+      <%!-- Sanity's pane footer: what happened last, Publish, and the same
+            actions behind its own "…" ("Open document actions"),
+            `Desk.DocFooter`. It is the pane's last child, so its coming and
+            going moves nothing. --%>
+      <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
+      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer">
+        <BarkparkWeb.Studio.Desk.DocFooter.bar
+          id={"#{@view.id}-footer"}
+          status={BarkparkWeb.Studio.Desk.DocFooter.status(assigns)}
+          publish={Enum.find(items, &(&1.event == "publish"))}
+          menu_button={"#{@view.id}-footer-actions-button"}
+        />
+        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
       </div>
     </section>
     """
