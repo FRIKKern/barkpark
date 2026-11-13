@@ -86,6 +86,21 @@ defmodule BarkparkWeb.ChatSendFailure do
       "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   @doc """
+  The Studio chat's `session` and `status` after a user turn failed to send.
+
+  A failed write means the session is gone: drop it and go `:offline`, so the
+  next send brings it up again. A host that cannot receive images refused the
+  turn before anything was leased, and the host is online: keep the session, so
+  the words sent alone go to the same runtime (task-72a5e0109236d6ea). A queued
+  send leaves the running turn's status as it is; a fresh one never started.
+  """
+  @spec studio_assigns(term(), map(), boolean()) :: keyword()
+  def studio_assigns({:host_cannot_receive_attachments, _}, %{session: s, status: st}, queued?),
+    do: [session: s, status: if(queued?, do: st, else: :ready)]
+
+  def studio_assigns(_reason, _assigns, _queued?), do: [session: nil, status: :offline]
+
+  @doc """
   The failure term with every stack frame's arguments replaced by their arity.
 
   A Recorder that raised in `init/1` comes back as `{reason, stacktrace}`, and

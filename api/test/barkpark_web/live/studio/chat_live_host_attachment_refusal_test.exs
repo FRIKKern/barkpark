@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.ChatLiveHostAttachmentRefusalTest do
   alias Barkpark.ChatHosts
   alias Barkpark.StudioChat
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ChatSendFailure
 
   # A 1x1 PNG: the store sniffs the bytes, so a stand-in string would be refused.
   @png Base.decode64!(
@@ -77,6 +78,88 @@ defmodule BarkparkWeb.Studio.ChatLiveHostAttachmentRefusalTest do
       |> Enum.filter(&(&1.command.operation == :send_turn))
 
     assert sends == []
+  end
+
+  # task-72a5e0109236d6ea: the refusal happens before anything is leased and the
+  # host is online, so the session stays live. Going `:offline` made the next send
+  # run `ensure_session` again — a reopen per retry of the image.
+  test "the refusal keeps the session live, and the words alone are leased on the same session",
+       %{conn: conn, ws: ws, proj: proj} do
+    host = enroll_text_only_host!(ws)
+    sid = Ecto.UUID.generate()
+
+    {:ok, _} =
+      StudioChat.create_session(
+        %{
+          id: sid,
+          mode: "plan",
+          execution_target: "registered_host",
+          execution_host_id: host.id
+        },
+        {:workspace, ws.id}
+      )
+
+    {:ok, view, _html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/chat/#{sid}")
+
+    view
+    |> file_input("#chat-composer-form", :attachments, [
+      %{name: "pic.png", content: @png, type: "image/png"}
+    ])
+    |> render_upload("pic.png")
+
+    render_submit(element(view, "form[phx-submit=send]"), %{"message" => "what is this?"})
+    assert render(view) =~ "receive images yet"
+
+    refused = assigns(view)
+    assert refused.session != nil
+    refute refused.status == :offline
+    refute refused.status in [:thinking, :interrupting]
+
+    # The open that brought the session up minted one token; a reopen would mint another.
+    assert session_token_count(sid) == 1
+
+    render_submit(element(view, "form[phx-submit=send]"), %{"message" => "the words alone"})
+    render(view)
+
+    after_text = assigns(view)
+    assert after_text.session == refused.session
+    assert session_token_count(sid) == 1
+
+    sends =
+      host
+      |> ChatHosts.next_commands()
+      |> Enum.filter(&(&1.command.operation == :send_turn))
+
+    assert length(sends) == 1
+  end
+
+  test "a queued refused send leaves the running turn alone; a dropped write still goes offline" do
+    refusal = {:host_cannot_receive_attachments, "claude"}
+    live = %{session: :ref, status: :thinking}
+
+    assert ChatSendFailure.studio_assigns(refusal, live, true) == [
+             session: :ref,
+             status: :thinking
+           ]
+
+    assert ChatSendFailure.studio_assigns(refusal, live, false) == [session: :ref, status: :ready]
+
+    assert ChatSendFailure.studio_assigns(:port_closed, live, false) == [
+             session: nil,
+             status: :offline
+           ]
+  end
+
+  defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
+
+  # Every `Runtime.open` on a registered host mints one claude-session token.
+  defp session_token_count(sid) do
+    import Ecto.Query
+
+    Barkpark.Repo.aggregate(
+      from(t in Barkpark.Auth.ApiToken, where: t.label == ^"claude-session #{sid}"),
+      :count
+    )
   end
 
   defp enroll_text_only_host!(ws) do
