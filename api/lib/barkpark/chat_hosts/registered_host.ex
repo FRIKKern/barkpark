@@ -4,6 +4,8 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Barkpark.StudioChat.Attachments
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -145,14 +147,15 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   # secret: `operations` is a bounded list of short command-name strings and
   # `task_hands` is a boolean, so admitting them keeps the "only non-secret
   # readiness metadata" invariant while making a genuine host reachable.
-  @provider_metadata_keys ~w(installed auth_ready version operations task_hands)
+  @provider_metadata_keys ~w(installed auth_ready version operations task_hands attachments)
 
   defp safe_provider_metadata?(%{"installed" => installed, "auth_ready" => auth_ready} = map)
        when is_boolean(installed) and is_boolean(auth_ready) do
     Enum.all?(Map.keys(map), &(&1 in @provider_metadata_keys)) and
       safe_version?(Map.get(map, "version")) and
       safe_operations?(Map.get(map, "operations")) and
-      safe_task_hands?(Map.get(map, "task_hands"))
+      safe_task_hands?(Map.get(map, "task_hands")) and
+      safe_attachments?(Map.get(map, "attachments"))
   end
 
   defp safe_provider_metadata?(_), do: false
@@ -173,4 +176,16 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   defp safe_task_hands?(nil), do: true
   defp safe_task_hands?(value) when is_boolean(value), do: true
   defp safe_task_hands?(_), do: false
+
+  # The image types this provider on the host can take as image blocks (Paper
+  # chat-host-attachments-plan). `TurnAttachments.admit/3` reads it before a
+  # send_turn that carries attachment references is leased; absent means none.
+  # Every value is one of the chat store's own media types and none repeats, so
+  # the list is at most four fixed strings and cannot carry a secret.
+  defp safe_attachments?(nil), do: true
+
+  defp safe_attachments?(types) when is_list(types),
+    do: Enum.all?(types, &(&1 in Attachments.media_types())) and Enum.uniq(types) == types
+
+  defp safe_attachments?(_), do: false
 end

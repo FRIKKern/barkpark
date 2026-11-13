@@ -421,10 +421,11 @@ defmodule Barkpark.StudioChat.Runtime do
     dispatch_managed(adapter(provider), command, opts)
   end
 
-  def dispatch("registered_host", _provider, %Command{} = command, opts) do
+  def dispatch("registered_host", provider, %Command{} = command, opts) do
     with {:ok, directory} <- fetch_contract(:host_directory, opts),
          {:ok, dispatcher} <- fetch_contract(:remote_dispatch, opts),
-         {:ok, host} <- directory.resolve(opts[:workspace_id], opts[:execution_host_id]) do
+         {:ok, host} <- directory.resolve(opts[:workspace_id], opts[:execution_host_id]),
+         :ok <- TurnAttachments.admit(host, provider, command) do
       dispatcher.dispatch(host, command, opts)
     end
   end
