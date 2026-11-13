@@ -1116,7 +1116,8 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       |> render()
       |> then(
         &Regex.scan(
-          ~r/<a[^>]*data-desk-row[^>]*>\s*<span class="pane-item-label">\s*<span class="dk-row-title">([^<]+?)</,
+          # A document row has its tile before its words (LOOKS A2).
+          ~r/<a[^>]*data-desk-row[^>]*>(?:(?!<\/a>).)*?<span class="dk-row-title">([^<]+?)</s,
           &1
         )
       )
