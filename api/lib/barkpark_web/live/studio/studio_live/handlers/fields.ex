@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
@@ -385,8 +386,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case fold_dot_paths(params, socket) do
       %{"doc" => doc} ->
-        saved = Shared.do_autosave(socket, doc, :change)
+        # A free-text field's post is merged onto the stored value from the
+        # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params)
+
+        saved =
+          socket
+          |> RemoteValues.put_bases(keys, params["_bp_seen"])
+          |> Shared.do_autosave(doc, :change)
+          |> RemoteValues.settle(socket, keys, doc)
+
         {:noreply, saved |> keep_unsaved_values(doc, keys) |> settle_dirty(keys)}
 
       _ ->

@@ -69,6 +69,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
+      /* The Studio's top bar sits outside .dk: on the desk it takes TanStack's navbar values (--bg, --border, --menu-fg, --icon-btn-hover, --menu-active-fg, --selected-fill, --tab-strong-fg, --focus-ring). */
+      .studio-shell:has(.dk) .studio-bar { --dk-nav-bg: #fff; --dk-nav-border: #e3e4e8; --dk-nav-fg: #383d51; --dk-nav-hover: #f6f6f8; --dk-nav-hover-fg: #242736; --dk-nav-selected: #eeeef1; --dk-nav-selected-fg: #232635; --dk-nav-focus: #556bfc; }
+      html[data-theme="dark"] .studio-shell:has(.dk) .studio-bar { --dk-nav-bg: #13141b; --dk-nav-border: #2a2d3f; --dk-nav-fg: #bdbfcb; --dk-nav-hover: #21232f; --dk-nav-hover-fg: #e5e6eb; --dk-nav-selected: #2a2d3f; --dk-nav-selected-fg: #e6e7ec; --dk-nav-focus: #596ffc; }
       .dk { --dk-icon-hover: #f6f6f8; --dk-selected-fill: #eeeef1; --dk-tab-selected-fg: #636776; --dk-focus: #556bfc; --dk-backdrop: rgba(227, 228, 232, 0.5); --dk-syntax-property: #4043e7; --dk-syntax-string: #965912; --dk-syntax-constant: #721fe5; --dk-syntax-punctuation: #515870; }
       html[data-theme="dark"] .dk { --dk-icon-hover: #21232f; --dk-selected-fill: #2a2d3f; --dk-tab-selected-fg: #9d9fae; --dk-focus: #596ffc; --dk-backdrop: rgba(19, 20, 27, 0.5); --dk-syntax-property: #7898ff; --dk-syntax-string: #f9be1e; --dk-syntax-constant: #b28af7; --dk-syntax-punctuation: #979cb0; }
       /* studio-literal-check: skip-end */
@@ -85,7 +88,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .pane-item-chevron, .dk .pane-item:hover .pane-item-chevron, .dk .pane-item.selected .pane-item-chevron { opacity: 0.5; color: inherit; display: flex; margin-right: -2px; }
       .dk .pane-item-chevron svg { width: 21px; height: 21px; }
-      .dk .dk-rows { padding: 0 12px 12px; }
+      /* The rows' containing block: a row's sr-only words (position: absolute) must not escape the pane's scroll area and make the page scroll. */
+      .dk .dk-rows { position: relative; padding: 0 12px 12px; }
       .dk .dk-row > .pane-item { box-sizing: border-box; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 7px 8px; height: 33px; min-height: 33px; border: 0; border-radius: 3px; font-size: 13px; line-height: 19px; font-weight: 500; color: var(--dk-fg); background: none; }
       .dk [data-pane-kind="list"] .dk-row > a.pane-item[data-desk-opens="doc"] { padding: 5px 8px; height: auto; min-height: 49px; }
       .dk .dk-row > a.pane-item:hover:not(.selected) { background: var(--dk-card-hover); color: var(--dk-fg); }
@@ -296,6 +300,27 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-menu-item { min-height: 44px; }
         .dk .dk-inspect-close, .dk .dk-inspect-tabs [role="tab"] { min-width: 44px; min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
+      }
+      /* The desk's navbar (Desk.Navbar): TanStack's .navbar, 52 px, 13/19 w500,
+         text tabs, and one More popover at the end. Only where a desk is. */
+      .studio-shell:has(.dk) .studio-bar { height: 52px; min-height: 52px; padding-inline: 12px; font-size: 13px; line-height: 19px; font-weight: 500; background: var(--dk-nav-bg); border-bottom: 1px solid var(--dk-nav-border); }
+      html[data-width-bucket="narrow"] .studio-shell:has(.dk) .studio-bar, html[data-width-bucket="phone"] .studio-shell:has(.dk) .studio-bar { height: auto; }
+      .studio-shell:has(.dk) .dk-nav { align-items: center; gap: 4px; }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-tab { width: auto; height: auto; padding: 3px 8px; border-radius: 3px; color: var(--dk-nav-fg); text-decoration: none; transition: none; }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-tab:hover { background: var(--dk-nav-hover); color: var(--dk-nav-hover-fg); }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-tab.active, .studio-shell:has(.dk) .dk-nav .dk-nav-tab.active:hover { background: var(--dk-nav-selected); color: var(--dk-nav-selected-fg); }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-more { box-sizing: border-box; width: 25px; height: 25px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--dk-nav-fg); cursor: pointer; }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-more:hover { background: var(--dk-nav-hover); color: var(--dk-nav-hover-fg); }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-more svg { display: block; width: 21px; height: 21px; }
+      .studio-shell:has(.dk) .dk-nav .dk-nav-tab:focus-visible, .studio-shell:has(.dk) .dk-nav .dk-nav-more:focus-visible, .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-nav-focus); }
+      .studio-shell:has(.dk) .dk-nav-more-list { min-width: 180px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }
+      .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item { display: flex; align-items: center; justify-content: flex-start; width: auto; height: auto; padding: 6px 10px; border-radius: 4px; color: inherit; text-decoration: none; }
+      .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item:hover, .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.active { background: var(--bg-accent); }
+      .studio-shell:has(.dk) .dk-nav-more-list .studio-tab-disabled { opacity: 0.45; cursor: not-allowed; }
+      @media (pointer: coarse) {
+        .studio-shell:has(.dk) .dk-nav .dk-nav-tab { min-height: 44px; display: inline-flex; align-items: center; }
+        .studio-shell:has(.dk) .dk-nav .dk-nav-more { width: 44px; height: 44px; }
+        .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item { min-height: 44px; }
       }
     </style>
     """
