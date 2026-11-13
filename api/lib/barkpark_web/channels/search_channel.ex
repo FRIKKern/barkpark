@@ -142,6 +142,10 @@ defmodule BarkparkWeb.SearchChannel do
          # answer an archived workspace 409, and so does this join.
          {:archived, false} <- {:archived, Tenancy.Workspace.archived?(ws)},
          :ok <- TenancyAuth.authorize(socket.assigns.api_token, ws.id, :read),
+         # The socket sits below the router, so no token plug holds a
+         # dataset-bound token here. Asked before the dataset lookup, so a bound
+         # token cannot learn which other datasets exist.
+         {:binding, true} <- {:binding, within_binding?(socket.assigns.api_token, dataset)},
          %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
          # The dataset leaf of the topic used to be trusted as a free string:
          # an unknown dataset joined GREEN and then matched zero rows forever,
@@ -187,9 +191,13 @@ defmodule BarkparkWeb.SearchChannel do
       [_ | _] -> {:error, %{reason: "bad_topic"}}
       {:dataset, _} -> {:error, %{reason: "unknown_dataset"}}
       {:archived, true} -> {:error, %{reason: "workspace_archived"}}
+      {:binding, false} -> {:error, %{reason: "forbidden_dataset"}}
       _ -> {:error, %{reason: "unauthorized"}}
     end
   end
+
+  defp within_binding?(token, dataset),
+    do: Barkpark.Auth.ApiToken.bound_dataset(token) in [nil, dataset]
 
   @impl true
   def handle_in("query", %{"q" => q} = params, socket) do
