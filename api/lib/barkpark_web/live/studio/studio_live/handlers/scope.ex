@@ -144,6 +144,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
     end
   end
 
+  # The desk's All fields tab sends "": no group, every field. The old
+  # Studio falls through to the plain clause, as on main.
+  def select_group(%{"group" => ""}, %{assigns: %{desk_base: base}} = socket)
+      when is_binary(base),
+      do: {:noreply, assign(socket, nav_group: nil)}
+
   def select_group(%{"group" => name}, socket) do
     {:noreply, assign(socket, nav_group: name)}
   end
