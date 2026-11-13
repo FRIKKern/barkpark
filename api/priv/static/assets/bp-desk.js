@@ -48,6 +48,8 @@
   var REF = "a[data-desk-ref]";
   var HIT = "a[data-desk-hit]";
   var OPENER = ROW + ", " + REF;
+  // A named button or link in a pane's own header row.
+  var HEADER_CONTROL = "[data-pane-index] > .pane-header button[aria-label], [data-pane-index] > .pane-header a[aria-label]";
   var WARM_DELAY_MS = 80;
   var WARM_FORGET_MS = 30000;
   var GIVE_UP_MS = 10000;
@@ -813,11 +815,22 @@
       // Enter pressed next opens nothing (rig panes spec, J21 F5). The same link in
       // the same pane takes the focus back, before any key can land: the
       // observer that lays the panes out runs right after the patch.
+      // A button in the pane's header row (Split, Share, "…", focus mode,
+      // close) goes the same way, and is found again by its name
+      // (`aria-label`) in the same pane's header. No button of that name
+      // there: the focus is left where it fell.
       hook._link = null;
       hook._noteLink = function (e) {
-        var a = e.target && e.target.closest ? e.target.closest(OPENER) : null;
+        var t = e.target && e.target.closest ? e.target : null;
+        var a = t ? t.closest(OPENER) : null;
         var pane = a && root.contains(a) ? a.closest("[data-pane-index]") : null;
-        hook._link = pane ? { el: a, href: a.getAttribute("href"), index: pane.getAttribute("data-pane-index") } : null;
+        if (pane) {
+          hook._link = { el: a, href: a.getAttribute("href"), index: pane.getAttribute("data-pane-index") };
+          return;
+        }
+        var b = t ? t.closest(HEADER_CONTROL) : null;
+        var head = b && root.contains(b) ? b.closest("[data-pane-index]") : null;
+        hook._link = head ? { el: b, label: b.getAttribute("aria-label"), index: head.getAttribute("data-pane-index") } : null;
       };
       hook._keepLink = function () {
         var link = hook._link;
@@ -825,10 +838,17 @@
         if (!link || link.el.isConnected) return;
         hook._link = null;
         if (doc.activeElement && doc.activeElement !== doc.body) return;
-        var again = Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
-          var pane = a.closest("[data-pane-index]");
-          return a.getAttribute("href") === link.href && pane && pane.getAttribute("data-pane-index") === link.index;
-        })[0];
+        var mine = function (el) {
+          var pane = el.closest("[data-pane-index]");
+          return pane && pane.parentNode === root && pane.getAttribute("data-pane-index") === link.index;
+        };
+        var again = link.href !== undefined
+          ? Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
+            return a.getAttribute("href") === link.href && mine(a);
+          })[0]
+          : Array.prototype.filter.call(root.querySelectorAll(HEADER_CONTROL), function (b) {
+            return b.getAttribute("aria-label") === link.label && mine(b);
+          })[0];
         if (again) again.focus({ preventScroll: true });
       };
 
