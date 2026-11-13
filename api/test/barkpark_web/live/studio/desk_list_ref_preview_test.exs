@@ -134,6 +134,24 @@ defmodule BarkparkWeb.Studio.DeskListRefPreviewTest do
            "the list: " <> list(view)
   end
 
+  test "a list row's subtitle shows the referenced document's draft, as Sanity's list", c do
+    {:ok, _} = Content.publish_document(c.ada, c.author, @dataset)
+
+    {:ok, _} =
+      Content.upsert_document(
+        c.author,
+        %{"doc_id" => "drafts." <> c.ada, "content" => %{"name" => "Ada Draft"}},
+        @dataset
+      )
+
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.post};lr-post-#{c.n}-1")
+
+    assert poll(view, fn -> has_element?(view, "#{@list} .dk-row-sub", "Ada Draft") end),
+           "the list: " <> list(view)
+
+    refute has_element?(view, "#{@list} .dk-row-sub", "Ada Lovelace")
+  end
+
   test "control: a list whose preview reads no reference is not read again", c do
     {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.other};lr-other-#{c.n}-1")
     assert poll(view, fn -> has_element?(view, "#{@list} a.pane-item", "Other 2") end)
