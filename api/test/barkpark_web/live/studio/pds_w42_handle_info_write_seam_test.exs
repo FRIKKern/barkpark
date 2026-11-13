@@ -273,7 +273,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The measured set is FOURTEEN sites in the LiveView/component tree (the two
+    # The measured set is FIFTEEN sites in the LiveView/component tree (the two
     # remaining tree-wide sends are `:after_join` in the channels, which are
     # not LiveView seams). `{:drop_focus_query, …}` is the one that writes
     # nothing: a URL patch after a desk search hit (task-4e10550394f87112).
@@ -285,6 +285,9 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # its read-only page the tab title (task-34d4249de9d1b654).
     # `{:desk_pane_failed, …}` writes nothing: a pane whose read failed tells
     # the page, which reads it again (`LiveRefresh`, J50).
+    # `{:desk_doc_titles, …}` writes nothing: a pane tells its page the titles
+    # its read named, so a frame drawn before a document is read is named by
+    # its title, not its id (task-e35222e32d3e3b88).
     # `{:desk_edit, …}` is the desk slice asking itself to load the Studio's
     # editor for the last document, one message after the pane's frame went
     # out; the writes that follow are the Studio's own guarded handlers
@@ -297,6 +300,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       assert send_self_sites() == [
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
+               {"live/studio/desk/pane_component.ex", "{:desk_doc_titles,"},
                {"live/studio/desk/pane_component.ex", "{:desk_list_sort,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_failed,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_title,"},

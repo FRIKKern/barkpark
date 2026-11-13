@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
     @impl true
     def handle_info({:set, kv}, socket), do: {:noreply, assign(socket, kv)}
     def handle_info({:desk_pane_title, _index, _title}, socket), do: {:noreply, socket}
-    def handle_info({:desk_doc_titles, _titles}, socket), do: {:noreply, socket}
+
+    def handle_info({:desk_doc_titles, titles}, socket) do
+      if socket.assigns[:test], do: send(socket.assigns.test, {:titles, titles})
+      {:noreply, socket}
+    end
 
     @impl true
     def render(assigns) do
@@ -55,6 +59,7 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
 
         receive do
           {:go, value} -> %{title: "Alpha", fields: [%{title: "Summary", value: value}]}
+          {:go, value, title} -> %{title: title, fields: [%{title: "Summary", value: value}]}
         end
       end
     )
@@ -165,5 +170,26 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
     send(view.pid, {:set, panes: Panes.parse("note;doc-z,rev=def456" <> tail)})
     assert eventually(fn -> has_element?(view, "#pane [data-desk-left-out]", "def456") end)
     refute_receive {:reading, _task}, 100
+  end
+
+  # A refresh of a list that names the same documents would send the page
+  # every title again; a 2,000-row list does that on each save.
+  test "a re-read that names the same documents tells the page nothing new", %{conn: conn} do
+    view = host(conn, %{test: self()})
+    assert_receive {:reading, first}, 2_000
+    send(first, {:go, "first"})
+    assert_receive {:titles, %{"doc-a" => "Alpha"}}, 2_000
+
+    Phoenix.LiveView.send_update(view.pid, PaneComponent, id: "pane", refresh: true)
+    assert_receive {:reading, again}, 2_000
+    send(again, {:go, "same title"})
+    assert eventually(fn -> shows?(view, "same title") end)
+    refute_receive {:titles, _}, 200
+
+    # Renamed: that one is news.
+    Phoenix.LiveView.send_update(view.pid, PaneComponent, id: "pane", refresh: true)
+    assert_receive {:reading, renamed}, 2_000
+    send(renamed, {:go, "renamed", "Alpha two"})
+    assert_receive {:titles, %{"doc-a" => "Alpha two"}}, 2_000
   end
 end

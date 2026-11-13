@@ -225,8 +225,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.id, data.title})
-    titles = doc_titles(socket.assigns.pane, data)
-    if titles != %{}, do: send(self(), {:desk_doc_titles, titles})
+    socket = tell_titles(socket, doc_titles(socket.assigns.pane, data))
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
     # Which key the result on screen was read for: while the pane reads for
     # another, the last result stays (`shown_key`).
@@ -437,6 +436,16 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   end
 
   defp doc_titles(_pane, _data), do: %{}
+
+  # Tell the page only titles it has not had from this pane: a refresh of a
+  # long list that names the same documents sends nothing.
+  defp tell_titles(socket, titles) when titles == %{}, do: socket
+  defp tell_titles(%{assigns: %{told_titles: titles}} = socket, titles), do: socket
+
+  defp tell_titles(socket, titles) do
+    send(self(), {:desk_doc_titles, titles})
+    assign(socket, :told_titles, titles)
+  end
 
   @doc "A pane's title from the URL and the tree alone, before anything is read."
   @spec provisional_title(Panes.pane(), struct() | nil) :: String.t()
