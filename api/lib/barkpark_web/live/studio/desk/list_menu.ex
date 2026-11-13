@@ -61,7 +61,7 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       aria-expanded="false"
       style={"anchor-name: --dk-list-menu-#{@index}"}
     >
-      <span aria-hidden="true">…</span>
+      <BarkparkWeb.Studio.Desk.Glyph.glyph name="ellipsis-horizontal" />
     </button>
     <div
       id={@menu_id}

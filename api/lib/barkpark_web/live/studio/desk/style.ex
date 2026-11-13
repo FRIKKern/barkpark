@@ -37,8 +37,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
     <style>
       /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
          measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
-      .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; }
-      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; }
+      .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; }
+      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #556bfc; }
       /* studio-literal-check: skip-end */
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; flex: 1 1 600px; border-right: 0; }
@@ -126,6 +126,20 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
       .dk [data-desk-leaving] { display: none; }
+      .dk .dk-pane:not(.dk-doc) > .pane-header { box-sizing: border-box; height: 49px; min-height: 49px; padding: 0 12px 0 20px; gap: 4px; border-bottom: 0; }
+      .dk .dk-pane:not(.dk-doc) > .pane-header .pane-header-title { flex: 1; min-width: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg-header); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn { box-sizing: border-box; flex: none; width: 25px; height: 25px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); }
+      .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn:hover { background: var(--dk-icon-btn-hover); color: var(--dk-icon-btn-hover-fg); }
+      .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn svg { width: 21px; height: 21px; }
+      .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: absolute; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      .dk .dk-list-search { position: relative; margin: -1px 12px 7px; padding: 0; border: 0; }
+      .dk .dk-list-search .search-icon { position: absolute; left: 2px; top: 2px; color: var(--dk-muted); pointer-events: none; }
+      .dk .dk-list-search .search-icon > svg { display: block; width: 21px; height: 21px; }
+      .dk .dk-list-search input { box-sizing: border-box; width: 100%; height: auto; min-height: 0; margin: 0; border: 0; outline: none; box-shadow: none; background: none; font: inherit; font-size: 13px; line-height: 19px; padding: 3px 8px 3px 29px; color: var(--dk-fg); border-radius: 3px; }
+      .dk .dk-list-search input::placeholder { color: var(--dk-placeholder); }
+      .dk .dk-list-search input:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-list-search input::-webkit-search-cancel-button { display: none; }
+      .dk .pane-divider { margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border); }
       .dk .dk-media { box-sizing: border-box; width: 33px; height: 33px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--dk-border); color: var(--dk-muted); background: var(--dk-bg); }
       .dk .dk-media svg { width: 21px; height: 21px; }
       .dk .dk-media img { width: 100%; height: 100%; object-fit: cover; }
@@ -140,7 +154,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-dot { background: var(--dk-published); }
       .dk .dk-row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-row-sub { display: block; margin-top: -2px; font-weight: 400; font-size: 13px; line-height: 19px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .dk .desk-divider { margin: 4px 12px 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--fg-muted); }
+      .dk .desk-divider { margin: 4px 12px 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--dk-border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-muted); }
       .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
       .dk .dk-more { margin: 12px 16px; }
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
