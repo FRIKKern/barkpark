@@ -579,6 +579,50 @@
     };
   }
 
+  // The search is a dialog, as the TanStack Studio's (LOOKS A4): the navbar's
+  // search button, Cmd+K / Ctrl+K and "/" open it with the box focused; a hit
+  // or Enter puts it away. A box with no dialog round it is only focused.
+  function openSearch(doc) {
+    var box = doc.getElementById("desk-search-input");
+    if (!box) return false;
+    var dialog = box.closest ? box.closest("dialog") : null;
+    if (dialog && !dialog.open && dialog.showModal) dialog.showModal();
+    box.focus();
+    if (box.select) box.select();
+    return true;
+  }
+
+  // `onward`: the search opened something (a hit, Enter). The browser hands
+  // the focus back to what opened the dialog; the opened pane takes it
+  // instead, as the desk's own patch focus does from the page.
+  function closeSearch(el, onward) {
+    var dialog = el && el.closest ? el.closest("dialog") : null;
+    if (!dialog || !dialog.open || !dialog.close) return;
+    dialog.close();
+    var at = dialog.ownerDocument.activeElement;
+    if (onward && at && at !== dialog.ownerDocument.body && at.blur) at.blur();
+  }
+
+  // The document a search hit opens: its href's last pane segment, the id
+  // after the last ";", without the pane's ",params".
+  function hitDoc(hit) {
+    var path = String(hit.getAttribute("href") || "").split("?")[0].split("#")[0];
+    var last = path.slice(path.lastIndexOf("/") + 1);
+    var id = last.slice(last.lastIndexOf(";") + 1).split(",")[0];
+    try {
+      return decodeURIComponent(id);
+    } catch (_) {
+      return id;
+    }
+  }
+
+  // A key typed into something that takes text is that thing's.
+  function typing(el) {
+    if (!el || !el.tagName) return false;
+    var tag = el.tagName.toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable === true;
+  }
+
   // Which hits these are: a patch with other hits starts the light again.
   function hitsKey(parts) {
     return parts.options
@@ -873,6 +917,14 @@
         var hit = e.currentTarget !== root;
         var row = e.target.closest ? e.target.closest(hit ? HIT : OPENER) : null;
         if (!row || root.contains(row) === hit || !plainClick(e)) return;
+        // A hit puts the search dialog away, whatever the panes do next, and
+        // its document's first field takes the focus when its editor is in,
+        // as Enter's open does (the server's `bp:focus-new-doc`).
+        if (hit) {
+          closeSearch(row, true);
+          var id = hitDoc(row);
+          if (id && hook._focusNewDoc) hook._focusNewDoc({ detail: { id: id } });
+        }
         hook._refocus = !hit && root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         // The click before this one has not landed: its answer is still to
         // come, and is not this click's (see _onLoaded).
@@ -1130,11 +1182,22 @@
         });
       }
 
-      // Cmd+K / Ctrl+K: the search box, unless something else took the key.
+      // Cmd+K / Ctrl+K, and "/" outside a text field: the search dialog,
+      // unless something else took the key.
       // In the box, ArrowDown and ArrowUp move the lit hit, and Enter's form
       // carries it.
       hook._onSearchKey = function (e) {
         var inBox = e.target && e.target.id === "desk-search-input";
+        // Escape in the box puts the dialog away, as TanStack's; the browser's
+        // own Escape on a search field would only empty it first.
+        if (inBox && e.key === "Escape" && !e.defaultPrevented) {
+          var open = e.target.closest ? e.target.closest("dialog[open]") : null;
+          if (open) {
+            e.preventDefault();
+            closeSearch(e.target);
+          }
+          return;
+        }
         if (inBox && !e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter")) {
           var parts = searchParts(root.ownerDocument);
           if (!parts.options.length) return;
@@ -1149,12 +1212,24 @@
           light(parts, hook._search.at);
           return;
         }
-        if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
-        var box = root.ownerDocument.getElementById("desk-search-input");
-        if (!box) return;
-        e.preventDefault();
-        box.focus();
-        if (box.select) box.select();
+        if (e.defaultPrevented || e.altKey) return;
+        var slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !typing(e.target);
+        // Not while typing: Ctrl+K in a field deletes to the end of the line, and
+        // Cmd+K in rich text is the link key (the chat palette has the same guard).
+        var cmdK = (e.metaKey || e.ctrlKey) && !e.shiftKey && String(e.key).toLowerCase() === "k" && !typing(e.target);
+        if (!slash && !cmdK) return;
+        if (openSearch(root.ownerDocument)) e.preventDefault();
+      };
+
+      // The navbar's search button opens the dialog; the search's own form,
+      // sent with Enter, puts it away (the server opens the hit).
+      hook._onSearchOpen = function (e) {
+        var opener = e.target && e.target.closest ? e.target.closest("[data-desk-search-open]") : null;
+        if (!opener || !plainClick(e)) return;
+        if (openSearch(root.ownerDocument)) e.preventDefault();
+      };
+      hook._onSearchSent = function (e) {
+        if (e.target && e.target.id === "desk-search-form") closeSearch(e.target, true);
       };
 
       // The draft in the editor was discarded elsewhere (`Desk.Discarded`):
@@ -1164,7 +1239,8 @@
       // new form, and takes its saves again. `was` is the old form as the page
       // last had it: a focused field that no longer matches it held keys not
       // yet sent (its debounce), which the discard took. The answer says so
-      // (`lost`), and the page's line says the typing was not saved.
+      // (`lost`) and carries what the field held (`text`): the page's line
+      // says the typing was not saved and offers that text back to copy.
       hook._onDiscarded = function (payload) {
         // The answer goes whatever the value step does: until it arrives the
         // page drops every save from this form.
@@ -1176,7 +1252,7 @@
           var own = Object.prototype.hasOwnProperty;
           if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
               at.type !== "checkbox" && at.type !== "radio") {
-            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true };
+            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true, text: String(at.value) };
             if (own.call(values, at.name)) at.value = values[at.name];
           }
         } finally {
@@ -1257,6 +1333,8 @@
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
+      root.ownerDocument.addEventListener("click", hook._onSearchOpen);
+      root.ownerDocument.addEventListener("submit", hook._onSearchSent);
       root.ownerDocument.addEventListener("keydown", hook._onEnterList);
       root.addEventListener("keydown", hook._onKey);
       // `toggle` does not bubble: caught on the way down.
@@ -1381,13 +1459,16 @@
         var text = item.getAttribute("data-desk-copy");
         if (item.hasAttribute("data-desk-copy-origin")) text = window.location.origin + text;
         var menu = item.closest("[popover]");
-        var toast = menu && menu.parentNode.querySelector(".dk-toast");
+        // In a menu: the toast beside it. Elsewhere in a pane (the discard
+        // line's Copy): the pane's toast, the Share menu's.
+        var pane = item.closest("[data-pane-index]");
+        var toast = (menu && menu.parentNode.querySelector(".dk-toast")) || (pane && pane.querySelector(".dk-toast"));
         var say = function (ok) {
           if (!toast) return;
           window.clearTimeout(hook._toastTimer);
           // Shown first, then filled: the change is what a screen reader reads.
           if (toast.showPopover && !toast.matches(":popover-open")) toast.showPopover();
-          toast.textContent = ok ? item.getAttribute("data-desk-copied") : menu.getAttribute("data-desk-copy-failed");
+          toast.textContent = ok ? item.getAttribute("data-desk-copied") : (menu || item).getAttribute("data-desk-copy-failed");
           hook._toastTimer = window.setTimeout(function () {
             toast.textContent = "";
             if (toast.hidePopover && toast.matches(":popover-open")) toast.hidePopover();
@@ -1557,6 +1638,8 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      root.ownerDocument.removeEventListener("click", this._onSearchOpen);
+      root.ownerDocument.removeEventListener("submit", this._onSearchSent);
       root.ownerDocument.removeEventListener("keydown", this._onEnterList);
       if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);

@@ -16,9 +16,10 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   link, or a dialog for an admin, as the toolbar drew them) and the switch to
   the Beta editor.
 
-  The menu is an HTML popover, as the list's "List options" is: Enter or a
-  click opens it, Escape or a click outside closes it and the focus goes back
-  to the button. `bp-desk.js` focuses the first item on open, keeps
+  It is drawn in the desk's one menu look (`Desk.Menu`), each action with
+  its glyph, Delete in red under a line. The menu is an HTML popover, as the
+  list's "List options" is: Enter or a click opens it, Escape or a click
+  outside closes it and the focus goes back to the button. `bp-desk.js` focuses the first item on open, keeps
   `aria-expanded` on the button and moves the focus with the arrow keys.
   """
   use Phoenix.Component
@@ -26,6 +27,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
 
   alias Barkpark.Content.PreviewLocations
   alias BarkparkWeb.Studio.Caps
+  alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.StudioLive.DocActions
 
   @typedoc "One menu item: what it is called, and what it sends or opens."
@@ -166,41 +168,59 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
         popover
         role="menu"
         aria-labelledby={"#{@id}-button"}
-        class="dk-doc-menu-list"
+        class="dk-doc-menu-list dk-menu"
         style={"position-anchor: #{@anchor}; inset: auto; #{@at}; right: anchor(right); #{@margin}"}
       >
-        <%= for item <- @items do %>
-          <a
+        <%= for {item, at} <- Enum.with_index(@items) do %>
+          <Menu.separator :if={at > 0 and item.name == "delete-doc"} />
+          <Menu.item
             :if={item[:href]}
-            role="menuitem"
-            tabindex="-1"
             href={item.href}
             target={item[:target]}
             rel={item[:rel]}
-            data-desk-doc-action={item.name}
-          >
-            {item.label}
-          </a>
-          <button
-            :if={!item[:href]}
-            type="button"
             role="menuitem"
             tabindex="-1"
+            icon={icon(item.name)}
+            data-desk-doc-action={item.name}
+          >{item.label}</Menu.item>
+          <Menu.item
+            :if={!item[:href]}
+            role="menuitem"
+            tabindex="-1"
+            icon={icon(item.name)}
+            danger={item.name == "delete-doc"}
             popovertarget={@id}
             popovertargetaction="hide"
             phx-click={item.event}
             data-desk-doc-action={item.name}
             {values(item)}
-          >
-            {item.label}
-          </button>
+          >{item.label}</Menu.item>
         <% end %>
       </div>
     </div>
     """
   end
 
-  defp values(item), do: for({k, v} <- item[:values] || %{}, do: {"phx-value-#{k}", v})
+  # Each action's glyph, as the TanStack Studio's menus draw them (Sanity's
+  # names; Barkpark's own glyph wins where it has one, `desk_icon/1`).
+  defp icon("publish"), do: "publish"
+  defp icon("unpublish"), do: "unpublish"
+  defp icon("show-history"), do: "restore"
+  defp icon("discard-draft"), do: "reset"
+  defp icon("duplicate-doc"), do: "copy"
+  defp icon("delete-doc"), do: "trash"
+  defp icon("preview"), do: "launch"
+  defp icon("toggle-content-preview"), do: "eye-open"
+  defp icon("toggle-diff"), do: "transfer"
+  defp icon("open-secondary-picker"), do: "split-vertical"
+  defp icon("close-secondary"), do: "close"
+  defp icon("view-graph"), do: "share"
+  defp icon("editor-set-mode"), do: "sparkles"
+  defp icon(_name), do: nil
+
+  # Each value as its phx-value attribute; the keys are this module's own
+  # (`name`, `mode`), never the document's.
+  defp values(item), do: for({k, v} <- item[:values] || %{}, do: {:"phx-value-#{k}", v})
 
   defp place(:header),
     do: %{
