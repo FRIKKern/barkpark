@@ -408,6 +408,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
         <div class="bp-tree-toolbar">
           <input
+            id={"#{@id}-search"}
             type="text"
             class="bp-input bp-tree-search"
             placeholder={gettext("Search codes or labels…")}
@@ -430,8 +431,10 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
             type="button"
             class="bp-btn bp-tree-remove"
             data-test-id="tree-codelist-remove"
-            phx-click="tree_node_clear"
-            phx-target={@myself}
+            phx-click={
+              Phoenix.LiveView.JS.push("tree_node_clear", target: @myself)
+              |> Phoenix.LiveView.JS.focus(to: "##{@id}-search")
+            }
           ><%= gettext("Remove") %></button>
         </div>
 

@@ -180,4 +180,30 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
       refute has_element?(view, field <> ~s( [data-test-id="tree-codelist-remove"]))
     end
   end
+
+  # Remove takes itself off the page, so the focus fell to <body>. Its click
+  # also focuses the tree's search box. LiveViewTest runs no JS.focus, so the
+  # command is read from the button (the browser check is in the PR).
+  test "Remove sends the focus to the tree's search box", c do
+    {:ok, view, _html} = live(c.conn, "#{c.studio}/#{c.type}/#{c.doc_id}")
+    pick(view, "#editor-form", "FB042")
+    field = ~s(#editor-form [data-field-name="subject"])
+
+    [search_id] =
+      view
+      |> element(field <> " input.bp-tree-search")
+      |> render()
+      |> then(&Regex.run(~r/id="([^"]+)"/, &1, capture: :all_but_first))
+
+    click =
+      view
+      |> element(field <> ~s( [data-test-id="tree-codelist-remove"]))
+      |> render()
+      |> then(&Regex.run(~r/phx-click="([^"]+)"/, &1, capture: :all_but_first))
+      |> hd()
+      |> String.replace("&quot;", ~s("))
+
+    assert click =~ ~s("focus")
+    assert click =~ ~s("to":"##{search_id}")
+  end
 end
