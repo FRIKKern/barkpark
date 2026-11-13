@@ -57,6 +57,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # room for an older, longer dataset string.
   @dataset_max 255
 
+  # Longer than any desk URL. The web server bounds a request line; a live
+  # patch and a hovered href come over the socket, which bounds neither.
+  # Refused before it is read byte by byte (`Text.text_only/1`) and parsed.
+  @splat_max 8_192
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
     # A dataset segment with a byte the database refuses as text names no
@@ -100,11 +105,25 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    # A live patch to such a dataset segment goes back to the desk it left.
-    if Text.text?(params["dataset"] || socket.assigns.dataset),
-      do: follow(params, uri, socket),
-      else: {:noreply, redirect(socket, to: socket.assigns.base)}
+    cond do
+      # A live patch to such a dataset segment goes back to the desk it left.
+      not Text.text?(params["dataset"] || socket.assigns.dataset) ->
+        {:noreply, redirect(socket, to: socket.assigns.base)}
+
+      # So does one to a pane splat past the cap; a first request for one
+      # names nothing.
+      splat_bytes(params) > @splat_max ->
+        if base = socket.assigns[:base],
+          do: {:noreply, redirect(socket, to: base)},
+          else: raise(NotFound)
+
+      true ->
+        follow(params, uri, socket)
+    end
   end
+
+  # Joined as `follow/3` joins it, so it takes what that takes.
+  defp splat_bytes(params), do: params |> Map.get("panes", []) |> Enum.join("/") |> byte_size()
 
   defp follow(params, uri, socket) do
     dataset = params["dataset"] || socket.assigns.dataset
@@ -180,6 +199,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
+         true <- byte_size(href) - byte_size(base) <= @splat_max,
          splat = href |> String.replace_prefix(base <> "/", "") |> Text.text_only(),
          chain = Tree.parse(splat, desk.root),
          last = List.last(chain),
