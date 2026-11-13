@@ -109,7 +109,16 @@ on:
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
-  group: paper-editor-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # main-collapse: harness-ok — publishes no context in
+  # .github/required-checks.json, performs no action, watches nothing.
+  # task-e7e988deee1d2b56; the long form is in
+  # scripts/main-run-concurrency-check.sh, § THE MAIN-COLLAPSE MARKER.
+  #
+  # Every main push shares ONE group: a merge evicts only the PENDING run, the
+  # running one completes. An evicted sha gets no verdict from this workflow;
+  # the next completed main run covers it, because every job here reads the
+  # tree as it stands. PRs keep their own per-ref group and still supersede.
+  group: paper-editor-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
   # Never cancel main; collapse superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -225,6 +234,8 @@ jobs:
           node ../paper-editor-host-tests/__picker_reference_type_words.test.mjs
           node ../paper-editor-host-tests/__picker_search_no_autosave.test.mjs
           node ../paper-editor-host-tests/__rte_keyboard.test.mjs
+          node ../paper-editor-host-tests/__rte_reconnect.test.mjs
+          node ../paper-editor-host-tests/__rte_move_focus.test.mjs
           node ../paper-editor-host-tests/__rte_pt_blocks.test.mjs
           node ../paper-editor-host-tests/__rte_vocabulary.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs

@@ -57,12 +57,22 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
        "the admin arm is an api_token (Auth.verify_token_id/1); the instance ingest secret " <>
          "is no token, so a producer holding it keys on its client IP"},
     "PreviewToken" => {:not_a_bearer, "reads `Authorization: Preview <jwt>`"},
-    "RequireChatHost" => {:not_a_bearer, "reads `Authorization: Host <cred>`"},
+    "RequireChatHost" =>
+      {:resolved,
+       "reads `Authorization: Host <cred>`, not a Bearer; RateLimit's \"host\" resolver " <>
+         "(chat_host_principal/1 -> ChatHosts.authenticate/1) keys it on the host, but only " <>
+         "where the mount passes `principal: :chat_host` (task-fd330c87f48b0b87)"},
     "DeriveWorkspaceFromToken" =>
       {:not_a_resolver, "derives scope from an already-assigned token"},
     # Local function plugs in the router itself, same rules.
     "scoped_api_optional_credential" =>
-      {:resolved, "delegates to OptionalSessionToken + OptionalToken — api_token either way"}
+      {:resolved, "delegates to OptionalSessionToken + OptionalToken — api_token either way"},
+    # Seen only once the scan counted mounts with options (`class:
+    # :presence_focus`); the bare-`RateLimit)` match had never looked at it.
+    "scoped_presence_credential" =>
+      {:resolved,
+       "a Bearer goes to OptionalSessionToken, anything else to " <>
+         "scoped_api_optional_credential — api_token or login session either way"}
   }
 
   defp metered_pipelines do
@@ -70,7 +80,28 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
 
     Regex.scan(~r/\n  pipeline (:\w+) do\n(.*?)\n  end\n/s, src)
     |> Enum.map(fn [_, name, body] -> {name, body} end)
-    |> Enum.filter(fn {_name, body} -> String.contains?(body, "Plugs.RateLimit)") end)
+    # `[),]`: a mount with options (`principal: :chat_host`, `class: :browser`)
+    # is still a mount. Matching only the bare `RateLimit)` dropped them.
+    |> Enum.filter(fn {_name, body} -> Regex.match?(~r/Plugs\.RateLimit[),]/, body) end)
+  end
+
+  # THE HOST SCHEME IS READ PER MOUNT, so the mount is the thing to pin. A
+  # pipeline that accepts `Authorization: Host` but mounts RateLimit without
+  # `principal: :chat_host` bills every host to its IP's 60/min — the
+  # task-fd330c87f48b0b87 incident: a streamed reply refused after ~60 deltas.
+  test "every metered pipeline that mounts RequireChatHost keys the host, not its IP" do
+    host_pipelines =
+      for {name, body} <- metered_pipelines(),
+          String.contains?(body, "Plugs.RequireChatHost)"),
+          do: {name, body}
+
+    assert host_pipelines != [],
+           "no metered pipeline mounts RequireChatHost — the scan is blind"
+
+    for {name, body} <- host_pipelines do
+      assert body =~ "plug(BarkparkWeb.Plugs.RateLimit, principal: :chat_host)",
+             "#{name} mounts RequireChatHost but its RateLimit does not pass principal: :chat_host"
+    end
   end
 
   test "the router still has metered pipelines to check (the parse is not silently empty)" do
@@ -151,6 +182,10 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     assert src =~ "{\"api\", {Barkpark.Auth, :verify_token_principal}}"
     assert src =~ "{\"scim\", {Barkpark.Scim, :resolve_token_id}}"
     assert src =~ "{\"user\", {__MODULE__, :login_session_principal}}"
+    assert src =~ "{\"host\", {__MODULE__, :chat_host_principal}}"
+    assert src =~ "Barkpark.ChatHosts.authenticate(raw)"
+    assert Code.ensure_loaded?(Barkpark.ChatHosts)
+    assert function_exported?(Barkpark.ChatHosts, :authenticate, 1)
 
     # And all three of those functions exist with the arity the registry (or
     # the session branch below) applies. `ensure_loaded?` first: in :test the

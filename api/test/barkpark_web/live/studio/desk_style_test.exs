@@ -275,7 +275,9 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
   end
 
   test "the list search is borderless, with the magnifier inside at the left" do
-    assert rule(@css, ".dk .dk-list-search") =~ "margin: -1px 12px 7px"
+    # TanStack's `.pane.list > .search`: no pull-up under the header, 12 px to
+    # the first row, which sits at the pane's top + 86 (it was at + 80).
+    assert rule(@css, ".dk .dk-list-search") =~ "margin: 0 12px 12px"
 
     assert rule(@css, ".dk .dk-list-search .search-icon") =~
              "position: absolute; left: 2px; top: 2px"

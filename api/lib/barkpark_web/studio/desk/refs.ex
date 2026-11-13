@@ -18,7 +18,13 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
 
-  @type target :: %{id: String.t(), type: String.t() | nil, title: String.t()}
+  @type target :: %{
+          required(:id) => String.t(),
+          required(:type) => String.t() | nil,
+          required(:title) => String.t(),
+          optional(:type_title) => String.t(),
+          optional(:icon) => String.t()
+        }
 
   @doc "The reference fields of `schema`, as `{name, :one | :many}`."
   @spec fields(map()) :: [{String.t(), :one | :many}]
@@ -172,8 +178,21 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
       TitleDerivation.preview_title(doc, schemas[doc.type]) ||
         if(is_binary(doc.title) and String.trim(doc.title) != "", do: doc.title, else: id)
 
-    %{id: id, type: doc.type, title: title}
+    # The type's name and icon, for a reference drawn as TanStack's card: the
+    # document icon for a type that has none, as a desk row.
+    schema = schemas[doc.type]
+
+    %{
+      id: id,
+      type: doc.type,
+      title: title,
+      type_title: type_title(schema, doc.type),
+      icon: BarkparkWeb.Icons.row_icon(schema && Map.get(schema, :icon))
+    }
   end
+
+  defp type_title(%{title: title}, _type) when is_binary(title) and title != "", do: title
+  defp type_title(_schema, type), do: type
 
   defp ref_id(%{"_ref" => id}) when is_binary(id) and id != "", do: Content.published_id(id)
   defp ref_id(id) when is_binary(id) and id != "", do: Content.published_id(id)

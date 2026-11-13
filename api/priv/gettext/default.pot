@@ -361,6 +361,11 @@ msgstr ""
 msgid "Edited %{ago}"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/editor.ex:898
+#, elixir-autogen, elixir-format
+msgid "All fields"
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:66
 #, elixir-autogen, elixir-format
 msgid "Last published %{ago}"

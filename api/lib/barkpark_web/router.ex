@@ -1314,7 +1314,7 @@ defmodule BarkparkWeb.Router do
   pipeline :registered_chat_host do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RateLimit, principal: :chat_host)
     plug(BarkparkWeb.Plugs.RequireChatHost)
   end
 

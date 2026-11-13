@@ -19,6 +19,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
   alias BarkparkWeb.PreviewDay
+  alias BarkparkWeb.Studio.Desk.DocFooter
+  alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
@@ -271,6 +273,16 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       data-desk-focused={@focus[:on] == true}
     >
       <div class="pane-header">
+        <%!-- A read-only document says its state as the edit pane does, with
+              the TanStack Studio's Published / Draft pills (`DocStatus`); its
+              title is then the big one in the column, and this one is for
+              screen readers (`Desk.Style`). --%>
+        <DocStatus.chips
+          :if={@pane.kind == :doc && @data.ok? && is_boolean(@data.result[:draft?])}
+          doc={@data.result}
+          draft?={@data.result.draft?}
+          published?={@data.result[:published?] == true}
+        />
         <%!-- A document pane's title is a div with the heading role, as the
               edit pane's (`EditorHost`): in focus mode it holds the
               breadcrumb nav, and one tag in both modes keeps the focus on the
@@ -320,7 +332,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
         <.link
           :if={@index > 0}
           patch={Panes.close_from(@panes, @index, @base)}
-          class="dk-close"
+          class={["dk-close", @pane.kind == :doc && "icon-btn"]}
           aria-label={gettext("Close %{title}", title: title(assigns))}
         >
           <span aria-hidden="true">×</span>
@@ -400,13 +412,24 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                      in the workspace's zone and format (06.09.2026). --%>
                 <span :if={entry[:sub]} class="dk-row-sub"><PreviewDay.text text={entry.sub} /></span>
               </span>
+              <%!-- The marks are named, not worded: the row's text is its
+                   title (and subtitle) alone, as the TanStack row's, which a
+                   spec reads to tell one row from the next. --%>
               <span :if={entry[:draft] || entry[:published]} class="dk-status">
-                <span :if={entry[:draft]} class="dk-ring dk-draft" title={gettext("Draft")}>
-                  <span class="sr-only">{gettext("Draft")}</span>
-                </span>
-                <span :if={entry[:published]} class="dk-dot" title={gettext("Published")}>
-                  <span class="sr-only">{gettext("Published")}</span>
-                </span>
+                <span
+                  :if={entry[:draft]}
+                  class="dk-ring dk-draft"
+                  role="img"
+                  aria-label={gettext("Draft")}
+                  title={gettext("Draft")}
+                ></span>
+                <span
+                  :if={entry[:published]}
+                  class="dk-dot"
+                  role="img"
+                  aria-label={gettext("Published")}
+                  title={gettext("Published")}
+                ></span>
               </span>
               <%!-- A singleton on the root opens its document as a pane, so it
                    has the chevron too, as the TanStack root's. --%>
@@ -438,30 +461,62 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <p :if={capped?(assigns)} class="dk-note dk-list-max" role="status">
             {gettext("Displaying a maximum of %{count} documents", count: Rows.max_rows())}
           </p>
-          <dl :if={@data.result[:fields]} class="dk-fields">
-            <div :for={field <- @data.result.fields}>
-              <dt>{field.title}</dt>
-              <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
-                    as its day in the workspace's time zone. --%>
-              <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
-              <dd :if={field[:refs]} class="dk-refs">
-                <span :if={field.refs == []}>—</span>
-                <%= for ref <- field.refs do %>
-                  <span :if={!ref.type} class="dk-ref-missing">{ref.title}</span>
-                  <.link
-                    :if={ref.type}
-                    patch={Panes.open_after(@panes, @index, ref_pane(ref, field.path), @base)}
-                    class="dk-ref"
-                    aria-current={selected?(@panes, @index, ref_pane(ref, field.path)) && "true"}
-                    data-desk-ref
-                  >
-                    {ref.title}
-                  </.link>
-                <% end %>
-              </dd>
+          <%!-- The document as the TanStack Studio's form draws it, read-only:
+               the type (none for a singleton), the title, then each field's
+               label over its value in a ringed box. A list of terms, so a
+               value is still found by its label. --%>
+          <div :if={@data.result[:fields]} class="dk-ro" data-desk-read-only>
+            <div :if={@data.result[:kind] && !is_binary(@pane[:node])} class="dk-kind">
+              {@data.result.kind}
             </div>
-          </dl>
+            <div class="dk-big-title">{@data.result.title}</div>
+            <dl class="dk-fields">
+              <div :for={field <- @data.result.fields}>
+                <dt>{field.title}</dt>
+                <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
+                      as its day in the workspace's time zone. --%>
+                <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
+                <%!-- An empty reference field is an empty box; each reference is
+                      TanStack's card (`.ref-box`, as the edit pane's): the type's
+                      tile, the title, the type under it. --%>
+                <dd :if={field[:refs]} class="dk-refs">
+                  <span :if={field.refs == []} class="dk-ref-none"></span>
+                  <%= for ref <- field.refs do %>
+                    <span :if={!ref.type} class="dk-ref-missing">{ref.title}</span>
+                    <.link
+                      :if={ref.type}
+                      patch={Panes.open_after(@panes, @index, ref_pane(ref, field.path), @base)}
+                      class="dk-ref ref-box ref-row"
+                      aria-current={selected?(@panes, @index, ref_pane(ref, field.path)) && "true"}
+                      data-desk-ref
+                    >
+                      <span class="preview">
+                        <span class="dk-media" aria-hidden="true">
+                          <BarkparkWeb.Icons.desk_icon name={ref[:icon] || "document"} size={21} />
+                        </span>
+                        <span class="text">
+                          <span class="t">{ref.title}</span>
+                          <span :if={ref[:type_title]} class="s">{ref.type_title}</span>
+                        </span>
+                      </span>
+                    </.link>
+                  <% end %>
+                </dd>
+              </div>
+            </dl>
+          </div>
         <% end %>
+      </div>
+      <%!-- The edit pane's footer words (`DocFooter`), with no Publish: this
+            document is read here, not edited. --%>
+      <div
+        :if={@pane.kind == :doc && @data.ok? && is_map(@data.result[:edited])}
+        class="dk-edit-footer dk-ro-footer"
+        data-desk-ro-footer
+      >
+        <span class="dk-footer-status" data-desk-footer-status>
+          {DocFooter.status(%{editor_doc: @data.result.edited, editor_is_draft: @data.result.draft?})}
+        </span>
       </div>
     </section>
     """
@@ -703,15 +758,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     type = (pane[:untyped] && Refs.type_of(id, dataset, scope)) || type
 
     with {:ok, schema} <- Content.resolve_schema(type, dataset, scope),
-         {%{} = doc, draft?, _published?} <-
+         {%{} = doc, draft?, published?} <-
            Content.fetch_doc_with_draft(type, id, dataset, scope) do
-      status = if draft?, do: gettext("Draft"), else: gettext("Published")
-
+      # The state is the header's pills, as the edit pane's, not a row.
       %{
         title: doc_title(doc, schema),
-        fields: [
-          %{title: gettext("Status"), value: status} | fields(doc, schema, dataset, scope)
-        ]
+        kind: schema.title || schema.name,
+        draft?: draft?,
+        published?: published?,
+        # What the footer says: "Edited 5m ago" or "Last published 2h ago".
+        edited: %{updated_at: doc.updated_at, status: Map.get(doc, :status)},
+        fields: fields(doc, schema, dataset, scope)
       }
     else
       _ ->
@@ -769,7 +826,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
         _ ->
           value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-          %{title: title, value: FieldText.show(value, field)}
+          %{title: title, value: FieldText.value(value, field)}
       end
     end
   end

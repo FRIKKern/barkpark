@@ -51,6 +51,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
+  alias BarkparkWeb.Studio.ChatHostGate
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -635,7 +636,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
             scope ->
               socket.assigns.task_reader
-              |> ChatTaskSeam.ready([limit: 8] ++ scope)
+              |> ChatTaskSeam.ready(
+                [limit: 8] ++ scope ++ ChatTaskSeam.bound_scope(socket.assigns[:api_token])
+              )
               |> Enum.map(&hand_ready_row/1)
           end
 
@@ -1339,12 +1342,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @impl true
   def handle_info({:dispatch_send, text, queued?}, socket) do
     socket = ensure_session(socket)
+    gate = socket.assigns.session && ChatHostGate.authorize(socket.assigns, :turn)
 
     case socket.assigns.session do
       nil ->
         # Nothing consumed yet — staged attachments survive in the strip, the
         # words go back to the composer. A send never disappears into a lie.
         {:noreply, restore_failed_send(socket, text)}
+
+      # A co-viewed pid was never spawned here: every turn passes the gate.
+      _ when gate != :ok ->
+        socket = append_message(socket, :system, spawn_error_text(elem(gate, 1)))
+        {:noreply, socket |> restore_failed_send(text) |> assign(status: :ready)}
 
       session ->
         # Consume the pasted/dropped images only once a session exists (D25):
@@ -4851,18 +4860,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # silently inherit the Default workspace's execution profile (D205).
     store_session = get_session_in_tenancy(socket, store_id)
 
-    # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
-    # owner's alone — with the operator allowlist armed, a non-operator Studio
-    # admin is refused here (the Runtime.open backstop covers tenant sessions).
-    with :ok <-
-           BarkparkWeb.HostExecutionGate.authorize_turn(
-             socket.assigns[:api_token] || socket.assigns[:current_user],
-             %{
-               provider: socket.assigns.provider,
-               execution_target: socket.assigns.execution_target,
-               owner_workspace_id: store_session && store_session.owner_workspace_id
-             }
-           ),
+    # A managed host turn is the instance owner's alone (ChatHostGate).
+    with :ok <- ChatHostGate.authorize_spawn(socket.assigns, store_session),
          {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: store_id,
@@ -6609,6 +6608,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         scope ->
           socket.assigns.task_reader
           |> ChatTaskSeam.held_claims(worker, scope)
+          |> ChatTaskSeam.only_bound(socket.assigns[:api_token])
           |> Map.new(fn d ->
             {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
           end)
@@ -6857,7 +6857,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             &1.approval_status == :pending)
       )
 
-    if pending? and socket.assigns.session do
+    # A co-viewing tab holds a pid it never spawned: gate the allow itself.
+    with true <- pending? and socket.assigns.session != nil,
+         :ok <- ChatHostGate.authorize(socket.assigns, decision) do
       Runtime.answer_approval(
         socket.assigns.provider,
         socket.assigns.session,
@@ -6892,7 +6894,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       |> clear_question_form(request_id)
       |> refresh_sessions()
     else
-      socket
+      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
+      _ -> socket
     end
   end
 
