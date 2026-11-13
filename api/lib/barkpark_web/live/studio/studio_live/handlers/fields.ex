@@ -35,7 +35,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def new_document(%{"type" => type} = params, socket) do
     # A type whose desk block says `authorCreatable: false` shows no "+"; a
-    # hand-pushed event is refused here too (task-631d6ea85517e668).
+    # hand-pushed event is refused here too (task-631d6ea85517e668). A type
+    # this dataset does not have is refused as well: a hand-pushed name made a
+    # document of a type nothing declares (#25897 review).
     case Content.resolve_schema(type, socket.assigns.dataset, Shared.hook_opts(socket)) do
       {:ok, schema} ->
         if BarkparkWeb.Studio.PaneBuilder.author_creatable?(schema),
@@ -43,8 +45,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           else: {:noreply, put_flash(socket, :error, not_creatable(schema, type))}
 
       _ ->
-        author_new_document(type, params, socket)
+        {:noreply, put_flash(socket, :error, no_such_type(type))}
     end
+  end
+
+  defp no_such_type(type) do
+    gettext("“%{type}” is not a document type in this dataset, so no document was made.",
+      type: type
+    )
   end
 
   defp not_creatable(schema, type) do

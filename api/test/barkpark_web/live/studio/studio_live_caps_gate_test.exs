@@ -193,6 +193,19 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
     } do
       {user, conn} = grantee_session(conn)
       bind_grant!(ws, user, %{capabilities: ["read", "write"]})
+      # new-document makes only a type this workspace resolves; the setup's
+      # `post` is the Default workspace's (#25897 review).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: ws.id
+        )
 
       {:ok, view, _html} = live(conn, priv_url(ws, proj))
 

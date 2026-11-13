@@ -59,6 +59,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       html[data-theme="dark"] .dk section.dk-edit { --dk-head-fg: rgb(189 191 203); --dk-head-icon: rgb(147 148 159); --dk-head-hover: rgb(33 35 47); --dk-head-hover-fg: rgb(145 147 160); --dk-chip-ring: rgb(42 45 63); --dk-chip-selected-fg: rgb(230 231 236); --dk-chip-active-bg: rgb(59 50 22); --dk-chip-positive-fg: rgb(93 243 189); --dk-chip-off-fg: rgb(90 96 123); --dk-chip-off-bg: rgb(25 26 36); --dk-chip-off-ring: rgb(38 40 55); --dk-published: rgb(19 193 132); --dk-caution-dot: rgb(216 147 27); --dk-line-strong: rgb(77 82 105); }
       .dk { --dk-menu-fg: #383d51; --dk-menu-hover-fg: #fff; --dk-menu-hover-icon: #bfcbfe; --dk-menu-danger: #8b2018; --dk-menu-danger-icon: #a85852; --dk-menu-danger-hover: #d63a2c; --dk-menu-danger-hover-icon: #fabab3; --dk-popover-shadow: 0 0 0 0.5px rgba(114, 120, 146, 0.3), 0 7px 8px -4px rgba(114, 120, 146, 0.1), 0 12px 17px 2px rgba(114, 120, 146, 0.07), 0 5px 22px 4px rgba(114, 120, 146, 0.06); }
       html[data-theme="dark"] .dk { --dk-menu-fg: #bdbfcb; --dk-menu-hover-fg: #0d0e12; --dk-menu-hover-icon: #303c7a; --dk-menu-danger: #fdafa8; --dk-menu-danger-icon: #c38885; --dk-menu-danger-hover: #f77a6f; --dk-menu-danger-hover-icon: #6c312f; --dk-popover-shadow: 0 0 0 0.5px rgba(117, 123, 150, 0.4), 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); }
+      .dk { --dk-shadow: rgba(0, 0, 0, 0.12); }
+      html[data-theme="dark"] .dk { --dk-shadow: rgba(0, 0, 0, 0.5); }
+      /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
+      .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
+      html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
       /* studio-literal-check: skip-end */
       .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; min-width: 320px; max-width: none; flex: 1 1 600px; border-right: 0; }
@@ -211,9 +216,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
-      .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
-      .dk-search form { max-width: 420px; }
-      .dk-search-hits { position: absolute; z-index: 5; left: 16px; top: 100%; width: min(420px, calc(100% - 32px)); max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; }
+      .dk-search-dialog { box-sizing: border-box; width: min(800px, calc(100vw - 32px)); max-height: 76vh; margin: 12vh auto auto; padding: 0; border: 0; border-radius: 6px; background: var(--bg-card); color: var(--fg); box-shadow: 0 0 0 1px var(--dk-border), 0 8px 24px var(--dk-shadow); overflow: hidden; }
+      .dk-search { position: relative; padding: 8px 12px; background: var(--bg-card); }
+      .dk-search form { max-width: none; }
+      .dk-search-hits { position: static; width: auto; max-height: 60vh; margin: 8px -12px -8px; padding: 4px 0; overflow-y: auto; background: var(--bg-card); border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; }
       .dk-search-hits a[aria-selected="true"] { background: var(--bg-muted); }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; font-size: var(--text-sm); }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--fg-dim); border-radius: 6px; color: var(--fg); text-decoration: none; }

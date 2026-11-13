@@ -64,6 +64,27 @@ defmodule BarkparkWeb.Studio.DeskHeaderTest do
     assert root =~ ~r/class="pane-item-chevron"[^>]*>\s*<svg[^>]*data-desk-glyph="chevron-right"/
   end
 
+  # LOOKS A4: no search bar over the panes; the search is a dialog the
+  # navbar's button opens (and Cmd+K, "/": bp-desk.js). Only the desk has the
+  # button: the old Studio's bar is unchanged.
+  test "the search is a dialog the navbar opens, on the desk only", %{conn: conn, base: base} do
+    {:ok, view, html} = live(conn, base)
+
+    assert has_element?(
+             view,
+             ~s(#studio-bar button[data-desk-search-open][aria-controls="dk-search-dialog"])
+           )
+
+    assert has_element?(view, "dialog#dk-search-dialog #desk-search-form")
+    assert html =~ ~s(<dialog id="dk-search-dialog")
+    refute html =~ ~r/<div class="dk-search"[^>]*>(?![\s\S]*<\/dialog>)/
+
+    studio = String.replace_suffix(base, "/_desk", "")
+    {:ok, _studio_view, studio_html} = live(conn, studio)
+    assert studio_html =~ ~s(id="studio-bar")
+    refute studio_html =~ "data-desk-search-open"
+  end
+
   test "a list pane's header and search carry Sanity's glyphs", %{conn: conn, base: base} do
     {:ok, view, _html} = live(conn, "#{base}/#{@type_name}")
     render_async(view, 5_000)
