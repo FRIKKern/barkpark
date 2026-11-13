@@ -13,28 +13,29 @@ LiveViews read `session["api_token_session"]`
 The principal is the API token; each binds to one **workspace** (tenancy boundary;
 `docs/api-v1.md` §1a) by two facts that must agree:
 
-- `api_tokens.workspace_id` — the workspace the token belongs to.
-- a `workspace_memberships` row — the principal is a member of it.
+- `api_tokens.workspace_id`: the token's workspace.
+- a `workspace_memberships` row: its membership.
 
 Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
-no membership row for the token → `403 forbidden`, reason
+no membership row → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`, …) resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). Minted with an explicit
-`dataset` (`dataset_bound`), a token gets `403 dataset_not_bound` elsewhere;
-unbound, `dataset` binds nothing.
+`dataset` (`dataset_bound`), a token gets `403 dataset_not_bound` elsewhere and on
+workspace/project create, playground, import (an older `bp` bound every
+`write`/`admin` mint: re-mint); unbound, `dataset` binds nothing.
 
 ## Roles (`ApiToken.permissions`)
 
 | Permission | Grants | Surfaces |
 |---|---|---|
-| `read` | Reads on private datasets / schemas | `…/v1/data/query/*` `/media` |
+| `read` | Reads on private datasets/schemas | `…/v1/data/query/*` `/media` |
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
 | `public-read` | Anonymous-equivalent GET-only reads | `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
-| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
+| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
@@ -80,8 +81,8 @@ writes ([sessions](auth-user-sessions.md)).
 
 `live_auth.ex`: `:admin` → `"admin"`; `:ops` → `"ops"` or `"admin"`;
 `:scoped_admin` → `workspace_admin?/2` on the URL's workspace (membership axis);
-all halt with a flash + redirect to `/studio`.
-`paper_viewer.ex` `:viewer` (paper readers): never halts; assigns
+all halt: flash + redirect to `/studio`.
+`paper_viewer.ex` `:viewer`: never halts; assigns
 `:current_user`/`:api_token`/`:viewer` + fail-closed `:can_edit?` (`authorize/3`
 `:write`, in `BulldocsLive.mount/3`).
 
@@ -93,14 +94,14 @@ all halt with a flash + redirect to `/studio`.
 on `[:api, :require_admin]` (instance-global only).
 
 Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
-*replaces* `:api` — `[:api, :require_admin]` is where the convergence above
+*replaces* `:api`: `[:api, :require_admin]` is where the convergence above
 bites. `DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
 `AssignDefaultScope` does nothing; `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token
 
 `barkpark-dev-token` (seeded by the `demo` profile; `clean` mints none) carries
-`["read","write","admin"]` AND a `Default` `workspace_memberships` row, so it
+`["read","write","admin"]` AND a `Default` `workspace_memberships` row: it
 passes every gate.
-**MUST rotate before prod** — starter templates bake it into `BARKPARK_TOKEN`
+**MUST rotate before prod**: starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
