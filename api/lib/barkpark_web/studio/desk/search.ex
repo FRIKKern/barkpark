@@ -7,8 +7,9 @@ defmodule BarkparkWeb.Studio.Desk.Search do
 
   The box is a combobox over its hits, as the TanStack Studio's: the focus
   stays in the box, the hits are options in a listbox, one is lit
-  (`aria-activedescendant`); ArrowDown and ArrowUp move the light
-  (`DeskLive`), Enter opens the lit hit.
+  (`aria-activedescendant`). Each new set of hits is drawn with the first
+  lit; ArrowDown and ArrowUp move the light in the browser (`bp-desk.js`),
+  with nothing sent, and Enter sends the lit index (`lit`) to open that hit.
   """
 
   use BarkparkWeb, :html
@@ -17,7 +18,6 @@ defmodule BarkparkWeb.Studio.Desk.Search do
 
   attr :query, :string, default: ""
   attr :hits, :list, default: []
-  attr :lit, :integer, default: 0
   attr :root, :any, required: true
   attr :base, :string, required: true
 
@@ -39,9 +39,9 @@ defmodule BarkparkWeb.Studio.Desk.Search do
           aria-autocomplete="list"
           aria-expanded={to_string(@hits != [])}
           aria-controls="desk-search-options"
-          aria-activedescendant={@hits != [] && option_id(@lit)}
-          phx-keydown="desk-search-key"
+          aria-activedescendant={@hits != [] && option_id(0)}
         />
+        <input type="hidden" id="desk-search-lit" name="lit" value="0" />
       </form>
       <div :if={String.trim(@query) != ""} class="dk-search-hits" id="desk-search-hits">
         <p :if={String.length(String.trim(@query)) < 2} class="dk-note">
@@ -57,7 +57,7 @@ defmodule BarkparkWeb.Studio.Desk.Search do
             id={option_id(i)}
             class="pane-item"
             role="option"
-            aria-selected={to_string(i == @lit)}
+            aria-selected={to_string(i == 0)}
             data-desk-hit
           >
             <%!-- The title is an element of its own: a spec finds a hit by it. --%>

@@ -91,4 +91,28 @@ defmodule BarkparkWeb.Studio.DeskEditorDbDownTest do
     assert Process.alive?(ctx.view.pid)
     assert eventually(fn -> has_element?(ctx.view, card) end)
   end
+
+  # task-f8383ce8dd2ef270 criterion 7: the editor keeps the document it had
+  # (A) when the next one (B) cannot be read, so a note about B's `rev=` sat
+  # over "This document could not be read."
+  test "no revision note over a document that could not be read", ctx do
+    other = "dd-other-#{System.unique_integer([:positive])}"
+    {:ok, _} = Content.create_document(ctx.type, %{"doc_id" => other, "title" => "B"}, @dataset)
+
+    render_patch(ctx.view, "#{ctx.base}/#{ctx.type};#{ctx.id}")
+    assert eventually(fn -> has_element?(ctx.view, "[data-pane-editing] #editor-form") end)
+
+    outage!()
+    render_patch(ctx.view, "#{ctx.base}/#{ctx.type};#{other},rev=abc123")
+
+    card = "section[data-pane-editing] [data-desk-edit-failed]"
+    assert eventually(fn -> has_element?(ctx.view, card) end)
+    refute has_element?(ctx.view, "section[data-pane-editing] [data-desk-left-out]")
+
+    # Read again, the note is back over the document it is about.
+    restore!()
+    ctx.view |> element("#{card} button", "Retry") |> render_click()
+    assert eventually(fn -> has_element?(ctx.view, "[data-pane-editing] #editor-form") end)
+    assert has_element?(ctx.view, "section[data-pane-editing] [data-desk-left-out]")
+  end
 end
