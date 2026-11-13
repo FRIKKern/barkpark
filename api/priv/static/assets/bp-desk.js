@@ -715,6 +715,7 @@
         }
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
+        if (hook._keepLink) hook._keepLink();
         // A strip that opened is no control: its tip goes. Any other shown tip
         // follows its control (a separator moved by the keys).
         var tip = hook._tip && hook._tip.anchor ? hook._tip : null;
@@ -793,6 +794,31 @@
         if (next && next.classList.contains(RESIZER)) next.focus({ preventScroll: true });
         else hook._sep = null;
       };
+      // A link focused in a pane that a patch then draws again goes with it
+      // (the read view becomes the editor one round trip after the URL: its
+      // section has an id of its own), and the focus falls to <body>, so the
+      // Enter pressed next opens nothing (panes.spec.ts:91). The same link in
+      // the same pane takes the focus back, before any key can land: the
+      // observer that lays the panes out runs right after the patch.
+      hook._link = null;
+      hook._noteLink = function (e) {
+        var a = e.target && e.target.closest ? e.target.closest(OPENER) : null;
+        var pane = a && root.contains(a) ? a.closest("[data-pane-index]") : null;
+        hook._link = pane ? { el: a, href: a.getAttribute("href"), index: pane.getAttribute("data-pane-index") } : null;
+      };
+      hook._keepLink = function () {
+        var link = hook._link;
+        var doc = root.ownerDocument;
+        if (!link || link.el.isConnected) return;
+        hook._link = null;
+        if (doc.activeElement && doc.activeElement !== doc.body) return;
+        var again = Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
+          var pane = a.closest("[data-pane-index]");
+          return a.getAttribute("href") === link.href && pane && pane.getAttribute("data-pane-index") === link.index;
+        })[0];
+        if (again) again.focus({ preventScroll: true });
+      };
+
       // The editor moved the focus, or pressed somewhere: the pane lets go.
       hook._letGo = function (e) {
         var on = e.target && e.target.classList && e.target.classList.contains(RESIZER) && e.target.parentNode === root;
@@ -1173,6 +1199,7 @@
       root.addEventListener("keydown", hook._noteFocus, true);
       root.addEventListener("keydown", hook._notePress, true);
       root.ownerDocument.addEventListener("focusin", hook._letGo);
+      root.ownerDocument.addEventListener("focusin", hook._noteLink);
       root.ownerDocument.addEventListener("pointerdown", hook._letGo, true);
       root.addEventListener("click", hook._onClick);
       // The search box sits beside the panes, not in them.
@@ -1457,6 +1484,7 @@
       window.clearTimeout(this._pressTimer);
       this._pressWatch.disconnect();
       root.ownerDocument.removeEventListener("focusin", this._letGo);
+      root.ownerDocument.removeEventListener("focusin", this._noteLink);
       root.ownerDocument.removeEventListener("pointerdown", this._letGo, true);
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
