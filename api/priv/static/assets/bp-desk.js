@@ -50,6 +50,8 @@
   var OPENER = ROW + ", " + REF;
   // A named button or link in a pane's own header row.
   var HEADER_CONTROL = "[data-pane-index] > .pane-header button[aria-label], [data-pane-index] > .pane-header a[aria-label]";
+  // The header controls both the read view and the editor draw, by class.
+  var HEADER_KINDS = ["dk-close", "dk-focus"];
   var WARM_DELAY_MS = 80;
   var WARM_FORGET_MS = 30000;
   var GIVE_UP_MS = 10000;
@@ -817,8 +819,10 @@
       // observer that lays the panes out runs right after the patch.
       // A button in the pane's header row (Split, Share, "…", focus mode,
       // close) goes the same way, and is found again by its name
-      // (`aria-label`) in the same pane's header. No button of that name
-      // there: the focus is left where it fell.
+      // (`aria-label`) in the same pane's header. The close link's name
+      // carries the title, which the read view may not have read yet (it
+      // says the id), so close and focus mode are also found by their class.
+      // Nothing of that name or class there: the focus is left where it fell.
       hook._link = null;
       hook._noteLink = function (e) {
         var t = e.target && e.target.closest ? e.target : null;
@@ -830,7 +834,8 @@
         }
         var b = t ? t.closest(HEADER_CONTROL) : null;
         var head = b && root.contains(b) ? b.closest("[data-pane-index]") : null;
-        hook._link = head ? { el: b, label: b.getAttribute("aria-label"), index: head.getAttribute("data-pane-index") } : null;
+        var kind = b ? HEADER_KINDS.filter(function (k) { return b.classList.contains(k); })[0] : null;
+        hook._link = head ? { el: b, label: b.getAttribute("aria-label"), kind: kind, index: head.getAttribute("data-pane-index") } : null;
       };
       hook._keepLink = function () {
         var link = hook._link;
@@ -848,7 +853,9 @@
           })[0]
           : Array.prototype.filter.call(root.querySelectorAll(HEADER_CONTROL), function (b) {
             return b.getAttribute("aria-label") === link.label && mine(b);
-          })[0];
+          })[0] || (link.kind && Array.prototype.filter.call(root.querySelectorAll(HEADER_CONTROL), function (b) {
+            return b.classList.contains(link.kind) && mine(b);
+          })[0]);
         if (again) again.focus({ preventScroll: true });
       };
 

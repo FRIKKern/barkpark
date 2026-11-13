@@ -63,6 +63,17 @@ const editor = (el, sel) => el.querySelector(`#desk-pane-2-doc\\:post-a-editor $
   hook.destroyed();
 }
 
+// ── The read view had no title yet (its close link says the id): the
+//    editor's close link takes the focus all the same ──────────────────────
+{
+  const { el, hook } = mount(focusBtn + close.replace("Close Post A", "Close post-a"));
+  el.querySelector('[data-pane-index="2"] .dk-close').focus();
+  swap(el, split + focusBtn + close);
+  await settle();
+  assert.equal(active(), editor(el, ".dk-close"), "found by its class when the name changed");
+  hook.destroyed();
+}
+
 // ── The focus mode button keeps the focus ───────────────────────────────────
 {
   const { el, hook } = mount();
@@ -73,11 +84,12 @@ const editor = (el, sel) => el.querySelector(`#desk-pane-2-doc\\:post-a-editor $
   hook.destroyed();
 }
 
-// ── No button of that name in the new header: the focus is left alone ───────
+// ── No button of that name or class in the new header: the focus is left alone
 {
-  const { el, hook } = mount();
-  el.querySelector('[data-pane-index="2"] .dk-focus').focus();
-  swap(el, split + close);
+  const other = `<button type="button" class="icon-btn" aria-label="Show more">M</button>`;
+  const { el, hook } = mount(focusBtn + other + close);
+  el.querySelector('[data-pane-index="2"] [aria-label="Show more"]').focus();
+  swap(el, split + focusBtn + close);
   await settle();
   assert.equal(active(), window.document.body, "no other button, and no field, is given the focus");
   hook.destroyed();
