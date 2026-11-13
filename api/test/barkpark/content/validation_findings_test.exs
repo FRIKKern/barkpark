@@ -434,7 +434,7 @@ defmodule Barkpark.Content.ValidationFindingsTest do
       assert Enum.sort(Validation.known_codes()) ==
                Enum.sort(~w(
                  required pattern_mismatch expected_object expected_list
-                 codelist_not_string codelist_empty codelist_has_whitespace
+                 codelist_not_string codelist_empty codelist_has_whitespace not_in_codelist
                  localized_text_shape language_key_not_string language_not_declared
                  rich_text_shape text_not_string image_shape file_shape
                  rect_shape rect_out_of_range missing_type unknown_type
