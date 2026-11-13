@@ -34,7 +34,8 @@ name: dependabot-task-trailer
 # BRANCH. No `ref:` override, no build, no dependency install, no PR script.
 # The PR contributes exactly three strings, all consumed as `env:` (never
 # interpolated into a shell body, where a crafted branch name would be code):
-# the actor, the head ref, and the body.
+# the actor, the head ref, and the body (read live from the API in the decide
+# step; see there for why not the event payload).
 #
 # ── WHY THE EDIT NEEDS ITS OWN TOKEN (task-9747f19f13f83368) ────────────────
 # Editing a PR body emits a `pull_request` event of type `edited`, and
@@ -145,9 +146,23 @@ jobs:
         env:
           ACTOR: ${{ github.actor }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          # The LIVE body, not github.event.pull_request.body. On a rebase
+          # dependabot force-pushes and rewrites the body together, and the
+          # synchronize payload can still hold the OLD body with its trailer:
+          # the decision then says "already there" while the live body has
+          # none. MEASURED on #25455, 2026-11-13: run 43390106707 printed
+          # NO-OP rc 4 and the PR was left with no trailer. A read needs no
+          # more than GITHUB_TOKEN, and the body is still only data in a
+          # variable, never shell text.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -uo pipefail
+          if ! PR_BODY="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')"; then
+            echo "::error title=dependabot-task-trailer could not read the PR body::gh pr view failed for PR #${PR_NUMBER}, so whether the body carries a trailer is unknown. Refusing to decide from the event payload, which can be stale. Re-run this job."
+            exit 1
+          fi
+          export PR_BODY
           rc=0
           bash scripts/dependabot-task-trailer.sh > new-body.txt || rc=$?
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"

@@ -260,7 +260,31 @@ wf_no_restated_id() {
   ! grep -vE '^[[:space:]]*#' "$1" | grep -qE 'task-[0-9a-f]{16}'
 }
 
+# 4. The decision reads the LIVE body, never the event payload's copy. On a
+#    rebase the payload can hold the old body with its trailer (#25455).
+# shellcheck disable=SC2016,SC2317,SC2329  # literal ${{ }} / $VAR patterns; called via "$check"
+wf_reads_live_body() {
+  grep -vE '^[[:space:]]*#' "$1" | grep -qF 'PR_BODY="$(gh pr view "$PR_NUMBER"' \
+    && ! grep -vE '^[[:space:]]*#' "$1" | grep -qF 'github.event.pull_request.body'
+}
+
 if [ -f "$WF" ]; then
+  if wf_reads_live_body "$WF"; then
+    ok "wf_reads_live_body holds on the shipped workflow"
+  else
+    bad "wf_reads_live_body does NOT hold on the shipped workflow" "$WF"
+  fi
+  M4="$TMP/wf-m4.yml"
+  # shellcheck disable=SC2016
+  sed 's/^\( *\)PR_NUMBER: \${{ github.event.pull_request.number }}$/&\n\1PR_BODY: ${{ github.event.pull_request.body }}/' "$WF" > "$M4"
+  if cmp -s "$WF" "$M4"; then
+    bad "MUTATION DID NOT APPLY for wf_reads_live_body" "the mutant equals the workflow, so this measured NOTHING"
+  elif wf_reads_live_body "$M4"; then
+    bad "wf_reads_live_body is UNPROVEN: it still holds on a mutant that reads the event body" "$M4"
+  else
+    ok "DETECTOR FIRES: wf_reads_live_body reds on its mutant"
+  fi
+
   for check in wf_token_preferred wf_fallback_warns wf_no_restated_id; do
     if "$check" "$WF"; then
       ok "$check holds on the shipped workflow"
