@@ -729,6 +729,19 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       # Grant B: project-P READ+WRITE — the sub-scope the old ws-level gate
       # could not see, so it used to fall to the read-only gate (writes nowhere).
       bind_grant!(ws_a, user, %{project_id: proj_a.id, capabilities: ["read", "write"]})
+      # new-document makes only a type this workspace resolves; the describe's
+      # `post` is the Default workspace's (#25897 review).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: ws_a.id
+        )
 
       {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
 
@@ -787,6 +800,20 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
 
     test "invariant (d) — a real member writes with NO gate (byte-identical: the event persists)",
          %{member_conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      # new-document makes only a type this workspace resolves; the describe's
+      # `post` is the Default workspace's (#25897 review).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: ws_a.id
+        )
+
       {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
 
       # No grant gate of either kind is attached for a member; the write goes
