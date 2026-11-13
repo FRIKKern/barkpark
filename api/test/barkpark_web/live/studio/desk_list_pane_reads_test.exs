@@ -192,4 +192,50 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
     send(renamed, {:go, "renamed", "Alpha two"})
     assert_receive {:titles, %{"doc-a" => "Alpha two"}}, 2_000
   end
+
+  # task-ad86cbf23b7dc0e8: a read belongs to the key it was started for. One
+  # that lands after the pane's key has moved on is not this pane's data.
+  describe "a read that lands after its key has moved on" do
+    @next "note;doc-z" <> ";doc-b,type=note,parentRefPath=more"
+
+    test "is not shown in a pane now held for the editor", %{conn: conn} do
+      view = host(conn, %{})
+      assert_receive {:reading, old}, 2_000
+
+      # Another document takes the pane, and the page holds it for the editor.
+      send(view.pid, {:set, panes: Panes.parse(@next), hold: true})
+      assert eventually(fn -> has_element?(view, ~s(#pane[aria-busy="true"])) end)
+
+      send(old, {:go, "about the document before"})
+      Process.sleep(100)
+      refute shows?(view, "about the document before")
+
+      # The hold lifts: the pane reads its own document.
+      send(view.pid, {:set, hold: false})
+      assert_receive {:reading, mine}, 2_000
+      send(mine, {:go, "about this document"})
+      assert eventually(fn -> shows?(view, "about this document") end)
+      refute has_element?(view, "#pane[aria-busy]")
+    end
+
+    test "is not shown in a pane that took a hover's read for the new key", %{conn: conn} do
+      view = host(conn, %{})
+      assert_receive {:reading, old}, 2_000
+      send(old, {:go, "about the document before"})
+      assert eventually(fn -> shows?(view, "about the document before") end)
+
+      # A refresh of the first document is out when the pane moves on with a
+      # hover's read of the next.
+      Phoenix.LiveView.send_update(view.pid, PaneComponent, id: "pane", refresh: true)
+      assert_receive {:reading, again}, 2_000
+      warm = %{title: "Zeta", fields: [%{title: "Summary", value: "read ahead"}]}
+      send(view.pid, {:set, panes: Panes.parse(@next), warm: warm})
+      assert eventually(fn -> shows?(view, "read ahead") end)
+
+      send(again, {:go, "the document before, read again"})
+      Process.sleep(100)
+      assert shows?(view, "read ahead")
+      refute shows?(view, "the document before, read again")
+    end
+  end
 end
