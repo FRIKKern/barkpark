@@ -56,6 +56,47 @@ defmodule BarkparkWeb.Studio.StudioPublishButtonSwapTest do
     refute has_element?(view, "#doc-action-publish")
   end
 
+  # The swap takes the focused Publish off the page, so the focus fell to
+  # <body>. A publish that lands asks the client to focus the document header
+  # (tabindex=-1, not an action); a refused one leaves Publish and its focus.
+  test "Classic: a publish that lands sends the focus to the document header", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/pubswap/pubswap-1"))
+
+    view |> element("#doc-action-publish") |> render_click()
+
+    assert_push_event(view, "bp:focus-doc-header", %{})
+    assert has_element?(view, ~s(.pane-header.editor-header[tabindex="-1"]))
+  end
+
+  test "Classic: a publish the validation refuses moves no focus", %{conn: conn} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "pubswap",
+          "title" => "Pub swap",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{
+              "name" => "body",
+              "title" => "Body",
+              "type" => "string",
+              "validation" => %{"required" => true}
+            }
+          ]
+        },
+        @dataset
+      )
+
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/pubswap/pubswap-1"))
+
+    html = view |> element("#doc-action-publish") |> render_click()
+
+    assert html =~ "Fix validation errors before publishing"
+    assert has_element?(view, "#doc-action-publish")
+    refute_push_event(view, "bp:focus-doc-header", %{})
+  end
+
   test "Beta: the same ids, so its header swaps the element too", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/pubswap/pubswap-1"))
     view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
