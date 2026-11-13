@@ -996,6 +996,26 @@
         items[to].focus();
       };
 
+      // A list is one Tab stop coming in, too: Tab or Shift+Tab that would
+      // land on one of its rows from outside them lands on its selected row
+      // (its first when none is), never on its last (leaveList is the way out).
+      hook._onEnterList = function (e) {
+        if (e.key !== "Tab" || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+        var from = e.target;
+        if (!from || !from.matches || from.matches(ROW)) return;
+        var all = Array.prototype.filter.call(root.ownerDocument.querySelectorAll(TABBABLE), function (el) {
+          return el.tabIndex >= 0 && el.getClientRects().length;
+        });
+        var at = all.indexOf(from);
+        var next = at < 0 ? null : all[at + (e.shiftKey ? -1 : 1)];
+        if (!next || !next.matches(ROW) || !root.contains(next)) return;
+        var pane = next.closest("[data-pane-index]");
+        var to = pane && (pane.querySelector(ROW + ".selected") || pane.querySelector(ROW));
+        if (!to || to === next) return;
+        e.preventDefault();
+        to.focus();
+      };
+
       // The search box's light: kept for the hits it was moved over.
       hook._search = { key: "", at: 0 };
       hook._relight = function () {
@@ -1115,6 +1135,7 @@
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
+      root.ownerDocument.addEventListener("keydown", hook._onEnterList);
       root.addEventListener("keydown", hook._onKey);
       // `toggle` does not bubble: caught on the way down.
       root.addEventListener("toggle", hook._onDocMenu, true);
@@ -1360,6 +1381,7 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      root.ownerDocument.removeEventListener("keydown", this._onEnterList);
       if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);
       Array.prototype.slice.call(root.children).forEach(function (el) {
