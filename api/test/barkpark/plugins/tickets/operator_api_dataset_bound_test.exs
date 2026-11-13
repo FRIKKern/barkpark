@@ -92,6 +92,46 @@ defmodule Barkpark.Plugins.Tickets.OperatorApiDatasetBoundTest do
     end
   end
 
+  # A ticket key is a second way to write tickets: the key carries a dataset
+  # and every ticket made with it lands there (task-d43ee29a26676189).
+  describe "minting a ticket key with no dataset named" do
+    defp mint_key(conn) do
+      conn
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/plugins/tickets/keys", Jason.encode!(%{name: "Kari"}))
+      |> json_response(201)
+    end
+
+    defp create_ticket(raw_key) do
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer " <> raw_key)
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/tickets", Jason.encode!(%{subject: "FROM-THE-KEY", body: "hello"}))
+      |> response(201)
+    end
+
+    defp inbox(ws, dataset) do
+      bearer(ws, []) |> get("/v1/tickets/inbox?dataset=#{dataset}") |> response(200)
+    end
+
+    test "a dataset-bound token's key is for its own dataset, and so are its tickets", %{ws: ws} do
+      minted = bearer(ws, dataset_bound: true) |> mint_key()
+      assert minted["key"]["dataset"] == @own
+
+      create_ticket(minted["raw"])
+      assert inbox(ws, @own) =~ "FROM-THE-KEY"
+      refute inbox(ws, @prod) =~ "FROM-THE-KEY"
+    end
+
+    test "an unbound token's key is still for production (control)", %{ws: ws} do
+      minted = bearer(ws, []) |> mint_key()
+      assert minted["key"]["dataset"] == @prod
+
+      create_ticket(minted["raw"])
+      assert inbox(ws, @prod) =~ "FROM-THE-KEY"
+    end
+  end
+
   test "an unbound token naming no dataset still gets production (control)", %{ws: ws} do
     body = bearer(ws, []) |> get("/v1/tickets/inbox") |> response(200)
 

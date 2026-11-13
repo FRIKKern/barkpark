@@ -13,6 +13,7 @@ this card owns the budget numbers and WHO gets which one.
 | `:verified` | `Authorization: Bearer <raw>` → `@principal_resolvers` (`api_token` via `Auth.verify_token_principal/1`, SCIM via `Scim.resolve_token_id/1`), `owner_user_id` nil | `:write_per_minute` (60) | `:read_per_minute` (300) |
 | `:owned` | same Bearer resolution, but `owner_user_id` set — a personal PAT, or an app token from `POST /v1/auth/app-tokens` (always owner-set, one per editor email) | `:session_write_per_minute` (180) | `:read_per_minute` (300) |
 | `:session` | a login-session Bearer (`/v1/auth/login`'s token; Studio account sign-in), or a session cookie with no Bearer: `session["api_token"]` → `Auth.verify_token_id/1`, else `session["user_session"]` → `Accounts.verify_user_session/1`. Bearer and cookie of one login share one bucket | `:session_write_per_minute` (180) | `:read_per_minute` (300) |
+| `:host` | `Authorization: Host <cred>` → `ChatHosts.authenticate/1`, read only where the mount passes `principal: :chat_host` | `:host_write_per_minute` (2400; one event per text_delta) | `:read_per_minute` (300) |
 | `:anonymous` | no resolvable credential at all | `client_ip/1`-keyed, `:write_per_minute` (60) | `:read_per_minute` (300) |
 
 A Bearer wins over a session cookie on the same request, same precedence
@@ -35,24 +36,20 @@ A 429's `details.budget` names the spent bucket (`class`, `per_minute`,
 
 ## Tuning
 
-All three knobs live in `config :barkpark, :rate_limits`
+The knobs live in `config :barkpark, :rate_limits`
 (`BARKPARK_RATE_LIMIT_*` in `runtime.exs`): `read_per_minute`,
-`write_per_minute`, `session_write_per_minute`. One token (say a site
-build prerendering in parallel) gets its own budget with
+`write_per_minute`, `session_write_per_minute`, `host_write_per_minute`. One
+token (say a site build prerendering in parallel) gets its own budget with
 `tokens: %{"<api_token id>" => %{read: N}}` or
 `BARKPARK_RATE_LIMIT_TOKENS="<id>:read=3000:write=120"`; it wins over class
-and dataset budgets. Changing one never changes the
-full-refill window (always 60s for this plug — capacity and refill scale
-together), so `Barkpark.RateLimiter`'s `@stale_after_ms` invariant holds
-without re-deriving it.
+and dataset budgets. Capacity and refill scale together, so the full-refill
+window stays 60s and `RateLimiter`'s `@stale_after_ms` invariant holds.
 
 ## Adding a new credential kind
 
-`rate_limit_principal_coverage_test.exs` is the tripwire: it walks
-`router.ex`, finds every pipeline mounting `RateLimit`, and refuses any
-credential plug not accounted for in its `@accounted` map. A new Bearer kind
-needs a resolver in `@principal_resolvers`; a new session-cookie kind needs a
-branch in `RateLimit.session_principal_id/1` (same file) — either way, add the
-row to `@accounted` with which bucket it keys, or that test reds at the mount
-site instead of silently metering the new kind as anonymous (the SCIM
-incident this test exists to prevent, see its own moduledoc).
+`rate_limit_principal_coverage_test.exs` walks `router.ex` and refuses any
+credential plug in a metered pipeline missing from its `@accounted` map. A new
+Bearer kind needs a resolver in `@principal_resolvers`, a new cookie kind a
+branch in `RateLimit.session_principal_id/1`, a new scheme a mount option like
+`principal: :chat_host`. Otherwise it is metered as anonymous (the SCIM
+incident, see that test's moduledoc).

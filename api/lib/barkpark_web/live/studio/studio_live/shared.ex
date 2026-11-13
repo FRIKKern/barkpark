@@ -1755,7 +1755,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # (task-0ded99e28e620ba5); every other schema is unchanged.
     new_schema = editor && BarkparkWeb.Studio.PluginSchemaCopy.localize(editor[:schema])
     old_schema = socket.assigns[:editor_schema]
-    nav_group = resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema)
+
+    nav_group =
+      BarkparkWeb.Studio.StudioLive.NavGroup.resolve(
+        socket.assigns[:nav_group],
+        old_schema,
+        new_schema,
+        desk?: is_binary(socket.assigns[:desk_base])
+      )
 
     new_form = (editor && editor[:form]) || %{}
 
@@ -2427,28 +2434,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       errors: BarkparkWeb.StudioLocale.localize_findings(errs),
       warnings: BarkparkWeb.StudioLocale.localize_findings(warns)
     }
-  end
-
-  @doc false
-  def resolve_nav_group(_current, _old, nil), do: nil
-
-  def resolve_nav_group(current, old, new_schema) do
-    cond do
-      schema_id(new_schema) == schema_id(old) and current != nil -> current
-      true -> first_group_name(new_schema)
-    end
-  end
-
-  @doc false
-  def schema_id(nil), do: nil
-  def schema_id(schema), do: Map.get(schema, :name) || Map.get(schema, "name")
-
-  @doc false
-  def first_group_name(schema) do
-    case BarkparkWeb.StudioComponents.schema_groups(schema) do
-      [%{"name" => name} | _] -> name
-      _ -> nil
-    end
   end
 
   @doc false

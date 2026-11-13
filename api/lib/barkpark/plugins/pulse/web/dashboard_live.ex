@@ -19,12 +19,34 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
 
   alias Barkpark.Pulse
   alias Barkpark.Pulse.Metrics
+  alias BarkparkWeb.OpsOperatorGate
 
   @refresh_ms 5_000
   @vitals_ms 2_000
 
+  # Pulse channels and counters carry no workspace: the whole view is
+  # instance-wide (activity, node vitals, storage, host cost). So it is the
+  # instance operator's on BOTH mounts. `OpsOperatorGate.mount/2` lets a scoped
+  # mount through for views that clamp to the workspace; there is nothing to
+  # clamp here, so the scoped mount asks the flat question too.
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    with {:ok, socket} <- OpsOperatorGate.mount(socket, session),
+         true <- OpsOperatorGate.flat_operator?(socket) do
+      mount_dashboard(socket)
+    else
+      {:halt, socket} ->
+        {:ok, socket}
+
+      false ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Pulse is instance-wide and reserved for the instance operator.")
+         |> redirect(to: "/studio")}
+    end
+  end
+
+  defp mount_dashboard(socket) do
     # The disconnected (dead) render is discarded by the client the instant the
     # LiveView socket connects, so running the three DB projections there is
     # pure waste — 3 discarded queries per open (2× per page load). Gate the
