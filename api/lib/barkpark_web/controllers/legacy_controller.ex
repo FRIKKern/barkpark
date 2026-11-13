@@ -15,6 +15,17 @@ defmodule BarkparkWeb.LegacyController do
 
   @dataset "production"
 
+  # Every action here works on `production` by name and the routes name no
+  # dataset, so the request-level fence has nothing to compare. A token minted
+  # with an explicit OTHER dataset is held to that one: it is refused here.
+  plug :refuse_other_dataset_binding
+
+  defp refuse_other_dataset_binding(conn, _opts) do
+    if Barkpark.Auth.ApiToken.bound_dataset(conn.assigns[:api_token]) in [nil, @dataset],
+      do: conn,
+      else: conn |> ErrorResponse.emit({:error, :forbidden_dataset}) |> halt()
+  end
+
   # The legacy list serves up to 10_000 documents — the number this route has
   # always PASSED as `:limit`, and never actually received (see `index/2`).
   # Ten pages of the server's 1000-row page cap is that same ceiling, now
