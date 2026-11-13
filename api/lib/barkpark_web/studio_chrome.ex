@@ -112,6 +112,7 @@ defmodule BarkparkWeb.StudioChrome do
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
 
   alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
@@ -213,7 +214,14 @@ defmodule BarkparkWeb.StudioChrome do
        when is_binary(bound),
        do: bound
 
-  defp chrome_dataset(_token, params), do: params["dataset"] || Content.default_dataset()
+  # `?dataset[]=x` and `?dataset[a]=x` arrive as a list and a map. Neither is a
+  # dataset name, so they count as absent.
+  defp chrome_dataset(_token, params) do
+    case params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> Content.default_dataset()
+    end
+  end
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
   #
@@ -314,12 +322,22 @@ defmodule BarkparkWeb.StudioChrome do
   # what `/api/workspaces` gives a token creator. Only a `nil` principal — a
   # genuinely anonymous / public-demo session — still gets "Sign in", and for
   # that one it is TRUE.
+
+  # A dataset-bound token makes no project and no workspace
+  # (`ApiToken.dataset_bound?/1`): each comes with datasets of its own.
+  @bound_token_creates_nothing "This token is bound to one dataset and cannot create a workspace or a project"
+
   defp chrome_fallback("create-workspace", %{"name" => name}, socket) do
-    case principal(socket) do
-      nil ->
+    principal = principal(socket)
+
+    cond do
+      is_nil(principal) ->
         put_flash(socket, :error, "Sign in to create a workspace")
 
-      principal ->
+      ApiToken.dataset_bound?(principal) ->
+        refuse_bound_create(socket)
+
+      true ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
           {:ok, ws} ->
             case project_for(ws) do
@@ -356,6 +374,9 @@ defmodule BarkparkWeb.StudioChrome do
           "You need write access in this workspace to create a project — ask an owner to add you"
         )
 
+      ApiToken.dataset_bound?(principal(socket)) ->
+        refuse_bound_create(socket)
+
       true ->
         case Tenancy.create_project_with_dataset(ws, %{name: name}) do
           {:ok, created} ->
@@ -369,6 +390,12 @@ defmodule BarkparkWeb.StudioChrome do
   end
 
   defp chrome_fallback(_event, _params, socket), do: socket
+
+  @doc """
+  The refusal a dataset-bound token gets when it asks for a new workspace or
+  project. One sentence for the chrome and for StudioLive's own handlers.
+  """
+  def refuse_bound_create(socket), do: put_flash(socket, :error, @bound_token_creates_nothing)
 
   # ── scope-menu state ──────────────────────────────────────────────────────
   #

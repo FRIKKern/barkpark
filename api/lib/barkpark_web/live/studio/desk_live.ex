@@ -54,12 +54,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
     defexception message: "no such dataset", plug_status: 404
   end
 
+  # A dataset slug is at most 63 characters (`Tenancy.Dataset`); this leaves
+  # room for an older, longer dataset string.
+  @dataset_max 255
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
     # A dataset segment with a byte the database refuses as text names no
     # dataset. Refused here, before the first read and before any redirect
     # that would carry it.
-    Text.text?(dataset) || raise NotFound
+    # Nor does one longer than any name can be (the Studio's tabs would
+    # compile it into a pattern: Regex.CompileError at 100,000 bytes).
+    (Text.text?(dataset) and byte_size(dataset) <= @dataset_max) || raise NotFound
 
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
@@ -84,8 +90,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
     else
+      # The dataset as a path segment: one that holds "%" or "/" must name
+      # the same dataset on the next request.
+      segment = URI.encode(dataset, &URI.char_unreserved?/1)
+
       {:ok,
-       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], dataset))}
+       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], segment))}
     end
   end
 
@@ -127,13 +137,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
     # Following a hit (or any link) puts the search and the Inspect dialog away.
-    socket =
-      assign(socket,
-        desk_search: "",
-        desk_search_hits: [],
-        desk_search_lit: 0,
-        desk_inspect: false
-      )
+    socket = assign(socket, desk_search: "", desk_search_hits: [], desk_inspect: false)
 
     # Focus mode is for the panes it was turned on over (`FocusMode`).
     socket = FocusMode.follow(socket, splat)
@@ -220,27 +224,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-focus", %{"index" => index}, socket),
     do: {:noreply, FocusMode.toggle(socket, index)}
 
-  # The search box (`Search`): new hits light the first; the arrows move the
-  # light; Enter opens the lit hit, or searches what was typed if its hits
-  # are not in yet.
-  def handle_event("desk-search", params, socket) do
-    {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
-    {:noreply, assign(socket, :desk_search_lit, 0)}
-  end
-
-  def handle_event("desk-search-key", %{"key" => key}, socket)
-      when key in ["ArrowDown", "ArrowUp"] do
-    %{desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
-    step = if key == "ArrowDown", do: 1, else: -1
-    {:noreply, assign(socket, :desk_search_lit, (lit + step) |> min(length(hits) - 1) |> max(0))}
-  end
-
-  def handle_event("desk-search-key", _params, socket), do: {:noreply, socket}
-
+  # The search box (`Search`): Enter opens the lit hit, or searches what was
+  # typed if its hits are not in yet. The arrows move the light in the
+  # browser (`bp-desk.js`), which sends its index with the form as `lit`.
   def handle_event("desk-search-open", %{"value" => value} = params, socket) do
-    %{desk_search: typed, desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+    %{desk_search: typed, desk_search_hits: hits} = socket.assigns
 
-    case value == typed && Enum.at(hits, lit) do
+    case value == typed && Enum.at(hits, lit(params["lit"], hits)) do
       # Opened from the keys: its first field takes the focus, as the
       # TanStack Studio's (`bp-desk.js` waits for the editor).
       %{} = hit ->
@@ -248,7 +238,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
 
       _ ->
-        handle_event("desk-search", params, socket)
+        EditorHost.handle_event("desk-search", params, socket)
     end
   end
 
@@ -261,6 +251,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
        assign(socket, :desk_inspect, open == true and is_map(socket.assigns[:editor_doc]))}
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
+
+  # The lit hit's index from the form: one of the hits, else the first.
+  defp lit(index, hits) do
+    case Integer.parse(to_string(index)) do
+      {i, ""} when i >= 0 and i < length(hits) -> i
+      _ -> 0
+    end
+  end
 
   @impl true
   def handle_async({:warm, key}, {:ok, data}, socket) do
@@ -359,7 +357,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Search.box
       query={@desk_search}
       hits={@desk_search_hits}
-      lit={@desk_search_lit}
       root={@desk.root}
       base={@base}
     />

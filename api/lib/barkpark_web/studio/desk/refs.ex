@@ -8,9 +8,15 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   string. A reference field is `type: "reference"`; an array of them is
   `type: "arrayOf"` (or `"array"`) whose `of` is, or holds, a reference.
   All targets of one document are read in one query, whatever their types.
+
+  A target is named as the desk's rows name it: a type with no `title` field
+  by its `list_preview.title` field (an author's `name`), which a rename
+  moves, while the stored `title` column keeps the first name the document
+  had (refs.spec:179). Each target type's schema is read once per call.
   """
 
   alias Barkpark.Content
+  alias Barkpark.Content.TitleDerivation
 
   @type target :: %{id: String.t(), type: String.t() | nil, title: String.t()}
 
@@ -66,10 +72,21 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
     ids_by_field = ids(doc, schema)
 
     found = lookup(ids_by_field |> Map.values() |> List.flatten() |> Enum.uniq(), dataset, scope)
+    schemas = schemas(found, dataset, scope)
 
     Map.new(ids_by_field, fn {name, ids} ->
-      {name, Enum.map(ids, &target(&1, found[&1]))}
+      {name, Enum.map(ids, &target(&1, found[&1], schemas))}
     end)
+  end
+
+  # The schema of each type among the targets: one read per type.
+  defp schemas(found, dataset, scope) do
+    for %{type: type} when is_binary(type) <- Map.values(found), uniq: true, into: %{} do
+      case Content.resolve_schema(type, dataset, scope) do
+        {:ok, schema} -> {type, schema}
+        _ -> {type, nil}
+      end
+    end
   end
 
   @doc """
@@ -104,10 +121,13 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
     Map.new(ids, fn id -> {id, rows["drafts." <> id] || rows[id]} end)
   end
 
-  defp target(id, nil), do: %{id: id, type: nil, title: id}
+  defp target(id, nil, _schemas), do: %{id: id, type: nil, title: id}
 
-  defp target(id, doc) do
-    title = if is_binary(doc.title) and String.trim(doc.title) != "", do: doc.title, else: id
+  defp target(id, doc, schemas) do
+    title =
+      TitleDerivation.preview_title(doc, schemas[doc.type]) ||
+        if(is_binary(doc.title) and String.trim(doc.title) != "", do: doc.title, else: id)
+
     %{id: id, type: doc.type, title: title}
   end
 

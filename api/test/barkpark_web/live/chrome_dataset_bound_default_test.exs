@@ -125,5 +125,16 @@ defmodule BarkparkWeb.Live.ChromeDatasetBoundDefaultTest do
       assert dataset_of(view) == @own
       assert render(view) =~ @own_ticket
     end
+
+    # A list or a map is not a dataset name. It used to become the `:dataset`
+    # assign and crash the mount in the top menu.
+    for {shape, query} <- [{"list", "dataset[]=x"}, {"map", "dataset[a]=x"}] do
+      test "a ?dataset= that is a #{shape} mounts on the default dataset", %{conn: conn, ws: ws} do
+        {:ok, view, _} = live(admin_conn(conn, ws, []), "/studio/tickets?#{unquote(query)}")
+
+        assert dataset_of(view) == @default
+        assert render(view) =~ @default_ticket
+      end
+    end
   end
 end

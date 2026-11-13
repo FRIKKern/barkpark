@@ -148,6 +148,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp strip(socket), do: socket
 
+  @doc """
+  A document the editor's references can point at changed (`LiveRefresh`):
+  the strip reads its targets again, though its ids are the same.
+  """
+  def refs_changed(socket), do: socket |> assign(:desk_ref_ids, nil) |> strip()
+
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The card's Retry, when the document could not be read: read it again.
   def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
@@ -159,6 +165,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # so a new document is placed by the event (and an optional `desk-pane`).
   def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
     do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
+
+  # Sent by hand with no type: nothing to create.
+  def handle_event("new-document", _params, socket), do: {:noreply, socket}
+
+  # A reference pick writes the editor's form. With no document in the editor
+  # (no form), or without its field and id, there is nothing to write.
+  def handle_event("select-ref", params, socket)
+      when not is_map_key(socket.assigns, :editor_form) or
+             not (is_map_key(params, "id") and is_map_key(params, "field")),
+      do: {:noreply, socket}
 
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
@@ -192,11 +208,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # joins its path with ";") is read back as that Studio path and answered with
   # the desk's own URL. Anything else (a navigate, a URL with a query, a patch
   # with no document handed over) goes out as the Studio printed it.
+  #
+  # A patch to a path outside the desk (the Studio opens another dataset when
+  # the URL's does not exist) is no patch of this page: it leaves for it.
   defp steer(%{redirected: {:live, :patch, %{to: to}}} = socket, how) do
     with %{desk_base: base} when is_binary(base) <- socket.assigns,
+         {:in, true} <- {:in, to == base or String.starts_with?(to, [base <> "/", base <> "?"])},
          {:ok, asked} <- asked(to, base) do
       route(socket, asked, how)
     else
+      {:in, false} -> push_navigate(%{socket | redirected: nil}, to: to)
       _ -> socket
     end
   end
@@ -426,9 +447,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             between the rows with ids would make the patch move the
             references and the editor below it. --%>
       <div id={"#{@view.id}-notes"}>
-        <%!-- Not over a document the editor did not open: it has no current one. --%>
+        <%!-- Not over a document the editor did not open: it has no current
+              one, or still holds the one before (the read failed). --%>
         <p
-          :for={note <- (assigns[:editor_doc] && PaneComponent.left_out(@view.pane)) || []}
+          :for={
+            note <-
+              (assigns[:editor_doc] && !@edit_failed && PaneComponent.left_out(@view.pane)) || []
+          }
           class="dk-note"
           data-desk-left-out
         >
