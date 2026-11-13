@@ -112,7 +112,7 @@ defmodule BarkparkWeb.LiveAuth do
         end
 
       nil ->
-        scoped_admin_deny(socket)
+        scoped_admin_deny(socket, session)
     end
   end
 
@@ -291,10 +291,20 @@ defmodule BarkparkWeb.LiveAuth do
   #
   # Called from the denial flash builder, so this runs only on a denial: an
   # admin who passes pays for no extra lookup.
-  defp put_denial_locale(params, session) do
+  defp put_denial_locale(params, session),
+    do: put_caller_locale(scoped_target_workspace(params), session)
+
+  # The denial speaks the URL workspace's language only to a member of it.
+  # Anyone else gets their own workspace's language, for a real slug and for
+  # one that names nothing alike: the flash used to tell a caller with no seat
+  # whether a slug exists, and its language (task-ef77135faa4cff66).
+  defp put_caller_locale(target, session) do
+    principal = denial_principal(session)
+
     ws =
-      scoped_target_workspace(params) ||
-        BarkparkWeb.Studio.ScopeResolver.resolve_workspace(denial_principal(session))
+      if target && Barkpark.Tenancy.Auth.member?(principal, target.id),
+        do: target,
+        else: BarkparkWeb.Studio.ScopeResolver.resolve_workspace(principal)
 
     StudioLocale.put(ws)
   end
@@ -499,7 +509,7 @@ defmodule BarkparkWeb.LiveAuth do
             end
 
           nil ->
-            scoped_admin_deny(socket)
+            scoped_admin_deny(socket, session)
         end
       end
     end)
@@ -534,18 +544,17 @@ defmodule BarkparkWeb.LiveAuth do
       # The TARGET workspace is already resolved here (it is this function's
       # own `ws` argument) — a denied member still gets the denial in THEIR
       # workspace's language, not English, before StudioChrome ever mounts.
-      _ -> scoped_admin_deny(socket, ws)
+      _ -> scoped_admin_deny(socket, session, ws)
     end
   end
 
   # `ws` is `nil` from the two call sites where the URL's workspace_slug
-  # never resolved at all (task-7efa49ea242a3e04) — an unknown workspace has
-  # no locale to put, so those stay on whatever the process already carries
-  # (English, same as before this fix). The one call site that DOES hold a
-  # resolved target workspace (`scoped_admin_authorize_user/3` above) passes
-  # it, and that is the real-world case the task's repro hits.
-  defp scoped_admin_deny(socket, ws \\ nil) do
-    if ws, do: StudioLocale.put(ws)
+  # never resolved at all, and the target workspace from
+  # `scoped_admin_authorize_user/3`. `put_caller_locale/2` answers a member of
+  # the target in its language (task-7efa49ea242a3e04) and everyone else, for
+  # a real slug and a missing one alike, in their own.
+  defp scoped_admin_deny(socket, session, ws \\ nil) do
+    put_caller_locale(ws, session)
 
     {:halt,
      socket

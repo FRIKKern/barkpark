@@ -76,7 +76,13 @@ defmodule BarkparkWeb.Studio.DeskPaneHeadingsTest do
              "Heading notes #{ctx.n}"
            )
 
-    assert has_element?(view, "section[data-pane-editing] > " <> @heading, "Headed")
+    # The edit pane's title is a div with the heading role: in focus mode it
+    # holds the breadcrumb nav, and it keeps one tag in both modes (`EditorHost`).
+    assert has_element?(
+             view,
+             ~s(section[data-pane-editing] > .pane-header > div.pane-header-title[role="heading"][aria-level="2"]),
+             "Headed"
+           )
   end
 
   test "a heading sits in the header as the span did: no margin of its own" do

@@ -113,4 +113,42 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     render_patch(view, "#{c.base}/#{c.type}")
     refute has_element?(view, @dialog)
   end
+
+  # keyboard:158: in the URL, as Sanity's (`inspect=on`), so Back after
+  # closing opens it again and a copied link opens it.
+  test "opening puts inspect=on in the URL; closing takes it out; Back opens it again", c do
+    view = open(c)
+    inspect_open(view)
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id},inspect=on")
+    assert has_element?(view, @dialog)
+    refute render(view) =~ "Other views and inspectors are not shown here."
+
+    render_hook(view, "desk-inspect", %{"open" => false})
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}")
+    refute has_element?(view, @dialog)
+
+    # The browser's Back: the URL with it again.
+    render_patch(view, "#{c.base}/#{c.type};#{c.id},inspect=on")
+    assert has_element?(view, @dialog)
+  end
+
+  test "a link with inspect=on opens the document with it open", c do
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=on")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+
+    assert has_element?(view, "#{@dialog} h2", "Inspecting Looked at")
+    refute render(view) =~ "Other views and inspectors are not shown here."
+  end
+
+  test "control: another inspector in the URL is still one the desk does not draw", c do
+    {:ok, view, _html} =
+      live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=sanity%2Fstructure%2Fhistory")
+
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+
+    refute has_element?(view, @dialog)
+    assert render(view) =~ "Other views and inspectors are not shown here."
+  end
 end

@@ -85,6 +85,49 @@ defmodule BarkparkWeb.LiveAuthLocaleTest do
     end
   end
 
+  # task-ef77135faa4cff66: the URL workspace's language is for its members. To
+  # anyone else it told whether the slug exists (and its language), so a caller
+  # with no seat there gets the same flash for a real nb-NO slug and for a slug
+  # that names nothing.
+  describe "a caller with no seat in the URL workspace" do
+    defp denial(conn, path) do
+      assert {:error, {:redirect, %{flash: flash}}} = live(conn, path)
+      flash["error"]
+    end
+
+    for {label, tail} <- [
+          {":admin (plugins admin)", "/p/default/d/production/studio/_plugins"},
+          {":scoped_admin (connectors)", "/p/default/studio/connectors"}
+        ] do
+      test "#{label}: an anonymous visitor reads the same flash for a real and a missing slug",
+           %{conn: conn, ws_nb: ws} do
+        real = denial(conn, "/w/#{ws.slug}" <> unquote(tail))
+        missing = denial(conn, "/w/no-such-workspace-at-all" <> unquote(tail))
+
+        assert real == "Admin access required"
+        assert real == missing
+      end
+
+      test "#{label}: a member of another workspace reads the same flash for both",
+           %{conn: conn, ws_nb: ws, ws_en: other} do
+        conn = member_conn!(conn, other)
+        real = denial(conn, "/w/#{ws.slug}" <> unquote(tail))
+        missing = denial(conn, "/w/no-such-workspace-at-all" <> unquote(tail))
+
+        assert real == "Admin access required"
+        assert real == missing
+      end
+    end
+
+    test "a member of an nb-NO workspace reads Norwegian for a missing slug too (their own language)",
+         %{conn: conn, ws_nb: ws} do
+      conn = member_conn!(conn, ws)
+      tail = "/p/default/studio/connectors"
+
+      assert denial(conn, "/w/no-such-workspace-at-all" <> tail) == "Administratortilgang kreves"
+    end
+  end
+
   # task-d8e3d76ad251bf73: a FLAT admin route has no workspace in the URL. The
   # flash used to take Default's locale (English); it now takes the caller's
   # own workspace — the one `ScopeResolver` lands them in, which is where the

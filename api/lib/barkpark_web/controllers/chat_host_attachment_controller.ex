@@ -14,13 +14,14 @@ defmodule BarkparkWeb.ChatHostAttachmentController do
 
   The host never names a session. It names the lease it is serving, and
   `ChatHosts.live_lease_for_host/2` answers only for a live lease this host
-  holds, in its own workspace, on a session that workspace owns. The session id
-  comes from that lease row, and only then is the store read, through
-  `Attachments.fetch/2`, which refuses any id that is not 64 lowercase hex
-  before touching the disk.
+  holds, in its own workspace, on a registered-host session that workspace owns
+  and this host executes. The session id comes from that lease row, and only
+  then is the store read, through `Attachments.fetch/2`, which refuses any id
+  that is not 64 lowercase hex before touching the disk.
 
   Every miss is ONE 404 body, `chat attachment not found`: another host's
-  lease, another workspace's, an ended (completed, cancelled, disconnected),
+  lease, another workspace's, a lease on a managed session or on one another
+  host executes, an ended (completed, cancelled, disconnected),
   expired or revoked lease, a malformed or unknown lease id, an attachment in
   another session, a malformed attachment id, a missing attachment. A caller
   learns nothing about which leg refused.

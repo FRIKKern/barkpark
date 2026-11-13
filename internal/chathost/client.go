@@ -45,6 +45,10 @@ func Transient(err error) bool {
 	if errors.As(err, &config) {
 		return false
 	}
+	var refused *AttachmentError
+	if errors.As(err, &refused) {
+		return false
+	}
 	var status *StatusError
 	if errors.As(err, &status) {
 		return status.Code >= 500 || status.Code == http.StatusRequestTimeout || status.Code == http.StatusTooManyRequests
@@ -117,12 +121,27 @@ func (c *Client) Publish(ctx context.Context, command RemoteCommand, cursor uint
 }
 
 func (c *Client) do(ctx context.Context, method, path string, authenticate bool, payload any, response any) error {
+	resp, err := c.send(ctx, method, path, authenticate, payload)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if response == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(response)
+}
+
+// send makes one request and returns a 2xx response with its body unread; the
+// caller closes it. Any other answer is closed here and returned as an error.
+func (c *Client) send(ctx context.Context, method, path string, authenticate bool, payload any) (*http.Response, error) {
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return &configError{fmt.Errorf("parse server URL: %w", err)}
+		return nil, &configError{fmt.Errorf("parse server URL: %w", err)}
 	}
 	if err := validateServerURL(base, c.AllowInsecureLoopback); err != nil {
-		return &configError{err}
+		return nil, &configError{err}
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + path
 
@@ -130,21 +149,21 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		body = bytes.NewReader(encoded)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, base.String(), body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if authenticate {
 		if c.Credential == "" {
-			return &configError{errors.New("missing chat host credential")}
+			return nil, &configError{errors.New("missing chat host credential")}
 		}
 		req.Header.Set("Authorization", "Host "+c.Credential)
 	}
@@ -155,24 +174,22 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer resp.Body.Close()
 	if err := validateServerURL(resp.Request.URL, c.AllowInsecureLoopback); err != nil {
-		return &configError{fmt.Errorf("unsafe redirect: %w", err)}
+		resp.Body.Close()
+		return nil, &configError{fmt.Errorf("unsafe redirect: %w", err)}
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return ErrRevoked
+		resp.Body.Close()
+		return nil, ErrRevoked
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(limited))}
+		resp.Body.Close()
+		return nil, &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(limited))}
 	}
-	if response == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(response)
+	return resp, nil
 }
 
 func validateServerURL(value *url.URL, allowInsecureLoopback bool) error {
