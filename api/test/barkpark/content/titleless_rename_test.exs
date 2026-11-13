@@ -261,6 +261,25 @@ defmodule Barkpark.Content.TitlelessRenameTest do
 
       assert column("drafts.author-rp") == "P2"
     end
+
+    # #25896 review: the direct publish builds the row through
+    # `Writer.build_document/4`, not `create_document`.
+    test "a fetched published author sent back with a new name and \"publish\": true moves the published column" do
+      author("author-rd", "D1")
+      {:ok, _} = Content.publish_document("author-rd", "author", @dataset)
+      {:ok, doc} = Content.get_document("author-rd", "author", @dataset)
+
+      envelope =
+        doc
+        |> Barkpark.Content.Envelope.render()
+        |> Map.drop(["_rev"])
+        |> Map.put("name", "D2")
+
+      {:ok, _} =
+        Mutations.apply_mutations([%{"createOrReplace" => envelope, "publish" => true}], @dataset)
+
+      assert column("author-rd") == "D2"
+    end
   end
 
   describe "a name set blank or unset shows what a new author with no name shows" do
