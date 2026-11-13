@@ -88,4 +88,83 @@ assert.equal(lit().active, "desk-search-hit-1");
 // Other keys are the box's own.
 assert.ok(!key("a").defaultPrevented);
 
+// ── The search is a dialog (LOOKS A4) ───────────────────────────────────────
+// jsdom draws no dialogs: open/close are the attribute, as a browser keeps
+// it, and close hands the focus back to what had it at showModal, as a
+// browser does.
+const proto = window.HTMLDialogElement.prototype;
+proto.showModal = function () { this._was = window.document.activeElement; this.setAttribute("open", ""); };
+proto.close = function () { this.removeAttribute("open"); if (this._was && this._was.focus) this._was.focus(); };
+Object.defineProperty(proto, "open", { get() { return this.hasAttribute("open"); }, configurable: true });
+const dialog = window.document.createElement("dialog");
+dialog.id = "dk-search-dialog";
+dialog.appendChild(window.document.querySelector(".dk-search"));
+window.document.body.prepend(dialog);
+const opener = window.document.createElement("button");
+opener.setAttribute("data-desk-search-open", "");
+window.document.body.prepend(opener);
+const bodyKey = (k, mods = {}) => {
+  const e = new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods });
+  window.document.body.dispatchEvent(e);
+  return e;
+};
+window.document.body.focus();
+
+// "/" outside a text field opens it with the box focused.
+assert.ok(bodyKey("/").defaultPrevented, '"/" opens the search');
+assert.ok(dialog.open, "the dialog is open");
+assert.equal(window.document.activeElement, $("desk-search-input"));
+// "/" typed in the box is a character.
+assert.ok(!key("/").defaultPrevented, '"/" in the box is the box\'s');
+// A submitted search (Enter) puts the dialog away, and the focus goes on
+// with what it opens, not back to where "/" was pressed.
+$("desk-search-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+assert.ok(!dialog.open, "Enter's form closes the dialog");
+assert.equal(window.document.activeElement, window.document.body);
+
+// The navbar's button opens it.
+opener.focus();
+opener.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(dialog.open, "the search button opens the dialog");
+// A hit puts it away. (The page's link is not followed here: jsdom has no
+// navigation; the window hears the click last, after the desk's handlers.)
+window.addEventListener("click", (e) => e.preventDefault());
+const focusAsked = [];
+hook._focusNewDoc = (e) => focusAsked.push(e.detail.id);
+$("desk-search-hit-0").dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(!dialog.open, "a hit closes the dialog");
+// The browser would hand the focus back to the button; the opened pane takes
+// it instead (the page has it until the patch lands).
+assert.equal(window.document.activeElement, window.document.body, "a hit leaves the focus to the opened pane");
+assert.deepEqual(focusAsked, ["x"], "the hit's document's first field is asked for, as Enter's open asks");
+
+// Escape in the box puts it away (a search field's own Escape only empties it).
+opener.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+assert.ok(dialog.open);
+assert.ok(key("Escape").defaultPrevented, "Escape is the dialog's");
+assert.ok(!dialog.open, "Escape closes the dialog");
+
+// Cmd+K opens it too; a bare letter does not.
+window.document.body.focus();
+assert.ok(!bodyKey("k").defaultPrevented);
+assert.ok(!dialog.open);
+assert.ok(bodyKey("k", { metaKey: true }).defaultPrevented);
+assert.ok(dialog.open, "Cmd+K opens the dialog");
+
+// Cmd+K and Ctrl+K typed in a field are the field's (Ctrl+K deletes to the end
+// of a line on a Mac; Cmd+K is the rich text's link key): neither opens it.
+dialog.close();
+for (const tag of ["input", "textarea"]) {
+  const field = window.document.createElement(tag);
+  window.document.body.append(field);
+  field.focus();
+  for (const mods of [{ metaKey: true }, { ctrlKey: true }]) {
+    const e = new window.KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true, ...mods });
+    field.dispatchEvent(e);
+    assert.ok(!e.defaultPrevented, `${Object.keys(mods)[0]}+K in a ${tag} is the field's`);
+    assert.ok(!dialog.open, `${Object.keys(mods)[0]}+K in a ${tag} opens nothing`);
+  }
+  field.remove();
+}
+
 console.log("ok — __desk_search_light");
