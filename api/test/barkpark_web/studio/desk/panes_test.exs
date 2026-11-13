@@ -196,6 +196,30 @@ defmodule BarkparkWeb.Studio.Desk.PanesTest do
     refute Panes.split?(one, 2)
   end
 
+  # In split view the editor is the sibling, and Inspect lives in the URL
+  # (`inspect=on`), so a sibling prints its own inspect as well as its view,
+  # as Sanity's sibling segments carry their own params. (TanStack prints a
+  # sibling's view only: its Inspect is not in its URL.)
+  test "a split sibling carries its own inspect, and reads it back" do
+    two = Panes.parse("post;post-26|,")
+
+    assert Panes.with_params(two, 3, %{inspect: "on"}) == "/structure/post;post-26|,inspect=on"
+
+    assert [_, _, first, %{sibling: true, inspect: "on"}] =
+             Panes.parse("post;post-26|,inspect=on")
+
+    refute Map.has_key?(first, :inspect)
+
+    for url <- [
+          "/structure/post;post-26|,inspect=on",
+          "/structure/post;post-26|,view=json,inspect=on"
+        ],
+        do: assert(round_trip(url) == url)
+
+    assert Panes.with_params(Panes.parse("post;post-26|,inspect=on"), 3, %{inspect: nil}) ==
+             "/structure/post;post-26|,"
+  end
+
   test "a focused field rides in the pane, nested paths included" do
     assert [_, _, %{path: "seo.metaTitle"}] = Panes.parse("post;post-22,path=seo.metaTitle")
 
