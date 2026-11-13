@@ -115,6 +115,24 @@ defmodule BarkparkWeb.PlaygroundControllerTest do
       assert playground_count() == 0
     end
 
+    # A token minted with an explicit dataset is held to it: it makes no
+    # workspace here either (`ApiToken.dataset_bound?/1`, as on
+    # POST /api/workspaces).
+    test "403 for a dataset-bound admin token, and no workspace is made", %{conn: conn} do
+      raw = "pg-bound-#{System.unique_integer([:positive])}"
+      perms = ["read", "write", "admin"]
+      {:ok, _} = Auth.create_token(raw, "pg bound", "bound-own", perms, nil, dataset_bound: true)
+
+      count = fn -> length(Barkpark.Repo.all(Tenancy.Workspace)) end
+      before = count.()
+
+      resp = conn |> authed(raw) |> post("/api/playground")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["reason"] == "dataset_not_bound"
+      assert count.() == before
+    end
+
     test "401 for an unauthenticated request (no token)", %{conn: conn} do
       resp = post(conn, "/api/playground")
       assert resp.status == 401

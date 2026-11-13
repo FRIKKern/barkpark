@@ -4,10 +4,11 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
   a rename.
 
   (a) A type with no `title` field names its list title in
-  `list_preview.title` (an author's `name`). The stored `title` column keeps
-  the first name a document had (the writer fills it only when blank:
-  task-f20c582a579fa514), so a link read from it showed the old name. The
-  link now reads the `list_preview` field, as the desk's rows do.
+  `list_preview.title` (an author's `name`). The stored `title` column kept
+  the first name a document had (the writer filled it only when blank, until
+  task-f20c582a579fa514; rows renamed before that still carry the old name),
+  so a link read from it showed the old name. The link now reads the
+  `list_preview` field, as the desk's rows do.
 
   (b) The pane that edits shows its links in a strip, read again only when
   its reference ids change. A change to a document of a type its references
@@ -108,13 +109,17 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
   end
 
   # Someone else renames Ada: the name moves, the stored title column stays.
+  # The writer now moves the column with the name (task-f20c582a579fa514), so
+  # the stale column a row renamed before that still carries is written behind
+  # the app's back: the link must read the name, not the column.
   defp rename_elsewhere(c, name) do
-    {:ok, _} =
-      Content.upsert_document(
-        c.author,
-        %{"doc_id" => c.ada, "title" => "Ada Lovelace", "content" => %{"name" => name}},
-        @dataset
+    %{num_rows: rows} =
+      Barkpark.Repo.query!(
+        "UPDATE documents SET content = jsonb_set(content, '{name}', to_jsonb($1::text)) WHERE doc_id IN ($2, $3)",
+        [name, c.ada, "drafts." <> c.ada]
       )
+
+    assert rows > 0
 
     {doc, _draft?, _published?} = Content.fetch_doc_with_draft(c.author, c.ada, @dataset)
     assert {doc.title, doc.content["name"]} == {"Ada Lovelace", name}

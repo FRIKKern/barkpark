@@ -1489,8 +1489,7 @@ defmodule Barkpark.Content.Writer do
     ctx = WriteScope.build_ctx(opts)
 
     # Scope the prev-doc lookup to the writer's workspace/project (mirror of
-    # create_document:654). An UNSCOPED lookup here would resolve (and then
-    # UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
+    # create_document:654). An UNSCOPED lookup here would resolve (and then UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
     # dataset) leaf — the write-path scoping gap. Scoped, a same-id write from
     # a different workspace sees no prev_doc and inserts its own row.
     #
@@ -1509,6 +1508,7 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
+    attrs = TitleDerivation.follow_on_upsert(attrs, type, dataset, doc_id, prev_doc, opts)
     # Transition gate (`Tasks.ChangeGuards.transition_legal/6`, the first
     # pre-write fence) immediately after prev-doc resolution, BEFORE
     # :before_save fires — a refusal is side-effect-free (the pre-write check

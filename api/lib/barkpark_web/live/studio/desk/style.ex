@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; flex: 1 0 600px; border-right: 0; }
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
+      .dk h2.pane-header-title { margin: 0; }
       .dk a.pane-item:hover { color: var(--fg); }
       .dk [data-lit] > a.pane-item:not(.selected) { background: var(--bg-muted); }
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -73,6 +74,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-create-new, .dk .dk-list-options { margin-left: auto; display: inline-flex; align-items: center; }
+      .dk .dk-create-new + .dk-list-options { margin-left: 0; }
       .dk .dk-doc-menu-list { min-width: 180px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }
       .dk .dk-doc-menu-list [role="menuitem"] { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); padding: 6px 10px; border-radius: 4px; cursor: pointer; }
       .dk .dk-doc-menu-list [role="menuitem"]:hover, .dk .dk-doc-menu-list [role="menuitem"]:focus { background: var(--bg-accent); outline: none; }
