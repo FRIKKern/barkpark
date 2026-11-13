@@ -34,6 +34,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   the page dimmed by its backdrop, its tree in a monospace with its syntax
   colours (styles.css `--syntax-*`), light and dark.
 
+  Search (`.dk-search-dialog`, `Desk.Search`) is TanStack's search dialog:
+  800 px at 12 % down over its backdrop, the toast's shadow, 49 px hits 4 px
+  apart with a tile, a type badge and a status mark; a phone's fills the
+  screen.
+
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
   page. A positioned edit pane boxed the backdrop in, so the other panes
@@ -53,6 +58,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       html[data-theme="dark"] .dk { --dk-menu-fg: #bdbfcb; --dk-menu-hover-fg: #0d0e12; --dk-menu-hover-icon: #303c7a; --dk-menu-danger: #fdafa8; --dk-menu-danger-icon: #c38885; --dk-menu-danger-hover: #f77a6f; --dk-menu-danger-hover-icon: #6c312f; --dk-popover-shadow: 0 0 0 0.5px rgba(117, 123, 150, 0.4), 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); }
       .dk { --dk-icon-hover: #f6f6f8; --dk-selected-fill: #eeeef1; --dk-tab-selected-fg: #636776; --dk-focus: #556bfc; --dk-backdrop: rgba(227, 228, 232, 0.5); --dk-syntax-property: #4043e7; --dk-syntax-string: #965912; --dk-syntax-constant: #721fe5; --dk-syntax-punctuation: #515870; }
       html[data-theme="dark"] .dk { --dk-icon-hover: #21232f; --dk-selected-fill: #2a2d3f; --dk-tab-selected-fg: #9d9fae; --dk-focus: #596ffc; --dk-backdrop: rgba(19, 20, 27, 0.5); --dk-syntax-property: #7898ff; --dk-syntax-string: #f9be1e; --dk-syntax-constant: #b28af7; --dk-syntax-punctuation: #979cb0; }
+      .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); --dk-fill-soft: #eeeef1; --dk-badge-fg: #4c536a; --dk-badge-lit-bg: #e6e6ea; --dk-badge-lit-fg: #4a5068; --dk-placeholder: #9499ad; }
+      html[data-theme="dark"] .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(121, 127, 154, 0.4), 0 3px 5px -2px rgba(0, 0, 0, 0.2), 0 6px 10px 0 rgba(0, 0, 0, 0.14), 0 1px 18px 1px rgba(0, 0, 0, 0.12); --dk-fill-soft: #21232f; --dk-badge-fg: #9da2b7; --dk-badge-lit-bg: #262837; --dk-badge-lit-fg: #9fa4ba; --dk-placeholder: #555c75; }
       /* studio-literal-check: skip-end */
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; border-right-color: var(--border); }
       .dk .dk-doc { width: auto; flex: 1 1 600px; border-right: 0; }
@@ -179,10 +186,33 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
       .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
-      .dk-search { position: relative; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-card); }
-      .dk-search form { max-width: 420px; }
-      .dk-search-hits { position: absolute; z-index: 5; left: 16px; top: 100%; width: min(420px, calc(100% - 32px)); max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; }
-      .dk-search-hits a[aria-selected="true"] { background: var(--bg-muted); }
+      .dk .dk-search { padding: 8px 16px; border-bottom: 1px solid var(--dk-border); }
+      .dk .dk-search-open { box-sizing: border-box; display: flex; align-items: center; gap: 4px; width: min(420px, 100%); height: 33px; padding: 0 8px; border: 0; border-radius: 3px; background: var(--dk-bg); box-shadow: inset 0 0 0 1px var(--dk-border); color: var(--dk-placeholder); font: inherit; font-size: 13px; cursor: text; }
+      .dk .dk-search-open:focus-visible, .dk .dk-search-close:focus-visible { outline: 2px solid var(--dk-focus); outline-offset: -2px; }
+      .dk .dk-search-dialog { box-sizing: border-box; inset: 0; margin: 12vh auto auto; width: min(800px, calc(100vw - 40px)); max-width: none; height: fit-content; max-height: min(735px, calc(88vh - 20px)); padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-toast-shadow); font-size: 13px; line-height: 19px; }
+      .dk .dk-search-dialog[open] { display: flex; flex-direction: column; }
+      .dk .dk-search-dialog::backdrop { background: var(--dk-backdrop); }
+      .dk .dk-search-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--dk-border); color: var(--dk-muted); }
+      .dk .dk-search-bar > svg { flex: none; width: 21px; height: 21px; margin: 0 2px; }
+      .dk .dk-search-bar svg[stroke-width] { stroke-width: 1.4; }
+      .dk .dk-search-bar > form:first-of-type { flex: 1; min-width: 0; display: flex; }
+      .dk .dk-search-bar input[type="search"] { flex: 1; min-width: 0; padding: 7px 0; border: 0; outline: none; background: none; color: var(--dk-fg); font: inherit; font-size: 13px; font-weight: 400; }
+      .dk .dk-search-bar input[type="search"]::placeholder { color: var(--dk-placeholder); }
+      .dk .dk-search-bar input[type="search"]::-webkit-search-cancel-button { appearance: none; }
+      .dk .dk-search-close { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-search-close:hover { background: var(--dk-icon-hover); }
+      .dk .dk-search-hits { display: flex; flex-direction: column; min-height: 0; padding: 8px; }
+      .dk .dk-search-hits > [role="listbox"] { flex: 0 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+      .dk .dk-search-empty { margin: 4px; font-size: 13px; color: var(--dk-muted); }
+      .dk a.dk-search-hit { box-sizing: border-box; display: flex; align-items: center; gap: 8px; min-height: 49px; margin: 0; padding: 5px 8px; border: 0; border-radius: 3px; background: none; color: var(--dk-fg); font-size: 13px; line-height: 19px; font-weight: 400; text-decoration: none; }
+      .dk a.dk-search-hit .pane-item-label { flex: 1; min-width: 0; }
+      .dk a.dk-search-hit .dk-row-title { display: block; font-weight: 500; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk a.dk-search-hit:is(:hover, [aria-selected="true"]) { background: var(--dk-card-hover); }
+      .dk a.dk-search-hit:is(:hover, [aria-selected="true"]) .dk-row-title { color: var(--dk-row-hover-fg); }
+      .dk a.dk-search-hit:is(:hover, [aria-selected="true"]) .dk-media { color: var(--dk-row-hover-muted); }
+      .dk .dk-badge { flex: none; margin-right: -3px; padding: 0 4px; border-radius: 9999px; background: var(--dk-fill-soft); color: var(--dk-badge-fg); font-size: 13px; font-weight: 400; line-height: 17px; }
+      .dk a.dk-search-hit[aria-selected="true"] .dk-badge { background: var(--dk-badge-lit-bg); color: var(--dk-badge-lit-fg); }
+      @media (max-width: 599px) { .dk .dk-search-dialog { margin: 0; width: 100%; height: 100%; max-height: none; border-radius: 0; box-shadow: none; } }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; font-size: var(--text-sm); }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--fg-dim); border-radius: 6px; color: var(--fg); text-decoration: none; }
       .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }

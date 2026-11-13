@@ -846,6 +846,7 @@
         var hit = e.currentTarget !== root;
         var row = e.target.closest ? e.target.closest(hit ? HIT : OPENER) : null;
         if (!row || root.contains(row) === hit || !plainClick(e)) return;
+        if (hit) hook._shutSearch();
         hook._refocus = !hit && root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         // The click before this one has not landed: its answer is still to
         // come, and is not this click's (see _onLoaded).
@@ -1123,11 +1124,41 @@
           return;
         }
         if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
-        var box = root.ownerDocument.getElementById("desk-search-input");
-        if (!box) return;
+        if (!root.ownerDocument.getElementById("desk-search-input")) return;
         e.preventDefault();
+        hook._openSearch();
+      };
+
+      // The search dialog (LOOKS C2, `Desk.Search`): Cmd+K or the opener
+      // shows it, modal, with the focus in its box. It shuts when a hit is
+      // followed, by a click (`_onClick`) or by Enter (the server's
+      // bp:focus-new-doc, before the editor takes the focus), and on a press
+      // on the dimmed page around it. Escape is the dialog's own.
+      hook._openSearch = function () {
+        var doc = root.ownerDocument;
+        var dialog = doc.getElementById("desk-search-dialog");
+        var box = doc.getElementById("desk-search-input");
+        if (dialog && !dialog.open && dialog.showModal) dialog.showModal();
+        if (!box) return;
         box.focus();
         if (box.select) box.select();
+      };
+      hook._shutSearch = function () {
+        var dialog = root.ownerDocument.getElementById("desk-search-dialog");
+        if (dialog && dialog.open && dialog.close) dialog.close();
+      };
+      hook._onSearchOpen = function (e) {
+        var dialog = root.ownerDocument.getElementById("desk-search-dialog");
+        if (dialog && e.target === dialog) {
+          var r = dialog.getBoundingClientRect();
+          var out = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+          if (out) hook._shutSearch();
+          return;
+        }
+        var opener = e.target.closest ? e.target.closest("[data-desk-search-open]") : null;
+        if (!opener) return;
+        e.preventDefault();
+        hook._openSearch();
       };
 
       // The draft in the editor was discarded elsewhere (`Desk.Discarded`):
@@ -1230,6 +1261,7 @@
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
+      root.ownerDocument.addEventListener("click", hook._onSearchOpen);
       root.ownerDocument.addEventListener("keydown", hook._onEnterList);
       root.addEventListener("keydown", hook._onKey);
       // `toggle` does not bubble: caught on the way down.
@@ -1342,6 +1374,7 @@
         };
         attempt();
       };
+      window.addEventListener("phx:bp:focus-new-doc", hook._shutSearch);
       window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
 
       // "Share document": an item with `data-desk-copy` puts its text on the
@@ -1530,6 +1563,7 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      root.ownerDocument.removeEventListener("click", this._onSearchOpen);
       root.ownerDocument.removeEventListener("keydown", this._onEnterList);
       if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);
@@ -1553,6 +1587,7 @@
       window.removeEventListener("scroll", this._putTipAway, true);
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
+      window.removeEventListener("phx:bp:focus-new-doc", this._shutSearch);
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       root.removeEventListener("click", this._onCopy);
       root.removeEventListener("keydown", this._onInspectKey);
