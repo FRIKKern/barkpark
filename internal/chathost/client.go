@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,8 @@ type StatusError struct {
 	Code   int
 	Status string
 	Body   string
+	// RetryAfter is the server's Retry-After in whole seconds; zero when absent.
+	RetryAfter time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -187,7 +190,11 @@ func (c *Client) send(ctx context.Context, method, path string, authenticate boo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(limited))}
+		statusErr := &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(limited))}
+		if seconds, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && seconds > 0 {
+			statusErr.RetryAfter = time.Duration(seconds) * time.Second
+		}
+		return nil, statusErr
 	}
 	return resp, nil
 }
