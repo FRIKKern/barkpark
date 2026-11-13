@@ -896,22 +896,21 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
 
       to_a = "#{base}/#{@ref_type};#{linked};#{a},type=#{@type_name},parentRefPath=note"
 
+      # The edit pane's links are in its "…" menu, as patches.
+      ref = ~s([data-pane-index="2"] .pane-header a[data-desk-doc-action="open-reference"])
+
       assert has_element?(
                view,
-               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_a}"]),
-               "Alpha note"
+               ~s(#{ref}[href="#{to_a}"][data-phx-link="patch"]),
+               "Open reference: Alpha note"
              )
 
       # An array of references: one link each, in stored order; a bare id reads too.
       to_b = "#{base}/#{@ref_type};#{linked};#{b},type=#{@type_name},parentRefPath=more"
 
-      assert has_element?(
-               view,
-               ~s([data-pane-index="2"] a[data-desk-ref][href="#{to_b}"]),
-               "Beta note"
-             )
+      assert has_element?(view, ~s(#{ref}[href="#{to_b}"]), "Open reference: Beta note")
 
-      view |> element(~s(a[data-desk-ref][href="#{to_a}"])) |> render_click()
+      view |> element(~s(#{ref}[href="#{to_a}"])) |> render_click()
       assert_patch(view, to_a)
       settle(view)
 

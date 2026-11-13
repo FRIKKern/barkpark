@@ -41,6 +41,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
   alias BarkparkWeb.Studio.StudioLive.Paths
+  alias Phoenix.LiveView.JS
 
   @doc """
   Mounts as the Studio does (the same state, capability gate and quota
@@ -149,6 +150,28 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   end
 
   defp strip(socket), do: socket
+
+  # The references as menu items, "Open reference: <title>", each a patch to
+  # the next pane, as the strip's links were.
+  defp ref_items(%{active_refs: refs, chain: chain, view: view, base: base}) do
+    for ref <- refs do
+      %{
+        label: gettext("Open reference: %{title}", title: ref.title),
+        name: "open-reference",
+        event: nil,
+        patch: true,
+        href:
+          Panes.open_after(
+            chain,
+            view.index,
+            %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: ref.path},
+            base
+          )
+      }
+    end
+  end
+
+  defp ref_items(_assigns), do: []
 
   @doc """
   A document the editor's references can point at changed (`LiveRefresh`):
@@ -442,6 +465,28 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             {@page_title}
           <% end %>
         </div>
+        <%!-- TanStack's order: Share, the "…", Split, Focus, close. --%>
+        <%!-- Sanity's "Share document": copy its ID or its URL. --%>
+        <ShareMenu.menu
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-share"}
+          doc={@editor_doc}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+        />
+        <%!-- The document's actions, none over a document that could not be
+              read or was deleted. --%>
+        <%!-- The document's references are in it too, each a link that opens
+              the next pane: the TanStack Studio has no row of them. --%>
+        <DocMenu.menu
+          id={"#{@view.id}-actions"}
+          items={
+            if @edit_failed or gone?(assigns),
+              do: [],
+              else: DocMenu.with_refs(DocMenu.items(assigns), ref_items(assigns))
+          }
+        />
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
@@ -473,21 +518,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="x" size={14} />
         </.link>
-        <%!-- Sanity's "Share document": copy its ID or its URL. --%>
-        <ShareMenu.menu
-          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
-          id={"#{@view.id}-share"}
-          doc={@editor_doc}
-          chain={@chain}
-          index={@view.index}
-          base={@base}
-        />
-        <%!-- The document's actions, none over a document that could not be
-              read or was deleted. --%>
-        <DocMenu.menu
-          id={"#{@view.id}-actions"}
-          items={if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns)}
-        />
         <a
           href={Panes.close_from(@chain, @view.index, @base)}
           data-phx-link="patch"
@@ -537,31 +567,30 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           cleared={Discarded.cleared?(assigns)}
         />
       </div>
-      <%!-- Always in the page, shown when there is a link: a pick adds the
-            first link while the editor has the focus, and a row that came and
+      <%!-- The TanStack Studio's title bar (`.doc-title-bar`): the title, and
+            under it the views, Editor and JSON (Sanity's). JSON is the
+            desk's Inspect dialog, so the tab opens it (`inspect=on`, as
+            Ctrl+Alt+I). A singleton has one view, so no tabs, as Sanity's.
+            The bar is always in the page (with an id): a row that came and
             went would make the patch rebuild the editor below it. --%>
-      <nav
-        id={"#{@view.id}-refs"}
-        class="dk-edit-refs dk-refs"
-        aria-label={gettext("References")}
-        style={@active_refs == [] && "display: none"}
-      >
-        <.link
-          :for={ref <- @active_refs}
-          patch={
-            Panes.open_after(
-              @chain,
-              @view.index,
-              %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: ref.path},
-              @base
-            )
-          }
-          class="dk-ref"
-          data-desk-ref
-        >
-          {ref.title}
-        </.link>
-      </nav>
+      <div id={"#{@view.id}-title-bar"} class="doc-title-bar dk-title-bar">
+        <%= if !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc]) do %>
+          <div class="title-row"><span class="title">{@page_title}</span></div>
+          <div :if={!document_node?(@view.pane)} class="view-tabs" role="tablist" aria-label={gettext("Views")}>
+            <button type="button" role="tab" aria-selected="true" tabindex="0">{gettext("Editor")}</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              phx-click={JS.push("desk-inspect", value: %{open: true})}
+              data-desk-json-tab
+            >
+              {gettext("JSON")}
+            </button>
+          </div>
+        <% end %>
+      </div>
       <%!-- `pane-body` and `doc-form` are the names the TanStack specs know
             the document's form region by. --%>
       <div id={"#{@view.id}-body"} class="pane-body doc-form dk-edit-body" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden">

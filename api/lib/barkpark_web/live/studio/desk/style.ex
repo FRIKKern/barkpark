@@ -60,7 +60,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       html[data-theme="dark"] .dk div.dk-edit-footer { --dk-foot-meta: rgb(147 148 159); --dk-foot-icon: rgb(147 148 159); --dk-foot-hover: rgb(33 35 47); --dk-publish-bg: rgb(228 229 233); --dk-publish-fg: rgb(19 20 27); --dk-publish-off-bg: rgb(85 92 117); --dk-publish-off-fg: rgb(33 38 57); }
       .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; }
       html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #596ffc; }
-      .dk section.dk-doc { --dk-head-fg: rgb(56 61 81); --dk-head-icon: rgb(106 110 125); --dk-head-hover: rgb(246 246 248); --dk-head-hover-fg: rgb(99 101 112); --dk-chip-ring: rgb(227 228 232); --dk-chip-selected-fg: rgb(35 38 53); --dk-chip-active-bg: rgb(253 243 200); --dk-chip-positive-fg: rgb(13 81 51); --dk-chip-off-fg: rgb(143 148 168); --dk-chip-off-bg: rgb(246 246 248); --dk-chip-off-ring: rgb(230 230 234); --dk-published: rgb(13 183 112); --dk-caution-dot: rgb(208 132 18); --dk-line-strong: rgb(199 202 211); }
+      .dk section.dk-doc { --dk-avatar-fg: rgb(255 255 255); --dk-head-fg: rgb(56 61 81); --dk-head-icon: rgb(106 110 125); --dk-head-hover: rgb(246 246 248); --dk-head-hover-fg: rgb(99 101 112); --dk-chip-ring: rgb(227 228 232); --dk-chip-selected-fg: rgb(35 38 53); --dk-chip-active-bg: rgb(253 243 200); --dk-chip-positive-fg: rgb(13 81 51); --dk-chip-off-fg: rgb(143 148 168); --dk-chip-off-bg: rgb(246 246 248); --dk-chip-off-ring: rgb(230 230 234); --dk-published: rgb(13 183 112); --dk-caution-dot: rgb(208 132 18); --dk-line-strong: rgb(199 202 211); }
       html[data-theme="dark"] .dk section.dk-doc { --dk-head-fg: rgb(189 191 203); --dk-head-icon: rgb(147 148 159); --dk-head-hover: rgb(33 35 47); --dk-head-hover-fg: rgb(145 147 160); --dk-chip-ring: rgb(42 45 63); --dk-chip-selected-fg: rgb(230 231 236); --dk-chip-active-bg: rgb(59 50 22); --dk-chip-positive-fg: rgb(93 243 189); --dk-chip-off-fg: rgb(90 96 123); --dk-chip-off-bg: rgb(25 26 36); --dk-chip-off-ring: rgb(38 40 55); --dk-published: rgb(19 193 132); --dk-caution-dot: rgb(216 147 27); --dk-line-strong: rgb(77 82 105); }
       .dk { --dk-menu-fg: #383d51; --dk-menu-hover-fg: #fff; --dk-menu-hover-icon: #bfcbfe; --dk-menu-danger: #8b2018; --dk-menu-danger-icon: #a85852; --dk-menu-danger-hover: #d63a2c; --dk-menu-danger-hover-icon: #fabab3; --dk-popover-shadow: 0 0 0 0.5px rgba(114, 120, 146, 0.3), 0 7px 8px -4px rgba(114, 120, 146, 0.1), 0 12px 17px 2px rgba(114, 120, 146, 0.07), 0 5px 22px 4px rgba(114, 120, 146, 0.06); }
       html[data-theme="dark"] .dk { --dk-menu-fg: #bdbfcb; --dk-menu-hover-fg: #0d0e12; --dk-menu-hover-icon: #303c7a; --dk-menu-danger: #fdafa8; --dk-menu-danger-icon: #c38885; --dk-menu-danger-hover: #f77a6f; --dk-menu-danger-hover-icon: #6c312f; --dk-popover-shadow: 0 0 0 0.5px rgba(117, 123, 150, 0.4), 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); }
@@ -133,7 +133,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-split { margin-left: auto; display: inline-flex; align-items: center; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; }
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-      .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu { margin-left: 0; }
+      .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu, .dk .dk-doc-menu + .dk-split { margin-left: 0; }
       .dk .dk-share-menu .dk-doc-menu-button { display: inline-flex; align-items: center; }
       .dk button.dk-focus { border: 0; background: none; font: inherit; cursor: pointer; }
       .dk .dk-focus-crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; font-weight: 400; color: var(--fg); }
@@ -249,7 +249,6 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
-      .dk .dk-edit-refs { padding: 8px 48px 8px 16px; border-bottom: 1px solid var(--border-subtle); }
       .dk-search-dialog { box-sizing: border-box; inset: 0; width: min(800px, calc(100vw - 32px)); max-width: none; height: fit-content; max-height: min(735px, calc(88vh - 20px)); margin: 12vh auto auto; padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-toast-shadow); overflow: hidden; font-size: 13px; line-height: 19px; }
       .dk-search-dialog[open] { display: flex; flex-direction: column; }
       .dk-search { display: flex; flex-direction: column; min-height: 0; }
@@ -281,14 +280,17 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
       .dk .dk-ref:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-ref-missing { color: var(--fg-muted); }
-      .dk .dk-doc > .pane-header { flex: none; box-sizing: border-box; height: 51px; min-height: 51px; gap: 4px; padding: 0 12px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
+      .dk .dk-doc > .pane-header { flex: none; box-sizing: border-box; height: 51px; min-height: 51px; gap: 4px; padding: 0 12px; border-bottom: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
       .dk .dk-doc > .pane-header > .pane-header-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-doc:has(.dk-big-title) > .pane-header > .pane-header-title:not(:has(nav)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       .dk .dk-doc > .pane-header .icon-btn { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-head-icon); font-size: 17px; line-height: 1; text-decoration: none; }
       .dk .dk-doc > .pane-header .icon-btn svg { width: 21px; height: 21px; }
       .dk .dk-doc > .pane-header .icon-btn:hover { background: var(--dk-head-hover); color: var(--dk-head-hover-fg); }
       .dk .dk-chips { display: flex; align-items: center; gap: 4px; min-width: 0; margin-right: auto; }
-      .dk .dk-chips .presence-dots { margin: 0 6px 0 0; }
+      .dk .dk-chips .p-avatars { display: inline-flex; align-items: center; flex: none; margin: 0 6px 0 0; }
+      .dk .dk-chips .p-avatar { box-sizing: border-box; width: 23px; height: 23px; flex: none; display: inline-grid; place-items: center; border-radius: 50%; box-shadow: 0 0 0 2px var(--dk-bg); color: var(--dk-avatar-fg); font-size: 10px; font-weight: 600; line-height: 1; }
+      .dk .dk-chips .p-avatar + .p-avatar { margin-left: -6px; }
+      .dk .dk-chips .p-avatar.more { width: auto; min-width: 23px; padding: 0 6px; border-radius: 12px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: 0 0 0 2px var(--dk-bg), inset 0 0 0 1px var(--dk-border); font-weight: 500; }
       .dk .dk-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 10px; border-radius: 999px; font-size: 13px; line-height: 19px; font-weight: 500; white-space: nowrap; color: var(--dk-head-fg); box-shadow: inset 0 0 0 1px var(--dk-chip-ring); }
       .dk .dk-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       .dk .dk-chip[data-selected] { color: var(--dk-chip-selected-fg); }
@@ -308,7 +310,6 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-list-search .search-clear { width: 44px; height: 44px; top: -10px; }
         .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: static; width: auto; height: auto; min-width: 44px; min-height: 44px; margin: 0 -12px 0 0; padding: 4px 8px; overflow: visible; clip-path: none; white-space: normal; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
-        .dk .dk-edit-refs { padding-right: 60px; }
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-menu-item { min-height: 44px; }

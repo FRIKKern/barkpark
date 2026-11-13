@@ -354,6 +354,26 @@ msgstr "Oppdatert %{ago}"
 msgid "Edited %{ago}"
 msgstr "Redigert %{ago}"
 
+#: lib/barkpark_web/live/studio/desk/editor_host.ex:159
+#, elixir-autogen, elixir-format
+msgid "Open reference: %{title}"
+msgstr "Åpne referanse: %{title}"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex:578
+#, elixir-autogen, elixir-format
+msgid "Views"
+msgstr "Visninger"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex:579
+#, elixir-autogen, elixir-format
+msgid "Editor"
+msgstr "Redigering"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex:588
+#, elixir-autogen, elixir-format
+msgid "JSON"
+msgstr "JSON"
+
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:66
 #, elixir-autogen, elixir-format
 msgid "Last published %{ago}"
