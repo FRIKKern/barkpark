@@ -140,7 +140,7 @@ defmodule Barkpark.Content.Validation do
   # honestly describe caller-written text).
   @known_codes ~w(
     required pattern_mismatch expected_object expected_list
-    codelist_not_string codelist_empty codelist_has_whitespace
+    codelist_not_string codelist_empty codelist_has_whitespace not_in_codelist
     localized_text_shape language_key_not_string language_not_declared
     rich_text_shape text_not_string image_shape file_shape
     rect_shape rect_out_of_range missing_type unknown_type
@@ -452,7 +452,7 @@ defmodule Barkpark.Content.Validation do
   def leaf_count(_), do: 0
 
   defp run_tree(content, title, schema, level) do
-    with_pt_level(schema, fn -> do_run_tree(content, title, schema_map(schema), level) end)
+    with_pt_level(schema, level, fn -> do_run_tree(content, title, schema_map(schema), level) end)
   end
 
   defp do_run_tree(content, title, schema, level) do
@@ -521,7 +521,7 @@ defmodule Barkpark.Content.Validation do
   # `required` warns and an error-level `required` blocks, from the same
   # field, in two independent passes.
   defp run(content, title, schema, level) do
-    with_pt_level(schema, fn -> do_run(content, title, schema_map(schema), level) end)
+    with_pt_level(schema, level, fn -> do_run(content, title, schema_map(schema), level) end)
   end
 
   defp do_run(content, title, schema, level) do
@@ -541,7 +541,9 @@ defmodule Barkpark.Content.Validation do
   # `check_findings/3`'s own pass — mirrors `run/4` exactly, but flattens to
   # `finding()` maps instead of collapsing into the field-keyed string tree.
   defp run_findings(content, title, schema, level) do
-    with_pt_level(schema, fn -> do_run_findings(content, title, schema_map(schema), level) end)
+    with_pt_level(schema, level, fn ->
+      do_run_findings(content, title, schema_map(schema), level)
+    end)
   end
 
   defp do_run_findings(content, title, schema, level) do
@@ -698,16 +700,48 @@ defmodule Barkpark.Content.Validation do
   # has no dataset in hand, so the pass's level is set for the duration of
   # one validation call and read where a richText field is walked.
   @pt_level_key {__MODULE__, :portable_text_level}
+  @codelist_key {__MODULE__, :codelist_answers}
 
-  defp with_pt_level(schema, fun) do
+  defp with_pt_level(schema, pass_level, fun) do
     level = if enforce?(schema_dataset(schema)), do: :error, else: :warning
     previous = Process.put(@pt_level_key, level)
 
     try do
-      fun.()
+      if pass_level == :warning, do: with_codelist_answers(fun), else: fun.()
     after
       if previous, do: Process.put(@pt_level_key, previous), else: Process.delete(@pt_level_key)
     end
+  end
+
+  # A warning pass checks each codelist value against its registered list
+  # (task-400a66c6ebd31026) with ONE read for the whole pass: the walk runs
+  # once to collect the questions (`{:collect, set}`), and, only when there
+  # are any, again with the answers (`{:answer, map}`). The walk is in memory;
+  # the read is the cost. Outside a pass no codelist is read.
+  defp with_codelist_answers(fun) do
+    previous = Process.put(@codelist_key, {:collect, MapSet.new()})
+
+    try do
+      result = fun.()
+
+      {:collect, questions} = Process.get(@codelist_key)
+
+      if MapSet.size(questions) == 0 do
+        result
+      else
+        Process.put(@codelist_key, {:answer, codelist_answers(MapSet.to_list(questions))})
+        fun.()
+      end
+    after
+      if previous, do: Process.put(@codelist_key, previous), else: Process.delete(@codelist_key)
+    end
+  end
+
+  defp codelist_answers(questions) do
+    Barkpark.Content.Codelists.memberships(questions)
+  rescue
+    # No registry to read (a check with no database) is no finding.
+    _ -> %{}
   end
 
   defp pt_level, do: Process.get(@pt_level_key, :warning)
@@ -972,8 +1006,11 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
-  # codelist — shape only (string, non-empty, no whitespace). Membership
-  # checks against the registry are deferred to the rendering layer (W2.4).
+  # codelist — shape (string, non-empty, no whitespace), then membership: a
+  # code the registered codelist does not hold is a WARNING finding
+  # (task-400a66c6ebd31026), shown under the field; it never refuses a save
+  # or a publish, since stored documents may hold such codes. An unregistered
+  # codelist gives no finding, as before.
   defp walk_field(%Field{type: "codelist"} = f, value, path, level) do
     rules = field_rules(f, level)
 
@@ -994,6 +1031,9 @@ defmodule Barkpark.Content.Validation do
         shape(level, [
           {path, "codelist value cannot contain whitespace", :codelist_has_whitespace, %{}}
         ])
+
+      level == :warning ->
+        codelist_membership_findings(f, value, path)
 
       true ->
         []
@@ -1079,6 +1119,39 @@ defmodule Barkpark.Content.Validation do
 
   # primitive leaf — apply v1-style rules from raw["validation"]
   defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  # Collects the question, or reads its answer (`with_codelist_answers/1`).
+  defp codelist_membership_findings(%Field{codelist_id: list_id} = f, value, path)
+       when is_binary(list_id) and list_id != "" do
+    question = {codelist_plugin(f, list_id), list_id, value}
+
+    case Process.get(@codelist_key) do
+      {:collect, questions} ->
+        Process.put(@codelist_key, {:collect, MapSet.put(questions, question)})
+        []
+
+      {:answer, %{^question => false}} ->
+        [
+          {path, "#{inspect(value)} is not a code in #{list_id}", :not_in_codelist,
+           %{codelist: list_id, value: value}}
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp codelist_membership_findings(_field, _value, _path), do: []
+
+  # The plugin the editor reads the codelist under (`Plugins.Adapter`): the
+  # field's own `plugin`, else the `codelistId` prefix, else "core".
+  defp codelist_plugin(%Field{raw: raw}, list_id) do
+    case {is_map(raw) && raw["plugin"], String.split(list_id, ":", parts: 2)} do
+      {plugin, _} when is_binary(plugin) and plugin != "" -> plugin
+      {_, [plugin, _]} when plugin != "" -> plugin
+      _ -> "core"
+    end
+  end
 
   # A richText field whose value is not Portable Text: PortableDoc blocks
   # (the block editor), or a legacy `body`/`blocks` that holds them.
@@ -1236,7 +1309,16 @@ defmodule Barkpark.Content.Validation do
     rules = field_rules(f, level)
     findings = validate_field(value, rules, f.raw || %{})
     findings = apply_message(findings ++ check_numeric_bounds(value, rules), rules)
-    Enum.map(findings, &pair(path, &1))
+
+    # A value outside the field's `options.list` (task-400a66c6ebd31026) is
+    # a warning: stored documents may hold one, so it never refuses a save
+    # or a publish. An unset value is not a choice.
+    in_list =
+      if level == :warning and not blank?(value),
+        do: list_option_findings(f, value, path),
+        else: []
+
+    Enum.map(findings, &pair(path, &1)) ++ in_list
   end
 
   @doc """
@@ -1281,8 +1363,12 @@ defmodule Barkpark.Content.Validation do
           value = fetch_field(block, child.name)
           child_path = path <> "/" <> (child.name || "")
 
-          walk_field(child, value, child_path, level) ++
-            shape(level, list_option_findings(child, value, child_path))
+          # A block keeps its own `options.list` check, an error; the
+          # field's warning for the same value (`walk_leaf`) is dropped.
+          child
+          |> walk_field(value, child_path, level)
+          |> Enum.reject(&match?({^child_path, _, :not_in_list, _}, &1))
+          |> Kernel.++(shape(level, list_option_findings(child, value, child_path)))
         end)
 
       {:error, reason} ->

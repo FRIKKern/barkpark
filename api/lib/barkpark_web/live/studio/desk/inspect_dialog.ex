@@ -13,6 +13,12 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   A modal `<dialog>`: `bp-desk.js` opens it when it is mounted. Its content
   is what the document was when it opened (`phx-update="ignore"`, which also
   keeps the browser's `open` on it).
+
+  It looks as the TanStack Studio's (barkpark-studio `InspectDialog`,
+  `JsonTree`; LOOKS C3): a card, the title in italics, and Parsed as its
+  JSON tree in a monospace, each key and value in its syntax colour, every
+  object and array open, each saying what it holds ("{…} 21 properties",
+  "[…] 3 items"). TanStack's search box over the tree is not drawn here.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -32,7 +38,7 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   @doc "The dialog, open."
   def dialog(assigns) do
     envelope = Envelope.render(assigns.doc, assigns.schema, assigns.caller)
-    assigns = assign(assigns, entries: entries(envelope))
+    assigns = assign(assigns, entries: entries(envelope), envelope: envelope)
 
     ~H"""
     <dialog
@@ -44,10 +50,10 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
       phx-mounted={JS.dispatch("desk:show-modal")}
     >
       <div class="dk-inspect-head">
-        <h2 id={"#{@id}-title"}>{gettext("Inspecting %{title}", title: @title)}</h2>
+        <h2 id={"#{@id}-title"}><.titled title={@title} /></h2>
         <form method="dialog">
           <button type="submit" class="dk-inspect-close" aria-label={gettext("Close")}>
-            <span aria-hidden="true">×</span>
+            <BarkparkWeb.Icons.desk_icon name="close" size={21} />
           </button>
         </form>
       </div>
@@ -77,7 +83,14 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
       <%!-- The one scroller (focus:165): the dialog fits the window, the body scrolls. --%>
       <div class="dk-inspect-body inspect-body">
         <div id={"#{@id}-parsed"} role="tabpanel" aria-labelledby={"#{@id}-tab-parsed"} class="dk-inspect-panel">
-          <.tree entries={@entries} />
+          <ul class="dk-inspect-tree">
+            <li>
+              <details open>
+                <summary><.held value={@envelope} /></summary>
+                <.tree entries={@entries} />
+              </details>
+            </li>
+          </ul>
         </div>
         <div id={"#{@id}-raw"} role="tabpanel" aria-labelledby={"#{@id}-tab-raw"} class="dk-inspect-panel" hidden>
           <pre><code>{Jason.encode!(ordered(@entries), pretty: true)}</code></pre>
@@ -89,27 +102,71 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
 
   attr :entries, :list, required: true
 
-  # An object or an array: a key per line, nested ones folded until opened.
+  # An object or an array: a key per line, every one open, as TanStack's
+  # Inspect; its caret folds it.
   defp tree(assigns) do
     ~H"""
     <ul class="dk-inspect-tree">
       <li :for={{key, value} <- @entries}>
         <%= if is_map(value) or is_list(value) do %>
-          <details>
-            <summary>
-              <span class="dk-inspect-key">{key}</span>
-              <span class="dk-inspect-count">{count(value)}</span>
-            </summary>
+          <details open>
+            <summary><span class="dk-inspect-key">{key}:</span><.held value={value} /></summary>
             <.tree entries={entries(value)} />
           </details>
         <% else %>
-          <span class="dk-inspect-key">{key}</span>
-          <code class="dk-inspect-value">{Jason.encode!(value)}</code>
+          <span class="dk-inspect-key">{key}:</span><span class="dk-inspect-value" data-type={type(value)}>{shown(value)}</span>
         <% end %>
       </li>
     </ul>
     """
   end
+
+  attr :value, :any, required: true
+
+  # What an object or an array holds, TanStack's: "{…} 21 properties", "[…] 3 items".
+  defp held(assigns) do
+    ~H"""
+    <span class="dk-inspect-count">{brace(@value)} {count(@value)}</span>
+    """
+  end
+
+  attr :title, :string, required: true
+
+  # "Inspecting <em>title</em>": the words around the title are the
+  # translation's, wherever it puts the title.
+  defp titled(assigns) do
+    marker = "\u0000"
+
+    [before, after_title] =
+      case String.split(gettext("Inspecting %{title}", title: marker), marker, parts: 2) do
+        [b, a] -> [b, a]
+        [b] -> [b, ""]
+      end
+
+    assigns = assign(assigns, before: before, after_title: after_title)
+
+    ~H"""
+    {@before}<em>{@title}</em>{@after_title}
+    """
+  end
+
+  defp brace(map) when is_map(map), do: if(map_size(map) == 0, do: "{}", else: "{…}")
+  defp brace(list), do: if(list == [], do: "[]", else: "[…]")
+
+  defp count(map) when is_map(map),
+    do: ngettext("1 property", "%{count} properties", map_size(map))
+
+  defp count(list), do: ngettext("1 item", "%{count} items", length(list))
+
+  # A string as it reads, unquoted, as TanStack's; anything else as JSON.
+  defp shown(value) when is_binary(value), do: value
+  defp shown(value), do: Jason.encode!(value)
+
+  defp type(value) when is_binary(value), do: "string"
+  defp type(value) when is_number(value), do: "number"
+  defp type(value) when is_boolean(value), do: "boolean"
+  defp type(nil), do: "null"
+  defp type(_value), do: "other"
 
   defp entries(map) when is_map(map) do
     {system, fields} = Enum.split_with(map, fn {key, _} -> key in @system end)
@@ -119,9 +176,6 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   end
 
   defp entries(list) when is_list(list), do: Enum.with_index(list, fn value, i -> {i, value} end)
-
-  defp count(map) when is_map(map), do: "{#{map_size(map)}}"
-  defp count(list), do: "[#{length(list)}]"
 
   # JSON in the tree's order, nested objects too.
   defp ordered(entries) when is_list(entries) do

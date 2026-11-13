@@ -271,6 +271,71 @@ defmodule Barkpark.Content.Codelists do
   end
 
   @doc """
+  Answers many "is `code` in this codelist?" questions with one read
+  (task-400a66c6ebd31026: the validator asks every codelist value of a
+  document in one pass). `questions` are `{plugin_name, list_id, code}`.
+
+  Returns `%{question => boolean}`, from the codelist's latest issue, any
+  level of a tree. A question about a codelist that is not registered has no
+  key. A list id the registry holds only under its friendly-name alias costs
+  one more read for those lists.
+  """
+  @spec memberships([{String.t(), String.t(), String.t()}]) :: %{
+          {String.t(), String.t(), String.t()} => boolean()
+        }
+  def memberships([]), do: %{}
+
+  def memberships(questions) when is_list(questions) do
+    lists = questions |> Enum.map(fn {p, l, _} -> {p, l} end) |> Enum.uniq()
+    codes = questions |> Enum.map(fn {_, _, c} -> c end) |> Enum.uniq()
+    found = codes_held(lists, codes)
+
+    aliased =
+      for {p, l} <- lists,
+          not Map.has_key?(found, {p, l}),
+          a = resolve_alias(p, l),
+          into: %{},
+          do: {{p, a}, {p, l}}
+
+    found =
+      if aliased == %{},
+        do: found,
+        else:
+          aliased
+          |> Map.keys()
+          |> codes_held(codes)
+          |> Enum.reduce(found, fn {key, held}, acc -> Map.put(acc, aliased[key], held) end)
+
+    for {p, l, c} = q <- questions, held = found[{p, l}], into: %{}, do: {q, c in held}
+  end
+
+  # For each registered list of `lists`: the `codes` its latest issue holds
+  # (as `do_latest_codelist_id/2` orders issues). One query.
+  defp codes_held(lists, codes) do
+    wanted =
+      Enum.reduce(lists, dynamic(false), fn {p, l}, acc ->
+        dynamic([c], ^acc or (c.plugin_name == ^p and c.list_id == ^l))
+      end)
+
+    latest =
+      from c in Codelist,
+        where: ^wanted,
+        distinct: [c.plugin_name, c.list_id],
+        order_by: [asc: c.plugin_name, asc: c.list_id, desc: c.issue],
+        select: %{id: c.id, plugin_name: c.plugin_name, list_id: c.list_id}
+
+    from(l in subquery(latest),
+      left_join: v in Value,
+      on: v.codelist_id == l.id and v.code in ^codes,
+      select: {l.plugin_name, l.list_id, v.code}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {p, l, code}, acc ->
+      Map.update(acc, {p, l}, List.wrap(code), &(List.wrap(code) ++ &1))
+    end)
+  end
+
+  @doc """
   Build the codelist as a nested tree.
 
   Returns a list of root maps `[%{value, label, children: [...]}]` walking
