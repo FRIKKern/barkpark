@@ -295,7 +295,10 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # nonexistent dataset still resolves to an honest 404 downstream, which is the
   # pre-existing contract), and only a non-binary is refused 400.
   defp operator_dataset(conn) do
-    case Map.get(conn.params, "dataset", "production") do
+    # A dataset-bound token's default is its own dataset, never production.
+    default = ApiToken.bound_dataset(conn.assigns[:api_token]) || "production"
+
+    case Map.get(conn.params, "dataset", default) do
       dataset when is_binary(dataset) -> {:ok, dataset}
       _ -> {:error, :malformed_dataset}
     end
