@@ -80,6 +80,27 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
     |> Map.get(:in_progress, [])
   end
 
+  @doc """
+  The extra read scope for a dataset-bound token: its own dataset. `[]` for
+  everyone else, who names none and spans the scope's datasets as before.
+  """
+  @spec bound_scope(term()) :: keyword()
+  def bound_scope(principal) do
+    case Barkpark.Auth.ApiToken.bound_dataset(principal) do
+      nil -> []
+      dataset -> [dataset: dataset]
+    end
+  end
+
+  @doc "Keep only the rows of a dataset-bound token's dataset (`Tasks.prime/1` takes no dataset)."
+  @spec only_bound([map()], term()) :: [map()]
+  def only_bound(docs, principal) do
+    case bound_scope(principal) do
+      [] -> docs
+      [dataset: dataset] -> Enum.filter(docs, &(&1.dataset == dataset))
+    end
+  end
+
   @doc "A task row's `%{met, total}` criteria count through the plugin contract; nil when unavailable."
   @spec criteria_progress(t(), map() | nil) :: map() | nil
   def criteria_progress(nil, _content), do: nil

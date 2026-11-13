@@ -635,7 +635,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
             scope ->
               socket.assigns.task_reader
-              |> ChatTaskSeam.ready([limit: 8] ++ scope ++ bound_dataset_opt(socket))
+              |> ChatTaskSeam.ready(
+                [limit: 8] ++ scope ++ ChatTaskSeam.bound_scope(socket.assigns[:api_token])
+              )
               |> Enum.map(&hand_ready_row/1)
           end
 
@@ -6528,23 +6530,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     [workspace_id: workspace_id, project_id: project_id]
   end
 
-  # A dataset-bound token reads its own dataset's tasks only. Everyone else
-  # names none, and spans the scope's datasets as before.
-  defp bound_dataset_opt(socket) do
-    case Barkpark.Auth.ApiToken.bound_dataset(socket.assigns[:api_token]) do
-      nil -> []
-      dataset -> [dataset: dataset]
-    end
-  end
-
-  # `Tasks.prime/1` takes no dataset, so the held claims are narrowed here.
-  defp only_bound_dataset(docs, socket) do
-    case bound_dataset_opt(socket) do
-      [] -> docs
-      [dataset: dataset] -> Enum.filter(docs, &(&1.dataset == dataset))
-    end
-  end
-
   # The workspace the VIEWER acts in, for the task ledger (task-180a07e9d178d6a8).
   # `:current_workspace` on BOTH mounts: `LiveScope.:resolve` pins the
   # authorized URL workspace on the scoped mount, and StudioChrome pins the
@@ -6626,7 +6611,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         scope ->
           socket.assigns.task_reader
           |> ChatTaskSeam.held_claims(worker, scope)
-          |> only_bound_dataset(socket)
+          |> ChatTaskSeam.only_bound(socket.assigns[:api_token])
           |> Map.new(fn d ->
             {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
           end)
