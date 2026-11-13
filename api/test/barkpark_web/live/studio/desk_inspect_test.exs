@@ -75,6 +75,25 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     refute has_element?(view, @dialog)
   end
 
+  # Final re-shoot, tell 3: TanStack draws Inspect over the doc pane's form,
+  # its header and footer still there, not over the page. The desk's sits in
+  # the edit pane's form (`.dk-edit-body`), in its dim layer, and is no modal
+  # that bp-desk.js would lift over the navbar.
+  test "Inspect sits in the edit pane's form, in its layer", c do
+    view = open(c)
+    inspect_open(view)
+
+    assert has_element?(
+             view,
+             "[data-pane-editing] > .pane-body.dk-edit-body > .dk-inspect-layer[data-desk-inspect-layer] > dialog[data-desk-inspect]"
+           )
+
+    refute has_element?(
+             view,
+             "[data-pane-editing] > div:not(.pane-body) dialog[data-desk-inspect]"
+           )
+  end
+
   test "desk-inspect opens Inspecting <title>, Parsed first, with the document's JSON", c do
     view = open(c)
     inspect_open(view)
