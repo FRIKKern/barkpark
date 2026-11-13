@@ -17,6 +17,14 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   Studio's, as Sanity's measures at 1440: its title 11 px under the row above,
   its line 6 px under the title and 8 px over the next row.
 
+  The edit pane's header is the TanStack Studio's (`styles.css`
+  `.pane-header`, `.icon-btn`, `.chip`): 51 px, 25 px buttons with 21 px
+  icons, and the Published / Draft pills (`DocStatus`) at its left, light
+  and dark as `--dk-*` properties. The Studio's own toolbar row under it is
+  hidden, its document heading kept for screen readers; its actions are in
+  the "…" menu (`DocMenu`). Only the Classic editor's row is hidden: the Beta
+  editor's header holds the way back to Classic.
+
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
   page. A positioned edit pane boxed the backdrop in, so the other panes
@@ -123,6 +131,29 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
       .dk .dk-ref:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-ref-missing { color: var(--fg-muted); }
+      .dk .dk-edit { --dk-head-fg: rgb(56 61 81); --dk-head-icon: rgb(106 110 125); --dk-head-hover: rgb(246 246 248); --dk-head-hover-fg: rgb(99 101 112); --dk-chip-ring: rgb(227 228 232); --dk-chip-selected-fg: rgb(35 38 53); --dk-chip-active-bg: rgb(253 243 200); --dk-chip-positive-fg: rgb(13 81 51); --dk-chip-off-fg: rgb(143 148 168); --dk-chip-off-bg: rgb(246 246 248); --dk-chip-off-ring: rgb(230 230 234); --dk-published: rgb(13 183 112); --dk-caution-dot: rgb(208 132 18); --dk-line-strong: rgb(199 202 211); }
+      html[data-theme="dark"] .dk .dk-edit { --dk-head-fg: rgb(189 191 203); --dk-head-icon: rgb(147 148 159); --dk-head-hover: rgb(33 35 47); --dk-head-hover-fg: rgb(145 147 160); --dk-chip-ring: rgb(42 45 63); --dk-chip-selected-fg: rgb(230 231 236); --dk-chip-active-bg: rgb(59 50 22); --dk-chip-positive-fg: rgb(93 243 189); --dk-chip-off-fg: rgb(90 96 123); --dk-chip-off-bg: rgb(25 26 36); --dk-chip-off-ring: rgb(38 40 55); --dk-published: rgb(19 193 132); --dk-caution-dot: rgb(216 147 27); --dk-line-strong: rgb(77 82 105); }
+      .dk .dk-edit > .pane-header { box-sizing: border-box; height: 51px; gap: 4px; padding: 0 12px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
+      .dk .dk-edit > .pane-header > .pane-header-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit:has(.dk-big-title) > .pane-header > .pane-header-title:not(:has(nav)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .dk .dk-edit > .pane-header .icon-btn { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-head-icon); font-size: 17px; line-height: 1; text-decoration: none; }
+      .dk .dk-edit > .pane-header .icon-btn svg { width: 21px; height: 21px; }
+      .dk .dk-edit > .pane-header .icon-btn:hover { background: var(--dk-head-hover); color: var(--dk-head-hover-fg); }
+      .dk .dk-chips { display: flex; align-items: center; gap: 4px; min-width: 0; margin-right: auto; }
+      .dk .dk-chips .presence-dots { margin: 0 6px 0 0; }
+      .dk .dk-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 10px; border-radius: 999px; font-size: 13px; line-height: 19px; font-weight: 500; white-space: nowrap; color: var(--dk-head-fg); box-shadow: inset 0 0 0 1px var(--dk-chip-ring); }
+      .dk .dk-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .dk .dk-chip[data-selected] { color: var(--dk-chip-selected-fg); }
+      .dk .dk-chip[data-active] { background: var(--dk-chip-active-bg); box-shadow: none; }
+      .dk .dk-chip[data-tone="positive"] { color: var(--dk-chip-positive-fg); }
+      .dk .dk-chip[data-off] { color: var(--dk-chip-off-fg); background: var(--dk-chip-off-bg); box-shadow: inset 0 0 0 1px var(--dk-chip-off-ring); }
+      .dk .dk-chip-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; }
+      .dk .dk-chip-dot-published { background: var(--dk-published); }
+      .dk .dk-chip-dot-draft { background: var(--dk-caution-dot); }
+      .dk .dk-chip[data-off] .dk-chip-dot { background: var(--dk-line-strong); }
+      .dk .dk-edit .editor-panel[role="main"] > .editor-header { visibility: hidden; height: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; }
+      .dk .dk-edit .editor-panel[role="main"] > .editor-header h1 { visibility: visible; }
+      .dk .dk-doc-menu-list a[role="menuitem"] { box-sizing: border-box; text-decoration: none; }
       @media (pointer: coarse) {
         .dk .pane-item { min-height: 44px; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
