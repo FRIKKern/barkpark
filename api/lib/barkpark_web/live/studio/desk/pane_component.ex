@@ -304,7 +304,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           }
           data-tip={gettext("Create new document")}
         >
-          <BarkparkWeb.Icons.icon name="plus" size={14} />
+          <BarkparkWeb.Studio.Desk.Glyph.glyph name="add" />
         </button>
         <ListMenu.menu
           :if={@pane.kind == :list}
@@ -632,8 +632,13 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # read, so a test can hold it or fail it. Unset everywhere else.
   defp reader, do: Application.get_env(:barkpark, __MODULE__, [])[:reader] || (&read/5)
 
+  # The TanStack Studio draws no line between plain type rows, only the
+  # dividers a structure declares (Sanity's S.divider()). `Barkpark.Structure`
+  # joins its host groups and plugin tiers with positional dividers it makes
+  # up itself (`div-<n>`); the desk leaves those out and keeps every declared
+  # one, titled or not.
   defp node_entries(node) do
-    for item <- Tree.rows(node) do
+    for item <- Tree.rows(node), not synthesized_divider?(item) do
       case item do
         %{type: :divider, title: title} when is_binary(title) -> {:divider, title}
         %{type: :divider} -> :divider
@@ -641,6 +646,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       end
     end
   end
+
+  defp synthesized_divider?(%{type: :divider, title: nil, id: "div-" <> n}),
+    do: n != "" and String.match?(n, ~r/^\d+$/)
+
+  defp synthesized_divider?(_), do: false
 
   @doc false
   def read(%{kind: :list, type: type, search: q}, node, dataset, scope, provisional)
