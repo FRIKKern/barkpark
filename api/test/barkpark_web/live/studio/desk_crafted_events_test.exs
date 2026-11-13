@@ -31,7 +31,19 @@ defmodule BarkparkWeb.Studio.DeskCraftedEventsTest do
     {"desk-list-more", %{"type" => "post"}},
     {"select-ref", %{}},
     {"select-ref", %{"field" => "author", "id" => "x"}},
-    {"select-ref", %{"field" => "author", "value" => "x"}}
+    {"select-ref", %{"field" => "author", "value" => "x"}},
+    # task-55e25e62466127f4: the editor's other reference and media events.
+    {"clear-ref", %{}},
+    {"clear-ref", %{"field" => "author"}},
+    {"ref-search", %{}},
+    {"ref-search", %{"value" => "x"}},
+    {"open-ref-picker", %{}},
+    {"open-ref-picker", %{"field" => "author"}},
+    {"open-ref-picker", %{"field" => "author", "ref-type" => "post"}},
+    {"select-media", %{}},
+    {"select-media", %{"url" => "/x.png", "field" => "image"}},
+    {"clear-image", %{}},
+    {"clear-image", %{"field" => "image"}}
   ]
 
   for {{event, params}, n} <- Enum.with_index(@events) do

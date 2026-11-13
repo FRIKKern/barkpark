@@ -5,23 +5,113 @@ defmodule BarkparkWeb.Studio.Desk.FieldText do
   Rich text reads as its text, a paragraph per block: a PortableDoc value
   (`%{"blocks" => [...]}`, text nodes `%{"type" => "text", "value" => ...}`)
   and Sanity-style portable text (a list of `_type: "block"` with span
-  `children`). Anything else structured prints as JSON, cut at 600 characters.
+  `children`).
+
+  The rest reads as the TanStack Studio's read-only form shows it, not as
+  JSON: a slug as its text, a yes/no as Yes or No, a date as the workspace's
+  day (a date-time as a `PreviewText` marker, which `PreviewDay` turns into
+  the day in the workspace's time zone), a list of plain values as a comma
+  list, an object as one "Label: value" line per field. What is left (an
+  odd shape) prints as JSON. All of it is cut at 600 characters.
   """
+
+  use Gettext, backend: BarkparkWeb.Gettext
+
+  alias Barkpark.Content.PreviewText
 
   @max 600
 
-  @doc "The text a read-only pane prints for `value`."
-  @spec show(term()) :: String.t()
-  def show(nil), do: "—"
-  def show(""), do: "—"
-  def show(value) when is_binary(value), do: value
-  def show(value) when is_number(value) or is_boolean(value), do: to_string(value)
+  @doc """
+  The text a read-only pane prints for `value`, a value of the schema field
+  `field` (its `type` and, for an object, its `fields`).
+  """
+  @spec show(term(), map()) :: String.t()
+  def show(value, field \\ %{}), do: value |> text(field || %{}) |> blank() |> cut()
 
-  def show(value) do
+  defp blank(""), do: "—"
+  defp blank(text), do: text
+
+  defp text(nil, _field), do: ""
+  defp text(value, _field) when is_binary(value) and value == "", do: ""
+  defp text(true, _field), do: pgettext("boolean", "Yes")
+  defp text(false, _field), do: pgettext("boolean", "No")
+  defp text(value, _field) when is_number(value), do: to_string(value)
+
+  defp text(value, %{"type" => type}) when is_binary(value) and type in ["date", "datetime"],
+    do: day(value)
+
+  defp text(value, _field) when is_binary(value), do: value
+
+  # A slug, a reference that names no title of its own.
+  defp text(%{"current" => current}, _field) when is_binary(current), do: current
+  defp text(%{"_ref" => ref}, _field) when is_binary(ref), do: ref
+
+  defp text(value, field) do
     case rich_text(value) do
-      nil -> cut(Jason.encode!(value, pretty: true))
-      "" -> "—"
-      text -> cut(text)
+      nil -> plain(value, field)
+      text -> text
+    end
+  end
+
+  # A list of plain values: a comma list. A list of objects: a line each.
+  defp plain(list, field) when is_list(list) do
+    of = item_field(field)
+
+    if Enum.all?(list, &(not is_map(&1) and not is_list(&1))) do
+      list |> Enum.map(&text(&1, of)) |> Enum.reject(&(&1 == "")) |> Enum.join(", ")
+    else
+      list
+      |> Enum.map(fn item -> item |> text(of) |> String.replace("\n", ", ") end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+    end
+  end
+
+  # An object: "Label: value" per field that has a value, in the schema's
+  # order, then any key the schema does not name; `_type`, `_key` left out.
+  defp plain(map, field) when is_map(map) do
+    named = for %{"name" => name} = f <- List.wrap(field["fields"]), do: {name, f}
+    known = MapSet.new(named, &elem(&1, 0))
+
+    rest =
+      for {key, _} <- Enum.sort(map),
+          not String.starts_with?(key, "_"),
+          not MapSet.member?(known, key),
+          do: {key, %{}}
+
+    (named ++ rest)
+    |> Enum.map(fn {name, f} -> {f["title"] || label(name), text(map[name], f)} end)
+    |> Enum.reject(fn {_label, value} -> value == "" end)
+    |> Enum.map_join("\n", fn {label, value} -> "#{label}: #{value}" end)
+  end
+
+  defp plain(value, _field), do: Jason.encode!(value, pretty: true)
+
+  defp item_field(%{"of" => [%{} = of | _]}), do: of
+  defp item_field(%{"of" => %{} = of}), do: of
+  defp item_field(_field), do: %{}
+
+  # "metaTitle" or "meta_title" as "Meta title".
+  defp label(name) do
+    name
+    |> String.replace(~r/([a-z0-9])([A-Z])/, "\\1 \\2")
+    |> String.replace("_", " ")
+    |> String.downcase()
+    |> String.capitalize()
+  end
+
+  # A day as the workspace prints it (dd.mm.yyyy); a date-time as a marker
+  # `PreviewDay` shows as its day in the workspace's time zone.
+  defp day(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _} ->
+        PreviewText.date_time_marker(at)
+
+      _ ->
+        case Date.from_iso8601(value) do
+          {:ok, date} -> Calendar.strftime(date, "%d.%m.%Y")
+          _ -> value
+        end
     end
   end
 

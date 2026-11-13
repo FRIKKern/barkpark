@@ -354,6 +354,11 @@ defmodule Barkpark.Content.Errors do
                          # 422: the provider/operation combination can never
                          # succeed as asked — permanent, do not retry.
                          "chat_unsupported",
+                         # 422: the turn names attachments and the session's
+                         # registered host does not advertise their type
+                         # (ChatSendFailure) — permanent until the host binary
+                         # is updated; the words alone can still be sent.
+                         "host_cannot_receive_attachments",
                          # 503: creating the session row/spawn failed — a store
                          # defect distinct from runtime availability.
                          "chat_create_failed",

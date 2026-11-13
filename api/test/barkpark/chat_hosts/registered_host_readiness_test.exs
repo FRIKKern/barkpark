@@ -84,6 +84,50 @@ defmodule Barkpark.ChatHosts.RegisteredHostReadinessTest do
     end
   end
 
+  # Paper chat-host-attachments-plan (T2): a host that can take images says so
+  # with `providers.<name>.attachments`, a list drawn from the four image types
+  # the chat store accepts. Before T2 the key was unknown, so the heartbeat that
+  # carried it was refused and the host went offline.
+  describe "a provider's attachments capability" do
+    defp heartbeat_valid_with?(attachments) do
+      caps =
+        put_in(full_readiness_capabilities(), ["providers", "claude", "attachments"], attachments)
+
+      RegisteredHost.heartbeat_changeset(%RegisteredHost{}, %{capabilities: caps}).valid?
+    end
+
+    test "a provider's attachments list is admitted as readiness metadata" do
+      %{host: host} = enroll_ready_host()
+      images = ~w(image/png image/jpeg image/gif image/webp)
+
+      caps =
+        put_in(full_readiness_capabilities(), ["providers", "claude", "attachments"], images)
+
+      assert {:ok, _} = ChatHosts.heartbeat(host, %{capabilities: caps})
+
+      stored = Repo.get!(RegisteredHost, host.id)
+      assert stored.capabilities["providers"]["claude"]["attachments"] == images
+    end
+
+    test "a subset, and an empty list, are admitted" do
+      assert heartbeat_valid_with?(["image/png"])
+      assert heartbeat_valid_with?([])
+    end
+
+    test "a value outside the four image types is refused" do
+      refute heartbeat_valid_with?(["application/pdf"])
+      refute heartbeat_valid_with?(["image/png", "image/svg+xml"])
+      refute heartbeat_valid_with?(["sk-ant-secret"])
+      refute heartbeat_valid_with?([1])
+    end
+
+    test "a repeated type and a non-list are refused" do
+      refute heartbeat_valid_with?(["image/png", "image/png"])
+      refute heartbeat_valid_with?("image/png")
+      refute heartbeat_valid_with?(%{"image/png" => true})
+    end
+  end
+
   describe "end-to-end: a wire-stored host passes the dispatch readiness gate" do
     test "Runtime.open/2 for a registered host gets past readiness once operations/task_hands are stored" do
       %{host: host} = enroll_ready_host()

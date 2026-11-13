@@ -148,7 +148,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
   end
 
   def handle_event("tree_node_select", %{"code" => code}, socket) do
-    if socket.assigns.readonly do
+    # The code comes from the browser. Only a code of this codelist is taken
+    # (task-ceef65b09ceebb9c): a hand-made event with another code stored it.
+    if socket.assigns.readonly or not Map.has_key?(socket.assigns.nodes_by_code, code) do
       {:noreply, socket}
     else
       # A row select only mutates this component's OWN `:selected` state — it

@@ -120,6 +120,13 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-inspect-panel pre code") =~ "font: inherit"
   end
 
+  # Feel walk 2: the Studio's sheet hides a row's chevron until hover or
+  # select; TanStack shows it on every row at half opacity. Hover and the
+  # selected row (the Studio's rules, more specific) still show it whole.
+  test "a row's chevron shows at rest, at half opacity, as TanStack's" do
+    assert @css =~ ".dk .pane-item-chevron { opacity: 0.5; }"
+  end
+
   test "the sheet uses design tokens only, no literal colours" do
     refute @css =~ ~r/#[0-9a-fA-F]{3,8}\b/
     refute @css =~ ~r/\b(rgb|rgba|hsl|hsla)\(/
