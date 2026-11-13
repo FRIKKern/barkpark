@@ -7,7 +7,14 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   no Unpublish, Duplicate or Delete, and a plugin's resolver applies). Discard
   asks first: the Studio's own dialog, with the published version kept. Each item
   sends the Studio's own event to the page, which hands it to the editor
-  (`EditorHost`): nothing here writes, and the Studio's toolbar is untouched.
+  (`EditorHost`): nothing here writes.
+
+  The desk hides the Studio's toolbar row (`Desk.Style`), as the TanStack
+  Studio has none. Every action that row drew and the desk has no place for
+  is here too, in the Studio's order: Preview, Show or Hide preview, Diff,
+  Open another, Close reference, View blast radius, a schema's own actions (a
+  link, or a dialog for an admin, as the toolbar drew them) and the switch to
+  the Beta editor.
 
   The menu is an HTML popover, as the list's "List options" is: Enter or a
   click opens it, Escape or a click outside closes it and the focus goes back
@@ -17,21 +24,99 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias Barkpark.Content.PreviewLocations
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.DocActions
 
-  # The Studio events this menu may send (grant R21); every other action
-  # stays where the Studio draws it.
-  @events ~w(publish unpublish show-history discard-draft duplicate-doc delete-doc)
+  @typedoc "One menu item: what it is called, and what it sends or opens."
+  @type item :: %{
+          required(:label) => String.t(),
+          required(:name) => String.t(),
+          required(:event) => String.t() | nil,
+          optional(:values) => map(),
+          optional(:href) => String.t(),
+          optional(:target) => String.t() | nil,
+          optional(:rel) => String.t() | nil
+        }
 
   @doc "The open document's menu items, in the Studio's order; none without a document."
-  @spec items(map()) :: [%{label: String.t(), event: String.t()}]
+  @spec items(map()) :: [item()]
   def items(%{editor_doc: %{}} = assigns) do
-    for %{"name" => name} = action <- DocActions.resolved_doc_actions(with_twin(assigns)),
-        name in @events,
-        do: %{label: action["label"], event: name}
+    actions = DocActions.resolved_doc_actions(with_twin(assigns))
+    admin? = Caps.admin_affordance?(assigns[:caps])
+    for(action <- actions, item = item(action, assigns, admin?), do: item) ++ mode_items(assigns)
   end
 
   def items(_assigns), do: []
+
+  # As the toolbar's `doc_action_button/1`: a link opens its address, a
+  # dialog (`schema_action`, admin-tier in `Caps`) is offered to an admin
+  # only, anything else sends its event.
+  defp item(%{"kind" => "link"} = action, assigns, _admin?) do
+    opts = action["opts"] || %{}
+
+    %{
+      label: action["label"],
+      name: action["name"],
+      event: nil,
+      href: href(opts["href"] || action["href"], assigns),
+      target: opts["target"],
+      rel: opts["rel"]
+    }
+  end
+
+  defp item(%{"kind" => "modal"} = action, _assigns, true),
+    do: %{
+      label: action["label"],
+      name: action["name"],
+      event: "schema_action",
+      values: %{"name" => action["name"]}
+    }
+
+  defp item(%{"kind" => "modal"}, _assigns, false), do: nil
+
+  defp item(action, _assigns, _admin?) do
+    event =
+      case action["opts"] do
+        %{"event" => ev} when is_binary(ev) -> ev
+        _ -> action["name"]
+      end
+
+    %{label: action["label"], name: action["name"], event: event}
+  end
+
+  defp href(href, assigns) when is_binary(href) do
+    PreviewLocations.interpolate(
+      href,
+      assigns.editor_doc,
+      assigns[:dataset],
+      slug(assigns[:current_workspace]),
+      slug(assigns[:current_project])
+    )
+  end
+
+  defp href(_href, _assigns), do: "#"
+
+  defp slug(%{slug: slug}) when is_binary(slug), do: slug
+  defp slug(_scope), do: ""
+
+  # The toolbar's Classic | Beta switch, offered where the Studio offers it
+  # (a document with blocks), under the toolbar's own word for it. In Beta the Studio draws its own header, which
+  # the desk leaves alone, with the way back to Classic in it.
+  defp mode_items(%{editor_blocks: [_ | _]} = assigns) do
+    if Map.get(assigns, :editor_mode, :classic) == :classic,
+      do: [
+        %{
+          label: gettext("Beta"),
+          name: "editor-set-mode",
+          event: "editor-set-mode",
+          values: %{"mode" => "beta"}
+        }
+      ],
+      else: []
+  end
+
+  defp mode_items(_assigns), do: []
 
   # The Studio offers Discard draft when it holds the published twin
   # (`published_doc`), which it reads only when the document opens: a draft
@@ -84,22 +169,38 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
         class="dk-doc-menu-list"
         style={"position-anchor: #{@anchor}; inset: auto; #{@at}; right: anchor(right); #{@margin}"}
       >
-        <button
-          :for={item <- @items}
-          type="button"
-          role="menuitem"
-          tabindex="-1"
-          popovertarget={@id}
-          popovertargetaction="hide"
-          phx-click={item.event}
-          data-desk-doc-action={item.event}
-        >
-          {item.label}
-        </button>
+        <%= for item <- @items do %>
+          <a
+            :if={item[:href]}
+            role="menuitem"
+            tabindex="-1"
+            href={item.href}
+            target={item[:target]}
+            rel={item[:rel]}
+            data-desk-doc-action={item.name}
+          >
+            {item.label}
+          </a>
+          <button
+            :if={!item[:href]}
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            popovertarget={@id}
+            popovertargetaction="hide"
+            phx-click={item.event}
+            data-desk-doc-action={item.name}
+            {values(item)}
+          >
+            {item.label}
+          </button>
+        <% end %>
       </div>
     </div>
     """
   end
+
+  defp values(item), do: for({k, v} <- item[:values] || %{}, do: {"phx-value-#{k}", v})
 
   defp place(:header),
     do: %{

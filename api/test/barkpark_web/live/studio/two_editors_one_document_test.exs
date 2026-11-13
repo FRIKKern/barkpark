@@ -129,4 +129,54 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
 
     assert stored(c) == {"Fixture post A2", "First B1 B2"}
   end
+
+  # task-e6ef964ac2e41d5a: LiveView never patches the input that has focus, so
+  # a person resting in the title kept showing the old text after B's save, and
+  # their next keystroke posted it back over B's words. The page is told which
+  # fields changed and what each showed before; the browser sets the focused
+  # one only while it still shows exactly that (bp-array-focus.js, host test
+  # __form_remote_values.test.mjs). Nothing is written.
+  test "a clean form told of another's save hears each changed field, new and old", c do
+    a = open(c)
+    b = open(c)
+
+    type_in(a, "title", " A2")
+    render(b)
+
+    type_in(b, "title", " B3")
+    render(a)
+
+    assert_push_event(a, "bp:form-remote-values", %{values: values})
+
+    assert values == %{
+             "doc[title]" => %{value: "Fixture post A2 B3", was: "Fixture post A2"}
+           }
+
+    assert stored(c) == {"Fixture post A2 B3", "First"}
+  end
+
+  test "with typing not saved, only the fields that take the remote save are told", c do
+    a = open(c)
+    b = open(c)
+
+    # A's excerpt edit is unsaved: the session holds it as dirty.
+    :sys.replace_state(a.pid, fn state ->
+      socket = state.socket
+
+      assigns =
+        Map.merge(socket.assigns, %{
+          editor_dirty: true,
+          editor_unsaved_keys: MapSet.new(["excerpt"]),
+          editor_form: Map.put(socket.assigns.editor_form, "excerpt", "First A-unsent")
+        })
+
+      %{state | socket: %{socket | assigns: assigns}}
+    end)
+
+    type_in(b, "title", " B3")
+    render(a)
+
+    assert_push_event(a, "bp:form-remote-values", %{values: values})
+    assert values == %{"doc[title]" => %{value: "Fixture post B3", was: "Fixture post"}}
+  end
 end
