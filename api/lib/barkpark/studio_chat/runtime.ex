@@ -13,6 +13,7 @@ defmodule Barkpark.StudioChat.Runtime do
   alias Barkpark.StudioChat.Runtime.Claude
   alias Barkpark.StudioChat.RuntimeAdmission
   alias Barkpark.StudioChat.RuntimeTelemetry
+  alias Barkpark.StudioChat.TurnAttachments
 
   @typedoc "A provider name persisted on a chat session."
   @type provider :: String.t()
@@ -522,20 +523,30 @@ defmodule Barkpark.StudioChat.Runtime do
   defp linked_os_pid(_), do: nil
 
   defp dispatch_remote(%RemoteRef{} = ref, operation, payload, command_opts \\ []) do
-    payload =
-      if operation == :send_turn do
-        payload
-        |> Map.put(:cwd, ref.cwd)
-        |> maybe_put_developer_instructions(ref.developer_instructions)
-        |> maybe_put_runtime_option(:mode, ref.mode)
-        |> maybe_put_runtime_option(:model, ref.model)
-        |> maybe_put_runtime_option(:effort, ref.effort)
-        |> maybe_put_runtime_option(:bypass_armed, ref.bypass_armed)
-        |> maybe_put_task_env(remote_task_env(ref))
-      else
-        payload
-      end
+    with {:ok, payload} <- remote_payload(ref, operation, payload) do
+      lease_remote(ref, operation, payload, command_opts)
+    end
+  end
 
+  # A send_turn leased to a host names its images by reference and never carries
+  # their bytes, which stay in the chat-owned store (`TurnAttachments`).
+  defp remote_payload(ref, :send_turn, payload) do
+    with {:ok, payload} <- TurnAttachments.to_references(payload) do
+      {:ok,
+       payload
+       |> Map.put(:cwd, ref.cwd)
+       |> maybe_put_developer_instructions(ref.developer_instructions)
+       |> maybe_put_runtime_option(:mode, ref.mode)
+       |> maybe_put_runtime_option(:model, ref.model)
+       |> maybe_put_runtime_option(:effort, ref.effort)
+       |> maybe_put_runtime_option(:bypass_armed, ref.bypass_armed)
+       |> maybe_put_task_env(remote_task_env(ref))}
+    end
+  end
+
+  defp remote_payload(_ref, _operation, payload), do: {:ok, payload}
+
+  defp lease_remote(ref, operation, payload, command_opts) do
     command = %Command{
       operation: operation,
       provider: ref.provider,
