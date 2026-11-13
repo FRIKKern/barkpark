@@ -365,6 +365,49 @@ defmodule BarkparkWeb.Studio.TwoEditorsSameFieldTest do
       assert stored(c)["title"] == "Fixture B3 A7"
     end
 
+    # #25994 review, BX: the beta editor switch reloads the form from the
+    # store (`Paper.sync_editor_blocks`) and sends no numbers.
+    for {label, b2, typed} <- [
+          {"B inserts mid-title, A types at the end", "Fixture B2 post B1",
+           "Fixture B2 post B1 x"},
+          {"B inserts before the end, A types at the start", "Fixture post B2 B1",
+           "X Fixture post B2 B1"}
+        ] do
+      test "after switching to beta and back, typing on does not repeat words: #{label}", c do
+        a = open(c)
+        b = open(c)
+
+        send_post(b, "title", %{"title" => "Fixture post B1"})
+        {_values, seqs} = told(a)
+        seen = %{"doc[title]" => seq(seqs, "doc[title]", :new)}
+
+        # A goes dirty on the title (as after a failed save), so B's next
+        # save is not pushed to it.
+        :sys.replace_state(a.pid, fn state ->
+          s = state.socket
+
+          assigns =
+            Map.merge(s.assigns, %{
+              editor_dirty: true,
+              editor_unsaved_keys: MapSet.new(["title"]),
+              editor_form: Map.put(s.assigns.editor_form, "title", "Fixture post B1 unsent")
+            })
+
+          %{state | socket: %{s | assigns: assigns}}
+        end)
+
+        render(b)
+        send_post(b, "title", %{"title" => unquote(b2)})
+        render_click(a, "editor-set-mode", %{"mode" => "beta"})
+        render_click(a, "editor-set-mode", %{"mode" => "classic"})
+        assert form_of(a)["title"] == unquote(b2)
+
+        send_post(a, "title", %{"title" => unquote(typed)}, seen)
+
+        assert stored(c)["title"] == unquote(typed)
+      end
+    end
+
     test "a new socket's numbers are above the old socket's", c do
       a = open(c)
       b = open(c)

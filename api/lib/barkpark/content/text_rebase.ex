@@ -10,8 +10,9 @@ defmodule Barkpark.Content.TextRebase do
   Each side's change is one splice of `base`: the longest common prefix and
   suffix stay, the middle is replaced. Two splices that do not touch each
   other both apply. Two inserts at the same point keep `theirs` first, as it
-  was saved first, unless `ours` already starts with `theirs`' insert: then
-  the page had it, and `ours` stands. Two splices that overlap give `ours`,
+  was saved first. When `theirs` is an insert at an edge of `ours`' splice
+  and `ours` already holds that insert there, the page had it, and `ours`
+  stands. Two splices that overlap give `ours`,
   the last post, as before this module: keeping the text of both brought back
   words either side had deleted (#25994 review).
 
@@ -86,8 +87,11 @@ defmodule Barkpark.Content.TextRebase do
     {ts, te, tins} = splice(base, theirs)
 
     cond do
-      # Both insert at the same point, and ours already holds theirs' insert.
-      os == oe and ts == te and os == ts and Enum.take(oins, length(tins)) == tins ->
+      # Theirs inserts at an edge of ours' splice, and ours already holds that
+      # insert there: the page had it, from a base older than it showed.
+      ts == te and
+          ((ts == os and Enum.take(oins, length(tins)) == tins) or
+             (ts == oe and Enum.take(oins, -length(tins)) == tins)) ->
         nil
 
       # Both insert at the same point: theirs was saved first.

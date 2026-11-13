@@ -38,6 +38,17 @@ defmodule Barkpark.Content.TextRebaseTest do
                "one four"
     end
 
+    test "an insert touching ours' splice that ours already holds stands" do
+      assert TextRebase.merge3("Fixture post B1", "Fixture B2 post B1 x", "Fixture B2 post B1") ==
+               "Fixture B2 post B1 x"
+
+      # Not held by ours: both changes still apply.
+      assert TextRebase.merge3("Hello world", "Hello world!", "Hello earth") == "Hello earth!"
+
+      assert TextRebase.merge3("Hello world", "Hello big world", "Hello world!") ==
+               "Hello big world!"
+    end
+
     test "an insert at the same point that already holds theirs' insert stands" do
       assert TextRebase.merge3(
                "Fixture post B1",

@@ -2544,6 +2544,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
         editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema]),
+        editor_remote_history: nil,
         editor_is_draft: Content.draft?(fresh.doc_id)
       )
       |> assign_published_twin(doc, fresh)
