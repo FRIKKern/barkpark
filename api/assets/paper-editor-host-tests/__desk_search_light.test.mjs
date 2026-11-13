@@ -167,4 +167,17 @@ for (const tag of ["input", "textarea"]) {
   field.remove();
 }
 
+// A press on the dimmed page round it puts it away (LOOKS C2): the press
+// lands on the dialog itself, outside its box. One inside its box does not.
+Object.defineProperty(dialog, "getBoundingClientRect", {
+  value: () => ({ left: 320, right: 1120, top: 108, bottom: 500 }),
+});
+const pressAt = (x, y) =>
+  dialog.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+dialog.showModal();
+pressAt(400, 120);
+assert.ok(dialog.open, "a press inside the dialog's box keeps it open");
+pressAt(40, 40);
+assert.ok(!dialog.open, "a press on the dimmed page closes the dialog");
+
 console.log("ok — __desk_search_light");
