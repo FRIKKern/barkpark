@@ -95,6 +95,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      # The search's hits: up to 50, as the TanStack Studio's text search,
+      # the first 40 drawn, then more as the list's end scrolls near (`Search`).
+      |> assign(desk_search_limit: Search.limit(), desk_search_drawn: Search.step())
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
@@ -269,7 +272,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-focus", %{"index" => index}, socket),
     do: {:noreply, FocusMode.toggle(socket, index)}
 
-  # The search box (`Search`): Enter opens the lit hit, or searches what was
+  # The search box (`Search`): each new set of hits is drawn from its first 40.
+  def handle_event("desk-search", params, socket) do
+    {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
+    {:noreply, assign(socket, :desk_search_drawn, Search.step())}
+  end
+
+  # The hits' end scrolled near (`phx-viewport-bottom`): 40 more drawn.
+  def handle_event("desk-search-more", _params, socket) do
+    drawn = socket.assigns.desk_search_drawn + Search.step()
+    {:noreply, assign(socket, :desk_search_drawn, min(drawn, Search.limit()))}
+  end
+
+  # Enter opens the lit hit, or searches what was
   # typed if its hits are not in yet. The arrows move the light in the
   # browser (`bp-desk.js`), which sends its index with the form as `lit`.
   def handle_event("desk-search-open", %{"value" => value} = params, socket) do
@@ -283,7 +298,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
 
       _ ->
-        EditorHost.handle_event("desk-search", params, socket)
+        handle_event("desk-search", params, socket)
     end
   end
 
@@ -437,6 +452,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       <Search.box
         query={@desk_search}
         hits={@desk_search_hits}
+        drawn={@desk_search_drawn}
         root={@desk.root}
         base={@base}
       />

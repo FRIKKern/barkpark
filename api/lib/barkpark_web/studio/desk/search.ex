@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Studio.Desk.Search do
 
   attr :query, :string, default: ""
   attr :hits, :list, default: []
+  attr :drawn, :integer, default: 40, doc: "how many of the hits are drawn (`step/0` at a time)"
   attr :root, :any, required: true
   attr :base, :string, required: true
 
@@ -73,9 +74,10 @@ defmodule BarkparkWeb.Studio.Desk.Search do
           id="desk-search-options"
           role="listbox"
           aria-label={gettext("Search documents")}
+          phx-viewport-bottom={length(@hits) > @drawn && "desk-search-more"}
         >
           <.link
-            :for={{hit, i} <- Enum.with_index(@hits)}
+            :for={{hit, i} <- @hits |> Enum.with_index() |> Enum.take(@drawn)}
             patch={href(@base, @root, hit)}
             id={option_id(i)}
             class="pane-item dk-search-hit"
@@ -107,6 +109,18 @@ defmodule BarkparkWeb.Studio.Desk.Search do
   end
 
   defp draft?(hit), do: hit[:status] == "draft"
+
+  @doc """
+  How many hits a search asks for: 50, as the TanStack Studio's text search
+  (`Search.tsx`). The first `step/0` are drawn, then `step/0` more each time
+  the list's end scrolls near, as TanStack's `ROWS_STEP`.
+  """
+  @spec limit() :: pos_integer()
+  def limit, do: 50
+
+  @doc "How many more hits are drawn each time the list's end scrolls near."
+  @spec step() :: pos_integer()
+  def step, do: 40
 
   @doc "The element id of hit `i`, the one `aria-activedescendant` names when it is lit."
   @spec option_id(non_neg_integer()) :: String.t()

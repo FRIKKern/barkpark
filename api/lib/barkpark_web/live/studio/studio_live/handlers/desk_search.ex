@@ -51,8 +51,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
     else
       scope = ScopeHelpers.scope_opts(socket)
 
+      # A host may ask for more hits (`desk_search_limit`): the desk asks
+      # for the TanStack Studio's 50 and draws them 40 at a time.
+      limit = socket.assigns[:desk_search_limit] || @limit
+
       found =
-        Content.search_documents_across_types(trimmed, socket.assigns.dataset, scope, @limit)
+        Content.search_documents_across_types(trimmed, socket.assigns.dataset, scope, limit)
 
       types = type_info(found, socket.assigns.dataset, scope)
 
