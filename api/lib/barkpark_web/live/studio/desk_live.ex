@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
@@ -84,7 +85,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
       |> assign(:title_suffix, " | Barkpark")
-      |> assign(warm: %{})
+      |> assign(warm: %{}, desk_focus: nil)
       |> assign(:titles, %{})
       # Each document's title as a list or a pane has read it, by id: a pane
       # drawn before its own read (a click, Back) is named by it, not its id.
@@ -159,6 +160,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
     last = List.last(views)
     # Following a hit (or any link) puts the search and the Inspect dialog away.
     socket = assign(socket, desk_search: "", desk_search_hits: [], desk_inspect: false)
+
+    # Focus mode is for the panes it was turned on over (`FocusMode`).
+    socket = FocusMode.follow(socket, splat)
 
     socket =
       socket
@@ -241,6 +245,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
+
+  # The edit pane's focus mode button (J26).
+  def handle_event("desk-focus", %{"index" => index}, socket),
+    do: {:noreply, FocusMode.toggle(socket, index)}
 
   # The search box (`Search`): Enter opens the lit hit, or searches what was
   # typed if its hits are not in yet. The arrows move the light in the
@@ -398,6 +406,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       id="desk-panes"
       data-testid="panes"
       role={if is_nil(@active), do: "main"}
+      data-focus-mode={@desk_focus != nil}
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
       style="flex: 1 1 auto; min-height: 0"

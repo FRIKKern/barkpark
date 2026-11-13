@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -387,6 +388,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
       data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
@@ -397,7 +399,26 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
-        <h2 class="pane-header-title">{@page_title}</h2>
+        <%!-- In focus mode the title line is the panes it hides, each a way
+              back (`FocusMode`). One title element, the same tag, either way:
+              an element that changed (a span or h2 swapped for a div) makes the
+              patch re-insert the focus mode button after it, and a re-inserted
+              button loses the focus. A div with the heading role, because the
+              breadcrumb is a nav and a nav cannot sit in an h2. --%>
+        <div class="pane-header-title" role="heading" aria-level="2">
+          <%= if assigns[:desk_focus] == @view.index do %>
+            <FocusMode.crumbs
+              views={@desk_panes}
+              titles={@titles}
+              index={@view.index}
+              chain={@chain}
+              base={@base}
+              title={@page_title}
+            />
+          <% else %>
+            {@page_title}
+          <% end %>
+        </div>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
@@ -411,6 +432,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="columns" size={14} />
         </.link>
+        <FocusMode.button
+          id={"#{@view.id}-focus"}
+          index={@view.index}
+          on={assigns[:desk_focus] == @view.index}
+        />
         <%!-- In a split, "Close split pane" drops just this pane
               (`Panes.close_split/3`); the close link drops it and the panes
               to its right. --%>

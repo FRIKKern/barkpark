@@ -114,15 +114,23 @@
   // One pane on screen: every other pane is hidden, and the pane's own close
   // link (the URL without it) moves to the front and reads as Back.
   function narrowRules(last) {
-    var all = "#desk-panes > [data-pane-index]";
     var pane = '#desk-panes > [data-pane-index="' + last + '"]';
     return (
-      all + " { display: none; }\n" +
-      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n" +
+      aloneRules(last) +
       pane + " > .pane-header { justify-content: flex-start; gap: 8px; }\n" +
       pane + " .dk-close { order: -1; padding-left: 0; }\n" +
       pane + ' .dk-close::before { content: "\\2190"; }\n' +
       pane + " .dk-close > span { display: none; }\n"
+    );
+  }
+
+  // One pane shown, the whole width: the narrow layout's, and focus mode's
+  // (J26: the server marks the desk and its focused pane).
+  function aloneRules(index) {
+    var pane = '#desk-panes > [data-pane-index="' + index + '"]';
+    return (
+      "#desk-panes > [data-pane-index] { display: none; }\n" +
+      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n"
     );
   }
 
@@ -253,12 +261,21 @@
     // document beside the strips takes what is left, under its 600 px too
     // (640 px: two strips and a 538 px document); the sheet lets it shrink.
     var narrow = width > 0 && shown.length > 0 && width < NARROW;
-    var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
+    // Focus mode: the focused pane alone, nothing a strip, no dividers.
+    var alone = root.hasAttribute("data-focus-mode")
+      ? shown.filter(function (el) {
+          return el.hasAttribute("data-desk-focused");
+        })[0]
+      : null;
+    var flags = width > 0 && !narrow && !alone ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = TIP_RULES;
 
     if (narrow) {
       if (!root.hasAttribute("data-narrow")) root.setAttribute("data-narrow", "");
-      css += narrowRules(shown[shown.length - 1].getAttribute("data-pane-index"));
+      css += narrowRules((alone || shown[shown.length - 1]).getAttribute("data-pane-index"));
+    } else if (alone) {
+      root.removeAttribute("data-narrow");
+      css += aloneRules(alone.getAttribute("data-pane-index"));
     } else {
       root.removeAttribute("data-narrow");
       css += EDGE_RULES + PHONE_RULES;
@@ -288,7 +305,7 @@
 
     placeResizers(
       root,
-      narrow
+      narrow || alone
         ? []
         : shown.filter(function (el, i) {
             return !flags[i] && i < shown.length - 1;
@@ -1142,7 +1159,7 @@
         });
         if (ours) hook._layout();
       });
-      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow", "tabindex"] });
+      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow", "tabindex", "data-focus-mode", "data-desk-focused"] });
       hook._layout();
 
       root.addEventListener("click", hook._noteFocus, true);

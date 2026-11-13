@@ -13403,3 +13403,28 @@ msgstr "Behandlet"
 #, elixir-autogen, elixir-format
 msgid "Raw JSON"
 msgstr "Rå JSON"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode (show navigation)"
+msgstr "Gå ut av fokusmodus (vis navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode (hide navigation)"
+msgstr "Gå til fokusmodus (skjul navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode"
+msgstr "Gå ut av fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode"
+msgstr "Gå til fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Breadcrumb"
+msgstr "Brødsmulesti"
