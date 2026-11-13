@@ -110,7 +110,8 @@ defmodule BarkparkWeb.Studio.DeskReadOnlyFormTest do
     html = view |> element("#{@pane} dl.dk-fields") |> render()
 
     for [_, label, value] <- Regex.scan(~r{<dt>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>}s, html) do
-      {String.trim(label), value |> String.replace(~r/<[^>]*>/, "") |> String.trim()}
+      {String.trim(label),
+       value |> String.replace(~r/<[^>]*>/, " ") |> String.replace(~r/\s+/, " ") |> String.trim()}
     end
   end
 
@@ -142,7 +143,11 @@ defmodule BarkparkWeb.Studio.DeskReadOnlyFormTest do
     # The pane's own heading stays, for screen readers.
     assert has_element?(view, "#{@pane} > .pane-header .pane-header-title", "First story")
 
-    assert terms(view) == [{"Title", "First story"}, {"Excerpt", "Short."}, {"Author", "Ada"}]
+    assert terms(view) == [
+             {"Title", "First story"},
+             {"Excerpt", "Short."},
+             {"Author", "Ada Writer #{c.n}"}
+           ]
 
     assert has_element?(
              view,
