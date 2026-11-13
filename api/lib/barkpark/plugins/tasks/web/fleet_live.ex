@@ -109,6 +109,11 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
     {:noreply, assign(socket, :roster, roster(socket))}
   end
 
+  # A stray message (there is no subscription, but be defensive) never crashes
+  # the socket.
+  @impl true
+  def handle_info(_other, socket), do: {:noreply, socket}
+
   # `global: true` is the operator's flat view; a scoped mount names its
   # workspace instead.
   defp roster(socket) do
@@ -117,11 +122,6 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
       ws_id -> Fleet.roster(@dataset, workspace_id: ws_id)
     end
   end
-
-  # A stray message (there is no subscription, but be defensive) never crashes
-  # the socket.
-  @impl true
-  def handle_info(_other, socket), do: {:noreply, socket}
 
   @impl true
   def render(%{loading: true} = assigns) do
