@@ -27,11 +27,21 @@ type Runner struct {
 
 	mu     sync.Mutex
 	active map[string]activeCommand
-	// ended: leases this process ran to an end the server took. A poll answered
-	// before that end landed still lists the lease; it is not started again.
-	// An entry goes when a poll no longer lists its lease.
-	ended map[string]bool
+	// seen: every lease this process has started, and whether it is done with
+	// it. A started lease is never handed to the Handler again: listed again
+	// while not active, it is only closed. A done lease (its end was taken, or
+	// the server refused it for good) is left alone, as when a poll answered
+	// just before the end landed still lists it. An entry goes when a poll no
+	// longer lists its lease.
+	seen map[string]leaseMark
 }
+
+type leaseMark int
+
+const (
+	leaseStarted leaseMark = iota + 1
+	leaseDone
+)
 
 type activeCommand struct {
 	sessionID string
@@ -49,7 +59,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.HeartbeatInterval = 15 * time.Second
 	}
 	r.active = make(map[string]activeCommand)
-	r.ended = make(map[string]bool)
+	r.seen = make(map[string]leaseMark)
 
 	poll := time.NewTicker(r.PollInterval)
 	heartbeat := time.NewTicker(r.HeartbeatInterval)
@@ -69,7 +79,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		r.forgetEnded(commands)
+		r.forgetUnlisted(commands)
 		for _, command := range commands {
 			r.start(ctx, command)
 		}
@@ -157,13 +167,17 @@ func (r *Runner) logf(format string, args ...any) {
 
 func (r *Runner) start(parent context.Context, command RemoteCommand) {
 	r.mu.Lock()
-	if _, exists := r.active[command.LeaseID]; exists || r.ended[command.LeaseID] {
+	mark := r.seen[command.LeaseID]
+	if _, exists := r.active[command.LeaseID]; exists || mark == leaseDone {
 		r.mu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
 	sessionID, _ := command.Command["session_id"].(string)
 	r.active[command.LeaseID] = activeCommand{sessionID: sessionID, cancel: cancel}
+	if r.seen != nil {
+		r.seen[command.LeaseID] = leaseStarted
+	}
 	r.mu.Unlock()
 
 	go func() {
@@ -185,29 +199,37 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 			cursor++
 			return nil
 		}
+		// The terminal is published under its own deadline, after the turn's
+		// ctx is cancelled, so a provider that gave up is not kept alive while
+		// it is sent. Taken, or refused for good (409, 422), the lease is done:
+		// re-posting a refused close every poll spends the write budget that
+		// started this. A refusal retrying can heal leaves it to the next poll.
 		terminal := func(state string, err error) {
+			cancel()
 			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), terminalPublishTimeout)
 			defer publishCancel()
-			if perr := publish(publishCtx, map[string]any{
+			perr := publish(publishCtx, map[string]any{
 				"kind":           "terminal",
 				"terminal_state": state,
 				"error":          map[string]any{"message": err.Error()},
-			}); perr != nil {
+			})
+			if perr != nil {
 				r.logf("lease %s: its %s terminal was not taken: %v", command.LeaseID, state, perr)
-				return
 			}
-			r.markEnded(command.LeaseID)
+			if perr == nil || !Transient(perr) {
+				r.markDone(command.LeaseID)
+			}
 		}
 
 		// The server hands a lease out again on every poll until it holds a
-		// completed event. One it already took events for was started before,
-		// here or by an earlier host process, and that run is gone. Running it
-		// again restarts the turn from the top: a second paid provider run,
-		// a second reply, and, when the first run died because its events were
-		// refused, the same failure again on every poll (task-1fa6009d589cd92a).
-		// The lease is closed instead.
-		if command.LastCursor > 0 {
-			err := fmt.Errorf("this command was cut off after %d events on the host and is not run twice", command.LastCursor)
+		// completed event. One this process started before, or one the server
+		// took events for (started by an earlier host process), had a run that
+		// is gone. Running it again restarts the turn from the top: a second
+		// paid provider run, a second reply, and, when the first run died
+		// because its events were refused, the same failure again on every poll
+		// (task-1fa6009d589cd92a). The lease is closed instead.
+		if mark == leaseStarted || command.LastCursor > 0 {
+			err := fmt.Errorf("this command was cut off on the host after %d events and is not run twice", command.LastCursor)
 			r.logf("lease %s: %v", command.LeaseID, err)
 			terminal("error", err)
 			return
@@ -222,34 +244,39 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 			terminal(terminalState, err)
 			return
 		}
-		r.markEnded(command.LeaseID)
+		r.markDone(command.LeaseID)
 	}()
 }
 
-func (r *Runner) markEnded(leaseID string) {
+func (r *Runner) markDone(leaseID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.ended != nil {
-		r.ended[leaseID] = true
+	if r.seen != nil {
+		r.seen[leaseID] = leaseDone
 	}
 }
 
-func (r *Runner) forgetEnded(listed []RemoteCommand) {
+// forgetUnlisted drops the marks of leases the server no longer lists. A
+// lease still running here keeps its mark.
+func (r *Runner) forgetUnlisted(listed []RemoteCommand) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for leaseID := range r.ended {
+	for leaseID := range r.seen {
+		if _, running := r.active[leaseID]; running {
+			continue
+		}
 		if !slices.ContainsFunc(listed, func(c RemoteCommand) bool { return c.LeaseID == leaseID }) {
-			delete(r.ended, leaseID)
+			delete(r.seen, leaseID)
 		}
 	}
 }
 
-const (
-	// A refused event is retried for this long before the turn gives up.
-	maxPublishOutage = 2 * time.Minute
-	// Bound on the terminal publish after the run has ended.
-	terminalPublishTimeout = 30 * time.Second
-)
+// A refused event is retried for this long before the turn gives up.
+const maxPublishOutage = 2 * time.Minute
+
+// Bound on the terminal publish after the run has ended. A var so a test can
+// end it sooner.
+var terminalPublishTimeout = 30 * time.Second
 
 // publish sends one event at cursor and retries an answer that retrying can
 // heal (network, timeout, 5xx, 408, 429) with the same cursor and key, so the

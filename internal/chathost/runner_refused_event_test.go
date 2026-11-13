@@ -21,7 +21,8 @@ type leaseServer struct {
 	lastCursor uint64
 	completed  bool
 	kinds      []string
-	refuse     func(cursor uint64) bool // true: answer this attempt 429
+	refuse     func(cursor uint64) int // non-zero: answer this attempt with that status
+	posts      int                     // event POSTs received
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
@@ -55,10 +56,15 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 				t.Error(err)
 				return
 			}
+			s.posts++
+			status := 0
+			if s.refuse != nil {
+				status = s.refuse(payload.Cursor)
+			}
 			switch {
-			case s.refuse != nil && s.refuse(payload.Cursor):
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":{"code":"rate_limited"}}`))
+			case status != 0:
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"code":"refused"}}`))
 			case payload.Cursor <= s.lastCursor && s.completed:
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"error":{"code":"unprocessable","message":":cursor_conflict"}}`))
@@ -108,10 +114,18 @@ func (h *turnHandler) Handle(_ context.Context, _ RemoteCommand, emit func(map[s
 	return nil
 }
 
-func runUntilCompleted(t *testing.T, server *leaseServer, handler Handler) {
+// failingHandler is a provider run that dies before it emits anything, as
+// claude does when it exits before the turn starts.
+type failingHandler struct{ runs atomic.Int32 }
+
+func (h *failingHandler) Handle(context.Context, RemoteCommand, func(map[string]any) error) error {
+	h.runs.Add(1)
+	return fmt.Errorf("claude exited before turn completion")
+}
+
+func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Context, func()) {
 	t.Helper()
 	ts := httptest.NewServer(server.handler(t))
-	defer ts.Close()
 	runner := Runner{
 		Client:       &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
 		Handler:      handler,
@@ -119,16 +133,26 @@ func runUntilCompleted(t *testing.T, server *leaseServer, handler Handler) {
 		Log:          &syncBuffer{},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	result := make(chan error, 1)
 	go func() { result <- runner.Run(ctx) }()
+	return ctx, func() {
+		cancel()
+		if err := <-result; err != nil && ctx.Err() == nil {
+			t.Errorf("Run ended: %v", err)
+		}
+		ts.Close()
+	}
+}
+
+func runUntilCompleted(t *testing.T, server *leaseServer, handler Handler) {
+	t.Helper()
+	ctx, stop := startRunner(t, server, handler)
+	defer stop()
 	for {
 		if done, _ := server.snapshot(); done {
 			break
 		}
 		select {
-		case err := <-result:
-			t.Fatalf("Run ended: %v", err)
 		case <-ctx.Done():
 			_, kinds := server.snapshot()
 			t.Fatalf("the lease never completed; events taken: %v", kinds)
@@ -146,8 +170,6 @@ func runUntilCompleted(t *testing.T, server *leaseServer, handler Handler) {
 		time.Sleep(time.Millisecond)
 	}
 	time.Sleep(30 * time.Millisecond)
-	cancel()
-	<-result
 }
 
 // The live failure on guerrilla (task-1fa6009d589cd92a): a long reply spent
@@ -158,12 +180,15 @@ func runUntilCompleted(t *testing.T, server *leaseServer, handler Handler) {
 // once.
 func TestRunnerRefusedEventDoesNotRestartTheTurn(t *testing.T) {
 	var attempts sync.Map
-	server := &leaseServer{refuse: func(cursor uint64) bool {
+	server := &leaseServer{refuse: func(cursor uint64) int {
 		if cursor != 3 {
-			return false
+			return 0
 		}
 		n, _ := attempts.LoadOrStore(cursor, new(atomic.Int32))
-		return n.(*atomic.Int32).Add(1) <= 2
+		if n.(*atomic.Int32).Add(1) <= 2 {
+			return http.StatusTooManyRequests
+		}
+		return 0
 	}}
 	handler := &turnHandler{}
 	runUntilCompleted(t, server, handler)
@@ -208,5 +233,50 @@ func TestRunnerDoesNotRestartALeaseItJustFinished(t *testing.T) {
 	want := []string{"session_started", "turn_started", "text_delta", "text_delta", "text_delta", "turn_completed"}
 	if fmt.Sprint(kinds) != fmt.Sprint(want) {
 		t.Fatalf("events=%v want %v: a finished lease was posted to again", kinds, want)
+	}
+}
+
+// A run that died before the server took any of its events, whose terminal
+// was refused too, is listed again with last_cursor 0. This process started
+// it, so it is closed, never handed to the provider a second time.
+func TestRunnerNeverRunsALeaseTwiceEvenWhenNoEventWasTaken(t *testing.T) {
+	defer func(old time.Duration) { terminalPublishTimeout = old }(terminalPublishTimeout)
+	terminalPublishTimeout = 20 * time.Millisecond
+	opened := time.Now()
+	server := &leaseServer{refuse: func(uint64) int {
+		if time.Since(opened) < 150*time.Millisecond {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}}
+	handler := &failingHandler{}
+	runUntilCompleted(t, server, handler)
+
+	if got := handler.runs.Load(); got != 1 {
+		t.Fatalf("provider runs=%d want 1: a lease this process started was run again", got)
+	}
+	if _, kinds := server.snapshot(); fmt.Sprint(kinds) != "[terminal]" {
+		t.Fatalf("events taken=%v want one terminal", kinds)
+	}
+}
+
+// A close the server refuses for good (409: the lease expired) is sent once.
+// Sent again on every poll, each try spends the write budget that started the
+// incident and logs two lines.
+func TestRunnerDoesNotRepeatACloseTheServerRefusedForGood(t *testing.T) {
+	server := &leaseServer{lastCursor: 4, refuse: func(uint64) int { return http.StatusConflict }}
+	handler := &turnHandler{}
+	_, stop := startRunner(t, server, handler)
+	time.Sleep(150 * time.Millisecond)
+	stop()
+
+	server.mu.Lock()
+	posts := server.posts
+	server.mu.Unlock()
+	if posts != 1 {
+		t.Fatalf("close POSTs=%d want 1", posts)
+	}
+	if got := handler.runs.Load(); got != 0 {
+		t.Fatalf("provider runs=%d want 0", got)
 	}
 }
