@@ -199,7 +199,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp ours({:noreply, socket}, how), do: {:noreply, settle(socket, how)}
   defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
-  defp settle(socket, how), do: socket |> steer(how) |> strip() |> assign(:panes, [])
+  defp settle(socket, how),
+    do: socket |> steer(how) |> strip() |> form_only() |> assign(:panes, [])
+
+  # A document the desk opens from a document node of its own (an
+  # `S.document()` child: a singleton) shows the form only, as Sanity's
+  # (singleton.spec:64): no view tabs, so no "Split pane right" (`pane/2`),
+  # and no type line over the title (`Desk.Style`). The Studio sets the tabs
+  # again on every rebuild, so they are cleared after each call it answers.
+  defp form_only(socket) do
+    if document_node?(List.last(socket.assigns[:chain] || [])),
+      do: assign(socket, :editor_views, []),
+      else: socket
+  end
+
+  # A doc pane that carries its desk node (`Tree.opens/1`, `Panes.parse_singleton/2`).
+  defp document_node?(%{kind: :doc, node: node}) when is_binary(node), do: true
+  defp document_node?(_pane), do: false
 
   # ── the Studio's navigation, read against the desk's chain ────────────────
 
@@ -344,6 +360,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-document={document_node?(@view.pane)}
       data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
     >
@@ -359,7 +376,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               the last pane, so the editor moves to the new one and this pane
               shows the document read-only. --%>
         <.link
-          :if={!@edit_failed and !gone?(assigns)}
+          :if={!@edit_failed and !gone?(assigns) and !document_node?(@view.pane)}
           patch={Panes.split_right(@chain, @view.index, @base)}
           class="dk-split icon-btn"
           aria-label={gettext("Split pane right")}
@@ -423,9 +440,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             between the rows with ids would make the patch move the
             references and the editor below it. --%>
       <div id={"#{@view.id}-notes"}>
-        <%!-- Not over a document the editor did not open: it has no current one. --%>
+        <%!-- Not over a document the editor did not open: it has no current
+              one, or still holds the one before (the read failed). --%>
         <p
-          :for={note <- (assigns[:editor_doc] && PaneComponent.left_out(@view.pane)) || []}
+          :for={
+            note <-
+              (assigns[:editor_doc] && !@edit_failed && PaneComponent.left_out(@view.pane)) || []
+          }
           class="dk-note"
           data-desk-left-out
         >

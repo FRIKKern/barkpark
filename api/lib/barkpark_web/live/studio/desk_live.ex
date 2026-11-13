@@ -142,7 +142,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
       assign(socket,
         desk_search: "",
         desk_search_hits: [],
-        desk_search_lit: 0,
         desk_inspect: match?(%{kind: :doc, inspect: "on"}, List.last(panes))
       )
 
@@ -232,27 +231,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
 
-  # The search box (`Search`): new hits light the first; the arrows move the
-  # light; Enter opens the lit hit, or searches what was typed if its hits
-  # are not in yet.
-  def handle_event("desk-search", params, socket) do
-    {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
-    {:noreply, assign(socket, :desk_search_lit, 0)}
-  end
-
-  def handle_event("desk-search-key", %{"key" => key}, socket)
-      when key in ["ArrowDown", "ArrowUp"] do
-    %{desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
-    step = if key == "ArrowDown", do: 1, else: -1
-    {:noreply, assign(socket, :desk_search_lit, (lit + step) |> min(length(hits) - 1) |> max(0))}
-  end
-
-  def handle_event("desk-search-key", _params, socket), do: {:noreply, socket}
-
+  # The search box (`Search`): Enter opens the lit hit, or searches what was
+  # typed if its hits are not in yet. The arrows move the light in the
+  # browser (`bp-desk.js`), which sends its index with the form as `lit`.
   def handle_event("desk-search-open", %{"value" => value} = params, socket) do
-    %{desk_search: typed, desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+    %{desk_search: typed, desk_search_hits: hits} = socket.assigns
 
-    case value == typed && Enum.at(hits, lit) do
+    case value == typed && Enum.at(hits, lit(params["lit"], hits)) do
       # Opened from the keys: its first field takes the focus, as the
       # TanStack Studio's (`bp-desk.js` waits for the editor).
       %{} = hit ->
@@ -260,7 +245,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
 
       _ ->
-        handle_event("desk-search", params, socket)
+        EditorHost.handle_event("desk-search", params, socket)
     end
   end
 
@@ -288,6 +273,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
+
+  # The lit hit's index from the form: one of the hits, else the first.
+  defp lit(index, hits) do
+    case Integer.parse(to_string(index)) do
+      {i, ""} when i >= 0 and i < length(hits) -> i
+      _ -> 0
+    end
+  end
 
   @impl true
   def handle_async({:warm, key}, {:ok, data}, socket) do
@@ -386,7 +379,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Search.box
       query={@desk_search}
       hits={@desk_search_hits}
-      lit={@desk_search_lit}
       root={@desk.root}
       base={@base}
     />
