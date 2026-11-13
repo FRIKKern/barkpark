@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     * `BarkparkWeb.Studio.Desk.EditorHost`  the active document's editor
     * `BarkparkWeb.Studio.Desk.LiveRefresh` someone else saved
     * `BarkparkWeb.Studio.Desk.Style`       the desk's CSS
+    * `BarkparkWeb.Studio.Desk.DocStyle`    the document pane's look (TanStack's)
   """
 
   use BarkparkWeb, :live_view
@@ -44,6 +45,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
@@ -421,6 +423,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def render(assigns) do
     ~H"""
     <Style.sheet />
+    <DocStyle.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <Search.box
       query={@desk_search}
