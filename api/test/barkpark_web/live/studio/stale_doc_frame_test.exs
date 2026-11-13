@@ -175,4 +175,27 @@ defmodule BarkparkWeb.Studio.StaleDocFrameTest do
 
     assert form_of(a)["title"] == "Q Fixture post z"
   end
+
+  # task-35fa42002a10445e: B saves twice before A handles anything. The list
+  # frame's rebuild reads the store as it is now (B's second save), and then
+  # B's first `doc_updated` frame arrives with the older text.
+  test "a burst of B's saves tells A's page only the newest value", c do
+    a = open(c, c.url)
+    b = open(c, c.url)
+
+    hold_frames_from(a)
+    send_post(b, "title", %{"title" => "Burst one"})
+    send_post(b, "title", %{"title" => "Burst two"})
+    frames = held_frames()
+    assert Enum.any?(frames, &match?({:doc_updated, %{doc: %{title: "Burst one"}}}, &1))
+
+    Enum.each(frames, &send(a.pid, &1))
+    render(a)
+
+    assert form_of(a)["title"] == "Burst two"
+
+    refute_push_event(a, "bp:form-remote-values", %{
+      values: %{"doc[title]" => %{value: "Burst one"}}
+    })
+  end
 end
