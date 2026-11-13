@@ -439,6 +439,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
+        focus={FocusMode.of(assigns, view)}
       />
       <% end %>
     </div>
