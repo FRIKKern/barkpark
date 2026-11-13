@@ -14,6 +14,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   published and the draft view. The desk has no published view, so here
   they only say the state.
 
+  The pills' state is in colour, so each also says it in words for screen
+  readers ("Not published", "Draft: unpublished changes", …); the visible
+  word is hidden from them, so the pill is read once.
+
   The dots show when someone else is in the document too: one per session,
   this one included, as the Studio's did. Alone, there are none, as in the
   TanStack Studio.
@@ -45,7 +49,8 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         title={!@published? && gettext("Unpublished")}
       >
         <span class="dk-chip-dot dk-chip-dot-published" aria-hidden="true"></span>
-        <span class="dk-chip-label">{gettext("Published")}</span>
+        <span class="dk-chip-label" aria-hidden="true">{gettext("Published")}</span>
+        <span class="sr-only">{if @published?, do: gettext("Published"), else: gettext("Not published")}</span>
       </span>
       <span
         class="dk-chip"
@@ -54,7 +59,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         title={@draft? && gettext("Edited")}
       >
         <span class="dk-chip-dot dk-chip-dot-draft" aria-hidden="true"></span>
-        <span class="dk-chip-label">{gettext("Draft")}</span>
+        <span class="dk-chip-label" aria-hidden="true">{gettext("Draft")}</span>
+        <span class="sr-only">
+          {if @draft?, do: gettext("Draft: unpublished changes"), else: gettext("Draft: no changes")}
+        </span>
       </span>
     </span>
     """

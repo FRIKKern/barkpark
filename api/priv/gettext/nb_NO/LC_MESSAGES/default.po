@@ -354,6 +354,21 @@ msgstr "Oppdatert %{ago}"
 msgid "Edited %{ago}"
 msgstr "Redigert %{ago}"
 
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:53
+#, elixir-autogen, elixir-format
+msgid "Not published"
+msgstr "Ikke publisert"
+
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:64
+#, elixir-autogen, elixir-format
+msgid "Draft: unpublished changes"
+msgstr "Utkast: upubliserte endringer"
+
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:64
+#, elixir-autogen, elixir-format
+msgid "Draft: no changes"
+msgstr "Utkast: ingen endringer"
+
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:66
 #, elixir-autogen, elixir-format
 msgid "Last published %{ago}"
