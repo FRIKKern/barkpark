@@ -126,6 +126,9 @@ assert.deepEqual(pushed, [["desk-discard-seen", {}]], "the answer is sent even w
 // The line offers the lost text back: its Copy writes the text to the
 // clipboard and the pane's toast (the Share menu's) says so. Not in a menu.
 const copied = [];
+// Node 20 (CI) has no global navigator; Node 21+ does.
+if (typeof globalThis.navigator !== "object" || globalThis.navigator === null)
+  Object.defineProperty(globalThis, "navigator", { configurable: true, writable: true, value: {} });
 Object.defineProperty(globalThis.navigator, "clipboard", {
   configurable: true,
   value: { writeText: (t) => (copied.push(t), Promise.resolve()) },
