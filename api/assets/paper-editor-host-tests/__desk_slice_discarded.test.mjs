@@ -77,6 +77,39 @@ handlers["desk:discarded"]({ values });
 assert.equal(outside.value, "Not the editor's");
 assert.deepEqual(pushed, [["desk-discard-seen", {}]]);
 
+// Keys typed in the focused field and not yet sent (its debounce) never
+// reached the page as a save: `was` is the old form as the page last had it,
+// and a focused field that no longer matches it held typing the discard
+// took. The answer says so (`lost`), and the page's line then says the
+// typing was not saved (guerrilla 2026-11-13: six keys vanished silently).
+const was = { "doc[title]": "Here elsewhere", "doc[cta][url]": "https://dead" };
+pushed.length = 0;
+title.focus();
+title.value = "Here elsewhere typ";
+handlers["desk:discarded"]({ values, was });
+assert.equal(title.value, "Here", "the focused field shows the published value");
+assert.deepEqual(pushed, [["desk-discard-seen", { lost: true }]], "unsent keys: the answer says they were lost");
+
+// Focused, nothing typed since the page last had it: nothing lost.
+pushed.length = 0;
+title.value = "Here elsewhere";
+handlers["desk:discarded"]({ values, was });
+assert.deepEqual(pushed, [["desk-discard-seen", {}]], "nothing unsent: a plain answer");
+
+// Typing outside the editor's form is not the editor's: nothing lost.
+pushed.length = 0;
+outside.focus();
+outside.value = "typed out here";
+handlers["desk:discarded"]({ values, was });
+assert.deepEqual(pushed, [["desk-discard-seen", {}]], "focus outside the editor: a plain answer");
+
+// A page that sends no `was` (an older server): a plain answer, as before.
+pushed.length = 0;
+title.focus();
+title.value = "Here elsewhere typ";
+handlers["desk:discarded"]({ values });
+assert.deepEqual(pushed, [["desk-discard-seen", {}]], "no was: a plain answer");
+
 // The value step throws (an odd focused element): the answer still goes, or
 // the page would drop every save until the editor navigates.
 pushed.length = 0;

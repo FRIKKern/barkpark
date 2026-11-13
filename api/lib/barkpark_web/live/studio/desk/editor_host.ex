@@ -180,9 +180,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 
   # The browser has the form that replaced a draft discarded elsewhere
-  # (`Discarded`): its saves are the editor's again.
-  def handle_event("desk-discard-seen", _params, socket),
-    do: {:noreply, Discarded.seen(socket)}
+  # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
+  # the old form that were never sent went with it.
+  def handle_event("desk-discard-seen", params, socket) do
+    socket = if params["lost"] == true, do: Discarded.drop(socket), else: socket
+    {:noreply, Discarded.seen(socket)}
+  end
 
   # The open document was deleted by someone else (J32): a save of the form
   # would write it back as a draft. The pane drops the form (`pane/2`); a
