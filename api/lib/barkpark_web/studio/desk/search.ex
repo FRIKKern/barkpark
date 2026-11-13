@@ -94,12 +94,20 @@ defmodule BarkparkWeb.Studio.Desk.Search do
             </span>
             <span class="dk-badge">{hit.type_title}</span>
             <span class="dk-status">
-              <span :if={draft?(hit)} class="dk-ring dk-draft" title={gettext("Draft")}>
-                <span class="sr-only">{gettext("Draft")}</span>
-              </span>
-              <span :if={!draft?(hit)} class="dk-dot" title={gettext("Published")}>
-                <span class="sr-only">{gettext("Published")}</span>
-              </span>
+              <span
+                :if={draft?(hit)}
+                class="dk-ring dk-draft"
+                role="img"
+                aria-label={gettext("Draft")}
+                title={gettext("Draft")}
+              ></span>
+              <span
+                :if={!draft?(hit)}
+                class="dk-dot"
+                role="img"
+                aria-label={gettext("Published")}
+                title={gettext("Published")}
+              ></span>
             </span>
           </.link>
         </div>

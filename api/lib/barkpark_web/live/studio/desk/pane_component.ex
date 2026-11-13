@@ -411,13 +411,24 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                      in the workspace's zone and format (06.09.2026). --%>
                 <span :if={entry[:sub]} class="dk-row-sub"><PreviewDay.text text={entry.sub} /></span>
               </span>
+              <%!-- The marks are named, not worded: the row's text is its
+                   title (and subtitle) alone, as the TanStack row's, which a
+                   spec reads to tell one row from the next. --%>
               <span :if={entry[:draft] || entry[:published]} class="dk-status">
-                <span :if={entry[:draft]} class="dk-ring dk-draft" title={gettext("Draft")}>
-                  <span class="sr-only">{gettext("Draft")}</span>
-                </span>
-                <span :if={entry[:published]} class="dk-dot" title={gettext("Published")}>
-                  <span class="sr-only">{gettext("Published")}</span>
-                </span>
+                <span
+                  :if={entry[:draft]}
+                  class="dk-ring dk-draft"
+                  role="img"
+                  aria-label={gettext("Draft")}
+                  title={gettext("Draft")}
+                ></span>
+                <span
+                  :if={entry[:published]}
+                  class="dk-dot"
+                  role="img"
+                  aria-label={gettext("Published")}
+                  title={gettext("Published")}
+                ></span>
               </span>
               <%!-- A singleton on the root opens its document as a pane, so it
                    has the chevron too, as the TanStack root's. --%>
