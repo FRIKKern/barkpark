@@ -84,6 +84,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       /* The read-only document pane's values (`PaneComponent`), as TanStack's disabled form: its --input-fg, --bg-soft fill, --line ring and the ring under the pointer. */
       .dk { --dk-field-fg: #0d0e12; --dk-field-fill: #f6f6f8; --dk-field-ring: #e3e4e8; --dk-field-hover-ring: #bbbdc9; }
       html[data-theme="dark"] .dk { --dk-field-fg: #e4e5e9; --dk-field-fill: #191a24; --dk-field-ring: #3d4258; --dk-field-hover-ring: #3d4258; }
+      /* The page behind the desk, in dark: TanStack's #13141b, not the Studio's #09090b. */
+      html[data-theme="dark"] body:has(.dk) { background: #13141b; }
       /* studio-literal-check: skip-end */
       .dk { background: var(--dk-bg); }
       .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); background: var(--dk-bg); }
@@ -111,6 +113,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected[data-desk-opens="doc"] { background: var(--dk-hover-strong); color: var(--dk-fg); }
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-row-sub { color: var(--dk-muted); }
       .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+      .dk .list-rows:has(> p.dk-note:only-child) { display: grid; place-items: center; padding: 0 12px; }
+      .dk .list-rows > p.dk-note:only-child { margin: 16px 8px; padding: 0; color: var(--dk-muted); font-size: 15px; line-height: 23px; text-align: center; }
       .dk .dk-lost { padding-top: 0; }
       .dk .dk-lost summary { cursor: pointer; color: var(--fg); }
       .dk .dk-lost-text { margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--border-subtle); color: var(--fg); white-space: pre-wrap; max-height: 12em; overflow: auto; }
