@@ -277,10 +277,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               title is then the big one in the column, and this one is for
               screen readers (`Desk.Style`). --%>
         <DocStatus.chips
-          :if={@pane.kind == :doc && @data.ok? && @data.result[:fields]}
+          :if={@pane.kind == :doc && @data.ok? && is_boolean(@data.result[:draft?])}
           doc={@data.result}
           draft?={@data.result.draft?}
-          published?={@data.result.published?}
+          published?={@data.result[:published?] == true}
         />
         <%!-- A document pane's title is a div with the heading role, as the
               edit pane's (`EditorHost`): in focus mode it holds the
@@ -454,7 +454,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                label over its value in a ringed box. A list of terms, so a
                value is still found by its label. --%>
           <div :if={@data.result[:fields]} class="dk-ro" data-desk-read-only>
-            <div :if={!is_binary(@pane[:node])} class="dk-kind">{@data.result.kind}</div>
+            <div :if={@data.result[:kind] && !is_binary(@pane[:node])} class="dk-kind">
+              {@data.result.kind}
+            </div>
             <div class="dk-big-title">{@data.result.title}</div>
             <dl class="dk-fields">
               <div :for={field <- @data.result.fields}>
