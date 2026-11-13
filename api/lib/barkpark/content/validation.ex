@@ -1040,39 +1040,6 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
-  # Collects the question, or reads its answer (`with_codelist_answers/1`).
-  defp codelist_membership_findings(%Field{codelist_id: list_id} = f, value, path)
-       when is_binary(list_id) and list_id != "" do
-    question = {codelist_plugin(f, list_id), list_id, value}
-
-    case Process.get(@codelist_key) do
-      {:collect, questions} ->
-        Process.put(@codelist_key, {:collect, MapSet.put(questions, question)})
-        []
-
-      {:answer, %{^question => false}} ->
-        [
-          {path, "#{inspect(value)} is not a code in #{list_id}", :not_in_codelist,
-           %{codelist: list_id, value: value}}
-        ]
-
-      _ ->
-        []
-    end
-  end
-
-  defp codelist_membership_findings(_field, _value, _path), do: []
-
-  # The plugin the editor reads the codelist under (`Plugins.Adapter`): the
-  # field's own `plugin`, else the `codelistId` prefix, else "core".
-  defp codelist_plugin(%Field{raw: raw}, list_id) do
-    case {is_map(raw) && raw["plugin"], String.split(list_id, ":", parts: 2)} do
-      {plugin, _} when is_binary(plugin) and plugin != "" -> plugin
-      {_, [plugin, _]} when plugin != "" -> plugin
-      _ -> "core"
-    end
-  end
-
   # localizedText — shape, then the field's own rules (task-63ce1db795a67a04).
   # `pattern`/`min`/`max` apply to EVERY locale's text uniformly, each finding
   # at `/field/<lang>`; `required` means at least one locale holds text, so a
@@ -1152,6 +1119,39 @@ defmodule Barkpark.Content.Validation do
 
   # primitive leaf — apply v1-style rules from raw["validation"]
   defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  # Collects the question, or reads its answer (`with_codelist_answers/1`).
+  defp codelist_membership_findings(%Field{codelist_id: list_id} = f, value, path)
+       when is_binary(list_id) and list_id != "" do
+    question = {codelist_plugin(f, list_id), list_id, value}
+
+    case Process.get(@codelist_key) do
+      {:collect, questions} ->
+        Process.put(@codelist_key, {:collect, MapSet.put(questions, question)})
+        []
+
+      {:answer, %{^question => false}} ->
+        [
+          {path, "#{inspect(value)} is not a code in #{list_id}", :not_in_codelist,
+           %{codelist: list_id, value: value}}
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp codelist_membership_findings(_field, _value, _path), do: []
+
+  # The plugin the editor reads the codelist under (`Plugins.Adapter`): the
+  # field's own `plugin`, else the `codelistId` prefix, else "core".
+  defp codelist_plugin(%Field{raw: raw}, list_id) do
+    case {is_map(raw) && raw["plugin"], String.split(list_id, ":", parts: 2)} do
+      {plugin, _} when is_binary(plugin) and plugin != "" -> plugin
+      {_, [plugin, _]} when plugin != "" -> plugin
+      _ -> "core"
+    end
+  end
 
   # A richText field whose value is not Portable Text: PortableDoc blocks
   # (the block editor), or a legacy `body`/`blocks` that holds them.
