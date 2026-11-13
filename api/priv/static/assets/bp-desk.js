@@ -1183,6 +1183,35 @@
       // `toggle` does not bubble: caught on the way down.
       root.addEventListener("toggle", hook._onDocMenu, true);
       root.addEventListener("keydown", hook._onDocMenuKey);
+
+      // A read-only pane's date-time (`<time data-desk-at>`, the server's UTC
+      // day and time): its day and HH:MM as the editor's own datetime field
+      // shows them, in the browser's locale, in the zone the page names
+      // (data-time-zone, as a list preview's day) or else the browser's. The
+      // server marks it phx-update="ignore", so a patch never writes the UTC
+      // text back, and phx-mounted sends "desk:at" when one is added.
+      var atFormats = {};
+      hook._showAt = function (el) {
+        var at = new Date(el.getAttribute("datetime"));
+        if (isNaN(at.getTime())) return;
+        var named = root.ownerDocument.querySelector("[data-time-zone]");
+        var zone = (named && named.getAttribute("data-time-zone")) || "";
+        if (!atFormats[zone]) {
+          var parts = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" };
+          try {
+            atFormats[zone] = new Intl.DateTimeFormat(undefined, zone ? Object.assign({ timeZone: zone }, parts) : parts);
+          } catch (_e) {
+            atFormats[zone] = new Intl.DateTimeFormat(undefined, parts);
+          }
+        }
+        var text = atFormats[zone].format(at);
+        if (el.textContent !== text) el.textContent = text;
+      };
+      hook._onAt = function (e) {
+        if (e.target && e.target.matches && e.target.matches("time[data-desk-at]")) hook._showAt(e.target);
+      };
+      root.addEventListener("desk:at", hook._onAt);
+      Array.prototype.forEach.call(root.querySelectorAll("time[data-desk-at]"), hook._showAt);
       root.addEventListener("pointerover", hook._onIntent);
       root.addEventListener("focusin", hook._onIntent);
       window.addEventListener("phx:page-loading-stop", hook._onLoaded);
@@ -1468,6 +1497,7 @@
         if (el.classList.contains(RESIZER)) root.removeChild(el);
       });
       root.removeEventListener("keydown", this._onKey);
+      root.removeEventListener("desk:at", this._onAt);
       root.removeEventListener("toggle", this._onDocMenu, true);
       root.removeEventListener("keydown", this._onDocMenuKey);
       root.removeEventListener("pointerover", this._onIntent);

@@ -16,9 +16,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   use BarkparkWeb, :live_component
 
   alias Barkpark.Content
+  alias Barkpark.Content.PreviewText
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
-  alias BarkparkWeb.PreviewDay
   alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.PaneBuilder
   alias Phoenix.LiveView.AsyncResult
+  alias Phoenix.LiveView.JS
 
   @page 100
 
@@ -416,11 +417,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             {gettext("Displaying a maximum of %{count} documents", count: Rows.max_rows())}
           </p>
           <dl :if={@data.result[:fields]} class="dk-fields">
-            <div :for={field <- @data.result.fields}>
+            <div :for={{field, n} <- Enum.with_index(@data.result.fields)}>
               <dt>{field.title}</dt>
-              <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
-                    as its day in the workspace's time zone. --%>
-              <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
+              <%!-- A date-time is a marker (`FieldText`): `at_text/1` prints its
+                    day and time as the editor's datetime field does. --%>
+              <dd :if={!field[:refs]}><.at_text id={"#{@id}-at-#{n}"} text={field.value} /></dd>
               <dd :if={field[:refs]} class="dk-refs">
                 <span :if={field.refs == []}>—</span>
                 <%= for ref <- field.refs do %>
@@ -585,6 +586,31 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     fn ->
       Gettext.put_locale(BarkparkWeb.Gettext, locale)
       read.()
+    end
+  end
+
+  # A read-only value whose date-times read as the editor's datetime field
+  # shows them: the day and HH:MM in the viewer's locale and zone. The server
+  # writes the UTC day and time, saying so; bp-desk.js rewrites it when the
+  # element is added ("desk:at"). phx-update="ignore" keeps a later patch from
+  # writing the UTC text back, and the id carries the instant, so a new value
+  # is a new element.
+  attr :id, :string, required: true
+  attr :text, :string, required: true
+
+  defp at_text(assigns) do
+    assigns =
+      assign(assigns, :pieces, Enum.with_index(PreviewText.split_date_times(assigns.text)))
+
+    ~H"""
+    <%= for {piece, i} <- @pieces do %><%= case piece do %><% {:date_time, iso, day} -> %><time id={"#{@id}-#{i}-#{String.replace(iso, ~r/[^0-9A-Za-z]/, "")}"} datetime={iso} data-desk-at phx-update="ignore" phx-mounted={JS.dispatch("desk:at")}>{day} {utc_time(iso)} UTC</time><% text -> %>{text}<% end %><% end %>
+    """
+  end
+
+  defp utc_time(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, at, _} -> Calendar.strftime(at, "%H:%M")
+      _ -> ""
     end
   end
 

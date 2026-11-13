@@ -110,7 +110,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldTextTest do
                "Label: One\nLabel: Two"
     end
 
-    test "a date is the workspace's day; a date-time is a marker PreviewDay turns into its day" do
+    test "a date is the workspace's day; a date-time is a marker the pane prints with its time" do
       assert FieldText.show("2026-09-27", %{"type" => "date"}) == "27.09.2026"
 
       shown = FieldText.show("2026-09-27T09:00:00Z", %{"type" => "datetime"})
@@ -234,11 +234,15 @@ defmodule BarkparkWeb.Studio.Desk.FieldTextTest do
     assert has_element?(view, pane <> " dd", "Meta title: Post 26")
     assert has_element?(view, pane <> " dd", "No")
 
-    assert has_element?(
-             view,
-             pane <> ~s( dd time[data-preview-day][datetime="2026-09-27T09:00:00Z"]),
-             "27.09.2026"
-           )
+    # A date-time with its time, as the editor's datetime field: the server
+    # says UTC; bp-desk.js shows it in the viewer's zone when it is added, and
+    # no patch writes the UTC text back over that.
+    at =
+      pane <>
+        ~s( dd time[data-desk-at][datetime="2026-09-27T09:00:00Z"][phx-update="ignore"][phx-mounted])
+
+    assert has_element?(view, at, "27.09.2026 09:00 UTC")
+    refute has_element?(view, pane <> " dd time[data-preview-day]")
 
     refute has_element?(view, pane <> " dd", "[")
     refute has_element?(view, pane <> " dd", "{")

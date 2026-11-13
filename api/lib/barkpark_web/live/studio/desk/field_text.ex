@@ -9,8 +9,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldText do
 
   The rest reads as the TanStack Studio's read-only form shows it, not as
   JSON: a slug as its text, a yes/no as Yes or No, a date as the workspace's
-  day (a date-time as a `PreviewText` marker, which `PreviewDay` turns into
-  the day in the workspace's time zone), a list of plain values as a comma
+  day (a date-time as a `PreviewText` marker, which the pane prints as its
+  day and time, as the editor's datetime field shows it), a list of plain values as a comma
   list, an object as one "Label: value" line per field. What is left (an
   odd shape) prints as JSON. All of it is cut at 600 characters.
   """
@@ -101,7 +101,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldText do
   end
 
   # A day as the workspace prints it (dd.mm.yyyy); a date-time as a marker
-  # `PreviewDay` shows as its day in the workspace's time zone.
+  # the pane prints as its day and time.
   defp day(value) do
     case DateTime.from_iso8601(value) do
       {:ok, at, _} ->
