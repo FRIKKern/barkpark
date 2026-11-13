@@ -1406,7 +1406,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 {:noreply,
                  socket
                  |> append_message(:system, ChatSendFailure.studio_text(reason) <> note)
-                 |> assign(session: nil, status: :offline)
+                 |> assign(ChatSendFailure.studio_assigns(reason, socket.assigns, queued?))
                  |> restore_failed_send(text)}
             end
         end

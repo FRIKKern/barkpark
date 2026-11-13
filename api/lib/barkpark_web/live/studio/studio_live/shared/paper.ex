@@ -2544,6 +2544,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
         editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema]),
+        editor_remote_history: nil,
         editor_is_draft: Content.draft?(fresh.doc_id)
       )
       |> assign_published_twin(doc, fresh)
@@ -2557,8 +2558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # The first edit of a published document writes its draft. The header picks
   # Publish and Discard draft from `editor_is_draft` and the published twin, as
   # it does after a Classic save; without them a Beta author saw "draft" in the
-  # status and only Unpublish in the actions until a reload
-  # (task-904659f0c8145633).
+  # status and only Unpublish in the actions until a reload (task-904659f0c8145633).
   defp assign_published_twin(socket, previous, fresh) do
     if Content.draft?(fresh.doc_id) and not Content.draft?(previous.doc_id) do
       assign(socket, editor_has_published: true, published_doc: previous)

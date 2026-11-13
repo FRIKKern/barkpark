@@ -28,7 +28,8 @@ defmodule Barkpark.Content.Forms do
     Labels,
     PatchLock,
     PortableText,
-    SlugValue
+    SlugValue,
+    TextRebase
   }
 
   alias Barkpark.PortableDoc.{Projection, Synthesis}
@@ -1309,7 +1310,13 @@ defmodule Barkpark.Content.Forms do
   defp upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts) do
     {current, write_opts} = current_doc(base_doc, type, dataset, opts)
 
-    case upsert_draft_once(base_doc, current, type, schema, params, dataset, write_opts) do
+    # A free-text field written from an older value than the store now holds
+    # keeps both editors' words (task-35956a566dd2c862). Redone on every
+    # attempt, so a writer that landed in between is merged in too.
+    {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
+    params_now = TextRebase.rebase(params, bases, text_values(current))
+
+    case upsert_draft_once(base_doc, current, type, schema, params_now, dataset, write_opts) do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
         upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
 
@@ -1369,6 +1376,14 @@ defmodule Barkpark.Content.Forms do
   rescue
     _ -> {Map.put(base_doc, :rev, nil), opts}
   end
+
+  # The top-level text values the store holds: the title column and content.
+  defp text_values(%{title: title} = current) do
+    content = Map.get(current, :content)
+    Map.put(if(is_map(content), do: content, else: %{}), "title", title)
+  end
+
+  defp text_values(_current), do: %{}
 
   # A row-level field the author did not change keeps what the store holds now.
   defp row_field(params, key, base_doc, current) do

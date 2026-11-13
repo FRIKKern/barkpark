@@ -31,6 +31,14 @@ defmodule BarkparkWeb.OpsOperatorGate do
   @refusal "This screen spans every workspace and is reserved for the instance operator. " <>
              "Open it from inside your workspace instead."
 
+  # Every console behind this gate reads and writes the `production` dataset by
+  # name. A token minted with an explicit OTHER dataset is held to that one
+  # (`dataset_bound`), and nothing on these routes names a dataset for the
+  # request-level fence to compare, so it is turned away here, on the flat and
+  # the scoped mount alike.
+  @console_dataset "production"
+  @bound_refusal "This token is bound to another dataset and cannot open the operations consoles."
+
   @doc """
   The mount gate, given the LiveView `session`. `{:ok, socket}` to continue
   (with the event hook attached on a flat mount), or `{:halt, socket}` carrying
@@ -52,6 +60,9 @@ defmodule BarkparkWeb.OpsOperatorGate do
     socket = Phoenix.Component.assign(socket, :ops_scoped_workspace_id, scoped)
 
     cond do
+      off_console_dataset?(socket) ->
+        {:halt, socket |> put_flash(:error, @bound_refusal) |> redirect(to: "/studio")}
+
       is_binary(scoped) ->
         {:ok, socket}
 
@@ -79,6 +90,16 @@ defmodule BarkparkWeb.OpsOperatorGate do
   def flat_operator?(socket) do
     principal = socket.assigns[:api_token] || socket.assigns[:current_user]
     RequirePlatformOperator.permits?(principal) and not foreign_bound?(principal)
+  end
+
+  defp off_console_dataset?(socket) do
+    case socket.assigns[:api_token] do
+      %ApiToken{dataset_bound: true, dataset: bound} when is_binary(bound) ->
+        bound != @console_dataset
+
+      _ ->
+        false
+    end
   end
 
   defp foreign_bound?(%ApiToken{workspace_id: ws_id}) when is_binary(ws_id) do

@@ -79,7 +79,21 @@
       </div>
     </:brand>
     <:tabs :if={assigns[:dataset]}>
+      <%!-- The desk (the one host that sets `:desk_base`) draws the same
+            tabs as the TanStack navbar: Structure, Media and API as text, the
+            rest under one More. Every other page keeps the icon tabs. --%>
+      <BarkparkWeb.Studio.Desk.Navbar.tabs
+        :if={is_binary(assigns[:desk_base])}
+        dataset={@dataset}
+        desk_base={@desk_base}
+        scope_prefix={assigns[:scope_prefix] || ""}
+        current_path={assigns[:current_path]}
+        admin?={assigns[:shares_admin?] == true}
+        ops?={assigns[:ops_access?] != false}
+        workspace_id={assigns[:current_workspace] && assigns[:current_workspace].id}
+      />
       <.studio_tabs
+        :if={!is_binary(assigns[:desk_base])}
         dataset={@dataset}
         scope_prefix={assigns[:scope_prefix] || ""}
         current_path={assigns[:current_path]}
