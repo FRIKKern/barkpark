@@ -77,10 +77,18 @@ jobs:
       # THE ARMS, FIRST AND HERMETICALLY. Present-in-file is not
       # fires-when-it-should: this step stubs `gh` and the predicate and proves
       # the mechanism still opens on a red, stays silent on a green, closes
-      # itself, and refuses when it cannot read. It runs on EVERY event,
-      # including pull_request, so a PR that breaks the delivery logic reds here
-      # before it can merge into a silence.
+      # itself, and refuses when it cannot read. It runs on pull_request, so a
+      # PR that breaks the delivery logic reds here before it can merge into a
+      # silence, and on schedule and workflow_dispatch.
+      #
+      # NOT ON PUSH (task-f56b3341256f1a4c). The three hermetic arms below read
+      # only the scripts, and the pull_request arm above already ran them on
+      # every PR that touches one. A push to main re-ran them about 137 times a
+      # day, two minutes each, on files that had not changed. The LIVE steps
+      # further down are untouched: every push still records its poll and
+      # delivers ownership.
       - name: arms (hermetic, no network)
+        if: github.event_name != 'push'
         run: bash scripts/main-red-owner.sh --selftest
 
       # THE PREDICATE'S OWN ARMS WERE NEVER RUN BY ANYTHING (gates-r21-w6,
@@ -91,10 +99,12 @@ jobs:
       # layer out. It costs ~4 minutes and it is the file every main-red verdict
       # in this repo is read off.
       - name: predicate arms (hermetic, no network)
+        if: github.event_name != 'push'
         run: bash scripts/main-red-predicate.sh --selftest
 
       # The 24 h window accumulator's arms. Fast (synthetic ledgers, no network).
       - name: window arms (hermetic, no network)
+        if: github.event_name != 'push'
         run: bash scripts/main-red-window.sh --selftest
 
       # ══ THE 24 H WINDOW LEDGER MUST OUTLIVE THE RUNNER ════════════════════
