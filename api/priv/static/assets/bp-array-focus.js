@@ -13,6 +13,11 @@
 // the rows change, focuses: the new row's first control (add); the row now at that position,
 // else the last row, else Add (remove); the moved item's same button at its
 // new position, else its other one (move).
+//
+// An array of several member types adds through a type menu: a <details>
+// whose buttons name the type. The patch closes the menu and the pressed
+// button is hidden, so focus fell to <body> (task-bc277388a704d276). Those
+// buttons count as Add, and the menu's summary is the field's Add control.
 (function () {
   "use strict";
 
@@ -33,16 +38,46 @@
     });
   }
 
+  var PRESSABLE = "button.bp-array-btn, button.bp-array-add-member";
+
+  var FIELD =
+    'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), ' +
+    '[contenteditable="true"]';
+
   function addButton(fieldset) {
     for (var i = 0; i < fieldset.children.length; i++) {
       var el = fieldset.children[i];
       if (el.matches && el.matches("button.bp-array-btn-add")) return el;
+      if (el.matches && el.matches("details.bp-array-add-menu")) {
+        var summary = el.querySelector("summary");
+        if (summary) return summary;
+      }
     }
     return null;
   }
 
   function first(li) {
     return li ? li.querySelector(FOCUSABLE) : null;
+  }
+
+  // A new row of an object type is drawn open: its first field, where the
+  // person types next, not the row's own summary. A field inside a closed
+  // row cannot take focus.
+  function firstField(li) {
+    if (!li) return null;
+    var all = li.querySelectorAll(FIELD);
+    for (var i = 0; i < all.length; i++) {
+      if (shown(all[i], li)) return all[i];
+    }
+    return null;
+  }
+
+  // Every <details> between `el` and `li` is open.
+  function shown(el, li) {
+    for (var d = el.closest("details"); d && li.contains(d); d = d.parentElement && d.parentElement.closest("details")) {
+      if (!d.open) return false;
+    }
+    return true;
   }
 
   function usable(el) {
@@ -54,7 +89,7 @@
     var all = rows(fieldset);
     switch (intent.action) {
       case "add_row":
-        return first(all[all.length - 1]) || addButton(fieldset);
+        return firstField(all[all.length - 1]) || first(all[all.length - 1]) || addButton(fieldset);
       case "remove_row":
         if (!all.length) return addButton(fieldset);
         return first(all[Math.min(intent.index, all.length - 1)]) || addButton(fieldset);
@@ -109,7 +144,7 @@
   }
 
   function onClick(e) {
-    var button = e.target && e.target.closest ? e.target.closest("button.bp-array-btn") : null;
+    var button = e.target && e.target.closest ? e.target.closest(PRESSABLE) : null;
     var fieldset = button && button.closest("fieldset.bp-field-array");
     if (!fieldset || !fieldset.id || button.closest("fieldset.bp-field-array") !== fieldset) return;
     stop();
