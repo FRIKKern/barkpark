@@ -69,4 +69,14 @@ defmodule BarkparkWeb.Studio.Desk.InspectLookTest do
     assert focus =~ "var(--dk-focus)"
     refute focus =~ "var(--primary)"
   end
+
+  test "the search box is TanStack's: the UI font at 15/23, a ringed input, the magnifier inside" do
+    assert rule(".dk .dk-inspect-search") =~ "font: 15px/23px 'Inter Variable', Inter"
+    assert rule(".dk .dk-inspect-search > svg") =~ "left: 6px"
+    input = rule(".dk .dk-inspect-search-input")
+    assert input =~ "padding: 6px 12px 6px 35px"
+    assert input =~ "box-shadow: inset 0 0 0 1px var(--dk-field-ring)"
+    assert rule(".dk .dk-inspect-search-input:focus") =~ "var(--dk-focus-ring)"
+    assert rule(".dk .dk-inspect-tree li[hidden]") =~ "display: none"
+  end
 end

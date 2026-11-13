@@ -117,10 +117,10 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     parsed = view |> element(~s{#{@dialog} [role="tabpanel"]:not([hidden])}) |> render()
 
     assert parsed =~
-             ~r/<details open="">\s*<summary><span class="dk-inspect-count">\{…\} \d+ properties<\/span><\/summary>/
+             ~r/<details open="">\s*<summary><span class="dk-inspect-count"[^>]*>\{…\} \d+ properties<\/span><\/summary>/
 
     assert parsed =~
-             ~r/<details open="">\s*<summary><span class="dk-inspect-key">meta:<\/span>\s*<span class="dk-inspect-count">\{…\} 1 property<\/span>/
+             ~r/<details open="">\s*<summary><span class="dk-inspect-key">meta:<\/span>\s*<span class="dk-inspect-count"[^>]*>\{…\} 1 property<\/span>/
 
     assert parsed =~
              ~r/<span class="dk-inspect-key">tag:<\/span><span class="dk-inspect-value" data-type="string">deep<\/span>/
@@ -184,5 +184,27 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
 
     refute has_element?(view, @dialog)
     assert render(view) =~ "Other views and inspectors are not shown here."
+  end
+
+  # TanStack's InspectDialog: a search box over Parsed (`bp-desk.js` filters).
+  test "Parsed has TanStack's search box, and each count carries its words for one and many", c do
+    view = open(c)
+    inspect_open(view)
+    parsed = ~s{#{@dialog} [role="tabpanel"]:not([hidden])}
+
+    assert has_element?(
+             view,
+             ~s(#{parsed} > label.dk-inspect-search > input[data-desk-inspect-search][aria-label="Search"][placeholder="Search"])
+           )
+
+    assert has_element?(view, ~s(#{parsed} > label.dk-inspect-search > svg[data-desk-glyph]))
+
+    html = view |> element(parsed) |> render()
+
+    assert html =~
+             ~r/class="dk-inspect-count" data-brace="\{…\}" data-one="1 property" data-other="\{n\} properties"/
+
+    # The raw view has no search: TanStack's box is over the tree only.
+    refute has_element?(view, ~s{#{@dialog} [role="tabpanel"][hidden] [data-desk-inspect-search]})
   end
 end
