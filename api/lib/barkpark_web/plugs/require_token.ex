@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Plugs.RequireToken do
   import Plug.Conn
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
+  alias BarkparkWeb.Plugs.BoundDataset
 
   def init(opts), do: opts
 
@@ -34,7 +35,7 @@ defmodule BarkparkWeb.Plugs.RequireToken do
     with ["Bearer " <> raw_token] <- get_req_header(conn, "authorization"),
          {:ok, token} <- Auth.verify_token(raw_token),
          false <- share_token_off_surface?(conn, token),
-         {:dataset, false} <- {:dataset, dataset_off_binding?(conn, token)} do
+         {:dataset, {:ok, conn}} <- {:dataset, BoundDataset.resolve(conn, token)} do
       # Best-effort, throttled liveness stamp so operators can spot dead tokens.
       # Never blocks auth (errors are swallowed inside touch_last_used/1).
       _ = Auth.touch_last_used(token)
@@ -43,7 +44,7 @@ defmodule BarkparkWeb.Plugs.RequireToken do
       # A VALID share token presented outside its share surface: forbidden,
       # not unauthorized — the credential verified, the surface is wrong.
       true -> deny(conn, {:error, :forbidden})
-      {:dataset, true} -> deny(conn, {:error, :forbidden_dataset})
+      {:dataset, {:error, :forbidden_dataset}} -> deny(conn, {:error, :forbidden_dataset})
       _ -> deny(conn, {:error, :unauthorized})
     end
   end

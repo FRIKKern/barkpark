@@ -26,8 +26,12 @@ defmodule BarkparkWeb.Plugs.LegacyDeprecation do
 
   def init(_), do: []
 
+  # `LegacyController.create/2` copies its params into the document, so the
+  # `dataset` a bound token was given upstream (`BoundDataset.resolve/2`) is
+  # taken out again here.
   def call(conn, _) do
     conn
+    |> BarkparkWeb.Plugs.BoundDataset.unfill()
     |> put_resp_header("deprecation", "true")
     |> put_resp_header("sunset", "Wed, 31 Dec 2026 23:59:59 GMT")
     |> put_resp_header("link", "</v1/data/query>; rel=\"successor-version\"")
