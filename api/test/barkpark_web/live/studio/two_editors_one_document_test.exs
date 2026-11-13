@@ -227,6 +227,35 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
       type_in(a, "title", " A3")
       assert stored(c) == {"Fixture post A2 A3", "First B1"}
     end
+
+    # The two windows the #25880 review named (probe r, shape b3).
+    test "old Studio: B's post left before A's title reached B; B's base already moved", c do
+      a = open(c)
+      b = open(c)
+
+      type_in(b, "excerpt", " B1")
+      type_in(a, "title", " A2")
+      # B's session reloads its base to A's save; B's browser has not patched.
+      render(b)
+
+      post_form(b, "excerpt", %{"title" => "Fixture post", "excerpt" => "First B1 B2"})
+
+      assert stored(c) == {"Fixture post A2", "First B1 B2"}
+    end
+
+    test "desk: B shows A's first title, A saves again, B posts what it shows", c do
+      desk = String.replace(c.url, ~r{/studio/(.+)/(.+)$}, "/studio/_desk/\\1;\\2")
+      a = open(c)
+      {:ok, b, _html} = live(c.conn, desk)
+
+      type_in(a, "title", " A2")
+      render(b)
+      type_in(a, "title", " A3")
+
+      post_form(b, "excerpt", %{"title" => "Fixture post A2", "excerpt" => "First B1"})
+
+      assert stored(c) == {"Fixture post A2 A3", "First B1"}
+    end
   end
 
   describe "a remote save while a field holds an edit the store does not have" do
