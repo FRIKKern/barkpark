@@ -1,5 +1,5 @@
 // __desk_slice_keep_link.test.mjs — a focused link survives the patch that
-// re-draws its pane (rig panes.spec.ts:91, J21 F5).
+// re-draws its pane (rig panes spec, J21 F5).
 //
 // When the URL makes a pane the last one, the page first draws it as the read
 // view and, one round trip later, as the editor (desk_live.ex: the editor's

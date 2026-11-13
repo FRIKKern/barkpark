@@ -797,7 +797,7 @@
       // A link focused in a pane that a patch then draws again goes with it
       // (the read view becomes the editor one round trip after the URL: its
       // section has an id of its own), and the focus falls to <body>, so the
-      // Enter pressed next opens nothing (panes.spec.ts:91). The same link in
+      // Enter pressed next opens nothing (rig panes spec, J21 F5). The same link in
       // the same pane takes the focus back, before any key can land: the
       // observer that lays the panes out runs right after the patch.
       hook._link = null;
