@@ -40,9 +40,9 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
     ~H"""
     <button
       type="button"
-      class="dk-list-options"
+      class="dk-list-options dk-doc-menu-button icon-btn"
       aria-label={gettext("List options")}
-      title={gettext("Show more")}
+      data-tip={gettext("Show more")}
       aria-haspopup="menu"
       popovertarget={@menu_id}
       style={"anchor-name: --dk-list-menu-#{@index}"}
