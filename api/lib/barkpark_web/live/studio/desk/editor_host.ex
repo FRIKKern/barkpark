@@ -166,6 +166,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
     do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
 
+  # Sent by hand with no type: nothing to create.
+  def handle_event("new-document", _params, socket), do: {:noreply, socket}
+
+  # A reference pick writes the editor's form. With no document in the editor
+  # (no form), or without its field and id, there is nothing to write.
+  def handle_event("select-ref", params, socket)
+      when not is_map_key(socket.assigns, :editor_form) or
+             not (is_map_key(params, "id") and is_map_key(params, "field")),
+      do: {:noreply, socket}
+
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 

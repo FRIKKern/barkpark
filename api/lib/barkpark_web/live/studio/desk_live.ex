@@ -53,12 +53,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
     defexception message: "no such dataset", plug_status: 404
   end
 
+  # A dataset slug is at most 63 characters (`Tenancy.Dataset`); this leaves
+  # room for an older, longer dataset string.
+  @dataset_max 255
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
     # A dataset segment with a byte the database refuses as text names no
     # dataset. Refused here, before the first read and before any redirect
     # that would carry it.
-    Text.text?(dataset) || raise NotFound
+    # Nor does one longer than any name can be (the Studio's tabs would
+    # compile it into a pattern: Regex.CompileError at 100,000 bytes).
+    (Text.text?(dataset) and byte_size(dataset) <= @dataset_max) || raise NotFound
 
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
