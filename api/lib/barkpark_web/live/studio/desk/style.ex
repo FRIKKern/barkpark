@@ -130,7 +130,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn { box-sizing: border-box; flex: none; width: 25px; height: 25px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); }
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn:hover { background: var(--dk-icon-btn-hover); color: var(--dk-icon-btn-hover-fg); }
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn svg { width: 21px; height: 21px; }
-      .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close { display: none; }
+      .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: absolute; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
       .dk .dk-list-search { position: relative; margin: -1px 12px 7px; padding: 0; border: 0; }
       .dk .dk-list-search .search-icon { position: absolute; left: 2px; top: 2px; color: var(--dk-muted); pointer-events: none; }
       .dk .dk-list-search .search-icon > svg { display: block; width: 21px; height: 21px; }

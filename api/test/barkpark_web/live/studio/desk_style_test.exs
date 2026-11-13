@@ -185,8 +185,9 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
 
   # LOOKS A3: TanStack's pane header (styles.css `.pane-header`, `.icon-btn`):
   # 49 px for a list or type pane, no bottom line, a 13/19 w600 title in
-  # --fg-header, 25 px icon buttons; the list's "×" goes on a wide desk
-  # (TanStack has none) and stays as the narrow desk's back arrow.
+  # --fg-header, 25 px icon buttons; the list's "×" is out of sight on a wide
+  # desk (TanStack has none) until Tab reaches it, and stays as the narrow
+  # desk's back arrow.
   test "a list pane's header is TanStack's: 49 px, no line, w600 title, 25 px buttons" do
     head = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header")
     assert head =~ "height: 49px"
@@ -202,8 +203,15 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert btn =~ "width: 25px; height: 25px"
     assert btn =~ "color: var(--dk-icon-muted)"
 
-    assert rule(@css, ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close") =~
-             "display: none"
+    # Out of sight but in the tab order: Tab reaches it and shows it, Enter closes.
+    close =
+      rule(
+        @css,
+        ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible)"
+      )
+
+    assert close =~ "clip-path: inset(50%)"
+    refute close =~ "display: none"
   end
 
   test "the list search is borderless, with the magnifier inside at the left" do
