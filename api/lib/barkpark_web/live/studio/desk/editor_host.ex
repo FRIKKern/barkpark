@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
@@ -414,6 +415,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
+        <%!-- The TanStack Studio's Published / Draft pills (`DocStatus`). With
+              the form's big title drawn (`Desk.DocStyle`), the title below is
+              for screen readers only, unless it holds focus mode's way back. --%>
+        <DocStatus.chips
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          {DocStatus.state(assigns)}
+        />
         <%!-- In focus mode the title line is the panes it hides, each a way
               back (`FocusMode`). One title element, the same tag, either way:
               an element that changed (a span or h2 swapped for a div) makes the
