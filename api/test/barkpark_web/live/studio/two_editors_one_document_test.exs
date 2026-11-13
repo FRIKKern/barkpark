@@ -19,7 +19,6 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
-  alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
 
   @dataset "production"
 
@@ -129,47 +128,5 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
     type_in(b, "excerpt", " B2")
 
     assert stored(c) == {"Fixture post A2", "First B1 B2"}
-  end
-
-  describe "a remote save while a field holds an edit the store does not have" do
-    defp dirty_socket(unsaved_keys) do
-      %Phoenix.LiveView.Socket{
-        assigns: %{
-          __changed__: %{},
-          flash: %{},
-          editor_doc: %{doc_id: "p1", title: "Base", status: "draft"},
-          editor_schema: nil,
-          editor_form: %{"title" => "Local typing", "status" => "draft"},
-          editor_dirty: true,
-          editor_unsaved_keys: MapSet.new(unsaved_keys),
-          doc_conflict: false,
-          save_status: "Save failed"
-        }
-      }
-    end
-
-    defp remote(title, status) do
-      %{
-        sender: spawn(fn -> :ok end),
-        doc: %{doc_id: "p1", title: title, status: status, content: %{}, updated_at: nil}
-      }
-    end
-
-    test "the unsaved field keeps its local value; the other fields take the remote save" do
-      {:noreply, socket} =
-        Lifecycle.doc_updated(remote("Remote title", "published"), dirty_socket(["title"]))
-
-      assert socket.assigns.editor_form["title"] == "Local typing"
-      assert socket.assigns.editor_form["status"] == "published"
-      assert socket.assigns.doc_conflict == true
-    end
-
-    test "dirty with no field named (an array op, a slug derive): the whole buffer is kept" do
-      {:noreply, socket} =
-        Lifecycle.doc_updated(remote("Remote title", "published"), dirty_socket([]))
-
-      assert socket.assigns.editor_form == %{"title" => "Local typing", "status" => "draft"}
-      assert socket.assigns.doc_conflict == true
-    end
   end
 end

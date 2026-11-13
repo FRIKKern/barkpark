@@ -80,8 +80,9 @@ defmodule BarkparkWeb.Studio.DeskSingletonPaneTest do
     assert has_element?(view, "#{@pane}[data-desk-document]")
     refute has_element?(view, "#{@pane} [role=tab]")
     refute has_element?(view, ~s(#{@pane} [aria-label="Split pane right"]))
-    # The type line is the shared editor's; the desk takes it out of the pane.
-    assert render(view) =~ "[data-desk-document] .editor-meta { display: none; }"
+    # TanStack's singleton: the title over the form, no type line above it.
+    assert has_element?(view, "#{@pane} .dk-big-title")
+    assert render(view) =~ ".dk .dk-edit[data-desk-document] .dk-kind { display: none; }"
   end
 
   test "control: a document from a list keeps its view tabs, Split and type line", ctx do
@@ -90,6 +91,6 @@ defmodule BarkparkWeb.Studio.DeskSingletonPaneTest do
     refute has_element?(view, "#{@pane}[data-desk-document]")
     assert has_element?(view, "#{@pane} [role=tab]", "Linked")
     assert has_element?(view, ~s(#{@pane} [aria-label="Split pane right"]))
-    assert has_element?(view, "#{@pane} .editor-meta", "Title of dsp_post")
+    assert has_element?(view, "#{@pane} .editor-meta .dk-kind", "Title of dsp_post")
   end
 end
