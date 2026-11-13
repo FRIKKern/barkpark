@@ -71,7 +71,8 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
   defp second(), do: person(BarkparkWeb.ConnCase.scoped_conn(), "b")
 
   # The document header's co-presence dots: one per session on the document,
-  # this one included. The pane's own header draws them (`Desk.DocStatus`);
+  # this one included, and none for a person alone. The pane's own header
+  # draws them (`Desk.DocStatus`);
   # the Studio's toolbar row that drew them before is hidden in the desk.
   defp header_dots(view) do
     view
@@ -127,7 +128,8 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
     render_async(vb, 5_000)
     refute has_element?(vb, "[data-pane-editing]")
 
-    assert eventually(fn -> header_dots(va) == 1 end),
+    # Alone again: no dots, as in the TanStack Studio (`Desk.DocStatus`).
+    assert eventually(fn -> header_dots(va) == 0 end),
            "B closed Alpha's pane, yet A still shows #{header_dots(va)} people on Alpha"
 
     assert online_others(va) == 1,

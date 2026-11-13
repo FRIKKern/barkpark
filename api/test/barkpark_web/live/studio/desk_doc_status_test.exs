@@ -158,7 +158,8 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     assert css =~
              ~s(.dk .dk-edit .editor-panel[role=main] > .editor-header h1 { visibility: visible; })
 
-    assert css =~ ".dk .dk-edit > .pane-header { box-sizing: border-box; height: 51px;"
+    assert css =~
+             ".dk .dk-edit > .pane-header { flex: none; box-sizing: border-box; height: 51px; min-height: 51px;"
   end
 
   # Control: the old Studio keeps its toolbar and draws no pills.

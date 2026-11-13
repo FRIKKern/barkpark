@@ -14,6 +14,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   published and the draft view. The desk has no published view, so here
   they only say the state.
 
+  The dots show when someone else is in the document too: one per session,
+  this one included, as the Studio's did. Alone, there are none, as in the
+  TanStack Studio.
+
   The Studio's toolbar row used to say this with its badge and presence dots.
   The desk hides that row (`Desk.Style`), so they live here now.
   """
@@ -31,7 +35,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   def chips(assigns) do
     ~H"""
     <span class="dk-chips" data-desk-status>
-      <span :if={@presences != []} class="presence-dots" role="img" aria-label={presence_label(@presences)}>
+      <span :if={length(@presences) > 1} class="presence-dots" role="img" aria-label={presence_label(@presences)}>
         <span :for={p <- @presences} class="presence-dot" style={"background: #{p.color}"}></span>
       </span>
       <span
