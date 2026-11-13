@@ -592,9 +592,28 @@
     return true;
   }
 
-  function closeSearch(el) {
+  // `onward`: the search opened something (a hit, Enter). The browser hands
+  // the focus back to what opened the dialog; the opened pane takes it
+  // instead, as the desk's own patch focus does from the page.
+  function closeSearch(el, onward) {
     var dialog = el && el.closest ? el.closest("dialog") : null;
-    if (dialog && dialog.open && dialog.close) dialog.close();
+    if (!dialog || !dialog.open || !dialog.close) return;
+    dialog.close();
+    var at = dialog.ownerDocument.activeElement;
+    if (onward && at && at !== dialog.ownerDocument.body && at.blur) at.blur();
+  }
+
+  // The document a search hit opens: its href's last pane segment, the id
+  // after the last ";", without the pane's ",params".
+  function hitDoc(hit) {
+    var path = String(hit.getAttribute("href") || "").split("?")[0].split("#")[0];
+    var last = path.slice(path.lastIndexOf("/") + 1);
+    var id = last.slice(last.lastIndexOf(";") + 1).split(",")[0];
+    try {
+      return decodeURIComponent(id);
+    } catch (_) {
+      return id;
+    }
   }
 
   // A key typed into something that takes text is that thing's.
@@ -898,8 +917,14 @@
         var hit = e.currentTarget !== root;
         var row = e.target.closest ? e.target.closest(hit ? HIT : OPENER) : null;
         if (!row || root.contains(row) === hit || !plainClick(e)) return;
-        // A hit puts the search dialog away, whatever the panes do next.
-        if (hit) closeSearch(row);
+        // A hit puts the search dialog away, whatever the panes do next, and
+        // its document's first field takes the focus when its editor is in,
+        // as Enter's open does (the server's `bp:focus-new-doc`).
+        if (hit) {
+          closeSearch(row, true);
+          var id = hitDoc(row);
+          if (id && hook._focusNewDoc) hook._focusNewDoc({ detail: { id: id } });
+        }
         hook._refocus = !hit && root.ownerDocument.activeElement === row ? row.getAttribute("href") : null;
         // The click before this one has not landed: its answer is still to
         // come, and is not this click's (see _onLoaded).
@@ -1202,7 +1227,7 @@
         if (openSearch(root.ownerDocument)) e.preventDefault();
       };
       hook._onSearchSent = function (e) {
-        if (e.target && e.target.id === "desk-search-form") closeSearch(e.target);
+        if (e.target && e.target.id === "desk-search-form") closeSearch(e.target, true);
       };
 
       // The draft in the editor was discarded elsewhere (`Desk.Discarded`):
