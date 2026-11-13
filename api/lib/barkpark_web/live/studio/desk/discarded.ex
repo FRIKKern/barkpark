@@ -22,12 +22,17 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   focused field and not yet sent (its debounce) never arrive as a save: the
   event also carries the old form's values (`was`), and the browser answers
   `lost: true` when the focused field no longer matches them, which counts
-  as a dropped save. A reconnect mounts a
+  as a dropped save. The answer also carries what the field held (`text`):
+  the line offers it back, to read and copy, while the field takes the
+  published value (so the dead draft is never written back). That offer
+  stays after the next save clears the line's sentence, until another
+  discard or a reload. A reconnect mounts a
   new LiveView process, whose assigns have no `desk_discarded`, so a browser
   that never answered is not stuck past it.
 
   Owns the `desk_discarded` assign:
-  `%{doc: {type, id}, seen: boolean, dropped: boolean}`, or nil.
+  `%{doc: {type, id}, seen: boolean, dropped: boolean, lost_text: nil | String.t(),
+  cleared: boolean}`, or nil.
   """
 
   use BarkparkWeb, :html
@@ -63,7 +68,13 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
       |> Shared.rebuild_panes()
 
     socket
-    |> assign(:desk_discarded, %{doc: {type, id}, seen: false, dropped: false})
+    |> assign(:desk_discarded, %{
+      doc: {type, id},
+      seen: false,
+      dropped: false,
+      lost_text: nil,
+      cleared: false
+    })
     |> push_event("desk:discarded", %{
       values: values(socket.assigns[:editor_form] || %{}),
       was: was
@@ -75,12 +86,32 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
     match?(%{seen: false}, assigns[:desk_discarded]) and open?(assigns)
   end
 
-  @doc "A save from the old form was dropped: the line says so, logged once."
-  def drop(socket) do
+  # What the line offers back is the user's typing in one field: kept whole
+  # up to this many characters.
+  @lost_text_max 20_000
+
+  @doc """
+  A save from the old form was dropped: the line says so, logged once.
+  `text`, when the browser sent it, is what the focused field held: the line
+  offers it back.
+  """
+  def drop(socket, text \\ nil) do
     case socket.assigns[:desk_discarded] do
-      %{dropped: false, doc: {type, id}} = d ->
-        Logger.warning("desk: a save from a discarded draft's form was dropped (#{type} #{id})")
-        assign(socket, :desk_discarded, %{d | dropped: true})
+      %{doc: {type, id}} = d ->
+        if not d.dropped,
+          do:
+            Logger.warning(
+              "desk: a save from a discarded draft's form was dropped (#{type} #{id})"
+            )
+
+        d = %{d | dropped: true}
+
+        d =
+          if is_binary(text) and text != "",
+            do: %{d | lost_text: String.slice(text, 0, @lost_text_max)},
+            else: d
+
+        assign(socket, :desk_discarded, d)
 
       _ ->
         socket
@@ -98,10 +129,33 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
     end
   end
 
-  @doc "A save from the new form landed: the pane's line goes."
+  @doc """
+  A save from the new form landed: the pane's line goes. Lost text stays
+  offered (`cleared`), so typing on does not take it away.
+  """
   def clear(socket) do
-    if socket.assigns[:desk_discarded], do: assign(socket, :desk_discarded, nil), else: socket
+    case socket.assigns[:desk_discarded] do
+      %{lost_text: text} = d when is_binary(text) ->
+        assign(socket, :desk_discarded, %{d | cleared: true})
+
+      %{} ->
+        assign(socket, :desk_discarded, nil)
+
+      _ ->
+        socket
+    end
   end
+
+  @doc "The lost text the line offers back, or nil."
+  def lost_text(assigns) do
+    case assigns[:desk_discarded] do
+      %{lost_text: text} when is_binary(text) -> text
+      _ -> nil
+    end
+  end
+
+  @doc "Whether the line's sentence is gone (a save landed) and only the offer stays."
+  def cleared?(assigns), do: match?(%{cleared: true}, assigns[:desk_discarded])
 
   @doc "Whether the pane says the draft was discarded (the document still open, still there)."
   def note?(assigns), do: open?(assigns) and is_map(assigns[:editor_doc])
@@ -109,12 +163,17 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   defp open?(%{desk_discarded: %{doc: {type, id}}, editing: {_dataset, type, id}}), do: true
   defp open?(_assigns), do: false
 
-  @doc "The pane's line, shown with the published version."
+  @doc """
+  The pane's line, shown with the published version, and what was typed and
+  lost, offered back to read and copy (the pane's toast says it was copied).
+  """
   attr :dropped, :boolean, default: false
+  attr :lost_text, :string, default: nil
+  attr :cleared, :boolean, default: false
 
   def note(assigns) do
     ~H"""
-    <p class="dk-note" role="status" data-desk-discarded>
+    <p :if={!@cleared} class="dk-note" role="status" data-desk-discarded>
       {if @dropped,
         do:
           gettext(
@@ -122,6 +181,28 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
           ),
         else: gettext("The draft was discarded elsewhere. This is the published version.")}
     </p>
+    <%!-- Ignored by patches once drawn: a patch would take away the `open`
+          the person gave it. Its id follows the text, so new lost text
+          draws anew. --%>
+    <details
+      :if={@lost_text}
+      id={"desk-lost-#{:erlang.phash2(@lost_text)}"}
+      class="dk-note dk-lost"
+      data-desk-lost
+      phx-update="ignore"
+    >
+      <summary>{gettext("What you typed before the discard")}</summary>
+      <blockquote class="dk-lost-text">{@lost_text}</blockquote>
+      <button
+        type="button"
+        class="dk-lost-copy"
+        data-desk-copy={@lost_text}
+        data-desk-copied={gettext("Copied")}
+        data-desk-copy-failed={gettext("Could not copy to the clipboard")}
+      >
+        {gettext("Copy")}
+      </button>
+    </details>
     """
   end
 

@@ -203,6 +203,29 @@ defmodule Barkpark.Content.TitleDerivation do
 
   def follow_on_replace(attrs, _type, _dataset, _id, _existing, _opts), do: attrs
 
+  @doc """
+  The `createOrReplace` + `"publish": true` door's entry (`Mutations`). Its
+  `existing` is the PUBLISHED row. A client may have fetched the DRAFT twin
+  and sent it to the published id: it carries the draft's title, which the
+  published row does not hold, so a rename did not follow
+  (task-ce23f03c4f03c335). The draft twin is tried as the base first; once it
+  moved the title, the published row sees no carried title and leaves it.
+  """
+  def follow_on_publish(attrs, type, dataset, id, existing, opts) do
+    draft =
+      with true <- is_binary(id) and is_binary(type),
+           {:ok, doc} <-
+             Content.get_document(Barkpark.Content.DraftId.draft_id(id), type, dataset, opts) do
+        doc
+      else
+        _ -> nil
+      end
+
+    attrs
+    |> then(&if(draft, do: follow_on_replace(&1, type, dataset, id, draft, opts), else: &1))
+    |> follow_on_replace(type, dataset, id, existing, opts)
+  end
+
   # Could `follow/3` move this write's title at all: it carries content and a
   # title, and its type has no title field but a list_preview.title field.
   defp followable?(attrs, type, dataset, opts) do

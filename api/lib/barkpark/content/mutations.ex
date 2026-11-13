@@ -995,7 +995,7 @@ defmodule Barkpark.Content.Mutations do
                dataset,
                opts
              ),
-           attrs = TitleDerivation.follow_on_replace(attrs, type, dataset, id, existing, opts),
+           attrs = TitleDerivation.follow_on_publish(attrs, type, dataset, id, existing, opts),
            {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
            {:ok, published} <-
              Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do
