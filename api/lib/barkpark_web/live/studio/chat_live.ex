@@ -50,6 +50,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.StreamTail
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
+  alias BarkparkWeb.ChatSendFailure
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -1350,7 +1351,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # store each under the chat-owned dir and build the content blocks.
         {attachments, socket} = consume_attachments(socket)
 
-        case build_user_content(text, attachments) do
+        case Attachments.user_content(text, attachments) do
           [] ->
             # Every image failed to store AND there was no text — never write
             # an empty user frame; say so honestly and keep the composer live.
@@ -1404,7 +1405,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
                 {:noreply,
                  socket
-                 |> append_message(:system, send_error_text(reason) <> note)
+                 |> append_message(:system, ChatSendFailure.studio_text(reason) <> note)
                  |> assign(session: nil, status: :offline)
                  |> restore_failed_send(text)}
             end
@@ -6111,27 +6112,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {Enum.reject(attachments, &(&1 == :error)), socket}
   end
 
-  # Assemble the user frame's content-block list: the text block (omitted when
-  # blank — an image-only turn) followed by one base64 image block per attachment
-  # (charter D25 wire shape, proven on the real binary).
-  defp build_user_content(text, attachments) do
-    text_blocks = if text == "", do: [], else: [%{"type" => "text", "text" => text}]
-
-    image_blocks =
-      Enum.map(attachments, fn a ->
-        %{
-          "type" => "image",
-          "source" => %{
-            "type" => "base64",
-            "media_type" => a.media_type,
-            "data" => Base.encode64(a.bytes)
-          }
-        }
-      end)
-
-    text_blocks ++ image_blocks
-  end
-
   # Live user bubble carrying the just-sent images as data-URIs (bytes in hand —
   # no disk re-read). Replay rebuilds the same shape from the store.
   defp append_user_message(socket, text, attachments) do
@@ -8515,13 +8495,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(_),
     do: "Failed to start the Claude session."
-
-  # Honest line for a user turn that never reached the model (charter D24): the
-  # port write failed or the session had already gone. The words are restored to
-  # the composer, so this is a "try again", not a "your message is lost".
-  defp send_error_text(_reason),
-    do:
-      "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   # ── the transcript header's context identity (chat-local-cloud-context-w3) ──
   #

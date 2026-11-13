@@ -18,7 +18,15 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
   alias Barkpark.Plugins.Github.Conflict
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
-  @flat ["/admin/projects", "/admin/onixedit/bokbasen", "/admin/github"]
+  # Fleet and ONIX staleness span every workspace too and were left out of the
+  # ruling's first pass (task-dc80c8cbf7d7473d).
+  @flat [
+    "/admin/projects",
+    "/admin/onixedit/bokbasen",
+    "/admin/github",
+    "/admin/fleet",
+    "/admin/onixedit/staleness"
+  ]
 
   setup do
     Repo.delete_all(from(d in Document, where: d.type == "task"))
@@ -122,6 +130,66 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
       {:ok, _view, peek} = live(conn, base <> "/projects?task=ops-b-task")
       refute peek =~ "Bravo secret in B"
     end
+  end
+
+  describe "Fleet and ONIX staleness, scoped" do
+    setup %{ws_a: ws_a, proj_a: proj_a} do
+      {raw, _} = token!(["read", "write", "ops"], ws_a.id)
+      %{conn: session(raw), base: "/w/#{ws_a.slug}/p/#{proj_a.slug}/admin"}
+    end
+
+    test "the fleet lists only this workspace's listeners",
+         %{conn: conn, base: base, ws_a: ws_a, ws_b: ws_b} do
+      listener!("LISTENER-IN-A", ws_a.id)
+      listener!("LISTENER-IN-B", ws_b.id)
+
+      {:ok, view, _html} = live(conn, base <> "/fleet")
+      html = render(view)
+      assert html =~ "LISTENER-IN-A"
+      refute html =~ "LISTENER-IN-B"
+    end
+
+    test "staleness lists and acknowledges only this workspace's books",
+         %{conn: conn, base: base, ws_a: ws_a, ws_b: ws_b} do
+      mine = book!("BOOK-IN-A", ws_a.id)
+      theirs = book!("BOOK-IN-B", ws_b.id)
+
+      {:ok, view, _html} = live(conn, base <> "/onixedit/staleness")
+      html = render(view)
+      assert html =~ "BOOK-IN-A"
+      refute html =~ "BOOK-IN-B"
+
+      render_hook(view, "acknowledge", %{"doc_id" => theirs.doc_id, "id" => theirs.id})
+      refute Repo.get!(Document, theirs.id).content["staleness_acknowledged"]
+
+      render_hook(view, "acknowledge", %{"doc_id" => mine.doc_id, "id" => mine.id})
+      assert Repo.get!(Document, mine.id).content["staleness_acknowledged"] == true
+    end
+  end
+
+  defp listener!(worker, ws_id) do
+    doc!("listener", "listener-#{worker}-#{System.unique_integer([:positive])}", ws_id, %{
+      "worker" => worker,
+      "status" => "idle",
+      "ttl_s" => 120,
+      "last_seen" => DateTime.utc_now() |> DateTime.to_iso8601()
+    })
+  end
+
+  defp book!(doc_id, ws_id),
+    do: doc!("book", "#{doc_id}-#{System.unique_integer([:positive])}", ws_id, %{})
+
+  defp doc!(type, doc_id, ws_id, content) do
+    Repo.insert!(%Document{
+      doc_id: doc_id,
+      type: type,
+      dataset: "production",
+      status: "published",
+      title: doc_id,
+      rev: "rev-#{doc_id}",
+      workspace_id: ws_id,
+      content: content
+    })
   end
 
   defp conflict!(issue, ws_id) do

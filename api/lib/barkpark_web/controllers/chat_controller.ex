@@ -92,6 +92,7 @@ defmodule BarkparkWeb.ChatController do
 
   alias Barkpark.Tenancy
   alias BarkparkWeb.ChatSendFailure
+  alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
 
@@ -273,29 +274,26 @@ defmodule BarkparkWeb.ChatController do
   # ── POST /v1/chat/sessions/:id/messages ────────────────────────────────────
 
   @doc """
-  Send a user turn. `{content}` → 202 `{accepted:true}`. Brings the runtime up
-  (`Recorder.ensure/1`) and dispatches through the single Session process; the
-  server does not distinguish queued (the client badges from local turn state,
-  D12).
+  Send a user turn. `{content, attachments?}` → 202 `{accepted:true}`, where
+  `attachments` names up to four images stored for THIS session (resolved after
+  the tenant oracle, `ChatUserTurn`). Brings the runtime up (`Recorder.ensure/1`)
+  and dispatches through the single Session process; the server does not
+  distinguish queued (the client badges from local turn state, D12).
   """
   def create_message(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
 
-    with {:ok, content} <- validate_content(body),
+    with {:ok, {content, attachment_ids}} <- validate_content(body),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
-         :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session) do
-      case ensure_and_send(id, session, content, conn) do
+         :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
+         {:ok, turn} <- ChatUserTurn.resolve(session.id, content, attachment_ids) do
+      case ensure_and_send(id, session, turn.content, conn) do
         :ok ->
-          # Persist the user's OWN turn (D140). ensure_and_send has already derived
-          # `resume?` from the pre-turn `session.message_count` and dispatched, so
-          # appending here — AFTER derivation — cannot false-flip turn 1 into a
-          # resume. Unlike the Studio LiveView composer (which persists its own
-          # `role:"user"` rows), the API path had ZERO append call sites, leaving
-          # every channel/bridge session's replay history assistant-only; a real
-          # Barkpark Chat session needs the human side too. Fail-soft: the turn is
-          # already on its way, so a persist miss must not turn a live send into an
-          # error — log and still 202 (the SSE seq-replay simply misses this row).
-          persist_user_turn(id, content)
+          # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send
+          # derived `resume?` from the pre-turn message_count, so the append
+          # cannot false-flip turn 1 into a resume. Fail-soft: the turn is
+          # already on its way, so a persist miss still answers 202.
+          ChatUserTurn.persist(id, content, turn.metadata)
           conn |> put_status(:accepted) |> json(%{accepted: true})
 
         {:error, reason} ->
@@ -1208,51 +1206,17 @@ defmodule BarkparkWeb.ChatController do
   def send_failure_response(conn, reason) do
     Logger.warning("chat transport: send failed: #{inspect(ChatSendFailure.loggable(reason))}")
 
-    case ChatSendFailure.classify(reason) do
-      :capacity ->
-        # Transient by definition — say when to come back (mirrors the
-        # rate-limit plugs' Retry-After convention).
-        conn
-        |> put_resp_header("retry-after", Integer.to_string(@capacity_retry_after_seconds))
-        |> ErrorResponse.emit_custom(
-          503,
-          "runtime_capacity",
-          "chat runtime capacity is exhausted — retry shortly"
-        )
+    class = ChatSendFailure.classify(reason)
+    {status, code, message} = ChatSendFailure.public_error(class)
 
-      :unavailable ->
-        ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", "chat runtime is unavailable")
+    # Capacity is transient by definition — say when to come back (mirrors the
+    # rate-limit plugs' Retry-After convention).
+    conn =
+      if class == :capacity,
+        do: put_resp_header(conn, "retry-after", "#{@capacity_retry_after_seconds}"),
+        else: conn
 
-      :unsupported ->
-        # PERMANENT for this session/provider — a 503 would make a well-behaved
-        # client retry forever, so it must be a 4xx (charter D26).
-        ErrorResponse.emit_custom(
-          conn,
-          422,
-          "chat_unsupported",
-          "chat is not supported for this session's provider or operation"
-        )
-    end
-  end
-
-  # Append the caller's turn as an organic `role:"user"` row so the Session's
-  # replayable history carries the human side (the LiveView composer persists its
-  # own rows; the API path did not). `origin: "api"` distinguishes it from a
-  # composer-authored row. Best-effort — the caller already got its turn
-  # dispatched, so a persist error is logged, never surfaced.
-  defp persist_user_turn(id, content) do
-    case StudioChat.append_message(id, %{
-           role: "user",
-           source_markdown: content,
-           metadata: %{"origin" => "api"}
-         }) do
-      {:ok, _message} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
-        :ok
-    end
+    ErrorResponse.emit_custom(conn, status, code, message)
   end
 
   defp apply_patch_op(id, {:draft, value}), do: StudioChat.set_draft(id, value)
@@ -1453,7 +1417,8 @@ defmodule BarkparkWeb.ChatController do
 
   defp validate_content(params) do
     with :ok <- reject_non_object(params),
-         :ok <- reject_unknown_keys(params, ["content"]),
+         :ok <- reject_unknown_keys(params, ["content", "attachments"]),
+         {:ok, attachment_ids} <- ChatUserTurn.validate_ids(Map.get(params, "attachments")),
          value <- Map.get(params, "content") do
       cond do
         not is_binary(value) ->
@@ -1463,7 +1428,7 @@ defmodule BarkparkWeb.ChatController do
           {:error, "content exceeds #{@content_max_bytes} bytes"}
 
         true ->
-          {:ok, value}
+          {:ok, {value, attachment_ids}}
       end
     end
   end

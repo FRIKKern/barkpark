@@ -85,7 +85,11 @@ defmodule Barkpark.Content.TitleDerivation do
   the caller carried over unchanged is replaced: a write that sets a title of
   its own in the same write keeps it. A write that leaves the field's value as
   it was leaves the column as it was, so a row whose column a caller once set
-  by hand keeps it until the field itself is renamed.
+  by hand keeps it until the field itself is renamed. A rename to blank (`""`,
+  spaces, or the field unset) clears the column to nil, the title a new
+  document with a blank name gets (task-a2064ff3c8c13417). That holds for a
+  column set by hand too: blanking the name clears it, as any other rename of
+  the field replaces it.
   """
   @spec follow(map(), map() | struct() | nil, map() | struct() | nil) :: map()
   def follow(attrs, base, schema) when is_map(attrs) and is_map(base) and not is_nil(schema) do
@@ -93,9 +97,10 @@ defmodule Barkpark.Content.TitleDerivation do
          true <- carried_title?(title_of(attrs), Map.get(base, :title) || Map.get(base, "title")),
          nil <- title_field(schema),
          field when is_binary(field) <- preview_title_field(schema),
-         value when is_binary(value) and value != "" <-
-           scalar(Barkpark.Content.PreviewText.field_value(content, field)),
-         true <- value != base_value(base, field) do
+         value = present(scalar(Barkpark.Content.PreviewText.field_value(content, field))),
+         true <- value != present(base_value(base, field)) do
+      # A name set blank or unset leaves no title, as a new document with a
+      # blank name has none: lists fall back the same way for both.
       Map.put(attrs, "title", value)
     else
       _ -> attrs
@@ -169,6 +174,34 @@ defmodule Barkpark.Content.TitleDerivation do
         attrs
     end
   end
+
+  @doc """
+  The `createOrReplace` door's entry (`Mutations`, before `Writer.create_document/4`).
+  A client that fetched the document sends the envelope back with the stored
+  title, so a rename must follow there as on the upsert door
+  (task-a2064ff3c8c13417). `existing` is the draft the call replaces, or nil;
+  then the published row is the base, as in `follow_on_upsert/6`. `attrs` may be
+  the flat envelope or the `content` shape; only its `"title"` is changed.
+  """
+  @spec follow_on_replace(
+          map(),
+          String.t(),
+          String.t(),
+          String.t() | nil,
+          struct() | nil,
+          keyword()
+        ) ::
+          map()
+  def follow_on_replace(attrs, type, dataset, id, existing, opts) when is_map(attrs) do
+    view = Barkpark.Content.Writer.from_envelope(attrs)
+    followed = follow_on_upsert(view, type, dataset, id, existing, opts)
+
+    if Map.get(followed, "title") == Map.get(view, "title"),
+      do: attrs,
+      else: attrs |> Map.delete(:title) |> Map.put("title", Map.get(followed, "title"))
+  end
+
+  def follow_on_replace(attrs, _type, _dataset, _id, _existing, _opts), do: attrs
 
   # Could `follow/3` move this write's title at all: it carries content and a
   # title, and its type has no title field but a list_preview.title field.
@@ -249,6 +282,9 @@ defmodule Barkpark.Content.TitleDerivation do
 
   defp title_of(attrs), do: Map.get(attrs, "title") || Map.get(attrs, :title)
   defp content_of(attrs), do: Map.get(attrs, "content") || Map.get(attrs, :content)
+
+  defp present(v) when is_binary(v) and v != "", do: v
+  defp present(_), do: nil
 
   defp blank?(nil), do: true
   defp blank?(t) when is_binary(t), do: String.trim(t) == ""

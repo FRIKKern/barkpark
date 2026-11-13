@@ -715,6 +715,7 @@
         }
         if (hook._keepHeld) hook._keepHeld();
         if (hook._keepSeparator) hook._keepSeparator();
+        if (hook._keepLink) hook._keepLink();
         // A strip that opened is no control: its tip goes. Any other shown tip
         // follows its control (a separator moved by the keys).
         var tip = hook._tip && hook._tip.anchor ? hook._tip : null;
@@ -746,6 +747,19 @@
       // The focus on a pane itself, kept through the patches that rewrite its
       // attributes, until the editor moves it or the URL changes.
       hook._held = null;
+      hook._landOnRow = function () {
+        window.setTimeout(function () {
+          var doc = root.ownerDocument;
+          if (doc.activeElement && doc.activeElement !== doc.body) return;
+          var left = panes(root).filter(function (el) {
+            return !el.hasAttribute("data-desk-leaving");
+          });
+          var last = left[left.length - 1];
+          var row = last && (last.querySelector(ROW + ".selected") || last.querySelector(ROW));
+          if (row) row.focus({ preventScroll: true });
+          else hook._holdPane(last);
+        }, 0);
+      };
       hook._holdPane = function (pane) {
         if (!pane) return;
         hook._held = { path: window.location.pathname, index: pane.getAttribute("data-pane-index") };
@@ -793,6 +807,31 @@
         if (next && next.classList.contains(RESIZER)) next.focus({ preventScroll: true });
         else hook._sep = null;
       };
+      // A link focused in a pane that a patch then draws again goes with it
+      // (the read view becomes the editor one round trip after the URL: its
+      // section has an id of its own), and the focus falls to <body>, so the
+      // Enter pressed next opens nothing (rig panes spec, J21 F5). The same link in
+      // the same pane takes the focus back, before any key can land: the
+      // observer that lays the panes out runs right after the patch.
+      hook._link = null;
+      hook._noteLink = function (e) {
+        var a = e.target && e.target.closest ? e.target.closest(OPENER) : null;
+        var pane = a && root.contains(a) ? a.closest("[data-pane-index]") : null;
+        hook._link = pane ? { el: a, href: a.getAttribute("href"), index: pane.getAttribute("data-pane-index") } : null;
+      };
+      hook._keepLink = function () {
+        var link = hook._link;
+        var doc = root.ownerDocument;
+        if (!link || link.el.isConnected) return;
+        hook._link = null;
+        if (doc.activeElement && doc.activeElement !== doc.body) return;
+        var again = Array.prototype.filter.call(root.querySelectorAll(OPENER), function (a) {
+          var pane = a.closest("[data-pane-index]");
+          return a.getAttribute("href") === link.href && pane && pane.getAttribute("data-pane-index") === link.index;
+        })[0];
+        if (again) again.focus({ preventScroll: true });
+      };
+
       // The editor moved the focus, or pressed somewhere: the pane lets go.
       hook._letGo = function (e) {
         var on = e.target && e.target.classList && e.target.classList.contains(RESIZER) && e.target.parentNode === root;
@@ -850,6 +889,8 @@
         hook._path = window.location.pathname;
         var inside = hook._wasInside;
         hook._wasInside = false;
+        var crumb = hook._crumb;
+        hook._crumb = false;
         if (doc.activeElement && doc.activeElement !== doc.body) return;
         var again =
           href &&
@@ -864,17 +905,26 @@
           var left = panes(root).filter(function (el) {
             return !el.hasAttribute("data-desk-leaving");
           });
-          hook._holdPane(left[left.length - 1]);
+          var last = left[left.length - 1];
+          // A focus mode crumb opened that pane: its selected row (its first
+          // when none is) takes the focus, as a Tab into the list would. After
+          // this task: the patch is still re-drawing the panes when the page
+          // says it stopped loading, and a row focused now is re-drawn blurred.
+          if (crumb) return hook._landOnRow();
+          hook._holdPane(last);
         }
       };
       // Whether the focus was on a link of the desk when it was followed (a
       // mouse click focuses the link too).
       hook._path = window.location.pathname;
       hook._wasInside = false;
+      hook._crumb = false;
       hook._noteFocus = function (e) {
-        var link = e.target.closest ? e.target.closest("a[href]") : null;
+        // A focus mode crumb is a button that patches (`FocusMode.crumbs`).
+        var link = e.target.closest ? e.target.closest("a[href], button.dk-crumb") : null;
         if (e.type === "keydown" && e.key !== "Enter") return;
         hook._wasInside = !!link && root.ownerDocument.activeElement === link;
+        hook._crumb = hook._wasInside && link.matches("button.dk-crumb");
       };
 
       // A document action pressed from the keyboard that the answer takes
@@ -1174,6 +1224,7 @@
       root.addEventListener("keydown", hook._noteFocus, true);
       root.addEventListener("keydown", hook._notePress, true);
       root.ownerDocument.addEventListener("focusin", hook._letGo);
+      root.ownerDocument.addEventListener("focusin", hook._noteLink);
       root.ownerDocument.addEventListener("pointerdown", hook._letGo, true);
       root.addEventListener("click", hook._onClick);
       // The search box sits beside the panes, not in them.
@@ -1362,10 +1413,59 @@
         e.preventDefault();
         hook.pushEvent("desk-inspect", { open: true });
       };
-      hook._onShowModal = function (e) {
-        var dialog = e.target;
-        if (dialog.matches && dialog.matches("dialog[data-desk-inspect]") && !dialog.open) dialog.showModal();
+      // Each dialog element opens once: after Escape it stays shut until the
+      // page draws a new one (Back to `inspect=on`).
+      hook._showInspect = function (dialog) {
+        if (!dialog || dialog.open || dialog._deskShown || !dialog.isConnected) return;
+        dialog._deskShown = true;
+        dialog.showModal();
       };
+      // Sanity's document shortcuts, from inside the edit pane only
+      // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
+      // delete. Each presses the document menu's own item (`DocMenu`), so a key
+      // does only what the menu offers: a singleton has no Delete, a document
+      // with no draft no Publish. Typing still in the focused field's debounce
+      // goes first: LiveView sends a debounced field on blur, and the socket
+      // keeps order, so the publish carries it. Typing in a published
+      // document makes the draft that Publish appears for: the key then waits
+      // (3 s at most) for the save's answer to bring it. The focus stays.
+      hook._docKeys = { KeyP: "publish", KeyD: "delete-doc" };
+      hook._onDocKey = function (e) {
+        var action = e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && hook._docKeys[e.code];
+        if (!action || !e.target.closest) return;
+        var pane = e.target.closest("[data-pane-editing]");
+        if (!pane) return;
+        var item = function () {
+          return pane.isConnected ? pane.querySelector('[data-desk-doc-action="' + action + '"]') : null;
+        };
+        var owes = action === "publish" && hook._owes();
+        if (!item() && !owes) return;
+        e.preventDefault();
+        var at = root.ownerDocument.activeElement;
+        if (at && at.form && pane.contains(at)) at.dispatchEvent(new root.ownerDocument.defaultView.FocusEvent("blur"));
+        if (item()) return item().click();
+        var tries = 0;
+        var later = function () {
+          var form = editForm();
+          var busy = hook._typed || (form && form.hasAttribute("data-phx-ref-loading"));
+          if (!busy && item()) return item().click();
+          if (++tries < 40) setTimeout(later, 75);
+        };
+        setTimeout(later, 75);
+      };
+      hook._onShowModal = function (e) {
+        if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook._showInspect(e.target);
+      };
+      // phx-mounted alone is not enough. The key's pushEvent locks the desk
+      // while it waits for its reply, and a patch that lands under the lock
+      // is drawn into a detached copy first. phx-mounted then dispatches on
+      // the copy, nobody hears it, and the dialog arrives shut
+      // (keyboard:158, from a list row). So the dialog also opens when it
+      // appears in the desk.
+      hook._inspectSeen = new root.ownerDocument.defaultView.MutationObserver(function () {
+        hook._showInspect(root.querySelector("dialog[data-desk-inspect]"));
+      });
+      hook._inspectSeen.observe(root, { childList: true, subtree: true });
       hook._onInspectClose = function (e) {
         if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook.pushEvent("desk-inspect", { open: false });
       };
@@ -1392,6 +1492,7 @@
         hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
       };
       root.addEventListener("keydown", hook._onInspectKey);
+      root.addEventListener("keydown", hook._onDocKey);
       root.addEventListener("desk:show-modal", hook._onShowModal);
       // `close` does not bubble: caught on the way down.
       root.addEventListener("close", hook._onInspectClose, true);
@@ -1427,6 +1528,7 @@
       window.clearTimeout(this._pressTimer);
       this._pressWatch.disconnect();
       root.ownerDocument.removeEventListener("focusin", this._letGo);
+      root.ownerDocument.removeEventListener("focusin", this._noteLink);
       root.ownerDocument.removeEventListener("pointerdown", this._letGo, true);
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
@@ -1457,7 +1559,9 @@
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       root.removeEventListener("click", this._onCopy);
       root.removeEventListener("keydown", this._onInspectKey);
+      root.removeEventListener("keydown", this._onDocKey);
       root.removeEventListener("desk:show-modal", this._onShowModal);
+      if (this._inspectSeen) this._inspectSeen.disconnect();
       root.removeEventListener("close", this._onInspectClose, true);
       root.removeEventListener("click", this._onInspectTab);
       root.removeEventListener("keydown", this._onInspectTab);

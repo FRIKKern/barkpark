@@ -13,20 +13,34 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query
   import ExUnit.CaptureLog
 
   @moduletag :requires_plugins
 
   alias Barkpark.Auth
   alias Barkpark.ChatHosts
-  alias Barkpark.ChatHosts.RegisteredHost
+  alias Barkpark.ChatHosts.{ExecutionLease, RegisteredHost}
   alias Barkpark.Repo
+  alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.Tenancy
   alias BarkparkWeb.ChatController
 
   @dataset "production"
+
+  # A 1x1 PNG: the store sniffs the bytes, so a stand-in string would be refused.
+  @png Base.decode64!(
+         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+       )
+
   @fixture Path.expand("../../support/fixtures/chat_host_go_capabilities.json", __DIR__)
+  # The same map plus `providers.claude.attachments` (the four image types): a
+  # host that says it can take image references (Paper chat-host-attachments-plan).
+  @attachments_fixture Path.expand(
+                         "../../support/fixtures/chat_host_go_capabilities_attachments.json",
+                         __DIR__
+                       )
 
   setup do
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -40,24 +54,29 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "rhs-#{suffix}", name: "RHS #{suffix}"})
 
-    {:ok, issued} =
-      ChatHosts.issue_enrollment(ws.id, %{
-        name: "go-host-#{suffix}",
-        approved_roots: [System.tmp_dir!()]
-      })
+    raw = "rhs-member-#{suffix}"
+    {:ok, _} = Auth.create_token(raw, "rhs-member", @dataset, ["read", "write", "admin"], ws.id)
 
-    caps = @fixture |> File.read!() |> Jason.decode!()
+    %{
+      ws: ws,
+      host_id: enroll_host!(ws, "go-host-#{suffix}", @fixture),
+      images_host_id: enroll_host!(ws, "go-images-host-#{suffix}", @attachments_fixture),
+      raw: raw
+    }
+  end
+
+  defp enroll_host!(ws, name, fixture) do
+    {:ok, issued} =
+      ChatHosts.issue_enrollment(ws.id, %{name: name, approved_roots: [System.tmp_dir!()]})
+
+    caps = fixture |> File.read!() |> Jason.decode!()
 
     {:ok, %{credential: credential}} =
       ChatHosts.enroll(issued.enrollment_token, %{"protocol_version" => 1, "capabilities" => caps})
 
     {:ok, host} = ChatHosts.authenticate(credential)
     {:ok, _} = ChatHosts.heartbeat(host, %{"protocol_version" => 1, "capabilities" => caps})
-
-    raw = "rhs-member-#{suffix}"
-    {:ok, _} = Auth.create_token(raw, "rhs-member", @dataset, ["read", "write", "admin"], ws.id)
-
-    %{ws: ws, host_id: issued.host.id, raw: raw}
+    issued.host.id
   end
 
   defp json_conn(raw) do
@@ -108,6 +127,60 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
     assert length(send_turns(host, sid)) == 2
   end
 
+  test "a message naming a stored attachment leases a send_turn with its reference and no bytes",
+       %{images_host_id: host_id, raw: raw} do
+    use_attachments_dir()
+    sid = create_host_session!(raw, host_id)
+    id = upload_png!(raw, sid)
+
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions/#{sid}/messages",
+      Jason.encode!(%{content: "what is this?", attachments: [id]})
+    )
+    |> json_response(202)
+
+    host = Repo.get!(RegisteredHost, host_id)
+    assert [%{command: command}] = send_turns(host, sid)
+    assert command.payload.content == "what is this?"
+
+    assert command.payload.attachments == [
+             %{id: id, media_type: "image/png", byte_size: byte_size(@png)}
+           ]
+
+    refute inspect(command) =~ Base.encode64(@png), "the leased command must carry no bytes"
+  end
+
+  # task-2b5de78f8f8d1c1a over the public path: the Go binary's own fixture lists
+  # no `attachments`, so the image would be dropped on the host. The send is
+  # refused by name before anything is leased, and the user's turn is not kept.
+  test "a message with attachments to a host without the capability is a 422 that leases nothing and writes no row",
+       %{host_id: host_id, raw: raw} do
+    use_attachments_dir()
+    sid = create_host_session!(raw, host_id)
+    id = upload_png!(raw, sid)
+
+    capture_log(fn ->
+      body =
+        json_conn(raw)
+        |> post(
+          "/v1/chat/sessions/#{sid}/messages",
+          Jason.encode!(%{content: "what is this?", attachments: [id]})
+        )
+        |> json_response(422)
+
+      assert body["error"]["code"] == "host_cannot_receive_attachments"
+    end)
+
+    host = Repo.get!(RegisteredHost, host_id)
+    assert send_turns(host, sid) == []
+
+    assert Repo.aggregate(from(l in ExecutionLease, where: l.session_id == ^sid), :count) == 0
+
+    assert StudioChat.list_messages(sid, :global) == [],
+           "a refused send must not persist the user's row"
+  end
+
   test "a send to a revoked host is a permanent 422, not a retryable 503",
        %{ws: ws, host_id: host_id, raw: raw} do
     session =
@@ -148,6 +221,20 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
       assert split(:host_offline) == {503, "runtime_unavailable"}
     end
 
+    # The host lacks the attachments capability: retrying the same turn to the
+    # same host can never succeed, so it is a permanent 422 with its own code,
+    # never the retryable 503 an unknown term falls to.
+    test "a host that cannot receive attachments is a permanent 422 with its own code" do
+      assert split({:host_cannot_receive_attachments, "claude"}) ==
+               {422, "host_cannot_receive_attachments"}
+    end
+
+    test "the existing classes keep their status and code" do
+      assert split({:managed_runtime_capacity, :full}) == {503, "runtime_capacity"}
+      assert split(:port_closed) == {503, "runtime_unavailable"}
+      assert split({:provider_not_ready, "claude"}) == {422, "chat_unsupported"}
+    end
+
     test "a crash term is logged by reason and arity, never by its arguments" do
       secret = "task-token-hash-#{System.unique_integer([:positive])}"
       stack = [{Some.Mod, :initialize, [%{task_token: secret}], [line: 1]}]
@@ -158,6 +245,42 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
       assert log =~ "Some.Mod, :initialize, 1"
       refute log =~ secret
     end
+  end
+
+  # Points the chat attachment store at a fresh directory for this test.
+  defp use_attachments_dir do
+    prev = Application.get_env(:barkpark, StudioChat)
+    dir = Path.join(System.tmp_dir!(), "rhs-att-#{System.unique_integer([:positive])}")
+    Application.put_env(:barkpark, StudioChat, attachments_dir: dir)
+
+    on_exit(fn ->
+      File.rm_rf(dir)
+
+      if prev,
+        do: Application.put_env(:barkpark, StudioChat, prev),
+        else: Application.delete_env(:barkpark, StudioChat)
+    end)
+  end
+
+  defp create_host_session!(raw, host_id) do
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions",
+      Jason.encode!(%{
+        provider: "claude",
+        execution_target: "registered_host",
+        execution_host_id: host_id
+      })
+    )
+    |> json_response(201)
+    |> Map.fetch!("id")
+  end
+
+  defp upload_png!(raw, sid) do
+    json_conn(raw)
+    |> post("/v1/chat/sessions/#{sid}/attachments", Jason.encode!(%{data: Base.encode64(@png)}))
+    |> json_response(201)
+    |> get_in(["attachment", "id"])
   end
 
   defp send_message!(raw, sid, content) do

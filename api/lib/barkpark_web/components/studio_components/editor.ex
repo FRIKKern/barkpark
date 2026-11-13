@@ -783,7 +783,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
         <div class={"editor-with-preview " <> if(@show_content_preview, do: "has-onix-preview", else: "")}>
         <div class="editor-body editor-panel-main">
-          <%= if @editor_schema do %>
+          <%= if @editor_schema && desk?(@parent_assigns) do %>
+            <%!-- The desk draws the type's name and the title over the form,
+                  as the TanStack Studio does (`Desk.DocStyle`). --%>
+            <div class="editor-meta dk-form-head">
+              <div class="dk-kind">{@editor_schema.title}</div>
+              <div class="dk-big-title">{BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}</div>
+            </div>
+          <% end %>
+          <%= if @editor_schema && !desk?(@parent_assigns) do %>
             <div class="editor-meta">
               <%!-- A schema's `:icon` is workspace DATA and nullable, so it gets
                     the same `drawable_icon/1` guard `tab_icon/1` and
@@ -1083,9 +1091,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           phx-value-name={@action["name"]}
         ><.doc_action_glyph action={@action} /></button>
       <% _ -> %>
-        <%!-- default: "event" — dispatch the named phx-click event --%>
+        <%!-- default: "event" — dispatch the named phx-click event. Publish
+              and Unpublish carry different ids (`lifecycle_dom_id/1`). --%>
         <button
           type="button"
+          id={lifecycle_dom_id(@action)}
           class={action_button_class(@action)}
           style={action_button_style(@action)}
           title={@action["label"]}
@@ -1182,6 +1192,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       _ -> nil
     end
   end
+
+  # task-964a7fb95408ca3f: Publish and Unpublish sit at the same place in the
+  # header. With no id, the patch after a publish morphed the one <button> in
+  # place, the focus stayed on it, and a second Enter unpublished. Different
+  # ids make LiveView's patch swap the element, so the focus leaves with the
+  # pressed button. Only these two: one of them is on the page at a time.
+  defp lifecycle_dom_id(%{"name" => name}) when name in ["publish", "unpublish"],
+    do: "doc-action-" <> name
+
+  defp lifecycle_dom_id(_action), do: nil
 
   defp doc_action_test_id(action) do
     case action["opts"] do

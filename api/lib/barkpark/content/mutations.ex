@@ -77,6 +77,7 @@ defmodule Barkpark.Content.Mutations do
     PatchPath,
     ReadOnlyFields,
     ReferenceIntegrity,
+    TitleDerivation,
     Warnings,
     WriteScope,
     Writer
@@ -954,7 +955,6 @@ defmodule Barkpark.Content.Mutations do
   end
 
   # ── Direct publish (task-6e2552cdeb223fa2) ─────────────────────────────────
-  #
   # `{"createOrReplace": doc, "publish": true}` lands the document on its
   # PUBLISHED row in one row write, with one revision, event and audit row. The
   # two-step `createOrReplace` + `publish` costs a draft insert, a published
@@ -995,6 +995,7 @@ defmodule Barkpark.Content.Mutations do
                dataset,
                opts
              ),
+           attrs = TitleDerivation.follow_on_replace(attrs, type, dataset, id, existing, opts),
            {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
            {:ok, published} <-
              Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do
@@ -1030,18 +1031,17 @@ defmodule Barkpark.Content.Mutations do
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
          :ok <-
            ensure_read_only_unchanged(type, existing, incoming_content(attrs), id, dataset, opts),
+         attrs = TitleDerivation.follow_on_replace(attrs, type, dataset, id, existing, opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
   end
 
-  # A PUBLISHED row occupies its id (owner ruling #41, task-e27126ee5e796e47).
-  # The lookup used to read the draft alone, so on a published document with
-  # no draft the call minted a fresh draft over the live content and the next
-  # publish replaced the page with the "if not exists" payload. The SDK docs
-  # and Sanity both call this a no-op; the server now agrees. A caller who
-  # names `drafts.<id>` explicitly asks for the draft row itself, so only that
-  # row is checked.
+  # A PUBLISHED row occupies its id (owner ruling #41, task-e27126ee5e796e47). The lookup used
+  # to read the draft alone, so on a published document with no draft the call minted a fresh
+  # draft over the live content and the next publish replaced the page with the "if not
+  # exists" payload. The SDK docs and Sanity both call this a no-op; the server now agrees. A
+  # caller who names `drafts.<id>` asks for the draft row itself, so only that row is checked.
   defp apply_one(%{"createIfNotExists" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]

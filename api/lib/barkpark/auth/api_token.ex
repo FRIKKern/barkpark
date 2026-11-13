@@ -121,6 +121,17 @@ defmodule Barkpark.Auth.ApiToken do
 
   def dataset_bound?(_principal), do: false
 
+  @doc """
+  The dataset a dataset-bound token is held to, else nil. A surface that falls
+  back to a default dataset when the request names none asks this first: the
+  request-level fence only compares a dataset the request names.
+  """
+  @spec bound_dataset(term()) :: binary() | nil
+  def bound_dataset(%__MODULE__{dataset_bound: true, dataset: bound}) when is_binary(bound),
+    do: bound
+
+  def bound_dataset(_principal), do: nil
+
   @doc "Hash a raw token string for storage/lookup."
   def hash_token(raw_token) do
     :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)

@@ -576,7 +576,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # @canonical capability:studio-nav-model aka:nav-tabs,top-menu,studio-tabs doc:docs/cards/studio.md
   def default_top_menu_entries(dataset, scope_prefix, admin?, current_path)
       when is_binary(dataset) do
-    ds = URI.encode(dataset)
+    # `Paths` prints the dataset as one path segment; encoded here too, a "%"
+    # in it was encoded twice.
+    ds = dataset
 
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
     # the page is on via the /d/ canonical. The plugins-admin LV lives at
