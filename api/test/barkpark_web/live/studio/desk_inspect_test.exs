@@ -84,6 +84,15 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     assert has_element?(view, ~s(#{@dialog} [role="tab"][aria-selected="true"]), "Parsed")
     assert has_element?(view, ~s(#{@dialog} [role="tab"][aria-selected="false"]), "Raw JSON")
 
+    # focus:165: both views sit in the one scroller, `.inspect-body`.
+    assert has_element?(
+             view,
+             ~s{#{@dialog} .inspect-body > [role="tabpanel"]:not([hidden])},
+             "_id"
+           )
+
+    assert has_element?(view, ~s(#{@dialog} .inspect-body > [role="tabpanel"][hidden] pre))
+
     # Parsed: the system keys first, the id among them; a nested object folded.
     parsed = view |> element(~s{#{@dialog} [role="tabpanel"]:not([hidden])}) |> render()
     assert parsed =~ c.id
