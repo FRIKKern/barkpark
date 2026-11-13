@@ -1,8 +1,8 @@
 defmodule BarkparkWeb.Studio.DeskRowChevronTest do
   @moduledoc """
-  A row that opens a pane carries one chevron, an svg from Barkpark's own
-  icon set (`BarkparkWeb.Icons`, `chevron-right`), hidden from the
-  accessibility tree. The same glyph at every depth: it is drawn by the one
+  A row that opens a pane carries one chevron, Sanity's thin `chevron-right`
+  (`Barkpark.DeskIcons`, the TanStack Studio's ChevronRight: a 1.2 stroke;
+  LOOKS A4, main 11-13), hidden from the accessibility tree. The same glyph at every depth: it is drawn by the one
   row template every pane uses. (singleton.spec.ts: the row's `svg` is its
   chevron.)
   """
@@ -54,12 +54,13 @@ defmodule BarkparkWeb.Studio.DeskRowChevronTest do
     |> render()
   end
 
-  defp barkpark_chevron?(html) do
+  defp sanity_chevron?(html) do
     html =~ ~s(aria-hidden="true") and length(Regex.scan(~r/<svg/, html)) == 1 and
-      html =~ ~s(d="m9 18 6-6-6-6") and not (html =~ "›")
+      html =~ ~s(d="M10 8L14.5 12.5L10 17") and html =~ ~s(stroke-width="1.2") and
+      not (html =~ "›")
   end
 
-  test "every chevron is Barkpark's svg, at every depth, and no text glyph", %{
+  test "every chevron is Sanity's thin svg, at every depth, and no text glyph", %{
     conn: conn,
     base: base
   } do
@@ -69,11 +70,11 @@ defmodule BarkparkWeb.Studio.DeskRowChevronTest do
     # The root: a menu, and a singleton's document. (Only rows this test's own
     # data declares: the root's other rows depend on the dataset.)
     for href <- ["#{base}/content-types", "#{base}/drc_prefs"] do
-      assert barkpark_chevron?(chevron(view, 0, href)), href
+      assert sanity_chevron?(chevron(view, 0, href)), href
     end
 
     # A menu one pane in, a row that opens a type's list: the same glyph.
-    assert barkpark_chevron?(chevron(view, 1, "#{base}/content-types;drc_note"))
+    assert sanity_chevron?(chevron(view, 1, "#{base}/content-types;drc_note"))
 
     refute view |> element("#desk-panes") |> render() =~ "›"
   end

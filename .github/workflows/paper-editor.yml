@@ -139,6 +139,7 @@ jobs:
       - name: Barkpark host-only editor assertions
         run: |
           node ../paper-editor-host-tests/__array_focus.test.mjs
+          node ../paper-editor-host-tests/__form_remote_values.test.mjs
           node ../paper-editor-host-tests/__asset_browser_strings.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_add_collection_name.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_landmarks.test.mjs

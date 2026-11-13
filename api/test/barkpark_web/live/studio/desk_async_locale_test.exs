@@ -4,8 +4,8 @@ defmodule BarkparkWeb.Studio.DeskAsyncLocaleTest do
   of its own: in an nb-NO workspace the notes a read builds came out English
   ("No documents here yet."), seen on guerrilla 2026-11-11. Every read task,
   the pane's own, its next page and a hovered row's warm read, now renders in
-  the page's locale. The root pane's fallback title ("Structure") is
-  Barkpark's word, so it is translated too.
+  the page's locale. The root pane's fallback title ("Content", as the
+  TanStack Studio's) is Barkpark's word, so it is translated too.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -87,7 +87,7 @@ defmodule BarkparkWeb.Studio.DeskAsyncLocaleTest do
     {:ok, view, _html} = live(c.conn, c.base)
     render_async(view, 5_000)
 
-    assert has_element?(view, ~s([data-pane-index="0"][aria-label="Struktur"])),
+    assert has_element?(view, ~s([data-pane-index="0"][aria-label="Innhold"])),
            "root pane: " <>
              (view |> element(~s([data-pane-index="0"])) |> render() |> String.slice(0, 300))
   end

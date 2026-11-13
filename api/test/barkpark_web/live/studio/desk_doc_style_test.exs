@@ -91,6 +91,47 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
     assert html =~ ~s(html[data-theme="dark"] .dk .dk-edit {)
   end
 
+  # LOOKS PR 4. TanStack steps the title by its `.doc-column` (the pane), not by
+  # the 600 px form inside it (styles.css :660, :1215): at 1440 it is 33 px.
+  test "the title steps by the pane, not by the 600 px column", c do
+    {:ok, view, _html} = live(c.conn, c.desk)
+    html = render(view)
+
+    assert html =~
+             "@container panel (max-width: 600px) { .dk .dk-edit .dk-big-title { font-size: 27px;"
+
+    assert html =~
+             "@container panel (max-width: 464px) { .dk .dk-edit .dk-big-title { font-size: 21px;"
+
+    refute html =~ "dk-doc-column"
+  end
+
+  # TanStack `.input` (:672-675, :692-693) and `.btn-create.btn-generate` (:793-795).
+  test "inputs are ringed, not bordered; Generate is TanStack's secondary button", c do
+    {:ok, view, _html} = live(c.conn, c.desk)
+    html = render(view)
+
+    assert html =~ "border: 0; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--dk-line); }"
+
+    assert html =~
+             ".dk .dk-edit .form-input:hover:not(:focus, :disabled, [readonly]) { box-shadow: inset 0 0 0 1px var(--dk-input-hover-ring); }"
+
+    assert html =~
+             ".dk .dk-edit .form-input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }"
+
+    assert html =~
+             ~S|.dk .dk-edit button[phx-click="slug-generate"] { box-sizing: border-box; flex: none; height: 35px; padding: 0 12px; border: 0; border-radius: 3px; background: var(--dk-bg-soft);|
+
+    # Light and dark values, TanStack's tokens.
+    assert html =~ "--dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);"
+    assert html =~ "--dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);"
+    # The pane is TanStack's page colour, and focus is its blue, not the Studio's green.
+    assert html =~ "--bg: var(--dk-bg); background: var(--bg);"
+
+    assert html =~
+             ".dk .dk-edit :where(button, a, [role=tab], [tabindex]):focus-visible { outline: 1px solid var(--dk-focus-ring);"
+  end
+
   test "control: the old Studio's editor keeps its type line and field count", c do
     {:ok, view, _html} = live(c.conn, c.studio)
     render_async(view, 5_000)
