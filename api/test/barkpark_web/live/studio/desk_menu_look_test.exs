@@ -112,6 +112,9 @@ defmodule BarkparkWeb.Studio.Desk.MenuLookTest do
 
     assert html =~ ~s(data-desk-icon="unpublish")
     assert html =~ ~s(data-desk-icon="restore")
+
+    assert html =~
+             ~r/>Open preview<span class="dk-menu-icon"[^>]*>\s*<svg[^>]*data-desk-icon="launch"/
   end
 
   test "the Share menu lists the URL first, as TanStack's" do

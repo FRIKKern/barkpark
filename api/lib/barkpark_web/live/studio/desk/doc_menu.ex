@@ -209,6 +209,13 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp icon("discard-draft"), do: "reset"
   defp icon("duplicate-doc"), do: "copy"
   defp icon("delete-doc"), do: "trash"
+  defp icon("preview"), do: "launch"
+  defp icon("toggle-content-preview"), do: "eye-open"
+  defp icon("toggle-diff"), do: "transfer"
+  defp icon("open-secondary-picker"), do: "split-vertical"
+  defp icon("close-secondary"), do: "close"
+  defp icon("view-graph"), do: "share"
+  defp icon("editor-set-mode"), do: "sparkles"
   defp icon(_name), do: nil
 
   # Each value as its phx-value attribute; the keys are this module's own
