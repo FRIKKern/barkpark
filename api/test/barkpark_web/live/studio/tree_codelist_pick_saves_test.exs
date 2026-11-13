@@ -139,4 +139,18 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
     assert doc.content["subject"] == "FB101"
     assert doc.title == "Volume one, retitled"
   end
+
+  test "a hand-made pick of a code the codelist does not hold is refused", c do
+    {:ok, view, _html} = live(c.conn, "#{c.studio}/#{c.type}/#{c.doc_id}")
+    pick(view, "#editor-form", "FB042")
+
+    row =
+      ~s(#editor-form [data-field-name="subject"] [phx-click="tree_node_select"][phx-value-code="FB042"])
+
+    view |> element(row) |> render_click(%{"code" => "NOPE"})
+    render(view)
+
+    assert stored_subject(c) == "FB042"
+    refute render(view) =~ ~s(value="NOPE")
+  end
 end
