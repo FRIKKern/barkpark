@@ -6,7 +6,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
 
   - The left says "Edited 5m ago" while there are edits not yet published,
     "Last published 2h ago" when there are none, and the save's own words
-    when a save went wrong ("Save failed", "Updated by another user").
+    when a save went wrong ("Save failed", "Updated by another user"). A
+    refused save names its field or its reason (`RefusedSave.status/1`).
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
     TanStack's is. A pressed button goes grey, so the focus moves to the "…"
@@ -19,6 +20,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias Phoenix.LiveView.JS
 
   # The save's words worth showing over the time: a save that did not land.
@@ -58,8 +60,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     at = Map.get(doc, :updated_at)
 
     cond do
-      assigns[:save_status] in @problems ->
-        BarkparkWeb.Studio.SaveStatus.label(assigns[:save_status])
+      RefusedSave.token(assigns) in @problems ->
+        BarkparkWeb.Studio.SaveStatus.label(RefusedSave.status(assigns))
 
       not match?(%DateTime{}, at) ->
         ""
