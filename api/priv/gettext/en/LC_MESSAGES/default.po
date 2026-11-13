@@ -367,6 +367,10 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/doc_status.ex:64
 #, elixir-autogen, elixir-format
 msgid "Draft: no changes"
+
+#: lib/barkpark_web/components/studio_components/editor.ex:898
+#, elixir-autogen, elixir-format
+msgid "All fields"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:66

@@ -73,6 +73,12 @@ defmodule BarkparkWeb.Studio.Desk.SearchLookTest do
     assert first =~ ~r/<span class="dk-badge">Post<\/span>/
     assert first =~ ~s(class="dk-dot")
     assert second =~ ~s(class="dk-ring dk-draft")
+    # The marks are named, not worded: a hit's text is its title and badge, as
+    # TanStack's DocPreview.
+    texts = for hit <- [first, second], do: hit |> LazyHTML.from_fragment() |> LazyHTML.text()
+    assert Enum.map(texts, &String.split/1) == [~w(Alpha Post), ~w(Beta Post)]
+    assert first =~ ~s(aria-label="Published")
+    assert second =~ ~s(aria-label="Draft")
   end
 
   test "the dialog is 800 wide at 12vh, rounded, with TanStack's shadow and ink" do

@@ -26,7 +26,14 @@ defmodule BarkparkWeb.Studio.Desk.FieldText do
   `field` (its `type` and, for an object, its `fields`).
   """
   @spec show(term(), map()) :: String.t()
-  def show(value, field \\ %{}), do: value |> text(field || %{}) |> blank() |> cut()
+  def show(value, field \\ %{}), do: value |> value(field) |> blank()
+
+  @doc """
+  The same text, but an empty value stays empty: the read-only pane draws it
+  as an empty box, as TanStack's disabled input.
+  """
+  @spec value(term(), map()) :: String.t()
+  def value(value, field \\ %{}), do: value |> text(field || %{}) |> cut()
 
   defp blank(""), do: "—"
   defp blank(text), do: text

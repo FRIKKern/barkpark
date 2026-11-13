@@ -369,6 +369,11 @@ msgstr "Utkast: upubliserte endringer"
 msgid "Draft: no changes"
 msgstr "Utkast: ingen endringer"
 
+#: lib/barkpark_web/components/studio_components/editor.ex:898
+#, elixir-autogen, elixir-format
+msgid "All fields"
+msgstr "Alle felt"
+
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:66
 #, elixir-autogen, elixir-format
 msgid "Last published %{ago}"

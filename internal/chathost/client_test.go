@@ -251,6 +251,9 @@ func TestRunnerPublishesInterruptedTerminalAfterCancel(t *testing.T) {
 	}
 }
 
+// A lease with events taken is closed rather than run again
+// (TestRunnerClosesALeaseItAlreadyStartedInsteadOfRunningItAgain); the closing
+// terminal still continues the server's cursor.
 func TestRunnerResumesEventCursorAfterReconnect(t *testing.T) {
 	var commandSent atomic.Bool
 	cursorSeen := make(chan uint64, 1)
