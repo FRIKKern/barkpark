@@ -271,6 +271,23 @@ defmodule Barkpark.Content.Codelists do
   end
 
   @doc """
+  Whether `code` is a value of the codelist (any level of a tree), or
+  `:unknown_list` when no such codelist is registered. One read for the
+  codelist, one `exists?` for the code. The validator's membership check
+  (`Barkpark.Content.Validation`, task-400a66c6ebd31026).
+  """
+  @spec member?(String.t(), String.t(), String.t()) :: boolean() | :unknown_list
+  def member?(plugin_name, list_id, code) when is_binary(code) do
+    case latest_codelist_id(plugin_name, list_id) do
+      %Codelist{id: codelist_id} ->
+        Repo.exists?(from v in Value, where: v.codelist_id == ^codelist_id and v.code == ^code)
+
+      _ ->
+        :unknown_list
+    end
+  end
+
+  @doc """
   Build the codelist as a nested tree.
 
   Returns a list of root maps `[%{value, label, children: [...]}]` walking

@@ -140,7 +140,7 @@ defmodule Barkpark.Content.Validation do
   # honestly describe caller-written text).
   @known_codes ~w(
     required pattern_mismatch expected_object expected_list
-    codelist_not_string codelist_empty codelist_has_whitespace
+    codelist_not_string codelist_empty codelist_has_whitespace not_in_codelist
     localized_text_shape language_key_not_string language_not_declared
     rich_text_shape text_not_string image_shape file_shape
     rect_shape rect_out_of_range missing_type unknown_type
@@ -972,8 +972,10 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
-  # codelist — shape only (string, non-empty, no whitespace). Membership
-  # checks against the registry are deferred to the rendering layer (W2.4).
+  # codelist — shape (string, non-empty, no whitespace), then membership: a
+  # code the registered codelist does not hold is an error finding
+  # (task-400a66c6ebd31026). Before, a hand-made post stored any code and it
+  # published. An unregistered codelist gives no finding, as before.
   defp walk_field(%Field{type: "codelist"} = f, value, path, level) do
     rules = field_rules(f, level)
 
@@ -996,7 +998,38 @@ defmodule Barkpark.Content.Validation do
         ])
 
       true ->
+        shape(level, codelist_membership_findings(f, value, path))
+    end
+  end
+
+  defp codelist_membership_findings(%Field{codelist_id: list_id} = f, value, path)
+       when is_binary(list_id) and list_id != "" do
+    plugin = codelist_plugin(f, list_id)
+
+    case Barkpark.Content.Codelists.member?(plugin, list_id, value) do
+      false ->
+        [
+          {path, "#{inspect(value)} is not a code in #{list_id}", :not_in_codelist,
+           %{codelist: list_id, value: value}}
+        ]
+
+      _ ->
         []
+    end
+  rescue
+    # No registry to read (a check with no database) is no finding.
+    _ -> []
+  end
+
+  defp codelist_membership_findings(_field, _value, _path), do: []
+
+  # The plugin the editor reads the codelist under (`Plugins.Adapter`): the
+  # field's own `plugin`, else the `codelistId` prefix, else "core".
+  defp codelist_plugin(%Field{raw: raw}, list_id) do
+    case {is_map(raw) && raw["plugin"], String.split(list_id, ":", parts: 2)} do
+      {plugin, _} when is_binary(plugin) and plugin != "" -> plugin
+      {_, [plugin, _]} when plugin != "" -> plugin
+      _ -> "core"
     end
   end
 
@@ -1236,7 +1269,12 @@ defmodule Barkpark.Content.Validation do
     rules = field_rules(f, level)
     findings = validate_field(value, rules, f.raw || %{})
     findings = apply_message(findings ++ check_numeric_bounds(value, rules), rules)
-    Enum.map(findings, &pair(path, &1))
+
+    # A value outside the field's `options.list` (task-400a66c6ebd31026),
+    # an error like the object-block check. An unset value is not a choice.
+    in_list = if blank?(value), do: [], else: list_option_findings(f, value, path)
+
+    Enum.map(findings, &pair(path, &1)) ++ shape(level, in_list)
   end
 
   @doc """
@@ -1281,8 +1319,13 @@ defmodule Barkpark.Content.Validation do
           value = fetch_field(block, child.name)
           child_path = path <> "/" <> (child.name || "")
 
+          # `walk_field` checks a set value against `options.list`; an unset
+          # one is checked here, as the block path always has.
           walk_field(child, value, child_path, level) ++
-            shape(level, list_option_findings(child, value, child_path))
+            shape(
+              level,
+              if(blank?(value), do: list_option_findings(child, value, child_path), else: [])
+            )
         end)
 
       {:error, reason} ->
