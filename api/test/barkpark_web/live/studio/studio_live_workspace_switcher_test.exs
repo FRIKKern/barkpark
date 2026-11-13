@@ -670,7 +670,19 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
     end
 
     test "a write after a refused project-less switch does NOT leak into the Default tenant",
-         %{conn: conn, empty_ws: empty_ws} do
+         %{conn: conn, empty_ws: empty_ws, acme_ws: acme_ws} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: acme_ws.id
+        )
+
       default_ws = Tenancy.get_default_workspace()
       default_project = Tenancy.get_default_project()
 
@@ -686,6 +698,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       refute assigns.current_workspace.id == empty_ws.id
       refute assigns.current_workspace.id == default_ws.id
       refute is_nil(assigns.current_project)
+      acme_before = doc_count(acme_ws.id, assigns.current_project.id)
 
       # New-document write under the (intact) prior scope. Dispatch the event
       # directly so the probe doesn't depend on which desk pane rendered the
@@ -696,6 +709,10 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       assert after_count == before_count,
              "TENANT LEAK: a write after a refused project-less switch landed in the Default tenant"
+
+      # The write happened, in acme: a refused write would pass the check above
+      # for nothing (#25947 review).
+      assert doc_count(acme_ws.id, assigns.current_project.id) == acme_before + 1
     end
 
     test "switching to a workspace WITH projects selects its default project and write lands there, not Default",
