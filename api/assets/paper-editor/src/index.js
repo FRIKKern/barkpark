@@ -76,6 +76,45 @@ function ensureStyles() {
   (document.head || document.documentElement).appendChild(link);
 }
 
+// Destroys the editor of an element that has left the page (not merely
+// moved: see `disconnectedCallback`). A function, not a method, so the
+// element's prototype stays the pinned boundary.
+function teardown(el) {
+  if (el._debounceTimer) {
+    clearTimeout(el._debounceTimer);
+    el._debounceTimer = null;
+  }
+  if (el._slash) {
+    el._slash.destroy();
+    el._slash = null;
+  }
+  if (el._wikilink) {
+    el._wikilink.destroy();
+    el._wikilink = null;
+  }
+  if (el._tag) {
+    el._tag.destroy();
+    el._tag = null;
+  }
+  if (el._bubble) {
+    el._bubble.destroy();
+    el._bubble = null;
+  }
+  if (el._editor) {
+    el._editor.destroy();
+    el._editor = null;
+  }
+  if (el._mount) {
+    el._mount.remove();
+    el._mount = null;
+  }
+  if (el._tableEditStatus) {
+    el._tableEditStatus.remove();
+    el._tableEditStatus = null;
+  }
+  el._settleTableLifecycle(false);
+}
+
 class BpPaperEditor extends HTMLElement {
   static CONTRACT_VERSION = CONTRACT_VERSION;
   static EDITOR_VERSION = EDITOR_VERSION;
@@ -393,44 +432,8 @@ class BpPaperEditor extends HTMLElement {
   // pending edit.
   disconnectedCallback() {
     queueMicrotask(() => {
-      if (!this.isConnected) this._teardown();
+      if (!this.isConnected) teardown(this);
     });
-  }
-
-  _teardown() {
-    if (this._debounceTimer) {
-      clearTimeout(this._debounceTimer);
-      this._debounceTimer = null;
-    }
-    if (this._slash) {
-      this._slash.destroy();
-      this._slash = null;
-    }
-    if (this._wikilink) {
-      this._wikilink.destroy();
-      this._wikilink = null;
-    }
-    if (this._tag) {
-      this._tag.destroy();
-      this._tag = null;
-    }
-    if (this._bubble) {
-      this._bubble.destroy();
-      this._bubble = null;
-    }
-    if (this._editor) {
-      this._editor.destroy();
-      this._editor = null;
-    }
-    if (this._mount) {
-      this._mount.remove();
-      this._mount = null;
-    }
-    if (this._tableEditStatus) {
-      this._tableEditStatus.remove();
-      this._tableEditStatus = null;
-    }
-    this._settleTableLifecycle(false);
   }
 
   flushPendingChanges() {
