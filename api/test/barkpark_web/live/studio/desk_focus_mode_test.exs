@@ -97,6 +97,23 @@ defmodule BarkparkWeb.Studio.DeskFocusModeTest do
     assert_raise ArgumentError, ~r/to patch, but got none/, fn -> assert_patch(view, 100) end
   end
 
+  # Measured in Chrome: a title element that changed tag between the modes
+  # (h2, then a div for the nav) made the patch re-insert the button after
+  # it, and Enter on the button left the focus on <body> every time.
+  test "the title is one element, the same tag, in both modes", c do
+    view = open(c, "#{c.base}/#{c.type};#{c.id}")
+
+    title =
+      ~s([data-pane-editing] > .pane-header > div.pane-header-title[role="heading"][aria-level="2"])
+
+    assert has_element?(view, title, "Focused")
+    view |> element(@enter) |> render_click()
+    assert has_element?(view, title <> ~s( > nav[aria-label="Breadcrumb"]))
+    view |> element(@exit) |> render_click()
+    assert has_element?(view, title, "Focused")
+    refute has_element?(view, "[data-pane-editing] > .pane-header > h2")
+  end
+
   test "a crumb opens its pane and ends focus mode", c do
     view = open(c, "#{c.base}/#{c.type};#{c.id}")
     view |> element(@enter) |> render_click()

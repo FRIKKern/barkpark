@@ -400,12 +400,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
         <%!-- In focus mode the title line is the panes it hides, each a way
-              back (`FocusMode`); a nav cannot sit in a heading, so there it is
-              a div. One title element in this place either way: a header row
-              that changed shape would move the focus mode button, and a moved
-              button loses the focus. --%>
-        <%= if assigns[:desk_focus] == @view.index do %>
-          <div class="pane-header-title">
+              back (`FocusMode`). One title element, the same tag, either way:
+              an element that changed (a span or h2 swapped for a div) makes the
+              patch re-insert the focus mode button after it, and a re-inserted
+              button loses the focus. A div with the heading role, because the
+              breadcrumb is a nav and a nav cannot sit in an h2. --%>
+        <div class="pane-header-title" role="heading" aria-level="2">
+          <%= if assigns[:desk_focus] == @view.index do %>
             <FocusMode.crumbs
               views={@desk_panes}
               titles={@titles}
@@ -414,10 +415,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               base={@base}
               title={@page_title}
             />
-          </div>
-        <% else %>
-          <h2 class="pane-header-title">{@page_title}</h2>
-        <% end %>
+          <% else %>
+            {@page_title}
+          <% end %>
+        </div>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
