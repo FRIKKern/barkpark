@@ -479,7 +479,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
   # Fail-closed workspace principal for a Cloud turn (D110). A concrete workspace
   # binary passes; nil, the sentinel `:global`/`"global"`, or a blank string
   # RAISE — the cloud profile never spawns an unattributed turn (mirror of the
-  # runtime.ex:349 `registered_host` Map.fetch! posture, never the fail-soft
+  # `Runtime.open/2` `registered_host` Map.fetch! posture, never the fail-soft
   # mcp empty-list pattern).
   defp cloud_workspace_id!(session_opts) do
     case Map.get(session_opts, :workspace_id) do
