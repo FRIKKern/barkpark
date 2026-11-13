@@ -336,6 +336,12 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav .dk-nav-more { width: 44px; height: 44px; }
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item { min-height: 44px; }
       }
+      /* Under 900 px the text tabs give way and More lists them first, as TanStack's bar moves its tools into its menu there: the bar stays one 52 px row (after the touch block, whose tabs are inline-flex). */
+      .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: none; }
+      @media (max-width: 899px) {
+        .studio-shell:has(.dk) .dk-nav .dk-nav-tab { display: none; }
+        .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
+      }
     </style>
     """
   end
