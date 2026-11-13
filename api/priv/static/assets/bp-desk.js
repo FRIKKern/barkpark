@@ -97,7 +97,8 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
       pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
-      pane + " > :not(.pane-header), " + pane + " .dk-close { display: none; }\n" +
+      // A strip reads its title alone: every control in its header goes too.
+      pane + " > :not(.pane-header), " + pane + " > .pane-header > :not(.pane-header-title), " + pane + " .dk-close { display: none; }\n" +
       pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
       // The editor pane has no header of its own: its strip reads its title.
       pane + '[data-pane-editing]::before { content: attr(data-desk-name); display: block; padding: 16px 0; margin: 0 auto; writing-mode: vertical-rl; font-weight: 600; font-size: var(--text-sm); white-space: nowrap; }\n'
@@ -546,6 +547,38 @@
     return { row: null, previous: null, wasCurrent: true, leaving: leaving, frames: frames, href: hit.href };
   }
 
+  // The search box's lit hit (J19). The keys move it here, at once and with
+  // nothing sent; the server draws the first hit lit with each new set of
+  // hits, and Enter sends the form's `lit` field (`DeskLive`).
+  function searchParts(doc) {
+    var list = doc.getElementById("desk-search-options");
+    return {
+      box: doc.getElementById("desk-search-input"),
+      field: doc.getElementById("desk-search-lit"),
+      options: list ? Array.prototype.slice.call(list.querySelectorAll('[role="option"]')) : []
+    };
+  }
+
+  // Which hits these are: a patch with other hits starts the light again.
+  function hitsKey(parts) {
+    return parts.options
+      .map(function (o) {
+        return o.getAttribute("href");
+      })
+      .join("\n");
+  }
+
+  // Only what differs is written: the observer that calls this sees its writes.
+  function light(parts, at) {
+    parts.options.forEach(function (o, i) {
+      var on = String(i === at);
+      if (o.getAttribute("aria-selected") !== on) o.setAttribute("aria-selected", on);
+    });
+    var lit = parts.options[at];
+    if (parts.box && lit && parts.box.getAttribute("aria-activedescendant") !== lit.id) parts.box.setAttribute("aria-activedescendant", lit.id);
+    if (parts.field && parts.field.value !== String(at)) parts.field.value = String(at);
+  }
+
   // The patch landed (the server's panes are in), or it never did.
   function settle(ahead, landed) {
     if (!ahead) return;
@@ -960,8 +993,45 @@
         items[to].focus();
       };
 
+      // The search box's light: kept for the hits it was moved over.
+      hook._search = { key: "", at: 0 };
+      hook._relight = function () {
+        var parts = searchParts(root.ownerDocument);
+        var key = hitsKey(parts);
+        if (key !== hook._search.key) hook._search = { key: key, at: 0 };
+        else if (parts.options.length) light(parts, hook._search.at);
+      };
+      hook._relight();
+      var searchArea = root.ownerDocument.querySelector(".dk-search");
+      if (searchArea && window.MutationObserver) {
+        hook._searchMarks = new window.MutationObserver(hook._relight);
+        hook._searchMarks.observe(searchArea, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["aria-selected", "aria-activedescendant", "value"]
+        });
+      }
+
       // Cmd+K / Ctrl+K: the search box, unless something else took the key.
+      // In the box, ArrowDown and ArrowUp move the lit hit, and Enter's form
+      // carries it.
       hook._onSearchKey = function (e) {
+        var inBox = e.target && e.target.id === "desk-search-input";
+        if (inBox && !e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter")) {
+          var parts = searchParts(root.ownerDocument);
+          if (!parts.options.length) return;
+          if (hitsKey(parts) !== hook._search.key) hook._search = { key: hitsKey(parts), at: 0 };
+          if (e.key !== "Enter") {
+            e.preventDefault();
+            var to = hook._search.at + (e.key === "ArrowDown" ? 1 : -1);
+            hook._search.at = Math.max(0, Math.min(parts.options.length - 1, to));
+            var lit = parts.options[hook._search.at];
+            if (lit.scrollIntoView) lit.scrollIntoView({ block: "nearest" });
+          }
+          light(parts, hook._search.at);
+          return;
+        }
         if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
         var box = root.ownerDocument.getElementById("desk-search-input");
         if (!box) return;
@@ -1287,6 +1357,7 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);
       Array.prototype.slice.call(root.children).forEach(function (el) {
         if (el.classList.contains(RESIZER)) root.removeChild(el);

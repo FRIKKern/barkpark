@@ -43,7 +43,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # :turn_started, on turn_completed, and on the terminal-error clause). Its
   # single write is an uncapped `<>` concat of every text_delta, and it persists
   # verbatim as `source_markdown` at BOTH persist sites (turn_completed and the
-  # terminal-error clause) via `persist_runtime_text/1`.
+  # terminal-error clause) via `persist_runtime_text/2`.
   #
   # D64's 262_144 bound governs only the DISPLAY tail (`StreamSegments`, a
   # live-render memory policy). The PERSIST path had no twin — a runaway turn
@@ -1406,7 +1406,7 @@ defmodule Barkpark.StudioChat.Recorder do
         |> publish_activity(%{state: :working, line: "writing…"})
 
       :approval_requested ->
-        ask = runtime_approval(event)
+        ask = Runtime.ApprovalAsk.from_event(event)
         persist_approval_ask(state.session_id, ask)
         broadcast(state, {:claude_chat_permission, ask})
 
@@ -1415,9 +1415,9 @@ defmodule Barkpark.StudioChat.Recorder do
         |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
 
       :turn_completed ->
-        persist_runtime_text(state)
+        persist_runtime_text(state, event)
         StudioChat.update_status(state.session_id, "active")
-        # `runtime_text` IS what `persist_runtime_text/1` just wrote, so it is
+        # `runtime_text` IS what `persist_runtime_text/2` just wrote, so it is
         # the durable text the D61 self-check must compare against.
         state = stable_settle(state, state.runtime_text)
 
@@ -1443,7 +1443,7 @@ defmodule Barkpark.StudioChat.Recorder do
         commit_rail(state, StudioChat.rail_apply_codex_item(state.rail_snapshot, item, lifecycle))
 
       kind when kind in [:error, :process_failed, :protocol_error] ->
-        persist_runtime_text(state)
+        persist_runtime_text(state, event)
         StudioChat.update_status(state.session_id, "exited")
         # Clear AFTER the offline publish: the D39 prior-state mapping must
         # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
@@ -1623,43 +1623,22 @@ defmodule Barkpark.StudioChat.Recorder do
     end
   end
 
-  defp runtime_approval(%Event{} = event) do
-    params = event.native["params"] || event.native[:params] || %{}
-
-    %{
-      request_id: event.approval_id,
-      tool_name: runtime_approval_name(event.native),
-      input: params,
-      title: nil
-    }
-  end
-
-  defp runtime_approval_name(native) do
-    case native["method"] || native[:method] do
-      "item/fileChange/requestApproval" -> "FileChange"
-      "item/permissions/requestApproval" -> "Permissions"
-      "item/commandExecution/requestApproval" -> "CommandExecution"
-      method when is_binary(method) -> method
-      _ -> "Approval"
-    end
-  end
-
-  defp persist_runtime_text(%{runtime_text: text, session_id: session_id})
+  defp persist_runtime_text(%{runtime_text: text, session_id: session_id}, event)
        when is_binary(text) and text != "" do
     # The explicit byte guard at the persist seam — the REAL bound covering both
     # persist sites (turn_completed and the terminal-error clause both funnel
     # here). Accumulation already caps in-flight, but this makes the durable size
     # provable at the one write, independent of how `runtime_text` was built.
-    source_markdown = cap_runtime_text(text)
+    metadata = Runtime.turn_outcome_metadata(event)
 
     persist(
       session_id,
-      %{role: "assistant", source_markdown: source_markdown, metadata: %{}},
+      %{role: "assistant", source_markdown: cap_runtime_text(text), metadata: metadata},
       "assistant"
     )
   end
 
-  defp persist_runtime_text(_state), do: :ok
+  defp persist_runtime_text(_state, _event), do: :ok
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
   # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the

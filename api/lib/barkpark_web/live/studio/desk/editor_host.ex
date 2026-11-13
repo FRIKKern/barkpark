@@ -147,6 +147,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp strip(socket), do: socket
 
+  @doc """
+  A document the editor's references can point at changed (`LiveRefresh`):
+  the strip reads its targets again, though its ids are the same.
+  """
+  def refs_changed(socket), do: socket |> assign(:desk_ref_ids, nil) |> strip()
+
   @doc "An event the page does not own is the editor's: the Studio's own handlers."
   # The card's Retry, when the document could not be read: read it again.
   def handle_event("desk-edit-retry", _params, %{assigns: %{edit_failed: true}} = socket),
@@ -158,6 +164,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # so a new document is placed by the event (and an optional `desk-pane`).
   def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
     do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
+
+  # Sent by hand with no type: nothing to create.
+  def handle_event("new-document", _params, socket), do: {:noreply, socket}
+
+  # A reference pick writes the editor's form. With no document in the editor
+  # (no form), or without its field and id, there is nothing to write.
+  def handle_event("select-ref", params, socket)
+      when not is_map_key(socket.assigns, :editor_form) or
+             not (is_map_key(params, "id") and is_map_key(params, "field")),
+      do: {:noreply, socket}
 
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
@@ -183,7 +199,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp ours({:noreply, socket}, how), do: {:noreply, settle(socket, how)}
   defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
-  defp settle(socket, how), do: socket |> steer(how) |> strip() |> assign(:panes, [])
+  defp settle(socket, how),
+    do: socket |> steer(how) |> strip() |> form_only() |> assign(:panes, [])
+
+  # A document the desk opens from a document node of its own (an
+  # `S.document()` child: a singleton) shows the form only, as Sanity's
+  # (singleton.spec:64): no view tabs, so no "Split pane right" (`pane/2`),
+  # and no type line over the title (`Desk.Style`). The Studio sets the tabs
+  # again on every rebuild, so they are cleared after each call it answers.
+  defp form_only(socket) do
+    if document_node?(List.last(socket.assigns[:chain] || [])),
+      do: assign(socket, :editor_views, []),
+      else: socket
+  end
+
+  # A doc pane that carries its desk node (`Tree.opens/1`, `Panes.parse_singleton/2`).
+  defp document_node?(%{kind: :doc, node: node}) when is_binary(node), do: true
+  defp document_node?(_pane), do: false
 
   # ── the Studio's navigation, read against the desk's chain ────────────────
 
@@ -191,11 +223,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # joins its path with ";") is read back as that Studio path and answered with
   # the desk's own URL. Anything else (a navigate, a URL with a query, a patch
   # with no document handed over) goes out as the Studio printed it.
+  #
+  # A patch to a path outside the desk (the Studio opens another dataset when
+  # the URL's does not exist) is no patch of this page: it leaves for it.
   defp steer(%{redirected: {:live, :patch, %{to: to}}} = socket, how) do
     with %{desk_base: base} when is_binary(base) <- socket.assigns,
+         {:in, true} <- {:in, to == base or String.starts_with?(to, [base <> "/", base <> "?"])},
          {:ok, asked} <- asked(to, base) do
       route(socket, asked, how)
     else
+      {:in, false} -> push_navigate(%{socket | redirected: nil}, to: to)
       _ -> socket
     end
   end
@@ -323,6 +360,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-document={document_node?(@view.pane)}
       data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
     >
@@ -338,7 +376,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               the last pane, so the editor moves to the new one and this pane
               shows the document read-only. --%>
         <.link
-          :if={!@edit_failed and !gone?(assigns)}
+          :if={!@edit_failed and !gone?(assigns) and !document_node?(@view.pane)}
           patch={Panes.split_right(@chain, @view.index, @base)}
           class="dk-split icon-btn"
           aria-label={gettext("Split pane right")}
@@ -402,9 +440,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             between the rows with ids would make the patch move the
             references and the editor below it. --%>
       <div id={"#{@view.id}-notes"}>
-        <%!-- Not over a document the editor did not open: it has no current one. --%>
+        <%!-- Not over a document the editor did not open: it has no current
+              one, or still holds the one before (the read failed). --%>
         <p
-          :for={note <- (assigns[:editor_doc] && PaneComponent.left_out(@view.pane)) || []}
+          :for={
+            note <-
+              (assigns[:editor_doc] && !@edit_failed && PaneComponent.left_out(@view.pane)) || []
+          }
           class="dk-note"
           data-desk-left-out
         >
