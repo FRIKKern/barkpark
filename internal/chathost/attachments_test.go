@@ -301,16 +301,26 @@ func TestFetchAttachmentUnauthorizedIsRevocation(t *testing.T) {
 	}
 }
 
-// commandWith decodes a leased command the way Client.Commands does, so the
-// references carry the JSON decoder's own types.
+// commandWith decodes a leased send_turn the way Client.Commands does, so the
+// references carry the JSON decoder's own types. The shape is the server's:
+// the references are in the command's payload, beside the content.
 func commandWith(t *testing.T, attachments string) RemoteCommand {
 	t.Helper()
 	var command RemoteCommand
-	raw := `{"lease_id":"lease-1","epoch":1,"command":{"kind":"send_turn","content":"look"` + attachments + `}}`
+	raw := `{"lease_id":"lease-1","epoch":1,"command":{"operation":"send_turn","payload":{"content":"look"` + attachments + `}}}`
 	if err := json.Unmarshal([]byte(raw), &command); err != nil {
 		t.Fatal(err)
 	}
 	return command
+}
+
+func payloadOf(t *testing.T, command RemoteCommand) map[string]any {
+	t.Helper()
+	payload, ok := command.Command["payload"].(map[string]any)
+	if !ok {
+		t.Fatal("fixture: the command has no payload")
+	}
+	return payload
 }
 
 func refJSON(ref AttachmentRef) string {
@@ -416,7 +426,7 @@ func TestSendTurnRefusesAMalformedAttachmentReference(t *testing.T) {
 	for name, attachments := range malformed {
 		client, requests := attachmentServer(t, map[string]string{good.ID: envelope(good.ID, "image/png", len(data), data)})
 		command := commandWith(t, `,"attachments":`+attachments)
-		if _, err := ParseAttachmentRefs(command.Command); err == nil {
+		if _, err := ParseAttachmentRefs(payloadOf(t, command)); err == nil {
 			t.Fatalf("%s: ParseAttachmentRefs accepted %s", name, attachments)
 		}
 		got, err := client.Attachments(context.Background(), command)
@@ -432,7 +442,7 @@ func TestSendTurnRefusesAMalformedAttachmentReference(t *testing.T) {
 
 func TestParseAttachmentRefsReadsTheLeasedShape(t *testing.T) {
 	good := refFor(pngBytes("png"), "image/png")
-	refs, err := ParseAttachmentRefs(commandWith(t, `,"attachments":[`+refJSON(good)+`]`).Command)
+	refs, err := ParseAttachmentRefs(payloadOf(t, commandWith(t, `,"attachments":[`+refJSON(good)+`]`)))
 	if err != nil || len(refs) != 1 || refs[0] != good {
 		t.Fatalf("got %+v err=%v want %+v", refs, err, good)
 	}

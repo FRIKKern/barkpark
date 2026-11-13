@@ -52,12 +52,12 @@ func refuse(format string, args ...any) *AttachmentError {
 	return &AttachmentError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// ParseAttachmentRefs reads the image references of a leased command
-// (RemoteCommand.Command). No "attachments" key means none. Anything other
-// than a list of at most MaxAttachments objects, each with exactly a valid id,
-// media_type and byte_size, is refused whole.
-func ParseAttachmentRefs(command map[string]any) ([]AttachmentRef, error) {
-	raw, present := command["attachments"]
+// ParseAttachmentRefs reads the image references of a leased command's
+// payload (RemoteCommand.Command["payload"]). No "attachments" key means none.
+// Anything other than a list of at most MaxAttachments objects, each with
+// exactly a valid id, media_type and byte_size, is refused whole.
+func ParseAttachmentRefs(payload map[string]any) ([]AttachmentRef, error) {
+	raw, present := payload["attachments"]
 	if !present {
 		return nil, nil
 	}
@@ -232,11 +232,14 @@ func (c *Client) Attachment(ctx context.Context, leaseID string, ref AttachmentR
 }
 
 // Attachments fetches every image a leased command references, in the
-// command's order. Any refused reference or failed fetch fails the whole set:
-// the result is nil, never a partial list. A bad reference is refused before
-// the first request.
+// command's order. The references are in the command's payload
+// (command.Command["payload"]["attachments"]), where the server leases them.
+// Any refused reference or failed fetch fails the whole set: the result is
+// nil, never a partial list. A bad reference is refused before the first
+// request.
 func (c *Client) Attachments(ctx context.Context, command RemoteCommand) ([]Attachment, error) {
-	refs, err := ParseAttachmentRefs(command.Command)
+	payload, _ := command.Command["payload"].(map[string]any)
+	refs, err := ParseAttachmentRefs(payload)
 	if err != nil {
 		return nil, err
 	}
