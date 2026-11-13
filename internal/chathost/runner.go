@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -26,6 +27,10 @@ type Runner struct {
 
 	mu     sync.Mutex
 	active map[string]activeCommand
+	// ended: leases this process ran to an end the server took. A poll answered
+	// before that end landed still lists the lease; it is not started again.
+	// An entry goes when a poll no longer lists its lease.
+	ended map[string]bool
 }
 
 type activeCommand struct {
@@ -44,6 +49,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.HeartbeatInterval = 15 * time.Second
 	}
 	r.active = make(map[string]activeCommand)
+	r.ended = make(map[string]bool)
 
 	poll := time.NewTicker(r.PollInterval)
 	heartbeat := time.NewTicker(r.HeartbeatInterval)
@@ -63,6 +69,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		r.forgetEnded(commands)
 		for _, command := range commands {
 			r.start(ctx, command)
 		}
@@ -150,7 +157,7 @@ func (r *Runner) logf(format string, args ...any) {
 
 func (r *Runner) start(parent context.Context, command RemoteCommand) {
 	r.mu.Lock()
-	if _, exists := r.active[command.LeaseID]; exists {
+	if _, exists := r.active[command.LeaseID]; exists || r.ended[command.LeaseID] {
 		r.mu.Unlock()
 		return
 	}
@@ -167,28 +174,127 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 			cancel()
 		}()
 
+		// The cursor moves only when the server took the event. A refused event
+		// keeps its cursor, so the terminal that follows it is not a gap the
+		// server refuses (cursor_gap).
 		cursor := command.LastCursor
-		emit := func(event map[string]any) error {
+		publish := func(ctx context.Context, event map[string]any) error {
+			if err := r.publish(ctx, command, cursor+1, event); err != nil {
+				return err
+			}
 			cursor++
-			key := fmt.Sprintf("%s:%d:%d", command.LeaseID, command.Epoch, cursor)
-			return r.Client.Publish(ctx, command, cursor, key, event)
+			return nil
 		}
-		if err := r.Handler.Handle(ctx, command, emit); err != nil {
+		terminal := func(state string, err error) {
+			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), terminalPublishTimeout)
+			defer publishCancel()
+			if perr := publish(publishCtx, map[string]any{
+				"kind":           "terminal",
+				"terminal_state": state,
+				"error":          map[string]any{"message": err.Error()},
+			}); perr != nil {
+				r.logf("lease %s: its %s terminal was not taken: %v", command.LeaseID, state, perr)
+				return
+			}
+			r.markEnded(command.LeaseID)
+		}
+
+		// The server hands a lease out again on every poll until it holds a
+		// completed event. One it already took events for was started before,
+		// here or by an earlier host process, and that run is gone. Running it
+		// again restarts the turn from the top: a second paid provider run,
+		// a second reply, and, when the first run died because its events were
+		// refused, the same failure again on every poll (task-1fa6009d589cd92a).
+		// The lease is closed instead.
+		if command.LastCursor > 0 {
+			err := fmt.Errorf("this command was cut off after %d events on the host and is not run twice", command.LastCursor)
+			r.logf("lease %s: %v", command.LeaseID, err)
+			terminal("error", err)
+			return
+		}
+
+		if err := r.Handler.Handle(ctx, command, func(event map[string]any) error { return publish(ctx, event) }); err != nil {
 			terminalState := "error"
 			if errors.Is(err, context.Canceled) {
 				terminalState = "interrupted"
 			}
-			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
-			defer publishCancel()
-			cursor++
-			key := fmt.Sprintf("%s:%d:%d", command.LeaseID, command.Epoch, cursor)
-			_ = r.Client.Publish(publishCtx, command, cursor, key, map[string]any{
-				"kind":           "terminal",
-				"terminal_state": terminalState,
-				"error":          map[string]any{"message": err.Error()},
-			})
+			r.logf("lease %s ended %s: %v", command.LeaseID, terminalState, err)
+			terminal(terminalState, err)
+			return
 		}
+		r.markEnded(command.LeaseID)
 	}()
+}
+
+func (r *Runner) markEnded(leaseID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ended != nil {
+		r.ended[leaseID] = true
+	}
+}
+
+func (r *Runner) forgetEnded(listed []RemoteCommand) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for leaseID := range r.ended {
+		if !slices.ContainsFunc(listed, func(c RemoteCommand) bool { return c.LeaseID == leaseID }) {
+			delete(r.ended, leaseID)
+		}
+	}
+}
+
+const (
+	// A refused event is retried for this long before the turn gives up.
+	maxPublishOutage = 2 * time.Minute
+	// Bound on the terminal publish after the run has ended.
+	terminalPublishTimeout = 30 * time.Second
+)
+
+// publish sends one event at cursor and retries an answer that retrying can
+// heal (network, timeout, 5xx, 408, 429) with the same cursor and key, so the
+// server dedupes a retry of an event it already took. A 429 waits out its
+// Retry-After. One refused event used to end the turn.
+func (r *Runner) publish(ctx context.Context, command RemoteCommand, cursor uint64, event map[string]any) error {
+	key := fmt.Sprintf("%s:%d:%d", command.LeaseID, command.Epoch, cursor)
+	giveUp := time.Now().Add(maxPublishOutage)
+	for failures := 0; ; failures++ {
+		err := r.Client.Publish(ctx, command, cursor, key, event)
+		if err == nil {
+			if failures > 0 {
+				r.logf("lease %s: events taken again after %d refused attempts", command.LeaseID, failures)
+			}
+			return nil
+		}
+		if ctx.Err() != nil || !Transient(err) || time.Now().After(giveUp) {
+			return err
+		}
+		if failures == 0 {
+			r.logf("lease %s: event %d refused, retrying: %v", command.LeaseID, cursor, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(r.publishWait(err, failures)):
+		}
+	}
+}
+
+func (r *Runner) publishWait(err error, failures int) time.Duration {
+	var status *StatusError
+	if errors.As(err, &status) && status.RetryAfter > 0 {
+		return min(status.RetryAfter, maxRetryWait)
+	}
+	base := r.PollInterval
+	if base <= 0 {
+		base = time.Second
+	}
+	if failures < 16 {
+		if grown := base << failures; grown > 0 && grown < maxRetryWait {
+			return grown
+		}
+	}
+	return maxRetryWait
 }
 
 func (r *Runner) cancelAll() {
