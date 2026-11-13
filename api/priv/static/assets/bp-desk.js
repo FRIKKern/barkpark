@@ -746,6 +746,19 @@
       // The focus on a pane itself, kept through the patches that rewrite its
       // attributes, until the editor moves it or the URL changes.
       hook._held = null;
+      hook._landOnRow = function () {
+        window.setTimeout(function () {
+          var doc = root.ownerDocument;
+          if (doc.activeElement && doc.activeElement !== doc.body) return;
+          var left = panes(root).filter(function (el) {
+            return !el.hasAttribute("data-desk-leaving");
+          });
+          var last = left[left.length - 1];
+          var row = last && (last.querySelector(ROW + ".selected") || last.querySelector(ROW));
+          if (row) row.focus({ preventScroll: true });
+          else hook._holdPane(last);
+        }, 0);
+      };
       hook._holdPane = function (pane) {
         if (!pane) return;
         hook._held = { path: window.location.pathname, index: pane.getAttribute("data-pane-index") };
@@ -850,6 +863,8 @@
         hook._path = window.location.pathname;
         var inside = hook._wasInside;
         hook._wasInside = false;
+        var crumb = hook._crumb;
+        hook._crumb = false;
         if (doc.activeElement && doc.activeElement !== doc.body) return;
         var again =
           href &&
@@ -864,17 +879,26 @@
           var left = panes(root).filter(function (el) {
             return !el.hasAttribute("data-desk-leaving");
           });
-          hook._holdPane(left[left.length - 1]);
+          var last = left[left.length - 1];
+          // A focus mode crumb opened that pane: its selected row (its first
+          // when none is) takes the focus, as a Tab into the list would. After
+          // this task: the patch is still re-drawing the panes when the page
+          // says it stopped loading, and a row focused now is re-drawn blurred.
+          if (crumb) return hook._landOnRow();
+          hook._holdPane(last);
         }
       };
       // Whether the focus was on a link of the desk when it was followed (a
       // mouse click focuses the link too).
       hook._path = window.location.pathname;
       hook._wasInside = false;
+      hook._crumb = false;
       hook._noteFocus = function (e) {
-        var link = e.target.closest ? e.target.closest("a[href]") : null;
+        // A focus mode crumb is a button that patches (`FocusMode.crumbs`).
+        var link = e.target.closest ? e.target.closest("a[href], button.dk-crumb") : null;
         if (e.type === "keydown" && e.key !== "Enter") return;
         hook._wasInside = !!link && root.ownerDocument.activeElement === link;
+        hook._crumb = hook._wasInside && link.matches("button.dk-crumb");
       };
 
       // A document action pressed from the keyboard that the answer takes

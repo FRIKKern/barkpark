@@ -175,6 +175,45 @@ window.dispatchEvent(new window.Event("phx:page-loading-stop"));
 assert.equal(window.document.activeElement, window.document.getElementById("p0"), "the pane that is last now has the focus, not <body>");
 assert.equal(window.document.getElementById("p0").getAttribute("tabindex"), "-1");
 
+// ── A focus mode crumb from the keyboard: the pane it opens, at its selected row ──
+// (feel walk 2: Enter on a crumb left the focus on <body>.)
+el.insertAdjacentHTML("beforeend", list());
+window.history.replaceState({}, "", `${BASE}/post;b`);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+el.insertAdjacentHTML(
+  "beforeend",
+  `<section class="pane-column dk-pane" id="pc" data-pane-index="2" data-pane-kind="doc" data-desk-focused><div class="pane-header">` +
+    `<div class="pane-header-title" role="heading" aria-level="2"><nav aria-label="Breadcrumb">` +
+    `<button type="button" class="dk-crumb">Structure</button><button type="button" class="dk-crumb">Posts</button></nav></div></div></section>`,
+);
+rowTo("post;b").classList.add("selected");
+const crumb = window.document.querySelectorAll("#pc .dk-crumb")[1];
+crumb.focus();
+key("Enter");
+crumb.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+// The patch: the document pane goes, and the crumb with it.
+window.document.getElementById("pc").remove();
+assert.equal(window.document.activeElement, window.document.body, "the crumb went with its pane (the defect)");
+window.history.replaceState({}, "", `${BASE}/post`);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+// After the patch's task: a row focused while it still re-draws is blurred.
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(focused(), "Beta", "the opened list's selected row has the focus");
+// No row selected: its first.
+rowTo("post;b").classList.remove("selected");
+el.insertAdjacentHTML("beforeend", `<section class="pane-column dk-pane" id="pc" data-pane-index="2" data-pane-kind="doc"><button type="button" class="dk-crumb">Posts</button></section>`);
+window.history.replaceState({}, "", `${BASE}/post;a`);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+window.document.querySelector("#pc .dk-crumb").focus();
+key("Enter");
+window.document.getElementById("pc").remove();
+window.history.replaceState({}, "", `${BASE}/post`);
+window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(focused(), "Alpha", "no selected row: the first");
+assert.equal(window.document.getElementById("p1").getAttribute("tabindex"), null, "a row, not the pane, has it");
+window.document.getElementById("p1").remove();
+
 // ── Publish by Enter: the answer takes the button away, the "…" beside it gets the focus ──
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const menuButton = (id) => `<div class="dk-doc-menu"><button type="button" id="${id}" aria-haspopup="menu">…</button></div>`;
