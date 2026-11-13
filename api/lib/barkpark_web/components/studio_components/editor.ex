@@ -783,7 +783,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
         <div class={"editor-with-preview " <> if(@show_content_preview, do: "has-onix-preview", else: "")}>
         <div class="editor-body editor-panel-main">
-          <%= if @editor_schema do %>
+          <%= if @editor_schema && desk?(@parent_assigns) do %>
+            <%!-- The desk draws the type's name and the title over the form,
+                  as the TanStack Studio does (`Desk.DocStyle`). --%>
+            <div class="editor-meta dk-form-head">
+              <div class="dk-kind">{@editor_schema.title}</div>
+              <div class="dk-big-title">{BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}</div>
+            </div>
+          <% end %>
+          <%= if @editor_schema && !desk?(@parent_assigns) do %>
             <div class="editor-meta">
               <%!-- A schema's `:icon` is workspace DATA and nullable, so it gets
                     the same `drawable_icon/1` guard `tab_icon/1` and
