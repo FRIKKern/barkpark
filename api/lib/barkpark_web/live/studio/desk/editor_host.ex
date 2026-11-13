@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
@@ -196,7 +197,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
   # the old form that were never sent went with it.
   def handle_event("desk-discard-seen", params, socket) do
-    socket = if params["lost"] == true, do: Discarded.drop(socket), else: socket
+    socket = if params["lost"] == true, do: Discarded.drop(socket, params["text"]), else: socket
     {:noreply, Discarded.seen(socket)}
   end
 
@@ -414,6 +415,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
+        <%!-- The TanStack Studio's Published / Draft pills (`DocStatus`). With
+              the form's big title drawn (`Desk.DocStyle`), the title below is
+              for screen readers only, unless it holds focus mode's way back. --%>
+        <DocStatus.chips
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          {DocStatus.state(assigns)}
+        />
         <%!-- In focus mode the title line is the panes it hides, each a way
               back (`FocusMode`). One title element, the same tag, either way:
               an element that changed (a span or h2 swapped for a div) makes the
@@ -525,6 +533,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <Discarded.note
           :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)}
           dropped={Discarded.dropped?(assigns)}
+          lost_text={Discarded.lost_text(assigns)}
+          cleared={Discarded.cleared?(assigns)}
         />
       </div>
       <%!-- Always in the page, shown when there is a link: a pick adds the
@@ -572,14 +582,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           {Components.studio_live_shell(assigns)}
         <% end %>
       </div>
-      <%!-- Sanity's pane footer has the same actions behind its own "…"
-            ("Open document actions"); the desk draws only that button there.
-            It is the pane's last child, so its coming and going moves nothing. --%>
-      <div :if={!@edit_failed and !gone?(assigns) and DocMenu.items(assigns) != []}
-        id={"#{@view.id}-footer"}
-        class="dk-edit-footer"
-      >
-        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={DocMenu.items(assigns)} place={:footer} />
+      <%!-- Sanity's pane footer: what happened last, Publish, and the same
+            actions behind its own "…" ("Open document actions"),
+            `Desk.DocFooter`. It is the pane's last child, so its coming and
+            going moves nothing. --%>
+      <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
+      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer">
+        <BarkparkWeb.Studio.Desk.DocFooter.bar
+          id={"#{@view.id}-footer"}
+          status={BarkparkWeb.Studio.Desk.DocFooter.status(assigns)}
+          publish={Enum.find(items, &(&1.event == "publish"))}
+          menu_button={"#{@view.id}-footer-actions-button"}
+        />
+        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
       </div>
     </section>
     """

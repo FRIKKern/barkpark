@@ -6,12 +6,14 @@ defmodule BarkparkWeb.Studio.Desk.ShareMenu do
   clipboard and shows the toast. Nothing goes to the server.
 
   It is the same popover as the "…" menu (`DocMenu`), and takes its classes,
-  so `bp-desk.js` opens, closes and moves through it the same way.
+  so `bp-desk.js` opens, closes and moves through it the same way; and the
+  desk's one menu look (`Desk.Menu`), the URL first, as TanStack's.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.Desk.Panes
 
   attr :id, :string, required: true
@@ -48,33 +50,29 @@ defmodule BarkparkWeb.Studio.Desk.ShareMenu do
         popover
         role="menu"
         aria-labelledby={"#{@id}-button"}
-        class="dk-doc-menu-list"
+        class="dk-doc-menu-list dk-menu"
         style="position-anchor: --dk-share-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"
         data-desk-copy-failed={gettext("Could not copy to the clipboard")}
       >
-        <button
-          type="button"
+        <Menu.item
           role="menuitem"
           tabindex="-1"
-          popovertarget={@id}
-          popovertargetaction="hide"
-          data-desk-copy={@doc_id}
-          data-desk-copied={gettext("Document ID copied to clipboard")}
-        >
-          {gettext("Copy document ID")}
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          tabindex="-1"
+          icon="link"
           popovertarget={@id}
           popovertargetaction="hide"
           data-desk-copy={@url}
           data-desk-copy-origin
           data-desk-copied={gettext("Document URL copied to clipboard")}
-        >
-          {gettext("Copy document URL")}
-        </button>
+        >{gettext("Copy document URL")}</Menu.item>
+        <Menu.item
+          role="menuitem"
+          tabindex="-1"
+          icon="target"
+          popovertarget={@id}
+          popovertargetaction="hide"
+          data-desk-copy={@doc_id}
+          data-desk-copied={gettext("Document ID copied to clipboard")}
+        >{gettext("Copy document ID")}</Menu.item>
       </div>
       <%!-- Kept in the page, so a screen reader reads what is put in it. A
             popover, so it is over everything and no pane can box it in. --%>

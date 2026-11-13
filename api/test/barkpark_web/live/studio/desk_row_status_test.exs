@@ -91,4 +91,47 @@ defmodule BarkparkWeb.Studio.DeskRowStatusTest do
     # The ring first, then the dot, as TanStack's.
     assert both =~ ~r/dk-ring.*dk-dot/s
   end
+
+  # Audit: a list search's results are the same rows, so they carry the same
+  # tile and marks. They came back with neither.
+  test "a list search's results keep the tile and the status marks", %{conn: conn, base: base} do
+    {:ok, view, _html} = live(conn, "#{base}/#{@type_name}")
+    render_async(view, 5_000)
+
+    view
+    |> element(~s(section.pane.list .dk-list-search form))
+    |> render_change(%{"q" => "Only"})
+
+    found =
+      Enum.any?(1..250, fn _ ->
+        render_async(view, 5_000)
+
+        not has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Both") or
+          (Process.sleep(20) && false)
+      end)
+
+    assert found, "the search never narrowed the list"
+
+    draft = row(view, "Only draft")
+    assert draft =~ ~s(class="dk-media")
+    assert draft =~ "dk-ring"
+
+    published = row(view, "Only published")
+    assert published =~ ~s(class="dk-media")
+    assert published =~ "dk-dot"
+  end
+
+  test "the list search's clear button is the close glyph", %{conn: conn, base: base} do
+    {:ok, view, _html} = live(conn, "#{base}/#{@type_name}")
+    render_async(view, 5_000)
+
+    view
+    |> element(~s(section.pane.list .dk-list-search form))
+    |> render_change(%{"q" => "Only"})
+
+    assert has_element?(
+             view,
+             ~s(.dk-list-search button.search-clear[aria-label="Clear search"] svg[data-desk-glyph="close"])
+           )
+  end
 end

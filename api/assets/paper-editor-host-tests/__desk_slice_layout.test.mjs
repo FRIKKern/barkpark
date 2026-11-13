@@ -122,7 +122,7 @@ const arrow = (key) => {
 };
 assert.ok(arrow("ArrowRight").defaultPrevented);
 arrow("ArrowRight");
-assert.match(sheet(), /\[data-pane-index="2"\][^{]*\{ width: 352px; min-width: 352px; flex: 0 0 352px; \}/);
+assert.match(sheet(), /\[data-pane-index="2"\][^{]*\{ width: 352px; min-width: 352px; max-width: none; flex: 0 0 352px; \}/);
 assert.equal(separators()[0].getAttribute("aria-valuenow"), "352", "the separator says its value");
 arrow("ArrowLeft"); arrow("ArrowLeft"); arrow("ArrowLeft");
 assert.match(sheet(), /\[data-pane-index="2"\][^{]*\{ width: 320px;/, "never under 320 px");
