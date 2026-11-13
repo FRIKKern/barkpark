@@ -225,7 +225,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.id, data.title})
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
-    socket |> assign(:data, AsyncResult.ok(data)) |> share()
+    # Which key the result on screen was read for: while the pane reads for
+    # another, the last result stays (`shown_key`).
+    socket
+    |> assign(:data, AsyncResult.ok(data))
+    |> assign(:shown_key, socket.assigns.data_key)
+    |> share()
   end
 
   # Hand this pane's read, landed or failed, to the panes that asked for it.
@@ -303,8 +308,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           </button>
         </div>
         <%= if @data.ok? do %>
-          <%!-- Not over a document that was not found: it has no current one. --%>
-          <p :for={note <- (@data.result[:fields] && left_out(@pane)) || []} class="dk-note" data-desk-left-out>{note}</p>
+          <%!-- Not over a document that was not found: it has no current one.
+               Nor over the one before, still shown while this one is read. --%>
+          <p :for={note <- (@data.result[:fields] && assigns[:shown_key] == @data_key && left_out(@pane)) || []} class="dk-note" data-desk-left-out>{note}</p>
           <p :if={@data.result[:note]} class="dk-note">{@data.result.note}</p>
           <%!-- The TanStack Studio's names (ruling R1): a document list is a
                `role="list"` named after its pane, each row a `listitem` that

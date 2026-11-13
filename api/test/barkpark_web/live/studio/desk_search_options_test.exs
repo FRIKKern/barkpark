@@ -2,8 +2,10 @@ defmodule BarkparkWeb.Studio.DeskSearchOptionsTest do
   @moduledoc """
   The desk's search box is a combobox over its hits, as the TanStack Studio's
   (keyboard.spec.ts J19): the focus stays in the box, the hits are options in
-  a listbox, the first is lit as they come, ArrowDown and ArrowUp move the
-  light (`aria-activedescendant`), and Enter opens the lit hit.
+  a listbox, the first is lit as they come (`aria-activedescendant`).
+  ArrowDown and ArrowUp move the light in the browser with nothing sent
+  (`bp-desk.js`, `__desk_search_light.test.mjs`); Enter sends the lit index
+  in the form's `lit` field and opens that hit.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -86,32 +88,23 @@ defmodule BarkparkWeb.Studio.DeskSearchOptionsTest do
     assert lit(view) == first
   end
 
-  test "ArrowDown and ArrowUp move the light, and stop at the ends", %{conn: conn, base: base} do
+  test "the keys stay in the browser: the box sends no key event, the form carries the light",
+       %{conn: conn, base: base} do
     view = searched(conn, base, "optic")
-    [{one, _}, {two, _}, {three, _}] = options(view)
-    key = fn k -> view |> element(@input) |> render_keydown(%{"key" => k}) end
 
-    key.("ArrowDown")
-    assert lit(view) == two
-    assert {two, "true"} in options(view)
-
-    key.("ArrowDown")
-    key.("ArrowDown")
-    assert lit(view) == three
-
-    key.("ArrowUp")
-    key.("ArrowUp")
-    key.("ArrowUp")
-    assert lit(view) == one
+    assert attr(view, @input, "phx-keydown") == nil
+    assert attr(view, "#desk-search-form #desk-search-lit", "name") == "lit"
+    assert attr(view, "#desk-search-form #desk-search-lit", "value") == "0"
   end
 
   test "Enter opens the lit hit", %{conn: conn, base: base} do
     view = searched(conn, base, "optic")
-    view |> element(@input) |> render_keydown(%{"key" => "ArrowDown"})
-    second = attr(view, "#" <> lit(view), "href")
+    [_, {second, _}, _] = options(view)
+    href = attr(view, "#" <> second, "href")
 
-    view |> form("#desk-search-form") |> render_submit(%{"value" => "optic"})
-    assert_patch(view, second)
+    # The browser moved the light down one: the form says so.
+    view |> form("#desk-search-form") |> render_submit(%{"value" => "optic", "lit" => "1"})
+    assert_patch(view, href)
     # Its first field takes the focus once its editor is drawn (`bp-desk.js`).
     assert_push_event(view, "bp:focus-new-doc", %{id: "dso-" <> _})
   end
@@ -124,5 +117,13 @@ defmodule BarkparkWeb.Studio.DeskSearchOptionsTest do
     render_async(view, 5_000)
     assert attr(view, @input, "aria-expanded") == "false"
     assert lit(view) == nil
+  end
+
+  test "a lit index that is no hit opens the first", %{conn: conn, base: base} do
+    view = searched(conn, base, "optic")
+    first = attr(view, "#" <> lit(view), "href")
+
+    view |> form("#desk-search-form") |> render_submit(%{"value" => "optic", "lit" => "9"})
+    assert_patch(view, first)
   end
 end

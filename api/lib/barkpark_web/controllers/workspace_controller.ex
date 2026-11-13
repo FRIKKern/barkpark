@@ -105,11 +105,19 @@ defmodule BarkparkWeb.WorkspaceController do
     token = conn.assigns[:api_token]
     attrs = workspace_attrs(params)
 
-    with {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, token) do
+    with :ok <- refuse_dataset_bound(token),
+         {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, token) do
       conn
       |> put_status(:created)
       |> json(%{workspace: render_workspace(workspace)})
     end
+  end
+
+  # A dataset-bound token makes no project and no workspace
+  # (`ApiToken.dataset_bound?/1`). On the project route it is asked after the
+  # seat check, so a caller with no seat gets the answer it got before.
+  defp refuse_dataset_bound(token) do
+    if ApiToken.dataset_bound?(token), do: {:error, :forbidden_dataset}, else: :ok
   end
 
   @doc """
@@ -143,7 +151,8 @@ defmodule BarkparkWeb.WorkspaceController do
         if TenancyAuth.authorize(token, workspace.id, :write) == :ok do
           unless_archived(workspace, fn ->
             # A changeset error flows to the FallbackController (422).
-            with {:ok, project} <-
+            with :ok <- refuse_dataset_bound(token),
+                 {:ok, project} <-
                    Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
               conn
               |> put_status(:created)
