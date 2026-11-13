@@ -383,7 +383,21 @@ class BpPaperEditor extends HTMLElement {
     }
   }
 
+  // A move in the page (morphdom appends a moved node again: the narrow
+  // width bucket moves the pane) disconnects and connects the element in one
+  // task. Tearing the editor down then re-mounted it from `data-block`, which
+  // sits frozen inside phx-update="ignore": the editor showed the block as
+  // first drawn, and the next key saved that over the stored text
+  // (task-fe3f7a8fbe7a7858). So the teardown waits a microtask, and an
+  // element that is back in the page by then keeps its live editor and its
+  // pending edit.
   disconnectedCallback() {
+    queueMicrotask(() => {
+      if (!this.isConnected) this._teardown();
+    });
+  }
+
+  _teardown() {
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
