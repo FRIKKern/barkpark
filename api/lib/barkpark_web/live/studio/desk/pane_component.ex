@@ -396,7 +396,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               </span>
               <span class="pane-item-label">
                 <span class="dk-row-title">{entry.title}</span>
-                <span :if={entry[:sub]} class="dk-row-sub">{entry.sub}</span>
+                <%!-- A date-time in it is a marker: `PreviewDay` prints the day
+                     in the workspace's zone and format (06.09.2026). --%>
+                <span :if={entry[:sub]} class="dk-row-sub"><PreviewDay.text text={entry.sub} /></span>
               </span>
               <span :if={entry[:draft] || entry[:published]} class="dk-status">
                 <span :if={entry[:draft]} class="dk-ring dk-draft" title={gettext("Draft")}>

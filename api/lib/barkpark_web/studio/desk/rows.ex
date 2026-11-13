@@ -236,7 +236,10 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   defp entry(item, type) do
     %{
       title: text(item.title) || item.id,
-      sub: text(item[:meta]) || text(item[:updated]),
+      # The schema's list preview subtitle, or none: the TanStack row shows
+      # the title alone where the schema names no subtitle (LOOKS C4), not
+      # the Studio's "Updated 6h ago".
+      sub: text(item[:meta]),
       draft: item[:is_draft] == true,
       # The row's tile, as the TanStack Studio's preview media: the image its
       # list preview names, else the type's icon (the document icon for none).
@@ -246,12 +249,16 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
     }
   end
 
-  # Whether each row's document is published, for its status marks (the
-  # TanStack Studio's ring for a draft, dot for published, both when a
-  # published document has unpublished edits). A list shows one row per
-  # document, the draft when there is one, so a draft row asks whether its
-  # published version exists too: one read for the page, in the caller's scope.
-  defp published(entries, type, dataset, scope) do
+  @doc """
+  Whether each row's document is published, for its status marks (the
+  TanStack Studio's ring for a draft, dot for published, both when a
+  published document has unpublished edits). A list shows one row per
+  document, the draft when there is one, so a draft row asks whether its
+  published version exists too: one read for the page, in the caller's scope.
+  The list search's hits use it too.
+  """
+  @spec published([map() | :divider], String.t(), String.t(), keyword()) :: [map() | :divider]
+  def published(entries, type, dataset, scope) do
     drafts = for %{draft: true, next: %{id: id}} <- entries, do: id
 
     live =

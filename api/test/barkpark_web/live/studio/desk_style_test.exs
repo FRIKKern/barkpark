@@ -112,6 +112,31 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-row > .pane-item") =~ "border: 0"
   end
 
+  # Audit: the draft ring is drawn in --dk-caution-dot, the same orange the
+  # blue row swallows. On the blue row it is drawn in the row's own ink, as the
+  # published dot is; on the soft chain fill it is orange again.
+  test "the draft ring shows on a selected row and on the soft chain fill" do
+    assert rule(@css, ".dk .dk-row > a.pane-item.selected .dk-ring") =~
+             "box-shadow: inset 0 0 0 1.5px var(--dk-on-selected)"
+
+    chain =
+      ".dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving]))"
+
+    assert rule(@css, chain <> " .dk-row > a.pane-item.selected .dk-ring") =~
+             "box-shadow: inset 0 0 0 1.5px var(--dk-caution-dot)"
+  end
+
+  # Audit: the list search's clear button is TanStack's `.search-clear`: a
+  # 25 px icon button inside the box at its right edge, not a bare × on a line
+  # of its own.
+  test "the list search's clear button sits inside the box as a 25 px icon button" do
+    body = rule(@css, ".dk .dk-list-search .search-clear")
+    assert body =~ "position: absolute; right: 2px; top: 0;"
+    assert body =~ "width: 25px; height: 25px;"
+    assert body =~ "border: 0;"
+    assert rule(@css, ".dk .dk-list-search .search-clear:focus-visible") =~ "var(--dk-focus-ring)"
+  end
+
   test "reference chips and the close link have the rows' focus ring" do
     ring = "outline: 2px solid var(--primary); outline-offset: -2px;"
     assert rule(@css, ".dk a.pane-item:focus-visible") =~ ring
@@ -129,6 +154,24 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
       assert body =~ "min-width: 44px", sel
     end
 
+    # Audit: the mouse rules name the row and the hidden close link with more
+    # specific selectors, so a bare `.dk .pane-item` lost (rows stayed 33 px,
+    # the list pane's close stayed clipped to 1x1). The coarse block repeats
+    # those exact selectors; equal weight, later in the sheet, it wins.
+    row = rule(coarse, ".dk .dk-row > .pane-item")
+    assert row =~ "height: auto"
+    assert row =~ "min-height: 44px"
+
+    hidden =
+      ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible)"
+
+    shown = rule(coarse, hidden)
+    assert shown =~ "position: static"
+    assert shown =~ "clip-path: none"
+    assert shown =~ "min-width: 44px; min-height: 44px"
+
+    assert rule(coarse, ".dk .dk-list-search .search-clear") =~ "width: 44px; height: 44px"
+
     # The mouse layout keeps its sizes: no 44 px outside the coarse block.
     [mouse, _] = String.split(@css, "@media (pointer: coarse) {", parts: 2)
     refute mouse =~ "44px"
@@ -143,31 +186,39 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-row > a.pane-item:hover:not(.selected)") =~ "var(--dk-card-hover)"
   end
 
-  test "the search hits popover fits a phone screen" do
-    assert rule(@css, ".dk-search-hits") =~ "width: min(420px, calc(100% - 32px))"
+  # LOOKS A4: the search is a dialog as TanStack's, 800 px at 12vh and never
+  # wider than the screen less 16 px a side; its hits sit inside it.
+  test "the search dialog fits a phone screen, its hits inside it" do
+    assert rule(@css, ".dk-search-dialog") =~ "width: min(800px, calc(100vw - 32px))"
+    assert rule(@css, ".dk-search-dialog") =~ "margin: 12vh auto auto"
+    assert rule(@css, ".dk-search-hits") =~ "position: static; width: auto"
   end
 
   # Feel walk 2: the popover drew as the browser's default buttons in a black
-  # box, as no rule named its classes. TanStack's: a card, an uppercase
-  # label, padded rows and a check on the current sort.
-  test "the List options popover is a card like the document menu, with its label and a check" do
-    assert @css =~
-             ".dk .dk-list-menu { min-width: 220px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }"
-
-    assert @css =~ ~r/\.dk \.dk-list-menu \.menu-label \{[^}]*text-transform: uppercase/
-
-    assert @css =~
-             ~r/\.dk \.dk-list-menu \[role="menuitemradio"\] \{[^}]*border: 0; background: none;/
+  # box, as no rule named its classes. Now the desk's one menu look (LOOKS C1,
+  # `desk_menu_look_test.exs`): an uppercase label, padded rows and a check on
+  # the current sort.
+  test "the List options popover is the desk's menu, with its label and a check" do
+    assert rule(@css, ".dk .dk-menu .dk-menu-label") =~ "text-transform: uppercase"
+    assert rule(@css, ".dk .dk-menu-item") =~ "border: 0; border-radius: 3px; background: none;"
 
     assert @css =~
-             ~s(.dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓";)
+             ~s(.dk .dk-menu-item[aria-checked="true"]::after { content: "✓";)
   end
 
   # A choice already in use ("Default sort" while it is) is faint and lights
   # nothing on hover, as the TanStack Studio's list menu.
   test "a List options choice already in use is faint and has no hover" do
     assert @css =~
-             ~s|.dk .dk-list-menu [role="menuitemradio"][aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--fg) 14%, var(--bg-card)); }|
+             ~s|.dk .dk-menu-item[aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--dk-menu-fg) 14%, var(--dk-bg)); }|
+
+    lit =
+      rule(
+        @css,
+        ".dk :is(.dk-menu .dk-menu-item:hover, .dk-menu:not(:hover) .dk-menu-item:focus-visible):not(:disabled, [aria-disabled=\"true\"])"
+      )
+
+    assert lit =~ "background: var(--dk-selected)"
   end
 
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
