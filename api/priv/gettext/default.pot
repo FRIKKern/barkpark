@@ -346,6 +346,16 @@ msgstr ""
 msgid "Updated %{ago}"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:858
+#, elixir-autogen, elixir-format
+msgid "Reference actions"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:860
+#, elixir-autogen, elixir-format
+msgid "Replace"
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/doc_footer.ex:63
 #, elixir-autogen, elixir-format
 msgid "Edited %{ago}"
@@ -960,6 +970,7 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:79
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3836
 #: lib/barkpark_web/live/studio/sheet_grid.ex:4186
+#: lib/barkpark_web/studio_locale.ex:859
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr ""

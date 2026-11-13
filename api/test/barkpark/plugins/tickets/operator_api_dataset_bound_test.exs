@@ -12,9 +12,11 @@ defmodule Barkpark.Plugins.Tickets.OperatorApiDatasetBoundTest do
   @moduletag :requires_plugins
 
   import Barkpark.TenancyFixtures
+  import Phoenix.LiveViewTest
 
   alias Barkpark.{Auth, Content, Tenancy}
-  alias Barkpark.Plugins.Tickets.Thread
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Plugins.Tickets.{Keys, Thread}
 
   @own "bound-own"
   @prod "production"
@@ -129,6 +131,81 @@ defmodule Barkpark.Plugins.Tickets.OperatorApiDatasetBoundTest do
 
       create_ticket(minted["raw"])
       assert inbox(ws, @prod) =~ "FROM-THE-KEY"
+    end
+  end
+
+  # Key management was scoped by workspace only, so a bound token could list,
+  # pause, rotate and revoke a key of another dataset; rotate handed it a
+  # working production key (task-7c227c003965f5a4).
+  describe "managing an existing ticket key" do
+    setup %{ws: ws} do
+      keys =
+        for ds <- [@prod, @own], into: %{} do
+          {:ok, %{key: key}} =
+            Keys.mint(%{name: "KEY-OF-#{ds}", dataset: ds, workspace_id: ws.id})
+
+          {ds, key}
+        end
+
+      {:ok, keys: keys}
+    end
+
+    defp key_row(key), do: Barkpark.Repo.get!(ApiToken, key.id)
+
+    test "a dataset-bound token cannot see or touch another dataset's key", %{ws: ws, keys: keys} do
+      prod = keys[@prod]
+      base = "/v1/plugins/tickets/keys"
+
+      listed = bearer(ws, dataset_bound: true) |> get(base) |> response(200)
+      assert listed =~ "KEY-OF-#{@own}"
+      refute listed =~ "KEY-OF-#{@prod}"
+
+      for action <- ~w(rotate pause unpause) do
+        assert bearer(ws, dataset_bound: true)
+               |> post("#{base}/#{prod.id}/#{action}")
+               |> response(404)
+      end
+
+      assert bearer(ws, dataset_bound: true) |> delete("#{base}/#{prod.id}") |> response(404)
+
+      after_row = key_row(prod)
+      assert after_row.token_hash == prod.token_hash
+      assert is_nil(after_row.paused_at) and is_nil(after_row.revoked_at)
+    end
+
+    test "it still rotates a key of its own dataset", %{ws: ws, keys: keys} do
+      path = "/v1/plugins/tickets/keys/#{keys[@own].id}/rotate"
+      assert bearer(ws, dataset_bound: true) |> post(path) |> response(200)
+    end
+
+    test "an unbound token still manages every key of the workspace (control)", %{
+      ws: ws,
+      keys: keys
+    } do
+      listed = bearer(ws, []) |> get("/v1/plugins/tickets/keys") |> response(200)
+      assert listed =~ "KEY-OF-#{@own}" and listed =~ "KEY-OF-#{@prod}"
+
+      path = "/v1/plugins/tickets/keys/#{keys[@prod].id}/rotate"
+      assert bearer(ws, []) |> post(path) |> response(200)
+    end
+
+    test "the Studio key panel follows the same rule", %{ws: ws, keys: keys} do
+      raw = "tickets-bound-" <> Ecto.UUID.generate()
+      perms = ["read", "write", "admin"]
+      {:ok, _} = Auth.create_token(raw, "bound", @own, perms, ws.id, dataset_bound: true)
+      conn = scoped_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
+
+      {:ok, view, _} = live(conn, "/w/#{ws.slug}/p/default/studio/tickets")
+      html = render_click(view, "open_keys", %{})
+      assert html =~ "KEY-OF-#{@own}"
+      refute html =~ "KEY-OF-#{@prod}"
+
+      render_click(view, "rotate_key", %{"id" => keys[@prod].id})
+      render_click(view, "pause_key", %{"id" => keys[@prod].id})
+
+      after_row = key_row(keys[@prod])
+      assert after_row.token_hash == keys[@prod].token_hash
+      assert is_nil(after_row.paused_at)
     end
   end
 

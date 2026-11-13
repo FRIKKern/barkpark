@@ -1604,6 +1604,51 @@
         var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
         hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
       };
+      // Inspect's search (TanStack's InspectDialog `matches`): a node stays
+      // while its key, its value or anything under it holds the words, in any
+      // case; a branch that holds one opens; each count says how many of its
+      // keys it shows. Cleared, every branch is as it was before the search.
+      hook._inspectFilter = function (input) {
+        var q = input.value.trim().toLowerCase();
+        var panel = input.closest(".dk-inspect-panel");
+        var top = panel && panel.querySelector(".dk-inspect-tree > li");
+        if (!top) return;
+        var kids = function (el, sel) {
+          return Array.prototype.filter.call(el ? el.children : [], function (c) { return c.matches(sel); });
+        };
+        var has = function (el) { return !!el && el.textContent.toLowerCase().indexOf(q) !== -1; };
+        var walk = function (li, isTop) {
+          var details = kids(li, "details")[0];
+          var holder = details ? kids(details, "summary")[0] : li;
+          var key = kids(holder, ".dk-inspect-key")[0];
+          var hit = !q || isTop || has(key);
+          if (details) {
+            var shown = kids(kids(details, "ul")[0], "li").filter(function (c) { return walk(c, false); }).length;
+            if (shown > 0) hit = true;
+            var count = kids(holder, ".dk-inspect-count")[0];
+            if (count && count.dataset.one) {
+              var words = shown === 1 ? count.dataset.one : count.dataset.other.replace("{n}", String(shown));
+              count.textContent = count.dataset.brace + " " + words;
+            }
+            if (q) {
+              if (!("deskOpen" in details.dataset)) details.dataset.deskOpen = details.open ? "1" : "";
+              details.open = true;
+            } else if ("deskOpen" in details.dataset) {
+              details.open = details.dataset.deskOpen === "1";
+              delete details.dataset.deskOpen;
+            }
+          } else if (!hit) {
+            hit = has(kids(li, ".dk-inspect-value")[0]);
+          }
+          li.hidden = !hit;
+          return hit;
+        };
+        walk(top, true);
+      };
+      hook._onInspectSearch = function (e) {
+        if (e.target.matches && e.target.matches("[data-desk-inspect-search]")) hook._inspectFilter(e.target);
+      };
+      root.addEventListener("input", hook._onInspectSearch);
       root.addEventListener("keydown", hook._onInspectKey);
       root.addEventListener("keydown", hook._onDocKey);
       root.addEventListener("desk:show-modal", hook._onShowModal);

@@ -179,6 +179,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_focus_mode.test.mjs
           node ../paper-editor-host-tests/__desk_host_tests_listed.test.mjs
           node ../paper-editor-host-tests/__desk_list_menu_keys.test.mjs
+          node ../paper-editor-host-tests/__desk_reference_card.test.mjs
           node ../paper-editor-host-tests/__desk_search_light.test.mjs
           node ../paper-editor-host-tests/__desk_slice_keys.test.mjs
           node ../paper-editor-host-tests/__desk_slice_layout.test.mjs
@@ -186,6 +187,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_slice_nav.test.mjs
           node ../paper-editor-host-tests/__desk_slice_tips.test.mjs
           node ../paper-editor-host-tests/__desk_slice_inspect.test.mjs
+          node ../paper-editor-host-tests/__desk_inspect_search.test.mjs
           node ../paper-editor-host-tests/__desk_slice_discarded.test.mjs
           node ../paper-editor-host-tests/__desk_slice_unload.test.mjs
           node ../paper-editor-host-tests/__desk_slice_doc_keys.test.mjs
@@ -234,6 +236,7 @@ jobs:
           node ../paper-editor-host-tests/__picker_search_no_autosave.test.mjs
           node ../paper-editor-host-tests/__rte_keyboard.test.mjs
           node ../paper-editor-host-tests/__rte_reconnect.test.mjs
+          node ../paper-editor-host-tests/__rte_move_focus.test.mjs
           node ../paper-editor-host-tests/__rte_pt_blocks.test.mjs
           node ../paper-editor-host-tests/__rte_vocabulary.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs

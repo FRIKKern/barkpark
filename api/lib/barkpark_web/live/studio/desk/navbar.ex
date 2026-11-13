@@ -12,6 +12,11 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
   button, Tab moves from the button into it, Escape and a click outside close
   it (the browser's own popover).
 
+  Under 900 px the bar has no room for the text tabs: they give way and the
+  popover lists them first, as the TanStack Studio's bar puts its tools in its
+  menu there (styles.css `@media (max-width: 899px)`). Those copies carry no
+  `data-test-id`: the page's tab set stays one of each.
+
   The layout draws this only where `:desk_base` is set; every other page keeps
   `Nav.studio_tabs/1`.
   """
@@ -42,7 +47,7 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
         data-test-id="top-menu-tab"
       >{tab.label}</a>
       <button
-        :if={@more != []}
+        :if={@main != [] or @more != []}
         type="button"
         class="dk-nav-more"
         popovertarget="dk-nav-more"
@@ -53,12 +58,18 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
         <BarkparkWeb.Studio.Desk.Glyph.glyph name="ellipsis-horizontal" />
       </button>
       <div
-        :if={@more != []}
+        :if={@main != [] or @more != []}
         id="dk-nav-more"
         popover
         class="dk-nav-more-list"
         style="position-anchor: --dk-nav-more; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"
       >
+        <a
+          :for={tab <- @main}
+          href={tab.href}
+          class={["studio-tab dk-nav-item dk-nav-narrow", tab.active && "active"]}
+          aria-current={tab.active && "page"}
+        >{tab.label}</a>
         <%= for tab <- @more do %>
           <span
             :if={tab.disabled}

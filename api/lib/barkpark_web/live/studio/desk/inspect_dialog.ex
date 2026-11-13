@@ -18,7 +18,13 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   `JsonTree`; LOOKS C3): a card, the title in italics, and Parsed as its
   JSON tree in a monospace, each key and value in its syntax colour, every
   object and array open, each saying what it holds ("{…} 21 properties",
-  "[…] 3 items"). TanStack's search box over the tree is not drawn here.
+  "[…] 3 items").
+
+  Over the tree is TanStack's search box: a node stays while its key, its
+  value or anything under it holds the words (any case), every branch that
+  holds a match opens, and each count says how many of its keys it shows
+  ("{…} 2 properties"). `bp-desk.js` filters the tree as one types: the
+  dialog is `phx-update="ignore"`, so the page does not draw it again.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -83,6 +89,18 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
       <%!-- The one scroller (focus:165): the dialog fits the window, the body scrolls. --%>
       <div class="dk-inspect-body inspect-body">
         <div id={"#{@id}-parsed"} role="tabpanel" aria-labelledby={"#{@id}-tab-parsed"} class="dk-inspect-panel">
+          <label class="dk-inspect-search">
+            <BarkparkWeb.Studio.Desk.Glyph.glyph name="search" />
+            <input
+              type="text"
+              class="dk-inspect-search-input"
+              placeholder={gettext("Search")}
+              aria-label={gettext("Search")}
+              autocomplete="off"
+              spellcheck="false"
+              data-desk-inspect-search
+            />
+          </label>
           <ul class="dk-inspect-tree">
             <li>
               <details open>
@@ -122,11 +140,26 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   end
 
   attr :value, :any, required: true
+  # A count no document holds, printed in the words for many and then
+  # replaced by `{n}`: the translation keeps its own order around the number.
+  attr :sentinel, :integer, default: 9_999_991
 
   # What an object or an array holds, TanStack's: "{…} 21 properties", "[…] 3 items".
+  # The words for one and for many ride along, so the search can say how many
+  # it shows (`{n}` is the count).
   defp held(assigns) do
+    %{value: value, sentinel: sentinel} = assigns
+    many = count(value, sentinel) |> String.replace(Integer.to_string(sentinel), "{n}")
+
+    assigns =
+      assign(assigns, :words, %{
+        "data-brace" => brace(value),
+        "data-one" => count(value, 1),
+        "data-other" => many
+      })
+
     ~H"""
-    <span class="dk-inspect-count">{brace(@value)} {count(@value)}</span>
+    <span class="dk-inspect-count" {@words}>{brace(@value)} {count(@value)}</span>
     """
   end
 
@@ -153,10 +186,11 @@ defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   defp brace(map) when is_map(map), do: if(map_size(map) == 0, do: "{}", else: "{…}")
   defp brace(list), do: if(list == [], do: "[]", else: "[…]")
 
-  defp count(map) when is_map(map),
-    do: ngettext("1 property", "%{count} properties", map_size(map))
+  defp count(map) when is_map(map), do: count(map, map_size(map))
+  defp count(list), do: count(list, length(list))
 
-  defp count(list), do: ngettext("1 item", "%{count} items", length(list))
+  defp count(map, n) when is_map(map), do: ngettext("1 property", "%{count} properties", n)
+  defp count(_list, n), do: ngettext("1 item", "%{count} items", n)
 
   # A string as it reads, unquoted, as TanStack's; anything else as JSON.
   defp shown(value) when is_binary(value), do: value
