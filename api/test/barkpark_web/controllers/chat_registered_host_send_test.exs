@@ -108,6 +108,62 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
     assert length(send_turns(host, sid)) == 2
   end
 
+  test "a message naming a stored attachment leases a send_turn with its reference and no bytes",
+       %{host_id: host_id, raw: raw} do
+    prev = Application.get_env(:barkpark, Barkpark.StudioChat)
+    dir = Path.join(System.tmp_dir!(), "rhs-att-#{System.unique_integer([:positive])}")
+    Application.put_env(:barkpark, Barkpark.StudioChat, attachments_dir: dir)
+
+    on_exit(fn ->
+      File.rm_rf(dir)
+
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.StudioChat, prev),
+        else: Application.delete_env(:barkpark, Barkpark.StudioChat)
+    end)
+
+    png =
+      Base.decode64!(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+      )
+
+    sid =
+      json_conn(raw)
+      |> post(
+        "/v1/chat/sessions",
+        Jason.encode!(%{
+          provider: "claude",
+          execution_target: "registered_host",
+          execution_host_id: host_id
+        })
+      )
+      |> json_response(201)
+      |> Map.fetch!("id")
+
+    id =
+      json_conn(raw)
+      |> post("/v1/chat/sessions/#{sid}/attachments", Jason.encode!(%{data: Base.encode64(png)}))
+      |> json_response(201)
+      |> get_in(["attachment", "id"])
+
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions/#{sid}/messages",
+      Jason.encode!(%{content: "what is this?", attachments: [id]})
+    )
+    |> json_response(202)
+
+    host = Repo.get!(RegisteredHost, host_id)
+    assert [%{command: command}] = send_turns(host, sid)
+    assert command.payload.content == "what is this?"
+
+    assert command.payload.attachments == [
+             %{id: id, media_type: "image/png", byte_size: byte_size(png)}
+           ]
+
+    refute inspect(command) =~ Base.encode64(png), "the leased command must carry no bytes"
+  end
+
   test "a send to a revoked host is a permanent 422, not a retryable 503",
        %{ws: ws, host_id: host_id, raw: raw} do
     session =
