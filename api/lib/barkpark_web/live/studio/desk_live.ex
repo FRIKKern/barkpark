@@ -472,6 +472,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
+        default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
       />
       <% end %>
@@ -500,7 +501,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     }
   end
 
-  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+  defp menu(desk, view),
+    do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: [], default: "updated"}
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its

@@ -988,7 +988,8 @@
       // closed. Escape and a click outside are the popover's own, and both
       // give the focus back to the button.
       var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
-      var MENU_ITEM = '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])';
+      // A choice already in use (aria-disabled, kept hoverable for its tip) is skipped.
+      var MENU_ITEM = '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled]):not([aria-disabled="true"])';
       hook._onDocMenu = function (e) {
         var menu = e.target;
         if (!menu.matches || !menu.matches(MENU)) return;
