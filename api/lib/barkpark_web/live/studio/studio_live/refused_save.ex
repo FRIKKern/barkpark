@@ -53,8 +53,13 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   The refusal branch of the write: the save token and the reason, as words.
   A changeset, a hook's own text or a known tag; never an inspected term.
   """
-  def failed(socket, token, reason),
-    do: assign(socket, save_status: token, editor_save_error: reason_text(reason))
+  def failed(socket, token, reason) do
+    assign(socket,
+      save_status: token,
+      editor_save_error: reason_text(reason),
+      editor_save_error_fields: by_field(reason)
+    )
+  end
 
   @doc """
   Runs `writer.(socket, params, trigger)`, and when the store refuses it,
@@ -63,7 +68,14 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   """
   def write(socket, params, trigger, writer) when is_map(params) and is_function(writer, 3) do
     keys = target_keys(socket, params)
-    socket = assign(socket, editor_save_target: nil, editor_save_error: nil)
+
+    socket =
+      assign(socket,
+        editor_save_target: nil,
+        editor_save_error: nil,
+        editor_save_error_fields: nil
+      )
+
     out = writer.(socket, params, trigger)
 
     cond do
@@ -117,11 +129,19 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
   # The refused value goes into the form buffer in the shape a landed save
   # leaves there (`Forms.coerce_params/2`), with the reason beside it.
+  #
+  # A refusal that names its fields (an enforcing dataset's schema check)
+  # holds only a changed field it names, with that field's own words. When it
+  # names another field (the stored document already breaks a rule), nothing
+  # is held: the save region says which field, and the typed value stays in
+  # the form (`Fields.keep_unsaved_values/3`).
   defp hold(socket, _params, []), do: socket
 
   defp hold(socket, params, keys) do
+    named = socket.assigns[:editor_save_error_fields]
+    keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
+    reason = fn key -> (is_map(named) && named[key]) || socket.assigns[:editor_save_error] end
     values = params |> Forms.coerce_params(socket.assigns[:editor_schema]) |> Map.take(keys)
-    reason = socket.assigns[:editor_save_error]
     doc_key = doc_key(socket.assigns)
 
     held =
@@ -130,7 +150,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
         _ -> %{}
       end
 
-    held = Enum.reduce(values, held, fn {k, v}, acc -> Map.put(acc, k, {v, reason}) end)
+    held = Enum.reduce(values, held, fn {k, v}, acc -> Map.put(acc, k, {v, reason.(k)}) end)
 
     assign(socket,
       editor_refused: {doc_key, held},
@@ -232,6 +252,17 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     |> clip()
   end
 
+  defp reason_text({:schema_validation_failed, errors, _findings}),
+    do: reason_text({:schema_validation_failed, errors})
+
+  defp reason_text({:schema_validation_failed, errors}) when is_map(errors) do
+    errors
+    |> BarkparkWeb.StudioLocale.localize_findings()
+    |> Enum.sort_by(fn {field, _} -> to_string(field) end)
+    |> Enum.map_join(" · ", fn {field, messages} -> "#{field}: #{words(messages)}" end)
+    |> clip()
+  end
+
   defp reason_text({:rev_mismatch, _}),
     do: gettext("The document changed since you loaded it — reload and retry.")
 
@@ -240,6 +271,33 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   defp reason_text(reason) when is_atom(reason) and not is_nil(reason), do: tag(reason)
   defp reason_text({reason, _}) when is_atom(reason), do: tag(reason)
   defp reason_text(_reason), do: nil
+
+  # The schema check's findings by top-level field (`seo.description` and
+  # `links[1].title` belong to `seo` and `links`), each with its own words.
+  # nil for a refusal that names no fields.
+  defp by_field({:schema_validation_failed, errors, _findings}),
+    do: by_field({:schema_validation_failed, errors})
+
+  defp by_field({:schema_validation_failed, errors}) when is_map(errors) do
+    errors
+    |> BarkparkWeb.StudioLocale.localize_findings()
+    |> Enum.group_by(fn {field, _} ->
+      field |> to_string() |> String.split([".", "["]) |> hd()
+    end)
+    |> Map.new(fn {top, entries} ->
+      text =
+        Enum.map_join(entries, " · ", fn {field, messages} ->
+          if to_string(field) == top, do: words(messages), else: "#{field}: #{words(messages)}"
+        end)
+
+      {top, clip(text)}
+    end)
+  end
+
+  defp by_field(_reason), do: nil
+
+  defp words(messages),
+    do: messages |> List.wrap() |> Enum.filter(&is_binary/1) |> Enum.join("; ")
 
   defp tag(atom), do: atom |> Atom.to_string() |> String.replace("_", " ")
 

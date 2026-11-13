@@ -251,4 +251,106 @@ defmodule BarkparkWeb.Studio.RefusedSaveTest do
     assert has_element?(view, ~s([data-pane-editing][data-desk-save="Save failed"]))
     assert mark(view, "title") =~ "should be at most 255 character(s)"
   end
+
+  describe "a dataset that enforces its schema's rules" do
+    setup c do
+      type = c.type <> "_rules"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "RS rules",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{
+                "name" => "code",
+                "title" => "Code",
+                "type" => "string",
+                "validation" => %{"max" => 5}
+              },
+              %{
+                "name" => "must",
+                "title" => "Must",
+                "type" => "string",
+                "validation" => %{"required" => true}
+              }
+            ]
+          },
+          @dataset
+        )
+
+      # Stored before the dataset enforces: `rules-old` has no `must`.
+      for {id, content} <- [{"-ok", %{"code" => "abc", "must" => "here"}}, {"-old", %{}}] do
+        {:ok, _} =
+          Content.create_document(
+            type,
+            %{"doc_id" => c.doc_id <> id, "title" => "Rules", "content" => content},
+            @dataset
+          )
+      end
+
+      previous = Application.get_env(:barkpark, Barkpark.Content.Validation)
+      Application.put_env(:barkpark, Barkpark.Content.Validation, enforce_datasets: [@dataset])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, Barkpark.Content.Validation, previous),
+          else: Application.delete_env(:barkpark, Barkpark.Content.Validation)
+      end)
+
+      {:ok, type: type}
+    end
+
+    defp open_rules(c, id) do
+      {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type}/#{c.doc_id}#{id}")
+      view
+    end
+
+    defp post_form(view, name, form) do
+      view
+      |> element("#editor-form")
+      |> render_change(%{"_target" => ["doc", name], "doc" => form})
+    end
+
+    defp rules(c, id) do
+      {doc, _draft?, _published?} =
+        Content.fetch_doc_with_draft(c.type, c.doc_id <> id, @dataset)
+
+      content = doc.content || %{}
+      {doc.title, content["code"], content["must"]}
+    end
+
+    test "a value over its rule is held with the rule's words; the next field saves", c do
+      view = open_rules(c, "-ok")
+
+      post_form(view, "code", %{"title" => "Rules", "code" => "toolong", "must" => "here"})
+
+      assert mark(view, "code") =~ "Not saved: "
+      assert mark(view, "code") =~ "5"
+      assert status(view) == "Not saved: Code"
+
+      post_form(view, "title", %{"title" => "Typed", "code" => "toolong", "must" => "here"})
+
+      assert rules(c, "-ok") == {"Typed", "abc", "here"}
+      assert mark(view, "code") =~ "5"
+    end
+
+    test "a stored document that breaks a rule: the typed field is not blamed", c do
+      view = open_rules(c, "-old")
+
+      post_form(view, "title", %{"title" => "Typed", "code" => "", "must" => ""})
+
+      assert rules(c, "-old") == {"Rules", nil, nil}
+      assert mark(view, "title") == nil
+      assert status(view) =~ "Save failed: must: "
+      assert shown(view, "title") == "Typed"
+
+      post_form(view, "must", %{"title" => "Typed", "code" => "", "must" => "now"})
+
+      assert {"Typed", _code, "now"} = rules(c, "-old")
+      assert status(view) == "Saved"
+    end
+  end
 end
