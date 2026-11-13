@@ -10750,6 +10750,11 @@ msgstr "skrivebeskyttet — lagret som strukturerte data feltets redigerer ikke 
 msgid "read-only — the .scaffy source of truth; edit in the repo"
 msgstr "skrivebeskyttet — .scaffy-kilden er fasiten; rediger i repoet"
 
+#: lib/barkpark_web/components/fields/codelist_field.ex:197
+#, elixir-autogen, elixir-format
+msgid "%{code} (not in list)"
+msgstr "%{code} (ikke i listen)"
+
 #: lib/barkpark_web/components/fields/codelist_field.ex:181
 #: lib/barkpark_web/components/fields/composite_field.ex:563
 #, elixir-autogen, elixir-format
