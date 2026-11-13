@@ -154,8 +154,7 @@
     return now.length - s;
   }
 
-  function onRemoteValues(e) {
-    var values = (e && e.detail && e.detail.values) || {};
+  function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
     if (!(el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
@@ -166,6 +165,46 @@
     var end = shift(el.selectionEnd, change.was, change.value);
     el.value = change.value;
     el.setSelectionRange(start, end);
+  }
+
+  // task-35956a566dd2c862: per free-text field, the number of the value this
+  // page shows (`seqs`: [number of was, number of value]). A field showing the
+  // new value reports its number; one that did not take it (typing not yet
+  // sent) keeps reporting the value it was typed from. The post carries the
+  // map in the hidden `_bp_seen` input, and the server merges the post onto
+  // the stored text from that value (`RemoteValues.put_bases/3`).
+  function lf(text) {
+    return String(text).replace(/\r\n?/g, "\n");
+  }
+
+  function recordSeen(values, seqs) {
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen;
+    try {
+      seen = JSON.parse(input.value || "{}");
+    } catch (_) {
+      seen = {};
+    }
+    if (!seen || typeof seen !== "object") seen = {};
+    Object.keys(seqs).forEach(function (name) {
+      var pair = seqs[name];
+      var change = values[name];
+      var field = form.elements.namedItem(name);
+      if (!Array.isArray(pair) || !change || !field || typeof field.value !== "string") return;
+      // A textarea's value has its line breaks as "\n" only.
+      if (lf(field.value) === lf(change.value)) seen[name] = pair[1];
+      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];
+    });
+    input.value = JSON.stringify(seen);
+  }
+
+  function onRemoteValues(e) {
+    var detail = (e && e.detail) || {};
+    var values = detail.values || {};
+    takeFocused(values);
+    if (detail.seqs) recordSeen(values, detail.seqs);
   }
 
   window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
