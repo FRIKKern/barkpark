@@ -1083,19 +1083,26 @@
       // the event comes after the patch that put the published version in the
       // form. The patch leaves the focused field as typed, so it is set from
       // the published values; then the page hears that this browser has the
-      // new form, and takes its saves again.
+      // new form, and takes its saves again. `was` is the old form as the page
+      // last had it: a focused field that no longer matches it held keys not
+      // yet sent (its debounce), which the discard took. The answer says so
+      // (`lost`), and the page's line says the typing was not saved.
       hook._onDiscarded = function (payload) {
         // The answer goes whatever the value step does: until it arrives the
         // page drops every save from this form.
+        var answer = {};
         try {
           var at = root.ownerDocument.activeElement;
           var values = (payload && payload.values) || {};
+          var was = (payload && payload.was) || {};
+          var own = Object.prototype.hasOwnProperty;
           if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
-              Object.prototype.hasOwnProperty.call(values, at.name) && at.type !== "checkbox" && at.type !== "radio") {
-            at.value = values[at.name];
+              at.type !== "checkbox" && at.type !== "radio") {
+            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true };
+            if (own.call(values, at.name)) at.value = values[at.name];
           }
         } finally {
-          hook.pushEvent("desk-discard-seen", {});
+          hook.pushEvent("desk-discard-seen", answer);
         }
       };
       if (hook.handleEvent) hook.handleEvent("desk:discarded", hook._onDiscarded);
