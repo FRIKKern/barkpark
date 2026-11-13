@@ -139,4 +139,31 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
     assert doc.content["subject"] == "FB101"
     assert doc.title == "Volume one, retitled"
   end
+
+  # task-03d337bc001f0a5b: once a code was picked, the tree offered no way
+  # back to no code; the flat select has its empty option.
+  for {surface, path, scope} <- [
+        {"old Studio", :studio, "#editor-form"},
+        {"desk", :desk, "[data-pane-editing]"}
+      ] do
+    test "#{surface}: Remove takes the picked code off the document", c do
+      url =
+        if unquote(path) == :desk,
+          do: "#{c.studio}/_desk/#{c.type};#{c.doc_id}",
+          else: "#{c.studio}/#{c.type}/#{c.doc_id}"
+
+      {:ok, view, _html} = live(c.conn, url)
+      field = unquote(scope) <> ~s( [data-field-name="subject"])
+      refute has_element?(view, field <> ~s( [data-test-id="tree-codelist-remove"]))
+
+      pick(view, unquote(scope), "FB042")
+      assert stored_subject(c) == "FB042"
+
+      view |> element(field <> ~s( [data-test-id="tree-codelist-remove"])) |> render_click()
+      render(view)
+
+      assert stored_subject(c) in [nil, ""]
+      refute has_element?(view, field <> ~s( [data-test-id="tree-codelist-remove"]))
+    end
+  end
 end
