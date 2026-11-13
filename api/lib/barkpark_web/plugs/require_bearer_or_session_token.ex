@@ -167,10 +167,13 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
   # predicate is applied here too.
   defp refuse_off_binding(%Plug.Conn{halted: true} = conn), do: conn
 
+  # `BoundDataset.resolve/2` also gives a request naming NO dataset the token's
+  # own, so a controller default never sends a bound token to `production`.
   defp refuse_off_binding(conn) do
-    if BarkparkWeb.Plugs.RequireToken.dataset_off_binding?(conn, conn.assigns[:api_token]),
-      do: halt_with(conn, {:error, :forbidden_dataset}),
-      else: conn
+    case BarkparkWeb.Plugs.BoundDataset.resolve(conn, conn.assigns[:api_token]) do
+      {:ok, conn} -> conn
+      {:error, :forbidden_dataset} -> halt_with(conn, {:error, :forbidden_dataset})
+    end
   end
 
   defp unauthorized(conn) do
