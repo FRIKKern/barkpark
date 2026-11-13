@@ -491,12 +491,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> root_title()
       |> Tree.normalize()
 
-    # The list menus' sorts per type (`ListMenu`), read with the tree: once.
+    # The list menus' sorts per type (`ListMenu`) and the types each type's
+    # panes show through a reference (`LiveRefresh`), read with the tree: once.
     %{
       dataset: dataset,
       root: root,
       nodes: Tree.index(root),
-      menus: ListMenu.menus(dataset, scope)
+      menus: ListMenu.menus(dataset, scope),
+      targets: LiveRefresh.targets(dataset, scope)
     }
   end
 
