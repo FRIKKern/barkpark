@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Give a CI runner public DNS resolvers when its own resolver does not answer
-# for the Ubuntu archive. Called by the libxml2-utils install in
-# .github/workflows/elixir.yml (job mix-test), before the first apt call and
-# again after a failed install attempt.
+# for the Ubuntu archive. Called by the libxml2-utils installs in
+# .github/workflows/elixir.yml (job mix-test), elixir-nightly.yml and
+# core-without-owned-tables.yml, before the first apt call and again after a
+# failed install attempt.
 #
 # 2026-11-11, 13:51Z on: every `apt-get` on the hosted runners (image
 # ubuntu-26.04 20261101.186.1, westus3) answered "Temporary failure resolving
