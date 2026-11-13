@@ -61,7 +61,7 @@ defmodule BarkparkWeb.Studio.DeskPaneHeadingsTest do
     Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
   end
 
-  @heading ~s(.pane-header > .pane-header-title[role="heading"][aria-level="2"])
+  @heading ".pane-header > h2.pane-header-title"
 
   test "the root, a list and the document being edited are each named by a heading", ctx do
     {:ok, view, _html} = live(ctx.conn, "#{ctx.base}/#{ctx.type};#{ctx.id}")
@@ -77,5 +77,10 @@ defmodule BarkparkWeb.Studio.DeskPaneHeadingsTest do
            )
 
     assert has_element?(view, "section[data-pane-editing] > " <> @heading, "Headed")
+  end
+
+  test "a heading sits in the header as the span did: no margin of its own" do
+    css = BarkparkWeb.Studio.Desk.Style.sheet(%{}) |> rendered_to_string()
+    assert css =~ ".dk h2.pane-header-title { margin: 0; }"
   end
 end

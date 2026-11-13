@@ -353,7 +353,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
-        <span class="pane-header-title" role="heading" aria-level="2">{@page_title}</span>
+        <h2 class="pane-header-title">{@page_title}</h2>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
