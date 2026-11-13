@@ -112,6 +112,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       # The page is about to put the Studio's editor here: draw the frame and
       # leave the read to it.
       assigns[:hold] ->
+        # A read for the key before is not this pane's: `in_flight` goes with
+        # it, or the pane would wait for it once the hold lifts.
+        socket = socket |> cancel_async(:load) |> assign(:in_flight, false)
         {:ok, socket |> assign(:data_key, key) |> assign(:data, AsyncResult.loading())}
 
       true ->
@@ -166,8 +169,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     do: ListSearch.handle(event, params, socket, &load/1)
 
   @impl true
-  def handle_async(:load, {:ok, data}, socket),
+  # A read is for the key it was started with. One that lands after the
+  # pane's key has moved on (the pane was put on hold for the editor, or took
+  # a hover's read, and the old read was already on its way) is not this
+  # pane's data: it is dropped, and whoever fills the pane now still does.
+  def handle_async(:load, {:ok, {key, data}}, %{assigns: %{data_key: key}} = socket),
     do: {:noreply, socket |> adopt(data) |> ListSearch.landed() |> landed()}
+
+  def handle_async(:load, {:ok, {_key, _data}}, socket), do: {:noreply, socket}
 
   # Cancelled because the pane took a hover's read instead: not a failure.
   def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
@@ -556,6 +565,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp load(socket), do: read_async(socket)
 
+  # The read, with the key the pane had when it was started.
+  defp keyed(%{assigns: %{data_key: key}}, read), do: fn -> {key, read.()} end
+
   defp read_async(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
     %{panes: panes, index: index, limit: limit, sort: sort} = socket.assigns
@@ -572,7 +584,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     |> assign(:reading, q || nil)
     |> assign(:in_flight, true)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
-    |> start_async(:load, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
+    |> start_async(
+      :load,
+      keyed(socket, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
+    )
   end
 
   @doc """

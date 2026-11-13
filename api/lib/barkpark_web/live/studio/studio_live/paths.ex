@@ -23,14 +23,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
 
   @doc false
   def studio_path_for([], dataset, opts),
-    do: append_desk_query("/d/#{dataset}/studio", opts)
+    do: append_desk_query("/d/#{segment(dataset)}/studio", opts)
 
   def studio_path_for(segments, dataset, opts),
     do:
       append_desk_query(
-        "/d/#{dataset}/studio/" <> Enum.join(segments, "/"),
+        "/d/#{segment(dataset)}/studio/" <> Enum.join(segments, "/"),
         opts
       )
+
+  # The dataset as ONE path segment. A dataset slug is unreserved characters
+  # and prints as it stands. A dataset string from a URL may hold "%" or "/"
+  # (the router decoded it once): printed raw it named another dataset, or
+  # another path, on the next request.
+  defp segment(dataset), do: dataset |> to_string() |> URI.encode(&URI.char_unreserved?/1)
 
   @doc """
   Full Studio path: `scope_prefix` + the `/d/:dataset/studio[/segments]`
@@ -47,7 +53,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   destination the chrome `push_navigate`s to.
   """
   def scoped_root(ws_slug, proj_slug, dataset),
-    do: "/w/#{ws_slug}/p/#{proj_slug}/d/#{dataset}/studio"
+    do: "/w/#{ws_slug}/p/#{proj_slug}/d/#{segment(dataset)}/studio"
 
   @doc """
   The deliberate-flat Studio root — `/studio/:dataset`. Used on surfaces
@@ -55,7 +61,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   which re-resolves the workspace from the session. ONE owner for the flat
   grammar too.
   """
-  def flat_root(dataset), do: "/studio/#{dataset}"
+  def flat_root(dataset), do: "/studio/#{segment(dataset)}"
 
   @doc """
   The `/w/:ws/p/:proj` scope prefix, or `""` when either slug is absent

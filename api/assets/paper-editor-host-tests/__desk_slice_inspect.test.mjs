@@ -55,6 +55,36 @@ press("row", { shiftKey: true });
 press("row", { code: "KeyP" });
 assert.deepEqual(inspects(), [], "Ctrl+Alt+Shift+I and Ctrl+Alt+P ask for nothing");
 
+// The dialog opens when the page draws it. jsdom has no showModal: counted here.
+const shown = [];
+window.HTMLDialogElement.prototype.showModal = function () { shown.push(this.id); this.setAttribute("open", ""); };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const draw = (id) => {
+  doc.getElementById("p1").insertAdjacentHTML("beforeend", `<dialog id="${id}" data-desk-inspect><h2>Inspecting Post A</h2></dialog>`);
+  return doc.getElementById(id);
+};
+
+// LiveView's phx-mounted dispatched on a detached copy (the key's pushEvent
+// locks the desk): no desk:show-modal reaches the page. It opens anyway, once.
+draw("insp-1");
+await tick();
+assert.deepEqual(shown, ["insp-1"], "drawn with no desk:show-modal: it opens");
+
+// Escape shut it; the page is told and has not taken it out yet. Another patch
+// in the desk does not open it again.
+doc.getElementById("insp-1").removeAttribute("open");
+doc.getElementById("p1").insertAdjacentHTML("beforeend", "<span>patched</span>");
+await tick();
+assert.deepEqual(shown, ["insp-1"], "closed by the user: a later patch leaves it shut");
+
+// phx-mounted reached the page: desk:show-modal and the drawing open it once.
+doc.getElementById("insp-1").remove();
+const second = draw("insp-2");
+second.dispatchEvent(new window.CustomEvent("desk:show-modal", { bubbles: true }));
+await tick();
+assert.deepEqual(shown, ["insp-1", "insp-2"], "with desk:show-modal too: opened once");
+second.remove();
+
 // No document open: nothing to inspect.
 doc.getElementById("p1").remove();
 pushed.length = 0;

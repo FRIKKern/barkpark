@@ -46,7 +46,7 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
 
-    {:ok, view: view, type: type, id: id}
+    {:ok, view: view, type: type, id: id, base: base}
   end
 
   # Poll for a value the view reaches after a message, never right after a send.
@@ -94,5 +94,17 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
   test "control: the same autosave on a document still there writes it", ctx do
     render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Typed while here"}})
     assert eventually(fn -> stored(ctx) && stored(ctx).title == "Typed while here" end)
+  end
+
+  # task-48df1109a916d526: the note about a `rev=` the desk does not show says
+  # "This is the current document". There is none once it is deleted.
+  test "no revision note over a document that was deleted", ctx do
+    render_patch(ctx.view, "#{ctx.base}/#{ctx.type};#{ctx.id},rev=abc123")
+    note = "[data-pane-editing] [data-desk-left-out]"
+    assert eventually(fn -> has_element?(ctx.view, note, "abc123") end)
+
+    delete_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, "[data-desk-edit-gone]") end)
+    refute has_element?(ctx.view, note)
   end
 end

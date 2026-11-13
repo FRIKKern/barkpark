@@ -955,7 +955,6 @@ defmodule Barkpark.Content.Mutations do
   end
 
   # ── Direct publish (task-6e2552cdeb223fa2) ─────────────────────────────────
-  #
   # `{"createOrReplace": doc, "publish": true}` lands the document on its
   # PUBLISHED row in one row write, with one revision, event and audit row. The
   # two-step `createOrReplace` + `publish` costs a draft insert, a published
@@ -996,6 +995,7 @@ defmodule Barkpark.Content.Mutations do
                dataset,
                opts
              ),
+           attrs = TitleDerivation.follow_on_replace(attrs, type, dataset, id, existing, opts),
            {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
            {:ok, published} <-
              Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do

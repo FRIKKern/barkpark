@@ -509,11 +509,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             references and the editor below it. --%>
       <div id={"#{@view.id}-notes"}>
         <%!-- Not over a document the editor did not open: it has no current
-              one, or still holds the one before (the read failed). --%>
+              one, still holds the one before (the read failed), or the one
+              it held was deleted. --%>
         <p
           :for={
             note <-
-              (assigns[:editor_doc] && !@edit_failed && PaneComponent.left_out(@view.pane)) || []
+              (assigns[:editor_doc] && !@edit_failed && !gone?(assigns) &&
+                 PaneComponent.left_out(@view.pane)) || []
           }
           class="dk-note"
           data-desk-left-out

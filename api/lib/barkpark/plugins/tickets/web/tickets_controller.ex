@@ -43,6 +43,7 @@ defmodule BarkparkWeb.TicketsController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.Tickets.{Thread, Triage}
 
@@ -298,11 +299,16 @@ defmodule BarkparkWeb.TicketsController do
   # an unfetched params struct is treated as "no override".
   defp dataset(conn) do
     case conn.params do
-      %Plug.Conn.Unfetched{} -> @default_dataset
-      params when is_map(params) -> Map.get(params, "dataset") || @default_dataset
-      _ -> @default_dataset
+      %Plug.Conn.Unfetched{} -> default_dataset(conn)
+      params when is_map(params) -> Map.get(params, "dataset") || default_dataset(conn)
+      _ -> default_dataset(conn)
     end
   end
+
+  # A dataset-bound token's default is its own dataset, never production: a
+  # request that names none is not stopped by the request-level fence.
+  defp default_dataset(conn),
+    do: ApiToken.bound_dataset(conn.assigns[:api_token]) || @default_dataset
 
   # ── Error envelopes ──────────────────────────────────────────────────────
 
