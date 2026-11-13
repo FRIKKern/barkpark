@@ -1,7 +1,7 @@
 {
   "contract": "1.22.0",
   "editor": "0.1.0-alpha.2",
-  "build": "0b58c27de90a",
+  "build": "feea69364fb8",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -961,6 +961,7 @@
         "_tagRange",
         "_tagSeq",
         "_tagSource",
+        "_teardown",
         "_upgradeProperty",
         "_validTableAction",
         "_wikilink",
