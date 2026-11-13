@@ -137,4 +137,33 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
 
     assert shows?(view, "read ahead")
   end
+
+  # task-f8383ce8dd2ef270 criterion 8: while a pane reads for a new key its
+  # last result stays on screen. The note about what the desk leaves out is
+  # from the URL, so it sat over the document before.
+  test "no revision note over the document before while the next is read", %{conn: conn} do
+    view = host(conn, %{})
+    assert_receive {:reading, task}, 1_000
+    send(task, {:go, "about the first"})
+    assert eventually(fn -> shows?(view, "about the first") end)
+    refute has_element?(view, "#pane [data-desk-left-out]")
+
+    tail = ";doc-b,type=note,parentRefPath=more"
+    send(view.pid, {:set, panes: Panes.parse("note;doc-z,rev=abc123" <> tail)})
+    assert_receive {:reading, task}, 1_000
+
+    # The first document's fields are still there; the note is not theirs.
+    assert shows?(view, "about the first")
+    refute has_element?(view, "#pane [data-desk-left-out]")
+
+    send(task, {:go, "about the second"})
+    assert eventually(fn -> shows?(view, "about the second") end)
+    assert has_element?(view, "#pane [data-desk-left-out]", "abc123")
+
+    # The same document asked for with another `rev=` is not read again: the
+    # note is its own at once.
+    send(view.pid, {:set, panes: Panes.parse("note;doc-z,rev=def456" <> tail)})
+    assert eventually(fn -> has_element?(view, "#pane [data-desk-left-out]", "def456") end)
+    refute_receive {:reading, _task}, 100
+  end
 end

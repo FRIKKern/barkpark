@@ -32,7 +32,7 @@ defmodule Barkpark.StudioChat.Message do
   @fields ~w(session_id seq role source_markdown metadata)a
 
   # A grapheme-count backstop on the durable text. The REAL per-turn bound lives
-  # at the write seam (`Recorder.persist_runtime_text/1` byte-caps before this
+  # at the write seam (`Recorder.persist_runtime_text/2` byte-caps before this
   # runs — charter D169); `validate_length` counts GRAPHEMES, not bytes, so it
   # can only ever be a looser second fence. Kept in lockstep-loose with the
   # 1 MiB byte cap: no realistic single message reaches a million graphemes, so

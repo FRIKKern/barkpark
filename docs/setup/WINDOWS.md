@@ -64,6 +64,20 @@ Then open `http://localhost:4000/papers/hello`. Note the block shapes: **heading
 
 **Always start the server through this script.** It sets PATH correctly each run, so you never fight the stale system Erlang/Elixir that Windows keeps ahead of Scoop in fresh shells.
 
+The launcher refuses missing or outdated Scoop Erlang/Elixir installs before
+starting Postgres or a VM. The minimum OTP major comes from `.tool-versions`;
+the Elixir minimum comes from `api/mix.exs`. It selects the installed runtime
+directories ahead of Scoop shims and system installs. After repairing an install,
+use `setup-windows.ps1 status` to check the selected versions.
+The launcher's automated Mix commands and Phoenix child also use Erlang's
+`-noinput` option, so they cannot enter a console-read loop on redirected input.
+
+Future VMs launched through the script default to a **64 MiB configured crash-dump limit**,
+so a memory failure cannot leave an unlimited dump. An explicit
+`ERL_CRASH_DUMP_BYTES` setting takes precedence, including `0` to disable dumps.
+Windows newline conversion and Erlang's abort marker add small on-disk overhead.
+This bounds diagnostic output; it does not establish that a memory leak is fixed.
+
 | Flag | Effect |
 |---|---|
 | `-Profile clean` | papers + media schemas only, one admin token printed once (default is `demo`) |

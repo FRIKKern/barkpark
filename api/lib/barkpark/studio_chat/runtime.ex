@@ -286,6 +286,19 @@ defmodule Barkpark.StudioChat.Runtime do
 
   def with_provider_session_id(runtime_ref, _id), do: runtime_ref
 
+  @doc """
+  Metadata for the assistant row a runtime turn's terminal `event` stores. A turn
+  the person stopped (`turn_completed` with `terminal_state: :interrupted`, from
+  codex or a registered host) says so with the same `turn_outcome` key
+  `StudioChat.turn_settle_stamp/1` writes; any other ending stores no mark
+  (task-bb50d873c868f411).
+  """
+  @spec turn_outcome_metadata(Event.t() | term()) :: map()
+  def turn_outcome_metadata(%Event{kind: :turn_completed, terminal_state: :interrupted}),
+    do: %{"turn_outcome" => "interrupted"}
+
+  def turn_outcome_metadata(_event), do: %{}
+
   def send_turn(_provider, %RemoteRef{} = runtime_ref, content),
     do: dispatch_remote(runtime_ref, :send_turn, %{content: content})
 
