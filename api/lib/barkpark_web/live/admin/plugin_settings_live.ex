@@ -72,6 +72,13 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   # `permits?/1` admits every admin, exactly like the plug.
   @impl true
   def mount(params, _session, socket) do
+    # A dataset segment the database refuses as text names no dataset: a 404,
+    # as on the desk page. It went into a redirect's Location as it stood.
+    dataset = params["dataset"]
+
+    (is_binary(dataset) and BarkparkWeb.Studio.Desk.Text.text?(dataset)) ||
+      raise BarkparkWeb.Studio.DeskLive.NotFound
+
     if BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token]) do
       mount_settings(params, socket)
     else
