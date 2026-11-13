@@ -165,6 +165,53 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
   end
 
+  # Owner's ruling (11-13): the person must not lose the text itself. The
+  # answer carries what the field held; the line offers it back to read and
+  # copy, and keeps offering it after the next save; the field still takes
+  # the published value (the dead draft is never written back).
+  test "the lost text is offered back to copy, and stays after the next save", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+
+    render_hook(ctx.view, "desk-discard-seen", %{
+      "lost" => true,
+      "text" => "Here elsewhere <typed>"
+    })
+
+    lost = "[data-pane-editing] details[data-desk-lost]"
+    assert has_element?(ctx.view, "#{lost} summary", "What you typed before the discard")
+    assert has_element?(ctx.view, "#{lost} blockquote", "Here elsewhere <typed>")
+
+    assert has_element?(
+             ctx.view,
+             ~s(#{lost} button[data-desk-copy="Here elsewhere <typed>"]),
+             "Copy"
+           )
+
+    assert title_shown(ctx.view, "Here")
+
+    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
+    refute has_element?(ctx.view, @note), "the save clears the line's sentence"
+    assert has_element?(ctx.view, "#{lost} blockquote", "Here elsewhere <typed>")
+  end
+
+  test "control: lost with no text (an older page): the line, no offer", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+
+    render_hook(ctx.view, "desk-discard-seen", %{"lost" => true})
+    assert has_element?(ctx.view, @note, "was not saved")
+    refute has_element?(ctx.view, "details[data-desk-lost]")
+    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
+    refute has_element?(ctx.view, @note)
+  end
+
   test "control: the browser lost nothing, the line stays plain", ctx do
     draft_elsewhere(ctx, "Here elsewhere")
     assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)

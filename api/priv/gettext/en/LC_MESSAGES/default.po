@@ -13284,6 +13284,11 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/desk/discarded.ex
 #, elixir-autogen, elixir-format
+msgid "What you typed before the discard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/discarded.ex
+#, elixir-autogen, elixir-format
 msgid "The draft was discarded elsewhere, so what you typed in it was not saved. This is the published version."
 msgstr ""
 

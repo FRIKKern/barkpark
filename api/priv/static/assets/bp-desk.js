@@ -1164,7 +1164,8 @@
       // new form, and takes its saves again. `was` is the old form as the page
       // last had it: a focused field that no longer matches it held keys not
       // yet sent (its debounce), which the discard took. The answer says so
-      // (`lost`), and the page's line says the typing was not saved.
+      // (`lost`) and carries what the field held (`text`): the page's line
+      // says the typing was not saved and offers that text back to copy.
       hook._onDiscarded = function (payload) {
         // The answer goes whatever the value step does: until it arrives the
         // page drops every save from this form.
@@ -1176,7 +1177,7 @@
           var own = Object.prototype.hasOwnProperty;
           if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
               at.type !== "checkbox" && at.type !== "radio") {
-            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true };
+            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true, text: String(at.value) };
             if (own.call(values, at.name)) at.value = values[at.name];
           }
         } finally {
@@ -1381,13 +1382,16 @@
         var text = item.getAttribute("data-desk-copy");
         if (item.hasAttribute("data-desk-copy-origin")) text = window.location.origin + text;
         var menu = item.closest("[popover]");
-        var toast = menu && menu.parentNode.querySelector(".dk-toast");
+        // In a menu: the toast beside it. Elsewhere in a pane (the discard
+        // line's Copy): the pane's toast, the Share menu's.
+        var pane = item.closest("[data-pane-index]");
+        var toast = (menu && menu.parentNode.querySelector(".dk-toast")) || (pane && pane.querySelector(".dk-toast"));
         var say = function (ok) {
           if (!toast) return;
           window.clearTimeout(hook._toastTimer);
           // Shown first, then filled: the change is what a screen reader reads.
           if (toast.showPopover && !toast.matches(":popover-open")) toast.showPopover();
-          toast.textContent = ok ? item.getAttribute("data-desk-copied") : menu.getAttribute("data-desk-copy-failed");
+          toast.textContent = ok ? item.getAttribute("data-desk-copied") : (menu || item).getAttribute("data-desk-copy-failed");
           hook._toastTimer = window.setTimeout(function () {
             toast.textContent = "";
             if (toast.hidePopover && toast.matches(":popover-open")) toast.hidePopover();
