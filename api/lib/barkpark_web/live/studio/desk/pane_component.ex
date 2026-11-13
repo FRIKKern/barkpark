@@ -386,13 +386,23 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             >
               <%!-- The title is an element of its own, as the TanStack row's
                    `.t`: a spec finds a row by its title alone. --%>
+              <%!-- A document row's tile and status marks, as the TanStack
+                   preview's media and its ring (draft) and dot (published). --%>
+              <span :if={entry[:icon]} class="dk-media" aria-hidden="true">
+                <img :if={entry[:media]} src={entry.media} alt="" loading="lazy" />
+                <BarkparkWeb.Icons.desk_icon :if={!entry[:media]} name={entry.icon} size={21} />
+              </span>
               <span class="pane-item-label">
                 <span class="dk-row-title">{entry.title}</span>
                 <span :if={entry[:sub]} class="dk-row-sub">{entry.sub}</span>
               </span>
-              <span :if={entry[:draft]} class="dk-draft" title={gettext("Draft")}>
-                <span aria-hidden="true">○</span>
-                <span class="sr-only">{gettext("Draft")}</span>
+              <span :if={entry[:draft] || entry[:published]} class="dk-status">
+                <span :if={entry[:draft]} class="dk-ring dk-draft" title={gettext("Draft")}>
+                  <span class="sr-only">{gettext("Draft")}</span>
+                </span>
+                <span :if={entry[:published]} class="dk-dot" title={gettext("Published")}>
+                  <span class="sr-only">{gettext("Published")}</span>
+                </span>
               </span>
               <%!-- A singleton on the root opens its document as a pane, so it
                    has the chevron too, as the TanStack root's. --%>
