@@ -159,6 +159,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-list-search input::placeholder { color: var(--dk-placeholder); }
       .dk .dk-list-search input:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       .dk .dk-list-search input::-webkit-search-cancel-button { display: none; }
+      .dk .dk-list-search .search-clear { position: absolute; right: 2px; top: 0; box-sizing: border-box; width: 25px; height: 25px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-list-search .search-clear:hover { background: var(--dk-icon-btn-hover); color: var(--dk-icon-btn-hover-fg); }
+      .dk .dk-list-search .search-clear:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-list-search .search-clear svg { display: block; width: 21px; height: 21px; }
       .dk .pane-divider { margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border); }
       .dk .dk-media { box-sizing: border-box; width: 33px; height: 33px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--dk-border); color: var(--dk-muted); background: var(--dk-bg); }
       .dk .dk-media svg { width: 21px; height: 21px; }
@@ -170,8 +174,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-ring + .dk-dot { margin-left: 8px; }
       .dk .dk-row > a.pane-item.selected .dk-media { background: transparent; color: var(--dk-on-selected); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dk-on-selected) 30%, transparent); }
       .dk .dk-row > a.pane-item.selected .dk-dot { background: var(--dk-dot-on-selected); }
+      .dk .dk-row > a.pane-item.selected .dk-ring { box-shadow: inset 0 0 0 1.5px var(--dk-on-selected); }
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-media { background: var(--dk-bg); color: var(--dk-muted); box-shadow: inset 0 0 0 1px var(--dk-border); }
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-dot { background: var(--dk-published); }
+      .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-ring { box-shadow: inset 0 0 0 1.5px var(--dk-caution-dot); }
       .dk .dk-row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-row-sub { display: block; margin-top: -2px; font-weight: 400; font-size: 13px; line-height: 19px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .desk-divider { margin: 4px 12px 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--dk-border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-muted); }
@@ -215,6 +221,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-doc-menu-list a[role="menuitem"] { box-sizing: border-box; text-decoration: none; }
       @media (pointer: coarse) {
         .dk .pane-item { min-height: 44px; }
+        .dk .dk-row > .pane-item { height: auto; min-height: 44px; }
+        .dk .dk-list-search .search-clear { width: 44px; height: 44px; top: -10px; }
+        .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: static; width: auto; height: auto; min-width: 44px; min-height: 44px; margin: 0 -12px 0 0; padding: 4px 8px; overflow: visible; clip-path: none; white-space: normal; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
         .dk .dk-edit-refs { padding-right: 60px; }
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }

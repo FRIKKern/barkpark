@@ -112,6 +112,31 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-row > .pane-item") =~ "border: 0"
   end
 
+  # Audit: the draft ring is drawn in --dk-caution-dot, the same orange the
+  # blue row swallows. On the blue row it is drawn in the row's own ink, as the
+  # published dot is; on the soft chain fill it is orange again.
+  test "the draft ring shows on a selected row and on the soft chain fill" do
+    assert rule(@css, ".dk .dk-row > a.pane-item.selected .dk-ring") =~
+             "box-shadow: inset 0 0 0 1.5px var(--dk-on-selected)"
+
+    chain =
+      ".dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving]))"
+
+    assert rule(@css, chain <> " .dk-row > a.pane-item.selected .dk-ring") =~
+             "box-shadow: inset 0 0 0 1.5px var(--dk-caution-dot)"
+  end
+
+  # Audit: the list search's clear button is TanStack's `.search-clear`: a
+  # 25 px icon button inside the box at its right edge, not a bare × on a line
+  # of its own.
+  test "the list search's clear button sits inside the box as a 25 px icon button" do
+    body = rule(@css, ".dk .dk-list-search .search-clear")
+    assert body =~ "position: absolute; right: 2px; top: 0;"
+    assert body =~ "width: 25px; height: 25px;"
+    assert body =~ "border: 0;"
+    assert rule(@css, ".dk .dk-list-search .search-clear:focus-visible") =~ "var(--dk-focus-ring)"
+  end
+
   test "reference chips and the close link have the rows' focus ring" do
     ring = "outline: 2px solid var(--primary); outline-offset: -2px;"
     assert rule(@css, ".dk a.pane-item:focus-visible") =~ ring
@@ -128,6 +153,24 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
       assert body =~ "min-height: 44px", sel
       assert body =~ "min-width: 44px", sel
     end
+
+    # Audit: the mouse rules name the row and the hidden close link with more
+    # specific selectors, so a bare `.dk .pane-item` lost (rows stayed 33 px,
+    # the list pane's close stayed clipped to 1x1). The coarse block repeats
+    # those exact selectors; equal weight, later in the sheet, it wins.
+    row = rule(coarse, ".dk .dk-row > .pane-item")
+    assert row =~ "height: auto"
+    assert row =~ "min-height: 44px"
+
+    hidden =
+      ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible)"
+
+    shown = rule(coarse, hidden)
+    assert shown =~ "position: static"
+    assert shown =~ "clip-path: none"
+    assert shown =~ "min-width: 44px; min-height: 44px"
+
+    assert rule(coarse, ".dk .dk-list-search .search-clear") =~ "width: 44px; height: 44px"
 
     # The mouse layout keeps its sizes: no 44 px outside the coarse block.
     [mouse, _] = String.split(@css, "@media (pointer: coarse) {", parts: 2)
