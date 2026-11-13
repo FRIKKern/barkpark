@@ -105,6 +105,8 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
   `:desk_refresh` fired: every stale pane but the one being edited reads
   again. A document pane is stale when its own document changed, or a
   document of a type its references can point at: it shows their titles (J23).
+  A list pane is stale when a document of its type changed, or of a type its
+  rows' preview reads through a reference (`author.name`).
   The pane being edited keeps its form; its reference strip reads again on
   the same rule (`EditorHost.refs_changed/1`).
   """
@@ -158,6 +160,22 @@ defmodule BarkparkWeb.Studio.Desk.LiveRefresh do
     end
   rescue
     # The store cannot say now: the pane still reads again on its own changes.
+    _ -> false
+  end
+
+  # A list's rows show what their previews read through a reference (an
+  # author's name under each post): a change of that type changes them (J23).
+  defp refers?(%{kind: :list, type: type}, types, assigns) when is_binary(type) do
+    with false <- MapSet.size(types) == 0,
+         {:ok, schema} <- Content.resolve_schema(type, assigns.dataset, assigns.scope) do
+      case Refs.preview_target_types(schema) do
+        :any -> true
+        targets -> not MapSet.disjoint?(targets, types)
+      end
+    else
+      _ -> false
+    end
+  rescue
     _ -> false
   end
 

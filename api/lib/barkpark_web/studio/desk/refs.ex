@@ -53,6 +53,50 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
       else: refs |> List.flatten() |> MapSet.new()
   end
 
+  @doc """
+  The document types a list row's preview of `schema` reads through a
+  reference (`list_preview.subtitle: "author.name"`, or an `each` over a
+  reference array), or `:any` when such a reference names none. A list of
+  `schema`'s documents shows those documents' values, so a change of one of
+  them changes its rows.
+  """
+  @spec preview_target_types(map()) :: MapSet.t(String.t()) | :any
+  def preview_target_types(schema) do
+    heads = preview_heads(Map.get(schema, :list_preview) || Map.get(schema, "list_preview"))
+
+    fields =
+      for %{"name" => name} = field <- Map.get(schema, :fields) || [],
+          MapSet.member?(heads, name),
+          do: field
+
+    target_types(%{fields: fields})
+  end
+
+  # The first segment of every path the preview walks further (`author` of
+  # `author.name` or `{author.name}`), and every `each` path.
+  defp preview_heads(preview) when is_map(preview) or is_list(preview) do
+    each = for {"each", path} <- flat(preview), is_binary(path), do: path
+
+    dotted =
+      for {_key, text} <- flat(preview),
+          is_binary(text),
+          [_, head] <- Regex.scan(~r/(?<![\w.])([A-Za-z_]\w*)(?:\.\d+)*\.[A-Za-z_]/, text),
+          do: head
+
+    MapSet.new(each ++ dotted)
+  end
+
+  defp preview_heads(_preview), do: MapSet.new()
+
+  # Every key and string value of a nested spec, as `{key, value}`.
+  defp flat(map) when is_map(map),
+    do: Enum.flat_map(map, fn {k, v} -> if is_binary(v), do: [{k, v}], else: flat(v) end)
+
+  defp flat(list) when is_list(list),
+    do: Enum.flat_map(list, fn v -> if is_binary(v), do: [{nil, v}], else: flat(v) end)
+
+  defp flat(_value), do: []
+
   defp of_refs(%{"type" => type, "of" => of}) when type in ["arrayOf", "array"],
     do: for(%{"type" => "reference"} = ref <- List.wrap(of), do: ref)
 
