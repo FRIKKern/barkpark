@@ -148,7 +148,8 @@ defmodule BarkparkWeb.Studio.DeskListNamesTest do
     view |> form("#desk-search-form") |> render_change(%{"value" => "Kicked note"})
     hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{id}"])
     render_async(view, 5_000)
-    assert has_element?(view, hit <> " .dk-row-sub", "Kicker notes")
+    # A hit names its type in a badge beside the title, as TanStack's (LOOKS C2).
+    assert has_element?(view, hit <> " .dk-badge", "Kicker notes")
     assert title_of(view, hit) == ["Kicked note"]
   end
 
