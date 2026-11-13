@@ -40,6 +40,15 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   its resolver every signed-in editor fell to the one per-IP 60/min bucket of
   the studio's egress address.
 
+  A registered chat host (`Authorization: Host <cred>`) gets its own bucket
+  too, keyed `token:host:<host id>`, but ONLY on a mount that opts in with
+  `principal: :chat_host` — `pipeline :registered_chat_host` is the one
+  (task-fd330c87f48b0b87). Its WRITE default is `:host_write_per_minute`
+  (2400/min): the host posts one `/v1/chat-host/events` per text_delta, about
+  20 a second per streaming turn, and on the anonymous 60/min a reply was
+  refused mid-turn. A credential `ChatHosts.authenticate/1` does not accept
+  stays on the IP bucket, and every other mount never reads the Host scheme.
+
   ## The `:browser` class — SHADOW ONLY (charter D2/D4 Gate A)
 
   A mount may pass `class: :browser` to meter a browser pipeline. That path is
@@ -123,9 +132,17 @@ defmodule BarkparkWeb.Plugs.RateLimit do
       :presence_focus -> presence_focus_plan(conn)
       :view -> class_plan(conn, :view)
       :read -> class_plan(conn, :read)
-      _ -> class_plan(conn, delivery_or(conn, method_class(conn.method)))
+      _ -> class_plan(conn, delivery_or(conn, method_class(conn.method)), principal_opt(opts))
     end
   end
+
+  # `principal: :chat_host` — the ONE mount that accepts `Authorization: Host`
+  # (`pipeline :registered_chat_host`). Any other mount leaves the Host scheme
+  # unread, so a real host credential sent to, say, `/v1/auth/request-magic-link`
+  # is anonymous there and spends its IP's budget, not the host's wider one.
+  defp principal_opt(opts) when is_list(opts), do: Keyword.get(opts, :principal)
+  defp principal_opt(%{} = opts), do: Map.get(opts, :principal)
+  defp principal_opt(_), do: nil
 
   # A media DELIVERY GET (the bytes at /media/files, /media/renditions and their
   # mirrors, marked by `DeliveryAccept`) is billed to its own `:delivery` bucket
@@ -143,9 +160,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # `class: :read` bills a POST that only reads (the GROQ query endpoint takes
   # long queries as POST, as Sanity's does) to the read bucket.
-  defp class_plan(conn, class) do
+  defp class_plan(conn, class, scheme \\ nil) do
     dataset = conn.path_params["dataset"]
-    {principal_class, key, token_id} = bucket_key(conn, class, dataset)
+    {principal_class, key, token_id} = bucket_key(conn, class, dataset, scheme)
     per_minute = limit_per_minute(class, dataset, principal_class, token_id)
     {class, per_minute, key}
   end
@@ -380,6 +397,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
+  # A registered chat host (task-fd330c87f48b0b87). It posts one event per
+  # text_delta, ~20 a second while a turn streams, plus a heartbeat every 15 s.
+  # 2400/min refills 40 a second — two turns streaming at once at provider pace
+  # — and a full bucket holds 2400, about 16 back-to-back 150-delta replies.
+  # Fixed per host, not per IP: the host's credential, not its address, is the
+  # thing an operator enrolled and can revoke.
+  defp default_per_minute(cfg, :write, :host) do
+    case Keyword.get(cfg, :host_write_per_minute, 2_400) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 2_400
+    end
+  end
+
   defp default_per_minute(cfg, :write, _principal_class),
     do: Keyword.get(cfg, :write_per_minute, 60)
 
@@ -419,11 +449,11 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # Returns `{principal_class, key}` — the class feeds `limit_per_minute/3`
   # (ONLY `:session` ever widens a budget; see there), the key is what
   # `check/2` debits exactly as before.
-  defp bucket_key(conn, class, dataset) do
+  defp bucket_key(conn, class, dataset, scheme \\ nil) do
     scope = dataset || "global"
 
     {principal_class, key, token_id} =
-      case principal_id(conn) do
+      case principal_id(conn, scheme) do
         nil ->
           # The trust boundary, NOT the raw peer. Every prod instance runs Caddy
           # on the box dialling localhost:4000, so `conn.remote_ip` is always
@@ -439,6 +469,11 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
         {:owned, token_id} ->
           {:owned, "token:#{token_id}:#{class}:#{scope}", token_id}
+
+        # No token_id: a host id is not an api_token id, so no `tokens:`
+        # override can ever name it.
+        {:host, host_id} ->
+          {:host, "token:#{host_id}:#{class}:#{scope}", nil}
 
         token_id ->
           {:verified, "token:#{token_id}:#{class}:#{scope}", token_id}
@@ -498,10 +533,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # plug it does not know a resolver for. Order is cheapest-and-commonest
   # first; each is an indexed hash lookup and the first hit wins.
   #
-  # Non-Bearer schemes are out of scope by construction and always were:
-  # `PreviewToken` reads `Authorization: Preview <jwt>` and `RequireChatHost`
-  # reads `Authorization: Host <cred>`, so neither ever matched this clause,
-  # before the fix or after it. They key on IP, as they did on main.
+  # Non-Bearer schemes never match the Bearer clause. `PreviewToken` reads
+  # `Authorization: Preview <jwt>` and keys on IP. `RequireChatHost` reads
+  # `Authorization: Host <cred>`, which `@host_resolvers` below resolves — but
+  # only on a mount passing `principal: :chat_host` (task-fd330c87f48b0b87).
   #
   # COST, deliberately paid: up to one indexed `token_hash` lookup per resolver
   # per BEARER-carrying request, ahead of the meter. A LIVE credential stops at
@@ -529,6 +564,11 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     {"scim", {Barkpark.Scim, :resolve_token_id}}
   ]
 
+  # `Authorization: Host <cred>`, read ONLY under `principal: :chat_host`. The
+  # same `ChatHosts.authenticate/1` `RequireChatHost` runs next, so a revoked,
+  # expired, unenrolled or made-up credential resolves to nil and keys on IP.
+  @host_resolvers [{"host", {__MODULE__, :chat_host_principal}}]
+
   # Returns a bare id/kind-string for a `:verified` (Bearer-resolved, no
   # owner) principal, `{:owned, id}` for a Bearer-resolved principal whose
   # `owner_user_id` names ONE human (task-2c31de0cf6597d32 follow-up),
@@ -538,7 +578,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # happens to ride a cookie elsewhere, because the Bearer branch always wins
   # here first (same precedence `OptionalSessionToken` documents for token
   # resolution).
-  defp principal_id(conn) do
+  defp principal_id(conn, :chat_host),
+    do: chat_host_principal_id(conn) || principal_id(conn, nil)
+
+  defp principal_id(conn, _scheme) do
     case conn.assigns[:api_token] do
       # Free path: a plug ahead of us already resolved this bearer. Nothing in
       # the tree mounts RateLimit after token resolution today, so this is a
@@ -552,6 +595,26 @@ defmodule BarkparkWeb.Plugs.RateLimit do
         verified_bearer_id(conn) || session_principal_id(conn)
     end
   end
+
+  # Same shape `RequireChatHost` accepts: exactly one Authorization header.
+  defp chat_host_principal_id(conn) do
+    case get_req_header(conn, "authorization") do
+      ["Host " <> raw] when byte_size(raw) > 0 -> resolve(raw, @host_resolvers)
+      _ -> nil
+    end
+  end
+
+  # A host credential to `{:host, host_id}`, or nil. Public only because
+  # `@host_resolvers` applies it by {module, function}.
+  @doc false
+  def chat_host_principal(raw) when is_binary(raw) do
+    case Barkpark.ChatHosts.authenticate(raw) do
+      {:ok, %{id: id}} when is_binary(id) -> {:host, id}
+      _ -> nil
+    end
+  end
+
+  def chat_host_principal(_), do: nil
 
   defp verified_bearer_id(conn) do
     case get_req_header(conn, "authorization") do
@@ -648,6 +711,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
       # A login-session resolver: the editor's own session budget.
       {:session, id} when is_binary(id) ->
         {:session, kind <> ":" <> id}
+
+      # The chat-host resolver: the host's own streaming budget.
+      {:host, id} when is_binary(id) ->
+        {:host, kind <> ":" <> id}
 
       # A bare-id resolver (e.g. Scim.resolve_token_id/1) — no owner concept.
       id when is_binary(id) ->
