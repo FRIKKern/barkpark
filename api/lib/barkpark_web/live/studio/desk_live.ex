@@ -35,17 +35,37 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
+  alias BarkparkWeb.Studio.Desk.ListFirst
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
 
+  defmodule NotFound do
+    @moduledoc "Raised for a desk URL that names nothing: its dataset segment is not text."
+    defexception message: "no such dataset", plug_status: 404
+  end
+
+  # A dataset slug is at most 63 characters (`Tenancy.Dataset`); this leaves
+  # room for an older, longer dataset string.
+  @dataset_max 255
+
   @impl true
   def mount(%{"dataset" => dataset} = params, session, socket) do
+    # A dataset segment with a byte the database refuses as text names no
+    # dataset. Refused here, before the first read and before any redirect
+    # that would carry it.
+    # Nor does one longer than any name can be (the Studio's tabs would
+    # compile it into a pattern: Regex.CompileError at 100,000 bytes).
+    (Text.text?(dataset) and byte_size(dataset) <= @dataset_max) || raise NotFound
+
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
     {:ok, socket} = EditorHost.mount(params, session, socket)
@@ -53,33 +73,53 @@ defmodule BarkparkWeb.Studio.DeskLive do
     socket =
       socket
       |> assign_new(:scope_prefix, fn -> "" end)
+      # The Studio's path before any document is loaded: a list's "Create
+      # new" (J18) runs the Studio's `new-document` with no editor open yet.
+      |> assign_new(:nav_path, fn -> [] end)
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
+      # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
+      |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      # Each list type's sort as this editor keeps it (`ListMenu`).
+      |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
+      |> assign(:desk_inspect, false)
       |> LiveRefresh.init()
 
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
     else
+      # The dataset as a path segment: one that holds "%" or "/" must name
+      # the same dataset on the next request.
+      segment = URI.encode(dataset, &URI.char_unreserved?/1)
+
       {:ok,
-       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], dataset))}
+       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], segment))}
     end
   end
 
   @impl true
   def handle_params(params, uri, socket) do
+    # A live patch to such a dataset segment goes back to the desk it left.
+    if Text.text?(params["dataset"] || socket.assigns.dataset),
+      do: follow(params, uri, socket),
+      else: {:noreply, redirect(socket, to: socket.assigns.base)}
+  end
+
+  defp follow(params, uri, socket) do
     dataset = params["dataset"] || socket.assigns.dataset
     # The router hands the splat over as decoded path segments; a param value
     # with a slash in it (`inspect=sanity/structure/history`) spans several.
-    splat = params |> Map.get("panes", []) |> Enum.join("/")
+    splat = params |> Map.get("panes", []) |> Enum.join("/") |> Text.text_only()
     scope = ScopeHelpers.scope_opts(socket)
     desk = desk(socket.assigns.desk, dataset, scope)
     panes = Tree.parse(splat, desk.root)
+    desk = expand_open(desk, panes, dataset, scope)
+
+    nodes = Tree.nodes_of(panes, desk.root, desk.nodes)
 
     views =
-      for {pane, index} <- Enum.with_index(panes) do
-        node = node_of(pane, desk)
-
+      for {{pane, node}, index} <- panes |> Enum.zip(nodes) |> Enum.with_index() do
         %{
           id: "desk-pane-#{index}-#{Panes.pane_key(pane)}",
           pane: pane,
@@ -90,12 +130,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
         }
       end
 
+    views = Enum.map(views, &Map.put(&1, :follows, leader(&1, views)))
     base = Paths.studio_path(socket.assigns.scope_prefix, ["_desk"], dataset)
     # A pane that stays does not read again, so the title it read is kept here.
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
-    # Following a hit (or any link) puts the search away.
-    socket = assign(socket, desk_search: "", desk_search_hits: [])
+    # Following a hit (or any link) puts the search and the Inspect dialog away.
+    socket =
+      assign(socket,
+        desk_search: "",
+        desk_search_hits: [],
+        desk_search_lit: 0,
+        desk_inspect: false
+      )
 
     socket =
       socket
@@ -114,6 +161,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         page_title: titles[last.id] || last.title
       )
 
+    # The lists' first pages: read in the first render, handed to the
+    # connected mount (ruling R12).
+    socket = ListFirst.warm(socket, views)
     socket = EditorHost.follow(socket, panes, dataset)
 
     # The pane's frame goes out with this patch; the editor follows in the
@@ -125,7 +175,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
-  # and for a few panes only; a pane never shows a read older than that.
+  # and for a few panes only; a pane never shows a read older than that. The
+  # while is counted from the hover, as `bp-desk.js` counts when it forgets
+  # the row: counted from the landing, a slow read would refuse the next hover.
   @warm_ttl_ms 30_000
   @warm_cap 8
 
@@ -134,20 +186,35 @@ defmodule BarkparkWeb.Studio.DeskLive do
     %{base: base, desk: desk, dataset: dataset, scope: scope, warm: warm} = socket.assigns
 
     with true <- String.starts_with?(href, base <> "/"),
-         chain = href |> String.replace_prefix(base <> "/", "") |> Tree.parse(desk.root),
-         pane = PaneComponent.with_query(List.last(chain), chain, length(chain) - 1),
+         splat = href |> String.replace_prefix(base <> "/", "") |> Text.text_only(),
+         chain = Tree.parse(splat, desk.root),
+         last = List.last(chain),
+         # A list in the sort its pane will read in: the pane takes this read.
+         sort = ListMenu.kept(socket.assigns.list_sorts, desk.menus, last[:type]),
+         pane = PaneComponent.with_query(last, chain, length(chain) - 1, Rows.page(), sort),
          true <- pane.kind in [:list, :doc],
-         node = node_of(pane, desk),
-         key = PaneComponent.data_key(pane, dataset, node),
-         false <- kept?(warm[key]) do
-      socket =
-        socket
-        |> assign(:warm, Map.put(warm, key, :reading))
-        |> start_async({:warm, key}, fn ->
-          PaneComponent.read_pane(pane, node, dataset, scope, :warm)
-        end)
+         node = chain |> Tree.nodes_of(desk.root, desk.nodes) |> List.last(),
+         key = PaneComponent.data_key(pane, dataset, node) do
+      now = System.monotonic_time(:millisecond)
+      hovered = assign(socket, :warm, Map.put(warm, key, {:reading, now}))
 
-      {:noreply, socket}
+      cond do
+        # Still out: nothing to read, but the row was hovered again just now.
+        reading?(warm[key]) ->
+          {:noreply, hovered}
+
+        # A read a pane may still show: no need to read again.
+        warm[key] && fresh?(warm[key], now) ->
+          {:noreply, socket}
+
+        true ->
+          read =
+            PaneComponent.in_locale(fn ->
+              PaneComponent.read_pane(pane, node, dataset, scope, :warm)
+            end)
+
+          {:noreply, start_async(hovered, {:warm, key}, read)}
+      end
     else
       _ -> {:noreply, socket}
     end
@@ -155,40 +222,84 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
 
+  # The search box (`Search`): new hits light the first; the arrows move the
+  # light; Enter opens the lit hit, or searches what was typed if its hits
+  # are not in yet.
+  def handle_event("desk-search", params, socket) do
+    {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
+    {:noreply, assign(socket, :desk_search_lit, 0)}
+  end
+
+  def handle_event("desk-search-key", %{"key" => key}, socket)
+      when key in ["ArrowDown", "ArrowUp"] do
+    %{desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+    step = if key == "ArrowDown", do: 1, else: -1
+    {:noreply, assign(socket, :desk_search_lit, (lit + step) |> min(length(hits) - 1) |> max(0))}
+  end
+
+  def handle_event("desk-search-key", _params, socket), do: {:noreply, socket}
+
+  def handle_event("desk-search-open", %{"value" => value} = params, socket) do
+    %{desk_search: typed, desk_search_hits: hits, desk_search_lit: lit} = socket.assigns
+
+    case value == typed && Enum.at(hits, lit) do
+      # Opened from the keys: its first field takes the focus, as the
+      # TanStack Studio's (`bp-desk.js` waits for the editor).
+      %{} = hit ->
+        to = Search.href(socket.assigns.base, socket.assigns.desk.root, hit)
+        {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
+
+      _ ->
+        handle_event("desk-search", params, socket)
+    end
+  end
+
   # Everything else is the editor's: the Studio's own handlers.
+  # Ctrl+Alt+I in the edit pane, and the dialog's close (`bp-desk.js`). Only
+  # over a document the editor holds: the dialog renders that one.
+  def handle_event("desk-inspect", %{"open" => open}, socket),
+    do:
+      {:noreply,
+       assign(socket, :desk_inspect, open == true and is_map(socket.assigns[:editor_doc]))}
+
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
   @impl true
   def handle_async({:warm, key}, {:ok, data}, socket) do
     now = System.monotonic_time(:millisecond)
 
-    warm =
-      socket.assigns.warm
-      |> Map.put(key, {data, now})
-      |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
-      |> Enum.sort_by(
-        fn {_key, entry} -> if entry == :reading, do: now, else: elem(entry, 1) end,
-        :desc
-      )
-      |> Enum.take(@warm_cap)
-      |> Map.new()
+    case socket.assigns.warm[key] do
+      {:reading, hovered} ->
+        warm =
+          socket.assigns.warm
+          |> Map.put(key, {data, hovered})
+          |> Enum.filter(fn {_key, entry} -> fresh?(entry, now) end)
+          |> Enum.sort_by(
+            fn {_key, entry} -> if reading?(entry), do: now, else: elem(entry, 1) end,
+            :desc
+          )
+          |> Enum.take(@warm_cap)
+          |> Map.new()
 
-    {:noreply, assign(socket, :warm, warm)}
+        {:noreply, assign(socket, :warm, warm)}
+
+      # Dropped while it was out (someone saved): it may be older than the save.
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def handle_async({:warm, key}, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
 
-  # A read still running, or one a pane may still show: no need to read again.
-  defp kept?(nil), do: false
-  defp kept?(entry), do: fresh?(entry, System.monotonic_time(:millisecond))
-
-  defp fresh?(:reading, _now), do: true
+  defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
+
+  defp reading?(entry), do: match?({:reading, _hovered}, entry)
 
   defp warm(warm, key) do
     case warm[key] do
-      {data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
+      {%{} = data, at} -> if fresh?({data, at}, System.monotonic_time(:millisecond)), do: data
       _ -> nil
     end
   end
@@ -204,18 +315,40 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: {:noreply, socket |> LiveRefresh.refresh() |> assign(:warm, %{})}
 
   # A pane's read landed: the tab title follows the last pane's real title.
-  def handle_info({:desk_pane_title, index, title}, socket) when is_binary(title) do
-    case Enum.at(socket.assigns.desk_panes, index) do
+  # The pane is named by its id, not its place: a title that lands after a
+  # click replaced its pane is no longer anyone's.
+  def handle_info({:desk_pane_title, id, title}, socket) when is_binary(title) do
+    panes = socket.assigns.desk_panes
+
+    case Enum.find(panes, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
 
       view ->
-        socket = assign(socket, :titles, Map.put(socket.assigns.titles, view.id, title))
+        socket = assign(socket, :titles, Map.put(socket.assigns.titles, id, title))
 
-        if index == length(socket.assigns.desk_panes) - 1,
+        if view.index == length(panes) - 1,
           do: {:noreply, assign(socket, :page_title, title)},
           else: {:noreply, socket}
     end
+  end
+
+  # A list's menu picked a sort: it sticks for the type, here and for this editor.
+  def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
+    # Only a sort the type offers is kept (the pane checked it too).
+    sort = ListMenu.pick(sort, (socket.assigns.desk.menus[type] || %{sorts: []}).sorts)
+    :ok = ListMenu.remember(socket, socket.assigns.dataset, type, sort)
+
+    sorts =
+      if sort,
+        do: Map.put(socket.assigns.list_sorts, type, sort),
+        else: Map.delete(socket.assigns.list_sorts, type)
+
+    # A read of the type's list kept from ahead of the pick is in the old
+    # order: the re-drawn pane would take it in place of its own sorted read.
+    warm = Map.reject(socket.assigns.warm, fn {{_pane, t, _ds, _filter}, _} -> t == type end)
+
+    {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
@@ -225,7 +358,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
     ~H"""
     <Style.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
-    <Search.box query={@desk_search} hits={@desk_search_hits} root={@desk.root} base={@base} />
+    <Search.box
+      query={@desk_search}
+      hits={@desk_search_hits}
+      lit={@desk_search_lit}
+      root={@desk.root}
+      base={@base}
+    />
+    <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
           own, is hosted in it. The two labels are `bp-desk.js`'s: it names
@@ -243,7 +383,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
       <%= for view <- @desk_panes do %>
-      {if view.index == @active, do: EditorHost.pane(assigns, view)}
+      <%!-- The editor's section has an id of its own. On the pane's id the
+            patch turned the pane into the editor in place, so the browser
+            never let the pane's component go; a Back to that document then
+            drew the component as an empty section until the editor came
+            (row 5). --%>
+      {if view.index == @active, do: EditorHost.pane(assigns, %{view | id: view.id <> "-editor"})}
       <.live_component
         :if={view.index != @active}
         module={PaneComponent}
@@ -251,12 +396,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
         pane={view.pane}
         index={view.index}
         node={view.node}
+        follows={view.follows}
         hold={view.index == length(@desk_panes) - 1 and @pending != nil}
         warm={warm(@warm, view.key)}
         panes={@chain}
         base={@base}
         dataset={@dataset}
         scope={@scope}
+        list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
+        orderings={menu(@desk, view).orderings}
+        sorts={menu(@desk, view).sorts}
       />
       <% end %>
     </div>
@@ -272,12 +421,60 @@ defmodule BarkparkWeb.Studio.DeskLive do
       dataset
       |> Structure.build([defer_group_by: true] ++ scope)
       |> StructureCopy.localize()
+      |> root_title()
       |> Tree.normalize()
 
-    %{dataset: dataset, root: root, nodes: Tree.index(root)}
+    # The list menus' sorts per type (`ListMenu`), read with the tree: once.
+    %{
+      dataset: dataset,
+      root: root,
+      nodes: Tree.index(root),
+      menus: ListMenu.menus(dataset, scope)
+    }
   end
 
-  defp node_of(%{kind: :types}, desk), do: desk.root
-  defp node_of(%{kind: :doc}, _desk), do: nil
-  defp node_of(pane, desk), do: pane[:node] && desk.nodes[pane.node]
+  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+
+  # The root's fallback title, when the desk document names none, is
+  # Barkpark's word. Only the desk translates it: the old Studio makes its
+  # pane's id from the title (`pane-structure`), so `StructureCopy` keeps it.
+  defp root_title(%{id: "root", title: "Structure"} = root),
+    do: Map.put(root, :title, gettext("Structure"))
+
+  defp root_title(root), do: root
+
+  # A groupBy is built deferred, with no groups: the menu that opens it builds
+  # them, as the Studio's own walk does (`Structure.expand/3`), and keeps them
+  # for the visit, so its groups' lists find their nodes too.
+  defp expand_open(desk, panes, dataset, scope) do
+    Enum.reduce(panes, desk, fn
+      %{missing: true}, desk ->
+        desk
+
+      %{kind: :menu, node: id}, desk ->
+        case desk.nodes[id] do
+          %{deferred: {:group_by, _item, _idx}} = node ->
+            open =
+              node
+              |> Structure.expand(dataset, scope)
+              |> StructureCopy.localize()
+              |> Tree.normalize()
+
+            %{desk | nodes: Map.merge(desk.nodes, Tree.index(open))}
+
+          _ ->
+            desk
+        end
+
+      _pane, desk ->
+        desk
+    end)
+  end
+
+  # The earlier pane that reads the same document (a split sibling's first):
+  # the later one shows that read instead of making its own.
+  defp leader(%{pane: %{kind: :doc}, key: key, index: index}, views),
+    do: Enum.find_value(views, &((&1.key == key and &1.index < index) && &1.id))
+
+  defp leader(_view, _views), do: nil
 end

@@ -72,7 +72,8 @@
 // invisible. Relaxing an assertion here to match reality deletes the test.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -109,18 +110,19 @@ const DECLARES_NO_SUMMARY = "gates no part-summary";
 // hooked Part earns its line without editing anything here.
 const OK_LINE_FLOOR = 22;
 
-/** One run of the real gate. `faults` is the array of part ids to force. */
-function runGate(faults) {
+/** One run of the real gate. `faults` is the array of part ids to force; `gate` is
+ *  the check.mjs to run, the real one unless an arm planted a copy elsewhere. */
+function runGate(faults, gate = CHECK) {
   const env = { ...process.env };
   if (faults.length) env.BP_DESIGN_CHECK_FAULT = faults.join(",");
   else delete env.BP_DESIGN_CHECK_FAULT;
-  const r = spawnSync(process.execPath, [CHECK], {
+  const r = spawnSync(process.execPath, [gate], {
     cwd: REPO_ROOT,
     env,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (r.error) throw new Error(`could not run ${CHECK}: ${r.error.message}`);
+  if (r.error) throw new Error(`could not run ${gate}: ${r.error.message}`);
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
@@ -168,7 +170,7 @@ export async function selftest() {
   console.log(`design/check.mjs --selftest: coverage — ${PARTS.length} Part(s) in the gate's own output, ${covered.length} exercised here.`);
   console.log(`  exercised: ${covered.join(", ") || "(none)"}`);
   if (uncovered.length) {
-    console.log(`  UNCOVERED — no \`FAULT.has("<id>")\` hook in design/check.mjs, so this selftest cannot ask whether`);
+    console.log(`  UNCOVERED — no \`FAULT.has("<id>")\` hook in design/check.mjs or design/check/part-*.mjs, so this selftest cannot ask whether`);
     console.log(`  their gate can still fail. A mutation to one of these exits 0 and is INVISIBLE here:`);
     for (const p of uncovered) console.log(`    Part ${p} — NOT exercised by --selftest`);
   } else {
@@ -318,6 +320,38 @@ export async function selftest() {
       return `${proven.size} withholdable, above the ${OK_LINE_FLOOR} floor`;
     }
     return `${proven.size} withholdable, at the floor`;
+  });
+
+  // ── a Part module the gate never imports: it must red, naming the module ────
+  // Every arm above reaches the Parts through check.mjs's import lines, so a
+  // module those lines leave out is invisible to all of them, and until
+  // task-6449cfc9286d060e it left the gate PASSING. This arm plants one in a
+  // scratch tree: a copy of check.mjs, links to everything else in design/ and
+  // design/check/, and the planted module as the only difference. The gate must
+  // red there and name it, and every Part must keep its healthy ok lines, so the
+  // red is the plant and not a broken scratch tree. Nothing is written in the repo.
+  check("unimported Part module: a design/check/part-*.mjs that check.mjs does not import reds the gate, naming it", () => {
+    const what = "planted design/check/part-zz.mjs";
+    const tmp = mkdtempSync(join(tmpdir(), "bp-design-check-"));
+    try {
+      const design = join(tmp, "design"), parts = join(design, "check");
+      mkdirSync(parts, { recursive: true });
+      symlinkSync(join(REPO_ROOT, "api"), join(tmp, "api"));
+      for (const e of readdirSync(DESIGN_DIR)) {
+        if (e !== "check" && e !== "check.mjs") symlinkSync(join(DESIGN_DIR, e), join(design, e));
+      }
+      for (const e of readdirSync(join(DESIGN_DIR, "check"))) symlinkSync(join(DESIGN_DIR, "check", e), join(parts, e));
+      copyFileSync(CHECK, join(design, "check.mjs"));
+      writeFileSync(join(parts, "part-zz.mjs"), 'import { fail } from "./state.mjs";\nfail("  Part ZZ FAIL: planted by --selftest, must never pass in silence");\n');
+      const r = runGate([], join(design, "check.mjs"));
+      ran(r, what);
+      if (r.status === 0) throw new Error(`${what}: the gate exited 0 — a Part module it does not import never runs, and nothing named it`);
+      if (!r.stderr.includes("design/check/part-zz.mjs")) throw new Error(`${what}: the gate exited ${r.status} without naming design/check/part-zz.mjs:\n${r.stderr}`);
+      compare(r, new Map(), what, false);
+      return `exit ${r.status}, names design/check/part-zz.mjs`;
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   let passed = 0;

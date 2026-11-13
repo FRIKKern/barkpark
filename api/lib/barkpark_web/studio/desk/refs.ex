@@ -8,9 +8,15 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   string. A reference field is `type: "reference"`; an array of them is
   `type: "arrayOf"` (or `"array"`) whose `of` is, or holds, a reference.
   All targets of one document are read in one query, whatever their types.
+
+  A target is named as the desk's rows name it: a type with no `title` field
+  by its `list_preview.title` field (an author's `name`), which a rename
+  moves, while the stored `title` column keeps the first name the document
+  had (refs.spec:179). Each target type's schema is read once per call.
   """
 
   alias Barkpark.Content
+  alias Barkpark.Content.TitleDerivation
 
   @type target :: %{id: String.t(), type: String.t() | nil, title: String.t()}
 
@@ -31,25 +37,70 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
   defp kind(_field), do: nil
 
   @doc """
+  The document types the reference fields of `schema` can point at (their
+  `to`), or `:any` when one of them names none. A document of another type
+  is never among its references, so a save of one changes nothing it shows.
+  """
+  @spec target_types(map()) :: MapSet.t(String.t()) | :any
+  def target_types(schema) do
+    refs =
+      for %{"type" => type} = field <- Map.get(schema, :fields) || [],
+          ref <- if(type == "reference", do: [field], else: of_refs(field)),
+          do: ref["to"] |> List.wrap() |> Enum.map(&to_name/1)
+
+    if Enum.any?(refs, &(&1 == [] or nil in &1)),
+      do: :any,
+      else: refs |> List.flatten() |> MapSet.new()
+  end
+
+  defp of_refs(%{"type" => type, "of" => of}) when type in ["arrayOf", "array"],
+    do: for(%{"type" => "reference"} = ref <- List.wrap(of), do: ref)
+
+  defp of_refs(_field), do: []
+
+  defp to_name(name) when is_binary(name) and name != "", do: name
+  defp to_name(%{"type" => name}) when is_binary(name) and name != "", do: name
+  defp to_name(_to), do: nil
+
+  @doc """
   The targets of every reference field of `doc`, by field name, in stored
   order. A target that cannot be read (deleted, or outside the caller's
   scope) keeps its id and has no type.
   """
   @spec resolve(map(), map(), String.t(), keyword()) :: %{optional(String.t()) => [target()]}
   def resolve(doc, schema, dataset, scope) do
-    content = Map.get(doc, :content) || %{}
-
-    ids_by_field =
-      for {name, kind} <- fields(schema), into: %{} do
-        values = if kind == :one, do: [content[name]], else: List.wrap(content[name])
-        {name, values |> Enum.map(&ref_id/1) |> Enum.reject(&is_nil/1)}
-      end
+    ids_by_field = ids(doc, schema)
 
     found = lookup(ids_by_field |> Map.values() |> List.flatten() |> Enum.uniq(), dataset, scope)
+    schemas = schemas(found, dataset, scope)
 
     Map.new(ids_by_field, fn {name, ids} ->
-      {name, Enum.map(ids, &target(&1, found[&1]))}
+      {name, Enum.map(ids, &target(&1, found[&1], schemas))}
     end)
+  end
+
+  # The schema of each type among the targets: one read per type.
+  defp schemas(found, dataset, scope) do
+    for %{type: type} when is_binary(type) <- Map.values(found), uniq: true, into: %{} do
+      case Content.resolve_schema(type, dataset, scope) do
+        {:ok, schema} -> {type, schema}
+        _ -> {type, nil}
+      end
+    end
+  end
+
+  @doc """
+  The ids every reference field of `doc` holds, by field name, in stored
+  order. Read from the document alone: no query.
+  """
+  @spec ids(map(), map()) :: %{optional(String.t()) => [String.t()]}
+  def ids(doc, schema) do
+    content = Map.get(doc, :content) || %{}
+
+    for {name, kind} <- fields(schema), into: %{} do
+      values = if kind == :one, do: [content[name]], else: List.wrap(content[name])
+      {name, values |> Enum.map(&ref_id/1) |> Enum.reject(&is_nil/1)}
+    end
   end
 
   @doc "The type of the document `id`, whatever it is, or nil when it cannot be read."
@@ -70,10 +121,13 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
     Map.new(ids, fn id -> {id, rows["drafts." <> id] || rows[id]} end)
   end
 
-  defp target(id, nil), do: %{id: id, type: nil, title: id}
+  defp target(id, nil, _schemas), do: %{id: id, type: nil, title: id}
 
-  defp target(id, doc) do
-    title = if is_binary(doc.title) and String.trim(doc.title) != "", do: doc.title, else: id
+  defp target(id, doc, schemas) do
+    title =
+      TitleDerivation.preview_title(doc, schemas[doc.type]) ||
+        if(is_binary(doc.title) and String.trim(doc.title) != "", do: doc.title, else: id)
+
     %{id: id, type: doc.type, title: title}
   end
 

@@ -6,7 +6,6 @@ import { derive, PASSTHROUGH_FAMILIES, SLOTS } from "../derive.mjs";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fail, failed, FAULT } from "./state.mjs";
-import { want } from "./part-b.mjs";
 import { here } from "./part-e.mjs";
 
 // ── Part F: theme compiler characterization (charter D12/D13/D14/D21) ─────────

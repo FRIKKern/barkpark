@@ -13186,3 +13186,208 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Using enterprise SSO? Enter your work email and continue without a password."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Close %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Desk"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expand %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "No document “%{id}” of type “%{type}” was found."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "No documents here yet."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex
+#, elixir-autogen, elixir-format
+msgid "No results found"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Other views and inspectors are not shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "References"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk_live.ex
+#, elixir-autogen, elixir-format
+msgid "Resize pane"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex
+#, elixir-autogen, elixir-format
+msgid "Search list"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{count}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_search.ex lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "There is no document type named “%{type}” here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "This document could not be read."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/live_refresh.ex
+#, elixir-autogen, elixir-format
+msgid "This document has been deleted."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This is the current document. Revision “%{rev}” is not shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This list is not on the desk."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This list's filter could not be read."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "This pane could not be read."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "List options"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Default sort"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by %{field}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Last Edited"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Sort by Created"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Displaying a maximum of %{count} documents"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new %{type}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/pane_component.ex
+#, elixir-autogen, elixir-format
+msgid "Create new document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Show document actions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open document actions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Split pane right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "Close split pane"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Share document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document ID"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document ID copied to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Document URL copied to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/share_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Could not copy to the clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspecting %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Inspect views"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Parsed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Raw JSON"
+msgstr ""

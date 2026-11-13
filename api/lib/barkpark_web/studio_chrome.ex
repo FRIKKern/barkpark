@@ -113,6 +113,7 @@ defmodule BarkparkWeb.StudioChrome do
 
   alias Barkpark.{Content, Tenancy}
   alias BarkparkWeb.Studio.Caps
+  alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -131,7 +132,9 @@ defmodule BarkparkWeb.StudioChrome do
     socket =
       socket
       |> assign_new(:api_token, fn -> nil end)
-      |> assign_new(:dataset, fn -> params["dataset"] || Content.default_dataset() end)
+      |> then(fn s ->
+        assign_new(s, :dataset, fn -> chrome_dataset(s.assigns[:api_token], params) end)
+      end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
       # ORDER IS THE FIX (task-e656670726427b96): derive the principal's OWN
@@ -195,6 +198,28 @@ defmodule BarkparkWeb.StudioChrome do
      socket
      |> attach_hook(:studio_chrome_nav, :handle_event, &chrome_event/3)
      |> attach_hook(:studio_chrome_path, :handle_params, &chrome_path/3)}
+  end
+
+  # The dataset the chrome hands a page. A dataset-bound token always gets its
+  # own dataset: not the `production` default when the URL names none, and not
+  # a `?dataset=` it names. The request-level fence
+  # (`RequireToken.dataset_off_binding?/2`) runs for a page load on the scoped
+  # routes only, so without this the Tickets inbox listed another dataset's
+  # tickets on a dataset-less page, on a socket join that added the query, and
+  # on the flat route. Routes with a `/d/:dataset` segment are fenced by
+  # `LiveScope` before this runs. Same rule as `MediaController`'s default for
+  # a request naming none.
+  defp chrome_dataset(%Barkpark.Auth.ApiToken{dataset_bound: true, dataset: bound}, _params)
+       when is_binary(bound),
+       do: bound
+
+  # `?dataset[]=x` and `?dataset[a]=x` arrive as a list and a map. Neither is a
+  # dataset name, so they count as absent.
+  defp chrome_dataset(_token, params) do
+    case params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> Content.default_dataset()
+    end
   end
 
   # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
@@ -488,8 +513,11 @@ defmodule BarkparkWeb.StudioChrome do
   # Same hard tenant boundary as StudioLive's switch handler: a principal
   # may switch only into a membership workspace; the anonymous/dev session
   # may "switch" only to the workspace already on the socket.
+  #
+  # A slug the database refuses as text (a NUL) names nothing: no read.
   defp nav_to_workspace(socket, slug) do
-    with %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(slug),
+    with true <- is_binary(slug) and Text.text?(slug),
+         %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(slug),
          true <- can_reach?(socket, ws),
          %{} = project <- project_for(ws) do
       push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
@@ -503,6 +531,7 @@ defmodule BarkparkWeb.StudioChrome do
   defp nav_to_project(socket, slug) do
     with %{slug: ws_slug} = ws when is_binary(ws_slug) <- socket.assigns[:current_workspace],
          true <- can_reach?(socket, ws),
+         true <- is_binary(slug) and Text.text?(slug),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, slug) do
       push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
     else

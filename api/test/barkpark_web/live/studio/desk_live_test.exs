@@ -169,6 +169,154 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     refute has_element?(view, ~s([data-pane-index="2"]))
   end
 
+  test "a URL that names a revision, a view or an inspector says what the desk shows instead", %{
+    conn: conn,
+    base: base,
+    a: a,
+    b: b
+  } do
+    # The last document of the chain: the editor, on the current document.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},rev=abc123")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert doc_shows?(view, 2, "About Alpha note")
+
+    # A document further left: a read-only pane.
+    chain = "#{@type_name};#{a},rev=abc123;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
+    assert doc_shows?(view, 2, "About Alpha note")
+    refute has_element?(view, ~s([data-pane-index="3"] [data-desk-left-out]))
+
+    for param <- ["view=json", "inspect=sanity%2Fstructure%2Fhistory"] do
+      {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},#{param}")
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out])), param
+    end
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+    refute has_element?(view, "[data-desk-left-out]")
+  end
+
+  test "a pane for a document that was not found shows no revision note", %{
+    conn: conn,
+    base: base,
+    b: b
+  } do
+    # A read-only pane (not the last document) for an id that does not exist.
+    chain = "#{@type_name};dsn-nobody,rev=abc123,view=json;#{b},type=#{@type_name}"
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{chain}")
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "dsn-nobody")
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
+
+    # The last document of the chain: the editor's pane, which opens nothing.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};dsn-nobody,rev=abc123")
+    settle(view)
+
+    assert has_element?(view, ~s([data-pane-index="2"] [role="alert"]), "dsn-nobody")
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
+  end
+
+  test "a pane URL whose bytes are not text after decoding reads as the text it spells", %{
+    conn: conn,
+    base: base
+  } do
+    # The router decodes once and the pane reader once more: %25FF is the byte
+    # 0xFF by then. It must not reach a query or the page as that byte.
+    # Encoded once, the router alone makes the byte: the same holds. So it
+    # does for a NUL, which is UTF-8 but which Postgres refuses as text.
+    for bad <- ~w(x%25FF x%25C3%2528 x%25E2%2582 x,path=%25FF x%FF x%C3%28 x%00 x%2500) do
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"]), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+
+      # Not the last document of the chain: a read-only pane, which queries.
+      {:ok, view, html} = live(admin(conn), "#{base}/#{@type_name};#{bad};y,type=#{@type_name}")
+      settle(view)
+
+      assert String.valid?(html), bad
+      assert String.valid?(render(view)), bad
+      assert has_element?(view, ~s([data-pane-index="2"] .dk-note), "x"), bad
+      refute has_element?(view, ~s(.dk-note[role="alert"])), bad
+    end
+
+    # A link that decodes twice to text reads as it always did.
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};x%2541")
+    settle(view)
+    assert has_element?(view, ~s([data-pane-index="2"]), "xA")
+
+    # The hover path takes its href from the browser: the same bytes, once encoded.
+    view
+    |> element("#desk-panes")
+    |> render_hook("warm", %{"href" => "#{base}/#{@type_name};x%FF"})
+
+    settle(view)
+    assert String.valid?(render(view))
+  end
+
+  test "the editor's notes sit in a holder that stays when a note comes or goes", %{
+    conn: conn,
+    base: base,
+    a: a
+  } do
+    # Every row of the editor pane has an id, so a live patch moves none of
+    # them: a note with no holder made it re-append the editor's body.
+    holder = ~s([data-pane-index="2"] > [id="desk-pane-2-doc:#{a}-editor-notes"])
+
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+    assert has_element?(view, holder)
+    refute has_element?(view, holder <> " [data-desk-left-out]")
+
+    render_patch(view, "#{base}/#{@type_name};#{a},rev=abc123")
+    settle(view)
+    assert has_element?(view, holder <> " [data-desk-left-out]", "abc123")
+
+    render_patch(view, "#{base}/#{@type_name};#{a}")
+    settle(view)
+    assert has_element?(view, holder)
+    refute has_element?(view, "[data-desk-left-out]")
+
+    # Every row of the pane after its header has an id.
+    refute has_element?(view, ~s{[data-pane-index="2"] > :not(.pane-header):not([id])})
+  end
+
+  # Row 5. A document opens as a read-only pane on hold, then becomes the
+  # editor. When the editor's section took the pane's id, the browser patched
+  # one into the other in place and kept the pane's component alive; Back to
+  # that document then drew it as an empty section until the editor came.
+  test "the editor's section never takes a pane component's id, through Back and Forward", %{
+    conn: conn,
+    base: base,
+    a: a,
+    b: b
+  } do
+    {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
+    settle(view)
+
+    for doc <- [b, a, b] do
+      render_patch(view, "#{base}/#{@type_name};#{doc}")
+      settle(view)
+
+      pane_ids = Enum.map(:sys.get_state(view.pid).socket.assigns.desk_panes, & &1.id)
+      assert "desk-pane-2-doc:#{doc}" in pane_ids, "precondition: #{inspect(pane_ids)}"
+
+      assert has_element?(view, ~s([data-pane-editing][id="desk-pane-2-doc:#{doc}-editor"])),
+             "the editor for #{doc} is not in its own section"
+
+      refute has_element?(view, ~s([data-pane-editing][id="desk-pane-2-doc:#{doc}"])),
+             "the editor took the id of the pane's component"
+    end
+  end
+
   test "closing a pane keeps the tab title the pane now last had read", %{
     conn: conn,
     base: base,
@@ -342,6 +490,27 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), "Alpha note")
     end
 
+    test "a document split in three is read once for its two read-only panes", %{
+      conn: conn,
+      base: base,
+      a: a
+    } do
+      # Panes 2 and 3 show the document read-only; pane 4, the last, is the editor.
+      {:ok, view, _html} =
+        live(admin(conn), "#{base}/#{@type_name};#{a}|,view=json|,view=json")
+
+      settle(view)
+
+      assert_received {:pane_load, :list}
+      assert_received {:pane_load, :doc}
+      refute_received {:pane_load, _}
+
+      assert has_element?(view, ~s([data-pane-index="2"] dd), "About Alpha note")
+      assert has_element?(view, ~s([data-pane-index="3"] dd), "About Alpha note")
+      refute has_element?(view, ~s([data-pane-index="2"][aria-busy]))
+      refute has_element?(view, ~s([data-pane-index="3"][aria-busy]))
+    end
+
     test "a read-ahead that fails is forgotten: the next hover reads, the click still opens", %{
       conn: conn,
       base: base,
@@ -442,9 +611,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     # The refresh is a message, and so is the pane's own re-read behind it:
     # `settle/1` right here can find nothing running yet and return at once
     # (it did on CI). Wait for the new value itself.
+    # The list re-reads in its own task too: wait for its row as well (it
+    # landed after the document on a loaded machine).
     shown? = fn ->
       settle(view)
-      doc_shows?(view, 2, "Now changed")
+
+      doc_shows?(view, 2, "Now changed") and
+        has_element?(view, ~s([data-pane-index="1"] a[data-desk-row]), "Alpha renamed")
     end
 
     assert Enum.any?(1..200, fn _ -> shown?.() or (Process.sleep(10) && false) end),
@@ -637,21 +810,24 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert titles == Enum.sort(titles)
       assert hd(titles) == "001"
 
-      # More than one page: the rest is one press away.
-      view |> element(list <> " button.dk-more") |> render_click()
+      # More than one page: scrolling to the last row reads the rest below it.
+      view
+      |> element(list <> " [role=list][phx-viewport-bottom=more]")
+      |> render_hook("more", %{})
+
       settle(view)
       assert length(row_titles(view)) == 130
       assert has_element?(view, list <> " a[data-desk-row]", "Big 130")
-      refute has_element?(view, list <> " button.dk-more")
     end
 
     test "the sort menu changes the order for this list", %{conn: conn, base: base} do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@big}")
       settle(view)
 
+      # A `desk.sortOrderings` entry is in the list's "…" menu (`ListMenu`).
       view
-      |> element(~s([data-pane-kind="list"] form.dk-sort))
-      |> render_change(%{"sort" => "titleDesc"})
+      |> element(~s([data-pane-kind="list"] [role="menuitemradio"]), "Sort by Title, Z first")
+      |> render_click()
 
       settle(view)
       assert hd(row_titles(view)) == "130"
@@ -783,6 +959,302 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       # Closing the fourth pane prints the chain up to it, params intact.
       view |> element(~s([data-pane-index="4"] a.dk-close)) |> render_click()
       assert_patch(view, "#{base}/#{@ref_type};#{linked};#{hop.(a, "note")}")
+    end
+  end
+
+  describe "a list id used in two menus" do
+    # Two menus each hold a list with the id «nyheter», of one type, each
+    # filtered its own way. The desk's flat id index keeps only one of them.
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "deskStructure",
+            "title" => "deskStructure",
+            "visibility" => "public",
+            "fields" => [%{"name" => "items", "title" => "Items", "type" => "array"}]
+          },
+          @dataset
+        )
+
+      menu = fn id, title, summary ->
+        %{
+          "kind" => "list",
+          "id" => id,
+          "title" => title,
+          "items" => [
+            %{
+              "kind" => "documentTypeList",
+              "id" => "nyheter",
+              "title" => title <> " nyheter",
+              "type" => @type_name,
+              "filter" => %{"content.summary" => %{"eq" => summary}}
+            }
+          ]
+        }
+      end
+
+      items = [
+        menu.("norsk", "Norsk", "About Alpha note"),
+        menu.("svensk", "Svensk", "About Beta note")
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "deskStructure",
+          %{"doc_id" => "deskStructure", "title" => "Desk", "content" => %{"items" => items}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+      :ok
+    end
+
+    test "each menu's list opens its own list", %{conn: conn, base: base} do
+      for {menu, title, want} <- [
+            {"norsk", "Norsk nyheter", "Alpha note"},
+            {"svensk", "Svensk nyheter", "Beta note"}
+          ] do
+        {:ok, view, _html} = live(admin(conn), "#{base}/#{menu};nyheter")
+
+        assert await_rows(view, 2, [want]) == [want], menu
+        assert has_element?(view, ~s([data-pane-index="2"] .pane-header-title), title)
+      end
+    end
+  end
+
+  describe "a tree list drills pane by pane, as the Studio's own desk" do
+    @cat "desk_slice_cat"
+
+    # A declared desk: «Kategorier» holds a parent-child tree of categories
+    # and a groupBy of the same categories by parent (built deferred).
+    setup do
+      for {name, fields} <- [
+            {@cat,
+             [
+               %{"name" => "title", "title" => "Title", "type" => "string"},
+               %{"name" => "parent", "title" => "Parent", "type" => "reference", "to" => [@cat]}
+             ]},
+            {"deskStructure", [%{"name" => "items", "title" => "Items", "type" => "array"}]}
+          ] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{"name" => name, "title" => name, "visibility" => "public", "fields" => fields},
+            @dataset
+          )
+      end
+
+      n = System.unique_integer([:positive])
+      id = fn key -> "dsc-#{key}-#{n}" end
+
+      for {key, title, parent} <- [
+            {"a", "Alpha", nil},
+            {"b", "Bravo", nil},
+            {"a1", "Alpha one", "a"},
+            {"a2", "Alpha two", "a"},
+            {"a1x", "Alpha one x", "a1"}
+          ] do
+        content = if parent, do: %{"parent" => id.(parent)}, else: %{}
+
+        {:ok, _} =
+          Content.create_document(
+            @cat,
+            %{"doc_id" => id.(key), "title" => title, "content" => content},
+            @dataset
+          )
+
+        {:ok, _} = Content.publish_document(id.(key), @cat, @dataset)
+      end
+
+      items = [
+        %{
+          "kind" => "list",
+          "id" => "kategorier",
+          "title" => "Kategorier",
+          "items" => [
+            %{
+              "kind" => "tree",
+              "id" => "hierarki",
+              "title" => "Hierarki",
+              "type" => @cat,
+              "parent" => "content.parent",
+              "orderings" => [%{"field" => "title", "direction" => "asc"}]
+            },
+            %{
+              "kind" => "groupBy",
+              "id" => "etter-forelder",
+              "title" => "Etter forelder",
+              "type" => @cat,
+              "over" => @cat,
+              "by" => "content.parent"
+            }
+          ]
+        }
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "deskStructure",
+          %{"doc_id" => "deskStructure", "title" => "Desk", "content" => %{"items" => items}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+      {:ok, cat: id}
+    end
+
+    defp rows(view, index) do
+      view
+      |> element(~s([data-pane-index="#{index}"] .pane-body))
+      |> render()
+      |> then(
+        &Regex.scan(
+          ~r/<a[^>]*data-desk-row[^>]*>\s*<span class="pane-item-label">\s*<span class="dk-row-title">([^<]+?)</,
+          &1
+        )
+      )
+      |> Enum.map(fn [_, title] -> title end)
+    end
+
+    # A pane's read is async, and CI is slower than a laptop: poll for the rows.
+    defp await_rows(view, index, want, tries \\ 50) do
+      settle(view)
+      got = rows(view, index)
+
+      cond do
+        got == want ->
+          got
+
+        tries == 0 ->
+          got
+
+        true ->
+          Process.sleep(100)
+          await_rows(view, index, want, tries - 1)
+      end
+    end
+
+    test "a row opens its children as the next pane, its parent on top", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      tree = "#{base}/kategorier;hierarki"
+      {:ok, view, _html} = live(admin(conn), tree)
+
+      # The root level: the parentless categories.
+      assert await_rows(view, 2, ["Alpha", "Bravo"]) == ["Alpha", "Bravo"]
+
+      # A row opens a tree level, not the document.
+      alpha = ~s([data-pane-index="2"] a[data-desk-row][href="#{tree};#{cat.("a")}"])
+      assert has_element?(view, alpha <> ~s([data-desk-opens="list"]))
+      view |> element(alpha) |> render_click()
+      assert_patch(view, "#{tree};#{cat.("a")}")
+
+      # The level: the parent on top, a divider, then its children.
+      want = ["Alpha", "Alpha one", "Alpha two"]
+      assert await_rows(view, 3, want) == want
+      assert has_element?(view, ~s([data-pane-index="3"][data-pane-kind="list"] .pane-divider))
+      refute has_element?(view, ~s([data-pane-index="3"] #editor-form))
+      assert has_element?(view, ~s([data-pane-index="2"] a[aria-current="true"]), "Alpha")
+      refute has_element?(view, ~s([data-pane-index="2"] a[aria-current="true"]), "Bravo")
+
+      # The URL it printed opens the same panes from a reload.
+      {:ok, again, _html} = live(admin(conn), "#{tree};#{cat.("a")}")
+      assert await_rows(again, 3, want) == want
+    end
+
+    test "the parent on top opens the document in the editor", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      level = "#{base}/kategorier;hierarki;#{cat.("a")}"
+      {:ok, view, _html} = live(admin(conn), level)
+      assert await_rows(view, 3, ["Alpha", "Alpha one", "Alpha two"]) |> hd() == "Alpha"
+
+      top = ~s([data-pane-index="3"] a[data-desk-row][href="#{level};#{cat.("a")}"])
+      assert has_element?(view, top <> ~s([data-desk-opens="doc"]))
+      view |> element(top) |> render_click()
+      assert_patch(view, "#{level};#{cat.("a")}")
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="4"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 4, "Alpha")
+      assert has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha")
+    end
+
+    test "a child drills one level deeper, and its own top opens it", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      level = "#{base}/kategorier;hierarki;#{cat.("a")}"
+      {:ok, view, _html} = live(admin(conn), level)
+      await_rows(view, 3, ["Alpha", "Alpha one", "Alpha two"])
+
+      child = ~s([data-pane-index="3"] a[data-desk-row][href="#{level};#{cat.("a1")}"])
+      view |> element(child) |> render_click()
+      assert_patch(view, "#{level};#{cat.("a1")}")
+
+      assert await_rows(view, 4, ["Alpha one", "Alpha one x"]) == ["Alpha one", "Alpha one x"]
+      assert has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha one")
+      refute has_element?(view, ~s([data-pane-index="3"] a[aria-current="true"]), "Alpha two")
+
+      deep = "#{level};#{cat.("a1")};#{cat.("a1")}"
+      {:ok, view, _html} = live(admin(conn), deep)
+      settle(view)
+      assert has_element?(view, ~s([data-pane-index="5"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 5, "Alpha one")
+    end
+
+    test "a search hit for a tree list's type opens the document, not a tree level", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      {:ok, view, _html} = live(admin(conn), base)
+      settle(view)
+
+      view |> form("#desk-search-form") |> render_change(%{"value" => "Alpha one x"})
+
+      # Under a tree an id alone opens a level; the id twice opens the doc.
+      doc = "#{base}/kategorier;hierarki;#{cat.("a1x")};#{cat.("a1x")}"
+      hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{cat.("a1x")}"])
+      assert has_element?(view, hit, "Alpha one x")
+      assert has_element?(view, ~s(#desk-search-hits a[data-desk-hit][href="#{doc}"]))
+
+      view |> element(hit) |> render_click()
+      assert_patch(view, doc)
+      settle(view)
+
+      assert has_element?(view, ~s([data-pane-index="4"][data-pane-editing] #editor-form))
+      assert doc_shows?(view, 4, "Alpha one x")
+    end
+
+    test "a deferred groupBy's menu shows its groups, and a group lists its docs", %{
+      conn: conn,
+      base: base,
+      cat: cat
+    } do
+      menu = "#{base}/kategorier;etter-forelder"
+      {:ok, view, _html} = live(admin(conn), menu)
+      settle(view)
+
+      groups = rows(view, 2)
+      assert "Alpha" in groups and "Alpha one" in groups
+
+      # A group's id is `<the groupBy's place in the desk>-<the over doc's id>`:
+      # the second item of the first desk item (`Structure`).
+      group = ~s([data-pane-index="2"] a[data-desk-row][href="#{menu};desk-0-1-#{cat.("a1")}"])
+      assert has_element?(view, group <> ~s([data-desk-opens="list"]), "Alpha one")
+      view |> element(group) |> render_click()
+      assert await_rows(view, 3, ["Alpha one x"]) == ["Alpha one x"]
+
+      assert has_element?(
+               view,
+               ~s([data-pane-index="3"] a[data-desk-row][href$=";#{cat.("a1x")}"])
+             )
     end
   end
 

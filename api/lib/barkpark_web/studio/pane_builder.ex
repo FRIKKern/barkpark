@@ -537,17 +537,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.1 — the declared sort: a desk group's own
         # `orderings` win, else the schema's `desk.orderings` (Sanity's
         # `orderings`, first entry = default). Absent → today's order.
-        #
         # task-fa57815041bead3d — a sort the author picked in the list's sort
         # menu (one of `desk.sortOrderings`) wins over that default for this
-        # list only. Picking nothing leaves the default as it is.
+        # list only; an order picked in the desk's list menu (`:list_orders`) wins over both.
         sort_options = sort_options(schema)
 
         active_sort =
           find_sort(sort_options, opts |> Keyword.get(:list_sorts, %{}) |> Map.get(type_name))
 
         list_opts =
-          case active_sort || desk_order(active_group, schema, Map.get(node, :orderings)) do
+          case opts[:list_orders][type_name] || active_sort ||
+                 desk_order(active_group, schema, Map.get(node, :orderings)) do
             %{order: order} -> Keyword.put(list_opts, :order, order)
             [] -> list_opts
             order -> Keyword.put(list_opts, :order, order)
@@ -1437,9 +1437,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # A desk list pane's page (Studio desk pagination). `list_documents/3` read a
   # 100-row page and dropped the truncation fact, so a type with 131 documents
   # showed "100" and no way past the 100th (stranger walk, 2026-10-01).
-  # `list_documents_page/3` answers `has_more` for one extra row; the page size
-  # grows per type through the `:list_limits` the LiveView threads in
-  # ("Show more"), capped by the query layer's own 1000-row limit.
+  # `list_documents_page/3` answers `has_more` for one extra row; `:list_limits` grows the page
+  # ("Show more", at most the query layer's 1000 rows) and `:list_offsets` moves its start.
   @desk_page 100
   @doc false
   def desk_page, do: @desk_page
@@ -1449,12 +1448,13 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # whole content.
   defp list_page_preflighted(type_name, dataset, list_opts, opts, schema) do
     limit = opts |> Keyword.get(:list_limits, %{}) |> Map.get(type_name, @desk_page)
+    offset = opts |> Keyword.get(:list_offsets, %{}) |> Map.get(type_name, 0)
 
     case filter_refusal(list_opts) do
       nil ->
         page_opts =
           list_opts
-          |> Keyword.put(:limit, limit)
+          |> Keyword.merge(limit: limit, offset: offset)
           |> Keyword.put(:content_keys, row_content_keys(schema))
 
         {docs, has_more} = Content.list_documents_page(type_name, dataset, page_opts)

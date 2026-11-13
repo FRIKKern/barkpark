@@ -65,6 +65,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # the buttons target that component so their `phx-click` events route there
   # instead of the parent LiveView.
   attr :target, :any, default: nil
+  # This array's bare field path (`links`), in the desk only: its rows list
+  # then carries `id="links"`, the element Sanity's Studio names by the
+  # path. nil adds no id.
+  attr :id_base, :string, default: nil
 
   # Several named member types (`field.of_types`, Sanity's page-builder
   # array, such as `page.landingPageSections`). Each row opens in the form of
@@ -85,6 +89,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:target, nil)
+      |> Map.put_new(:id_base, nil)
       |> Map.put(:path, path)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
@@ -98,7 +103,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               id={@dom_id} data-field-name={@field.name}>
       <legend class="bp-field-title"><%= @title %></legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
-      <ol class="bp-array-rows">
+      <ol class="bp-array-rows" id={@id_base}>
         <li :for={row <- @rows} class="bp-array-row bp-array-row-item" data-row-index={row.idx}
             data-member-type={row.type} data-row-key={row.key}>
           <div class="bp-array-row-body">
@@ -251,6 +256,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:target, nil)
+      |> Map.put_new(:id_base, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
@@ -267,7 +273,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         <% end %>
       </legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
-      <ol class="bp-array-rows">
+      <ol class="bp-array-rows" id={@id_base}>
         <%= for {row_value, idx} <- @rows do %>
           <li class={"bp-array-row " <> if(composite_rows?(@field), do: "bp-array-row-item", else: "")} data-row-index={idx}>
             <div class="bp-array-row-body">
@@ -322,6 +328,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           </li>
         <% end %>
       </ol>
+      <%!-- In the desk the button is named "Add item", the name Sanity's
+            Studio gives it (string-arrays J34); the "+" is decoration. --%>
       <button
         type="button"
         class="bp-array-btn bp-array-btn-add"
@@ -331,7 +339,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-field={@field.name}
         phx-value-path={@path}
         disabled={@readonly}
-      >+ <%= gettext("Add") %></button>
+      ><%= if @id_base do %><span aria-hidden="true">+ </span><%= gettext("Add item") %><% else %>+ <%= gettext("Add") %><% end %></button>
     </fieldset>
     """
   end
@@ -521,7 +529,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
       _ ->
         leaf_assigns = %{
-          input_id: "f-#{assigns.field.name}-#{idx}",
+          input_id: leaf_id(assigns, idx),
           input_name: row_path,
           row_value: row_value,
           row_label: row_label(assigns, idx),
@@ -825,6 +833,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     />
     """
   end
+
+  # In the desk (an `id_base`) a row's input is named by the array's path and
+  # its index, `highlights[3]` as Sanity's Studio names it; elsewhere the old id.
+  defp leaf_id(%{id_base: base}, idx) when is_binary(base), do: "#{base}[#{idx}]"
+  defp leaf_id(assigns, idx), do: "f-#{assigns.field.name}-#{idx}"
 
   # A row's own name: the fieldset legend names the group, not each input,
   # so a screen reader heard only "edit text" per row.

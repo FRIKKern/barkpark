@@ -3,7 +3,7 @@
 // its Part when imported. Moved out of check.mjs with no change in behaviour.
 
 import { RULE_KEYS, RULE_UNITS, tokens } from "../emit.mjs";
-import { bumpFailed, failed, FAULT } from "./state.mjs";
+import { bumpFailed, FAULT } from "./state.mjs";
 import { LEDGER_MARKER, readDesignSource } from "./part-e.mjs";
 
 // ── Part M: the RULE LADDER — one weight for structure, one for everything ───

@@ -105,4 +105,59 @@ defmodule BarkparkWeb.Studio.DeskListNamesTest do
     refute has_element?(view, ~s|a[data-desk-row][aria-current="true"]:not([data-selected])|),
            "every current row has data-selected"
   end
+
+  # The specs find a row and a search hit by its title alone
+  # (`getByText('Fixture post 12', {exact: true})` in keyboard.spec.ts). With
+  # the subtitle in the same element as a bare title the element read
+  # "Fixture post 12 Post", and no element was the title.
+  test "a row's and a search hit's title is an element of its own, beside its subtitle", %{
+    conn: conn,
+    base: base
+  } do
+    type = "desk_lnames_kicker"
+
+    {:ok, _schema} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => "Kicker notes",
+          "visibility" => "public",
+          "list_preview" => %{"subtitle" => "kicker"},
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "kicker", "title" => "Kicker", "type" => "string"}
+          ]
+        },
+        @dataset
+      )
+
+    id = "dlk-#{System.unique_integer([:positive])}"
+
+    {:ok, _doc} =
+      Content.create_document(
+        type,
+        %{"doc_id" => id, "title" => "Kicked note", "kicker" => "Small print"},
+        @dataset
+      )
+
+    view = open(conn, "#{base}/#{type}")
+    row = ~s(section.pane.list a[data-desk-row][href$=";#{id}"])
+    assert has_element?(view, row <> " .dk-row-sub", "Small print")
+    assert title_of(view, row) == ["Kicked note"]
+
+    view |> form("#desk-search-form") |> render_change(%{"value" => "Kicked note"})
+    hit = ~s(#desk-search-hits a[data-desk-hit][href$=";#{id}"])
+    render_async(view, 5_000)
+    assert has_element?(view, hit <> " .dk-row-sub", "Kicker notes")
+    assert title_of(view, hit) == ["Kicked note"]
+  end
+
+  # The text of the element that holds only the title, as getByText(exact) reads it.
+  defp title_of(view, link) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(link <> " .dk-row-title")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+  end
 end
