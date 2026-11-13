@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
@@ -84,8 +85,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(dataset: dataset, page_title: gettext("Desk"), desk_panes: [], desk: nil)
       # The tab reads "X | Barkpark", as the TanStack Studio's (J01 J02, R23).
       |> assign(:title_suffix, " | Barkpark")
-      |> assign(warm: %{})
+      |> assign(warm: %{}, desk_focus: nil)
       |> assign(:titles, %{})
+      # Each document's title as a list or a pane has read it, by id: a pane
+      # drawn before its own read (a click, Back) is named by it, not its id.
+      |> assign(:doc_titles, %{})
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
@@ -145,7 +149,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
           index: index,
           node: node,
           key: PaneComponent.data_key(pane, dataset, node),
-          title: PaneComponent.provisional_title(pane, node)
+          title: known_title(socket, pane) || PaneComponent.provisional_title(pane, node)
         }
       end
 
@@ -154,8 +158,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # A pane that stays does not read again, so the title it read is kept here.
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
-    # Following a hit (or any link) puts the search and the Inspect dialog away.
-    socket = assign(socket, desk_search: "", desk_search_hits: [], desk_inspect: false)
+    # Following a hit (or any link) puts the search away. The Inspect dialog
+    # is open while the URL says so (`inspect=on` on the last document, as
+    # Sanity's), so Back after closing it opens it again.
+    socket =
+      assign(socket,
+        desk_search: "",
+        desk_search_hits: [],
+        desk_inspect: match?(%{kind: :doc, inspect: "on"}, List.last(panes))
+      )
+
+    # Focus mode is for the panes it was turned on over (`FocusMode`).
+    socket = FocusMode.follow(socket, splat)
 
     socket =
       socket
@@ -171,7 +185,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         desk_base: base,
         desk_uri: uri,
         titles: titles,
-        page_title: titles[last.id] || last.title
+        page_title: titles[last.id] || kept_title(socket.assigns, last) || last.title
       )
 
     # The lists' first pages: read in the first render, handed to the
@@ -185,6 +199,17 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     {:noreply, socket}
   end
+
+  # The same last pane after a patch that changed only its params (Inspect,
+  # a view tab): the title it has is kept. The edit pane's title comes from
+  # the editor, which a param change does not load again.
+  defp kept_title(%{desk_panes: [_ | _] = views, page_title: title}, last),
+    do: if(List.last(views).id == last.id, do: title)
+
+  defp kept_title(_assigns, _last), do: nil
+
+  defp known_title(socket, %{kind: :doc, id: id}), do: socket.assigns.doc_titles[id]
+  defp known_title(_socket, _pane), do: nil
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
@@ -236,6 +261,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_event("warm", _params, socket), do: {:noreply, socket}
 
+  # The edit pane's focus mode button (J26).
+  def handle_event("desk-focus", %{"index" => index}, socket),
+    do: {:noreply, FocusMode.toggle(socket, index)}
+
   # The search box (`Search`): Enter opens the lit hit, or searches what was
   # typed if its hits are not in yet. The arrows move the light in the
   # browser (`bp-desk.js`), which sends its index with the form as `lit`.
@@ -255,12 +284,27 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # Everything else is the editor's: the Studio's own handlers.
-  # Ctrl+Alt+I in the edit pane, and the dialog's close (`bp-desk.js`). Only
-  # over a document the editor holds: the dialog renders that one.
-  def handle_event("desk-inspect", %{"open" => open}, socket),
-    do:
-      {:noreply,
-       assign(socket, :desk_inspect, open == true and is_map(socket.assigns[:editor_doc]))}
+  # Ctrl+Alt+I while a document is open, and the dialog's close (`bp-desk.js`):
+  # `inspect=on` in, or out of, the last document's URL. Only over a document
+  # the editor holds: the dialog renders that one.
+  def handle_event("desk-inspect", %{"open" => open}, socket) do
+    %{chain: panes, base: base} = socket.assigns
+    last = List.last(panes)
+
+    to =
+      &push_patch(socket, to: Panes.with_params(panes, length(panes) - 1, %{inspect: &1}, base))
+
+    cond do
+      open == true and is_map(socket.assigns[:editor_doc]) and match?(%{kind: :doc}, last) ->
+        {:noreply, to.("on")}
+
+      open != true and match?(%{inspect: "on"}, last) ->
+        {:noreply, to.(nil)}
+
+      true ->
+        {:noreply, assign(socket, :desk_inspect, false)}
+    end
+  end
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
@@ -342,6 +386,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # A list's menu picked a sort: it sticks for the type, here and for this editor.
+  # Titles a list or a document pane has read (`PaneComponent`). Kept for the
+  # session's panes to come; a desk that has read more than @doc_titles_cap
+  # starts over from the latest read.
+  @doc_titles_cap 5_000
+  def handle_info({:desk_doc_titles, titles}, socket) when is_map(titles) do
+    known = Map.merge(socket.assigns.doc_titles, titles)
+    known = if map_size(known) > @doc_titles_cap, do: titles, else: known
+    {:noreply, assign(socket, :doc_titles, known)}
+  end
+
   def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
     # Only a sort the type offers is kept (the pane checked it too).
     sort = ListMenu.pick(sort, (socket.assigns.desk.menus[type] || %{sorts: []}).sorts)
@@ -382,6 +436,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       id="desk-panes"
       data-testid="panes"
       role={if is_nil(@active), do: "main"}
+      data-focus-mode={@desk_focus != nil}
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
       style="flex: 1 1 auto; min-height: 0"
@@ -404,6 +459,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         index={view.index}
         node={view.node}
         follows={view.follows}
+        hint={view.title}
         hold={view.index == length(@desk_panes) - 1 and @pending != nil}
         warm={warm(@warm, view.key)}
         panes={@chain}

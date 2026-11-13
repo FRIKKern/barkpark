@@ -178,10 +178,17 @@ func runInstanceAdminToken(out *writer, g globals, args []string) int {
 		dataset = "production"
 	}
 
+	// The mint names a dataset only when -d was typed: naming one binds the
+	// token to it, and an operator's admin token then cannot create a workspace
+	// or project or import a bundle. `dataset` above still fills the saved profile.
+	mintDataset := ""
+	if g.datasetSet {
+		mintDataset = dataset
+	}
 	body, _ := tokenMintBody(tokenCreateArgs{
 		label:       a.label,
 		permissions: []string{"read", "write", "admin"},
-		dataset:     dataset,
+		dataset:     mintDataset,
 		expiresIn:   a.expiresIn,
 		noExpiry:    a.noExpiry,
 	}, time.Now())

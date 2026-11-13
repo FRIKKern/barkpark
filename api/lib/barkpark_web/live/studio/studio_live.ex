@@ -442,6 +442,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_info({:tree_codelist_change, msg}, socket),
     do: Lifecycle.tree_codelist_change(msg, socket)
 
+  def handle_info({:tree_codelist_pick, msg}, socket), do: Fields.tree_codelist_pick(msg, socket)
+
   # Fall-through: a stray PubSub message must not FunctionClauseError-crash the
   # session (mirrors bulldocs_live.ex). Keep LAST among handle_info/2 clauses.
   # A workspace write (plugin toggle, rename, archive, delete): forget the

@@ -13264,6 +13264,16 @@ msgstr "Dokumentet kunne ikke leses."
 msgid "This document has been deleted."
 msgstr "Dokumentet er slettet."
 
+#: lib/barkpark_web/live/studio/desk/discarded.ex
+#, elixir-autogen, elixir-format
+msgid "The draft was discarded elsewhere. This is the published version."
+msgstr "Utkastet ble forkastet et annet sted. Dette er den publiserte versjonen."
+
+#: lib/barkpark_web/live/studio/desk/discarded.ex
+#, elixir-autogen, elixir-format
+msgid "The draft was discarded elsewhere, so what you typed in it was not saved. This is the published version."
+msgstr "Utkastet ble forkastet et annet sted, så det du skrev i det, ble ikke lagret. Dette er den publiserte versjonen."
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "This is the current document. Revision “%{rev}” is not shown here."
@@ -13393,3 +13403,28 @@ msgstr "Behandlet"
 #, elixir-autogen, elixir-format
 msgid "Raw JSON"
 msgstr "Rå JSON"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode (show navigation)"
+msgstr "Gå ut av fokusmodus (vis navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode (hide navigation)"
+msgstr "Gå til fokusmodus (skjul navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode"
+msgstr "Gå ut av fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode"
+msgstr "Gå til fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Breadcrumb"
+msgstr "Brødsmulesti"

@@ -27,7 +27,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   require Logger
 
+  alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocMenu
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -178,20 +180,49 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 
+  # The browser has the form that replaced a draft discarded elsewhere
+  # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
+  # the old form that were never sent went with it.
+  def handle_event("desk-discard-seen", params, socket) do
+    socket = if params["lost"] == true, do: Discarded.drop(socket), else: socket
+    {:noreply, Discarded.seen(socket)}
+  end
+
   # The open document was deleted by someone else (J32): a save of the form
   # would write it back as a draft. The pane drops the form (`pane/2`); a
-  # save still in flight from it is dropped here.
+  # save still in flight from it is dropped here. So is a save from the form
+  # a draft discarded elsewhere had (live.spec:48), until the browser has the
+  # new one.
   def handle_event(event, params, socket) do
-    if event in @form_writes and gone?(socket.assigns),
-      do: {:noreply, socket},
-      else: event |> StudioLive.handle_event(params, socket) |> ours()
+    cond do
+      event in @form_writes and gone?(socket.assigns) ->
+        {:noreply, socket}
+
+      event in @form_writes and Discarded.drop?(socket.assigns) ->
+        {:noreply, Discarded.drop(socket)}
+
+      true ->
+        event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+    end
   end
+
+  # A save from the new form: the line that said the draft was discarded goes.
+  defp written(socket, event) when event in @form_writes, do: Discarded.clear(socket)
+  defp written(socket, _event), do: socket
 
   # Whether the document in the editor was deleted while it was on the desk.
   defp gone?(%{editing: {_dataset, type, id}} = assigns), do: LiveRefresh.gone?(assigns, type, id)
   defp gone?(_assigns), do: false
 
   @doc "A message the page does not own is the editor's."
+  # Someone else discarded the open draft: the frame carries the dead draft,
+  # which the Studio would put in the form (`Discarded`).
+  def handle_info({:doc_updated, msg} = message, socket) do
+    if Discarded.frame?(msg, socket.assigns),
+      do: ours({:noreply, Discarded.reload(socket)}),
+      else: message |> StudioLive.handle_info(socket) |> ours()
+  end
+
   def handle_info(message, socket), do: message |> StudioLive.handle_info(socket) |> ours()
 
   # The Studio's panes are not drawn here; its editor is.
@@ -360,6 +391,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-index={@view.index}
       data-pane-kind="doc"
       data-pane-editing
+      data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
       data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
@@ -370,7 +402,26 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
-        <h2 class="pane-header-title">{@page_title}</h2>
+        <%!-- In focus mode the title line is the panes it hides, each a way
+              back (`FocusMode`). One title element, the same tag, either way:
+              an element that changed (a span or h2 swapped for a div) makes the
+              patch re-insert the focus mode button after it, and a re-inserted
+              button loses the focus. A div with the heading role, because the
+              breadcrumb is a nav and a nav cannot sit in an h2. --%>
+        <div class="pane-header-title" role="heading" aria-level="2">
+          <%= if assigns[:desk_focus] == @view.index do %>
+            <FocusMode.crumbs
+              views={@desk_panes}
+              titles={@titles}
+              index={@view.index}
+              chain={@chain}
+              base={@base}
+              title={@page_title}
+            />
+          <% else %>
+            {@page_title}
+          <% end %>
+        </div>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
@@ -384,6 +435,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           <BarkparkWeb.Icons.icon name="columns" size={14} />
         </.link>
+        <FocusMode.button
+          id={"#{@view.id}-focus"}
+          index={@view.index}
+          on={assigns[:desk_focus] == @view.index}
+        />
         <%!-- In a split, "Close split pane" drops just this pane
               (`Panes.close_split/3`); the close link drops it and the panes
               to its right. --%>
@@ -452,6 +508,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         >
           {note}
         </p>
+        <Discarded.note
+          :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)}
+          dropped={Discarded.dropped?(assigns)}
+        />
       </div>
       <%!-- Always in the page, shown when there is a link: a pick adds the
             first link while the editor has the focus, and a row that came and
