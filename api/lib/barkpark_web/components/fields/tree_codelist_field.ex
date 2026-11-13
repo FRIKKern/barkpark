@@ -166,6 +166,17 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     end
   end
 
+  # Back to no code, as the flat select's empty option does
+  # (task-03d337bc001f0a5b). The document editor saves "" like that option.
+  def handle_event("tree_node_clear", _params, socket) do
+    if socket.assigns.readonly do
+      {:noreply, socket}
+    else
+      maybe_notify_select(socket, "")
+      {:noreply, assign(socket, selected: nil)}
+    end
+  end
+
   def handle_event("tree_search_input", %{"value" => query}, socket) do
     apply_search(socket, query)
   end
@@ -397,6 +408,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
         <div class="bp-tree-toolbar">
           <input
+            id={"#{@id}-search"}
             type="text"
             class="bp-input bp-tree-search"
             placeholder={gettext("Search codes or labels…")}
@@ -414,6 +426,16 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
               phx-target={@myself}
             ><%= gettext("Clear") %></button>
           <% end %>
+          <button
+            :if={@selected not in [nil, ""] and not @readonly}
+            type="button"
+            class="bp-btn bp-tree-remove"
+            data-test-id="tree-codelist-remove"
+            phx-click={
+              Phoenix.LiveView.JS.push("tree_node_clear", target: @myself)
+              |> Phoenix.LiveView.JS.focus(to: "##{@id}-search")
+            }
+          ><%= gettext("Remove") %></button>
         </div>
 
         <ul class="bp-tree-list" role="tree">
