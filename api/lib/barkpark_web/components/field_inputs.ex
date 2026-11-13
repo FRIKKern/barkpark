@@ -174,7 +174,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         </label>
       <% end %>
     </div>
-    <select :if={not @radio} id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
+    <select :if={not @radio} id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" aria-required={aria_required(@field)} phx-debounce="300">
       <option :if={@show_placeholder} value="" selected disabled={@required}><%= gettext("Select…") %></option>
       <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
@@ -261,7 +261,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
     ~H"""
-    <textarea id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" rows={@rows} phx-debounce="500"><%= @v %></textarea>
+    <textarea id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" aria-required={aria_required(@field)} rows={@rows} phx-debounce="500"><%= @v %></textarea>
     """
   end
 
@@ -312,7 +312,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
       <input type="hidden" id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
       <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
-        <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+        <input type="datetime-local" class="form-input" aria-required={aria_required(@field)} aria-label={@field["title"] || @n} />
       </span>
     </div>
     """
@@ -328,7 +328,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <input id={@id_prefix && @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-label={@field["title"] || @n} phx-debounce="300" />
+    <input id={@id_prefix && @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-required={aria_required(@field)} aria-label={@field["title"] || @n} phx-debounce="300" />
     """
   end
 
@@ -494,7 +494,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
-      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" aria-required={aria_required(@field)} />
       <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
     </div>
     """
@@ -558,9 +558,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <%= if @numeric do %>
-      <input id={@id_prefix && @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" phx-debounce="500" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" aria-required={aria_required(@field)} phx-debounce="500" />
     <% else %>
-      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" aria-required={aria_required(@field)} />
     <% end %>
     """
   end
@@ -937,5 +937,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
       "This edit was not saved. Your text is still here." =>
         gettext("This edit was not saved. Your text is still here.")
     })
+  end
+
+  # A required field's control says so to screen readers (WCAG 3.3.2); the
+  # label's "*" alone is read out as "star" or, in the desk, not at all.
+  defp aria_required(field) do
+    if Barkpark.Content.Validation.rules_at(field["validation"], :error)["required"] == true,
+      do: "true"
   end
 end
