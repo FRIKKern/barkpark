@@ -293,9 +293,14 @@ defmodule BarkparkWeb.Studio.Desk.Panes do
   defp put_segment(%{kind: :list} = pane, _i, _panes, segs),
     do: [enc(pane[:tree_parent] || pane[:node] || pane.type) | segs]
 
-  # A sibling of the same doc carries only its own view, like Sanity's "|,".
-  defp put_segment(%{kind: :doc, sibling: true} = pane, _i, _panes, [last | rest]),
-    do: [last <> "|," <> String.trim_leading(opt("view", pane[:view]), ",") | rest]
+  # A sibling of the same doc carries only its own view and inspector, like
+  # Sanity's "|,". In split view the editor is the sibling, and the desk's
+  # Inspect is in its URL (`inspect=on`). TanStack prints the view only: its
+  # Inspect is not in its URL.
+  defp put_segment(%{kind: :doc, sibling: true} = pane, _i, _panes, [last | rest]) do
+    own = opt("view", pane[:view]) <> inspect_out(pane[:inspect])
+    [last <> "|," <> String.trim_leading(own, ",") | rest]
+  end
 
   defp put_segment(%{kind: :doc} = pane, i, panes, segs),
     do: [enc(pane[:node] || pane.id) <> doc_params(pane, i, panes) | segs]
