@@ -57,9 +57,10 @@ defmodule BarkparkWeb.Studio.DeskHeaderTest do
 
   # LOOKS A4: the root is "Content" as TanStack's (no desk declared), and a
   # row's chevron is Sanity's thin one (1.2 stroke), TanStack's ChevronRight.
-  test "the root pane is titled Content, its chevrons Sanity's", %{conn: conn, base: base} do
+  # Audit 2: a root row titled "Content" (the content-types group, here) takes
+  # that name, and the root keeps "Structure", so no two panes share a title.
+  test "the root pane's chevrons are Sanity's", %{conn: conn, base: base} do
     {:ok, view, _html} = live(conn, base)
-    assert has_element?(view, ~s([data-pane-index="0"][aria-label="Content"]))
     root = view |> element(~s([data-pane-index="0"])) |> render()
     assert root =~ ~r/class="pane-item-chevron"[^>]*>\s*<svg[^>]*data-desk-glyph="chevron-right"/
   end
@@ -83,6 +84,41 @@ defmodule BarkparkWeb.Studio.DeskHeaderTest do
     {:ok, _studio_view, studio_html} = live(conn, studio)
     assert studio_html =~ ~s(id="studio-bar")
     refute studio_html =~ "data-desk-search-open"
+  end
+
+  test "the root pane and the content-types pane have different titles", %{
+    conn: conn,
+    base: base
+  } do
+    {:ok, view, _html} = live(conn, base <> "/content-types")
+    render_async(view, 5_000)
+
+    title = fn i ->
+      view
+      |> element(~s([data-pane-index="#{i}"] > .pane-header .pane-header-title))
+      |> render()
+      |> then(&Regex.replace(~r/<[^>]+>/, &1, ""))
+      |> String.trim()
+    end
+
+    assert title.(1) == "Content"
+    assert title.(0) == "Structure"
+    assert has_element?(view, ~s([data-pane-index="0"][aria-label="Structure"]))
+  end
+
+  test "the root is Content when no root row is titled Content, Structure when one is" do
+    root = fn titles ->
+      %{id: "root", title: "Structure", items: Enum.map(titles, &%{id: &1, title: &1})}
+    end
+
+    assert BarkparkWeb.Studio.DeskLive.root_title(root.(["Papers", "Sheets"])).title == "Content"
+
+    assert BarkparkWeb.Studio.DeskLive.root_title(root.(["Papers", "Content"])).title ==
+             "Structure"
+
+    # A declared desk's own title is left alone.
+    assert BarkparkWeb.Studio.DeskLive.root_title(%{id: "root", title: "Shop", items: []}).title ==
+             "Shop"
   end
 
   test "a list pane's header and search carry Sanity's glyphs", %{conn: conn, base: base} do
