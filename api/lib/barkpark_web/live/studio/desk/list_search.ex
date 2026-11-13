@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
             |> JS.focus(to: by_id(@input))
           }
         >
-          <span aria-hidden="true">×</span>
+          <BarkparkWeb.Studio.Desk.Glyph.glyph name="close" />
         </button>
       </form>
     </div>
@@ -280,7 +280,12 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
           ] ++ scope
 
         {docs, _total, _meta} = Content.search_documents(q, dataset, opts)
-        entries = docs |> Enum.map(&entry(&1, schema)) |> rank(q)
+        # A hit is a list row: its tile and its status marks, as the list's.
+        entries =
+          docs
+          |> Enum.map(&entry(&1, schema))
+          |> rank(q)
+          |> Rows.published(type, dataset, scope)
 
         %{
           title: if(node, do: provisional, else: schema.title || type),
@@ -325,6 +330,7 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
       title: text(doc.title) || TitleDerivation.preview_title(doc, schema) || id,
       sub: nil,
       draft: String.starts_with?(doc.doc_id, "drafts."),
+      icon: BarkparkWeb.Icons.row_icon(Map.get(schema, :icon)),
       updated: doc.updated_at || ~U[1970-01-01 00:00:00Z],
       next: %{kind: :doc, id: id, type: schema.name}
     }
