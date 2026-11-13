@@ -758,7 +758,7 @@ defmodule Barkpark.Content.Forms do
         list |> Enum.reject(&(&1 == "")) |> Enum.map(&coerce_field_value(of, &1))
 
       list when is_list(list) ->
-        Enum.map(list, &coerce_field_value(of, &1))
+        Enum.map(list, &coerce_field_value(of, kept_row(of, &1)))
 
       other ->
         other
@@ -815,6 +815,20 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp coerce_field_value(_field, val), do: val
+
+  # A stored row the editor has no input for (an object in a list of plain
+  # values) is posted back as its JSON under `_json`, and saved as it was
+  # (`ArrayField`'s kept row, task-7655868c8b346c43).
+  defp kept_row(%{"type" => type}, %{"_json" => json} = row)
+       when type in ~w(string text number boolean url email date datetime) and
+              map_size(row) == 1 and is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, %{} = stored} -> stored
+      _ -> row
+    end
+  end
+
+  defp kept_row(_of, row), do: row
 
   defp coerce_member_row(members, %{} = row) do
     row = drop_unused(row)

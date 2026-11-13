@@ -1752,8 +1752,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     editor = redact_editor_for_viewer(editor, socket)
 
     # A content plugin's schema chrome reads in the Studio language
-    # (task-0ded99e28e620ba5); every other schema is unchanged.
-    new_schema = editor && BarkparkWeb.Studio.PluginSchemaCopy.localize(editor[:schema])
+    # (task-0ded99e28e620ba5), and a list of one plain member reads as it.
+    new_schema = editor && BarkparkWeb.Studio.EditorSchema.load(editor[:schema])
     old_schema = socket.assigns[:editor_schema]
 
     nav_group =
