@@ -153,10 +153,10 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     css = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
 
     assert css =~
-             ~s(.dk .dk-edit .editor-panel[role="main"] > .editor-header { visibility: hidden; height: 0;)
+             ~s(.dk .dk-edit .editor-panel[role=main] > .editor-header { visibility: hidden; height: 0;)
 
     assert css =~
-             ~s(.dk .dk-edit .editor-panel[role="main"] > .editor-header h1 { visibility: visible; })
+             ~s(.dk .dk-edit .editor-panel[role=main] > .editor-header h1 { visibility: visible; })
 
     assert css =~ ".dk .dk-edit > .pane-header { box-sizing: border-box; height: 51px;"
   end

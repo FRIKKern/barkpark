@@ -151,8 +151,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-chip-dot-published { background: var(--dk-published); }
       .dk .dk-chip-dot-draft { background: var(--dk-caution-dot); }
       .dk .dk-chip[data-off] .dk-chip-dot { background: var(--dk-line-strong); }
-      .dk .dk-edit .editor-panel[role="main"] > .editor-header { visibility: hidden; height: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; }
-      .dk .dk-edit .editor-panel[role="main"] > .editor-header h1 { visibility: visible; }
+      .dk .dk-edit .editor-panel[role=main] > .editor-header { visibility: hidden; height: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; }
+      .dk .dk-edit .editor-panel[role=main] > .editor-header h1 { visibility: visible; }
       .dk .dk-doc-menu-list a[role="menuitem"] { box-sizing: border-box; text-decoration: none; }
       @media (pointer: coarse) {
         .dk .pane-item { min-height: 44px; }

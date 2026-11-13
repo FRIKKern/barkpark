@@ -70,13 +70,14 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
 
   defp second(), do: person(BarkparkWeb.ConnCase.scoped_conn(), "b")
 
-  # The editor header's co-presence dots: one per session on the document,
-  # this one included.
+  # The document header's co-presence dots: one per session on the document,
+  # this one included. The pane's own header draws them (`Desk.DocStatus`);
+  # the Studio's toolbar row that drew them before is hidden in the desk.
   defp header_dots(view) do
     view
     |> render()
     |> LazyHTML.from_fragment()
-    |> LazyHTML.query("[data-pane-editing] .presence-dots .presence-dot")
+    |> LazyHTML.query("[data-pane-editing] > .pane-header .presence-dots .presence-dot")
     |> Enum.count()
   end
 
