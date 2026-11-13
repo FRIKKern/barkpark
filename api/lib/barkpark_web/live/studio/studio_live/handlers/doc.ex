@@ -172,7 +172,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
     # Publish moves the revision outside the editor's save path; tell the
     # open editors, or their next edit pauses for review.
-    {:noreply, Paper.push_document_revision(socket, previous_rev)}
+    {:noreply,
+     socket
+     |> Paper.push_document_revision(previous_rev)
+     |> focus_header_after_publish(previous_rev)}
+  end
+
+  # The patch after a publish swaps Publish for Unpublish, and the focus left
+  # with the removed button, onto <body>. A publish that landed (the revision
+  # moved) asks the client to focus the document's header, a non-action
+  # element with tabindex=-1: the root layout's `bp:focus-doc-header` listener
+  # takes it only while the focus idles on <body>, so a press that kept its
+  # button keeps its focus, and Unpublish never gets it.
+  defp focus_header_after_publish(socket, previous_rev) do
+    case socket.assigns[:editor_doc] do
+      %{rev: rev} when is_binary(rev) and rev != previous_rev ->
+        push_event(socket, "bp:focus-doc-header", %{})
+
+      _ ->
+        socket
+    end
   end
 
   # Owner ruling #58 (2026-10-03): a published sheet is public. The

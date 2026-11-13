@@ -157,6 +157,79 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
     assert hd(items(view)) == "Sort by Title"
   end
 
+  defp checked(view) do
+    view
+    |> element(~s([data-pane-index="1"] [role="menu"]))
+    |> render()
+    |> then(&Regex.scan(~r/aria-checked="true"[^>]*>\s*([^<]+?)\s*</, &1))
+    |> Enum.map(fn [_, label] -> label end)
+  end
+
+  @in_use ~s([role="menuitemradio"][aria-disabled="true"][data-tip="Already using the default sort order"])
+
+  # Ruling (c): with no pick, a type that declares orderings reads in its
+  # first, as PaneBuilder and the old Studio do, and that choice carries the
+  # check; "Default sort" is in use, hoverable for its tip, and clicks nothing.
+  test "with no pick, a type's first declared ordering is checked and Default sort is in use", %{
+    conn: conn,
+    base: base
+  } do
+    view = open(sign_in(conn), "#{base}/#{@post}")
+    assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
+    assert checked(view) == ["Sort by Rating, highest"]
+
+    in_use = ~s([data-pane-index="1"] [role="menu"] ) <> @in_use
+    assert has_element?(view, in_use, "Default sort")
+    refute has_element?(view, in_use <> "[phx-click]")
+    refute has_element?(view, in_use <> "[popovertarget]")
+
+    # Another pick: the default is no longer in use.
+    pick(view, "Sort by Created")
+    assert await_titles(view, ["Beta", "Alpha", "Gamma"]) == ["Beta", "Alpha", "Gamma"]
+    refute has_element?(view, @in_use)
+    assert has_element?(view, ~s([role="menuitemradio"][phx-click="sort"]), "Default sort")
+
+    # Picking the default's own choice is the default again.
+    pick(view, "Sort by Rating, highest")
+    assert has_element?(view, @in_use, "Default sort")
+  end
+
+  # Ruling (c): a type that declares no orderings reads by last edit, as the
+  # TanStack Studio reads its default ("updated"), and "Sort by Last Edited"
+  # carries the check.
+  test "with no pick, a type that declares none reads by last edit, and that is checked", %{
+    conn: conn,
+    base: base
+  } do
+    for {id, title} <- [{"dlm-n1", "Older"}, {"dlm-n2", "Newer"}] do
+      {:ok, _} = Content.create_document(@note, %{"doc_id" => id, "title" => title}, @dataset)
+      Process.sleep(5)
+    end
+
+    view = open(sign_in(conn), "#{base}/#{@note}")
+    assert await_titles(view, ["Newer", "Older"]) == ["Newer", "Older"]
+    assert checked(view) == ["Sort by Last Edited"]
+    assert has_element?(view, @in_use, "Default sort")
+
+    pick(view, "Sort by Title")
+    assert await_titles(view, ["Newer", "Older"]) == ["Newer", "Older"]
+    assert checked(view) == ["Sort by Title"]
+    refute has_element?(view, @in_use)
+  end
+
+  test "the default a list reads in, as a menu sort" do
+    menus = ListMenu.menus(@dataset, [])
+    assert menus[@post].default == "rating:desc"
+    assert menus[@note].default == "updated"
+
+    # A list's own desk node declares its own (or none, an empty list: by last edit).
+    node = %{orderings: [%{"field" => "title", "direction" => "asc"}]}
+    assert ListMenu.default("rating:desc", node) == "title:asc"
+    assert ListMenu.default("rating:desc", %{orderings: []}) == "updated"
+    assert ListMenu.default("rating:desc", %{orderings: nil}) == "rating:desc"
+    assert ListMenu.default("rating:desc", nil) == "rating:desc"
+  end
+
   test "a pick re-reads the list in that order; Default sort goes back", %{conn: conn, base: base} do
     view = open(sign_in(conn), "#{base}/#{@post}")
     assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
@@ -167,7 +240,7 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
 
     pick(view, "Default sort")
     assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
-    refute has_element?(view, ~s([role="menuitemradio"][aria-checked="true"]))
+    assert checked(view) == ["Sort by Rating, highest"]
   end
 
   test "a pick sticks across a reload in the editor's studio.lists pref", %{
@@ -285,7 +358,7 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
 
     Process.sleep(100)
     assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
-    refute has_element?(view, ~s([role="menuitemradio"][aria-checked="true"]))
+    assert checked(view) == ["Sort by Rating, highest"]
     assert UserPrefs.get(user.id, ws.id, @dataset, "studio.lists") == nil
   end
 
@@ -302,7 +375,7 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
 
     view = open(sign_in(conn, user), "#{base}/#{@post}")
     assert await_titles(view, ["Alpha", "Beta", "Gamma"]) == ["Alpha", "Beta", "Gamma"]
-    refute has_element?(view, ~s([role="menuitemradio"][aria-checked="true"]))
+    assert checked(view) == ["Sort by Rating, highest"]
   end
 
   describe "the :list_orders seam (R20)" do

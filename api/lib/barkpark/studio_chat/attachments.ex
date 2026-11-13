@@ -123,12 +123,14 @@ defmodule Barkpark.StudioChat.Attachments do
   Read one attachment back by its opaque `attachment_id`, scoped to
   `session_id`.
 
-  Returns `{:ok, %{id, media_type, byte_size, sha256, bytes}}` or
-  `{:error, :missing}`. The id must be a 64-character lowercase sha256 hex — any
-  other shape (a traversal attempt, a sidecar-looking name, an absolute path) is
-  rejected BEFORE the store is touched, so this can never be walked out of the
-  session's own directory even before `StudioChat.read_attachment/1`'s own
-  two-segment guard runs.
+  Returns `{:ok, %{id, path, media_type, byte_size, sha256, bytes}}` or
+  `{:error, :missing}`. Minus `id` and `bytes`, that is the pointer `put/2`
+  returns, so `pointer_json/1` of a fetched attachment is the row pointer a
+  Studio send of the same bytes persists. The id must be a 64-character
+  lowercase sha256 hex — any other shape (a traversal attempt, a sidecar-looking
+  name, an absolute path) is rejected BEFORE the store is touched, so this can
+  never be walked out of the session's own directory even before
+  `StudioChat.read_attachment/1`'s own two-segment guard runs.
 
   The media type is sniffed from the bytes on the way out too, so what the route
   reports always describes what it is actually serving.
@@ -137,11 +139,14 @@ defmodule Barkpark.StudioChat.Attachments do
   def fetch(session_id, attachment_id)
       when is_binary(session_id) and is_binary(attachment_id) do
     if valid_id?(attachment_id) do
-      case StudioChat.read_attachment(Path.join(session_id, attachment_id)) do
+      path = Path.join(session_id, attachment_id)
+
+      case StudioChat.read_attachment(path) do
         {:ok, bytes} ->
           {:ok,
            %{
              id: attachment_id,
+             path: path,
              sha256: attachment_id,
              media_type: sniff_media_type(bytes) || "application/octet-stream",
              byte_size: byte_size(bytes),
@@ -180,6 +185,32 @@ defmodule Barkpark.StudioChat.Attachments do
       "sha256" => get(pointer, :sha256),
       "byte_size" => get(pointer, :byte_size)
     }
+  end
+
+  @doc """
+  The user turn's content-block list, the one both surfaces hand
+  `Runtime.send_turn/3`: a text block (omitted when `text` is empty, an
+  image-only turn) followed by one base64 image block per attachment, in order
+  (charter D25 wire shape). Each attachment is a map with `:media_type` and
+  `:bytes`, as `fetch/2` returns and the Studio composer carries after `put/2`.
+  """
+  @spec user_content(String.t(), [map()]) :: [map()]
+  def user_content(text, attachments) when is_list(attachments) do
+    text_blocks = if text == "", do: [], else: [%{"type" => "text", "text" => text}]
+
+    image_blocks =
+      Enum.map(attachments, fn a ->
+        %{
+          "type" => "image",
+          "source" => %{
+            "type" => "base64",
+            "media_type" => a.media_type,
+            "data" => Base.encode64(a.bytes)
+          }
+        }
+      end)
+
+    text_blocks ++ image_blocks
   end
 
   @doc """

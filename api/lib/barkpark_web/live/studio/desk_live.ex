@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     * `BarkparkWeb.Studio.Desk.EditorHost`  the active document's editor
     * `BarkparkWeb.Studio.Desk.LiveRefresh` someone else saved
     * `BarkparkWeb.Studio.Desk.Style`       the desk's CSS
+    * `BarkparkWeb.Studio.Desk.DocStyle`    the document pane's look (TanStack's)
   """
 
   use BarkparkWeb, :live_view
@@ -44,6 +45,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
@@ -70,7 +72,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # that would carry it.
     # Nor does one longer than any name can be (the Studio's tabs would
     # compile it into a pattern: Regex.CompileError at 100,000 bytes).
-    (Text.text?(dataset) and byte_size(dataset) <= @dataset_max) || raise NotFound
+    named?(dataset) || raise NotFound
 
     # The active document is edited by the Studio's own editor, so this page
     # mounts as the Studio does: the same state, capability gate and quota gate.
@@ -98,12 +100,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
     else
-      # The dataset as a path segment: one that holds "%" or "/" must name
-      # the same dataset on the next request.
-      segment = URI.encode(dataset, &URI.char_unreserved?/1)
-
       {:ok,
-       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], segment))}
+       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], dataset))}
     end
   end
 
@@ -111,7 +109,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_params(params, uri, socket) do
     cond do
       # A live patch to such a dataset segment goes back to the desk it left.
-      not Text.text?(params["dataset"] || socket.assigns.dataset) ->
+      # So does one to a dataset longer than any name can be.
+      not named?(params["dataset"] || socket.assigns.dataset) ->
         {:noreply, redirect(socket, to: socket.assigns.base)}
 
       # So does one to a pane splat past the cap; a first request for one
@@ -127,6 +126,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # Joined as `follow/3` joins it, so it takes what that takes.
+  defp named?(dataset), do: Text.text?(dataset) and byte_size(dataset) <= @dataset_max
+
   defp splat_bytes(params), do: params |> Map.get("panes", []) |> Enum.join("/") |> byte_size()
 
   defp follow(params, uri, socket) do
@@ -422,6 +423,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def render(assigns) do
     ~H"""
     <Style.sheet />
+    <DocStyle.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <Search.box
       query={@desk_search}
@@ -472,6 +474,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
+        default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
       />
       <% end %>
@@ -500,7 +503,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     }
   end
 
-  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+  defp menu(desk, view),
+    do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: [], default: "updated"}
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its

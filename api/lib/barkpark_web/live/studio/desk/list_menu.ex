@@ -30,12 +30,24 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   attr :id, :string, required: true
   attr :index, :integer, required: true
   attr :sort, :string, default: nil
+
+  attr :default, :string,
+    default: "updated",
+    doc: "the sort the list reads in with no pick (`default/2`)"
+
   attr :orderings, :list, default: []
   attr :named, :list, default: [], doc: "the type's `desk.sortOrderings` (`%{name, title}`)"
   attr :myself, :any, required: true
 
   def menu(assigns) do
-    assigns = assign(assigns, :menu_id, assigns.id <> "-menu")
+    # No pick reads in the default order: its item carries the check, and
+    # "Default sort" says it is already in use, as the TanStack Studio's.
+    assigns =
+      assign(assigns,
+        menu_id: assigns.id <> "-menu",
+        current: assigns.sort || assigns.default,
+        at_default?: is_nil(assigns.sort) or assigns.sort == assigns.default
+      )
 
     ~H"""
     <button
@@ -49,7 +61,7 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       aria-expanded="false"
       style={"anchor-name: --dk-list-menu-#{@index}"}
     >
-      <span aria-hidden="true">…</span>
+      <BarkparkWeb.Studio.Desk.Glyph.glyph name="ellipsis-horizontal" />
     </button>
     <div
       id={@menu_id}
@@ -64,11 +76,18 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
         :for={choice <- choices(@orderings, @named)}
         label={choice.label}
         sort={choice.sort}
-        checked={choice.sort == @sort}
+        checked={choice.sort == @current}
         menu_id={@menu_id}
         myself={@myself}
       />
-      <.item label={gettext("Default sort")} sort="" checked={false} menu_id={@menu_id} myself={@myself} />
+      <.item
+        label={gettext("Default sort")}
+        sort=""
+        checked={false}
+        disabled={@at_default? && gettext("Already using the default sort order")}
+        menu_id={@menu_id}
+        myself={@myself}
+      />
     </div>
     """
   end
@@ -76,6 +95,11 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   attr :label, :string, required: true
   attr :sort, :string, required: true
   attr :checked, :boolean, required: true
+
+  attr :disabled, :any,
+    default: false,
+    doc: "false, or why the choice is already in use: it stays hoverable for that tip"
+
   attr :menu_id, :string, required: true
   attr :myself, :any, required: true
 
@@ -85,13 +109,14 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       type="button"
       role="menuitemradio"
       aria-checked={to_string(@checked)}
+      aria-disabled={@disabled && "true"}
+      data-tip={@disabled || nil}
       class="menu-item"
-      style="display: block; width: 100%; text-align: start"
-      phx-click="sort"
+      phx-click={!@disabled && "sort"}
       phx-value-sort={@sort}
       phx-target={@myself}
-      popovertarget={@menu_id}
-      popovertargetaction="hide"
+      popovertarget={!@disabled && @menu_id}
+      popovertargetaction={!@disabled && "hide"}
     >
       {@label}
     </button>
@@ -118,7 +143,7 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   pick or a kept pref may name for the type (`pick/2`).
   """
   @spec menus(String.t(), keyword()) :: %{
-          String.t() => %{orderings: [map()], sorts: [String.t()]}
+          String.t() => %{orderings: [map()], sorts: [String.t()], default: String.t()}
         }
   def menus(dataset, scope) do
     for schema <- Content.list_schemas(dataset, scope), into: %{} do
@@ -130,9 +155,29 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
           Enum.map(PaneBuilder.sort_options(schema), & &1.name) ++
           ["#{title}:asc", "#{title}:desc", "updated", "created"]
 
-      {schema.name, %{orderings: orderings, sorts: Enum.uniq(sorts)}}
+      default = first_sort(PaneBuilder.desk_order(nil, schema))
+      {schema.name, %{orderings: orderings, sorts: Enum.uniq(sorts), default: default}}
     end
   end
+
+  @doc """
+  The sort a list reads in with no pick, as a menu sort: the first ordering
+  PaneBuilder reads it in (`PaneBuilder.desk_order/3`), the list's own desk
+  node's when it declares them, else its type's (`type_default`, from
+  `menus/2`). None declared, it reads by last edit, as the TanStack Studio's
+  default (`"updated"`). The declared case is ruling (c); REQUESTS.md parks
+  the switch to "updated" for every type for the owner.
+  """
+  @spec default(String.t(), map() | nil) :: String.t()
+  def default(type_default, node) do
+    case node && Map.get(node, :orderings) do
+      orderings when is_list(orderings) -> first_sort(PaneBuilder.desk_order(nil, nil, orderings))
+      _ -> type_default
+    end
+  end
+
+  defp first_sort([{:field, field, dir} | _]), do: "#{field}:#{dir}"
+  defp first_sort(_order), do: "updated"
 
   @doc """
   `sort` when the type offers it (`menus/2`'s `sorts`), else nil: the

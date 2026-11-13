@@ -13311,6 +13311,11 @@ msgstr "Listevalg"
 
 #: lib/barkpark_web/live/studio/desk/list_menu.ex
 #, elixir-autogen, elixir-format
+msgid "Already using the default sort order"
+msgstr "Bruker allerede standard sorteringsrekkefølge"
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
 msgid "Default sort"
 msgstr "Standard sortering"
 

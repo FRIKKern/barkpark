@@ -148,7 +148,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
   end
 
   def handle_event("tree_node_select", %{"code" => code}, socket) do
-    if socket.assigns.readonly do
+    # The code comes from the browser. Only a code of this codelist is taken
+    # (task-ceef65b09ceebb9c): a hand-made event with another code stored it.
+    if socket.assigns.readonly or not Map.has_key?(socket.assigns.nodes_by_code, code) do
       {:noreply, socket}
     else
       # A row select only mutates this component's OWN `:selected` state — it
@@ -161,6 +163,17 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       # `maybe_notify_select/2`).
       maybe_notify_select(socket, code)
       {:noreply, assign(socket, selected: code)}
+    end
+  end
+
+  # Back to no code, as the flat select's empty option does
+  # (task-03d337bc001f0a5b). The document editor saves "" like that option.
+  def handle_event("tree_node_clear", _params, socket) do
+    if socket.assigns.readonly do
+      {:noreply, socket}
+    else
+      maybe_notify_select(socket, "")
+      {:noreply, assign(socket, selected: nil)}
     end
   end
 
@@ -395,6 +408,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
         <div class="bp-tree-toolbar">
           <input
+            id={"#{@id}-search"}
             type="text"
             class="bp-input bp-tree-search"
             placeholder={gettext("Search codes or labels…")}
@@ -412,6 +426,16 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
               phx-target={@myself}
             ><%= gettext("Clear") %></button>
           <% end %>
+          <button
+            :if={@selected not in [nil, ""] and not @readonly}
+            type="button"
+            class="bp-btn bp-tree-remove"
+            data-test-id="tree-codelist-remove"
+            phx-click={
+              Phoenix.LiveView.JS.push("tree_node_clear", target: @myself)
+              |> Phoenix.LiveView.JS.focus(to: "##{@id}-search")
+            }
+          ><%= gettext("Remove") %></button>
         </div>
 
         <ul class="bp-tree-list" role="tree">
