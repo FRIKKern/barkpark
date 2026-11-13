@@ -74,6 +74,21 @@ assert.equal(hidden, 1, "Tab closes the menu");
 toggle("closed");
 assert.equal(button.getAttribute("aria-expanded"), "false", "closed, the button says so");
 
+// "Default sort" while the default is in use: aria-disabled, kept hoverable for
+// its tip, and the arrows skip it, as the TanStack Studio's ListMenu.
+const fallback = items[2];
+fallback.setAttribute("aria-disabled", "true");
+fallback.setAttribute("data-tip", "Already using the default sort order");
+toggle("open");
+assert.equal(focused(), "Sort by Title", "opened again, the first item has the focus");
+key("ArrowUp");
+assert.equal(focused(), "Sort by Last Edited", "ArrowUp wraps past the item in use");
+key("ArrowDown");
+assert.equal(focused(), "Sort by Title", "and ArrowDown wraps past it to the first");
+key("End");
+assert.equal(focused(), "Sort by Last Edited", "End stops before it");
+toggle("closed");
+
 hook.destroyed();
 console.log("desk list menu keys: ok");
 window.close();
