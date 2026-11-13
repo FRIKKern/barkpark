@@ -7,8 +7,9 @@ defmodule BarkparkWeb.ChatHostAttachmentControllerTest do
   The named failure mode: a host credential that can name a session reads that
   session's private images. So the caller never names a session. It names a
   lease, the server takes the session from the lease row, and only a lease this
-  host holds, in its own workspace, on a session its workspace owns, that is
-  still live (leased or running, unrevoked, unexpired) opens the store.
+  host holds, in its own workspace, on a registered-host session its workspace
+  owns and this host executes, that is still live (leased or running,
+  unrevoked, unexpired) opens the store.
 
   Every miss answers ONE body. Each miss case below has its own test, and each
   compares against the same literal body, so a miss that answered from the
@@ -72,7 +73,7 @@ defmodule BarkparkWeb.ChatHostAttachmentControllerTest do
 
     ws = workspace!("hatt")
     {host, credential} = host!(ws, "runner")
-    sid = session!(ws)
+    sid = host_session!(ws, host)
     {:ok, pointer} = Attachments.put(sid, @png)
     fence = lease!(host, sid)
 
@@ -101,9 +102,31 @@ defmodule BarkparkWeb.ChatHostAttachmentControllerTest do
     {host, credential}
   end
 
+  # A managed session: the server runs it, no host executes it.
   defp session!(ws) do
     sid = Ecto.UUID.generate()
     {:ok, _} = StudioChat.create_session(%{id: sid, mode: "plan"}, {:workspace, ws.id})
+    sid
+  end
+
+  # A registered-host session `host` executes, owned by `ws`. The shape a real
+  # lease is minted for: dispatch resolves the host from the session's
+  # `execution_host_id`.
+  defp host_session!(ws, host) do
+    sid = Ecto.UUID.generate()
+
+    {:ok, _} =
+      StudioChat.create_session(
+        %{
+          id: sid,
+          mode: "plan",
+          provider: "claude",
+          execution_target: "registered_host",
+          execution_host_id: host.id
+        },
+        {:workspace, ws.id}
+      )
+
     sid
   end
 
@@ -217,12 +240,52 @@ defmodule BarkparkWeb.ChatHostAttachmentControllerTest do
 
   test "a lease on a session another workspace owns answers the not-found body",
        %{host: host, ws: ws, credential: credential} do
-    # The lease row names this host and this workspace, but the session it
-    # points at belongs to another workspace, and holds a real attachment.
-    foreign_sid = session!(workspace!("hatt-foreign"))
+    # The lease row names this host and this workspace, and the session names
+    # this host as its executor, but it belongs to another workspace, and holds
+    # a real attachment. Only the owner leg refuses it.
+    foreign_sid = host_session!(workspace!("hatt-foreign"), host)
     {:ok, pointer} = Attachments.put(foreign_sid, @gif)
 
     lease = raw_lease!(%{host_id: host.id, workspace_id: ws.id, session_id: foreign_sid})
+
+    assert read(credential, lease.id, pointer.sha256) |> miss_body() == @miss
+  end
+
+  test "a lease for this host on a session another host executes answers the not-found body",
+       %{host: host, ws: ws, credential: credential} do
+    # Same workspace, live lease row naming this host, but the session's
+    # executor is host B: the lease row's host is a copy, the session's
+    # execution_host_id is the truth.
+    {host_b, _} = host!(ws, "executor-b")
+    sid = host_session!(ws, host_b)
+    {:ok, pointer} = Attachments.put(sid, @gif)
+
+    lease = raw_lease!(%{host_id: host.id, workspace_id: ws.id, session_id: sid})
+
+    assert read(credential, lease.id, pointer.sha256) |> miss_body() == @miss
+  end
+
+  test "another host's lease on a session this host executes answers the not-found body",
+       %{host: host, ws: ws} do
+    # The caller (B) executes the session; the live lease row belongs to this
+    # setup's host (A). Only the lease's own host leg refuses B.
+    {executor, executor_credential} = host!(ws, "executor")
+    sid = host_session!(ws, executor)
+    {:ok, pointer} = Attachments.put(sid, @gif)
+
+    lease = raw_lease!(%{host_id: host.id, workspace_id: ws.id, session_id: sid})
+
+    assert read(executor_credential, lease.id, pointer.sha256) |> miss_body() == @miss
+  end
+
+  test "a lease for this host on a managed session answers the not-found body",
+       %{host: host, ws: ws, credential: credential} do
+    # The server runs a managed session; no host executes it, so no host lease
+    # opens its store.
+    sid = session!(ws)
+    {:ok, pointer} = Attachments.put(sid, @gif)
+
+    lease = raw_lease!(%{host_id: host.id, workspace_id: ws.id, session_id: sid})
 
     assert read(credential, lease.id, pointer.sha256) |> miss_body() == @miss
   end
