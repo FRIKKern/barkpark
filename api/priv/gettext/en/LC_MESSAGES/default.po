@@ -10195,9 +10195,14 @@ msgstr ""
 msgid "Create cancelled: %{reason}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:51
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:59
 #, elixir-autogen, elixir-format
 msgid "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:53
+#, elixir-autogen, elixir-format
+msgid "“%{type}” is not a document type in this dataset, so no document was made."
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:105
