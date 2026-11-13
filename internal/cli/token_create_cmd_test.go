@@ -135,8 +135,13 @@ func TestTokenCreateSendsPermissionsAsAJSONArrayOnTheScopedRoute(t *testing.T) {
 	if len(sent.Permissions) != 1 || sent.Permissions[0] != "read" {
 		t.Errorf("permissions = %v, want [read] as a JSON ARRAY — a scalar is the 422 the manifest path takes", sent.Permissions)
 	}
-	if sent.Label != "desk-reader" || sent.Dataset != "production" {
-		t.Errorf("label/dataset = %q/%q, want desk-reader/production", sent.Label, sent.Dataset)
+	if sent.Label != "desk-reader" {
+		t.Errorf("label = %q, want desk-reader", sent.Label)
+	}
+	// No -d was typed, so the body names no dataset: naming one makes the
+	// server bind the token to it (dataset_bound).
+	if strings.Contains(string(body), `"dataset"`) {
+		t.Errorf("an unflagged mint named a dataset, which binds the token to it: %s", body)
 	}
 
 	out := so.String()
@@ -340,5 +345,42 @@ func TestTokenNounHelpAdvertisesTheReadTierVerb(t *testing.T) {
 	if !found {
 		t.Errorf("`bp capabilities` would name this verb without its gate flag, which reads as a "+
 			"duplicate of the manifest verb; labels = %v", builtinVerbsFor("token"))
+	}
+}
+
+// A typed -d/--dataset is the operator asking for a token bound to that
+// dataset, so it reaches the wire. The saved context's dataset does not.
+func TestTokenCreateNamesADatasetOnlyWhenTheFlagWasTyped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		g    globals
+		want string
+	}{
+		{"typed -d staging", globals{dataset: "staging", datasetSet: true}, "staging"},
+		{"dataset from the saved context only", globals{dataset: "staging"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var path string
+			var body []byte
+			srv := mintServer(t, http.StatusCreated,
+				`{"token":"raw","id":"tok-2","label":"x","permissions":["read"],"dataset":"staging","workspace":"gyldendal"}`,
+				&path, &body)
+			defer srv.Close()
+
+			ctx := tokenCtx(srv.URL)
+			ctx.Dataset = "staging"
+			var so, se bytes.Buffer
+			if code := runTokenCreate(newWriter(&so, &se), tc.g, ctx, []string{"x", "--permissions", "read"}); code != exitOK {
+				t.Fatalf("exit = %d; stderr=%q", code, se.String())
+			}
+			var sent map[string]any
+			if err := json.Unmarshal(body, &sent); err != nil {
+				t.Fatalf("body is not JSON: %v", err)
+			}
+			got, _ := sent["dataset"].(string)
+			if got != tc.want {
+				t.Errorf("dataset on the wire = %q, want %q (body %s)", got, tc.want, body)
+			}
+		})
 	}
 }
