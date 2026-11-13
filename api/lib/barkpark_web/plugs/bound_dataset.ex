@@ -23,7 +23,8 @@ defmodule BarkparkWeb.Plugs.BoundDataset do
   A few endpoints treat every param as input: the chat API refuses unknown
   keys, and the legacy `POST /api/documents/:type` copies its params into the
   document. Their pipelines call `unfill/1`, which removes the param again when
-  (and only when) this module put it there. They keep the refusal half.
+  (and only when) this module put it there. They keep the refusal half, and
+  the request stays unfilled: a token plug that runs later does not fill again.
   """
 
   alias Barkpark.Auth.ApiToken
@@ -42,11 +43,12 @@ defmodule BarkparkWeb.Plugs.BoundDataset do
   @spec unfill(Plug.Conn.t()) :: Plug.Conn.t()
   def unfill(%Plug.Conn{private: %{@filled => true}, params: %{} = params} = conn) do
     %{conn | params: Map.delete(params, "dataset")}
-    |> Plug.Conn.put_private(@filled, false)
+    |> Plug.Conn.put_private(@filled, :unfilled)
   end
 
-  def unfill(conn), do: conn
+  def unfill(conn), do: Plug.Conn.put_private(conn, @filled, :unfilled)
 
+  defp decide(%Plug.Conn{private: %{@filled => :unfilled}} = conn, _bound, :none), do: {:ok, conn}
   defp decide(conn, bound, :none), do: {:ok, fill(conn, bound)}
   defp decide(conn, bound, bound), do: {:ok, conn}
   defp decide(_conn, _bound, _other), do: {:error, :forbidden_dataset}

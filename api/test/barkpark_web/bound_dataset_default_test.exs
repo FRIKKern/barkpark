@@ -101,13 +101,11 @@ defmodule BarkparkWeb.BoundDatasetDefaultTest do
     test "the chat API does not see the filled dataset as an unknown key", %{ws: ws} do
       {conn, _} = bearer(ws, dataset_bound: true)
 
-      resp =
-        conn
-        |> put_req_header("content-type", "application/json")
-        |> post("/v1/chat/sessions", Jason.encode!(%{}))
-
-      refute resp.resp_body =~ "unrecognized"
-      refute resp.resp_body =~ "dataset"
+      # 201, not the 400 "unrecognized keys: dataset" the fill would cause.
+      assert conn
+             |> put_req_header("content-type", "application/json")
+             |> post("/v1/chat/sessions", Jason.encode!(%{}))
+             |> response(201)
     end
   end
 
@@ -125,6 +123,15 @@ defmodule BarkparkWeb.BoundDatasetDefaultTest do
       # A dataset the CALLER named is not ours to remove.
       assert {:ok, named} = BoundDataset.resolve(conn_with(%{"dataset" => @own}), token)
       assert BoundDataset.unfill(named).params == %{"dataset" => @own}
+
+      # Unfilled stays unfilled: a token plug that runs later does not fill
+      # again, whether or not the first one had filled.
+      assert {:ok, again} = BoundDataset.resolve(BoundDataset.unfill(filled), token)
+      assert again.params == %{"a" => "1"}
+
+      early = BoundDataset.unfill(conn_with(%{"a" => "1"}))
+      assert {:ok, still} = BoundDataset.resolve(early, token)
+      assert still.params == %{"a" => "1"}
     end
 
     test "refuses another dataset in the path or the params; leaves the path alone", %{ws: ws} do
