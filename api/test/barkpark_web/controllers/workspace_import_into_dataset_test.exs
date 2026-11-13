@@ -142,6 +142,37 @@ defmodule BarkparkWeb.WorkspaceImportIntoDatasetTest do
     end
   end
 
+  # A token minted with an explicit dataset is held to it. An import makes a
+  # dataset, or a whole workspace, outside that binding, and the request names
+  # no `dataset` for the request-level fence to compare.
+  describe "a dataset-bound token" do
+    defp bound_admin_token(ws) do
+      raw = "remap-bound-#{System.unique_integer([:positive])}"
+      perms = ["read", "write", "admin"]
+      {:ok, _} = Auth.create_token(raw, "remap bound", "test", perms, ws.id, dataset_bound: true)
+      raw
+    end
+
+    test "403 on into_dataset, with write on the target, and no dataset is made", %{conn: conn} do
+      %{bundle: bundle} = source_bundle!()
+      %{ws_b: ws_b, proj_b: proj_b} = target!()
+      query = %{into_dataset: "copy", into_project: proj_b.slug}
+
+      resp = post_import(conn, bound_admin_token(ws_b), ws_b.slug, query, bundle)
+
+      assert json_response(resp, 403)["error"]["reason"] == "dataset_not_bound"
+      assert datasets_named(proj_b.id, "copy") == []
+    end
+
+    test "403 on a plain import, before the bundle is read", %{conn: conn} do
+      %{ws_b: ws_b} = target!()
+
+      resp = post_import(conn, bound_admin_token(ws_b), ws_b.slug, %{}, "not a bundle")
+
+      assert json_response(resp, 403)["error"]["reason"] == "dataset_not_bound"
+    end
+  end
+
   describe "authorization on the TARGET workspace" do
     test "403: a global-admin token that is not a member of the target is refused, nothing written",
          %{conn: conn} do
