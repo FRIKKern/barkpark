@@ -53,7 +53,7 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   def reload(%{assigns: %{editing: {_dataset, type, id}}} = socket) do
     socket =
       socket
-      |> assign(editor_dirty: false, doc_conflict: false)
+      |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
       |> Shared.rebuild_panes()
 
     socket
