@@ -234,6 +234,26 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk .dk-list-search input::placeholder") =~ "var(--dk-placeholder)"
   end
 
+  # LOOKS A4: TanStack's `.pane.list, .pane.types` (styles.css): they share
+  # the room from 321 to 351 px each, the line inside; a width the editor
+  # dragged lifts the cap, as TanStack's resize does.
+  test "a list or type pane flexes from 321 to 351 px; a document pane keeps its own" do
+    pane = rule(@css, ".dk .dk-pane")
+    assert pane =~ "box-sizing: border-box; flex: 1 1 0"
+    assert pane =~ "min-width: 321px; max-width: 351px"
+    assert rule(@css, ".dk .dk-doc") =~ "min-width: 320px; max-width: none; flex: 1 1 600px"
+
+    js = File.read!(Path.expand("../../../../priv/static/assets/bp-desk.js", __DIR__))
+    assert js =~ ~s(min-width: " + px + "px; max-width: none; flex: 0 0 " + px)
+    assert js =~ "width: 100%; min-width: 0; max-width: none; flex: 1 1 auto;"
+  end
+
+  # The build line under the desk is the old Studio's; TanStack has none. The
+  # desk's own sheet hides it, so every other Studio page keeps it.
+  test "the desk hides the Studio's build footer, only where a desk is" do
+    assert rule(@css, ".studio-shell:has(.dk) > .studio-footer") =~ "display: none"
+  end
+
   test "a plain divider is TanStack's hr: inset 12 px, one --dk-border line" do
     assert rule(@css, ".dk .pane-divider") =~
              "margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border)"

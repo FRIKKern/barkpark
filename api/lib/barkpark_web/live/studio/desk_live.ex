@@ -509,8 +509,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its
   # pane's id from the title (`pane-structure`), so `StructureCopy` keeps it.
+  # The TanStack Studio titles its root "Content" when no desk is declared
+  # (a declared desk's own title otherwise); Barkpark.Structure's default is
+  # "Structure".
   defp root_title(%{id: "root", title: "Structure"} = root),
-    do: Map.put(root, :title, gettext("Structure"))
+    do: Map.put(root, :title, gettext("Content"))
 
   defp root_title(root), do: root
 
