@@ -163,6 +163,13 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
              ~s(.dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓";)
   end
 
+  # A choice already in use ("Default sort" while it is) is faint and lights
+  # nothing on hover, as the TanStack Studio's list menu.
+  test "a List options choice already in use is faint and has no hover" do
+    assert @css =~
+             ~s|.dk .dk-list-menu [role="menuitemradio"][aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--fg) 14%, var(--bg-card)); }|
+  end
+
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
   # JSON in a mono that starts with ui-monospace, a long value on one line.
   test "Inspect has one scroller, its body; Raw JSON is mono, unwrapped" do

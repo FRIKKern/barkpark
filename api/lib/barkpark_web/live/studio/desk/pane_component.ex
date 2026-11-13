@@ -69,7 +69,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts hint focus)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus)a
         )
       )
       |> assign_new(:sharers, fn -> [] end)
@@ -77,6 +77,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign_new(:focus, fn -> nil end)
       |> assign_new(:orderings, fn -> [] end)
       |> assign_new(:sorts, fn -> [] end)
+      |> assign_new(:default, fn -> "updated" end)
       |> assign_new(:limit, fn -> Rows.page() end)
       # The sort this editor keeps for the type (`ListMenu`), at first.
       |> assign_new(:sort, fn -> assigns[:list_sort] end)
@@ -310,6 +311,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           id={@id}
           index={@index}
           sort={@sort}
+          default={ListMenu.default(@default, @node)}
           orderings={@orderings}
           named={(@data.ok? && @data.result[:sorts]) || []}
           myself={@myself}
