@@ -39,6 +39,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   under the pointer, or under the focus when the keys moved it there
   (`:focus-visible`): a click opens a menu with nothing lit.
 
+  Inspect (`.dk-inspect`) is TanStack's card: radius 6, the popover shadow,
+  the page dimmed by its backdrop, its tree in a monospace with its syntax
+  colours (styles.css `--syntax-*`), light and dark.
+
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
   page. A positioned edit pane boxed the backdrop in, so the other panes
@@ -65,6 +69,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
+      .dk { --dk-icon-hover: #f6f6f8; --dk-selected-fill: #eeeef1; --dk-tab-selected-fg: #636776; --dk-focus: #556bfc; --dk-backdrop: rgba(227, 228, 232, 0.5); --dk-syntax-property: #4043e7; --dk-syntax-string: #965912; --dk-syntax-constant: #721fe5; --dk-syntax-punctuation: #515870; }
+      html[data-theme="dark"] .dk { --dk-icon-hover: #21232f; --dk-selected-fill: #2a2d3f; --dk-tab-selected-fg: #9d9fae; --dk-focus: #596ffc; --dk-backdrop: rgba(19, 20, 27, 0.5); --dk-syntax-property: #7898ff; --dk-syntax-string: #f9be1e; --dk-syntax-constant: #b28af7; --dk-syntax-punctuation: #979cb0; }
       /* studio-literal-check: skip-end */
       .dk { background: var(--dk-bg); }
       .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); background: var(--dk-bg); }
@@ -127,27 +133,35 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit-footer .dk-doc-menu-button { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-foot-icon); font-size: 17px; line-height: 1; cursor: pointer; }
       .dk .dk-edit-footer .dk-doc-menu-button:hover { background: var(--dk-foot-hover); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
-      .dk .dk-inspect { margin: auto; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-card); color: var(--fg); }
+      .dk .dk-inspect { margin: auto; width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
       .dk .dk-inspect[open] { display: flex; flex-direction: column; }
-      .dk .dk-inspect::backdrop { background: color-mix(in srgb, var(--fg) 30%, transparent); }
-      .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; }
-      .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .dk .dk-inspect-close { border: 0; background: none; color: var(--fg-muted); font: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-      .dk .dk-inspect-close:hover { background: var(--bg-accent); color: var(--fg); }
-      .dk .dk-inspect-tabs { display: flex; gap: 4px; padding: 0 16px 8px; border-bottom: 1px solid var(--border-subtle); }
-      .dk .dk-inspect-tabs [role="tab"] { border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--text-sm); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
-      .dk .dk-inspect-tabs [role="tab"][aria-selected="true"] { background: var(--bg-accent); color: var(--fg); }
-      .dk .dk-inspect-close:focus-visible, .dk .dk-inspect-tabs [role="tab"]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-      .dk .dk-inspect-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
-      .dk .dk-inspect-panel { padding: 12px 16px 16px; font-size: var(--text-sm); }
-      .dk .dk-inspect-panel pre { margin: 0; font-family: var(--paper-font-mono, ui-monospace, Menlo, monospace); white-space: pre; }
+      .dk .dk-inspect::backdrop { background: var(--dk-backdrop); }
+      .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0 20px; }
+      .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-inspect-head h2 em { font-style: italic; }
+      .dk .dk-inspect-close { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-inspect-close:hover { background: var(--dk-icon-hover); color: var(--dk-fg); }
+      .dk .dk-inspect-tabs { display: flex; gap: 4px; padding: 12px; border-bottom: 1px solid var(--dk-border); }
+      .dk .dk-inspect-tabs [role="tab"] { border: 0; background: none; color: var(--dk-icon-muted); font: inherit; font-size: 13px; line-height: 19px; font-weight: 500; padding: 3px 8px; border-radius: 3px; cursor: pointer; }
+      .dk .dk-inspect-tabs [role="tab"]:hover { background: var(--dk-icon-hover); }
+      .dk .dk-inspect-tabs [role="tab"][aria-selected="true"] { background: var(--dk-selected-fill); color: var(--dk-tab-selected-fg); }
+      .dk .dk-inspect-close:focus-visible, .dk .dk-inspect-tabs [role="tab"]:focus-visible { outline: 2px solid var(--dk-focus); outline-offset: -2px; }
+      .dk .dk-inspect-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 19px 20px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 19px; }
+      .dk .dk-inspect-panel { padding: 0; }
+      .dk .dk-inspect-panel pre { margin: -6px 0 0; font: inherit; white-space: pre; color: var(--dk-syntax-punctuation); }
       .dk .dk-inspect-panel pre code { font: inherit; }
       .dk .dk-inspect-tree { list-style: none; margin: 0; padding: 0; }
-      .dk .dk-inspect-tree .dk-inspect-tree { padding-left: 16px; }
-      .dk .dk-inspect-tree li { padding: 2px 0; overflow-wrap: anywhere; }
-      .dk .dk-inspect-key { font-weight: 600; margin-right: 6px; }
-      .dk .dk-inspect-count { color: var(--fg-muted); }
-      .dk .dk-inspect-tree summary { cursor: pointer; }
+      .dk .dk-inspect-tree .dk-inspect-tree { padding-left: 20px; }
+      .dk .dk-inspect-tree li { overflow-wrap: anywhere; }
+      .dk .dk-inspect-tree summary { display: block; list-style: none; cursor: pointer; }
+      .dk .dk-inspect-tree summary::-webkit-details-marker { display: none; }
+      .dk .dk-inspect-tree summary::before { content: "▸"; display: inline-block; width: 1.5ch; margin-left: -1.5ch; color: var(--dk-syntax-punctuation); }
+      .dk .dk-inspect-tree details[open] > summary::before { content: "▾"; }
+      .dk .dk-inspect-tree summary:hover { background: var(--dk-card-hover); }
+      .dk .dk-inspect-tree summary:focus-visible { outline: 2px solid var(--dk-focus); outline-offset: -2px; }
+      .dk .dk-inspect-key { margin-right: 1ch; color: var(--dk-syntax-property); }
+      .dk .dk-inspect-count, .dk .dk-inspect-value { color: var(--dk-syntax-constant); }
+      .dk .dk-inspect-value[data-type="string"] { color: var(--dk-syntax-string); }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
