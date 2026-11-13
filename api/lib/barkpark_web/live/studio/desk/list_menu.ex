@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   the list that way in both. A sign-in with no editor behind it (a token
   with no owner) keeps the pick for the visit only.
 
-  The menu is an HTML popover: the button opens it before the page's
+  It is drawn in the desk's one menu look (`Desk.Menu`). The menu is an HTML popover: the button opens it before the page's
   script runs, Escape and a click outside close it, and nothing is drawn
   on the server for it.
   """
@@ -22,22 +22,24 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.UserPrefs
   alias BarkparkWeb.Studio.PaneBuilder
+  alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.ScopeHelpers
 
   @pref "studio.lists"
 
-  attr :id, :string, required: true
-  attr :index, :integer, required: true
-  attr :sort, :string, default: nil
+  attr(:id, :string, required: true)
+  attr(:index, :integer, required: true)
+  attr(:sort, :string, default: nil)
 
-  attr :default, :string,
+  attr(:default, :string,
     default: "updated",
     doc: "the sort the list reads in with no pick (`default/2`)"
+  )
 
-  attr :orderings, :list, default: []
-  attr :named, :list, default: [], doc: "the type's `desk.sortOrderings` (`%{name, title}`)"
-  attr :myself, :any, required: true
+  attr(:orderings, :list, default: [])
+  attr(:named, :list, default: [], doc: "the type's `desk.sortOrderings` (`%{name, title}`)")
+  attr(:myself, :any, required: true)
 
   def menu(assigns) do
     # No pick reads in the default order: its item carries the check, and
@@ -68,15 +70,16 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       popover
       role="menu"
       aria-label={gettext("List options")}
-      class="dk-list-menu"
+      class="dk-list-menu dk-menu"
       style={"position-anchor: --dk-list-menu-#{@index}; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"}
     >
-      <div class="menu-label">{gettext("Actions")}</div>
+      <Menu.label>{gettext("Actions")}</Menu.label>
       <.item
         :for={choice <- choices(@orderings, @named)}
         label={choice.label}
         sort={choice.sort}
         checked={choice.sort == @current}
+        icon="sort"
         menu_id={@menu_id}
         myself={@myself}
       />
@@ -92,34 +95,38 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
     """
   end
 
-  attr :label, :string, required: true
-  attr :sort, :string, required: true
-  attr :checked, :boolean, required: true
+  attr(:label, :string, required: true)
+  attr(:sort, :string, required: true)
+  attr(:checked, :boolean, required: true)
 
-  attr :disabled, :any,
+  attr(:disabled, :any,
     default: false,
     doc: "false, or why the choice is already in use: it stays hoverable for that tip"
+  )
 
-  attr :menu_id, :string, required: true
-  attr :myself, :any, required: true
+  attr(:icon, :string,
+    default: nil,
+    doc: "TanStack's: each sort with its sort glyph, Default sort with none"
+  )
+
+  attr(:menu_id, :string, required: true)
+  attr(:myself, :any, required: true)
 
   defp item(assigns) do
     ~H"""
-    <button
-      type="button"
+    <Menu.item
       role="menuitemradio"
       aria-checked={to_string(@checked)}
       aria-disabled={@disabled && "true"}
       data-tip={@disabled || nil}
       class="menu-item"
+      icon={@icon}
       phx-click={!@disabled && "sort"}
       phx-value-sort={@sort}
       phx-target={@myself}
       popovertarget={!@disabled && @menu_id}
       popovertargetaction={!@disabled && "hide"}
-    >
-      {@label}
-    </button>
+    >{@label}</Menu.item>
     """
   end
 
