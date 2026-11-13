@@ -108,6 +108,22 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".dk-search-hits") =~ "width: min(420px, calc(100% - 32px))"
   end
 
+  # Feel walk 2: the popover drew as the browser's default buttons in a black
+  # box, as no rule named its classes. TanStack's: a card, an uppercase
+  # label, padded rows and a check on the current sort.
+  test "the List options popover is a card like the document menu, with its label and a check" do
+    assert @css =~
+             ".dk .dk-list-menu { min-width: 220px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }"
+
+    assert @css =~ ~r/\.dk \.dk-list-menu \.menu-label \{[^}]*text-transform: uppercase/
+
+    assert @css =~
+             ~r/\.dk \.dk-list-menu \[role="menuitemradio"\] \{[^}]*border: 0; background: none;/
+
+    assert @css =~
+             ~s(.dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓";)
+  end
+
   test "the sheet uses design tokens only, no literal colours" do
     refute @css =~ ~r/#[0-9a-fA-F]{3,8}\b/
     refute @css =~ ~r/\b(rgb|rgba|hsl|hsla)\(/

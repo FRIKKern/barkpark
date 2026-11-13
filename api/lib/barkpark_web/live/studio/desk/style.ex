@@ -89,6 +89,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-doc-menu-list [role="menuitem"] { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); padding: 6px 10px; border-radius: 4px; cursor: pointer; }
       .dk .dk-doc-menu-list [role="menuitem"]:hover, .dk .dk-doc-menu-list [role="menuitem"]:focus { background: var(--bg-accent); outline: none; }
       .dk .dk-doc-menu-list [role="menuitem"][data-desk-doc-action="delete-doc"] { color: var(--destructive); }
+      .dk .dk-list-menu { min-width: 220px; padding: 4px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); border-radius: 8px; }
+      .dk .dk-list-menu .menu-label { padding: 8px 10px 4px; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-muted); }
+      .dk .dk-list-menu [role="menuitemradio"] { display: flex; align-items: center; gap: 12px; width: 100%; text-align: start; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+      .dk .dk-list-menu [role="menuitemradio"]:hover, .dk .dk-list-menu [role="menuitemradio"]:focus { background: var(--bg-accent); outline: none; }
+      .dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓"; margin-left: auto; color: var(--fg-muted); }
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
