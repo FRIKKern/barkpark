@@ -372,6 +372,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/editor_host.ex:588
 #, elixir-autogen, elixir-format
 msgid "JSON"
+msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor.ex:898
 #, elixir-autogen, elixir-format
