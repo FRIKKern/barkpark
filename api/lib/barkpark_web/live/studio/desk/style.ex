@@ -85,7 +85,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .pane-item-chevron, .dk .pane-item:hover .pane-item-chevron, .dk .pane-item.selected .pane-item-chevron { opacity: 0.5; color: inherit; display: flex; margin-right: -2px; }
       .dk .pane-item-chevron svg { width: 21px; height: 21px; }
-      .dk .dk-rows { padding: 0 12px 12px; }
+      /* The rows' containing block: a row's sr-only words (position: absolute) must not escape the pane's scroll area and make the page scroll. */
+      .dk .dk-rows { position: relative; padding: 0 12px 12px; }
       .dk .dk-row > .pane-item { box-sizing: border-box; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 7px 8px; height: 33px; min-height: 33px; border: 0; border-radius: 3px; font-size: 13px; line-height: 19px; font-weight: 500; color: var(--dk-fg); background: none; }
       .dk [data-pane-kind="list"] .dk-row > a.pane-item[data-desk-opens="doc"] { padding: 5px 8px; height: auto; min-height: 49px; }
       .dk .dk-row > a.pane-item:hover:not(.selected) { background: var(--dk-card-hover); color: var(--dk-fg); }
