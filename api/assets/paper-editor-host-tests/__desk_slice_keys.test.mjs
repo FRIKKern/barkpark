@@ -83,6 +83,26 @@ rowTo("post").focus();
 key("Tab");
 assert.equal(window.document.activeElement.getAttribute("role"), "separator");
 assert.equal(window.document.activeElement.previousElementSibling.id, "p0");
+// ── One Tab stop coming in: the selected row, never the last ────────────────
+// (task-1b35e2d6b0c3f242: Shift+Tab back into the root landed on "…Rest".)
+const more = window.document.querySelector(".dk-more");
+const above = window.document.querySelector("#p1 .dk-close");
+rowTo("post;b").classList.add("selected");
+more.focus();
+assert.ok(key("Tab", { shiftKey: true }).defaultPrevented, "Shift+Tab into a list is the hook's");
+assert.equal(focused(), "Beta", "Shift+Tab from below lands on the selected row, not the last");
+above.focus();
+assert.ok(key("Tab").defaultPrevented);
+assert.equal(focused(), "Beta", "Tab from above lands on the selected row too");
+rowTo("post;b").classList.remove("selected");
+more.focus();
+key("Tab", { shiftKey: true });
+assert.equal(focused(), "Alpha", "with none selected, Shift+Tab lands on the first row");
+above.focus();
+assert.ok(!key("Tab").defaultPrevented, "Tab from above onto the first row is the browser's own");
+window.document.getElementById("desk-search-input").focus();
+assert.ok(!key("Tab").defaultPrevented, "the search box onto the root's selected first row: the browser's own");
+
 // Nothing after the rows (the last pane): the focus leaves for the page, and nothing is left behind.
 window.document.querySelector(".dk-more").remove();
 rowTo("post;b").focus();
