@@ -244,6 +244,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"POST", "/v1/chat-host/enroll"} => "chat-host daemon enrollment handshake",
     {"POST", "/v1/chat-host/events"} => "chat-host daemon pushes runtime events",
     {"POST", "/v1/chat-host/heartbeat"} => "chat-host daemon liveness ping",
+    {"GET", "/v1/chat-host/leases/:*/attachments/:*"} =>
+      "chat-host daemon reads a leased session's attachment",
     {"POST", "/v1/chat-host/rotate"} => "chat-host daemon rotates its own secret",
     {"POST", "/v1/chat/sessions/:*/state"} => "chat-host daemon reports session state",
 
