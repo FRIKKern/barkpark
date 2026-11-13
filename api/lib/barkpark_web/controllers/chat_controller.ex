@@ -261,14 +261,39 @@ defmodule BarkparkWeb.ChatController do
     # claude-only values), so the row has to exist first. Deliberate precedence
     # flip: unknown session + bad body is now 404, not 400 — the tenant
     # not-found oracle outranks body shape (pinned in the controller tests).
-    with %StudioChat.Session{provider: provider} <- fetch_scoped(id, scope(conn)),
-         {:ok, ops} <- validate_patch(body, provider) do
+    with %StudioChat.Session{provider: provider} = session <- fetch_scoped(id, scope(conn)),
+         {:ok, ops} <- validate_patch(body, provider),
+         :ok <- authorize_patch_steer(conn, session, ops) do
       Enum.each(ops, &apply_patch_op(id, &1))
       json(conn, full_session_json(StudioChat.get_session(id), []))
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
+  end
+
+  # task-14e61a60450c4678: a mode/model/effort CHANGE on a session whose runtime
+  # is live steers the running CLI (`apply_patch_op/2`), a host act like a turn,
+  # so it passes the `/messages` gate; a refusal writes nothing. Persist-only
+  # (no live runtime, or an echo of the current value) is intent and passes,
+  # as the Studio tab's offline switch does.
+  defp authorize_patch_steer(conn, session, ops) do
+    steers? =
+      Enum.any?(ops, fn {key, value} ->
+        key in [:mode, :model_choice, :effort_choice] and Map.get(session, key) != value
+      end)
+
+    if steers? and live_runtime?(session.id),
+      do: HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
+      else: :ok
+  end
+
+  defp live_runtime?(id) do
+    with recorder when is_pid(recorder) <- Recorder.whereis(id),
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder),
+         do: true,
+         else: (_ -> false)
   end
 
   # ── POST /v1/chat/sessions/:id/messages ────────────────────────────────────
