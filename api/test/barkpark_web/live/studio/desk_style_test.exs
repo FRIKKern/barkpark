@@ -223,12 +223,14 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
 
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
   # JSON in a mono that starts with ui-monospace, a long value on one line.
+  # LOOKS C3: the whole body is TanStack's mono (Parsed too); pre takes it.
   test "Inspect has one scroller, its body; Raw JSON is mono, unwrapped" do
     assert rule(@css, ".dk .dk-inspect-body") =~ "overflow: auto"
     assert rule(@css, ".dk .dk-inspect-body") =~ "min-height: 0"
+    assert rule(@css, ".dk .dk-inspect-body") =~ "font-family: ui-monospace,"
     refute rule(@css, ".dk .dk-inspect-panel") =~ "overflow"
     pre = rule(@css, ".dk .dk-inspect-panel pre")
-    assert pre =~ "font-family: var(--paper-font-mono, ui-monospace,"
+    assert pre =~ "font: inherit"
     assert pre =~ ~r/white-space: pre;/
     assert rule(@css, ".dk .dk-inspect-panel pre code") =~ "font: inherit"
   end
@@ -305,9 +307,27 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert rule(@css, ".studio-shell:has(.dk) > .studio-footer") =~ "display: none"
   end
 
-  test "a plain divider is TanStack's hr: inset 12 px, one --dk-border line" do
+  # The dividers sit inside `.dk-rows`, which already insets the rows 12 px,
+  # so their own margin is 0 at the sides: the line runs 12 px from each pane
+  # edge and a titled divider's words start at x 20, the rows' own words, as
+  # TanStack's (measured: they were at 32, the inset counted twice).
+  test "a divider lines up with the rows: line 12 px in, its words at the rows' x" do
     assert rule(@css, ".dk .pane-divider") =~
-             "margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border)"
+             "margin: 4px 0; padding: 0; border: 0; border-top: 1px solid var(--dk-border)"
+
+    titled = rule(@css, ".dk .desk-divider")
+    assert titled =~ "margin: 4px 0 8px; padding: 7px 8px 6px;"
+    assert titled =~ "color: var(--dk-muted)"
+    assert rule(@css, ".dk .dk-rows") =~ "padding: 0 12px 12px"
+    assert rule(@css, ".dk .dk-row > .pane-item") =~ "padding: 7px 8px"
+  end
+
+  # TanStack's page and panes are one surface, --bg (#13141b dark), and a
+  # row's tile is filled with that same colour so only its ring shows.
+  test "the desk, its panes and a row's tile share one background, --dk-bg" do
+    assert @css =~ ~r/(^|\s)\.dk \{ background: var\(--dk-bg\); \}/
+    assert rule(@css, ".dk .dk-pane") =~ "background: var(--dk-bg)"
+    assert rule(@css, ".dk .dk-media") =~ "background: var(--dk-bg)"
   end
 
   # The desk's own look is TanStack's measured values, declared once as
@@ -327,5 +347,12 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     assert block =~ "--dk-selected: #465be8; --dk-on-selected: #fff;"
     assert block =~ ~s(html[data-theme="dark"] .dk { --dk-fg: #e4e5e9;)
     assert block =~ "--dk-selected: #7898ff; --dk-on-selected: #0d0e12;"
+
+    [light, dark] = String.split(block, ~s(html[data-theme="dark"] .dk {), parts: 2)
+    assert light =~ "--dk-bg: #fff;"
+    assert light =~ "--dk-focus-ring: #556bfc;"
+    assert dark =~ "--dk-bg: #13141b;"
+    # TanStack's dark --focus-ring.
+    assert dark =~ "--dk-focus-ring: #596ffc;"
   end
 end
