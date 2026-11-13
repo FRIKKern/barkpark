@@ -37,6 +37,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk a.pane-item:hover { color: var(--fg); }
       .dk [data-lit] > a.pane-item:not(.selected) { background: var(--bg-muted); }
       .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .pane-item-chevron { opacity: 0.5; }
       .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
       .dk .dk-fields { padding: 24px 32px; margin: 0; display: grid; gap: 20px; max-width: 72ch; }
       .dk .dk-fields dt { font-size: var(--text-xs); color: var(--fg-muted); margin-bottom: 4px; }
