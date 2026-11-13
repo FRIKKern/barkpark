@@ -413,7 +413,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                 class="pane-item-chevron"
                 aria-hidden="true"
               >
-                <BarkparkWeb.Icons.icon name="chevron-right" size={16} />
+                <BarkparkWeb.Studio.Desk.Glyph.glyph name="chevron-right" />
               </span>
                 </.link>
               </div>

@@ -20,16 +20,19 @@ defmodule BarkparkWeb.Studio.Desk.Menu do
   attr :danger, :boolean, default: false, doc: "a destructive action, in the menu's red"
   attr :class, :string, default: nil
 
+  attr :href, :string, default: nil, doc: "a link item (a schema's own link action): an `<a>`"
+
   attr :rest, :global,
-    include: ~w(popovertarget popovertargetaction disabled),
+    include: ~w(popovertarget popovertargetaction disabled target rel),
     doc: "role, aria-checked, phx-click and the rest, as the menu gives them"
 
   slot :inner_block, required: true
 
-  @doc "One menu item: its words, then its icon."
+  @doc "One menu item: its words, then its icon; a button, or a link with `href`."
   def item(assigns) do
     ~H"""
-    <button type="button" class={["dk-menu-item", @danger && "danger", @class]} {@rest}>{render_slot(@inner_block)}<.glyph :if={@icon} name={@icon} /></button>
+    <a :if={@href} href={@href} class={["dk-menu-item", @danger && "danger", @class]} {@rest}>{render_slot(@inner_block)}<.glyph :if={@icon} name={@icon} /></a>
+    <button :if={!@href} type="button" class={["dk-menu-item", @danger && "danger", @class]} {@rest}>{render_slot(@inner_block)}<.glyph :if={@icon} name={@icon} /></button>
     """
   end
 

@@ -134,14 +134,14 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]';
     return (
       "#desk-panes > [data-pane-index] { display: none; }\n" +
-      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n"
+      pane + " { display: flex; width: 100%; min-width: 0; max-width: none; flex: 1 1 auto; }\n"
     );
   }
 
   // A pane the editor dragged to a width of their own, and the edge to drag.
   function widthRules(index, px) {
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
-    return pane + " { width: " + px + "px; min-width: " + px + "px; flex: 0 0 " + px + "px; }\n";
+    return pane + " { width: " + px + "px; min-width: " + px + "px; max-width: none; flex: 0 0 " + px + "px; }\n";
   }
 
   // The Studio shell hides every pane but one in its phone bucket (under 640
