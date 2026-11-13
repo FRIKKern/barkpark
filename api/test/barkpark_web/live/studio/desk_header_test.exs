@@ -55,6 +55,15 @@ defmodule BarkparkWeb.Studio.DeskHeaderTest do
     refute root =~ "pane-divider"
   end
 
+  # LOOKS A4: the root is "Content" as TanStack's (no desk declared), and a
+  # row's chevron is Sanity's thin one (1.2 stroke), TanStack's ChevronRight.
+  test "the root pane is titled Content, its chevrons Sanity's", %{conn: conn, base: base} do
+    {:ok, view, _html} = live(conn, base)
+    assert has_element?(view, ~s([data-pane-index="0"][aria-label="Content"]))
+    root = view |> element(~s([data-pane-index="0"])) |> render()
+    assert root =~ ~r/class="pane-item-chevron"[^>]*>\s*<svg[^>]*data-desk-glyph="chevron-right"/
+  end
+
   test "a list pane's header and search carry Sanity's glyphs", %{conn: conn, base: base} do
     {:ok, view, _html} = live(conn, "#{base}/#{@type_name}")
     render_async(view, 5_000)
