@@ -69,6 +69,22 @@ defmodule BarkparkWeb.Studio.Desk.InspectLookTest do
         do: assert(card =~ want)
   end
 
+  # Anchor positioning is in Chrome 125+, Safari 26+ and Firefox 147+, not
+  # in older Safari or Firefox ESR 140. There the card is today's: centred on
+  # the page over a dimmed window, never left unplaced.
+  test "with no anchor positioning, Inspect is the page-centred card" do
+    [_, block] =
+      Regex.run(~r/@supports not \(anchor-name: --x\) \{(.*?\})\s*\}/s, @css) ||
+        flunk("no @supports not (anchor-name) fallback for Inspect")
+
+    [_, layer] = Regex.run(~r/\.dk \.dk-inspect-layer \{([^}]*)\}/, block)
+    for want <- ["position: fixed", "inset: 0", "place-items: center"], do: assert(layer =~ want)
+
+    [_, card] = Regex.run(~r/\.dk \.dk-inspect \{([^}]*)\}/, block)
+    assert card =~ "width: min(774px, calc(100vw - 32px))"
+    assert card =~ "max-height: calc(100vh - 64px)"
+  end
+
   test "the tabs are TanStack's pills: 3 8, radius 3, the selected fill" do
     tab = rule(~s(.dk .dk-inspect-tabs [role="tab"]))
     assert tab =~ "padding: 3px 8px"

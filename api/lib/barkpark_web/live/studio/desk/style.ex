@@ -44,7 +44,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   pane's form only, the card 12 px in, centred while short; below 600 px it
   takes the whole window. The layer is anchored to the form
   (`anchor-name: --dk-edit-body`), not boxed in by it: the form stays
-  unpositioned, for the reason below. Its tree in a monospace with its syntax
+  unpositioned, for the reason below. A browser with no anchor positioning
+  gets the card centred on the page instead (`@supports not`). Its tree in a monospace with its syntax
   colours (styles.css `--syntax-*`), light and dark. Its search box is
   TanStack's `.inspect-search`: the UI font at 15 px, a ringed input with
   the magnifier inside.
@@ -167,6 +168,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-inspect-layer:not(:has(> dialog[open])) { display: none; }
       @media (max-width: 599px) { .dk .dk-inspect-layer { position: fixed; inset: 0; } }
       .dk .dk-inspect { position: static; margin: 0; width: auto; max-height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      /* No anchor positioning (Safari before 26, Firefox before 147, Firefox ESR 140): the
+         card as it was before it moved into the pane, centred on the page over a dimmed
+         window, so it is never drawn unplaced. */
+      @supports not (anchor-name: --x) { .dk .dk-inspect-layer { position: fixed; inset: 0; place-items: center; padding: 16px; } .dk .dk-inspect { width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); } }
       .dk .dk-inspect[open] { display: flex; flex-direction: column; }
       .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0 20px; }
       .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
