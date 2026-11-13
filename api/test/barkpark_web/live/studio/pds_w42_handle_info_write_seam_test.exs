@@ -79,6 +79,10 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # send_update(PaperFieldBlock, tree_value:) → persist/2 → {:paper_op, …};
     # terminates on the paper chokepoint (covered by the paper-op suite)
     {"{:tree_codelist_change, msg}", :write},
+    # Fields.tree_codelist_pick/2 — a tree codelist pick in the document
+    # editor (task-0f806691db0e06dd): buffer put + Shared.do_autosave/3, the
+    # same gated seam as {:autosave_form, …}; run below
+    {"{:tree_codelist_pick, msg}", :write},
     # Enablement.forget/1 — drops this process's memo (task-c8a87043cb286a2f)
     {"{:plugin_enablement_changed, ws_id}", :no_write},
     # push_patch(replace: true) that drops a desk search hit's `?focus=doc`
@@ -240,7 +244,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 17,
+      assert length(heads) == 18,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 
@@ -273,7 +277,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The measured set is FOURTEEN sites in the LiveView/component tree (the two
+    # The measured set is FIFTEEN sites in the LiveView/component tree (the two
     # remaining tree-wide sends are `:after_join` in the channels, which are
     # not LiveView seams). `{:drop_focus_query, …}` is the one that writes
     # nothing: a URL patch after a desk search hit (task-4e10550394f87112).
@@ -296,6 +300,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "the set of in-process send(self(), …) senders is pinned" do
       assert send_self_sites() == [
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
+               {"components/fields/tree_codelist_field.ex", "{:tree_codelist_pick,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
                {"live/studio/desk/pane_component.ex", "{:desk_list_sort,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_failed,"},
@@ -391,6 +396,26 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       drive_seam(view, {:autosave_form, %{"title" => "Seam Post", "body" => "ANON-WRITE"}})
 
       assert stored_body() == {"ANON-WRITE", :absent}
+    end
+
+    # The tree codelist pick (task-0f806691db0e06dd) rides the same seam: the
+    # input name and code become a buffer put and `Shared.do_autosave/3`.
+    test "a {:tree_codelist_pick, …} from a write-denied principal is refused", %{conn: conn} do
+      view = open!(conn, @readonly)
+      assert_write_denied_socket!(view)
+
+      drive_seam(view, {:tree_codelist_pick, %{name: "doc[body]", value: "ESCALATED-VIA-PICK"}})
+
+      assert stored_body() == @untouched
+    end
+
+    test "POSITIVE CONTROL: the same {:tree_codelist_pick, …} from a writer LANDS",
+         %{conn: conn} do
+      view = open!(conn, @writer)
+
+      drive_seam(view, {:tree_codelist_pick, %{name: "doc[body]", value: "ENTITLED-PICK"}})
+
+      assert stored_body() == {"ENTITLED-PICK", :absent}
     end
 
     # Denied WRITE is not denied READ.
