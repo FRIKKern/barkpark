@@ -419,7 +419,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   end
 
   defp fetch_keys(socket) do
-    safely("keys_list", fn -> {:ok, Keys.list(workspace(socket))} end)
+    safely("keys_list", fn ->
+      {:ok, socket |> workspace() |> Keys.list() |> Keys.confine(bound_dataset(socket))}
+    end)
   end
 
   defp apply_mint(socket, name) do
@@ -445,14 +447,26 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   # restate tenant confinement here as if this
   # module enforced it: the guarantee is the mount's, and any new flat mount of
   # this LiveView inherits the obligation.
-  defp apply_key_action(socket, :rotate, id),
+  #
+  # A dataset-bound token manages only its own dataset's keys: another
+  # dataset's key is NOT FOUND too (`Keys.manageable?/3`).
+  defp apply_key_action(socket, action, id) do
+    if Keys.manageable?(id, workspace_id(socket), bound_dataset(socket)),
+      do: key_action(socket, action, id),
+      else: {:error, :not_found}
+  end
+
+  defp key_action(socket, :rotate, id),
     do: safely("keys_rotate", fn -> Keys.rotate(id, workspace_id(socket)) end)
 
-  defp apply_key_action(socket, :pause, id),
+  defp key_action(socket, :pause, id),
     do: safely("keys_pause", fn -> Keys.pause(id, workspace_id(socket)) end)
 
-  defp apply_key_action(socket, :unpause, id),
+  defp key_action(socket, :unpause, id),
     do: safely("keys_unpause", fn -> Keys.unpause(id, workspace_id(socket)) end)
+
+  defp bound_dataset(socket),
+    do: Barkpark.Auth.ApiToken.bound_dataset(socket.assigns[:api_token])
 
   # Run a direct sibling call, degrading a runtime raise (DB blip, etc.) to the
   # honest `{:error, :unavailable}` state instead of crashing the LiveView. The
