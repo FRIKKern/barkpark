@@ -33,7 +33,9 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       85 px with its view tabs under it (Editor and JSON), pills as the
       group tabs.
     * The pane is TanStack's page colour (`--dk-bg`, light and dark), and
-      inputs sit on it.
+      inputs sit on it. In dark, the boxed fields (array, object, code
+      list, localized), an array's rows and a chosen reference sit on it
+      too, not on the Studio's near-black card.
     * A picked reference is TanStack's card (`.ref-box`, :677, :739-745):
       a 1 px inset ring, 5 px in, the type's tile, the title and the type,
       and one "…" menu with Clear and Replace. bp-reference-picker draws it
@@ -71,6 +73,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .view-tabs [role=tab] { font: inherit; font-size: 13px; font-weight: 500; padding: 3px 8px; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
       .dk .dk-edit .view-tabs [role=tab]:hover { background: var(--dk-icon-btn-hover); }
       .dk .dk-edit .view-tabs [role=tab][aria-selected="true"] { background: var(--dk-selected-fill); color: var(--dk-tab-selected-fg); }
+      html[data-theme="dark"] .dk .dk-edit fieldset.bp-field-array, html[data-theme="dark"] .dk .dk-edit .bp-field-composite, html[data-theme="dark"] .dk .dk-edit .bp-field-codelist, html[data-theme="dark"] .dk .dk-edit .bp-field-localized, html[data-theme="dark"] .dk .dk-edit .bp-array-row, html[data-theme="dark"] .dk .dk-edit .ref-selected { background: var(--dk-bg); }
       .dk .dk-edit .editor-body.editor-panel-main { max-width: none; padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-edit .editor-meta { display: block; margin: 0 0 52px; color: var(--dk-muted); font-size: 13px; line-height: 19px; }
       .dk .dk-edit .dk-kind { font-size: 13px; line-height: 19px; color: var(--dk-muted); }

@@ -166,6 +166,28 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     assert has_element?(view, @dialog)
   end
 
+  # In split view (`|,`) the editor is the split pane on the right. Ctrl+Alt+I
+  # there opens Inspect in that pane; closing takes it out of the URL.
+  test "in split view it opens in the split pane's editor and closes again", c do
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};#{c.id}|,")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+
+    inspect_open(view)
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}|,inspect=on")
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing][data-pane-index="3"] dialog[data-desk-inspect])
+           )
+
+    assert has_element?(view, "#{@dialog} h2", "Inspecting Looked at")
+
+    render_hook(view, "desk-inspect", %{"open" => false})
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}|,")
+    refute has_element?(view, @dialog)
+  end
+
   test "a link with inspect=on opens the document with it open", c do
     {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=on")
     render_async(view, 5_000)
