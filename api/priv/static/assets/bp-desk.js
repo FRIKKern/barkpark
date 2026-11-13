@@ -97,7 +97,8 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
       pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
-      pane + " > :not(.pane-header), " + pane + " .dk-close { display: none; }\n" +
+      // A strip reads its title alone: every control in its header goes too.
+      pane + " > :not(.pane-header), " + pane + " > .pane-header > :not(.pane-header-title), " + pane + " .dk-close { display: none; }\n" +
       pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
       // The editor pane has no header of its own: its strip reads its title.
       pane + '[data-pane-editing]::before { content: attr(data-desk-name); display: block; padding: 16px 0; margin: 0 auto; writing-mode: vertical-rl; font-weight: 600; font-size: var(--text-sm); white-space: nowrap; }\n'
@@ -982,31 +983,54 @@
         }, WARM_DELAY_MS);
       };
 
-      // The edit pane's "…" menu (a popover): opened, its first item has the
-      // focus and the button says it is expanded; the arrows move between the
-      // items; Tab leaves it closed. Escape and a click outside are the
-      // popover's own, and both give the focus back to the button.
+      // The desk's popover menus (the edit pane's Share and "…", a list's
+      // "List options"): opened, the first item has the focus and the button
+      // says it is expanded; the arrows move between the items; Tab leaves it
+      // closed. Escape and a click outside are the popover's own, and both
+      // give the focus back to the button.
+      var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
+      var MENU_ITEM = '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])';
       hook._onDocMenu = function (e) {
         var menu = e.target;
-        if (!menu.matches || !menu.matches(".dk-doc-menu-list[popover]")) return;
+        if (!menu.matches || !menu.matches(MENU)) return;
         var open = e.newState === "open";
         var button = root.ownerDocument.getElementById(menu.id + "-button");
         if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
-        var first = menu.querySelector('[role="menuitem"]:not([disabled])');
+        var first = menu.querySelector(MENU_ITEM);
         if (open && first) first.focus();
       };
       hook._onDocMenuKey = function (e) {
-        var menu = e.target.closest ? e.target.closest(".dk-doc-menu-list[popover]") : null;
+        var menu = e.target.closest ? e.target.closest(MENU) : null;
         if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "Tab") return menu.hidePopover();
         var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
         if (step === undefined) return;
-        var items = Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]:not([disabled])'));
+        var items = Array.prototype.slice.call(menu.querySelectorAll(MENU_ITEM));
         if (!items.length) return;
         e.preventDefault();
         var at = items.indexOf(root.ownerDocument.activeElement);
         var to = Math.abs(step) === Infinity ? (step < 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
         items[to].focus();
+      };
+
+      // A list is one Tab stop coming in, too: Tab or Shift+Tab that would
+      // land on one of its rows from outside them lands on its selected row
+      // (its first when none is), never on its last (leaveList is the way out).
+      hook._onEnterList = function (e) {
+        if (e.key !== "Tab" || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+        var from = e.target;
+        if (!from || !from.matches || from.matches(ROW)) return;
+        var all = Array.prototype.filter.call(root.ownerDocument.querySelectorAll(TABBABLE), function (el) {
+          return el.tabIndex >= 0 && el.getClientRects().length;
+        });
+        var at = all.indexOf(from);
+        var next = at < 0 ? null : all[at + (e.shiftKey ? -1 : 1)];
+        if (!next || !next.matches(ROW) || !root.contains(next)) return;
+        var pane = next.closest("[data-pane-index]");
+        var to = pane && (pane.querySelector(ROW + ".selected") || pane.querySelector(ROW));
+        if (!to || to === next) return;
+        e.preventDefault();
+        to.focus();
       };
 
       // The search box's light: kept for the hits it was moved over.
@@ -1128,6 +1152,7 @@
       // The search box sits beside the panes, not in them.
       root.ownerDocument.addEventListener("click", hook._onClick);
       root.ownerDocument.addEventListener("keydown", hook._onSearchKey);
+      root.ownerDocument.addEventListener("keydown", hook._onEnterList);
       root.addEventListener("keydown", hook._onKey);
       // `toggle` does not bubble: caught on the way down.
       root.addEventListener("toggle", hook._onDocMenu, true);
@@ -1373,6 +1398,7 @@
       root.removeEventListener("keydown", this._onResizeKey);
       root.ownerDocument.removeEventListener("click", this._onClick);
       root.ownerDocument.removeEventListener("keydown", this._onSearchKey);
+      root.ownerDocument.removeEventListener("keydown", this._onEnterList);
       if (this._searchMarks) this._searchMarks.disconnect();
       window.removeEventListener("pointercancel", this._onPointerUp);
       Array.prototype.slice.call(root.children).forEach(function (el) {

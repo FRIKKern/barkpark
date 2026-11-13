@@ -89,6 +89,18 @@ assert.equal(panesOf()[0].getAttribute("aria-label"), "Expand Pane 0", "named fo
 assert.equal(panesOf()[0].getAttribute("aria-expanded"), "false");
 assert.equal(panesOf()[2].getAttribute("aria-label"), null, "an open pane keeps the name the server gave it");
 
+// A strip reads its title alone: no control of its header is drawn in it
+// (feel walk 2026-11-13: a list strip showed its + and … under the title).
+panesOf()[1].querySelector(".pane-header").insertAdjacentHTML(
+  "beforeend",
+  `<button type="button" class="dk-create-new">+</button><button type="button" class="dk-list-options">…</button><a class="dk-close" href="#">×</a>`,
+);
+for (const control of panesOf()[1].querySelectorAll(".pane-header > :not(.pane-header-title)")) {
+  assert.equal(window.getComputedStyle(control).display, "none", `a strip hides its ${control.className}`);
+}
+assert.notEqual(window.getComputedStyle(panesOf()[1].querySelector(".pane-header-title")).display, "none", "and keeps its title");
+assert.notEqual(window.getComputedStyle(panesOf()[2].querySelector(".pane-header-title")).display, "none");
+
 // One separator, after the open pane that is not the last: the TanStack
 // Studio's PaneResizer (role, name, value), reachable by Tab.
 const separators = () => [...el.querySelectorAll(':scope > [role="separator"]')];

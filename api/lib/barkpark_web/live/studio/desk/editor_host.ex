@@ -200,7 +200,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp ours({:noreply, socket}, how), do: {:noreply, settle(socket, how)}
   defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
-  defp settle(socket, how), do: socket |> steer(how) |> strip() |> assign(:panes, [])
+  defp settle(socket, how),
+    do: socket |> steer(how) |> strip() |> form_only() |> assign(:panes, [])
+
+  # A document the desk opens from a document node of its own (an
+  # `S.document()` child: a singleton) shows the form only, as Sanity's
+  # (singleton.spec:64): no view tabs, so no "Split pane right" (`pane/2`),
+  # and no type line over the title (`Desk.Style`). The Studio sets the tabs
+  # again on every rebuild, so they are cleared after each call it answers.
+  defp form_only(socket) do
+    if document_node?(List.last(socket.assigns[:chain] || [])),
+      do: assign(socket, :editor_views, []),
+      else: socket
+  end
+
+  # A doc pane that carries its desk node (`Tree.opens/1`, `Panes.parse_singleton/2`).
+  defp document_node?(%{kind: :doc, node: node}) when is_binary(node), do: true
+  defp document_node?(_pane), do: false
 
   # ── the Studio's navigation, read against the desk's chain ────────────────
 
@@ -346,6 +362,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-kind="doc"
       data-pane-editing
       data-desk-focused={assigns[:desk_focus] == @view.index}
+      data-desk-document={document_node?(@view.pane)}
       data-desk-save={assigns[:save_status] || ""}
       aria-label={@page_title}
     >
@@ -356,11 +373,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             (`bp-desk.js`) finds it. --%>
       <div class="pane-header">
         <%!-- In focus mode the title line is the panes it hides, each a way
-              back (`FocusMode`). One title element either way: a header row
-              that changed shape would move the focus mode button, and a
-              moved button loses the focus. --%>
-        <span class="pane-header-title">
-          <%= if assigns[:desk_focus] == @view.index do %>
+              back (`FocusMode`); a nav cannot sit in a heading, so there it is
+              a div. One title element in this place either way: a header row
+              that changed shape would move the focus mode button, and a moved
+              button loses the focus. --%>
+        <%= if assigns[:desk_focus] == @view.index do %>
+          <div class="pane-header-title">
             <FocusMode.crumbs
               views={@desk_panes}
               titles={@titles}
@@ -369,16 +387,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               base={@base}
               title={@page_title}
             />
-          <% else %>
-            {@page_title}
-          <% end %>
-        </span>
+          </div>
+        <% else %>
+          <h2 class="pane-header-title">{@page_title}</h2>
+        <% end %>
         <%!-- Sanity's "Split pane right": the same document again, beside
               this pane in its group (`Panes.split_right/3`). The desk edits
               the last pane, so the editor moves to the new one and this pane
               shows the document read-only. --%>
         <.link
-          :if={!@edit_failed and !gone?(assigns)}
+          :if={!@edit_failed and !gone?(assigns) and !document_node?(@view.pane)}
           patch={Panes.split_right(@chain, @view.index, @base)}
           class="dk-split icon-btn"
           aria-label={gettext("Split pane right")}

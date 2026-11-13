@@ -254,22 +254,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       aria-busy={@data.loading && "true"}
     >
       <div class="pane-header">
-        <span class="pane-header-title">{title(assigns)}</span>
+        <h2 class="pane-header-title">{title(assigns)}</h2>
         <%!-- J18: the Studio's own "+" event, which the page hands to the
               Studio (`EditorHost`); the new document opens after this pane. --%>
         <button
           :if={@pane.kind == :list && @data.ok? && @data.result[:creatable]}
           type="button"
-          class="dk-create-new"
+          class="dk-create-new dk-doc-menu-button icon-btn"
           phx-click="new-document"
           phx-value-type={@pane.type}
           phx-value-desk-pane={@index}
           aria-label={
             gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
           }
-          title={gettext("Create new document")}
+          data-tip={gettext("Create new document")}
         >
-          <span aria-hidden="true">+</span>
+          <BarkparkWeb.Icons.icon name="plus" size={14} />
         </button>
         <ListMenu.menu
           :if={@pane.kind == :list}
