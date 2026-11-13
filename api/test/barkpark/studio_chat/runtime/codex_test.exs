@@ -86,6 +86,48 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     assert wire =~ ~s("id":93,"result":{"decision":"cancel"})
   end
 
+  # task-db05e79f858f9afc. Both chat surfaces build the turn with
+  # `Attachments.user_content/2`, whose image block is claude's
+  # `{type:image, source:{type:base64,...}}`. Codex's pinned UserInput
+  # (priv/codex_app_server_schema/0.144.1, v2/TurnStartParams.json) reads an
+  # image as `{type:"image", url}` and has no `source` key, so a verbatim pass
+  # hands the app-server an item it cannot read.
+  test "an image turn reaches turn/start as a codex image item, a data URL of the same bytes" do
+    {binary, args, log} = fake_app_server()
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: binary,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               cwd: "/tmp",
+               timeout_ms: :infinity
+             })
+
+    bytes = <<137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3>>
+
+    content =
+      Barkpark.StudioChat.Attachments.user_content("what is this?", [
+        %{media_type: "image/png", bytes: bytes}
+      ])
+
+    assert :ok = Codex.send_turn(runtime, content)
+    assert :ok = Codex.close(runtime)
+
+    [turn_start] =
+      log
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["method"] == "turn/start"))
+
+    assert turn_start["params"]["input"] == [
+             %{"type" => "text", "text" => "what is this?"},
+             %{"type" => "image", "url" => "data:image/png;base64," <> Base.encode64(bytes)}
+           ]
+  end
+
   test "resume uses the opaque provider thread id" do
     {binary, args, log} = fake_app_server()
 

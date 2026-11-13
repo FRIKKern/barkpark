@@ -284,9 +284,20 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       # per anonymous IP, 6000 per token, rate_limit.ex), refused with the
       # standard JSON 429 by `limited/4`'s catch-all, so a burst of views never
       # debits the caller's write budget.
+      #
+      # FOURTH DELIBERATE EXCEPTION (task-fd330c87f48b0b87): `principal:
+      # :chat_host` on `:registered_chat_host`. Not a class: the request keeps
+      # its read/write class and is refused by the same JSON 429. It only lets
+      # RateLimit read `Authorization: Host` on the one mount that accepts it,
+      # so an enrolled host keys its own bucket instead of its IP's.
       assert Enum.all?(
                others,
-               &(&1 in [", class: :presence_focus", ", class: :read", ", class: :view"])
+               &(&1 in [
+                   ", class: :presence_focus",
+                   ", class: :read",
+                   ", class: :view",
+                   ", principal: :chat_host"
+                 ])
              ),
              "a RateLimit mount now passes options: #{inspect(others)} — a new class must be " <>
                "reasoned about here deliberately, not silently"

@@ -635,7 +635,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
             scope ->
               socket.assigns.task_reader
-              |> ChatTaskSeam.ready([limit: 8] ++ scope)
+              |> ChatTaskSeam.ready(
+                [limit: 8] ++ scope ++ ChatTaskSeam.bound_scope(socket.assigns[:api_token])
+              )
               |> Enum.map(&hand_ready_row/1)
           end
 
@@ -6609,6 +6611,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         scope ->
           socket.assigns.task_reader
           |> ChatTaskSeam.held_claims(worker, scope)
+          |> ChatTaskSeam.only_bound(socket.assigns[:api_token])
           |> Map.new(fn d ->
             {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
           end)
