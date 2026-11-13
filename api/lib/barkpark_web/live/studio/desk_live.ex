@@ -474,6 +474,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
         sorts={menu(@desk, view).sorts}
+        default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
       />
       <% end %>
@@ -493,16 +494,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> root_title()
       |> Tree.normalize()
 
-    # The list menus' sorts per type (`ListMenu`), read with the tree: once.
+    # The list menus' sorts per type (`ListMenu`) and the types each type's
+    # panes show through a reference (`LiveRefresh`), read with the tree: once.
     %{
       dataset: dataset,
       root: root,
       nodes: Tree.index(root),
-      menus: ListMenu.menus(dataset, scope)
+      menus: ListMenu.menus(dataset, scope),
+      targets: LiveRefresh.targets(dataset, scope)
     }
   end
 
-  defp menu(desk, view), do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: []}
+  defp menu(desk, view),
+    do: desk.menus[view.pane[:type]] || %{orderings: [], sorts: [], default: "updated"}
 
   # The root's fallback title, when the desk document names none, is
   # Barkpark's word. Only the desk translates it: the old Studio makes its

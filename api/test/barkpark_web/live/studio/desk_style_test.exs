@@ -163,6 +163,13 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
              ~s(.dk .dk-list-menu [role="menuitemradio"][aria-checked="true"]::after { content: "✓";)
   end
 
+  # A choice already in use ("Default sort" while it is) is faint and lights
+  # nothing on hover, as the TanStack Studio's list menu.
+  test "a List options choice already in use is faint and has no hover" do
+    assert @css =~
+             ~s|.dk .dk-list-menu [role="menuitemradio"][aria-disabled="true"] { background: none; cursor: default; color: color-mix(in srgb, var(--fg) 14%, var(--bg-card)); }|
+  end
+
   # focus:165: Inspect fits the window and scrolls inside, in one place; Raw
   # JSON in a mono that starts with ui-monospace, a long value on one line.
   test "Inspect has one scroller, its body; Raw JSON is mono, unwrapped" do
@@ -181,6 +188,55 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
   test "a row's chevron shows at rest, at half opacity, as TanStack's" do
     assert @css =~
              ".dk .pane-item-chevron, .dk .pane-item:hover .pane-item-chevron, .dk .pane-item.selected .pane-item-chevron { opacity: 0.5; color: inherit;"
+  end
+
+  # LOOKS A3: TanStack's pane header (styles.css `.pane-header`, `.icon-btn`):
+  # 49 px for a list or type pane, no bottom line, a 13/19 w600 title in
+  # --fg-header, 25 px icon buttons; the list's "×" is out of sight on a wide
+  # desk (TanStack has none) until Tab reaches it, and stays as the narrow
+  # desk's back arrow.
+  test "a list pane's header is TanStack's: 49 px, no line, w600 title, 25 px buttons" do
+    head = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header")
+    assert head =~ "height: 49px"
+    assert head =~ "padding: 0 12px 0 20px"
+    assert head =~ "border-bottom: 0"
+
+    title = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header .pane-header-title")
+
+    assert title =~
+             "font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg-header)"
+
+    btn = rule(@css, ".dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn")
+    assert btn =~ "width: 25px; height: 25px"
+    assert btn =~ "color: var(--dk-icon-muted)"
+
+    # Out of sight but in the tab order: Tab reaches it and shows it, Enter closes.
+    close =
+      rule(
+        @css,
+        ".dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible)"
+      )
+
+    assert close =~ "clip-path: inset(50%)"
+    refute close =~ "display: none"
+  end
+
+  test "the list search is borderless, with the magnifier inside at the left" do
+    assert rule(@css, ".dk .dk-list-search") =~ "margin: -1px 12px 7px"
+
+    assert rule(@css, ".dk .dk-list-search .search-icon") =~
+             "position: absolute; left: 2px; top: 2px"
+
+    input = rule(@css, ".dk .dk-list-search input")
+    assert input =~ "border: 0"
+    assert input =~ "background: none"
+    assert input =~ "padding: 3px 8px 3px 29px"
+    assert rule(@css, ".dk .dk-list-search input::placeholder") =~ "var(--dk-placeholder)"
+  end
+
+  test "a plain divider is TanStack's hr: inset 12 px, one --dk-border line" do
+    assert rule(@css, ".dk .pane-divider") =~
+             "margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border)"
   end
 
   # The desk's own look is TanStack's measured values, declared once as

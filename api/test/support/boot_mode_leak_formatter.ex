@@ -30,10 +30,23 @@ defmodule Barkpark.BootModeLeakFormatter do
 
   ## What it does
 
-  On the FIRST module that finishes with `:boot_mode` set, it prints the module
-  name and arms a non-zero exit. It reports once: the key is still set for every
-  module after it, and a detector that names 1799 innocent modules is a
-  detector nobody reads.
+  At each `:module_finished` it reads the key. The first module that finishes
+  with the key set becomes the SUSPECT; a later module that finishes with the
+  key clean clears it. At `:suite_finished`, if the key is still set, it prints
+  the suspect and arms a non-zero exit. It reports once: the key is still set
+  for every module after the suspect, and a detector that names 1799 innocent
+  modules is a detector nobody reads.
+
+  Why it waits for the end (task-e6a070e903a72c37). A formatter gets its
+  events by `cast`, so it reads the key when it gets to the event, not when the
+  module finished. By then the NEXT module may be running, and
+  `Barkpark.ApplicationBootModeTest` sets the key on purpose inside
+  `BootModeSandbox.sandboxed/1` (`:nope`, `:seed`) and puts it back. Read at
+  that moment, a sandbox's own value looked like a leak: PR #25908's run
+  43390762489 blamed `Barkpark.Bench.PaperReadLatencyBenchTest`, which never
+  touches the key, for `:nope`, and exited 1 over 12018 passing tests. A real
+  leak is never put back, so it is still set when the suite ends; a sandbox's
+  value is gone by then.
 
   It WRITES NOTHING. Restoring the key here would repair the leak and make the
   run green again, which is a fix dressed as a probe; and it would also make
@@ -42,8 +55,8 @@ defmodule Barkpark.BootModeLeakFormatter do
 
   ## Honest limits
 
-    * It attributes the leak to the module that finished when the dirty key was
-      FIRST observed. Under `async: true` several modules are in flight, so the
+    * It attributes the leak to the first module of the run of modules that
+      all finished with the key set. Under `async: true` several modules are in flight, so the
       name is the best available witness, not a proof of authorship. Every
       known writer is in an `async: false` module, where the attribution is
       exact.
@@ -54,23 +67,57 @@ defmodule Barkpark.BootModeLeakFormatter do
 
   use GenServer
 
+  # `:on_leak` is for the formatter's own test, which drives this process with
+  # the real key and must not arm the run's exit. ExUnit passes its config,
+  # which has no such key, so a run always prints and fails.
   @impl GenServer
-  def init(_opts), do: {:ok, %{reported: nil}}
+  def init(opts) do
+    on_leak = if is_list(opts), do: Keyword.get(opts, :on_leak)
+    {:ok, %{suspect: nil, on_leak: on_leak || (&report_and_fail/2)}}
+  end
 
   @impl GenServer
-  def handle_cast({:module_finished, %{name: name}}, %{reported: nil} = state) do
-    case Barkpark.BootModeSandbox.current() do
-      :error ->
+  def handle_cast({:module_finished, %{name: name}}, state) do
+    {state, nil} = step(state, {:module_finished, name}, Barkpark.BootModeSandbox.current())
+    {:noreply, state}
+  end
+
+  def handle_cast({:suite_finished, _times}, state) do
+    case step(state, :suite_finished, Barkpark.BootModeSandbox.current()) do
+      {state, nil} ->
         {:noreply, state}
 
-      {:ok, mode} ->
-        IO.puts(:stderr, report(name, mode))
-        System.at_exit(fn _ -> exit({:shutdown, 1}) end)
-        {:noreply, %{state | reported: name}}
+      {state, {name, mode}} ->
+        state.on_leak.(name, mode)
+        {:noreply, state}
     end
   end
 
   def handle_cast(_event, state), do: {:noreply, state}
+
+  @doc """
+  One event against the key as read now. Returns the new state and, at
+  `:suite_finished` with the key still set, the `{module, value}` to report.
+  Pure, so the cases are testable without arming an exit.
+  """
+  @spec step(map(), {:module_finished, module()} | :suite_finished, {:ok, term()} | :error) ::
+          {map(), {module(), term()} | nil}
+  def step(state, {:module_finished, _name}, :error), do: {%{state | suspect: nil}, nil}
+
+  def step(%{suspect: nil} = state, {:module_finished, name}, {:ok, mode}),
+    do: {%{state | suspect: {name, mode}}, nil}
+
+  def step(state, {:module_finished, _name}, {:ok, _mode}), do: {state, nil}
+
+  def step(%{suspect: {name, _}} = state, :suite_finished, {:ok, mode}),
+    do: {state, {name, mode}}
+
+  def step(state, :suite_finished, _now), do: {state, nil}
+
+  defp report_and_fail(name, mode) do
+    IO.puts(:stderr, report(name, mode))
+    System.at_exit(fn _ -> exit({:shutdown, 1}) end)
+  end
 
   defp report(module, mode) do
     """
