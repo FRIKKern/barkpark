@@ -9,8 +9,11 @@ defmodule BarkparkWeb.Studio.Desk.FocusMode do
   navigation shows the panes again. The hidden panes stay in the page, so
   leaving is instant; `bp-desk.js` lays out the focused pane alone.
 
-  `DeskLive` holds the focused pane's index in `:desk_focus`; the edit pane
-  (`EditorHost.pane/2`) draws the button and the breadcrumb from here.
+  `DeskLive` holds the focused pane's index in `:desk_focus`. Every document
+  pane has the button, as the TanStack Studio's `DocumentPane` does: the edit
+  pane (`EditorHost.pane/2`) and a read-only one, such as a split's other side
+  (`PaneComponent`, handed `of/2`), draw the button and the breadcrumb from
+  here.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -32,19 +35,45 @@ defmodule BarkparkWeb.Studio.Desk.FocusMode do
   end
 
   @doc """
-  The button's click: the pane at `index` alone, or the panes back. Only the
-  edit pane has the button, so any other index is refused.
+  The button's click: the pane at `index` alone, or the panes back. Only a
+  document pane has the button, so a list's or the root's index is refused.
   """
   def toggle(socket, index) do
-    case Integer.parse(to_string(index)) do
-      {i, ""} when i == socket.assigns.active ->
-        focus = if socket.assigns[:desk_focus] == i, do: nil, else: i
-        Phoenix.Component.assign(socket, :desk_focus, focus)
-
-      _ ->
-        socket
+    with {i, ""} <- Integer.parse(to_string(index)),
+         true <- document?(socket.assigns, i) do
+      focus = if socket.assigns[:desk_focus] == i, do: nil, else: i
+      Phoenix.Component.assign(socket, :desk_focus, focus)
+    else
+      _ -> socket
     end
   end
+
+  defp document?(assigns, i) do
+    i == assigns[:active] or
+      Enum.any?(assigns[:desk_panes] || [], &(&1.index == i and &1.pane.kind == :doc))
+  end
+
+  @doc """
+  What a read-only pane draws: nil for a list or the root (no button);
+  `%{on: false}` for a document pane; `%{on: true, ...}` with what the
+  breadcrumb needs for the focused one. Only the focused pane gets the panes
+  and titles, so a title read elsewhere re-draws no other pane.
+  """
+  def of(assigns, %{pane: %{kind: :doc}, index: i}) do
+    if assigns[:desk_focus] == i do
+      %{
+        on: true,
+        views: assigns.desk_panes,
+        titles: assigns.titles,
+        chain: assigns.chain,
+        base: assigns.base
+      }
+    else
+      %{on: false}
+    end
+  end
+
+  def of(_assigns, _view), do: nil
 
   attr :id, :string, required: true
   attr :index, :integer, required: true

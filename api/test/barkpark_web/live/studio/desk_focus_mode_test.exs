@@ -140,6 +140,69 @@ defmodule BarkparkWeb.Studio.DeskFocusModeTest do
     refute has_element?(view, "#desk-panes[data-focus-mode]")
   end
 
+  # TanStack's DocumentPane has the button on every document pane, so a
+  # split's read-only side can be focused too.
+  test "a split's read-only side has the button, and is shown alone with its breadcrumb", c do
+    view = open(c, "#{c.base}/#{c.type};#{c.id}")
+
+    view
+    |> element(~s([data-pane-editing] > .pane-header a[aria-label="Split pane right"]))
+    |> render_click()
+
+    assert eventually(fn ->
+             has_element?(view, ~s([data-pane-index="3"][data-pane-editing] #editor-form))
+           end)
+
+    side = ~s|#desk-panes > section[data-pane-index="2"]:not([data-pane-editing])|
+    enter = side <> ~s| > .pane-header button[aria-label="Enter focus mode (hide navigation)"]|
+    exit = side <> ~s| > .pane-header button[aria-label="Exit focus mode (show navigation)"]|
+    title = side <> ~s( > .pane-header > div.pane-header-title[role="heading"][aria-level="2"])
+    assert has_element?(view, title, "Focused")
+    [button] = view |> element(side) |> render() |> ids_of("Enter focus mode (hide navigation)")
+
+    view |> element(enter) |> render_click()
+
+    assert has_element?(view, "#desk-panes[data-focus-mode]")
+    assert has_element?(view, side <> "[data-desk-focused]")
+    refute has_element?(view, "[data-pane-editing][data-desk-focused]")
+
+    assert view |> element(side) |> render() |> ids_of("Exit focus mode (show navigation)") == [
+             button
+           ]
+
+    assert has_element?(
+             view,
+             title <> ~s( > nav[aria-label="Breadcrumb"] button.dk-crumb),
+             "Focus note"
+           )
+
+    assert has_element?(view, title <> ~s( [aria-current="page"]), "Focused")
+    # The edit pane's own button is still the way into focus mode over it.
+    assert has_element?(view, @enter)
+
+    view |> element(exit) |> render_click()
+    refute has_element?(view, "#desk-panes[data-focus-mode]")
+    assert has_element?(view, title, "Focused")
+  end
+
+  test "a list pane has no button, and its index is still refused", c do
+    view = open(c, "#{c.base}/#{c.type};#{c.id}")
+
+    refute has_element?(
+             view,
+             ~s|#desk-panes > [data-pane-index="1"] button[aria-label="Enter focus mode (hide navigation)"]|
+           )
+
+    refute has_element?(
+             view,
+             ~s|#desk-panes > [data-pane-index="0"] button[aria-label="Enter focus mode (hide navigation)"]|
+           )
+
+    render_click(view, "desk-focus", %{"index" => "1"})
+    render_click(view, "desk-focus", %{"index" => "0"})
+    refute has_element?(view, "#desk-panes[data-focus-mode]")
+  end
+
   defp ids_of(html, label) do
     ~r/<button[^>]*>/
     |> Regex.scan(html)
