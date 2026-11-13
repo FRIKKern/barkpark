@@ -718,6 +718,20 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       refute is_nil(assigns.current_project)
       assert assigns.current_project.slug == acme_blog.slug
 
+      # new-document makes only a type the workspace resolves; the setup's
+      # `post` is the Default workspace's (#25897 review).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: acme_ws.id
+        )
+
       acme_before = doc_count(acme_ws.id, acme_blog.id)
 
       render_click(view, "new-document", %{"type" => "post"})

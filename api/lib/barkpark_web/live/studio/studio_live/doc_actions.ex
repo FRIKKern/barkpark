@@ -63,10 +63,22 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
   @doc """
   The built-in action names Studio withholds for `schema`. A singleton
-  withholds Unpublish, Duplicate and Delete; any other type withholds nothing.
+  withholds Unpublish, Duplicate and Delete. A type whose desk block says
+  `authorCreatable: false` withholds Duplicate: a copy is a new document, and
+  an author may not make one of that type (#25897 review). Any other type
+  withholds nothing.
   """
   def withheld_action_names(schema) do
-    if singleton_schema?(schema), do: @singleton_withheld, else: []
+    cond do
+      singleton_schema?(schema) ->
+        @singleton_withheld
+
+      is_map(schema) and not BarkparkWeb.Studio.PaneBuilder.author_creatable?(schema) ->
+        ["duplicate-doc"]
+
+      true ->
+        []
+    end
   end
 
   @doc """
