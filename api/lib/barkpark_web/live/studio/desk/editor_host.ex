@@ -184,7 +184,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
   # the old form that were never sent went with it.
   def handle_event("desk-discard-seen", params, socket) do
-    socket = if params["lost"] == true, do: Discarded.drop(socket), else: socket
+    socket = if params["lost"] == true, do: Discarded.drop(socket, params["text"]), else: socket
     {:noreply, Discarded.seen(socket)}
   end
 
@@ -511,6 +511,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <Discarded.note
           :if={!@edit_failed and !gone?(assigns) and Discarded.note?(assigns)}
           dropped={Discarded.dropped?(assigns)}
+          lost_text={Discarded.lost_text(assigns)}
+          cleared={Discarded.cleared?(assigns)}
         />
       </div>
       <%!-- Always in the page, shown when there is a link: a pick adds the

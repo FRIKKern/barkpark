@@ -88,7 +88,11 @@ title.focus();
 title.value = "Here elsewhere typ";
 handlers["desk:discarded"]({ values, was });
 assert.equal(title.value, "Here", "the focused field shows the published value");
-assert.deepEqual(pushed, [["desk-discard-seen", { lost: true }]], "unsent keys: the answer says they were lost");
+assert.deepEqual(
+  pushed,
+  [["desk-discard-seen", { lost: true, text: "Here elsewhere typ" }]],
+  "unsent keys: the answer says they were lost, with what the field held",
+);
 
 // Focused, nothing typed since the page last had it: nothing lost.
 pushed.length = 0;
@@ -118,6 +122,24 @@ odd.focus();
 Object.defineProperty(odd, "value", { configurable: true, set() { throw new Error("odd element"); }, get() { return ""; } });
 assert.throws(() => handlers["desk:discarded"]({ values }), /odd element/);
 assert.deepEqual(pushed, [["desk-discard-seen", {}]], "the answer is sent even when the value step throws");
+
+// The line offers the lost text back: its Copy writes the text to the
+// clipboard and the pane's toast (the Share menu's) says so. Not in a menu.
+const copied = [];
+Object.defineProperty(globalThis.navigator, "clipboard", {
+  configurable: true,
+  value: { writeText: (t) => (copied.push(t), Promise.resolve()) },
+});
+doc.getElementById("p1").insertAdjacentHTML(
+  "beforeend",
+  `<details><summary>What you typed before the discard</summary><blockquote>Here elsewhere typ</blockquote>` +
+    `<button type="button" id="lost-copy" data-desk-copy="Here elsewhere typ" data-desk-copied="Copied" data-desk-copy-failed="Could not copy">Copy</button></details>` +
+    `<div class="dk-toast" popover="manual" role="status"></div>`,
+);
+doc.getElementById("lost-copy").click();
+await new Promise((r) => setTimeout(r, 0));
+assert.deepEqual(copied, ["Here elsewhere typ"], "Copy puts the lost text on the clipboard");
+assert.equal(doc.querySelector("#p1 .dk-toast").textContent, "Copied", "the pane's toast says it was copied");
 
 // A hook mounted with no handleEvent (another host) does not break.
 const bare = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
