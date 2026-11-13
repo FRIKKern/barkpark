@@ -23,6 +23,7 @@ defmodule BarkparkWeb.Studio.DeskListPaneReadsTest do
     @impl true
     def handle_info({:set, kv}, socket), do: {:noreply, assign(socket, kv)}
     def handle_info({:desk_pane_title, _index, _title}, socket), do: {:noreply, socket}
+    def handle_info({:desk_doc_titles, _titles}, socket), do: {:noreply, socket}
 
     @impl true
     def render(assigns) do

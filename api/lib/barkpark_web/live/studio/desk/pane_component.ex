@@ -66,10 +66,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts hint)a
         )
       )
       |> assign_new(:sharers, fn -> [] end)
+      |> assign_new(:hint, fn -> nil end)
       |> assign_new(:orderings, fn -> [] end)
       |> assign_new(:sorts, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
@@ -224,6 +225,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp adopt(socket, data) do
     # The tab title follows the last pane; only the page can set it.
     send(self(), {:desk_pane_title, socket.assigns.id, data.title})
+    titles = doc_titles(socket.assigns.pane, data)
+    if titles != %{}, do: send(self(), {:desk_doc_titles, titles})
     data = Tree.tree_rows(data, socket.assigns.pane, socket.assigns.node)
     socket |> assign(:data, AsyncResult.ok(data)) |> share()
   end
@@ -412,7 +415,22 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   # The title before the read lands: what the URL and the tree already say.
   defp title(%{data: %AsyncResult{ok?: true, result: %{title: title}}}), do: title
+  # What the page already knows (a title its list read): never the bare id.
+  defp title(%{hint: hint}) when is_binary(hint) and hint != "", do: hint
   defp title(%{pane: pane, node: node}), do: provisional_title(pane, node)
+
+  # The documents' titles this read names, by id, for the page (`DeskLive`).
+  defp doc_titles(%{kind: :doc, id: id}, %{title: title}) when is_binary(title),
+    do: %{id => title}
+
+  defp doc_titles(%{kind: :list}, %{entries: entries}) when is_list(entries) do
+    for %{title: title, next: %{kind: :doc, id: id}} <- entries,
+        is_binary(title),
+        into: %{},
+        do: {id, title}
+  end
+
+  defp doc_titles(_pane, _data), do: %{}
 
   @doc "A pane's title from the URL and the tree alone, before anything is read."
   @spec provisional_title(Panes.pane(), struct() | nil) :: String.t()
