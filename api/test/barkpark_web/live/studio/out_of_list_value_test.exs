@@ -4,9 +4,10 @@ defmodule BarkparkWeb.Studio.OutOfListValueTest do
 
   The select and the codelist controls offer only listed values, but the
   form's `phx-change` takes any value (#25933 review: `doc[subject]=NOPE`).
-  It was stored with no finding and published. Now the draft is still
-  stored (findings are advisory on save), the error shows under the field,
-  and the Studio publish refuses it.
+  It was stored with no finding and published. Now a warning shows under
+  the field. It is a warning, not an error (owner ruling via main,
+  2026-11-13): documents already in production may hold such values, so the
+  save and the publish go through as before.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -126,22 +127,23 @@ defmodule BarkparkWeb.Studio.OutOfListValueTest do
         {"flat", "a flat codelist"},
         {"subject", "a tree codelist"}
       ] do
-    test "#{label}: the value is stored, the error shows under the field, publish is refused",
+    test "#{label}: the value is stored, a warning shows under the field, publish goes through",
          c do
       key = unquote(key)
-      before = published(c)[key]
       {:ok, view, _} = live(c.conn, c.url)
 
       send_post(view, key, "NOPE")
 
       assert stored(c, key) == "NOPE"
       assert assigns(view).save_status == "Saved"
-      assert [_ | _] = Map.get(assigns(view).validation_errors, key)
+      assert Map.get(assigns(view).validation_errors, key) in [nil, []]
+      assert [warning] = Map.get(assigns(view).validation_warnings, key)
+      assert render(view) =~ Phoenix.HTML.html_escape(warning) |> Phoenix.HTML.safe_to_string()
 
       render_click(view, "publish", %{})
 
-      assert published(c)[key] == before
-      assert render(view) =~ "Fix validation errors before publishing"
+      assert published(c)[key] == "NOPE"
+      refute render(view) =~ "Fix validation errors before publishing"
     end
   end
 
@@ -153,6 +155,7 @@ defmodule BarkparkWeb.Studio.OutOfListValueTest do
     send_post(view, "subject", "FB042")
 
     assert Map.take(assigns(view).validation_errors, ["stage", "flat", "subject"]) == %{}
+    assert Map.take(assigns(view).validation_warnings, ["stage", "flat", "subject"]) == %{}
 
     render_click(view, "publish", %{})
 
