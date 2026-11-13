@@ -33,6 +33,38 @@
 // renders BYTE-IDENTICALLY (sidebar / per-block form contexts keep full chrome).
 // Hosts drive it through the public openFileDialog() / openBrowser() methods
 // rather than poking .bp-mp-browse internals.
+//
+// ── chrome="bar" (the desk's image field, as TanStack's ImageInput) ─────────
+//
+// The desk (field_inputs.ex, id_prefix "") asks for TanStack's empty image:
+// ONE focusable box, the image icon and "Drag or paste image here", then
+// Upload and Select. A paste on the box uploads the image, as a drop does.
+// While the field is empty the host carries `data-bar-empty` so the desk's
+// sheet can drop the actions row; with an image set the bar picker is the
+// default one. Opt-in like ghost: absent → nothing here changes.
+const BP_MP_SVG = '<svg width="21" height="21" viewBox="0 0 25 25" fill="none" aria-hidden="true">';
+const BP_MP_ICONS = {
+  image: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M5.5 15.5L8.79289 12.2071C9.18342 11.8166 9.81658 11.8166 10.2071 12.2071L12.8867 14.8867C13.2386 15.2386 13.7957 15.2782 14.1938 14.9796L15.1192 14.2856C15.3601 14.1049 15.6696 14.0424 15.9618 14.1154L19.5 15M5.5 6.5H19.5V18.5H5.5V6.5ZM15.5 10.5C15.5 11.0523 15.0523 11.5 14.5 11.5C13.9477 11.5 13.5 11.0523 13.5 10.5C13.5 9.94772 13.9477 9.5 14.5 9.5C15.0523 9.5 15.5 9.94772 15.5 10.5Z"/></svg>',
+  upload: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M12.5 6V15.5M5.5 15.5H19.5V19.5H5.5V15.5Z"/><path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M7.5 11L12.5 6L17.5 11"/></svg>',
+  search: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M15.0355 15.0355L20 20M16.5 11.5C16.5 14.2614 14.2614 16.5 11.5 16.5C8.73858 16.5 6.5 14.2614 6.5 11.5C6.5 8.73858 8.73858 6.5 11.5 6.5C14.2614 6.5 16.5 8.73858 16.5 11.5Z"/></svg>'
+};
+
+// The image a paste carries: a pasted file first, then a file item (a
+// screenshot arrives as an item). Anything that is not an image is no image.
+function bpMediaPickerPastedImage(data) {
+  if (!data) return null;
+  const isImage = (f) => !!f && /^image\//.test(f.type || "");
+  const files = Array.from(data.files || []);
+  const file = files.find(isImage);
+  if (file) return file;
+  for (const item of Array.from(data.items || [])) {
+    if (item && item.kind === "file" && /^image\//.test(item.type || "")) {
+      const f = item.getAsFile && item.getAsFile();
+      if (isImage(f)) return f;
+    }
+  }
+  return null;
+}
 
 // The context-menu MODEL for a ghost picker — the ordered menu items given the
 // current state. Pure + host-free so the test hook can pin it without a DOM.
@@ -402,6 +434,10 @@ class BpMediaPicker extends HTMLElement {
 
   // Ghost chrome (pd-doctrine rule 6): drop the visible actions row; actions
   // ride the empty-card click + a right-click context menu instead.
+  _isBar() {
+    return this.getAttribute("chrome") === "bar";
+  }
+
   _isGhost() {
     return this.getAttribute("chrome") === "ghost";
   }
@@ -483,6 +519,8 @@ class BpMediaPicker extends HTMLElement {
 
   _render() {
     const ghost = this._isGhost();
+    // Read once per render: the old path in _renderPreview stays untouched.
+    this._bar = this._isBar();
 
     // Ghost chrome omits the whole actions row (no Upload / Browse / Remove
     // buttons ever) — but the file input must still exist for the file dialog,
@@ -567,8 +605,14 @@ class BpMediaPicker extends HTMLElement {
     // Delegated once (the preview's innerHTML is replaced on every render).
     this._previewEl.addEventListener("click", (e) => {
       if (this._busy) return;
-      if (e.target.closest(".bp-mp-empty")) {
+      if (e.target.closest(".bp-mp-empty, .bp-mp-bar-upload")) {
         this._fileInput.click();
+        return;
+      }
+      // Select is the library; with none wired, the file dialog (as the
+      // ghost menu's Browse falls back).
+      if (e.target.closest(".bp-mp-bar-select")) {
+        if (!this._openBrowser()) this._fileInput.click();
         return;
       }
       // Gyldendal parity E1: with `hotspot`, a click on the image IS the
@@ -631,6 +675,15 @@ class BpMediaPicker extends HTMLElement {
         this.classList.remove("bp-mp-drag-over");
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if (f) this._takeFile(f);
+      });
+      // The bar's "or paste": an image pasted while focus is in the picker
+      // uploads, as a drop does. Text pastes (the alt input) pass through.
+      this.addEventListener("paste", (e) => {
+        if (!this._isBar() || this._busy) return;
+        const f = bpMediaPickerPastedImage(e.clipboardData);
+        if (!f) return;
+        e.preventDefault();
+        this._takeFile(f);
       });
     }
 
@@ -850,7 +903,7 @@ class BpMediaPicker extends HTMLElement {
   // empty — land focus on the empty-state card (the next affordance).
   _removeAndFocusEmpty() {
     this._clearValue();
-    const card = this._previewEl && this._previewEl.querySelector(".bp-mp-empty");
+    const card = this._previewEl && this._previewEl.querySelector(".bp-mp-empty, .bp-mp-bar");
     if (card && typeof card.focus === "function") card.focus();
   }
 
@@ -879,6 +932,7 @@ class BpMediaPicker extends HTMLElement {
 
   _renderPreview() {
     if (!this._previewEl) return;
+    if (this._bar) this.removeAttribute("data-bar-empty");
     // In reference mode the value is an asset ID, never a URL: falling back to
     // parsing it painted <img src="a97bf457-…">, whose late error event then
     // replaced the resolved preview with "Image unavailable".
@@ -915,6 +969,8 @@ class BpMediaPicker extends HTMLElement {
           "</div>";
       });
       this._setClearVisible(true);
+    } else if (this._bar) {
+      this._renderBar();
     } else {
       const label = this._busy ? this._t("uploading", "Uploading…") : this._t("empty", "No image selected — drop a file, or click to upload");
       this._previewEl.innerHTML =
@@ -924,6 +980,26 @@ class BpMediaPicker extends HTMLElement {
         "</div>";
       this._setClearVisible(false);
     }
+  }
+
+  // chrome="bar", empty: TanStack's box (ImageInput.tsx). The box is
+  // focusable so a paste has somewhere to land; its buttons are the actions.
+  _renderBar() {
+    const busy = this._busy;
+    const off = busy ? " disabled" : "";
+    const hint = busy ? this._t("uploading", "Uploading…") : this._t("drag_paste", "Drag or paste image here");
+    this._previewEl.innerHTML =
+      '<div class="bp-mp-bar" role="group" tabindex="0" aria-label="' +
+      this._attr(this._t("bar_label", "Drop, paste or upload an image")) + '">' +
+      '<span class="bp-mp-bar-hint">' + BP_MP_ICONS.image + "<span>" + this._attr(hint) + "</span></span>" +
+      '<span class="bp-mp-bar-actions">' +
+      '<button type="button" class="bp-mp-bar-upload"' + off + ">" + BP_MP_ICONS.upload +
+      "<span>" + this._attr(this._t("upload_button", "Upload")) + "</span></button>" +
+      '<button type="button" class="bp-mp-bar-select"' + off + ">" + BP_MP_ICONS.search +
+      "<span>" + this._attr(this._t("select", "Select")) + "</span></button>" +
+      "</span></div>";
+    this.setAttribute("data-bar-empty", "");
+    this._setClearVisible(false);
   }
 
   // Position the focal marker at the stored focal point (percent of the box),

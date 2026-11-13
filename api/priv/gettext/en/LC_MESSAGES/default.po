@@ -364,6 +364,22 @@ msgstr ""
 msgid "Edited %{ago}"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:104
+#, elixir-autogen, elixir-format
+msgid "Drag or paste image here"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:104
+#, elixir-autogen, elixir-format
+msgctxt "image action"
+msgid "Select"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:104
+#, elixir-autogen, elixir-format
+msgid "Drop, paste or upload an image"
+msgstr ""
+
 #: lib/barkpark_web/components/studio_components/editor.ex:898
 #, elixir-autogen, elixir-format
 msgid "All fields"
