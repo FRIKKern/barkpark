@@ -86,7 +86,6 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
       role="menuitemradio"
       aria-checked={to_string(@checked)}
       class="menu-item"
-      style="display: block; width: 100%; text-align: start"
       phx-click="sort"
       phx-value-sort={@sort}
       phx-target={@myself}
