@@ -98,12 +98,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     if socket.assigns[:shares_admin?] do
       {:ok, socket}
     else
-      # The dataset as a path segment: one that holds "%" or "/" must name
-      # the same dataset on the next request.
-      segment = URI.encode(dataset, &URI.char_unreserved?/1)
-
       {:ok,
-       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], segment))}
+       push_navigate(socket, to: Paths.studio_path(socket.assigns.scope_prefix, [], dataset))}
     end
   end
 
