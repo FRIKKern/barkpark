@@ -136,6 +136,7 @@
                   "forbidden_field",
                   "halted",
                   "hollow_paper",
+                  "host_cannot_receive_attachments",
                   "host_execution_not_permitted",
                   "idempotency_key_in_use",
                   "import_body_read_failed",
