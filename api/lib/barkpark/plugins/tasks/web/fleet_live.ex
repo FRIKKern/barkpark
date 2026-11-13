@@ -57,6 +57,7 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Tasks.Fleet
+  alias BarkparkWeb.OpsOperatorGate
   alias BarkparkWeb.Studio.TokensGen
 
   @refresh_ms 5_000
@@ -72,8 +73,18 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   # Map is status-string => hex; the pill label is the status itself.
   @fleet_colors TokensGen.fleet_status()
 
+  # Owner ruling #4 (`BarkparkWeb.OpsOperatorGate`): the flat mount spans every
+  # workspace and is the instance operator's; a scoped mount reads the mounted
+  # workspace's fleet only.
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    case OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_fleet(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_fleet(socket) do
     connected = connected?(socket)
 
     if connected, do: Process.send_after(self(), :refresh, @refresh_ms)
@@ -82,7 +93,7 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
     # the instant the socket connects and mount re-runs, so reading the roster
     # there is pure waste (2× per open). Paint an empty skeleton on the dead
     # render; load the real roster ONCE, on connect (board_live/ops_live idiom).
-    roster = if connected, do: Fleet.roster(@dataset, global: true), else: []
+    roster = if connected, do: roster(socket), else: []
 
     {:ok,
      socket
@@ -95,7 +106,16 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
-    {:noreply, assign(socket, :roster, Fleet.roster(@dataset, global: true))}
+    {:noreply, assign(socket, :roster, roster(socket))}
+  end
+
+  # `global: true` is the operator's flat view; a scoped mount names its
+  # workspace instead.
+  defp roster(socket) do
+    case OpsOperatorGate.scoped_workspace_id(socket) do
+      nil -> Fleet.roster(@dataset, global: true)
+      ws_id -> Fleet.roster(@dataset, workspace_id: ws_id)
+    end
   end
 
   # A stray message (there is no subscription, but be defensive) never crashes
