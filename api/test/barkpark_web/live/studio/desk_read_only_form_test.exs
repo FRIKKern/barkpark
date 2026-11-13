@@ -161,6 +161,13 @@ defmodule BarkparkWeb.Studio.DeskReadOnlyFormTest do
       assert rule(".dk .dk-ro .dk-big-title") =~
                "font-size: 33px; line-height: 41px; font-weight: 700"
 
+      # It steps down with the pane, as the edit pane's: the query is on the
+      # pane's body, not the 600 px column (which would always match).
+      assert rule(".dk .dk-doc:not(.dk-edit) > .pane-body") =~ "container: dk-ro / inline-size"
+
+      assert @css =~
+               "@container dk-ro (max-width: 600px) { .dk .dk-ro .dk-big-title { font-size: 27px"
+
       assert rule(".dk .dk-fields dt") =~ "font-size: 13px; line-height: 19px; font-weight: 500"
       assert rule(".dk .dk-fields") =~ "gap: 59px"
 

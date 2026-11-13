@@ -106,7 +106,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-lost-copy { border: 1px solid var(--border-subtle); background: none; color: var(--fg); font: inherit; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
       .dk .dk-lost-copy:hover { background: var(--bg-accent); }
       .dk .dk-lost-copy:focus-visible, .dk .dk-lost summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-      .dk .dk-ro { container: dk-ro / inline-size; padding: 28px max(20px, calc(50% - 300px)) 161px; }
+      .dk .dk-doc:not(.dk-edit) > .pane-body { container: dk-ro / inline-size; }
+      .dk .dk-ro { padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-ro .dk-kind { font-size: 13px; line-height: 19px; color: var(--dk-muted); }
       .dk .dk-ro .dk-big-title { margin: 8px 0 52px; font-size: 33px; line-height: 41px; font-weight: 700; color: var(--dk-fg); overflow-wrap: anywhere; }
       @container dk-ro (max-width: 600px) { .dk .dk-ro .dk-big-title { font-size: 27px; line-height: 35px; } }
