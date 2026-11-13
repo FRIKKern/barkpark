@@ -212,6 +212,29 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     |> Repo.all()
   end
 
+  @doc """
+  The rows of `list/1` a caller held to `dataset` may see. `nil` (no dataset
+  binding) keeps them all.
+
+  Keys are scoped by workspace; a key also carries the dataset its tickets
+  land in. A dataset-bound API token is held to one dataset, so it sees and
+  manages only that dataset's keys (see `manageable?/3`).
+  """
+  @spec confine([ApiToken.t()], binary() | nil) :: [ApiToken.t()]
+  def confine(keys, nil), do: keys
+  def confine(keys, dataset), do: Enum.filter(keys, &(&1.dataset == dataset))
+
+  @doc """
+  True when key `id` of workspace `ws_id` is one a caller held to `dataset`
+  may rotate, pause, unpause or revoke. `nil` (no binding) is always true; the
+  workspace fence of each action still decides.
+  """
+  @spec manageable?(term(), binary() | nil, binary() | nil) :: boolean()
+  def manageable?(_id, _ws_id, nil), do: true
+
+  def manageable?(id, ws_id, dataset),
+    do: match?(%ApiToken{dataset: ^dataset}, get_ticket_key(id, ws_id))
+
   # ── internals ──────────────────────────────────────────────────────────
 
   defp generate_raw,

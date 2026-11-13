@@ -92,6 +92,27 @@ defmodule BarkparkWeb.Studio.DeskRowStatusTest do
     assert both =~ ~r/dk-ring.*dk-dot/s
   end
 
+  # Rig run n, big-list:101 (J41): the spec reads a row's text to see which
+  # document is first after a new sort. The TanStack row's text is its title;
+  # the marks carry no words. The desk's held hidden "Draft"/"Published" words.
+  test "a row's text is its title; the marks are named, not worded", %{conn: conn, base: base} do
+    {:ok, view, _html} = live(conn, "#{base}/#{@type_name}")
+    render_async(view, 5_000)
+
+    for title <- ["Only draft", "Only published", "Both, edited"] do
+      link = view |> row(title) |> LazyHTML.from_fragment()
+      assert link |> LazyHTML.text() |> String.trim() == title
+    end
+
+    both = view |> row("Both, edited") |> LazyHTML.from_fragment()
+
+    assert both |> LazyHTML.query(~s(.dk-ring[role="img"])) |> LazyHTML.attribute("aria-label") ==
+             ["Draft"]
+
+    assert both |> LazyHTML.query(~s(.dk-dot[role="img"])) |> LazyHTML.attribute("aria-label") ==
+             ["Published"]
+  end
+
   # Audit: a list search's results are the same rows, so they carry the same
   # tile and marks. They came back with neither.
   test "a list search's results keep the tile and the status marks", %{conn: conn, base: base} do

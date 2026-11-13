@@ -82,6 +82,25 @@ defmodule BarkparkWeb.Studio.DeskNavbarTest do
     end
   end
 
+  # At 640 the bar wrapped to two rows (89 px). Under 900 px TanStack's bar
+  # moves its tools into its menu: the desk's More lists the three text tabs
+  # first, and the stylesheet hides the bar's own there.
+  test "More lists Structure, Media and API first, for a narrow bar", %{conn: conn, base: base} do
+    {:ok, _view, html} = live(conn, base)
+
+    bar = tabs(html, ~s(#studio-bar .dk-nav > a.dk-nav-tab))
+    narrow = tabs(html, ~s(#dk-nav-more[popover] > a.dk-nav-item.dk-nav-narrow))
+    assert narrow == bar
+    assert Enum.map(narrow, &elem(&1, 1)) == ["Structure", "Media", "API"]
+
+    first = tabs(html, "#dk-nav-more[popover] > :is(a, span)")
+    assert Enum.take(first, 3) == narrow, "the three come first in More"
+
+    # The copies are no tabs of their own: the page's tab set stays one of each.
+    copies = html |> LazyHTML.from_document() |> LazyHTML.query(~s(.dk-nav-narrow[data-test-id]))
+    assert Enum.count(copies) == 0
+  end
+
   test "the old Studio's bar keeps its icon tabs and has no More", %{conn: conn, studio: studio} do
     {:ok, view, html} = live(conn, studio <> "/media")
 
@@ -113,6 +132,23 @@ defmodule BarkparkWeb.Studio.DeskNavbarTest do
       assert tab =~ "padding: 3px 8px; border-radius: 3px; color: var(--dk-nav-fg)"
       assert @css =~ "--dk-nav-border: #e3e4e8;"
       assert @css =~ "--dk-nav-bg: #13141b;"
+    end
+
+    test "under 900 px the text tabs give way to their copies in More, also on touch" do
+      hide = rule(".studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow")
+      assert hide =~ "display: none;"
+      assert hide =~ "display: flex;"
+
+      hidden = ".studio-shell:has(.dk) .dk-nav .dk-nav-tab { display: none; }"
+      assert @css =~ ~r/@media \(max-width: 899px\) \{\s*#{Regex.escape(hidden)}/
+
+      # After the touch block, whose tabs are inline-flex, or a phone keeps them.
+      touch =
+        ".studio-shell:has(.dk) .dk-nav .dk-nav-tab { min-height: 44px; display: inline-flex;"
+
+      {coarse, _} = :binary.match(@css, touch)
+      {at, _} = :binary.match(@css, hidden)
+      assert at > coarse
     end
   end
 end
