@@ -218,9 +218,15 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp icon("editor-set-mode"), do: "sparkles"
   defp icon(_name), do: nil
 
-  # Each value as its phx-value attribute; the keys are this module's own
-  # (`name`, `mode`), never the document's.
-  defp values(item), do: for({k, v} <- item[:values] || %{}, do: {:"phx-value-#{k}", v})
+  # Each value as its phx-value attribute. The keys are this module's own
+  # (`name`, `mode`), never the document's, and each has its attribute
+  # written out: no atom is made from a key, and another key draws nothing.
+  defp values(item),
+    do: for({k, v} <- item[:values] || %{}, attr = value_attr(k), do: {attr, v})
+
+  defp value_attr("name"), do: :"phx-value-name"
+  defp value_attr("mode"), do: :"phx-value-mode"
+  defp value_attr(_key), do: nil
 
   defp place(:header),
     do: %{
