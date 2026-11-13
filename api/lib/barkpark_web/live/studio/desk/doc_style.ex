@@ -34,6 +34,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       group tabs.
     * The pane is TanStack's page colour (`--dk-bg`, light and dark), and
       inputs sit on it.
+    * A picked reference is TanStack's card (`.ref-box`, :677, :739-745):
+      a 1 px inset ring, 5 px in, the type's tile, the title and the type,
+      and one "…" menu with Clear and Replace. bp-reference-picker draws it
+      in the edit pane; the menu wears the desk's `.dk-menu`.
   """
 
   use Phoenix.Component
@@ -95,6 +99,20 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit button[phx-click="slug-generate"]:hover:not(:disabled) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }
       .dk .dk-edit :where(button, a, [role=tab], [tabindex]):focus-visible { outline: 1px solid var(--dk-focus-ring); outline-offset: -1px; }
       .dk .dk-edit .field-errors, .dk .dk-edit .field-error { font-size: 13px; color: var(--dk-danger-text); }
+      .dk .dk-edit .ref-box { box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--dk-line); }
+      .dk .dk-edit .ref-box:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-edit .ref-box > .preview { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 49px; padding: 5px 8px; border-radius: 3px; font-size: 13px; line-height: 19px; color: var(--dk-fg); }
+      .dk .dk-edit .ref-box > .preview > .text { flex: 1; min-width: 0; margin-right: 20px; display: flex; flex-direction: column; }
+      .dk .dk-edit .ref-box .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit .ref-box .s { margin-top: -2px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit .ref-box .dk-media svg { width: 21px; height: 21px; }
+      .dk .dk-edit .ref-box > .menu-wrap { position: relative; flex: none; }
+      .dk .dk-edit .ref-box .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); }
+      .dk .dk-edit .ref-box .icon-btn svg { width: 21px; height: 21px; }
+      .dk .dk-edit .ref-box .icon-btn:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-edit .ref-box .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
+      .dk .dk-edit .ref-box .ref-menu { position: absolute; z-index: 10; right: 0; top: 30px; display: flex; flex-direction: column; gap: 4px; }
+      .dk .dk-edit .ref-box .ref-menu[hidden] { display: none; }
     </style>
     """
   end

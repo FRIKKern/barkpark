@@ -854,6 +854,10 @@ defmodule BarkparkWeb.StudioLocale do
       "change" => gettext("Change"),
       "cancel" => gettext("Cancel"),
       "remove" => gettext("Remove"),
+      # The desk's reference card: its "…" menu (TanStack's RefMenu).
+      "reference_actions" => gettext("Reference actions"),
+      "clear" => gettext("Clear"),
+      "replace" => gettext("Replace"),
       "no_matches" => gettext("No matches"),
       "draft" => gettext("draft"),
       # The picker fills %{types} client-side (the joined ref-type set), so the
