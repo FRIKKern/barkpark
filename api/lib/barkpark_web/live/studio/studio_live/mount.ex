@@ -373,6 +373,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # `doc_conflict`, which renders the "Updated by another user — Reload"
       # banner (studio_editor_shell). "reload-remote-doc" reloads from the DB.
       editor_dirty: false,
+      # The fields typed in since the last save that landed (`settle_dirty/2`).
+      editor_unsaved_keys: MapSet.new(),
       doc_conflict: false,
       # The dotted form keys (`doc[altText].nob`) whose input the author has
       # actually touched this buffer, accumulated from `phx-change`'s
