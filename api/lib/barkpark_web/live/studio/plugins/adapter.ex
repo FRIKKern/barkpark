@@ -283,7 +283,11 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   """
   def field_struct(%{} = raw), do: raw |> stringify() |> to_field_struct()
 
-  defp to_field_struct(%{"type" => type, "name" => name} = raw) do
+  defp to_field_struct(%{"type" => _, "name" => _} = raw) do
+    raw |> Barkpark.Content.Forms.plain_of() |> build_field_struct()
+  end
+
+  defp build_field_struct(%{"type" => type, "name" => name} = raw) do
     base = %Field{
       name: name,
       type: type,

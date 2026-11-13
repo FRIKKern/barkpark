@@ -678,11 +678,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # in an array has a `_key`. A first row of an empty list there gets one too.
   def add_row(current, field, member, keyed_parent? \\ false)
 
-  def add_row(current, %{"of" => members} = field, member, _keyed_parent?)
+  def add_row(current, %{"of" => members} = field, member, keyed_parent?)
       when is_list(members) do
-    case BarkparkWeb.Studio.StudioLive.Path.empty_for_of(field, member) do
-      %{} = row -> ArrayField.add_row(current, row)
-      _ -> current
+    case Barkpark.Content.Forms.plain_of(field) do
+      # One member that is not an object: plain items (task-7655868c8b346c43).
+      %{"of" => %{}} = plain ->
+        add_row(current, plain, member, keyed_parent?)
+
+      _ ->
+        case BarkparkWeb.Studio.StudioLive.Path.empty_for_of(field, member) do
+          %{} = row -> ArrayField.add_row(current, row)
+          _ -> current
+        end
     end
   end
 

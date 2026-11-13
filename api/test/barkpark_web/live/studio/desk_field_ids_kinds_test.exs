@@ -83,7 +83,11 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
     root = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
 
     {:ok,
-     conn: conn, desk: "#{root}/_desk/#{type};#{id}", studio: "#{root}/#{type}/#{id}", id: id}
+     conn: conn,
+     desk: "#{root}/_desk/#{type};#{id}",
+     studio: "#{root}/#{type}/#{id}",
+     id: id,
+     type: type}
   end
 
   @form "[data-pane-editing] #editor-form"
@@ -144,6 +148,29 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
     old = studio |> element("#editor-form") |> render()
     assert old =~ ~s(id="f-highlights-0")
     refute old =~ ~s(id="highlights[0]")
+  end
+
+  # task-7655868c8b346c43: `of` as a list of one member, Sanity's shape. It was
+  # drawn as typed rows, and Add made a read-only `{_key, _type: "string"}`
+  # row with no input, saved where a string belongs.
+  test "a string array declared `of: [{type: string}]` gets rows to type in, and saves strings",
+       c do
+    view = desk(c)
+    assert has_element?(view, ~s(#{@form} ol[id="tags"] input[id="tags[0]"][value="a"]))
+
+    view
+    |> element(~s(#{@form} button.bp-array-btn-add[phx-value-field="tags"]))
+    |> render_click()
+
+    assert has_element?(view, ~s(#{@form} ol[id="tags"] input[type="text"][name="doc[tags][1]"]))
+    refute has_element?(view, ~s(#{@form} ol[id="tags"] [data-structured-value]))
+
+    view
+    |> form("#editor-form")
+    |> render_change(%{"doc" => %{"tags" => %{"0" => "a", "1" => "alpha"}}})
+
+    {doc, true, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+    assert doc.content["tags"] == ["a", "alpha"]
   end
 
   test "image, block canvas, reference and localized text carry the path", c do

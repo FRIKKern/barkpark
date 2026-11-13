@@ -739,10 +739,12 @@ defmodule Barkpark.Content.Forms do
   # each row is coerced by the member its `_type` names, and keeps `_type`,
   # `_key` and any other key its member does not declare. A row whose `_type`
   # names no member passes through unchanged (task-e24e33a2a1a4fe10).
-  defp coerce_field_value(%{"type" => "arrayOf", "of" => members}, val) when is_list(members) do
-    case indexed_map_to_list(val) do
-      list when is_list(list) -> Enum.map(list, &coerce_member_row(members, &1))
-      other -> other
+  defp coerce_field_value(%{"type" => "arrayOf", "of" => members} = field, val)
+       when is_list(members) do
+    case {plain_of(field), indexed_map_to_list(val)} do
+      {%{"of" => %{}} = plain, _} -> coerce_field_value(plain, val)
+      {_, list} when is_list(list) -> Enum.map(list, &coerce_member_row(members, &1))
+      {_, other} -> other
     end
   end
 
@@ -826,6 +828,28 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp coerce_member_row(_members, row), do: row
+
+  @doc """
+  An `arrayOf` whose `of` is a list of ONE member that is not an object (a
+  string, a reference, an image) is Sanity's array of that one item: the same
+  array as `of` given as that one map. Returns the field with `of` as the map,
+  so it is drawn, added to and saved as plain items; any other field comes
+  back unchanged. An object member (a `composite` with fields) stays a typed
+  member: its rows carry `_type`. Before, the one-member list was a typed
+  array, and Add made a read-only `{_key, _type: "string"}` row where a
+  string belongs (task-7655868c8b346c43).
+  """
+  @spec plain_of(map()) :: map()
+  def plain_of(%{"type" => "arrayOf", "of" => [%{} = only]} = field) do
+    if object_member?(only), do: field, else: Map.put(field, "of", only)
+  end
+
+  def plain_of(field), do: field
+
+  # A member is typed by its `type`, else by its `name` (the editor's rule).
+  defp object_member?(member) do
+    (member["type"] || member["name"]) == "composite" and match?([_ | _], member["fields"])
+  end
 
   @doc """
   The member of a several-type `arrayOf` (`of` is a list) that a row's `_type`
