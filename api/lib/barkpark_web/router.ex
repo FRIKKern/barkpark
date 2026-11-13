@@ -2977,6 +2977,7 @@ defmodule BarkparkWeb.Router do
     post("/rotate", ChatHostController, :rotate)
     get("/commands", ChatHostController, :commands)
     post("/events", ChatHostController, :event)
+    get("/leases/:lease_id/attachments/:attachment_id", ChatHostAttachmentController, :show)
   end
 
   # Authoritative external state report (herd-s6, charter D78h/D79h): the

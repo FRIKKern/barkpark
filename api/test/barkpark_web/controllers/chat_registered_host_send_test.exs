@@ -148,6 +148,20 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
       assert split(:host_offline) == {503, "runtime_unavailable"}
     end
 
+    # The host lacks the attachments capability: retrying the same turn to the
+    # same host can never succeed, so it is a permanent 422 with its own code,
+    # never the retryable 503 an unknown term falls to.
+    test "a host that cannot receive attachments is a permanent 422 with its own code" do
+      assert split({:host_cannot_receive_attachments, "claude"}) ==
+               {422, "host_cannot_receive_attachments"}
+    end
+
+    test "the existing classes keep their status and code" do
+      assert split({:managed_runtime_capacity, :full}) == {503, "runtime_capacity"}
+      assert split(:port_closed) == {503, "runtime_unavailable"}
+      assert split({:provider_not_ready, "claude"}) == {422, "chat_unsupported"}
+    end
+
     test "a crash term is logged by reason and arity, never by its arguments" do
       secret = "task-token-hash-#{System.unique_integer([:positive])}"
       stack = [{Some.Mod, :initialize, [%{task_token: secret}], [line: 1]}]

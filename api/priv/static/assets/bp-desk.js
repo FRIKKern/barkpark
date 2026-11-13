@@ -114,15 +114,23 @@
   // One pane on screen: every other pane is hidden, and the pane's own close
   // link (the URL without it) moves to the front and reads as Back.
   function narrowRules(last) {
-    var all = "#desk-panes > [data-pane-index]";
     var pane = '#desk-panes > [data-pane-index="' + last + '"]';
     return (
-      all + " { display: none; }\n" +
-      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n" +
+      aloneRules(last) +
       pane + " > .pane-header { justify-content: flex-start; gap: 8px; }\n" +
       pane + " .dk-close { order: -1; padding-left: 0; }\n" +
       pane + ' .dk-close::before { content: "\\2190"; }\n' +
       pane + " .dk-close > span { display: none; }\n"
+    );
+  }
+
+  // One pane shown, the whole width: the narrow layout's, and focus mode's
+  // (J26: the server marks the desk and its focused pane).
+  function aloneRules(index) {
+    var pane = '#desk-panes > [data-pane-index="' + index + '"]';
+    return (
+      "#desk-panes > [data-pane-index] { display: none; }\n" +
+      pane + " { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }\n"
     );
   }
 
@@ -249,17 +257,25 @@
     });
     // No width yet (the desk is not laid out): nothing collapses.
     var width = root.clientWidth;
-    // One pane: under the narrow width, or when even with every other pane a
-    // strip the last one would be cut (a document needs 600 px: with two
-    // strips that is 702).
-    var floor = (MIN[kinds[kinds.length - 1]] || MIN.list) + (kinds.length - 1) * STRIP;
-    var narrow = width > 0 && shown.length > 0 && (width < NARROW || floor > width);
-    var flags = width > 0 && !narrow ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
+    // One pane under the narrow width, as the TanStack Studio. Above it a
+    // document beside the strips takes what is left, under its 600 px too
+    // (640 px: two strips and a 538 px document); the sheet lets it shrink.
+    var narrow = width > 0 && shown.length > 0 && width < NARROW;
+    // Focus mode: the focused pane alone, nothing a strip, no dividers.
+    var alone = root.hasAttribute("data-focus-mode")
+      ? shown.filter(function (el) {
+          return el.hasAttribute("data-desk-focused");
+        })[0]
+      : null;
+    var flags = width > 0 && !narrow && !alone ? collapsed(kinds, width, at) : kinds.map(function () { return false; });
     var css = TIP_RULES;
 
     if (narrow) {
       if (!root.hasAttribute("data-narrow")) root.setAttribute("data-narrow", "");
-      css += narrowRules(shown[shown.length - 1].getAttribute("data-pane-index"));
+      css += narrowRules((alone || shown[shown.length - 1]).getAttribute("data-pane-index"));
+    } else if (alone) {
+      root.removeAttribute("data-narrow");
+      css += aloneRules(alone.getAttribute("data-pane-index"));
     } else {
       root.removeAttribute("data-narrow");
       css += EDGE_RULES + PHONE_RULES;
@@ -289,7 +305,7 @@
 
     placeResizers(
       root,
-      narrow
+      narrow || alone
         ? []
         : shown.filter(function (el, i) {
             return !flags[i] && i < shown.length - 1;
@@ -1067,19 +1083,26 @@
       // the event comes after the patch that put the published version in the
       // form. The patch leaves the focused field as typed, so it is set from
       // the published values; then the page hears that this browser has the
-      // new form, and takes its saves again.
+      // new form, and takes its saves again. `was` is the old form as the page
+      // last had it: a focused field that no longer matches it held keys not
+      // yet sent (its debounce), which the discard took. The answer says so
+      // (`lost`), and the page's line says the typing was not saved.
       hook._onDiscarded = function (payload) {
         // The answer goes whatever the value step does: until it arrives the
         // page drops every save from this form.
+        var answer = {};
         try {
           var at = root.ownerDocument.activeElement;
           var values = (payload && payload.values) || {};
+          var was = (payload && payload.was) || {};
+          var own = Object.prototype.hasOwnProperty;
           if (at && at.form && at.form.id === "editor-form" && root.contains(at.form) && at.name &&
-              Object.prototype.hasOwnProperty.call(values, at.name) && at.type !== "checkbox" && at.type !== "radio") {
-            at.value = values[at.name];
+              at.type !== "checkbox" && at.type !== "radio") {
+            if (own.call(was, at.name) && at.value !== was[at.name]) answer = { lost: true };
+            if (own.call(values, at.name)) at.value = values[at.name];
           }
         } finally {
-          hook.pushEvent("desk-discard-seen", {});
+          hook.pushEvent("desk-discard-seen", answer);
         }
       };
       if (hook.handleEvent) hook.handleEvent("desk:discarded", hook._onDiscarded);
@@ -1143,7 +1166,7 @@
         });
         if (ours) hook._layout();
       });
-      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow", "tabindex"] });
+      hook._marks.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-pane-collapsed", "data-narrow", "tabindex", "data-focus-mode", "data-desk-focused"] });
       hook._layout();
 
       root.addEventListener("click", hook._noteFocus, true);
@@ -1320,17 +1343,53 @@
       };
       root.addEventListener("click", hook._onCopy);
 
-      // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I in the edit
-      // pane asks the page for it (by the key's place: Alt changes the letter
-      // on a Mac); it opens as a modal when it is mounted. Escape or its close
+      // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I while a
+      // document is open asks the page for it (by the key's place: Alt changes
+      // the letter on a Mac); the page puts `inspect=on` in the URL, and it
+      // opens as a modal when it is mounted. Escape or its close
       // button closes it, which tells the page, and the browser gives the
       // focus back to where it was. Its two tabs switch here, by click or
       // the arrow keys.
       hook._onInspectKey = function (e) {
         if (!e.ctrlKey || !e.altKey || e.metaKey || e.shiftKey || e.code !== "KeyI") return;
-        if (!e.target.closest || !e.target.closest("[data-pane-editing]")) return;
+        // As soon as a document is open, wherever the focus is: a click on
+        // a list row leaves it on the row (Sanity's, keyboard:158).
+        if (!root.querySelector("[data-pane-editing]")) return;
         e.preventDefault();
         hook.pushEvent("desk-inspect", { open: true });
+      };
+      // Sanity's document shortcuts, from inside the edit pane only
+      // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
+      // delete. Each presses the document menu's own item (`DocMenu`), so a key
+      // does only what the menu offers: a singleton has no Delete, a document
+      // with no draft no Publish. Typing still in the focused field's debounce
+      // goes first: LiveView sends a debounced field on blur, and the socket
+      // keeps order, so the publish carries it. Typing in a published
+      // document makes the draft that Publish appears for: the key then waits
+      // (3 s at most) for the save's answer to bring it. The focus stays.
+      hook._docKeys = { KeyP: "publish", KeyD: "delete-doc" };
+      hook._onDocKey = function (e) {
+        var action = e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && hook._docKeys[e.code];
+        if (!action || !e.target.closest) return;
+        var pane = e.target.closest("[data-pane-editing]");
+        if (!pane) return;
+        var item = function () {
+          return pane.isConnected ? pane.querySelector('[data-desk-doc-action="' + action + '"]') : null;
+        };
+        var owes = action === "publish" && hook._owes();
+        if (!item() && !owes) return;
+        e.preventDefault();
+        var at = root.ownerDocument.activeElement;
+        if (at && at.form && pane.contains(at)) at.dispatchEvent(new root.ownerDocument.defaultView.FocusEvent("blur"));
+        if (item()) return item().click();
+        var tries = 0;
+        var later = function () {
+          var form = editForm();
+          var busy = hook._typed || (form && form.hasAttribute("data-phx-ref-loading"));
+          if (!busy && item()) return item().click();
+          if (++tries < 40) setTimeout(later, 75);
+        };
+        setTimeout(later, 75);
       };
       hook._onShowModal = function (e) {
         var dialog = e.target;
@@ -1362,6 +1421,7 @@
         hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
       };
       root.addEventListener("keydown", hook._onInspectKey);
+      root.addEventListener("keydown", hook._onDocKey);
       root.addEventListener("desk:show-modal", hook._onShowModal);
       // `close` does not bubble: caught on the way down.
       root.addEventListener("close", hook._onInspectClose, true);
@@ -1427,6 +1487,7 @@
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       root.removeEventListener("click", this._onCopy);
       root.removeEventListener("keydown", this._onInspectKey);
+      root.removeEventListener("keydown", this._onDocKey);
       root.removeEventListener("desk:show-modal", this._onShowModal);
       root.removeEventListener("close", this._onInspectClose, true);
       root.removeEventListener("click", this._onInspectTab);

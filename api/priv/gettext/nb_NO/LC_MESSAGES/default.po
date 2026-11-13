@@ -10180,6 +10180,11 @@ msgstr "Kunne ikke registrere «%{tag}» som etikett. Prøv igjen, eller spør e
 msgid "Create cancelled: %{reason}"
 msgstr "Opprettelse avbrutt: %{reason}"
 
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:51
+#, elixir-autogen, elixir-format
+msgid "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form."
+msgstr "«%{type}» kan ikke lages her: dokumentene kommer inn fra et annet sted, for eksempel et skjema."
+
 #: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:105
 #, elixir-autogen, elixir-format
 msgid "Delete cancelled: %{reason}"
@@ -13403,3 +13408,28 @@ msgstr "Behandlet"
 #, elixir-autogen, elixir-format
 msgid "Raw JSON"
 msgstr "Rå JSON"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode (show navigation)"
+msgstr "Gå ut av fokusmodus (vis navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode (hide navigation)"
+msgstr "Gå til fokusmodus (skjul navigasjonen)"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode"
+msgstr "Gå ut av fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode"
+msgstr "Gå til fokusmodus"
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Breadcrumb"
+msgstr "Brødsmulesti"

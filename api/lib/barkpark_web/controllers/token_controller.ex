@@ -39,7 +39,9 @@ defmodule BarkparkWeb.TokenController do
     * `label` is required and must be a non-empty string.
     * `permissions` defaults to `["public-read"]`; every entry must be in
       `#{inspect(@allowed_permissions)}` or the request 422s.
-    * `dataset` defaults to `"production"`.
+    * `dataset` defaults to `"production"`. A request that NAMES one binds the
+      token to it (`dataset_bound`): every other dataset answers 403. A request
+      that names none mints an unbound token.
     * `expires_at` (optional, ISO-8601) — must be in the future and within the
       kind's max age (365 days for both `public-read` (share) and `read` (api)),
       else 422 naming the max. Never clamped.
@@ -61,7 +63,12 @@ defmodule BarkparkWeb.TokenController do
          {:ok, expiry} <- fetch_expiry(params),
          %{id: ws_id, slug: ws_slug} <- workspace do
       raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-      mint_opts = [expires_at: expiry, actor: conn.assigns[:api_token]]
+
+      mint_opts = [
+        expires_at: expiry,
+        actor: conn.assigns[:api_token],
+        dataset_bound: dataset_named?(params)
+      ]
 
       case Auth.create_token(raw, label, dataset, perms, ws_id, mint_opts) do
         {:ok, token} ->
@@ -177,6 +184,13 @@ defmodule BarkparkWeb.TokenController do
   end
 
   defp fetch_dataset(_), do: "production"
+
+  # A named dataset is a binding the caller asked for; the fallback is only a
+  # default. `nil` when absent: unbound. Same rule as the elevated mint.
+  defp dataset_named?(%{"dataset" => dataset}) when is_binary(dataset),
+    do: if(String.trim(dataset) == "", do: nil, else: true)
+
+  defp dataset_named?(_), do: nil
 
   # `expires_at` (ISO-8601) XOR `no_expiry: true`; neither → nil (the configured
   # default decides). Anything else is a 422 before a token exists.

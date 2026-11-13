@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # document must not license folding an empty value on the next one.
       |> assign(
         editor_dirty: false,
+        editor_unsaved_keys: MapSet.new(),
         doc_conflict: false,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
@@ -66,9 +67,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `sender != self()` guard skips our own writes).
   #
   # With NO unsaved local edits, auto-refresh the form in place (unchanged
-  # behaviour). With unsaved local edits (`editor_dirty`), do NOT overwrite the
-  # buffer — that would silently drop the user's pre-debounce edits. Instead
-  # raise the `doc_conflict` banner and let the user choose to reload.
+  # behaviour; `editor_dirty` clears when an autosave lands, see
+  # `Handlers.Fields.settle_dirty/2`). The browser keeps the value of the input
+  # that has the focus, so typing that has not been posted yet survives, and
+  # `editor_doc` stays this tab's base, so a post of a value this tab never
+  # changed keeps the remote one (`Forms.upsert_draft/6`).
+  #
+  # With unsaved local edits (`editor_dirty`), raise the `doc_conflict` banner.
+  # The fields named in `editor_unsaved_keys` keep their local value and the
+  # other fields take the remote save (task-6f5426c4b04de74b); with none named
+  # (an array op, a slug derive) the whole buffer is kept, as before.
   #
   # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
   # topic is keyed by id + type + workspace + dataset NAME, which a same-id
@@ -84,7 +92,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
-        {:noreply, assign(socket, doc_conflict: true, save_status: "Updated by another user")}
+        {:noreply,
+         socket
+         |> keep_unsaved_fields(doc_data)
+         |> assign(doc_conflict: true, save_status: "Updated by another user")}
 
       true ->
         schema = socket.assigns[:editor_schema]
@@ -102,6 +113,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            doc_conflict: false,
            save_status: "Updated by another user"
          )}
+    end
+  end
+
+  defp keep_unsaved_fields(socket, doc_data) do
+    keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+    if MapSet.size(keys) == 0 do
+      socket
+    else
+      schema = socket.assigns[:editor_schema]
+      local = socket.assigns[:editor_form] || %{}
+
+      form =
+        doc_data
+        |> Content.doc_to_form(schema)
+        |> Map.merge(Map.take(local, MapSet.to_list(keys)))
+
+      changed? = Shared.widget_values_changed?(schema, local, form)
+      assign(socket, editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
     end
   end
 

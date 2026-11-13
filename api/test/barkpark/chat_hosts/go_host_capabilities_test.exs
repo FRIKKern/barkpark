@@ -79,6 +79,48 @@ defmodule Barkpark.ChatHosts.GoHostCapabilitiesTest do
              %{"protocol" => "bidirectional-v2"}
   end
 
+  # The shape the Go host emits once it fetches images (Paper
+  # chat-host-attachments-plan, T6): today's map with
+  # `providers.claude.attachments` added, and codex unchanged. The server must
+  # admit it before any binary sends it, or that host's heartbeats are refused
+  # and it goes offline. When T6 ships, this literal becomes the main fixture.
+  describe "the Go binary's attachments shape (T6)" do
+    @attachments_fixture Path.expand(
+                           "../../support/fixtures/chat_host_go_capabilities_attachments.json",
+                           __DIR__
+                         )
+
+    defp attachments_capabilities, do: @attachments_fixture |> File.read!() |> Jason.decode!()
+
+    test "it is today's fixture plus providers.claude.attachments and nothing else" do
+      caps = attachments_capabilities()
+      {images, claude} = Map.pop(caps["providers"]["claude"], "attachments")
+
+      assert images == ~w(image/png image/jpeg image/gif image/webp)
+      assert put_in(caps, ["providers", "claude"], claude) == go_capabilities()
+    end
+
+    test "enroll/2 and heartbeat/2 accept it and store the list" do
+      issued = issue()
+
+      assert {:ok, %{credential: credential}} =
+               ChatHosts.enroll(issued.enrollment_token, %{
+                 "protocol_version" => 1,
+                 "capabilities" => attachments_capabilities()
+               })
+
+      {:ok, host} = ChatHosts.authenticate(credential)
+
+      assert {:ok, _} =
+               ChatHosts.heartbeat(host, %{
+                 "protocol_version" => 1,
+                 "capabilities" => attachments_capabilities()
+               })
+
+      assert Repo.get!(RegisteredHost, host.id).capabilities == attachments_capabilities()
+    end
+  end
+
   describe "chat_runtime stays non-secret readiness metadata only" do
     defp heartbeat_valid?(chat_runtime) do
       caps = Map.put(go_capabilities(), "chat_runtime", chat_runtime)

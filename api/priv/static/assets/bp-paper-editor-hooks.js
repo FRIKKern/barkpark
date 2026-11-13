@@ -14,6 +14,7 @@
 
 (function () {
   const Hooks = {};
+  let lastRemoteSelections = []; window.addEventListener("phx:bp:remote-selections", (e) => { lastRemoteSelections = Array.isArray(e.detail?.list) ? e.detail.list : []; });
 
   // The editor's words in the viewer's Studio language (task-e8a5c972b7720591).
   // The server stamps `data-paper-strings`
@@ -4425,11 +4426,10 @@
           }, 80);
         };
         this.el.addEventListener("bp-canvas-selection", this._onCanvasSelection);
-        this.handleEvent("bp:remote-selections", (payload) => {
-          const wc = this.el.querySelector("bp-paper-canvas");
-          if (typeof wc?.setRemoteSelections !== "function") return;
-          wc.setRemoteSelections(Array.isArray(payload?.list) ? payload.list : []);
-        });
+        const drawRemote = (list) => { const wc = this.el.querySelector("bp-paper-canvas"); if (typeof wc?.setRemoteSelections === "function") wc.setRemoteSelections(Array.isArray(list) ? list : []); };
+        this.handleEvent("bp:remote-selections", (payload) => drawRemote(payload?.list));
+        // LiveView hands a push only to handlers listening then; a run mounted after the join's push (the bundle loads async) draws the page's last list (task-3235ac130ea73701).
+        if (lastRemoteSelections.length) drawRemote(lastRemoteSelections);
 
         // A wikilink's Open on the hover card (task-387501f9ce96c335): the
         // canvas asks the host first (`bp-canvas-open-link`, cancelable) and

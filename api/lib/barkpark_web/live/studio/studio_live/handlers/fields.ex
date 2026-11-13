@@ -34,6 +34,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   @create_retry_window_ms 30_000
 
   def new_document(%{"type" => type} = params, socket) do
+    # A type whose desk block says `authorCreatable: false` shows no "+"; a
+    # hand-pushed event is refused here too (task-631d6ea85517e668).
+    case Content.resolve_schema(type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      {:ok, schema} ->
+        if BarkparkWeb.Studio.PaneBuilder.author_creatable?(schema),
+          do: author_new_document(type, params, socket),
+          else: {:noreply, put_flash(socket, :error, not_creatable(schema, type))}
+
+      _ ->
+        author_new_document(type, params, socket)
+    end
+  end
+
+  defp not_creatable(schema, type) do
+    gettext(
+      "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form.",
+      type: Map.get(schema, :title) || type
+    )
+  end
+
+  defp author_new_document(type, params, socket) do
     preset = pane_preset(params, socket)
 
     case retry_of_recent_create(socket, type, preset) do
@@ -232,7 +253,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           socket
           |> put_flash(:info, gettext("Saved"))
           |> Shared.rebuild_panes()
-          |> assign(editor_dirty: false, doc_conflict: false)
+          |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> clear_touched()
 
         {:noreply, socket}
@@ -248,7 +269,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     socket =
       socket
       |> Shared.rebuild_panes()
-      |> assign(editor_dirty: false, doc_conflict: false)
+      |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
       |> clear_touched()
 
     {:noreply, socket}
@@ -282,7 +303,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case value do
       t when is_binary(t) and t != "" ->
         {:noreply,
-         mark_dirty(Shared.do_autosave(socket, %{field => document_slug(t)}, :slug_derive))}
+         settle_dirty(Shared.do_autosave(socket, %{field => document_slug(t)}, :slug_derive))}
 
       _ ->
         {:noreply, socket}
@@ -303,7 +324,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       {%{}, [_ | _] = path} ->
         form = StudioLive.Path.put_value_at(base_form(socket), path, code)
         socket = assign(socket, editor_form: form)
-        {:noreply, mark_dirty(Shared.do_autosave(socket, form, :tree_codelist_pick))}
+        {:noreply, settle_dirty(Shared.do_autosave(socket, form, :tree_codelist_pick))}
 
       _ ->
         {:noreply, socket}
@@ -353,8 +374,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     socket = track_touched(socket, params)
 
     case fold_dot_paths(params, socket) do
-      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc, :change))}
-      _ -> {:noreply, socket}
+      %{"doc" => doc} ->
+        {:noreply, settle_dirty(Shared.do_autosave(socket, doc, :change), target_key(params))}
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -617,7 +641,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
+      {:noreply, settle_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
   end
 
@@ -689,10 +713,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     |> elem(1)
   end
 
-  # A user-driven form edit leaves the browser buffer ahead of the last remote
-  # snapshot. `editor_dirty` gates the concurrent-edit clobber in
-  # `Handlers.Lifecycle.doc_updated/2` + `document_changed/2`: while it's set, a
-  # remote save surfaces a "reload?" banner instead of overwriting the buffer.
-  # Reset on navigation (finish_handle_params), explicit save, and reload.
-  defp mark_dirty(socket), do: assign(socket, editor_dirty: true)
+  # `editor_dirty` gates the concurrent-edit guard in
+  # `Handlers.Lifecycle.doc_updated/2` + `document_changed/2`: while it is set,
+  # a remote save does not replace the buffer. It means "the buffer holds an
+  # edit the store does not have", so a save that LANDED clears it
+  # (task-6f5426c4b04de74b): the form then equals the store, and a later remote
+  # save refreshes it. Before, the first keystroke set it for the rest of the
+  # session, every remote save after it read as a conflict, B's form kept A's
+  # old values, and B's next keystroke in that field wrote them back over A's.
+  # A save that did not land keeps the buffer dirty and remembers the field
+  # typed in (`editor_unsaved_keys`), so a remote save keeps that field and
+  # takes the others. Also reset on navigation, explicit save and Reload.
+  defp settle_dirty(socket, keys \\ []) do
+    if socket.assigns[:save_status] == "Saved" do
+      assign(socket, editor_dirty: false, editor_unsaved_keys: MapSet.new())
+    else
+      unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+      assign(socket,
+        editor_dirty: true,
+        editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
+      )
+    end
+  end
+
+  # The top-level field a `phx-change` typed in, from its `_target`:
+  # `["doc", "title"]` for a bracket name, `["doc[altText].nob"]` for a dotted one.
+  defp target_key(%{"_target" => ["doc", key | _]}) when is_binary(key), do: [key]
+
+  defp target_key(%{"_target" => [name]}) when is_binary(name) do
+    case StudioLive.parse_path(name) do
+      [key | _] when is_binary(key) -> [key]
+      _ -> []
+    end
+  end
+
+  defp target_key(_params), do: []
 end

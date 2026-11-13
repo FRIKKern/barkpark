@@ -668,7 +668,13 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       assert doc.title == "Alpha to publish"
     end
 
-    test "a remote save during unsaved typing raises the conflict banner, and keeps the typing",
+    # This test once pinned the bug of task-6f5426c4b04de74b: its "unsaved"
+    # typing was in fact saved by `render_change`, and the editor still called
+    # the next remote save a conflict and kept the stale form, so the tab's next
+    # keystroke wrote it back over the other person's save. A save that landed
+    # leaves nothing unsaved: the remote save now reaches the form. Typing the
+    # store does not have is kept: `two_editors_one_document_test.exs`.
+    test "a remote save after this tab's own save landed reaches the form, with no conflict",
          %{
            conn: conn,
            base: base,
@@ -677,7 +683,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
       settle(view)
 
-      view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Mine, unsaved"}})
+      view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Mine, saved"}})
+      {doc, _draft?, _published?} = Content.fetch_doc_with_draft(@type_name, a, @dataset)
+      assert doc.title == "Mine, saved"
 
       {:ok, _doc} =
         Content.upsert_document(
@@ -686,16 +694,15 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
           @dataset
         )
 
-      conflicted? = fn -> :sys.get_state(view.pid).socket.assigns.doc_conflict == true end
+      refreshed? = fn ->
+        :sys.get_state(view.pid).socket.assigns.editor_form["title"] == "Theirs"
+      end
 
-      assert Enum.any?(1..200, fn _ -> conflicted?.() or (Process.sleep(10) && false) end),
-             "the editor never raised the conflict"
+      assert Enum.any?(1..200, fn _ -> refreshed?.() or (Process.sleep(10) && false) end),
+             "the editor never took in the remote save"
 
-      html = render(view)
-      assert html =~ "Updated by another user"
-      # The buffer is not overwritten by the remote value.
-      assert has_element?(view, ~s(#editor-form [value="Mine, unsaved"]))
-      refute has_element?(view, ~s(#editor-form [value="Theirs"]))
+      assert has_element?(view, ~s(#editor-form [value="Theirs"]))
+      refute has_element?(view, ~s([data-test-id="doc-conflict-banner"]))
     end
 
     test "another document in the chain stays a read-only pane", %{conn: conn, base: base} do

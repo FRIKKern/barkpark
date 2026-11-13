@@ -1208,31 +1208,17 @@ defmodule BarkparkWeb.ChatController do
   def send_failure_response(conn, reason) do
     Logger.warning("chat transport: send failed: #{inspect(ChatSendFailure.loggable(reason))}")
 
-    case ChatSendFailure.classify(reason) do
-      :capacity ->
-        # Transient by definition — say when to come back (mirrors the
-        # rate-limit plugs' Retry-After convention).
-        conn
-        |> put_resp_header("retry-after", Integer.to_string(@capacity_retry_after_seconds))
-        |> ErrorResponse.emit_custom(
-          503,
-          "runtime_capacity",
-          "chat runtime capacity is exhausted — retry shortly"
-        )
+    class = ChatSendFailure.classify(reason)
+    {status, code, message} = ChatSendFailure.public_error(class)
 
-      :unavailable ->
-        ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", "chat runtime is unavailable")
+    # Capacity is transient by definition — say when to come back (mirrors the
+    # rate-limit plugs' Retry-After convention).
+    conn =
+      if class == :capacity,
+        do: put_resp_header(conn, "retry-after", "#{@capacity_retry_after_seconds}"),
+        else: conn
 
-      :unsupported ->
-        # PERMANENT for this session/provider — a 503 would make a well-behaved
-        # client retry forever, so it must be a 4xx (charter D26).
-        ErrorResponse.emit_custom(
-          conn,
-          422,
-          "chat_unsupported",
-          "chat is not supported for this session's provider or operation"
-        )
-    end
+    ErrorResponse.emit_custom(conn, status, code, message)
   end
 
   # Append the caller's turn as an organic `role:"user"` row so the Session's

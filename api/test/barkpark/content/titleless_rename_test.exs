@@ -229,6 +229,82 @@ defmodule Barkpark.Content.TitlelessRenameTest do
     assert saved.title == "Before"
   end
 
+  describe "createOrReplace (task-a2064ff3c8c13417)" do
+    # What an SDK client sends back after a fetch: the rendered envelope, which
+    # carries the stored title, with the name changed.
+    defp replace_with_name(id, name) do
+      {:ok, doc} = Content.get_document(id, "author", @dataset)
+
+      envelope =
+        doc
+        |> Barkpark.Content.Envelope.render()
+        |> Map.drop(["_rev"])
+        |> Map.put("_id", Barkpark.Content.DraftId.published_id(doc.doc_id))
+        |> Map.put("name", name)
+
+      {:ok, _} = Mutations.apply_mutations([%{"createOrReplace" => envelope}], @dataset)
+    end
+
+    test "a fetched draft sent back with a new name moves the column" do
+      author("author-r", "R1")
+
+      replace_with_name("drafts.author-r", "R2")
+
+      assert column("drafts.author-r") == "R2"
+    end
+
+    test "a fetched published author with no draft, sent back with a new name, moves the draft's column" do
+      author("author-rp", "P1")
+      {:ok, _} = Content.publish_document("author-rp", "author", @dataset)
+
+      replace_with_name("author-rp", "P2")
+
+      assert column("drafts.author-rp") == "P2"
+    end
+  end
+
+  describe "a name set blank or unset shows what a new author with no name shows" do
+    # The rule for the blank case: a new author with a blank name gets no title
+    # from the derivation, and every list falls back from there. A rename to
+    # blank lands on the same column, so lists and search stop showing a name
+    # the document no longer has.
+    setup do
+      %{fresh: author("author-fresh-blank", "").title}
+    end
+
+    test "patch set name to \"\"", %{fresh: fresh} do
+      author("author-b1", "Eve")
+      patch("author-b1", %{"set" => %{"name" => ""}})
+      assert column("drafts.author-b1") == fresh
+    end
+
+    test "patch unset name", %{fresh: fresh} do
+      author("author-b2", "Eve")
+      patch("author-b2", %{"unset" => ["name"]})
+      assert column("drafts.author-b2") == fresh
+    end
+
+    test "createOrReplace with a blank name", %{fresh: fresh} do
+      author("author-b3", "Eve")
+      replace_with_name("drafts.author-b3", "   ")
+      assert column("drafts.author-b3") == fresh
+    end
+
+    test "a write that leaves a blank name blank leaves a hand-set column as it was" do
+      author("author-b4", "", %{"title" => "Hand-set"})
+      patch("author-b4", %{"set" => %{"bio" => "New bio."}})
+      assert column("drafts.author-b4") == "Hand-set"
+    end
+  end
+
+  defp patch(id, ops) do
+    {:ok, _} =
+      Mutations.apply_mutations(
+        [%{"patch" => Map.merge(%{"id" => id, "type" => "author"}, ops)}],
+        @dataset
+      )
+  end
+
   defp hit_id(hit),
     do:
       Map.get(hit, :doc_id) || Map.get(hit, "doc_id") || Map.get(hit, :id) || Map.get(hit, "_id")

@@ -154,6 +154,11 @@ func TestInstanceAdminTokenInstallMintsANewTokenAndSavesOnlyIt(t *testing.T) {
 	if len(perms) != 3 || f.mintBody["label"] != "laptop-admin" || f.mintBody["no_expiry"] != true {
 		t.Errorf("mint body = %v, want label laptop-admin, read/write/admin, no_expiry", f.mintBody)
 	}
+	// No -d was typed: the operator's admin token must not be bound to one
+	// dataset, so the mint names none.
+	if _, named := f.mintBody["dataset"]; named {
+		t.Errorf("mint body names a dataset, which binds the admin token to it: %v", f.mintBody)
+	}
 	var mintPath string
 	for _, r := range f.sent() {
 		if strings.HasSuffix(r, "/v1/tokens/elevated") {

@@ -906,6 +906,10 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh cron-scream-coverage -- bash scripts/cron-scream-coverage.sh --selftest
 
+      - name: ci-apt-dns-fallback.sh self-test (no network, no sudo)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh ci-apt-dns-fallback-selftest -- bash scripts/ci-apt-dns-fallback.test.sh
+
       # ── the two harnesses the census could not see, riding the same job ───
       # task-13bfa649df851d5f. `scripts/pr-required.sh` is the instrument every
       # lane in this campaign runs before merging anything — 766 lines, 33 arms,
@@ -941,10 +945,6 @@ jobs:
       # 2.3 s wall for 33/33 arms and stranded-worktree-report.sh --selftest is
       # 1.0 s for 49, against this job's 2m35s average. Both are hermetic —
       # fixture trees and a fake `gh` on PATH, no network, no token.
-      - name: ci-apt-dns-fallback.sh self-test (no network, no sudo)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/run-instrument.sh ci-apt-dns-fallback-selftest -- bash scripts/ci-apt-dns-fallback.test.sh
-
       - name: pr-required.sh self-test (33 arms) — scripts/ copy
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh pr-required-selftest -- bash scripts/pr-required.sh --selftest
