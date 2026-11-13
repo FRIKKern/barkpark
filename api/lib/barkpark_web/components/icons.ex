@@ -225,6 +225,11 @@ defmodule BarkparkWeb.Icons do
     "folder-tree" =>
       ~s(<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/>),
     "columns" => ~s(<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>),
+    # The desk's focus mode button (J26): show the document alone, and back.
+    "maximize-2" =>
+      ~s(<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>),
+    "minimize-2" =>
+      ~s(<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/>),
     "kanban" => ~s(<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>),
     "check-square" =>
       ~s(<path d="M21 10.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.5"/><path d="m9 11 3 3L22 4"/>),

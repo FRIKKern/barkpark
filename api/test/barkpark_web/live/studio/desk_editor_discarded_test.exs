@@ -134,6 +134,48 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     refute has_element?(ctx.view, @note, "was not saved")
   end
 
+  # Keys typed in the focused field and not yet sent (its debounce) never
+  # reach the page as a save. The browser finds them: the event carries the
+  # old form's values (`was`), and the focused field no longer matching them
+  # is typing the discard took. It answers `lost: true`, and the line says so
+  # (guerrilla, 2026-11-13: six keys typed across a discard vanished without
+  # a word, 3 of 3).
+  test "the event carries the old form's values, for the browser to find unsent keys", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+
+    assert_push_event(ctx.view, "desk:discarded", %{values: values, was: was}, 2_000)
+    assert values["doc[title]"] == "Here"
+    assert was["doc[title]"] == "Here elsewhere"
+    assert was["doc[excerpt]"] == "Draft words"
+  end
+
+  test "the browser lost unsent keys: the line says the typing was not saved", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+
+    render_hook(ctx.view, "desk-discard-seen", %{"lost" => true})
+
+    assert has_element?(ctx.view, @note, "was not saved")
+    # The browser has the new form: its saves write again.
+    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
+  end
+
+  test "control: the browser lost nothing, the line stays plain", ctx do
+    draft_elsewhere(ctx, "Here elsewhere")
+    assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
+    discard_elsewhere(ctx)
+    assert eventually(fn -> has_element?(ctx.view, @note) end)
+
+    render_hook(ctx.view, "desk-discard-seen", %{})
+    assert has_element?(ctx.view, @note, "discarded")
+    refute has_element?(ctx.view, @note, "was not saved")
+  end
+
   # A browser that never answered `desk:discarded` is not stuck: a reconnect
   # mounts a new LiveView process, whose assigns have no `desk_discarded`.
   test "a reconnect starts clean: the new page's saves write", %{conn: conn} = ctx do

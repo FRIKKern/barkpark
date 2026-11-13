@@ -13406,3 +13406,28 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Raw JSON"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode (show navigation)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode (hide navigation)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Exit focus mode"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Enter focus mode"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/focus_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Breadcrumb"
+msgstr ""
