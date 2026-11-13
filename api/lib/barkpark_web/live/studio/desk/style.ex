@@ -22,7 +22,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
 
   A titled divider (`.desk-divider`, the root's "Settings") is the TanStack
   Studio's, as Sanity's measures at 1440: its title 11 px under the row above,
-  its line 6 px under the title and 8 px over the next row.
+  its line 6 px under the title and 8 px over the next row. Its words start at
+  the rows' x (20 px): `.dk-rows` already insets it 12 px.
 
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
@@ -38,12 +39,13 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
          measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
       .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; --dk-shadow: rgba(0, 0, 0, 0.12); }
-      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #556bfc; --dk-shadow: rgba(0, 0, 0, 0.5); }
+      html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #596ffc; --dk-shadow: rgba(0, 0, 0, 0.5); }
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
       /* studio-literal-check: skip-end */
-      .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); }
+      .dk { background: var(--dk-bg); }
+      .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); background: var(--dk-bg); }
       .dk .dk-doc { width: auto; min-width: 320px; max-width: none; flex: 1 1 600px; border-right: 0; }
       .studio-shell:has(.dk) > .studio-footer { display: none; }
       .dk .dk-edit .editor-panel { min-width: 0; }
@@ -143,7 +145,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-list-search input::placeholder { color: var(--dk-placeholder); }
       .dk .dk-list-search input:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       .dk .dk-list-search input::-webkit-search-cancel-button { display: none; }
-      .dk .pane-divider { margin: 4px 12px; padding: 0; border: 0; border-top: 1px solid var(--dk-border); }
+      .dk .pane-divider { margin: 4px 0; padding: 0; border: 0; border-top: 1px solid var(--dk-border); }
       .dk .dk-media { box-sizing: border-box; width: 33px; height: 33px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--dk-border); color: var(--dk-muted); background: var(--dk-bg); }
       .dk .dk-media svg { width: 21px; height: 21px; }
       .dk .dk-media img { width: 100%; height: 100%; object-fit: cover; }
@@ -158,7 +160,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-dot { background: var(--dk-published); }
       .dk .dk-row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-row-sub { display: block; margin-top: -2px; font-weight: 400; font-size: 13px; line-height: 19px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .dk .desk-divider { margin: 4px 12px 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--dk-border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-muted); }
+      .dk .desk-divider { margin: 4px 0 8px; padding: 7px 8px 6px; border-bottom: 1px solid var(--dk-border); font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-muted); }
       .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
       .dk .dk-more { margin: 12px 16px; }
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
