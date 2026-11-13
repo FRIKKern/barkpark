@@ -220,6 +220,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-search-empty { margin: 4px; font-size: 13px; color: var(--dk-muted); }
       .dk a.dk-search-hit { box-sizing: border-box; display: flex; align-items: center; gap: 8px; min-height: 49px; margin: 0; padding: 5px 8px; border: 0; border-radius: 3px; background: none; color: var(--dk-fg); font-size: 13px; line-height: 19px; font-weight: 400; text-decoration: none; }
       .dk a.dk-search-hit .pane-item-label { flex: 1; min-width: 0; }
+      .dk a.dk-search-hit .dk-status { justify-content: center; width: 17px; }
+      .dk a.dk-search-hit .dk-status > * { flex: none; margin: 0; }
       .dk a.dk-search-hit .dk-row-title { display: block; font-weight: 500; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk a.dk-search-hit:is(:hover, [aria-selected="true"]) { background: var(--dk-card-hover); }
       .dk a.dk-search-hit:is(:hover, [aria-selected="true"]) .dk-row-title { color: var(--dk-row-hover-fg); }

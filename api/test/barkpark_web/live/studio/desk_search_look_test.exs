@@ -96,5 +96,8 @@ defmodule BarkparkWeb.Studio.Desk.SearchLookTest do
     assert hit =~ "padding: 5px 8px"
     assert hit =~ "color: var(--dk-fg)"
     assert rule(".dk .dk-badge") =~ "color: var(--dk-badge-fg)"
+
+    assert rule(".dk a.dk-search-hit .dk-status") =~ "width: 17px",
+           "the dot and the ring share one column, so the badges line up"
   end
 end
