@@ -45,6 +45,7 @@ defmodule BarkparkWeb.PlaygroundController do
   use BarkparkWeb, :controller
 
   alias Barkpark.{Auth, Content, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy.Quota
 
   action_fallback BarkparkWeb.FallbackController
@@ -134,7 +135,10 @@ defmodule BarkparkWeb.PlaygroundController do
       expires_at: expires_at
     }
 
-    with {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, admin_token),
+    # A dataset-bound token makes no workspace (`ApiToken.dataset_bound?/1`),
+    # here as on POST /api/workspaces.
+    with false <- ApiToken.dataset_bound?(admin_token),
+         {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, admin_token),
          # `create_workspace_with_owner/2` returns the Default Project inline
          # (`workspace.projects == [project]`), so the write coordinates are in
          # hand without a re-derive. Captured BEFORE `set_quota/2`, whose
@@ -162,6 +166,9 @@ defmodule BarkparkWeb.PlaygroundController do
         tier: workspace.tier,
         expires_at: workspace.expires_at
       })
+    else
+      true -> {:error, :forbidden_dataset}
+      other -> other
     end
   end
 

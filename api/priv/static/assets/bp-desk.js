@@ -97,7 +97,8 @@
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
       pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
-      pane + " > :not(.pane-header), " + pane + " .dk-close { display: none; }\n" +
+      // A strip reads its title alone: every control in its header goes too.
+      pane + " > :not(.pane-header), " + pane + " > .pane-header > :not(.pane-header-title), " + pane + " .dk-close { display: none; }\n" +
       pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
       // The editor pane has no header of its own: its strip reads its title.
       pane + '[data-pane-editing]::before { content: attr(data-desk-name); display: block; padding: 16px 0; margin: 0 auto; writing-mode: vertical-rl; font-weight: 600; font-size: var(--text-sm); white-space: nowrap; }\n'
