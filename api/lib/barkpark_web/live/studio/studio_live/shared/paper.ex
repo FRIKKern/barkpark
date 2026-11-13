@@ -2558,8 +2558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # The first edit of a published document writes its draft. The header picks
   # Publish and Discard draft from `editor_is_draft` and the published twin, as
   # it does after a Classic save; without them a Beta author saw "draft" in the
-  # status and only Unpublish in the actions until a reload
-  # (task-904659f0c8145633).
+  # status and only Unpublish in the actions until a reload (task-904659f0c8145633).
   defp assign_published_twin(socket, previous, fresh) do
     if Content.draft?(fresh.doc_id) and not Content.draft?(previous.doc_id) do
       assign(socket, editor_has_published: true, published_doc: previous)
