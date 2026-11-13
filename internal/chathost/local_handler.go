@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -408,7 +409,9 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 		return ctx.Err()
 	}
 	waited = true
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+	// The turn completed. ErrWaitDelay means codex exited 0 and only a
+	// grandchild still held its stderr: the turn stays a good one.
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return fmt.Errorf("codex exec: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
@@ -417,7 +420,7 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 // providerWaitDelay bounds cmd.Wait once the provider has exited or been
 // killed: a grandchild that inherited stderr (an MCP server) cannot hold the
 // turn open past it.
-const providerWaitDelay = 5 * time.Second
+var providerWaitDelay = 5 * time.Second
 
 // reapUnlessWaited kills and waits for a provider that a turn left without
 // waiting for (an emit error, a decode error, a failed request). Without the

@@ -3,9 +3,13 @@ package chathost
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // A turn whose emit fails (the Runner gave up publishing an event) returns
@@ -27,6 +31,43 @@ func TestRunCodexWaitsForTheChildAfterAnEmitError(t *testing.T) {
 	cmd := handleWithFailingEmit(t, "codex", "session-reap-codex")
 	if cmd.ProcessState == nil {
 		t.Fatal("codex was not waited for after an emit error: it is left a zombie with its pipes open")
+	}
+}
+
+// A codex turn that completed stays a good turn when a grandchild still holds
+// codex's stderr after codex exits 0: Wait then answers exec.ErrWaitDelay, and
+// before the fix Handle returned it, so the Runner published an error terminal
+// after a good reply (review of #26164).
+func TestRunCodexCompletedTurnIgnoresAStderrHeldPastWaitDelay(t *testing.T) {
+	previous := providerWaitDelay
+	providerWaitDelay = 200 * time.Millisecond
+	t.Cleanup(func() { providerWaitDelay = previous })
+
+	dir := t.TempDir()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nBARKPARK_PROVIDER_HELPER=codex BARKPARK_HELPER_STDERR_CHILD=1 exec %q -test.run=TestProviderHelperProcess -- \"$@\"\n", binary)
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	handler := NewLocalHandler([]string{t.TempDir()})
+	var kinds []any
+	err = handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
+		"provider": "codex", "operation": "send_turn", "session_id": "session-stderr-held",
+		"payload": map[string]any{"cwd": handler.ApprovedRoots[0], "content": "prove it"},
+	}}, func(event map[string]any) error {
+		kinds = append(kinds, event["kind"])
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Handle() = %v; want nil: the turn completed (events %v)", err, kinds)
+	}
+	if len(kinds) == 0 || kinds[len(kinds)-1] != "turn_completed" {
+		t.Fatalf("events %v; want the turn to end with turn_completed", kinds)
 	}
 }
 
