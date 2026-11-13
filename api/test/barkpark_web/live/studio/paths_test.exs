@@ -232,4 +232,41 @@ defmodule BarkparkWeb.Studio.StudioLive.PathsTest do
       assert Paths.paper_path("/w/acme/p/site", "ai-score") == "/w/acme/p/site/papers/ai-score"
     end
   end
+
+  # task-f64a9ddbd85be9d6: the dataset is one path segment. A dataset string
+  # from a URL may hold "%" or "/" (the router decoded it once); printed raw
+  # it named another dataset, or another path, on the next request.
+  describe "the dataset as one path segment" do
+    @odd ["production%FF", "pro/duction", "a b", "a?b#c", "blåbær", "%2e%2e"]
+
+    # What the router hands a LiveView for a path the builders printed.
+    defp routed_dataset("/d/" <> rest), do: rest |> String.split("/") |> hd() |> URI.decode()
+    defp routed_dataset("/studio/" <> rest), do: rest |> String.split("/") |> hd() |> URI.decode()
+
+    test "every builder prints a dataset the next request reads back" do
+      for dataset <- @odd do
+        assert routed_dataset(Paths.studio_path_for([], dataset, [])) == dataset
+        assert routed_dataset(Paths.studio_path_for(["post", "p1"], dataset, [])) == dataset
+        assert routed_dataset(Paths.studio_path("", ["_desk"], dataset)) == dataset
+        assert routed_dataset(Paths.flat_root(dataset)) == dataset
+        assert routed_dataset(Paths.desk_chip_href("", ["post"], dataset, "main")) == dataset
+
+        assert "/w/ws/p/proj" <> rest = Paths.scoped_root("ws", "proj", dataset)
+        assert routed_dataset(rest) == dataset
+        assert rest |> String.split("/") |> length() == 4
+      end
+    end
+
+    test "a dataset slug prints as it stands" do
+      for dataset <- ["production", "staging_2", "a-b_c9"] do
+        assert Paths.studio_path_for([], dataset, []) == "/d/#{dataset}/studio"
+
+        assert Paths.studio_path("/w/a/p/b", ["post"], dataset) ==
+                 "/w/a/p/b/d/#{dataset}/studio/post"
+
+        assert Paths.scoped_root("a", "b", dataset) == "/w/a/p/b/d/#{dataset}/studio"
+        assert Paths.flat_root(dataset) == "/studio/#{dataset}"
+      end
+    end
+  end
 end

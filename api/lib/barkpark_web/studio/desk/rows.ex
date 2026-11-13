@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
 
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Tree
@@ -94,7 +95,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
       opts = opts(type, query, scope)
 
       case PaneBuilder.walk_path([id], 0, %{items: [node]}, [], nil, dataset, opts) do
-        {[list], _editor} -> rows(list, type)
+        {[list], _editor} -> rows(list, type, dataset, scope)
         _ -> nil
       end
     else
@@ -104,7 +105,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
 
   def read(type, %{path: path} = query, dataset, scope, _node) do
     with {[_ | _] = panes, _editor} <- PaneBuilder.build(dataset, path, opts(type, query, scope)),
-         %{} = rows <- rows(List.last(panes), type) do
+         %{} = rows <- rows(List.last(panes), type, dataset, scope) do
       rows
     else
       _ -> nil
@@ -122,7 +123,10 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
       # A name is one of the type's `desk.sortOrderings`; anything else the
       # list menu picked is an order of its own.
       list_sorts: if(sort && is_nil(order), do: %{type => sort}, else: %{}),
-      list_orders: if(order, do: %{type => order}, else: %{})
+      list_orders: if(order, do: %{type => order}, else: %{}),
+      # A row's preview read through a reference shows the target's draft
+      # when it has one, as Sanity's list does (J23).
+      prefer_draft_targets: true
     ]
   end
 
@@ -205,13 +209,15 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
     (field && field["title"]) || gettext("Title")
   end
 
-  defp rows(%{role: :list, type_name: type} = list, type) do
+  defp rows(%{role: :list, type_name: type} = list, type, dataset, scope) do
+    # A tree level is its parent, a divider, then its children; it has
+    # no more, no sorts.
+    entries =
+      for(%{type: t} = item when t in [:doc, :divider] <- list.items, do: entry(item, type))
+
     %{
       title: list.title,
-      # A tree level is its parent, a divider, then its children; it has
-      # no more, no sorts.
-      entries:
-        for(%{type: t} = item when t in [:doc, :divider] <- list.items, do: entry(item, type)),
+      entries: published(entries, type, dataset, scope),
       more?: list[:has_more] == true,
       sorts: list[:sort_options],
       sort: list[:active_sort],
@@ -223,7 +229,7 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
     }
   end
 
-  defp rows(_pane, _type), do: nil
+  defp rows(_pane, _type, _dataset, _scope), do: nil
 
   defp entry(%{type: :divider}, _type), do: :divider
 
@@ -232,8 +238,37 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
       title: text(item.title) || item.id,
       sub: text(item[:meta]) || text(item[:updated]),
       draft: item[:is_draft] == true,
+      # The row's tile, as the TanStack Studio's preview media: the image its
+      # list preview names, else the type's icon (the document icon for none).
+      media: if(is_binary(item[:media]), do: item[:media]),
+      icon: item[:type_icon] || "document",
       next: %{kind: :doc, id: item.id, type: type}
     }
+  end
+
+  # Whether each row's document is published, for its status marks (the
+  # TanStack Studio's ring for a draft, dot for published, both when a
+  # published document has unpublished edits). A list shows one row per
+  # document, the draft when there is one, so a draft row asks whether its
+  # published version exists too: one read for the page, in the caller's scope.
+  defp published(entries, type, dataset, scope) do
+    drafts = for %{draft: true, next: %{id: id}} <- entries, do: id
+
+    live =
+      if drafts == [],
+        do: MapSet.new(),
+        else: Content.resolvable_doc_ids(drafts, type, dataset, scope)
+
+    Enum.map(entries, fn
+      %{draft: true, next: %{id: id}} = entry ->
+        Map.put(entry, :published, MapSet.member?(live, id))
+
+      %{} = entry ->
+        Map.put(entry, :published, true)
+
+      divider ->
+        divider
+    end)
   end
 
   defp text(value) when is_binary(value), do: if(String.trim(value) == "", do: nil, else: value)

@@ -208,10 +208,14 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
       nil ->
         {:error, :unauthorized}
 
+      # `OptionalSessionToken` does not run the dataset fence either, so a
+      # dataset-bound token naming another dataset is refused here, by the
+      # same predicate `RequireToken` uses.
       %ApiToken{} = tok ->
-        if RequireToken.share_token_off_surface?(conn, tok),
-          do: {:error, :forbidden},
-          else: {:ok, tok}
+        if RequireToken.share_token_off_surface?(conn, tok) or
+             RequireToken.dataset_off_binding?(conn, tok),
+           do: {:error, :forbidden},
+           else: {:ok, tok}
 
       tok ->
         {:ok, tok}
@@ -295,7 +299,10 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # nonexistent dataset still resolves to an honest 404 downstream, which is the
   # pre-existing contract), and only a non-binary is refused 400.
   defp operator_dataset(conn) do
-    case Map.get(conn.params, "dataset", "production") do
+    # A dataset-bound token's default is its own dataset, never production.
+    default = ApiToken.bound_dataset(conn.assigns[:api_token]) || "production"
+
+    case Map.get(conn.params, "dataset", default) do
       dataset when is_binary(dataset) -> {:ok, dataset}
       _ -> {:error, :malformed_dataset}
     end

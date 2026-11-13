@@ -56,10 +56,20 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   @dataset_default "production"
   @default_current_issue "73"
 
+  # Owner ruling #4 (`BarkparkWeb.OpsOperatorGate`): the flat mount spans every
+  # workspace and is the instance operator's; a scoped mount lists, and so
+  # acknowledges, the mounted workspace's books only.
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    case BarkparkWeb.OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_console(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_console(socket) do
     # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
-    # the moment the WebSocket connects and mount re-runs. Both `load_books/0`
+    # the moment the WebSocket connects and mount re-runs. Both `load_books/1`
     # (full `book`-table read) and `current_registry_issue/0` (codelist
     # aggregate) plus the per-book `row_for/2` classification are DB work. This
     # console is admin/ops-gated (no crawler consumes the dead HTML), so run the
@@ -68,7 +78,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     {current_issue, rows} =
       if connected?(socket) do
         issue = current_registry_issue()
-        {issue, Enum.map(load_books(), &row_for(&1, issue))}
+        ws_id = BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket)
+        {issue, Enum.map(load_books(ws_id), &row_for(&1, issue))}
       else
         {@default_current_issue, []}
       end
@@ -316,12 +327,19 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   # dataset STRING, unscoped by workspace. It is NOT a tenant-scoped read that
   # forgot its scope; it is an operator's cross-workspace ONIX drift console.
   # Scoping it to nil would fail CLOSED (barkpark-s6t1) and blank the console.
-  defp load_books do
+  #
+  # `ws_id` is the mounted workspace on a SCOPED mount; nil on the operator's
+  # flat mount. Every event reads its row from this listing.
+  defp load_books(ws_id) do
     Document
     |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
+    |> clamp_workspace(ws_id)
     |> order_by([d], asc: d.doc_id)
     |> Repo.all()
   end
+
+  defp clamp_workspace(query, nil), do: query
+  defp clamp_workspace(query, ws_id), do: where(query, [d], d.workspace_id == ^ws_id)
 
   # The acknowledge target is the ROW THIS VIEW LISTED, re-read by primary key
   # (owner ruling #30 Q12, 2026-10-03). It used to be a global
@@ -338,7 +356,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
     case listed do
       [%{doc: %Document{id: pk}}] ->
-        # global-read: same flat-posture ops console as load_books/0 — pk is a row this view listed
+        # global-read: same console as load_books/1 — pk is a row this view listed
         case Repo.get(Document, pk) do
           %Document{type: @type_default, dataset: @dataset_default} = doc -> {:ok, doc}
           _ -> {:error, :not_found}

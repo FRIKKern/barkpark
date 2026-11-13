@@ -87,7 +87,9 @@ defmodule Barkpark.Content.TitleDerivation do
   it was leaves the column as it was, so a row whose column a caller once set
   by hand keeps it until the field itself is renamed. A rename to blank (`""`,
   spaces, or the field unset) clears the column to nil, the title a new
-  document with a blank name gets (task-a2064ff3c8c13417).
+  document with a blank name gets (task-a2064ff3c8c13417). That holds for a
+  column set by hand too: blanking the name clears it, as any other rename of
+  the field replaces it.
   """
   @spec follow(map(), map() | struct() | nil, map() | struct() | nil) :: map()
   def follow(attrs, base, schema) when is_map(attrs) and is_map(base) and not is_nil(schema) do

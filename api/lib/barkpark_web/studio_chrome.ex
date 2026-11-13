@@ -129,7 +129,23 @@ defmodule BarkparkWeb.StudioChrome do
   @per_view_events ~w(switch-workspace switch-project switch-dataset shares-open
                       toggle-create create-workspace create-project)
 
+  # A dataset slug is at most 63 characters (`Tenancy.Dataset`); this leaves
+  # room for an older, longer dataset string. The desk's own cap is the same.
+  @dataset_max 255
+
   def on_mount(:default, params, _session, socket) do
+    # A dataset longer than any name can be names no dataset: a 404 on every
+    # Studio page, as on the desk. The tabs compile the page's path, dataset
+    # and all, into a pattern (Regex.CompileError at 100,000 bytes), and the
+    # Studio's "no dataset named" flash carried it into the cookie.
+    case params do
+      %{"dataset" => dataset} when is_binary(dataset) and byte_size(dataset) > @dataset_max ->
+        raise BarkparkWeb.Studio.DeskLive.NotFound
+
+      _ ->
+        :ok
+    end
+
     socket =
       socket
       |> assign_new(:api_token, fn -> nil end)

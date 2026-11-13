@@ -4827,6 +4827,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("id", true, "string", "Chat session id."),
           arg("content", true, "string", "Message content (≤64 KiB).")
         ],
+        flags: [flag("attachments", "string", "Uploaded image id (max 4).", repeatable: true)],
         writes: true,
         default_output: "minimal"
       ),

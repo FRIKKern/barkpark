@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
+  alias BarkparkWeb.PreviewDay
   alias BarkparkWeb.Studio.Desk.FieldText
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
@@ -110,6 +111,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       # The page is about to put the Studio's editor here: draw the frame and
       # leave the read to it.
       assigns[:hold] ->
+        # A read for the key before is not this pane's: `in_flight` goes with
+        # it, or the pane would wait for it once the hold lifts.
+        socket = socket |> cancel_async(:load) |> assign(:in_flight, false)
         {:ok, socket |> assign(:data_key, key) |> assign(:data, AsyncResult.loading())}
 
       true ->
@@ -164,8 +168,14 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     do: ListSearch.handle(event, params, socket, &load/1)
 
   @impl true
-  def handle_async(:load, {:ok, data}, socket),
+  # A read is for the key it was started with. One that lands after the
+  # pane's key has moved on (the pane was put on hold for the editor, or took
+  # a hover's read, and the old read was already on its way) is not this
+  # pane's data: it is dropped, and whoever fills the pane now still does.
+  def handle_async(:load, {:ok, {key, data}}, %{assigns: %{data_key: key}} = socket),
     do: {:noreply, socket |> adopt(data) |> ListSearch.landed() |> landed()}
+
+  def handle_async(:load, {:ok, {_key, _data}}, socket), do: {:noreply, socket}
 
   # Cancelled because the pane took a hover's read instead: not a failure.
   def handle_async(:load, {:exit, {:shutdown, :cancel}}, socket),
@@ -376,13 +386,23 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             >
               <%!-- The title is an element of its own, as the TanStack row's
                    `.t`: a spec finds a row by its title alone. --%>
+              <%!-- A document row's tile and status marks, as the TanStack
+                   preview's media and its ring (draft) and dot (published). --%>
+              <span :if={entry[:icon]} class="dk-media" aria-hidden="true">
+                <img :if={entry[:media]} src={entry.media} alt="" loading="lazy" />
+                <BarkparkWeb.Icons.desk_icon :if={!entry[:media]} name={entry.icon} size={21} />
+              </span>
               <span class="pane-item-label">
                 <span class="dk-row-title">{entry.title}</span>
                 <span :if={entry[:sub]} class="dk-row-sub">{entry.sub}</span>
               </span>
-              <span :if={entry[:draft]} class="dk-draft" title={gettext("Draft")}>
-                <span aria-hidden="true">○</span>
-                <span class="sr-only">{gettext("Draft")}</span>
+              <span :if={entry[:draft] || entry[:published]} class="dk-status">
+                <span :if={entry[:draft]} class="dk-ring dk-draft" title={gettext("Draft")}>
+                  <span class="sr-only">{gettext("Draft")}</span>
+                </span>
+                <span :if={entry[:published]} class="dk-dot" title={gettext("Published")}>
+                  <span class="sr-only">{gettext("Published")}</span>
+                </span>
               </span>
               <%!-- A singleton on the root opens its document as a pane, so it
                    has the chevron too, as the TanStack root's. --%>
@@ -417,7 +437,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <dl :if={@data.result[:fields]} class="dk-fields">
             <div :for={field <- @data.result.fields}>
               <dt>{field.title}</dt>
-              <dd :if={!field[:refs]}>{field.value}</dd>
+              <%!-- A date-time is a marker (`FieldText`): `PreviewDay` prints it
+                    as its day in the workspace's time zone. --%>
+              <dd :if={!field[:refs]}><PreviewDay.text text={field.value} /></dd>
               <dd :if={field[:refs]} class="dk-refs">
                 <span :if={field.refs == []}>—</span>
                 <%= for ref <- field.refs do %>
@@ -551,6 +573,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
   defp load(socket), do: read_async(socket)
 
+  # The read, with the key the pane had when it was started.
+  defp keyed(%{assigns: %{data_key: key}}, read), do: fn -> {key, read.()} end
+
   defp read_async(socket) do
     %{pane: pane, node: node, dataset: dataset, scope: scope} = socket.assigns
     %{panes: panes, index: index, limit: limit, sort: sort} = socket.assigns
@@ -567,7 +592,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     |> assign(:reading, q || nil)
     |> assign(:in_flight, true)
     |> assign(:data, AsyncResult.loading(socket.assigns[:data] || AsyncResult.loading()))
-    |> start_async(:load, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
+    |> start_async(
+      :load,
+      keyed(socket, in_locale(fn -> read_pane(pane, node, dataset, scope) end))
+    )
   end
 
   @doc """
@@ -717,7 +745,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
 
         _ ->
           value = if name == "title", do: doc.title, else: (doc.content || %{})[name]
-          %{title: title, value: FieldText.show(value)}
+          %{title: title, value: FieldText.show(value, field)}
       end
     end
   end

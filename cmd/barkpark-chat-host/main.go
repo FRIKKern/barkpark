@@ -53,18 +53,22 @@ func main() {
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runner := &chathost.Runner{
-			Client:       &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential, AllowInsecureLoopback: state.AllowInsecureLoopback},
-			Handler:      chathost.NewLocalHandler(state.Host.ApprovedRoots),
-			Capabilities: capabilities(),
-		}
-		if err := runner.Run(ctx); err != nil && ctx.Err() == nil {
+		if err := newRunner(state).Run(ctx); err != nil && ctx.Err() == nil {
 			fatal(err.Error())
 		}
 
 	default:
 		fatal("unknown command: " + os.Args[1])
 	}
+}
+
+// newRunner wires the host: the handler fetches a turn's images through the
+// same client, and so the same Host credential, that leased the command.
+func newRunner(state chathost.State) *chathost.Runner {
+	client := &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential, AllowInsecureLoopback: state.AllowInsecureLoopback}
+	handler := chathost.NewLocalHandler(state.Host.ApprovedRoots)
+	handler.Images = client
+	return &chathost.Runner{Client: client, Handler: handler, Capabilities: capabilities()}
 }
 
 func capabilities() map[string]any {
@@ -78,6 +82,10 @@ func capabilities() map[string]any {
 			"auth_ready": false,
 			"operations": []string{"send_turn", "steer", "interrupt", "answer_approval", "close"},
 			"task_hands": taskHandsReady,
+		}
+		if name == "claude" {
+			// Only claude takes image blocks; codex on a host is text-only.
+			metadata["attachments"] = chathost.ClaudeImageTypes()
 		}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {

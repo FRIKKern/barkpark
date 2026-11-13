@@ -19,6 +19,9 @@ import (
 
 type LocalHandler struct {
 	ApprovedRoots []string
+	// Images fetches the images a send_turn references (turn_images.go). Nil
+	// means the host cannot fetch: a turn that carries images is refused.
+	Images ImageFetcher
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession
@@ -65,7 +68,14 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 
 	cwd, _ := payload["cwd"].(string)
 	content := textContent(payload["content"])
-	if cwd == "" || content == "" {
+	// The image references ride payload.attachments
+	// (StudioChat.TurnAttachments.to_references/1). A bad one refuses the turn.
+	refs, err := ParseAttachmentRefs(payload)
+	if err != nil {
+		return fmt.Errorf("refused the images of this turn, so %s was not started: %w", provider, err)
+	}
+	// Empty text is a turn only when at least one image comes with it.
+	if cwd == "" || (content == "" && len(refs) == 0) {
 		return fmt.Errorf("command requires cwd and content")
 	}
 	resolved, err := ResolveApprovedPath(h.ApprovedRoots, cwd)
@@ -73,11 +83,20 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 		return err
 	}
 	if provider == "codex" {
+		if len(refs) > 0 {
+			return fmt.Errorf("codex on a registered host takes text only: this turn carries %d image(s), so it was refused and codex was not started", len(refs))
+		}
 		return h.runCodex(ctx, resolved, content, remote, emit)
 	}
 	switch provider {
 	case "claude":
-		return h.runClaude(ctx, resolved, content, remote, emit)
+		var images []Attachment
+		if len(refs) > 0 {
+			if images, err = h.fetchTurnImages(ctx, remote, refs); err != nil {
+				return err
+			}
+		}
+		return h.runClaude(ctx, resolved, content, images, remote, emit)
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)
 	}
@@ -124,7 +143,7 @@ func (h *LocalHandler) handleControl(ctx context.Context, sessionID, operation s
 	return emit(map[string]any{"kind": "control_completed", "operation": operation})
 }
 
-func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, remote RemoteCommand, emit func(map[string]any) error) error {
+func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, images []Attachment, remote RemoteCommand, emit func(map[string]any) error) error {
 	providerSessionID, _ := remote.Command["provider_session_id"].(string)
 	sessionID, _ := remote.Command["session_id"].(string)
 	payload, _ := remote.Command["payload"].(map[string]any)
@@ -189,13 +208,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, remot
 	}
 	defer h.unregister(sessionID, session)
 
-	if err := session.write(map[string]any{
-		"type": "user",
-		"message": map[string]any{
-			"role":    "user",
-			"content": []any{map[string]any{"type": "text", "text": content}},
-		},
-	}); err != nil {
+	if err := session.write(claudeUserFrame(content, images)); err != nil {
 		return err
 	}
 

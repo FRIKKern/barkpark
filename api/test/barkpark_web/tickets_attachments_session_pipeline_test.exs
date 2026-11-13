@@ -115,6 +115,24 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
     assert response(conn, 200) == @pdf
   end
 
+  # ── DATASET BINDING — this pipeline has no dataset fence of its own ───────
+
+  test "a dataset-bound token naming another dataset is refused, by Bearer and by cookie",
+       %{path: path, default_ws: ws} do
+    raw = "tk-attach-bound-" <> Ecto.UUID.generate()
+    perms = ["read", "write"]
+    {:ok, _} = Auth.create_token(raw, "bound", "bound-own", perms, ws.id, dataset_bound: true)
+
+    bearer = build_conn() |> put_req_header("authorization", "Bearer #{raw}")
+    cookie = build_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
+
+    for conn <- [bearer, cookie] do
+      assert conn |> get(path <> "?dataset=#{@dataset}") |> response(403)
+      # Naming none falls to its own dataset, where this ticket does not live.
+      assert conn |> get(path) |> response(404)
+    end
+  end
+
   # ── (A) TIER — a public-read token must never reach this surface ──────────
 
   test "(A) a public-read token bound to the SAME workspace is refused, not served bytes",
