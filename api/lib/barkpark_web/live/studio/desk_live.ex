@@ -135,13 +135,15 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # A pane that stays does not read again, so the title it read is kept here.
     titles = Map.take(socket.assigns.titles, Enum.map(views, & &1.id))
     last = List.last(views)
-    # Following a hit (or any link) puts the search and the Inspect dialog away.
+    # Following a hit (or any link) puts the search away. The Inspect dialog
+    # is open while the URL says so (`inspect=on` on the last document, as
+    # Sanity's), so Back after closing it opens it again.
     socket =
       assign(socket,
         desk_search: "",
         desk_search_hits: [],
         desk_search_lit: 0,
-        desk_inspect: false
+        desk_inspect: match?(%{kind: :doc, inspect: "on"}, List.last(panes))
       )
 
     socket =
@@ -158,7 +160,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         desk_base: base,
         desk_uri: uri,
         titles: titles,
-        page_title: titles[last.id] || last.title
+        page_title: titles[last.id] || kept_title(socket.assigns, last) || last.title
       )
 
     # The lists' first pages: read in the first render, handed to the
@@ -172,6 +174,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     {:noreply, socket}
   end
+
+  # The same last pane after a patch that changed only its params (Inspect,
+  # a view tab): the title it has is kept. The edit pane's title comes from
+  # the editor, which a param change does not load again.
+  defp kept_title(%{desk_panes: [_ | _] = views, page_title: title}, last),
+    do: if(List.last(views).id == last.id, do: title)
+
+  defp kept_title(_assigns, _last), do: nil
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
@@ -255,12 +265,27 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # Everything else is the editor's: the Studio's own handlers.
-  # Ctrl+Alt+I in the edit pane, and the dialog's close (`bp-desk.js`). Only
-  # over a document the editor holds: the dialog renders that one.
-  def handle_event("desk-inspect", %{"open" => open}, socket),
-    do:
-      {:noreply,
-       assign(socket, :desk_inspect, open == true and is_map(socket.assigns[:editor_doc]))}
+  # Ctrl+Alt+I while a document is open, and the dialog's close (`bp-desk.js`):
+  # `inspect=on` in, or out of, the last document's URL. Only over a document
+  # the editor holds: the dialog renders that one.
+  def handle_event("desk-inspect", %{"open" => open}, socket) do
+    %{chain: panes, base: base} = socket.assigns
+    last = List.last(panes)
+
+    to =
+      &push_patch(socket, to: Panes.with_params(panes, length(panes) - 1, %{inspect: &1}, base))
+
+    cond do
+      open == true and is_map(socket.assigns[:editor_doc]) and match?(%{kind: :doc}, last) ->
+        {:noreply, to.("on")}
+
+      open != true and match?(%{inspect: "on"}, last) ->
+        {:noreply, to.(nil)}
+
+      true ->
+        {:noreply, assign(socket, :desk_inspect, false)}
+    end
+  end
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 

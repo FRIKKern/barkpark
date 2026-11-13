@@ -1206,15 +1206,18 @@
       };
       root.addEventListener("click", hook._onCopy);
 
-      // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I in the edit
-      // pane asks the page for it (by the key's place: Alt changes the letter
-      // on a Mac); it opens as a modal when it is mounted. Escape or its close
+      // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I while a
+      // document is open asks the page for it (by the key's place: Alt changes
+      // the letter on a Mac); the page puts `inspect=on` in the URL, and it
+      // opens as a modal when it is mounted. Escape or its close
       // button closes it, which tells the page, and the browser gives the
       // focus back to where it was. Its two tabs switch here, by click or
       // the arrow keys.
       hook._onInspectKey = function (e) {
         if (!e.ctrlKey || !e.altKey || e.metaKey || e.shiftKey || e.code !== "KeyI") return;
-        if (!e.target.closest || !e.target.closest("[data-pane-editing]")) return;
+        // As soon as a document is open, wherever the focus is: a click on
+        // a list row leaves it on the row (Sanity's, keyboard:158).
+        if (!root.querySelector("[data-pane-editing]")) return;
         e.preventDefault();
         hook.pushEvent("desk-inspect", { open: true });
       };

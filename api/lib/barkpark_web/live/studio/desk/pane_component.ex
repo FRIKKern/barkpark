@@ -432,7 +432,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           gettext("This is the current document. Revision “%{rev}” is not shown here.",
             rev: pane.rev
           ),
-        (pane[:view] || pane[:inspect]) &&
+        # `inspect=on` is the Inspect dialog, which the desk draws.
+        (pane[:view] || pane[:inspect] not in [nil, "on"]) &&
           gettext("Other views and inspectors are not shown here.")
       ],
       & &1
