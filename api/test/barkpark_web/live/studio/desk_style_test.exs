@@ -26,6 +26,19 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     after_media
   end
 
+  # Scorecard row 7: at 640 px the TanStack Studio shows two strips and a
+  # 538 px document. The desk's document pane and the Studio editor inside it
+  # give way below 600 px as the editor does in the phone bucket (measured:
+  # with the 560 px floor back the editor ran 22 px past the window).
+  test "a document beside the strips can be narrower than 600 px and is not cut" do
+    assert rule(@css, ".dk .dk-doc") =~ "flex: 1 1 600px"
+    assert rule(@css, ".dk .dk-edit") =~ "min-width: 0"
+    assert rule(@css, ".dk .dk-edit .editor-panel") =~ "min-width: 0"
+
+    assert @css =~
+             ".dk .dk-edit .editor-panel .bp-paper-surface, .dk .dk-edit .editor-panel .editor-body, .dk .dk-edit .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) { min-inline-size: 0; }"
+  end
+
   test "a reference chip's resting border is --fg-dim (3:1 in both themes), not --border-subtle" do
     body = rule(@css, ".dk .dk-ref")
     assert body =~ "var(--fg-dim)"
