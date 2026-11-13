@@ -1,4 +1,5 @@
-// bp-array-focus.js — keyboard focus for Studio array fields
+// bp-array-focus.js — keyboard focus for Studio array fields, and the focused
+// field after another editor's save (bp:form-remote-values, at the end)
 // (task-278c7992ed05a30b).
 //
 // An arrayOf field's row buttons (+ Add, ▲, ▼, ×) are server round-trips: the
@@ -126,4 +127,47 @@
   document.addEventListener("click", onClick);
 
   window.BarkparkArrayRowFocusTarget = target;
+})();
+
+// bp:form-remote-values (task-e6ef964ac2e41d5a): another editor's save reached
+// this document's form while it had nothing unsaved. A LiveView patch leaves
+// the FOCUSED input as it is, so the field the person rests in kept the old
+// text, and their next keystroke posted it back over the other's words. The
+// server names each changed text field with its new value and the one it
+// showed before (`Lifecycle.push_remote_values`). The focused input takes the
+// new value only while it still shows exactly the old one: anything else is
+// typing not yet sent, and stays. Focus stays; the caret keeps its place in
+// the text around the other's change.
+(function () {
+  "use strict";
+
+  var TEXT = /^(text|search|url|tel)$/;
+
+  // Where `pos` in `was` lands in `now`, given one changed stretch between them.
+  function shift(pos, was, now) {
+    var p = 0;
+    while (p < was.length && p < now.length && was[p] === now[p]) p++;
+    var s = 0;
+    while (s < was.length - p && s < now.length - p && was[was.length - 1 - s] === now[now.length - 1 - s]) s++;
+    if (pos <= p) return pos;
+    if (pos >= was.length - s) return pos + now.length - was.length;
+    return now.length - s;
+  }
+
+  function onRemoteValues(e) {
+    var values = (e && e.detail && e.detail.values) || {};
+    var el = document.activeElement;
+    if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
+    if (!(el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
+    if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;
+    var change = values[el.name];
+    if (!change || typeof change.value !== "string" || el.value !== change.was) return;
+    var start = shift(el.selectionStart, change.was, change.value);
+    var end = shift(el.selectionEnd, change.was, change.value);
+    el.value = change.value;
+    el.setSelectionRange(start, end);
+  }
+
+  window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
+  window.BarkparkFormRemoteValues = onRemoteValues;
 })();

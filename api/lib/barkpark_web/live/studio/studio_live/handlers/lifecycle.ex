@@ -107,13 +107,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           Shared.widget_values_changed?(schema, socket.assigns[:editor_form], updated_form)
 
         {:noreply,
-         assign(socket,
+         socket
+         |> push_remote_values(socket.assigns[:editor_form] || %{}, updated_form)
+         |> assign(
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
          )}
     end
+  end
+
+  # task-e6ef964ac2e41d5a: a LiveView patch leaves the FOCUSED input as it is,
+  # so a person resting in a field kept the old text after another's save, and
+  # the next keystroke there posted it back over their words. The page gets
+  # each changed text field's new value and the one it showed before
+  # (`bp:form-remote-values`); bp-array-focus.js sets the focused input when it
+  # still shows exactly the old one, so nothing typed and unsent is lost.
+  defp push_remote_values(socket, old_form, new_form) do
+    values =
+      for {key, new} <- new_form,
+          is_binary(key) and is_binary(new),
+          old = Map.get(old_form, key),
+          is_binary(old) and old != new,
+          into: %{},
+          do: {"doc[#{key}]", %{value: new, was: old}}
+
+    if values == %{},
+      do: socket,
+      else: push_event(socket, "bp:form-remote-values", %{values: values})
   end
 
   defp keep_unsaved_fields(socket, doc_data) do
@@ -335,8 +357,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       socket.assigns[:editor_dirty] ->
         {:noreply, socket}
 
+      # The rebuild may reach the form before `doc_updated` does; whichever
+      # reloads it tells the page what changed.
       true ->
-        {:noreply, Shared.rebuild_panes(socket)}
+        old_form = socket.assigns[:editor_form] || %{}
+        rebuilt = Shared.rebuild_panes(socket)
+        {:noreply, push_remote_values(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
     end
   end
 

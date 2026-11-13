@@ -131,6 +131,28 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
     assert stored(c) == {"Fixture post A2", "First B1 B2"}
   end
 
+  # task-e6ef964ac2e41d5a: LiveView never patches the input that has focus, so
+  # a person resting in the title kept showing the old text after B's save, and
+  # their next keystroke posted it back over B's words. With the form clean, the
+  # page is told which fields changed and what each showed before; the browser
+  # sets the focused one when it still shows exactly that (nothing unsent).
+  test "a clean form told of another's save hears each changed field, new and old", c do
+    a = open(c)
+    b = open(c)
+
+    type_in(a, "title", " A2")
+    render(b)
+
+    type_in(b, "title", " B3")
+    render(a)
+
+    assert_push_event(a, "bp:form-remote-values", %{values: values})
+
+    assert values == %{
+             "doc[title]" => %{value: "Fixture post A2 B3", was: "Fixture post A2"}
+           }
+  end
+
   describe "a remote save while a field holds an edit the store does not have" do
     defp dirty_socket(unsaved_keys) do
       %Phoenix.LiveView.Socket{
