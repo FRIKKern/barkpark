@@ -1406,7 +1406,7 @@ defmodule Barkpark.StudioChat.Recorder do
         |> publish_activity(%{state: :working, line: "writing…"})
 
       :approval_requested ->
-        ask = runtime_approval(event)
+        ask = Runtime.ApprovalAsk.from_event(event)
         persist_approval_ask(state.session_id, ask)
         broadcast(state, {:claude_chat_permission, ask})
 
@@ -1620,27 +1620,6 @@ defmodule Barkpark.StudioChat.Recorder do
     case get_in(native, ["params", "delta"]) || get_in(native, [:params, :delta]) do
       text when is_binary(text) -> text
       _ -> ""
-    end
-  end
-
-  defp runtime_approval(%Event{} = event) do
-    params = event.native["params"] || event.native[:params] || %{}
-
-    %{
-      request_id: event.approval_id,
-      tool_name: runtime_approval_name(event.native),
-      input: params,
-      title: nil
-    }
-  end
-
-  defp runtime_approval_name(native) do
-    case native["method"] || native[:method] do
-      "item/fileChange/requestApproval" -> "FileChange"
-      "item/permissions/requestApproval" -> "Permissions"
-      "item/commandExecution/requestApproval" -> "CommandExecution"
-      method when is_binary(method) -> method
-      _ -> "Approval"
     end
   end
 
