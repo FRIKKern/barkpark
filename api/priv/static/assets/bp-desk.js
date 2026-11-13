@@ -966,26 +966,29 @@
         }, WARM_DELAY_MS);
       };
 
-      // The edit pane's "…" menu (a popover): opened, its first item has the
-      // focus and the button says it is expanded; the arrows move between the
-      // items; Tab leaves it closed. Escape and a click outside are the
-      // popover's own, and both give the focus back to the button.
+      // The desk's popover menus (the edit pane's Share and "…", a list's
+      // "List options"): opened, the first item has the focus and the button
+      // says it is expanded; the arrows move between the items; Tab leaves it
+      // closed. Escape and a click outside are the popover's own, and both
+      // give the focus back to the button.
+      var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
+      var MENU_ITEM = '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])';
       hook._onDocMenu = function (e) {
         var menu = e.target;
-        if (!menu.matches || !menu.matches(".dk-doc-menu-list[popover]")) return;
+        if (!menu.matches || !menu.matches(MENU)) return;
         var open = e.newState === "open";
         var button = root.ownerDocument.getElementById(menu.id + "-button");
         if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
-        var first = menu.querySelector('[role="menuitem"]:not([disabled])');
+        var first = menu.querySelector(MENU_ITEM);
         if (open && first) first.focus();
       };
       hook._onDocMenuKey = function (e) {
-        var menu = e.target.closest ? e.target.closest(".dk-doc-menu-list[popover]") : null;
+        var menu = e.target.closest ? e.target.closest(MENU) : null;
         if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "Tab") return menu.hidePopover();
         var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
         if (step === undefined) return;
-        var items = Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]:not([disabled])'));
+        var items = Array.prototype.slice.call(menu.querySelectorAll(MENU_ITEM));
         if (!items.length) return;
         e.preventDefault();
         var at = items.indexOf(root.ownerDocument.activeElement);
