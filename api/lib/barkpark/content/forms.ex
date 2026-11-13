@@ -28,7 +28,8 @@ defmodule Barkpark.Content.Forms do
     Labels,
     PatchLock,
     PortableText,
-    SlugValue
+    SlugValue,
+    TextRebase
   }
 
   alias Barkpark.PortableDoc.{Projection, Synthesis}
@@ -1383,7 +1384,23 @@ defmodule Barkpark.Content.Forms do
     end
   end
 
+  # `:field_bases` (task-e6ef964ac2e41d5a) names the text fields this post was
+  # written from an older value than the editor was last told of: each is put
+  # on top of what the store holds NOW, so another editor's words stay.
+  # The value this editor's own last save left is a base it may type from too:
+  # a save by another editor it has not yet been told of moved the store.
+  defp with_snapshot(bases, base_doc) do
+    snapshot = text_values(base_doc)
+    Map.new(bases, fn {key, values} -> {key, List.wrap(values) ++ [Map.get(snapshot, key)]} end)
+  end
+
+  defp text_values(doc),
+    do: Map.put(Map.get(doc, :content) || %{}, "title", Map.get(doc, :title))
+
   defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
+    {bases, opts} = Keyword.pop(opts, :field_bases, %{})
+    params = TextRebase.rebase(params, with_snapshot(bases, base_doc), text_values(current))
+
     with content when is_map(content) <-
            classic_save_content(
              base_doc,

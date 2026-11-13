@@ -627,7 +627,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              schema,
              Barkpark.Content.Forms.with_posted_rich_text(params, raw_params, schema),
              socket.assigns.dataset,
-             hook_opts(socket)
+             [field_bases: socket.assigns[:editor_field_bases] || %{}] ++ hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
           ensure_sanity_image_assets(socket, schema, saved_doc)

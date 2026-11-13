@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
@@ -354,7 +355,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case fold_dot_paths(params, socket) do
       %{"doc" => doc} ->
-        {:noreply, settle_dirty(Shared.do_autosave(socket, doc, :change), target_key(params))}
+        # A post written from an older value than the store holds is rebased
+        # onto it, so another editor's words stay (task-e6ef964ac2e41d5a).
+        bases = RemoteValues.bases(doc, socket)
+        before = socket.assigns[:editor_doc]
+
+        socket =
+          socket
+          |> assign(editor_field_bases: bases)
+          |> Shared.do_autosave(doc, :change)
+          |> assign(editor_field_bases: %{})
+          |> RemoteValues.settle(bases, doc, before)
+
+        {:noreply, settle_dirty(socket, target_key(params))}
 
       _ ->
         {:noreply, socket}

@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
@@ -151,6 +152,81 @@ defmodule BarkparkWeb.Studio.TwoEditorsOneDocumentTest do
     assert values == %{
              "doc[title]" => %{value: "Fixture post A2 B3", was: "Fixture post A2"}
            }
+  end
+
+  # A post as a browser sends it from inputs that show `form`, typed in `name`.
+  defp post_form(view, name, form) do
+    view
+    |> element("#editor-form")
+    |> render_change(%{"_target" => ["doc", name], "doc" => form})
+  end
+
+  describe "a post written from an older value than the store holds" do
+    # The browser kept typing it had not sent over the push, or sent the post
+    # before the push reached it: the title still grows from "Fixture post".
+    test "A was told of B's save but posts from the old title: both words stay", c do
+      a = open(c)
+      b = open(c)
+
+      type_in(b, "title", " B3")
+      render(a)
+
+      post_form(a, "title", %{"title" => "Fixture post A7", "excerpt" => "First"})
+
+      assert stored(c) == {"Fixture post B3 A7", "First"}
+
+      # The merged title goes back to A's page, which still shows its post.
+      assert_push_event(a, "bp:form-remote-values", %{
+        values: %{"doc[title]" => %{value: "Fixture post B3 A7", was: "Fixture post A7"}}
+      })
+    end
+
+    test "A's post is handled before A hears of B's save: both words stay", c do
+      a = open(c)
+      type_in(a, "excerpt", " A1")
+
+      # Another editor's save that A's session has not been told of yet.
+      draft = "drafts." <> c.doc_id
+
+      {1, _} =
+        Barkpark.Repo.update_all(
+          from(d in Barkpark.Content.Document, where: d.doc_id == ^draft and d.type == ^c.type),
+          set: [title: "Fixture post B3"]
+        )
+
+      post_form(a, "title", %{"title" => "Fixture post A7", "excerpt" => "First A1"})
+
+      assert stored(c) == {"Fixture post B3 A7", "First A1"}
+    end
+
+    test "A took B's title and types on: A's post stands as typed", c do
+      a = open(c)
+      b = open(c)
+
+      type_in(b, "title", " B3")
+      render(a)
+
+      type_in(a, "title", " A7")
+
+      assert stored(c) == {"Fixture post B3 A7", "First"}
+    end
+
+    test "a field A did not touch, posted from before B's save: B's words stay, and A shows them",
+         c do
+      a = open(c)
+      b = open(c)
+
+      type_in(b, "excerpt", " B1")
+      render(a)
+
+      # A's browser had not patched the excerpt when it posted the title.
+      post_form(a, "title", %{"title" => "Fixture post A2", "excerpt" => "First"})
+      assert stored(c) == {"Fixture post A2", "First B1"}
+      assert shown(a, "excerpt") == "First B1"
+
+      type_in(a, "title", " A3")
+      assert stored(c) == {"Fixture post A2 A3", "First B1"}
+    end
   end
 
   describe "a remote save while a field holds an edit the store does not have" do
