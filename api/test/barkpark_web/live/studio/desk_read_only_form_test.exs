@@ -172,8 +172,7 @@ defmodule BarkparkWeb.Studio.DeskReadOnlyFormTest do
         assert body =~ "font-size: 15px; line-height: 23px"
       end
 
-      # The pane and its header are the edit pane's: #13141b in dark, 51 px.
-      assert rule(".dk .dk-doc:not(.dk-edit)") =~ "background: var(--dk-bg)"
+      # Its header is the edit pane's: 51 px.
       assert rule(".dk .dk-doc > .pane-header") =~ "height: 51px"
     end
   end

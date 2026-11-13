@@ -1224,6 +1224,14 @@
       // The navbar's search button opens the dialog; the search's own form,
       // sent with Enter, puts it away (the server opens the hit).
       hook._onSearchOpen = function (e) {
+        // A press on the dimmed page round the dialog puts it away, as
+        // TanStack's: the press lands on the dialog itself, outside its box.
+        var dialog = e.target && e.target.id === "dk-search-dialog" ? e.target : null;
+        if (dialog && dialog.open && dialog.getBoundingClientRect) {
+          var r = dialog.getBoundingClientRect();
+          if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeSearch(dialog);
+          return;
+        }
         var opener = e.target && e.target.closest ? e.target.closest("[data-desk-search-open]") : null;
         if (!opener || !plainClick(e)) return;
         if (openSearch(root.ownerDocument)) e.preventDefault();

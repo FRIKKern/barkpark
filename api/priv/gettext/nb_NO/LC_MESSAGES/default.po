@@ -678,6 +678,20 @@ msgid_plural "%{count} results"
 msgstr[0] "1 treff"
 msgstr[1] "%{count} treff"
 
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "1 item"
+msgid_plural "%{count} items"
+msgstr[0] "1 element"
+msgstr[1] "%{count} elementer"
+
+#: lib/barkpark_web/live/studio/desk/inspect_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "1 property"
+msgid_plural "%{count} properties"
+msgstr[0] "1 egenskap"
+msgstr[1] "%{count} egenskaper"
+
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:590
 #, elixir-autogen, elixir-format
 msgid "1 word"
