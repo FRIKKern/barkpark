@@ -60,7 +60,15 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk button.dk-crumb:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-crumb.current { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: default; }
       .dk .dk-toast { inset: auto; left: 50%; bottom: 56px; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: 8px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); font-size: var(--text-sm); }
-      .dk .dk-edit-footer { display: flex; justify-content: flex-end; padding: 4px 8px; border-top: 1px solid var(--border-subtle); }
+      .dk .dk-edit-footer { --dk-foot-meta: rgb(106 110 125); --dk-foot-icon: rgb(106 110 125); --dk-foot-hover: rgb(246 246 248); --dk-publish-bg: rgb(31 34 48); --dk-publish-fg: rgb(255 255 255); --dk-publish-off-bg: rgb(187 189 201); --dk-publish-off-fg: rgb(236 237 243); flex: none; box-sizing: border-box; min-height: 49px; display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; font-size: 13px; line-height: 19px; color: var(--dk-foot-meta); }
+      html[data-theme="dark"] .dk .dk-edit-footer { --dk-foot-meta: rgb(147 148 159); --dk-foot-icon: rgb(147 148 159); --dk-foot-hover: rgb(33 35 47); --dk-publish-bg: rgb(228 229 233); --dk-publish-fg: rgb(19 20 27); --dk-publish-off-bg: rgb(85 92 117); --dk-publish-off-fg: rgb(33 38 57); }
+      .dk .dk-footer-status { flex: 1 1 0; min-width: 0; padding: 3px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-publish { display: inline-flex; align-items: center; gap: 6px; min-height: 25px; padding: 4px 12px; border: 0; border-radius: 3px; background: var(--dk-publish-bg); color: var(--dk-publish-fg); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+      .dk .dk-publish:disabled { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); cursor: default; }
+      .dk .dk-publish svg { width: 17px; height: 17px; margin: -2px 0 -2px -4px; }
+      .dk .dk-edit-footer .dk-doc-menu { margin-left: 4px; }
+      .dk .dk-edit-footer .dk-doc-menu-button { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-foot-icon); font-size: 17px; line-height: 1; cursor: pointer; }
+      .dk .dk-edit-footer .dk-doc-menu-button:hover { background: var(--dk-foot-hover); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
       .dk .dk-inspect { margin: auto; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-card); color: var(--fg); }
       .dk .dk-inspect[open] { display: flex; flex-direction: column; }

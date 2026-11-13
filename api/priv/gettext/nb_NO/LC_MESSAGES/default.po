@@ -349,6 +349,16 @@ msgstr "%{type} uten tittel · %{tail}"
 msgid "Updated %{ago}"
 msgstr "Oppdatert %{ago}"
 
+#: lib/barkpark_web/live/studio/desk/doc_footer.ex:63
+#, elixir-autogen, elixir-format
+msgid "Edited %{ago}"
+msgstr "Redigert %{ago}"
+
+#: lib/barkpark_web/live/studio/desk/doc_footer.ex:66
+#, elixir-autogen, elixir-format
+msgid "Last published %{ago}"
+msgstr "Sist publisert %{ago}"
+
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:302
 #, elixir-autogen, elixir-format
 msgid "View blast radius"
