@@ -8519,6 +8519,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Honest line for a user turn that never reached the model (charter D24): the
   # port write failed or the session had already gone. The words are restored to
   # the composer, so this is a "try again", not a "your message is lost".
+  # A registered host that does not advertise the attachments capability did not
+  # drop: retrying with the same images fails the same way, so say what will work.
+  defp send_error_text({:host_cannot_receive_attachments, _provider}),
+    do:
+      "This session's chat host can't receive images yet. Update barkpark-chat-host, or send the words alone."
+
   defp send_error_text(_reason),
     do:
       "That message didn't reach Claude — the session dropped. Your words were kept; send again."
