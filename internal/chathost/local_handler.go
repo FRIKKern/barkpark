@@ -197,13 +197,14 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, image
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = providerWaitDelay
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	waited := false
+	defer reapUnlessWaited(cmd, &waited)
 	session := newActiveLocalSession("claude", cmd, stdin)
 	if err := h.register(sessionID, session); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
 		return err
 	}
 	defer h.unregister(sessionID, session)
@@ -234,6 +235,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, image
 	if err := scanner.Err(); err != nil {
 		return err
 	}
+	waited = true
 	waitErr := cmd.Wait()
 	if waitErr != nil && !terminal {
 		return fmt.Errorf("claude: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
@@ -301,13 +303,14 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = providerWaitDelay
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	waited := false
+	defer reapUnlessWaited(cmd, &waited)
 	session := newActiveLocalSession("codex", cmd, stdin)
 	if err := h.register(sessionID, session); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
 		return err
 	}
 	defer h.unregister(sessionID, session)
@@ -404,10 +407,28 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	waited = true
 	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
 		return fmt.Errorf("codex exec: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// providerWaitDelay bounds cmd.Wait once the provider has exited or been
+// killed: a grandchild that inherited stderr (an MCP server) cannot hold the
+// turn open past it.
+const providerWaitDelay = 5 * time.Second
+
+// reapUnlessWaited kills and waits for a provider that a turn left without
+// waiting for (an emit error, a decode error, a failed request). Without the
+// Wait the child stays a zombie and its pipes stay open until the host exits
+// (task-248ddc24af006c04).
+func reapUnlessWaited(cmd *exec.Cmd, waited *bool) {
+	if *waited {
+		return
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 }
 
 func claudePermissionMode(payload map[string]any) (string, error) {
