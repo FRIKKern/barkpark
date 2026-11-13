@@ -213,7 +213,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn:hover { background: var(--dk-icon-btn-hover); color: var(--dk-icon-btn-hover-fg); }
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn svg { width: 21px; height: 21px; }
       .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: absolute; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-      .dk .dk-list-search { position: relative; margin: -1px 12px 7px; padding: 0; border: 0; }
+      /* A list's box sits right under its 49 px header and the first row 12 px under it, as TanStack's `.pane.list > .search`: the row at the pane's top + 86. */
+      .dk .dk-list-search { position: relative; margin: 0 12px 12px; padding: 0; border: 0; }
       .dk .dk-list-search .search-icon { position: absolute; left: 2px; top: 2px; color: var(--dk-muted); pointer-events: none; }
       .dk .dk-list-search .search-icon > svg { display: block; width: 21px; height: 21px; }
       .dk .dk-list-search input { box-sizing: border-box; width: 100%; height: auto; min-height: 0; margin: 0; border: 0; outline: none; box-shadow: none; background: none; font: inherit; font-size: 13px; line-height: 19px; padding: 3px 8px 3px 29px; color: var(--dk-fg); border-radius: 3px; }
