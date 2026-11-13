@@ -116,7 +116,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put(:list_id, list_id)
       |> Map.put(:options, options)
       |> Map.put(:input_name, assigns.path)
-      |> Map.put(:input_id, "f-#{assigns.field.name}")
+      |> Map.put(:input_id, input_id(assigns.field.name, assigns.path))
       |> Map.put(:errors_list, errors_list(assigns.errors))
       |> Map.put(:empty_phrase, @no_codelist_phrase)
       |> Map.put(:use_combobox, use_combobox?)
@@ -207,6 +207,24 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   def empty_registry_phrase, do: @no_codelist_phrase
 
   # ─── private ────────────────────────────────────────────────────────────────
+
+  # The DOM id of the control, and through it the tree's LiveComponent id. It
+  # carries the input's path: every row of an array has the same item field,
+  # so an id built from the field's name alone (`f-subject`) repeated in each
+  # row, and two rows of a tree codelist raised `found duplicate ID
+  # "tree-f-subject"` (task-f9f7a9acd3608ca4). A top-level field keeps
+  # `f-<name>`; `doc[subjects][1]` gives `f-subjects-1`.
+  defp input_id(name, path) do
+    segments =
+      ~r/\[([^\]]*)\]/
+      |> Regex.scan(path || "", capture: :all_but_first)
+      |> Enum.map(fn [seg] -> String.replace(seg, ~r/[^A-Za-z0-9_-]/, "_") end)
+
+    case segments do
+      [] -> "f-#{name}"
+      segments -> "f-" <> Enum.join(segments, "-")
+    end
+  end
 
   defp default_loader(plugin_name, list_id) do
     Code.ensure_loaded?(Barkpark.Content.Codelists) and
