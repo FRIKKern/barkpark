@@ -44,7 +44,14 @@ class BpRichTextEditor extends HTMLElement {
   }
 
   connectedCallback() {
-    if (this._editor) return; // double-mount guard
+    // Moved in the page (the desk's narrow layout moves the editor pane):
+    // the text and toolbar stay, and the listeners `disconnectedCallback`
+    // took off go back on. Without this the text took typing and never told
+    // the field bridge, so nothing saved (task-1647a0c1c37cf069).
+    if (this._editor) {
+      this._listen();
+      return;
+    }
 
     const initial = this.getAttribute("value") || this.dataset.value || "";
 
@@ -71,7 +78,6 @@ class BpRichTextEditor extends HTMLElement {
     this._decorateBlocks();
 
     this._onInput = () => this._emit();
-    this._editor.addEventListener("input", this._onInput);
 
     // A custom Portable Text block (a mediaModule, a quote) is a box the text
     // cannot edit. Clicking it, or Enter or Space on it, asks the host to open
@@ -94,8 +100,6 @@ class BpRichTextEditor extends HTMLElement {
       e.preventDefault();
       this._openBlock(box);
     };
-    this._editor.addEventListener("click", this._onBlockClick);
-    this._editor.addEventListener("keydown", this._onBlockKey);
 
     // Paste-as-plain-text: strip formatting + sanitise XSS surface.
     // document.execCommand is deprecated but supported across current
@@ -106,8 +110,18 @@ class BpRichTextEditor extends HTMLElement {
       const text = cb ? cb.getData("text/plain") : "";
       document.execCommand("insertText", false, text);
     };
-    this._editor.addEventListener("paste", this._onPaste);
+    this._listen();
     this._loadLinkTitles();
+  }
+
+  // The listeners `disconnectedCallback` takes off. Adding the same function
+  // twice is a no-op, so a second call adds nothing.
+  _listen() {
+    if (this._onSelection) document.addEventListener("selectionchange", this._onSelection);
+    this._editor.addEventListener("input", this._onInput);
+    this._editor.addEventListener("click", this._onBlockClick);
+    this._editor.addEventListener("keydown", this._onBlockKey);
+    this._editor.addEventListener("paste", this._onPaste);
   }
 
   disconnectedCallback() {
