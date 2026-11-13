@@ -86,6 +86,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:title_suffix, " | Barkpark")
       |> assign(warm: %{})
       |> assign(:titles, %{})
+      # Each document's title as a list or a pane has read it, by id: a pane
+      # drawn before its own read (a click, Back) is named by it, not its id.
+      |> assign(:doc_titles, %{})
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
@@ -145,7 +148,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
           index: index,
           node: node,
           key: PaneComponent.data_key(pane, dataset, node),
-          title: PaneComponent.provisional_title(pane, node)
+          title: known_title(socket, pane) || PaneComponent.provisional_title(pane, node)
         }
       end
 
@@ -185,6 +188,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     {:noreply, socket}
   end
+
+  defp known_title(socket, %{kind: :doc, id: id}), do: socket.assigns.doc_titles[id]
+  defp known_title(_socket, _pane), do: nil
 
   # A row was hovered or focused (`bp-desk.js`): read the pane it opens now,
   # so the click that follows opens it with its data. Kept for a short while
@@ -342,6 +348,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # A list's menu picked a sort: it sticks for the type, here and for this editor.
+  # Titles a list or a document pane has read (`PaneComponent`). Kept for the
+  # session's panes to come; a desk that has read more than @doc_titles_cap
+  # starts over from the latest read.
+  @doc_titles_cap 5_000
+  def handle_info({:desk_doc_titles, titles}, socket) when is_map(titles) do
+    known = Map.merge(socket.assigns.doc_titles, titles)
+    known = if map_size(known) > @doc_titles_cap, do: titles, else: known
+    {:noreply, assign(socket, :doc_titles, known)}
+  end
+
   def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
     # Only a sort the type offers is kept (the pane checked it too).
     sort = ListMenu.pick(sort, (socket.assigns.desk.menus[type] || %{sorts: []}).sorts)
@@ -404,6 +420,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         index={view.index}
         node={view.node}
         follows={view.follows}
+        hint={view.title}
         hold={view.index == length(@desk_panes) - 1 and @pending != nil}
         warm={warm(@warm, view.key)}
         panes={@chain}
