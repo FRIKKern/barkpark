@@ -254,7 +254,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       aria-busy={@data.loading && "true"}
     >
       <div class="pane-header">
-        <span class="pane-header-title">{title(assigns)}</span>
+        <span class="pane-header-title" role="heading" aria-level="2">{title(assigns)}</span>
         <%!-- J18: the Studio's own "+" event, which the page hands to the
               Studio (`EditorHost`); the new document opens after this pane. --%>
         <button
