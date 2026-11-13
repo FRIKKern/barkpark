@@ -41,7 +41,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
 
   Inspect (`.dk-inspect`) is TanStack's card: radius 6, the popover shadow,
   the page dimmed by its backdrop, its tree in a monospace with its syntax
-  colours (styles.css `--syntax-*`), light and dark.
+  colours (styles.css `--syntax-*`), light and dark. Its search box is
+  TanStack's `.inspect-search`: the UI font at 15 px, a ringed input with
+  the magnifier inside.
 
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
@@ -185,6 +187,13 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-inspect-key { margin-right: 1ch; color: var(--dk-syntax-property); }
       .dk .dk-inspect-count, .dk .dk-inspect-value { color: var(--dk-syntax-constant); }
       .dk .dk-inspect-value[data-type="string"] { color: var(--dk-syntax-string); }
+      .dk .dk-inspect-search { position: relative; display: block; margin-bottom: 12px; font: 15px/23px 'Inter Variable', Inter, -apple-system, system-ui, sans-serif; }
+      .dk .dk-inspect-search > svg { position: absolute; left: 6px; top: 50%; width: 21px; height: 21px; transform: translateY(-50%); color: var(--dk-muted); pointer-events: none; }
+      .dk .dk-inspect-search-input { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 6px 12px 6px 35px; border: 0; border-radius: 3px; background: var(--dk-bg); color: var(--dk-field-fg); font: inherit; box-shadow: inset 0 0 0 1px var(--dk-field-ring); }
+      .dk .dk-inspect-search-input::placeholder { color: var(--dk-placeholder); }
+      .dk .dk-inspect-search-input:hover:not(:focus) { box-shadow: inset 0 0 0 1px var(--dk-field-hover-ring); }
+      .dk .dk-inspect-search-input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-inspect-tree li[hidden] { display: none; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -341,6 +350,12 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav .dk-nav-tab { min-height: 44px; display: inline-flex; align-items: center; }
         .studio-shell:has(.dk) .dk-nav .dk-nav-more { width: 44px; height: 44px; }
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item { min-height: 44px; }
+      }
+      /* Under 900 px the text tabs give way and More lists them first, as TanStack's bar moves its tools into its menu there: the bar stays one 52 px row (after the touch block, whose tabs are inline-flex). */
+      .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: none; }
+      @media (max-width: 899px) {
+        .studio-shell:has(.dk) .dk-nav .dk-nav-tab { display: none; }
+        .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
     </style>
     """
