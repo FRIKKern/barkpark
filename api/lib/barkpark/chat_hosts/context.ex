@@ -453,7 +453,11 @@ defmodule Barkpark.ChatHosts do
       same terms as `live_fence_subquery/1`;
     * its session exists and is owned by this host's workspace. The lease row's
       `workspace_id` is a copy written at lease time; the session's owner is
-      the tenancy truth, so both must agree.
+      the tenancy truth, so both must agree;
+    * its session is a `registered_host` session whose `execution_host_id` is
+      this host. The lease row's `host_id` is also a copy; the session names
+      its executor, so a lease on a managed session or on a session another
+      host executes opens nothing, whoever minted it.
 
   Every miss is the same nil, so a caller cannot tell another host's lease from
   an ended one or from an id that never existed.
@@ -470,6 +474,7 @@ defmodule Barkpark.ChatHosts do
           where: l.id == ^lease_id,
           where: l.host_id == ^host_id and l.workspace_id == ^workspace_id,
           where: s.owner_workspace_id == ^workspace_id,
+          where: s.execution_target == "registered_host" and s.execution_host_id == ^host_id,
           where: l.status in ["leased", "running"],
           where: is_nil(l.revoked_at) and l.expires_at > ^now
         )

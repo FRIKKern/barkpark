@@ -1,9 +1,11 @@
 defmodule BarkparkWeb.Studio.Desk.DocMenu do
   @moduledoc """
   The edit pane's "…" menu, Sanity's document actions: Publish or Unpublish,
-  History, Duplicate and Delete, as the Studio offers them for the open
-  document (`DocActions.resolved_doc_actions/1`, so a singleton has no
-  Unpublish, Duplicate or Delete, and a plugin's resolver applies). Each item
+  History, Discard draft (Sanity's "Discard changes": a draft over a
+  published document), Duplicate and Delete, as the Studio offers them for
+  the open document (`DocActions.resolved_doc_actions/1`, so a singleton has
+  no Unpublish, Duplicate or Delete, and a plugin's resolver applies). Discard
+  asks first: the Studio's own dialog, with the published version kept. Each item
   sends the Studio's own event to the page, which hands it to the editor
   (`EditorHost`): nothing here writes, and the Studio's toolbar is untouched.
 
@@ -19,17 +21,29 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
 
   # The Studio events this menu may send (grant R21); every other action
   # stays where the Studio draws it.
-  @events ~w(publish unpublish show-history duplicate-doc delete-doc)
+  @events ~w(publish unpublish show-history discard-draft duplicate-doc delete-doc)
 
   @doc "The open document's menu items, in the Studio's order; none without a document."
   @spec items(map()) :: [%{label: String.t(), event: String.t()}]
   def items(%{editor_doc: %{}} = assigns) do
-    for %{"name" => name} = action <- DocActions.resolved_doc_actions(assigns),
+    for %{"name" => name} = action <- DocActions.resolved_doc_actions(with_twin(assigns)),
         name in @events,
         do: %{label: action["label"], event: name}
   end
 
   def items(_assigns), do: []
+
+  # The Studio offers Discard draft when it holds the published twin
+  # (`published_doc`), which it reads only when the document opens: a draft
+  # made by typing in a published document has a twin and no `published_doc`
+  # until it is opened again. The Discard handler's own guard reads
+  # `editor_is_draft` and `editor_has_published`, which the save keeps; so
+  # does the menu. `published_doc` is read here for being there, nothing else
+  # (the plugins' context does not carry it).
+  defp with_twin(%{published_doc: nil, editor_is_draft: true, editor_has_published: true} = a),
+    do: Map.put(a, :published_doc, a.editor_doc)
+
+  defp with_twin(assigns), do: assigns
 
   # Two places draw it, with Sanity's two names: the header's "Show document
   # actions" (DocHeaderMenu) and the footer's "Open document actions"

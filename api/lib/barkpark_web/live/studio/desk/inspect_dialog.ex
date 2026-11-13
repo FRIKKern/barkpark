@@ -1,9 +1,10 @@
 defmodule BarkparkWeb.Studio.Desk.InspectDialog do
   @moduledoc """
   Sanity's Inspect dialog: the open document as the API gives it, as a tree
-  ("Parsed") and as JSON ("Raw JSON"). Ctrl+Alt+I in the edit pane opens it
-  and Escape closes it (`bp-desk.js`); the page keeps whether it is open
-  (`:desk_inspect`), and any navigation closes it.
+  ("Parsed") and as JSON ("Raw JSON"). Ctrl+Alt+I while a document is open
+  opens it and Escape closes it (`bp-desk.js`). Whether it is open is in the
+  URL, as Sanity's: `inspect=on` on the last document (`:desk_inspect` follows
+  it), so Back after closing opens it again and a navigation away closes it.
 
   It reads nothing: it renders the document the editor already holds
   (`editor_doc`) through `Content.Envelope.render/3`, with the page's own

@@ -18,7 +18,11 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   (LiveView keeps what is typed in it); the browser sets it from `values`.
 
   A dropped save is not silent: the pane's line then says the typing was not
-  saved, and one warning is logged with the document id. A reconnect mounts a
+  saved, and one warning is logged with the document id. Keys typed in the
+  focused field and not yet sent (its debounce) never arrive as a save: the
+  event also carries the old form's values (`was`), and the browser answers
+  `lost: true` when the focused field no longer matches them, which counts
+  as a dropped save. A reconnect mounts a
   new LiveView process, whose assigns have no `desk_discarded`, so a browser
   that never answered is not stuck past it.
 
@@ -51,6 +55,8 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   same.
   """
   def reload(%{assigns: %{editing: {_dataset, type, id}}} = socket) do
+    was = values(socket.assigns[:editor_form] || %{})
+
     socket =
       socket
       |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
@@ -58,7 +64,10 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
 
     socket
     |> assign(:desk_discarded, %{doc: {type, id}, seen: false, dropped: false})
-    |> push_event("desk:discarded", %{values: values(socket.assigns[:editor_form] || %{})})
+    |> push_event("desk:discarded", %{
+      values: values(socket.assigns[:editor_form] || %{}),
+      was: was
+    })
   end
 
   @doc "A form write that must not land: it was sent from the old form."

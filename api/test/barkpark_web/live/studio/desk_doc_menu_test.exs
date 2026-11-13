@@ -63,6 +63,17 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
   defp eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
 
+  # Waits on the page's own reads (render_async) as well as on time.
+  defp poll(view, fun, tries \\ 50) do
+    render_async(view, 5_000)
+
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true -> Process.sleep(100) && poll(view, fun, tries - 1)
+    end
+  end
+
   defp items(view, menu \\ @menu) do
     html = view |> element(menu) |> render()
     for [_, label] <- Regex.scan(~r/role="menuitem"[^>]*>\s*([^<]+?)\s*</, html), do: label
@@ -140,6 +151,74 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
     view |> element(~s(#{@footer_menu} [data-desk-doc-action="duplicate-doc"])) |> render_click()
 
     assert eventually(fn -> count.() == before + 1 end), "no copy was made"
+  end
+
+  # Sanity's "Discard changes": a draft over a published document can be
+  # thrown away from the menu. The desk offered Publish, History, Duplicate
+  # and Delete, and no way back to the published version but Delete.
+  describe "Discard draft" do
+    setup c do
+      {:ok, _} = Content.publish_document(c.id, c.type, @dataset)
+
+      {:ok, _} =
+        Content.upsert_document(
+          c.type,
+          %{"doc_id" => "drafts." <> c.id, "title" => "Edited"},
+          @dataset
+        )
+
+      :ok
+    end
+
+    test "a draft over a published document: the menus offer Discard draft", c do
+      view = open(c, c.type, c.id)
+
+      assert "Discard draft" in items(view), inspect(items(view))
+      assert "Discard draft" in items(view, @footer_menu), inspect(items(view, @footer_menu))
+    end
+
+    test "Discard draft asks first, then the published version is back", c do
+      view = open(c, c.type, c.id)
+
+      view |> element(~s(#{@menu} [data-desk-doc-action="discard-draft"])) |> render_click()
+      assert has_element?(view, "#discard-modal-dialog[role=dialog]")
+      # Asked, not done.
+      assert {:ok, %{}} = Content.get_document("drafts." <> c.id, c.type, @dataset)
+
+      view |> element("#discard-modal-dialog [data-test-id=confirm-discard]") |> render_click()
+
+      assert poll(view, fn ->
+               match?({:error, _}, Content.get_document("drafts." <> c.id, c.type, @dataset))
+             end),
+             "the draft is still there"
+
+      assert {:ok, %{title: "Here"}} = Content.get_document(c.id, c.type, @dataset)
+      # Still the desk, on the same document, now the published version.
+      render_async(view, 5_000)
+      refute has_element?(view, "#discard-modal-dialog")
+
+      title = ~s([data-pane-editing] #editor-form input[name="doc[title]"][value="Here"])
+      assert poll(view, fn -> has_element?(view, title) end), "the form kept the discarded draft"
+
+      refute "Discard draft" in items(view)
+    end
+
+    test "a draft made by typing in the open document: Discard draft is offered", c do
+      {:ok, _} = Content.discard_draft(c.id, c.type, @dataset)
+      view = open(c, c.type, c.id)
+      refute "Discard draft" in items(view)
+
+      view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
+      render_async(view, 5_000)
+
+      assert poll(view, fn -> "Discard draft" in items(view) end), inspect(items(view))
+    end
+  end
+
+  test "control: a document never published has no Discard draft", c do
+    view = open(c, c.type, c.id)
+    refute "Discard draft" in items(view)
+    refute has_element?(view, ~s([data-desk-doc-action="discard-draft"]))
   end
 
   # Control: the old Studio's editor draws neither button.

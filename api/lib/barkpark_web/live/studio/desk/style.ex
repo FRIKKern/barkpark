@@ -29,7 +29,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
     ~H"""
     <style>
       .dk .dk-pane { width: 320px; min-width: 320px; flex-shrink: 0; border-right-color: var(--border); }
-      .dk .dk-doc { width: auto; flex: 1 0 600px; border-right: 0; }
+      .dk .dk-doc { width: auto; flex: 1 1 600px; border-right: 0; }
+      .dk .dk-edit .editor-panel { min-width: 0; }
+      .dk .dk-edit .editor-panel .bp-paper-surface, .dk .dk-edit .editor-panel .editor-body, .dk .dk-edit .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) { min-inline-size: 0; }
       .dk a.pane-item { text-decoration: none; box-sizing: border-box; }
       .dk h2.pane-header-title { margin: 0; }
       .dk a.pane-item:hover { color: var(--fg); }
@@ -50,6 +52,12 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu { margin-left: 0; }
       .dk .dk-share-menu .dk-doc-menu-button { display: inline-flex; align-items: center; }
+      .dk button.dk-focus { border: 0; background: none; font: inherit; cursor: pointer; }
+      .dk .dk-focus-crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; font-weight: 400; color: var(--fg); }
+      .dk .dk-crumb { flex: none; font: inherit; padding: 4px; border: 0; border-radius: 3px; background: none; color: inherit; cursor: pointer; white-space: nowrap; }
+      .dk button.dk-crumb:hover { background: var(--bg-accent); }
+      .dk button.dk-crumb:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-crumb.current { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: default; }
       .dk .dk-toast { inset: auto; left: 50%; bottom: 56px; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: 8px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); font-size: var(--text-sm); }
       .dk .dk-edit-footer { display: flex; justify-content: flex-end; padding: 4px 8px; border-top: 1px solid var(--border-subtle); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
@@ -92,7 +100,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-sort { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--fg-muted); }
       .dk .dk-more { margin: 12px 16px; }
       .dk .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-      .dk .dk-edit { display: flex; flex-direction: column; min-width: 600px; }
+      .dk .dk-edit { display: flex; flex-direction: column; min-width: 0; }
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
       .dk .dk-edit[data-desk-document] .editor-meta { display: none; }
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
