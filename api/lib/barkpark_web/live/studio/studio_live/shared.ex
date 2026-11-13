@@ -1828,11 +1828,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         # E3.5: set only when the walk ALIASED a dead head (friction 67) and
         # opened a document — the LiveView rewrites the URL to it once.
         editor_canonical_path: editor && editor[:canonical_path],
-        save_status:
-          if(same_doc?,
-            do: socket.assigns[:save_status] || "",
-            else: ""
-          ),
+        save_status: if(same_doc?, do: socket.assigns[:save_status] || "", else: ""),
+        # The form came from the store with no numbers sent (`RemoteValues`).
+        editor_remote_history: nil,
         nav_group: nav_group,
         cross_violations: compute_cross_violations(new_schema, new_form),
         published_doc:

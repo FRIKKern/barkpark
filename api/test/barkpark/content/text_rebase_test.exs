@@ -30,10 +30,20 @@ defmodule Barkpark.Content.TextRebaseTest do
                "Fixture post A2 A5 B3 A7"
     end
 
-    test "overlapping changes keep the text of both" do
-      merged = TextRebase.merge3("abcdef", "abXef", "aYdef")
-      assert merged == "aYdbXef"
-      assert String.contains?(merged, "X") and String.contains?(merged, "Y")
+    # #25994 review: keeping the text of both brought deleted words back.
+    test "overlapping changes give ours, the last post, deletions kept" do
+      assert TextRebase.merge3("abcdef", "abXef", "aYdef") == "abXef"
+
+      assert TextRebase.merge3("one two three four", "one four", "one TWO three four") ==
+               "one four"
+    end
+
+    test "an insert at the same point that already holds theirs' insert stands" do
+      assert TextRebase.merge3(
+               "Fixture post B1",
+               "Fixture post B1 B2 x",
+               "Fixture post B1 B2"
+             ) == "Fixture post B1 B2 x"
     end
 
     test "a letter is never cut from its accent" do

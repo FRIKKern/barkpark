@@ -29,6 +29,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   value: it is what the field shows after the save. Every older entry is
   dropped then, so an older remote value can never be picked again.
 
+  Any other path that loads the form from the store (Reload, an explicit
+  save, navigation: `Shared.rebuild_panes/1`) sends the page no numbers, so
+  it drops the history (#25994 review): the page's last number then maps to
+  nothing. Only a rebuild that then pushes keeps it (`keep_history/2`). The
+  numbers start from the clock at the first one, so a page that rejoins a new
+  socket and still reports the old socket's numbers matches nothing either.
+
   A field the page reports nothing for is not merged: the post stands, as
   before this module. So is any field that is not free text: a date or a
   select is a choice, not text two people type into.
@@ -156,6 +163,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   @doc """
+  Keeps `before`'s history on `socket`, which `Shared.rebuild_panes/1` built
+  from it: for a rebuild that tells the page what changed with `push/3`.
+  """
+  def keep_history(socket, before),
+    do: assign(socket, :editor_remote_history, before.assigns[:editor_remote_history])
+
+  @doc """
   A field two people type text into: `title` (unless the schema declares it
   otherwise), a `text` field, or a `string` field without `options.list`.
   """
@@ -204,7 +218,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   defp latest(entries), do: Enum.max_by(entries, fn {seq, _, _} -> seq end)
 
   defp next_seq(socket) do
-    seq = (socket.assigns[:editor_remote_seq] || 0) + 1
+    seq = (socket.assigns[:editor_remote_seq] || System.os_time(:microsecond)) + 1
     {assign(socket, :editor_remote_seq, seq), seq}
   end
 

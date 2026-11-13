@@ -10,9 +10,10 @@ defmodule Barkpark.Content.TextRebase do
   Each side's change is one splice of `base`: the longest common prefix and
   suffix stay, the middle is replaced. Two splices that do not touch each
   other both apply. Two inserts at the same point keep `theirs` first, as it
-  was saved first. Two splices that overlap keep the text of both over the
-  span they cover, `theirs` then `ours`: odd to read, but nothing either
-  editor wrote is lost, and the result shows in both editors.
+  was saved first, unless `ours` already starts with `theirs`' insert: then
+  the page had it, and `ours` stands. Two splices that overlap give `ours`,
+  the last post, as before this module: keeping the text of both brought back
+  words either side had deleted (#25994 review).
 
   Text is split into graphemes, so a splice never cuts a letter from its
   accent or an emoji in half.
@@ -33,7 +34,8 @@ defmodule Barkpark.Content.TextRebase do
         ours
 
       true ->
-        merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs))
+        merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs)) ||
+          ours
     end
   end
 
@@ -77,11 +79,17 @@ defmodule Barkpark.Content.TextRebase do
   @doc false
   def max_bytes, do: @max_bytes
 
+  # The merged text, or nil when the two splices overlap (the caller keeps
+  # `ours`).
   defp merge_splices(base, ours, theirs) do
     {os, oe, oins} = splice(base, ours)
     {ts, te, tins} = splice(base, theirs)
 
     cond do
+      # Both insert at the same point, and ours already holds theirs' insert.
+      os == oe and ts == te and os == ts and Enum.take(oins, length(tins)) == tins ->
+        nil
+
       # Both insert at the same point: theirs was saved first.
       os == oe and ts == te and os == ts ->
         join([slice(base, 0, ts), tins, oins, slice(base, ts, length(base))])
@@ -93,11 +101,7 @@ defmodule Barkpark.Content.TextRebase do
         join([slice(base, 0, ts), tins, slice(base, te, os), oins, slice(base, oe, length(base))])
 
       true ->
-        s = min(os, ts)
-        e = max(oe, te)
-        theirs_span = [slice(base, s, ts), tins, slice(base, te, e)]
-        ours_span = [slice(base, s, os), oins, slice(base, oe, e)]
-        join([slice(base, 0, s), theirs_span, ours_span, slice(base, e, length(base))])
+        nil
     end
   end
 

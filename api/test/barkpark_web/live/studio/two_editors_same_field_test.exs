@@ -286,6 +286,126 @@ defmodule BarkparkWeb.Studio.TwoEditorsSameFieldTest do
     end
   end
 
+  # #25994 review, must-fix 1: these paths put a new value in the field and
+  # send the page no numbers, so its `_bp_seen` still names an older value.
+  describe "a form the store reloads without numbers" do
+    test "after Reload, typing on does not repeat the other's words", c do
+      a = open(c)
+      b = open(c)
+
+      send_post(b, "title", %{"title" => "Fixture post B1"})
+      {_values, seqs} = told(a)
+      seen = %{"doc[title]" => seq(seqs, "doc[title]", :new)}
+
+      # A goes dirty on the title, as after a failed save.
+      :sys.replace_state(a.pid, fn state ->
+        s = state.socket
+
+        assigns =
+          Map.merge(s.assigns, %{
+            editor_dirty: true,
+            editor_unsaved_keys: MapSet.new(["title"]),
+            editor_form: Map.put(s.assigns.editor_form, "title", "Fixture post B1 unsent")
+          })
+
+        %{state | socket: %{s | assigns: assigns}}
+      end)
+
+      render(b)
+      send_post(b, "title", %{"title" => "Fixture post B1 B2"})
+      render_click(a, "reload-remote-doc", %{})
+      assert form_of(a)["title"] == "Fixture post B1 B2"
+
+      send_post(a, "title", %{"title" => "Fixture post B1 B2 x"}, seen)
+
+      assert stored(c)["title"] == "Fixture post B1 B2 x"
+    end
+
+    test "after an explicit save, typing on does not repeat its own words", c do
+      a = open(c)
+      b = open(c)
+
+      send_post(b, "title", %{"title" => "Fixture post B3"})
+      {_values, seqs} = told(a)
+      seen = %{"doc[title]" => seq(seqs, "doc[title]", :new)}
+
+      a
+      |> element("#editor-form")
+      |> render_submit(%{
+        "doc" => Map.merge(form_of(a), %{"title" => "Fixture post B3 A7"}),
+        "_bp_seen" => Jason.encode!(seen)
+      })
+
+      assert stored(c)["title"] == "Fixture post B3 A7"
+
+      send_post(a, "title", %{"title" => "Fixture post B3 A7 x"}, seen)
+
+      assert stored(c)["title"] == "Fixture post B3 A7 x"
+    end
+
+    # Not an insert at the same point, so merge3's guard does not catch it:
+    # only dropping the history does.
+    test "after an explicit save, a deletion does not repeat its own words", c do
+      a = open(c)
+      b = open(c)
+
+      send_post(b, "title", %{"title" => "Fixture post B3"})
+      {_values, seqs} = told(a)
+      seen = %{"doc[title]" => seq(seqs, "doc[title]", :new)}
+
+      a
+      |> element("#editor-form")
+      |> render_submit(%{
+        "doc" => Map.merge(form_of(a), %{"title" => "Fixture post B3 A7"}),
+        "_bp_seen" => Jason.encode!(seen)
+      })
+
+      send_post(a, "title", %{"title" => "Fixture B3 A7"}, seen)
+
+      assert stored(c)["title"] == "Fixture B3 A7"
+    end
+
+    test "a new socket's numbers are above the old socket's", c do
+      a = open(c)
+      b = open(c)
+
+      send_post(b, "title", %{"title" => "Fixture post B3"})
+      {_values, old_seqs} = told(a)
+
+      # The page rejoins: `_bp_seen` keeps the old socket's numbers.
+      a2 = open(c)
+      render(b)
+      send_post(b, "title", %{"title" => "Fixture post B3 B4"})
+      {_values, new_seqs} = told(a2)
+
+      assert Enum.min(new_seqs["doc[title]"]) > Enum.max(old_seqs["doc[title]"])
+    end
+  end
+
+  # #25994 review, must-fix 2: A's page took B's delete after it sent P1, so
+  # its next post is written from P1 and overlaps B's delete.
+  test "an overlap with the other's delete stores the last post, as before", c do
+    a = open(c)
+    b = open(c)
+
+    send_post(b, "title", %{"title" => "Fixture post B3"})
+    {_values, seqs} = told(a)
+    n1 = seq(seqs, "doc[title]", :new)
+
+    render(b)
+    send_post(b, "title", %{"title" => "Fixture post"})
+    {_values, seqs} = told(a)
+    n2 = seq(seqs, "doc[title]", :new)
+
+    send_post(a, "title", %{"title" => "Fixture post B3 A7"}, %{"doc[title]" => n1})
+    assert stored(c)["title"] == "Fixture post A7"
+    told(a)
+
+    send_post(a, "title", %{"title" => "Fixture post y"}, %{"doc[title]" => n2})
+
+    assert stored(c)["title"] == "Fixture post y"
+  end
+
   test "above the size bound the post stands as sent (last post wins), and the save is fast",
        c do
     # 72 KB: above TextRebase's 64 KB bound.
