@@ -18,6 +18,7 @@ defmodule BarkparkWeb.TicketKeysController do
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Plugins.Tickets.{Handoff, Keys}
   alias BarkparkWeb.ErrorResponse
 
@@ -25,13 +26,16 @@ defmodule BarkparkWeb.TicketKeysController do
   `POST /v1/plugins/tickets/keys` — mint a named ticket key.
 
   Body/params: `name` (required, the human identity label), `dataset`
-  (optional, default `"production"`). 201 with `{key, raw, quickstart}`; 422 on
+  (optional, default `"production"`, or the caller's own dataset when its
+  token is dataset-bound). 201 with `{key, raw, quickstart}`; 422 on
   a missing/blank/over-long name.
   """
   def create(conn, params) do
     attrs = %{
       name: params["name"],
-      dataset: params["dataset"],
+      # A dataset-bound token that names none mints a key for its own dataset,
+      # never the `production` default: the key decides where tickets land.
+      dataset: params["dataset"] || ApiToken.bound_dataset(conn.assigns[:api_token]),
       workspace_id: current_workspace_id(conn)
     }
 
