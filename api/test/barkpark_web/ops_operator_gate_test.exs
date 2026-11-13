@@ -39,9 +39,9 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
     %{default_id: default_id, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b}
   end
 
-  defp token!(perms, ws_id \\ nil, seat \\ nil) do
+  defp token!(perms, ws_id \\ nil, seat \\ nil, dataset \\ "production", opts \\ []) do
     raw = "ops-gate-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "ops-gate", "production", perms, ws_id)
+    {:ok, token} = Auth.create_token(raw, "ops-gate", dataset, perms, ws_id, opts)
 
     if seat do
       {ws, role} = seat
@@ -129,6 +129,38 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
 
       {:ok, _view, peek} = live(conn, base <> "/projects?task=ops-b-task")
       refute peek =~ "Bravo secret in B"
+    end
+  end
+
+  # The consoles are pinned to `production`. A token minted with an explicit
+  # other dataset is held to that one, so it opens none of them
+  # (task-6b02208a730fc4fd).
+  describe "a dataset-bound token" do
+    @consoles ~w(/projects /onixedit/bokbasen /github /fleet /onixedit/staleness)
+
+    test "bound to another dataset is turned away from every console, scoped and flat",
+         %{ws_a: ws_a, proj_a: proj_a, default_id: d} do
+      perms = ["read", "write", "ops"]
+      {scoped_raw, _} = token!(perms, ws_a.id, nil, "bound-own", dataset_bound: true)
+      {flat_raw, _} = token!(perms, d, nil, "bound-own", dataset_bound: true)
+
+      for console <- @consoles do
+        scoped = "/w/#{ws_a.slug}/p/#{proj_a.slug}/admin" <> console
+
+        assert {:error, {:redirect, %{to: "/studio"}}} = live(session(scoped_raw), scoped)
+
+        assert {:error, {:redirect, %{to: "/studio"}}} =
+                 live(session(flat_raw), "/admin" <> console)
+      end
+    end
+
+    test "bound to production still opens them (control)", %{ws_a: ws_a, proj_a: proj_a} do
+      {raw, _} = token!(["read", "write", "ops"], ws_a.id, nil, "production", dataset_bound: true)
+
+      for console <- @consoles do
+        assert {:ok, _view, _html} =
+                 live(session(raw), "/w/#{ws_a.slug}/p/#{proj_a.slug}/admin" <> console)
+      end
     end
   end
 
