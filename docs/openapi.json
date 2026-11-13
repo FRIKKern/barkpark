@@ -1452,7 +1452,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind, source, enabled.",
           "required": true
         },
         "responses": {
@@ -2034,7 +2034,7 @@
               }
             }
           },
-          "description": "Request body fields: queryEventId, objectId.",
+          "description": "Request body fields: queryEventId, objectId, type, position.",
           "required": true
         },
         "responses": {
@@ -2084,7 +2084,7 @@
               }
             }
           },
-          "description": "Request body fields: worker.",
+          "description": "Request body fields: worker, status, ttl, agent, scope, feed, capacity, dataset.",
           "required": true
         },
         "responses": {
@@ -3143,7 +3143,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: confirm-production.",
           "required": true
         },
         "responses": {
@@ -3306,7 +3306,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: provider, execution_target, execution_host_id, mode, model, effort.",
           "required": true
         },
         "responses": {
@@ -3957,7 +3957,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: mode.",
           "required": true
         },
         "responses": {
@@ -4153,7 +4153,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: ids, force.",
           "required": true
         },
         "responses": {
@@ -4306,7 +4306,7 @@
               }
             }
           },
-          "description": "Request body fields: title, started_at.",
+          "description": "Request body fields: title, started_at, component, impact, status, body.",
           "required": true
         },
         "responses": {
@@ -4947,7 +4947,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: ttl.",
           "required": true
         },
         "responses": {
@@ -5314,7 +5314,7 @@
               }
             }
           },
-          "description": "Request body fields: email.",
+          "description": "Request body fields: email, workspace, permissions, label, dataset.",
           "required": true
         },
         "responses": {
@@ -5380,7 +5380,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind.",
           "required": true
         },
         "responses": {
@@ -5516,7 +5516,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: kind, ref, note, conversation.",
           "required": true
         },
         "responses": {
@@ -5802,7 +5802,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: dataset.",
           "required": true
         },
         "responses": {
@@ -6391,7 +6391,7 @@
               }
             }
           },
-          "description": "Request body fields: email.",
+          "description": "Request body fields: email, role, bind_on_sso.",
           "required": true
         },
         "responses": {
@@ -6507,7 +6507,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: conversation, harness, account, machine, cwd.",
           "required": true
         },
         "responses": {
@@ -7268,7 +7268,7 @@
               }
             }
           },
-          "description": "Request body fields: body.",
+          "description": "Request body fields: body, close.",
           "required": true
         },
         "responses": {
@@ -7989,7 +7989,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id, phase_id.",
+          "description": "Request body fields: worker_id, phase_id, order, observed_rail_rev.",
           "required": true
         },
         "responses": {
@@ -9129,7 +9129,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: grace, now, force, grace_seconds, expires_in_days.",
           "required": true
         },
         "responses": {
@@ -9677,7 +9677,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id.",
+          "description": "Request body fields: worker_id, now, criterion, dataset.",
           "required": true
         },
         "responses": {
@@ -10161,7 +10161,7 @@
               }
             }
           },
-          "description": "Request body fields: queryEventId, objectId.",
+          "description": "Request body fields: queryEventId, objectId, type, position.",
           "required": true
         },
         "responses": {
@@ -11334,7 +11334,7 @@
               }
             }
           },
-          "description": "Request body fields: scope, surfaces.",
+          "description": "Request body fields: scope, surfaces, access.",
           "required": true
         },
         "responses": {
@@ -11666,7 +11666,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind, source, enabled.",
           "required": true
         },
         "responses": {
@@ -12364,7 +12364,7 @@
               }
             }
           },
-          "description": "Request body fields: name.",
+          "description": "Request body fields: name, slug.",
           "required": true
         },
         "responses": {
@@ -13070,7 +13070,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: dataset.",
           "required": true
         },
         "responses": {
@@ -13139,7 +13139,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: body, pr, commit, dataset.",
           "required": true
         },
         "responses": {
@@ -13719,7 +13719,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id.",
+          "description": "Request body fields: worker_id, resources, observed_rail_rev, dataset.",
           "required": true
         },
         "responses": {
@@ -13885,7 +13885,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: mode.",
           "required": true
         },
         "responses": {
@@ -14038,7 +14038,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind, source, enabled.",
           "required": true
         },
         "responses": {
@@ -14277,7 +14277,7 @@
               }
             }
           },
-          "description": "Request body fields: scope, doc_id, ref_type.",
+          "description": "Request body fields: scope, doc_id, ref_type, label, ttl.",
           "required": true
         },
         "responses": {
@@ -14747,7 +14747,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: confirm-production.",
           "required": true
         },
         "responses": {
@@ -14992,7 +14992,7 @@
               }
             }
           },
-          "description": "Request body fields: email.",
+          "description": "Request body fields: email, role, bind_on_sso.",
           "required": true
         },
         "responses": {
@@ -15261,7 +15261,7 @@
               }
             }
           },
-          "description": "Request body fields: scope, kind, ref_id.",
+          "description": "Request body fields: scope, kind, ref_id, ref_type, access, label, ttl.",
           "required": true
         },
         "responses": {
@@ -15431,7 +15431,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: commit, pr, note, files (array), criterion, dataset.",
           "required": true
         },
         "responses": {
@@ -15549,7 +15549,7 @@
               }
             }
           },
-          "description": "Request body fields: email, password.",
+          "description": "Request body fields: email, password, totp_code, recovery_code.",
           "required": true
         },
         "responses": {
@@ -15605,7 +15605,7 @@
               }
             }
           },
-          "description": "Request body fields: client_secret.",
+          "description": "Request body fields: client_secret, client_secret_expires_at.",
           "required": true
         },
         "responses": {
@@ -15810,7 +15810,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind, source, enabled.",
           "required": true
         },
         "responses": {
@@ -15924,7 +15924,7 @@
               }
             }
           },
-          "description": "Request body fields: label.",
+          "description": "Request body fields: label, permissions, dataset.",
           "required": true
         },
         "responses": {
@@ -16382,7 +16382,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: draft, mode, model_choice, effort_choice, title.",
           "required": true
         },
         "responses": {
@@ -16726,7 +16726,7 @@
               }
             }
           },
-          "description": "Request body fields: label.",
+          "description": "Request body fields: label, permissions, dataset.",
           "required": true
         },
         "responses": {
@@ -17046,7 +17046,7 @@
               }
             }
           },
-          "description": "Request body fields: profile, inventory_json, scale_contract_json.",
+          "description": "Request body fields: profile, inventory_json, scale_contract_json, experiment_contract_json, correction_of_json, correction_of_digest, release_gate_receipt_json.",
           "required": true
         },
         "responses": {
@@ -17131,7 +17131,7 @@
               }
             }
           },
-          "description": "Request body fields: id.",
+          "description": "Request body fields: id, visitor.",
           "required": true
         },
         "responses": {
@@ -17424,7 +17424,7 @@
               }
             }
           },
-          "description": "Request body fields: role.",
+          "description": "Request body fields: role, principal_type.",
           "required": true
         },
         "responses": {
@@ -18512,7 +18512,7 @@
               }
             }
           },
-          "description": "Request body fields: queryEventId, objectId.",
+          "description": "Request body fields: queryEventId, objectId, type, position.",
           "required": true
         },
         "responses": {
@@ -18571,7 +18571,7 @@
               }
             }
           },
-          "description": "Request body fields: new_parent_id.",
+          "description": "Request body fields: new_parent_id, dataset.",
           "required": true
         },
         "responses": {
@@ -18640,7 +18640,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: pr, state, reason, dataset.",
           "required": true
         },
         "responses": {
@@ -18709,7 +18709,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id, observed_epoch.",
+          "description": "Request body fields: worker_id, observed_epoch, dataset.",
           "required": true
         },
         "responses": {
@@ -18876,7 +18876,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: grace, now, force, grace_seconds, expires_in_days.",
           "required": true
         },
         "responses": {
@@ -19076,7 +19076,7 @@
               }
             }
           },
-          "description": "Request body fields: queryEventId, objectId.",
+          "description": "Request body fields: queryEventId, objectId, type, position.",
           "required": true
         },
         "responses": {
@@ -19334,7 +19334,7 @@
               }
             }
           },
-          "description": "Request body fields: grantee_email, workspace_id, capabilities.",
+          "description": "Request body fields: grantee_email, workspace_id, capabilities, project_id, dataset, type, doc_id, single_use, expires_at.",
           "required": true
         },
         "responses": {
@@ -19400,7 +19400,7 @@
               }
             }
           },
-          "description": "Request body fields: content.",
+          "description": "Request body fields: content, attachments (array).",
           "required": true
         },
         "responses": {
@@ -19557,7 +19557,7 @@
               }
             }
           },
-          "description": "Request body fields: role.",
+          "description": "Request body fields: role, principal_type.",
           "required": true
         },
         "responses": {
@@ -19693,7 +19693,7 @@
               }
             }
           },
-          "description": "Request body fields: state.",
+          "description": "Request body fields: state, object, note, supersede, worker, disposition, reopen-trigger, rerun, clear-rerun, instruction, supersede-instruction, dataset.",
           "required": true
         },
         "responses": {
@@ -19762,7 +19762,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: types.",
           "required": true
         },
         "responses": {
@@ -19924,7 +19924,7 @@
               }
             }
           },
-          "description": "Request body fields: scope, surfaces.",
+          "description": "Request body fields: scope, surfaces, access, ttl, label.",
           "required": true
         },
         "responses": {
@@ -20812,7 +20812,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: add, dataset.",
           "required": true
         },
         "responses": {
@@ -22554,7 +22554,7 @@
               }
             }
           },
-          "description": "Request body fields: from, to.",
+          "description": "Request body fields: from, to, kind.",
           "required": true
         },
         "responses": {
@@ -23133,7 +23133,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: ids, force.",
           "required": true
         },
         "responses": {
@@ -23274,7 +23274,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: ttl.",
           "required": true
         },
         "responses": {
@@ -23806,7 +23806,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id, observed_epoch, lifecycle_status, reason.",
+          "description": "Request body fields: worker_id, observed_epoch, lifecycle_status, reason, observed_rail_rev, dataset.",
           "required": true
         },
         "responses": {
@@ -24330,7 +24330,7 @@
               }
             }
           },
-          "description": "Request body fields: worker_id, observed_epoch.",
+          "description": "Request body fields: worker_id, observed_epoch, criterion, criterion-text, ack_gate, met, evidence, miss, note, withdraw, amend, amended-criterion, confirm-amendment, observed-rev, merge-gated, dataset.",
           "required": true
         },
         "responses": {
@@ -24423,7 +24423,7 @@
               }
             }
           },
-          "description": "Request body fields: idempotency_key, correction_receipt_json, gate_receipt_json, evidence, evidence_revision.",
+          "description": "Request body fields: idempotency_key, correction_receipt_json, gate_receipt_json, evidence, evidence_revision, previous_event_id.",
           "required": true
         },
         "responses": {
@@ -24572,7 +24572,7 @@
               }
             }
           },
-          "description": "Request body fields: assignment_id, phase, agent_type, effort, snapshot_json.",
+          "description": "Request body fields: assignment_id, phase, agent_type, effort, snapshot_json, task_id, replaces_assignment_id.",
           "required": true
         },
         "responses": {
@@ -25093,7 +25093,7 @@
               }
             }
           },
-          "description": "Request body fields: file.",
+          "description": "Request body fields: file, slug, title, dataset, sep.",
           "required": true
         },
         "responses": {
@@ -25730,7 +25730,7 @@
               }
             }
           },
-          "description": "Request body.",
+          "description": "Request body fields: scopes, token_endpoint_auth_method, tenant_id, strict_validation, trust_idp_mfa, mfa_acr, require_group_match, client_secret_expires_at.",
           "required": true
         },
         "responses": {
@@ -25797,7 +25797,7 @@
               }
             }
           },
-          "description": "Request body fields: issuer, client_id, client_secret.",
+          "description": "Request body fields: issuer, client_id, client_secret, scopes, token_endpoint_auth_method, tenant_id, strict_validation, trust_idp_mfa, mfa_acr, require_group_match, client_secret_expires_at.",
           "required": true
         },
         "responses": {
