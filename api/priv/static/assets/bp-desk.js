@@ -1382,6 +1382,13 @@
         e.preventDefault();
         hook.pushEvent("desk-inspect", { open: true });
       };
+      // Each dialog element opens once: after Escape it stays shut until the
+      // page draws a new one (Back to `inspect=on`).
+      hook._showInspect = function (dialog) {
+        if (!dialog || dialog.open || dialog._deskShown || !dialog.isConnected) return;
+        dialog._deskShown = true;
+        dialog.showModal();
+      };
       // Sanity's document shortcuts, from inside the edit pane only
       // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
       // delete. Each presses the document menu's own item (`DocMenu`), so a key
@@ -1416,9 +1423,18 @@
         setTimeout(later, 75);
       };
       hook._onShowModal = function (e) {
-        var dialog = e.target;
-        if (dialog.matches && dialog.matches("dialog[data-desk-inspect]") && !dialog.open) dialog.showModal();
+        if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook._showInspect(e.target);
       };
+      // phx-mounted alone is not enough. The key's pushEvent locks the desk
+      // while it waits for its reply, and a patch that lands under the lock
+      // is drawn into a detached copy first. phx-mounted then dispatches on
+      // the copy, nobody hears it, and the dialog arrives shut
+      // (keyboard:158, from a list row). So the dialog also opens when it
+      // appears in the desk.
+      hook._inspectSeen = new root.ownerDocument.defaultView.MutationObserver(function () {
+        hook._showInspect(root.querySelector("dialog[data-desk-inspect]"));
+      });
+      hook._inspectSeen.observe(root, { childList: true, subtree: true });
       hook._onInspectClose = function (e) {
         if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook.pushEvent("desk-inspect", { open: false });
       };
@@ -1513,6 +1529,7 @@
       root.removeEventListener("keydown", this._onInspectKey);
       root.removeEventListener("keydown", this._onDocKey);
       root.removeEventListener("desk:show-modal", this._onShowModal);
+      if (this._inspectSeen) this._inspectSeen.disconnect();
       root.removeEventListener("close", this._onInspectClose, true);
       root.removeEventListener("click", this._onInspectTab);
       root.removeEventListener("keydown", this._onInspectTab);
