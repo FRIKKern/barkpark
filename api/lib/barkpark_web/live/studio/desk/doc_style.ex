@@ -30,7 +30,9 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       button (35 px, filled, ringed). A focused button, link or tab is
       outlined in the same blue, as TanStack's, not the Studio's green.
     * The pane is TanStack's page colour (`--dk-bg`, light and dark), and
-      inputs sit on it.
+      inputs sit on it. In dark, the boxed fields (array, object, code
+      list, localized), an array's rows and a chosen reference sit on it
+      too, not on the Studio's near-black card.
   """
 
   use Phoenix.Component
@@ -55,6 +57,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);
         --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
       }
+      html[data-theme="dark"] .dk .dk-edit fieldset.bp-field-array, html[data-theme="dark"] .dk .dk-edit .bp-field-composite, html[data-theme="dark"] .dk .dk-edit .bp-field-codelist, html[data-theme="dark"] .dk .dk-edit .bp-field-localized, html[data-theme="dark"] .dk .dk-edit .bp-array-row, html[data-theme="dark"] .dk .dk-edit .ref-selected { background: var(--dk-bg); }
       .dk .dk-edit .editor-body.editor-panel-main { max-width: none; padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-edit .editor-meta { display: block; margin: 0 0 52px; color: var(--dk-muted); font-size: 13px; line-height: 19px; }
       .dk .dk-edit .dk-kind { font-size: 13px; line-height: 19px; color: var(--dk-muted); }
