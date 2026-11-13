@@ -246,12 +246,16 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
     }
   end
 
-  # Whether each row's document is published, for its status marks (the
-  # TanStack Studio's ring for a draft, dot for published, both when a
-  # published document has unpublished edits). A list shows one row per
-  # document, the draft when there is one, so a draft row asks whether its
-  # published version exists too: one read for the page, in the caller's scope.
-  defp published(entries, type, dataset, scope) do
+  @doc """
+  Whether each row's document is published, for its status marks (the
+  TanStack Studio's ring for a draft, dot for published, both when a
+  published document has unpublished edits). A list shows one row per
+  document, the draft when there is one, so a draft row asks whether its
+  published version exists too: one read for the page, in the caller's scope.
+  The list search's hits use it too.
+  """
+  @spec published([map() | :divider], String.t(), String.t(), keyword()) :: [map() | :divider]
+  def published(entries, type, dataset, scope) do
     drafts = for %{draft: true, next: %{id: id}} <- entries, do: id
 
     live =

@@ -151,4 +151,20 @@ assert.ok(!dialog.open);
 assert.ok(bodyKey("k", { metaKey: true }).defaultPrevented);
 assert.ok(dialog.open, "Cmd+K opens the dialog");
 
+// Cmd+K and Ctrl+K typed in a field are the field's (Ctrl+K deletes to the end
+// of a line on a Mac; Cmd+K is the rich text's link key): neither opens it.
+dialog.close();
+for (const tag of ["input", "textarea"]) {
+  const field = window.document.createElement(tag);
+  window.document.body.append(field);
+  field.focus();
+  for (const mods of [{ metaKey: true }, { ctrlKey: true }]) {
+    const e = new window.KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true, ...mods });
+    field.dispatchEvent(e);
+    assert.ok(!e.defaultPrevented, `${Object.keys(mods)[0]}+K in a ${tag} is the field's`);
+    assert.ok(!dialog.open, `${Object.keys(mods)[0]}+K in a ${tag} opens nothing`);
+  }
+  field.remove();
+}
+
 console.log("ok — __desk_search_light");
