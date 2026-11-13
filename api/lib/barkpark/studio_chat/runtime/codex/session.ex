@@ -498,9 +498,23 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp normalize_input(content) when is_binary(content),
     do: [%{"type" => "text", "text" => content}]
 
-  defp normalize_input(content) when is_list(content), do: content
+  defp normalize_input(content) when is_list(content), do: Enum.map(content, &codex_input_item/1)
   defp normalize_input(nil), do: []
   defp normalize_input(content), do: [%{"type" => "text", "text" => to_string(content)}]
+
+  # Both chat surfaces build an image turn with `Attachments.user_content/2`,
+  # whose image block is claude's `{type:"image", source:{type:"base64",...}}`.
+  # Codex's UserInput (pinned schema, v2/TurnStartParams.json) reads an image as
+  # `{type:"image", url}` and has no `source` key, so the same bytes go as a
+  # data URL (task-db05e79f858f9afc). Text blocks already match codex's shape.
+  defp codex_input_item(%{
+         "type" => "image",
+         "source" => %{"type" => "base64", "media_type" => media_type, "data" => data}
+       })
+       when is_binary(media_type) and is_binary(data),
+       do: %{"type" => "image", "url" => "data:#{media_type};base64,#{data}"}
+
+  defp codex_input_item(item), do: item
 
   defp split_lines(data) do
     parts = String.split(data, "\n")
