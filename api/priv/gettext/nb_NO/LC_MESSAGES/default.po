@@ -10190,10 +10190,15 @@ msgstr "Kunne ikke registrere «%{tag}» som etikett. Prøv igjen, eller spør e
 msgid "Create cancelled: %{reason}"
 msgstr "Opprettelse avbrutt: %{reason}"
 
-#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:51
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:59
 #, elixir-autogen, elixir-format
 msgid "“%{type}” cannot be made here: its documents come in from somewhere else, such as a form."
 msgstr "«%{type}» kan ikke lages her: dokumentene kommer inn fra et annet sted, for eksempel et skjema."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:53
+#, elixir-autogen, elixir-format
+msgid "“%{type}” is not a document type in this dataset, so no document was made."
+msgstr "«%{type}» er ikke en dokumenttype i dette datasettet, så det ble ikke laget noe dokument."
 
 #: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:105
 #, elixir-autogen, elixir-format
