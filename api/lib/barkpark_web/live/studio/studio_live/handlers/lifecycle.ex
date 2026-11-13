@@ -346,7 +346,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # reloads it tells the page what changed.
       true ->
         old_form = socket.assigns[:editor_form] || %{}
-        rebuilt = Shared.rebuild_panes(socket)
+        rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
         {:noreply, RemoteValues.push(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
     end
   end

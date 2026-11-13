@@ -22,7 +22,8 @@ await import("../../priv/static/assets/bp-array-focus.js");
 
 function mount(title, excerpt) {
   document.body.innerHTML =
-    `<form id="editor-form"><input type="text" name="doc[title]" value="${title}">` +
+    `<form id="editor-form"><input type="hidden" name="_bp_seen" value="{}">` +
+    `<input type="text" name="doc[title]" value="${title}">` +
     `<textarea name="doc[excerpt]">${excerpt}</textarea></form>` +
     `<form id="other-form"><input type="text" name="doc[title]" value="${title}"></form>`;
   return {
@@ -32,8 +33,12 @@ function mount(title, excerpt) {
   };
 }
 
-const push = (values) =>
-  window.dispatchEvent(new window.CustomEvent("phx:bp:form-remote-values", { detail: { values } }));
+const push = (values, seqs) =>
+  window.dispatchEvent(
+    new window.CustomEvent("phx:bp:form-remote-values", { detail: seqs ? { values, seqs } : { values } }),
+  );
+
+const seen = () => JSON.parse(document.querySelector('#editor-form [name="_bp_seen"]').value);
 
 let failures = 0;
 function check(name, fn) {
@@ -94,6 +99,39 @@ check("only the editor form: a focused input of the same name elsewhere is not t
   other.focus();
   push({ "doc[title]": { value: "New", was: "Old" } });
   assert.equal(other.value, "Old");
+});
+
+// task-35956a566dd2c862: the page reports, per free-text field, the number of
+// the value it shows, so the server knows what the next post was typed from.
+check("a field that shows the new value reports the new number", () => {
+  const { title } = mount("Fixture post", "First");
+  title.focus();
+  push({ "doc[title]": { value: "Fixture post B3", was: "Fixture post" } }, { "doc[title]": [1, 2] });
+  assert.deepEqual(seen(), { "doc[title]": 2 });
+});
+
+check("an unfocused field the patch already set reports the new number", () => {
+  const { title, excerpt } = mount("Fixture post", "First");
+  excerpt.focus();
+  title.value = "Fixture post B3";
+  push({ "doc[title]": { value: "Fixture post B3", was: "Fixture post" } }, { "doc[title]": [1, 2] });
+  assert.deepEqual(seen(), { "doc[title]": 2 });
+});
+
+check("a field with typing not sent reports the value it was typed from, and keeps it", () => {
+  const { title } = mount("Fixture post", "First");
+  title.focus();
+  title.value = "Fixture post A7";
+  push({ "doc[title]": { value: "Fixture post B3", was: "Fixture post" } }, { "doc[title]": [1, 2] });
+  assert.deepEqual(seen(), { "doc[title]": 1 });
+  push({ "doc[title]": { value: "Fixture post B3 B4", was: "Fixture post B3" } }, { "doc[title]": [2, 3] });
+  assert.deepEqual(seen(), { "doc[title]": 1 }, "a later value it did not take changes nothing");
+});
+
+check("a push without numbers (not free text) reports nothing", () => {
+  mount("Old", "First");
+  push({ "doc[title]": { value: "New", was: "Old" } });
+  assert.deepEqual(seen(), {});
 });
 
 window.close();
