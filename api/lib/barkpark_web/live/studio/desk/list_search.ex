@@ -96,6 +96,9 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
 
     ~H"""
     <div class="search dk-list-search">
+      <span class="search-icon" aria-hidden="true">
+        <BarkparkWeb.Studio.Desk.Glyph.glyph name="search" />
+      </span>
       <form
         id={@id <> "-search"}
         phx-change="list-search"
