@@ -210,3 +210,29 @@
   window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
   window.BarkparkFormRemoteValues = onRemoteValues;
 })();
+
+// task-7f47b7ad78b08048: an array row's open state is the person's. The row
+// keeps the browser's `open` across patches (`JS.ignore_attributes`), so a
+// save no longer closes the row someone is typing in. The server only ever
+// opens a row: one that comes to carry a finding gets `data-row-finding`,
+// and this opens it. A row drawn new comes with its `open` already.
+(function () {
+  "use strict";
+
+  var ROW = "details.bp-array-item";
+
+  function onFindings(records) {
+    for (var i = 0; i < records.length; i++) {
+      var el = records[i].target;
+      if (el && el.matches && el.matches(ROW) && el.hasAttribute("data-row-finding") && !el.open) {
+        el.open = true;
+      }
+    }
+  }
+
+  new MutationObserver(onFindings).observe(document.documentElement, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-row-finding"]
+  });
+})();

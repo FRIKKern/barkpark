@@ -112,6 +112,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               idx={row.idx}
               preview={row.preview}
               open={row.fresh? or row_findings?(assigns, row.idx)}
+              finding={row_findings?(assigns, row.idx)}
               row_id={row.row_id}
               body={
                 ObjectForm.object_form(%{
@@ -407,6 +408,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           preview: preview,
           # A row carrying a finding opens so the author sees it (E1.11).
           open: row_empty?(row_value) or row_findings?(assigns, idx),
+          finding: row_findings?(assigns, idx),
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
           body:
             CompositeField.composite_field(%{
@@ -450,6 +452,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
             media: media_url(map, preview_ctx(assigns))
           },
           open: map == %{},
+          finding: false,
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
           body:
             image_row(%{
@@ -541,9 +544,26 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end
   end
 
+  # task-7f47b7ad78b08048: whether a row is open is the person's, as Sanity's.
+  # `open` is the row's state when it is first drawn (a new or empty row, one
+  # with a finding); after that a patch leaves the browser's `open` alone
+  # (`JS.ignore_attributes`). It used to be worked out again on every render,
+  # so the save after the first keys in a new or opened row closed it, hid the
+  # focused field and dropped the next keys. A finding that arrives later
+  # still opens the row: `data-row-finding` comes with it, and
+  # `bp-array-focus.js` opens a row that gains it. The server only opens.
   defp item_row(assigns) do
+    assigns = Map.put_new(assigns, :finding, false)
+
     ~H"""
-    <details class="bp-array-item" id={@row_id} open={@open} data-row-index={@idx}>
+    <details
+      class="bp-array-item"
+      id={@row_id}
+      open={@open}
+      data-row-index={@idx}
+      data-row-finding={@finding}
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
       <summary class="bp-array-item-summary">
         <span :if={@preview.media} class="bp-array-item-media" aria-hidden="true">
           <img src={@preview.media} alt="" loading="lazy" />

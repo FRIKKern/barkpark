@@ -114,6 +114,27 @@ try {
     hook.destroyed();
   }
 
+  {
+    // task-7f47b7ad78b08048: a row's open state is the person's; the server
+    // only opens one, by giving it `data-row-finding`.
+    document.body.innerHTML =
+      `<details class="bp-array-item" id="bp-item-s0"><summary>Row</summary><input id="s0-note"></details>` +
+      `<details class="bp-array-item" id="bp-item-s1" open data-row-finding><summary>Row</summary></details>`;
+    const [s0, s1] = [document.getElementById("bp-item-s0"), document.getElementById("bp-item-s1")];
+    s0.setAttribute("data-row-finding", "");
+    await settle();
+    assert.equal(s0.open, true, "a closed row that comes to carry a finding opens");
+    s1.open = false;
+    s1.setAttribute("data-row-index", "1");
+    await settle();
+    assert.equal(s1.open, false, "a row the person closed stays closed while its finding is unchanged");
+    const other = document.createElement("details");
+    document.body.append(other);
+    other.setAttribute("data-row-finding", "");
+    await settle();
+    assert.equal(other.open, false, "only array rows are opened");
+  }
+
   console.log("array focus: all checks passed");
 } finally {
   window.close();
