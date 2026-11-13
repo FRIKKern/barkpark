@@ -882,6 +882,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     bp-tab-keys.js moves between groups on the arrow keys
                     (task-9bf415c3d78b42d6). The editor form is the panel. --%>
               <div class="bp-tab-bar" role="tablist">
+                <%!-- The desk leads with All fields, as the TanStack Studio and
+                      Sanity do: every field, grouped or not (nav_group nil). --%>
+                <button
+                  :if={desk?(@parent_assigns)}
+                  type="button"
+                  id="bp-group-tab-all-fields"
+                  phx-click="select-group"
+                  phx-value-group=""
+                  role="tab"
+                  aria-selected={to_string(is_nil(@nav_group))}
+                  aria-controls="editor-tabpanel"
+                  tabindex={if tab_stop(@editor_schema, @nav_group, @parent_assigns) == "all-fields", do: "0", else: "-1"}
+                  class={"bp-tab " <> if(is_nil(@nav_group), do: "is-active", else: "")}
+                ><span class="bp-tab-label"><%= gettext("All fields") %></span></button>
                 <%= for grp <- schema_groups(@editor_schema) do %>
                   <button
                     type="button"
@@ -891,7 +905,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     role="tab"
                     aria-selected={to_string(@nav_group == grp["name"])}
                     aria-controls="editor-tabpanel"
-                    tabindex={if tab_stop_group(@editor_schema, @nav_group) == grp["name"], do: "0", else: "-1"}
+                    tabindex={if tab_stop(@editor_schema, @nav_group, @parent_assigns) == grp["name"], do: "0", else: "-1"}
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
@@ -915,7 +929,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               :if={@nav_view == nil}
               id="editor-tabpanel"
               role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
-              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
+              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop(@editor_schema, @nav_group, @parent_assigns)}
             >
             <form
               phx-submit="save"
@@ -1443,10 +1457,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   end
 
   # The group tab that is the bar's one Tab stop: the selected group, else the
-  # first, so the bar is never unreachable from the keyboard.
-  defp tab_stop_group(schema, nav_group) do
+  # first, so the bar is never unreachable from the keyboard. On the desk,
+  # no group selected is All fields (its tab's id ends "all-fields").
+  defp tab_stop(schema, nav_group, parent_assigns) do
     names = Enum.map(schema_groups(schema), & &1["name"])
-    if nav_group in names, do: nav_group, else: List.first(names)
+
+    cond do
+      nav_group in names -> nav_group
+      desk?(parent_assigns) -> "all-fields"
+      true -> List.first(names)
+    end
   end
 
   # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still
