@@ -12,6 +12,10 @@ defmodule Barkpark.StudioChat.TurnAttachments do
   read a host uses to fetch those bytes with its own credential, through the
   lease it holds, is planned in the Paper chat-host-attachments-plan.
 
+  A host is only leased references it says it can take: `admit/3` checks each
+  reference's media type against the host's advertised
+  `providers.<provider>.attachments` list.
+
   A reference has exactly three keys: `id` (the sha256 hex of the decoded bytes,
   which is the chat store's content address), `media_type` and `byte_size`. No
   file name, store path, url or token.
@@ -45,6 +49,48 @@ defmodule Barkpark.StudioChat.TurnAttachments do
   end
 
   def to_references(payload), do: {:ok, payload}
+
+  @doc """
+  Whether `host` may be leased `command`. A send_turn that carries references
+  needs every reference's media type in the host's
+  `capabilities.providers[provider].attachments`. Otherwise it is refused with
+  `{:error, {:host_cannot_receive_attachments, provider}}` and the caller
+  leases nothing, so a host binary that would drop the image is never sent it.
+  Any other command, and a send_turn without references, is admitted.
+  """
+  @spec admit(map(), String.t() | atom(), map()) ::
+          :ok | {:error, {:host_cannot_receive_attachments, String.t()}}
+  def admit(host, provider, %{operation: :send_turn, payload: %{attachments: [_ | _] = refs}}) do
+    provider = to_string(provider)
+    accepted = accepted_types(host, provider)
+
+    if Enum.all?(refs, &(&1.media_type in accepted)),
+      do: :ok,
+      else: {:error, {:host_cannot_receive_attachments, provider}}
+  end
+
+  def admit(_host, _provider, _command), do: :ok
+
+  # Fails closed: a missing or malformed capability reads as "takes none".
+  defp accepted_types(host, provider) do
+    with caps when is_map(caps) <- field(host, "capabilities"),
+         providers when is_map(providers) <- field(caps, "providers"),
+         metadata when is_map(metadata) <- provider_metadata(providers, provider),
+         types when is_list(types) <- field(metadata, "attachments") do
+      types
+    else
+      _ -> []
+    end
+  end
+
+  defp provider_metadata(providers, provider),
+    do:
+      Enum.find_value(providers, fn {name, meta} -> if to_string(name) == provider, do: meta end)
+
+  # Stored capabilities are string-keyed JSON; a host struct and in-memory test
+  # hosts use atom keys.
+  defp field(map, key),
+    do: Map.get(map, key, Map.get(map, String.to_existing_atom(key)))
 
   defp split([], texts, refs), do: {:ok, Enum.reverse(texts), Enum.reverse(refs)}
 

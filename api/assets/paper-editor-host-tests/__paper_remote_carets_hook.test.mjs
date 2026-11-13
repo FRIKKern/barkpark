@@ -101,6 +101,35 @@ await check("every run draws the other sessions' carets", () => {
   assert.deepEqual(mounts[0].canvas.remote, [], "an empty list clears them");
 });
 
+// task-3235ac130ea73701: the paper bundle loads async (#25621), so a run's hook
+// can mount after the join's `bp:remote-selections` went by. LiveView hands a
+// push only to the handlers listening at that moment (a hook's handleEvent is a
+// `phx:<event>` window listener), so the late run drew no carets until the list
+// changed. Here the push goes by on the window first, then the run mounts.
+await check("a run that mounts after the join's push draws the carets already there", () => {
+  const list = [{ id: "s3", name: "Cleo", color: "#2563eb", anchor: sel(1).anchor, head: sel(2).head }];
+  window.dispatchEvent(new window.CustomEvent("phx:bp:remote-selections", { detail: { list } }));
+
+  const el = window.document.createElement("div");
+  el.id = "paper-canvas-carets-run-late";
+  el.setAttribute("phx-hook", "BarkparkPaperCanvas");
+  el.dataset.canvasBlocks = "[]";
+  el.innerHTML = '<bp-paper-canvas tabindex="0"></bp-paper-canvas>';
+  window.document.querySelector(".bp-paper-editor").append(el);
+  const canvas = el.querySelector("bp-paper-canvas");
+  canvas.acknowledgedSaves = true;
+  canvas.setRemoteSelections = (l) => { canvas.remote = l; };
+  const hook = {
+    ...Hooks.BarkparkPaperCanvas,
+    el,
+    handleEvent: (name, handler) => handlers.push({ el, name, handler }),
+    pushEvent: () => Promise.resolve({}),
+  };
+  hook.mounted();
+
+  assert.equal(JSON.stringify(canvas.remote), JSON.stringify(list));
+});
+
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);

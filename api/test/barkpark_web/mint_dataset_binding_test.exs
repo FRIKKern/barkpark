@@ -127,6 +127,59 @@ defmodule BarkparkWeb.MintDatasetBindingTest do
     end
   end
 
+  # The read-tier mint recorded the named dataset and did not bind the token,
+  # so "a read token for staging" read every dataset of its workspace.
+  describe "POST /v1/tokens (read tier)" do
+    defp read_mint(raw, ws, project, body) do
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> put_req_header("content-type", "application/json")
+      |> post("/w/#{ws.slug}/p/#{project.slug}/v1/tokens", Jason.encode!(body))
+    end
+
+    # No schema is seeded, so an admitted read is a 404 for the type. The
+    # binding's refusal is the 403.
+    defp refused?(raw, ws, project, dataset) do
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> get("/w/#{ws.slug}/p/#{project.slug}/v1/data/query/#{dataset}/post")
+
+      resp.status == 403 and resp.resp_body =~ "dataset_not_bound"
+    end
+
+    test "a mint that names a dataset is bound to it, and refused on another", ctx do
+      resp =
+        read_mint(ctx.unbound_raw, ctx.ws, ctx.project, %{
+          label: "mdb-read-named",
+          permissions: ["read"],
+          dataset: @other
+        })
+
+      assert resp.status == 201, resp.resp_body
+      assert %ApiToken{dataset: @other, dataset_bound: true} = labelled("mdb-read-named")
+
+      minted = Jason.decode!(resp.resp_body)["token"]
+      refute refused?(minted, ctx.ws, ctx.project, @other)
+      assert refused?(minted, ctx.ws, ctx.project, @own)
+    end
+
+    test "a mint that names no dataset stays unbound and reads both (control)", ctx do
+      resp =
+        read_mint(ctx.unbound_raw, ctx.ws, ctx.project, %{
+          label: "mdb-read-unnamed",
+          permissions: ["read"]
+        })
+
+      assert resp.status == 201, resp.resp_body
+      assert %ApiToken{dataset: "production", dataset_bound: nil} = labelled("mdb-read-unnamed")
+
+      minted = Jason.decode!(resp.resp_body)["token"]
+      refute refused?(minted, ctx.ws, ctx.project, @other)
+      refute refused?(minted, ctx.ws, ctx.project, @own)
+    end
+  end
+
   describe "Auth.mint_delegated_token/3" do
     test "refuses a bound actor naming another dataset, and mints nothing", ctx do
       assert {:error, :dataset_binding} =

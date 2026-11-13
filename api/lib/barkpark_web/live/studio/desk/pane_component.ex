@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
   alias BarkparkWeb.Studio.Desk.FieldText
+  alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.ListSearch
   alias BarkparkWeb.Studio.Desk.Panes
@@ -67,11 +68,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts hint)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts hint focus)a
         )
       )
       |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:hint, fn -> nil end)
+      |> assign_new(:focus, fn -> nil end)
       |> assign_new(:orderings, fn -> [] end)
       |> assign_new(:sorts, fn -> [] end)
       |> assign_new(:limit, fn -> Rows.page() end)
@@ -255,9 +257,28 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       data-pane={@pane.kind == :types && "types"}
       aria-label={title(assigns)}
       aria-busy={@data.loading && "true"}
+      data-desk-focused={@focus[:on] == true}
     >
       <div class="pane-header">
-        <h2 class="pane-header-title">{title(assigns)}</h2>
+        <%!-- A document pane's title is a div with the heading role, as the
+              edit pane's (`EditorHost`): in focus mode it holds the
+              breadcrumb nav, and one tag in both modes keeps the focus on the
+              button after it. --%>
+        <h2 :if={!@focus} class="pane-header-title">{title(assigns)}</h2>
+        <div :if={@focus} class="pane-header-title" role="heading" aria-level="2">
+          <%= if @focus.on do %>
+            <FocusMode.crumbs
+              views={@focus.views}
+              titles={@focus.titles}
+              index={@index}
+              chain={@focus.chain}
+              base={@focus.base}
+              title={title(assigns)}
+            />
+          <% else %>
+            {title(assigns)}
+          <% end %>
+        </div>
         <%!-- J18: the Studio's own "+" event, which the page hands to the
               Studio (`EditorHost`); the new document opens after this pane. --%>
         <button
@@ -283,6 +304,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           named={(@data.ok? && @data.result[:sorts]) || []}
           myself={@myself}
         />
+        <FocusMode.button :if={@focus} id={"#{@id}-focus"} index={@index} on={@focus.on} />
         <.link
           :if={@index > 0}
           patch={Panes.close_from(@panes, @index, @base)}

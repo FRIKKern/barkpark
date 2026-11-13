@@ -64,10 +64,44 @@ defmodule BarkparkWeb.Studio.StudioAuthorCreatableTest do
       refute has_element?(view, ~s(button[phx-click="new-document"]))
     end
 
+    # task-631d6ea85517e668: hiding the button was the only guard, so a
+    # hand-pushed `new-document` still made a document. The server refuses.
+    test "old Studio: a pushed new-document for it makes no document and says why", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/intake_log"))
+
+      html = render_hook(view, "new-document", %{"type" => "intake_log"})
+
+      assert count("intake_log") == 0
+      assert html =~ "cannot be made here"
+    end
+
+    test "desk: a pushed new-document for it makes no document and says why", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/_desk/intake_log"))
+
+      html = render_hook(view, "new-document", %{"type" => "intake_log", "desk-pane" => "1"})
+
+      assert count("intake_log") == 0
+      assert html =~ "cannot be made here"
+    end
+
+    test "control: a pushed new-document for an ordinary type still makes one", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/field_log"))
+
+      render_hook(view, "new-document", %{"type" => "field_log"})
+
+      assert count("field_log") == 1
+    end
+
     test "still offers New for an ordinary type", %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/field_log"))
       assert has_element?(view, ~s(.pane-add-btn[phx-click="new-document"]))
       assert has_element?(view, ~s(.btn-primary[phx-click="new-document"]))
     end
+  end
+
+  defp count(type) do
+    import Ecto.Query
+
+    Barkpark.Repo.aggregate(from(d in Barkpark.Content.Document, where: d.type == ^type), :count)
   end
 end

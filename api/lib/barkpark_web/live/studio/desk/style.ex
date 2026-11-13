@@ -72,8 +72,10 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-inspect-tabs [role="tab"] { border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--text-sm); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
       .dk .dk-inspect-tabs [role="tab"][aria-selected="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-inspect-close:focus-visible, .dk .dk-inspect-tabs [role="tab"]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-      .dk .dk-inspect-panel { overflow: auto; padding: 12px 16px 16px; font-size: var(--text-sm); }
-      .dk .dk-inspect-panel pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+      .dk .dk-inspect-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+      .dk .dk-inspect-panel { padding: 12px 16px 16px; font-size: var(--text-sm); }
+      .dk .dk-inspect-panel pre { margin: 0; font-family: var(--paper-font-mono, ui-monospace, Menlo, monospace); white-space: pre; }
+      .dk .dk-inspect-panel pre code { font: inherit; }
       .dk .dk-inspect-tree { list-style: none; margin: 0; padding: 0; }
       .dk .dk-inspect-tree .dk-inspect-tree { padding-left: 16px; }
       .dk .dk-inspect-tree li { padding: 2px 0; overflow-wrap: anywhere; }

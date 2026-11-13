@@ -352,6 +352,11 @@ var codeExit = map[string]int{
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
 	"host_execution_not_permitted": exitAuth,
 
+	// 422, ChatSendFailure: the turn names attachments and the session's
+	// registered host does not advertise their type. Permanent until the host
+	// binary is updated, so a validation exit, never a retry.
+	"host_cannot_receive_attachments": exitValidation,
+
 	// 403, Auth.rotate_token/3 (owner ruling #7): a user-owned token is rotated
 	// only by its owner; a workspace admin revokes it instead.
 	"owner_only": exitAuth,
