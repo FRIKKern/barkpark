@@ -122,8 +122,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
-  defp splat_bytes(params),
-    do: params |> Map.get("panes", []) |> Enum.reduce(0, &(byte_size(&1) + &2))
+  # Joined as `follow/3` joins it, so it takes what that takes.
+  defp splat_bytes(params), do: params |> Map.get("panes", []) |> Enum.join("/") |> byte_size()
 
   defp follow(params, uri, socket) do
     dataset = params["dataset"] || socket.assigns.dataset

@@ -64,5 +64,8 @@ defmodule BarkparkWeb.Studio.DeskUrlCapTest do
 
     {:ok, view, _html} = live(conn, href(base, 100))
     assert render_async(view, 5_000) =~ "post-01"
+
+    # A hand-made query the page answered before is answered still.
+    assert html_response(get(conn, base <> "?panes[][]=post"), 200)
   end
 end
