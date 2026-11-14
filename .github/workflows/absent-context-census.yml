@@ -72,11 +72,12 @@
 # 2-16 s), and a run that never leaves the queue completes never.
 #
 # WORST-CASE LATENCY, DERIVED FROM THE TWO NUMBERS IN THIS FILE (the harness
-# recomputes it from them and reds past 120 min). P = HOLD_MINUTES, the least
-# spacing between two census starts; T = the census job's timeout-minutes.
-# One cycle, an event to a concluded verdict, is at most max(P,T) + T: the
-# event lands while run k is holding the group, run k+1 starts no later than
-# max(start_k + P, end_k), and runs at most T. With P = 20 and T = 20:
+# recomputes it from them and reds past 120 min). P = HOLD_MINUTES, the wait
+# between one census ending and the next starting (the `census-cadence`
+# environment's wait timer); T = the census job's timeout-minutes.
+# One cycle, an event to a concluded verdict, is at most T + P + T: the
+# event lands just after run k started, run k ends within T, the timer holds
+# the group for P, and run k+1 runs at most T. With P = 20 and T = 10:
 #   NAME_NOT_IN_RUN, RERUN_DELETED  the producing run's own completion IS
 #                   the event -> <= 40 min.
 #   CANCELLED_CURRENT  PR #16709's specimen (first filed NAME_NOT_IN_RUN):
@@ -99,19 +100,34 @@
 # for a head on which NO producer dispatched at all and no producer completed
 # anywhere else in the repository — an Actions outage or a dead-quiet night.
 #
-# RUNNER COST. The cadence job sleeps on a runner for the rest of P. That is
-# not extra occupancy: at a median 54 events an hour a pending census always
-# exists, so without the hold the group would run census after census
-# back-to-back on the same one slot. The hold turns that slot's time into sleep
-# instead of API reads. Off-peak (36 of 94 measured hours had no completion at
-# all) no event arrives and nothing holds.
+# RUNNER COST: NONE WHILE IT WAITS (task-ba7a891a65899409). Until 2026-11-14
+# the cadence job SLEPT on a runner for the rest of P: measured 2026-11-13, a
+# census started every 20.4 min and a runner slept about 17 of every 20 — about
+# 1,390 runner-minutes a day. The hold is now the 20-minute wait timer of the
+# repository environment `census-cadence`, named on the cadence job. A job
+# waiting on that timer has no runner, and the run still holds the group.
+# Proved on a scratch branch before this landed (group
+# `absent-context-census-proof`): run 43576511771 sat `waiting` with no runner
+# assigned, 43576546672 stayed `pending` behind it with zero jobs, and
+# 43576555916 evicted that pending run and took its place.
+#   · THE TIMER IS A REPOSITORY SETTING, NOT A LINE IN THIS FILE. If the
+#     environment is deleted or its timer removed, GitHub starts the job at
+#     once. The hold step below then sleeps the rest of P exactly as before and
+#     says so with a warning, so the rate limit survives; only the saving is
+#     lost. HOLD_MINUTES must equal the environment's wait timer.
+#   · Each cycle writes one deployment record for `census-cadence` (about 3 an
+#     hour). No workflow here triggers on `deployment` or `deployment_status`.
+#   · The timer starts when the census ENDS, so two starts are spaced by the
+#     census's own run time plus P, not by P alone. T came down from 20 to 10
+#     to keep the table below at 40 and 80 minutes: over the last 100 runs the
+#     census job took 2 to 6.5 minutes, green or red.
 #
 # COST, BOUNDED BY P rather than by traffic. Measured 2026-09-20..23: the four
 # producers completed a median 54 times an hour, 142 at peak. One census makes
 # 3 API reads per open head + 4 (153 at 50 open PRs, counted by shimming gh),
 # and GITHUB_TOKEN carries 1000 requests an hour for the whole repository, so
 # a census per completion would spend the repository's budget in minutes. The
-# hold caps starts at 60/P = 3 an hour whatever the traffic.
+# hold caps starts at under 60/P = 3 an hour whatever the traffic.
 #
 # THE HARNESS RUNS FIRST, EVERY TIME. scripts/absent-context-census.test.sh is a
 # hermetic mutation suite: it disarms each verdict and watches the census go
@@ -182,14 +198,19 @@ jobs:
   # all open heads LIVE at its start and carries no payload from its event, so
   # the survivor answers every question the evicted run would have asked, from
   # fresher data. The running census is never cancelled, so a pending one always
-  # starts when this job releases the group. This job keeps the run open until
-  # P minutes after the census started, which is what spaces two starts by P.
+  # starts when this job releases the group. The environment's wait timer
+  # keeps the run open, with NO runner, for P minutes after the census ended.
   cadence:
     name: Census cadence (hold, re-arm)
     needs: absent-context-census
     if: always()
     runs-on: ubuntu-latest
-    # P + margin. A hold that hung would hold the group; this ends it.
+    # THE HOLD. This environment carries a 20-minute wait timer (a repository
+    # setting): the job waits for it before it is given a runner, and the run
+    # holds the concurrency group meanwhile. See RUNNER COST in the header.
+    environment: census-cadence
+    # P + margin, counted from when the job gets its runner. It covers the
+    # fallback sleep below; a hold that hung would hold the group.
     timeout-minutes: 25
     permissions:
       # The re-arm is a workflow_dispatch of this file, and GITHUB_TOKEN may
@@ -225,29 +246,37 @@ jobs:
             echo "no undispatched producer run — nothing can end silently, so no re-arm"
           fi
 
-      - name: Hold the group until P minutes after the census started
+      # THE FALLBACK. The environment's wait timer has normally run out before
+      # this job got its runner, so there is nothing left to hold. If the timer
+      # did NOT hold (environment deleted, timer removed or shortened), this
+      # sleeps the rest of P on the runner, as the job did before 2026-11-14,
+      # so the cap on census starts never depends on a setting alone.
+      - name: Hold the group until P minutes after the census started (fallback)
         run: |
           set -uo pipefail
           now="$(date +%s)"
           case "${STARTED:-}" in
-            ''|*[!0-9]*) started="$now" ;;   # no stamp: hold the full P
+            # No stamp (the census died before its first step, which is rare):
+            # nothing here can tell whether the timer held, so hold the full P.
+            ''|*[!0-9]*) started="$now" ;;
             *) started="$STARTED" ;;
           esac
+          echo "this job got its runner $(( now - started ))s after the census started"
           rem=$(( started + HOLD_MINUTES * 60 - now ))
           if [ "$rem" -gt 0 ]; then
-            echo "holding ${rem}s so the next census starts no sooner than ${HOLD_MINUTES} min after this one did"
+            echo "::warning::the census-cadence wait timer did not hold for ${HOLD_MINUTES} min — sleeping ${rem}s on this runner instead. Check the environment's wait timer (it must equal HOLD_MINUTES)."
             sleep "$rem"
           else
-            echo "the census alone ran past ${HOLD_MINUTES} min; no hold"
+            echo "the wait timer held; no sleep on this runner"
           fi
 
   absent-context-census:
     name: Absent required-context census
     runs-on: ubuntu-latest
-    # T in the header's latency table. Measured over 183 runs: median about a
-    # minute, and the four runs past 20 min all concluded failure anyway, so a
-    # timeout here cancels nothing that was going to be green.
-    timeout-minutes: 20
+    # T in the header's latency table. Measured 2026-11-14 over the last 100
+    # runs: 2 to 3.5 minutes when green, at most 6.5 when red, so a timeout
+    # here cancels nothing that was going to conclude.
+    timeout-minutes: 10
     outputs:
       started: ${{ steps.stamp.outputs.started }}
       undispatched_young: ${{ steps.census.outputs.undispatched_young }}

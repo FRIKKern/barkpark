@@ -1272,9 +1272,13 @@ section "7b. the cadence: event leg derived from the spec, re-arm wired, latency
 #   (b) the re-arm is wired end to end: census step id + opt-in env ->
 #       job output -> cadence job reads it -> dispatches this file.
 #   (c) the worst-case latency, recomputed from HOLD_MINUTES (P) and the census
-#       job's timeout-minutes (T): one cycle max(P,T)+T, the re-arm chain
-#       2*(max(P,T)+T). Both must be under 120 min, and the numbers the header
-#       prints must be the ones this arithmetic produces.
+#       job's timeout-minutes (T): one cycle T+P+T (the hold is a wait timer
+#       that starts when the census ENDS), the re-arm chain 2*(T+P+T). Both
+#       must be under 120 min, and the numbers the header prints must be the
+#       ones this arithmetic produces.
+#   (d) the hold costs no runner and cannot silently vanish: the cadence job
+#       names the `census-cadence` environment (its wait timer is the hold),
+#       and still carries the fallback sleep for the rest of P.
 
 # The `name:` of each workflow producing a required context, spec-derived.
 producer_names() {
@@ -1323,13 +1327,17 @@ cadence_report() { # <yml> -> findings, empty when the cadence is intact
   grep -q . <<<"$(job_key "$f" cadence 'needs\.absent-context-census\.outputs\.undispatched_young')" || echo "CADENCE JOB DOES NOT READ undispatched_young"
   grep -q . <<<"$(job_key "$f" cadence 'gh workflow run absent-context-census\.yml --ref main')" || echo "CADENCE JOB DOES NOT RE-ARM"
   grep -q . <<<"$(job_key "$f" cadence 'if:[[:space:]]*always\(\)')" || echo "CADENCE JOB IS NOT always() — a red census would skip the hold and the re-arm"
+  # (d) the hold: a wait timer first, the sleep only as its fallback.
+  grep -q . <<<"$(job_key "$f" cadence '^    environment:[[:space:]]*census-cadence[[:space:]]*$')" || echo "CADENCE JOB NAMES NO census-cadence ENVIRONMENT — the hold is back on a sleeping runner"
+  grep -q . <<<"$(job_key "$f" cadence 'rem=\$\(\( started \+ HOLD_MINUTES \* 60 - now \)\)')" || echo "CADENCE JOB DOES NOT COMPUTE THE REST OF P FROM HOLD_MINUTES"
+  grep -q . <<<"$(job_key "$f" cadence 'sleep "\$rem"')" || echo "CADENCE JOB HAS NO FALLBACK SLEEP — a deleted wait timer would uncap census starts"
   # (c) the arithmetic, off the file's own numbers.
   p="$(job_key "$f" cadence 'HOLD_MINUTES:' | sed -n 's/.*HOLD_MINUTES:[[:space:]]*"\{0,1\}\([0-9][0-9]*\).*/\1/p' | head -1)"
   t="$(job_key "$f" absent-context-census '^    timeout-minutes:' | sed -n 's/.*timeout-minutes:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
   if [ -z "$p" ] || [ -z "$t" ]; then
     echo "LATENCY NOT DERIVABLE (P='$p' T='$t')"
   else
-    cyc=$(( (p > t ? p : t) + t )); chain=$(( 2 * cyc ))
+    cyc=$(( t + p + t )); chain=$(( 2 * cyc ))
     [ "$cyc" -lt 120 ] || echo "EVENT CYCLE ${cyc} min IS NOT UNDER THE 120-min BLACKOUT"
     [ "$chain" -lt 120 ] || echo "RE-ARM CHAIN ${chain} min IS NOT UNDER THE 120-min BLACKOUT"
     grep -qF "With P = $p and T = $t:" "$f" || echo "HEADER DOES NOT STATE P = $p, T = $t"
@@ -1348,7 +1356,7 @@ fi
 P_NOW="$(job_key "$WF" cadence 'HOLD_MINUTES:' | sed -n 's/.*HOLD_MINUTES:[[:space:]]*"\{0,1\}\([0-9][0-9]*\).*/\1/p' | head -1)"
 T_NOW="$(job_key "$WF" absent-context-census '^    timeout-minutes:' | sed -n 's/.*timeout-minutes:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
 if [ -n "$P_NOW" ] && [ -n "$T_NOW" ]; then
-  CYC_NOW=$(( (P_NOW > T_NOW ? P_NOW : T_NOW) + T_NOW ))
+  CYC_NOW=$(( T_NOW + P_NOW + T_NOW ))
   ok "7.7 [derived] P=${P_NOW} T=${T_NOW}: event leg <= ${CYC_NOW} min, re-arm chain <= $((2 * CYC_NOW)) min, both < 120 (PR #18045's blackout) — plus GitHub dispatch/queue time, which no trigger bounds"
 else
   bad "7.7 P or T could not be read from $(basename "$WF")"
@@ -1387,6 +1395,12 @@ cad_fires "7.13 [mutation] the census job's timeout-minutes removed (T unbounded
 C7F="$TMP/canary-no-output.yml"
 grep -v 'ABSENT_CENSUS_EMIT_OUTPUT' "$WF" > "$C7F"
 cad_fires "7.14 [mutation] the census step's output opt-in removed" "$C7F" "CENSUS STEP DOES NOT OPT IN TO THE OUTPUT"
+C7G="$TMP/canary-no-environment.yml"
+grep -v '^    environment: census-cadence' "$WF" > "$C7G"
+cad_fires "7.14b [mutation] the cadence job's environment removed (the hold sleeps on a runner again)" "$C7G" "CADENCE JOB NAMES NO census-cadence ENVIRONMENT"
+C7H="$TMP/canary-no-fallback.yml"
+grep -v 'sleep "\$rem"' "$WF" > "$C7H"
+cad_fires "7.14c [mutation] the fallback sleep removed (a deleted wait timer would uncap census starts)" "$C7H" "CADENCE JOB HAS NO FALLBACK SLEEP"
 # Reason 2 still holds with the new legs: the §7.3 planted-pull_request canary
 # is re-run over the CURRENT file (which now carries workflow_run).
 grep -q 'PULL_REQUEST TRIGGER' <<<"$(shape_report "$CANARY")" \

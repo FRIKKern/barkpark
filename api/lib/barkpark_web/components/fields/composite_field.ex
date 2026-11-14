@@ -205,10 +205,14 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # same Classic rich-text editor as a top-level body (task-eba86f7ba252cb20).
   # The editor edits HTML; `Content.Forms` turns the post back into blocks
   # against the stored ones, so an untouched block keeps its stored bytes.
+  # An EMPTY one opens in it too (task-7f47b7ad78b08048): it used to draw a
+  # text input until its first save and the editor after, so that save swapped
+  # the element under the caret, the focus fell to the page and the next keys
+  # were lost ("Note text" in a new array row kept "N").
   defp render_subfield_guarded(%{readonly: false} = assigns, %{type: "richText"} = sub) do
     value = get_value(assigns.value, sub.name, nil)
 
-    if Barkpark.Content.PortableText.value?(value) and
+    if (Barkpark.Content.PortableText.value?(value) or value in [nil, "", []]) and
          Barkpark.Content.RichTextFormat.format(Map.get(sub, :raw) || %{}) != :portable_doc do
       input_id = sub_id(assigns, sub.name)
       owner_key = get_value(assigns.value, "_key", nil)
@@ -219,7 +223,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text.
         wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
-        html: Barkpark.Content.PortableText.to_html(value),
+        html:
+          if(value in [nil, "", []], do: "", else: Barkpark.Content.PortableText.to_html(value)),
         label: title_for(sub),
         vocabulary:
           case Barkpark.Content.PortableText.editor_vocabulary(Map.get(sub, :raw) || %{},
