@@ -24,9 +24,12 @@ const tidesLabel = "Explaining ocean tides"
 // PATH by installStatusHelper. BARKPARK_STATUS_HELPER picks what it plays:
 //
 //	turn   a stream-json claude turn: init, message_start, then (once the gate
-//	       file exists, or after 5 s) one text delta and a success result
-//	label  the label side call: records its args, stdin, cwd and whether a
-//	       Barkpark token reached it, then prints BARKPARK_STATUS_HELPER_SAY
+//	       file exists, or after 5 s) one text delta and a success result.
+//	       BARKPARK_STATUS_HELPER_TIMES names a file that gets the UnixNano
+//	       time the text line was written
+//	label  the label side call: records its args, stdin, cwd, niceness and
+//	       whether a Barkpark token reached it, then prints
+//	       BARKPARK_STATUS_HELPER_SAY
 //	hang   a side call that never answers: records its pid and sleeps
 func TestStatusLabelHelperProcess(t *testing.T) {
 	mode := os.Getenv("BARKPARK_STATUS_HELPER")
@@ -41,6 +44,14 @@ func TestStatusLabelHelperProcess(t *testing.T) {
 		_ = decoder.Decode(&input)
 		encoder := json.NewEncoder(os.Stdout)
 		write := func(value map[string]any) { _ = encoder.Encode(value) }
+		times := map[string]int64{}
+		stamp := func(name string) {
+			if path := os.Getenv("BARKPARK_STATUS_HELPER_TIMES"); path != "" {
+				times[name] = time.Now().UnixNano()
+				encoded, _ := json.Marshal(times)
+				_ = os.WriteFile(path, encoded, 0o600)
+			}
+		}
 		write(map[string]any{"type": "system", "subtype": "init", "session_id": "claude-thread"})
 		write(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start"}})
 		if gate := os.Getenv("BARKPARK_STATUS_HELPER_GATE"); gate != "" {
@@ -50,6 +61,7 @@ func TestStatusLabelHelperProcess(t *testing.T) {
 				}
 			}
 		}
+		stamp("text")
 		write(map[string]any{"type": "stream_event", "event": map[string]any{
 			"type": "content_block_delta", "index": 0.0,
 			"delta": map[string]any{"type": "text_delta", "text": "Tides come from the moon."},
@@ -61,6 +73,7 @@ func TestStatusLabelHelperProcess(t *testing.T) {
 		_, token := os.LookupEnv("BARKPARK_API_TOKEN")
 		encoded, _ := json.Marshal(map[string]any{
 			"args": os.Args[slices.Index(os.Args, "--")+1:], "stdin": stdin, "cwd": cwd, "token": token,
+			"nice": niceOf(os.Getpid()),
 		})
 		_ = os.WriteFile(record, encoded, 0o600)
 		fmt.Print(os.Getenv("BARKPARK_STATUS_HELPER_SAY"))

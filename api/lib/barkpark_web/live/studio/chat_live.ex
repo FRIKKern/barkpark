@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.{ChatHostGate, ChatModeSteer}
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer}
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -1197,10 +1197,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       refused = host_refused(socket, :steer) ->
         refused
 
-      session = socket.assigns.session ->
+      socket.assigns.session ->
         # Optimistic: move the selector now, persist on the ack. Keep the request_id (latest-
         # outstanding correlation) and the revert target: the last known-good mode.
-        case ChatModeSteer.steer(socket.assigns.provider, session, mode) do
+        case ChatSteer.steer(socket.assigns, %{mode: mode}) do
           {:ok, req} ->
             socket
             |> assign(mode: mode, pending_mode: %{req: req, revert_to: revert_target(socket)})
@@ -1216,19 +1216,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Switch the brain — shared by the header picker and the /model slash builtin.
-  # `choice` is an already-normalized alias or nil (= CLI default).
+  # Switch the brain (header picker, /model). `choice` is a normalized alias or nil (CLI default).
   defp change_model(socket, choice) do
-    with nil <- host_refused(socket, :steer) do
+    with nil <- host_refused(socket, :steer),
+         {:ok, _} <- ChatSteer.steer(socket.assigns, %{model: choice || "default"}) do
       label = if choice, do: model_label(choice), else: "the CLI default"
       if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
-
-      if session = socket.assigns[:session],
-        do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
 
       socket
       |> assign(model_choice: choice || "default")
       |> append_message(:system, "Model → #{label}.")
+    else
+      {:error, line} -> append_message(socket, :system, line)
+      refused -> refused
     end
   end
 
@@ -2322,6 +2322,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
                 <%= gettext("attachment missing") %>
               </div>
+              <ChatAttachmentChip.chip :if={img[:file]} file={img.file} />
               <img
                 :if={img[:data_uri]}
                 src={img.data_uri}
@@ -6361,14 +6362,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp replay_image(%{"path" => path, "media_type" => media_type}) when is_binary(path) do
-    case StudioChat.read_attachment(path) do
-      {:ok, bytes} -> %{data_uri: data_uri(media_type, bytes)}
-      {:error, :missing} -> %{missing: true}
-    end
-  end
-
-  defp replay_image(_), do: %{missing: true}
+  # An image reads its bytes; a file pointer becomes a name-and-size chip.
+  defp replay_image(pointer), do: ChatAttachmentChip.replay(pointer)
 
   defp replay_approval_status("allowed", _live?), do: :allowed
   defp replay_approval_status("denied", _live?), do: :denied

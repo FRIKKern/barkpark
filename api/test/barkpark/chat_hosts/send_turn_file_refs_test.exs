@@ -104,6 +104,21 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
     assert Repo.aggregate(from(l in ExecutionLease, where: l.session_id == ^sid), :count) == 0
   end
 
+  test "codex is refused a file even when the host lists file types under codex",
+       %{ws: ws} do
+    %{host: host, ref: ref, session_id: sid} =
+      open_host_session(ws, "codex-files-mac", @images ++ @files, "codex", @images ++ @files)
+
+    assert {:error, {:host_cannot_receive_attachments, "codex"}} =
+             Runtime.send_turn("codex", ref, [
+               text("read this"),
+               document("text/plain", Base.encode64(@csv), "notes.csv")
+             ])
+
+    assert ChatHosts.next_commands(host) == []
+    assert Repo.aggregate(from(l in ExecutionLease, where: l.session_id == ^sid), :count) == 0
+  end
+
   test "a document block that is not a well-formed named file is refused and leases nothing",
        %{ws: ws} do
     %{host: host, ref: ref} = open_host_session(ws, "strict-mac", @images ++ @files)
@@ -141,7 +156,7 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
   # its file types are then written past the heartbeat changeset, so this file
   # tests the lease alone; registered_host_readiness_test.exs tests that a real
   # heartbeat may carry the file types.
-  defp open_host_session(ws, name, attachments, provider \\ "claude") do
+  defp open_host_session(ws, name, attachments, provider \\ "claude", codex_attachments \\ nil) do
     root = System.tmp_dir!()
     caps = caps(Enum.filter(attachments, &(&1 in @images)))
 
@@ -153,7 +168,7 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
 
     {1, _} =
       Repo.update_all(from(h in RegisteredHost, where: h.id == ^host.id),
-        set: [capabilities: caps(attachments)]
+        set: [capabilities: caps(attachments, codex_attachments)]
       )
 
     {:ok, host} = ChatHosts.authenticate(enrolled.credential)
@@ -181,7 +196,16 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
     %{host: host, ref: ref, session_id: session_id}
   end
 
-  defp caps(attachments) do
+  # Codex on a host takes no attachment of any kind, unless a test lists some
+  # under it to show the server refuses a file to codex regardless.
+  defp caps(attachments, codex_attachments \\ nil) do
+    codex = %{
+      "installed" => true,
+      "auth_ready" => true,
+      "operations" => ~w(send_turn steer interrupt answer_approval close),
+      "task_hands" => true
+    }
+
     %{
       "protocol_version" => 1,
       "providers" => %{
@@ -192,13 +216,8 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
           "task_hands" => true,
           "attachments" => attachments
         },
-        # Codex on a host takes no attachment of any kind.
-        "codex" => %{
-          "installed" => true,
-          "auth_ready" => true,
-          "operations" => ~w(send_turn steer interrupt answer_approval close),
-          "task_hands" => true
-        }
+        "codex" =>
+          if(codex_attachments, do: Map.put(codex, "attachments", codex_attachments), else: codex)
       }
     }
   end

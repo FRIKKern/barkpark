@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.Studio.ChatModeSteerUnsupportedTest do
+defmodule BarkparkWeb.Studio.ChatSteerUnsupportedTest do
   @moduledoc """
   task-9ae8a0c89d9209b5: the /plan and /autopilot builtins and the header mode
   toggle reach `change_mode/2`, which steered a live session and matched
@@ -172,5 +172,24 @@ defmodule BarkparkWeb.Studio.ChatModeSteerUnsupportedTest do
       # And nothing went to the app-server: a mode steer has no request there.
       refute File.read!(log) =~ "turn/steer"
     end
+  end
+
+  # task-5c21baa4f63db9ac / task-dd4f9c910a709c11: change_model ignored the same
+  # answer for a model steer, saved the choice and posted "Model → Opus." while
+  # the running thread kept its model.
+  test "/model on a live codex session posts no Model line and says the model cannot change",
+       %{conn: conn, log: log} do
+    view = live_codex_session!(conn, log)
+    choice_before = lv_assigns(view)[:model_choice]
+    sid = lv_assigns(view)[:store_session_id]
+    row_before = StudioChat.get_session(sid).model_choice
+
+    html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model opus"})
+
+    assert html =~ "This Codex session can&#39;t change its model while it runs."
+    refute html =~ "Model →"
+    assert lv_assigns(view)[:model_choice] == choice_before
+    assert StudioChat.get_session(sid).model_choice == row_before
+    refute File.read!(log) =~ "turn/steer"
   end
 end
