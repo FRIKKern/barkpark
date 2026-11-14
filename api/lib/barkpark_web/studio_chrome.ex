@@ -866,7 +866,7 @@ defmodule BarkparkWeb.StudioChrome do
   #
   # NOT used for any workspace-scoped affordance — that is `shares_admin?`,
   # which is `Caps.admin?/1`. Do not re-merge these two.
-  defp instance_admin?(token, user), do: token_admin?(token) or account_admin?(user)
+  def instance_admin?(token, user), do: token_admin?(token) or account_admin?(user)
 
   defp host_vitals?(socket),
     do:
