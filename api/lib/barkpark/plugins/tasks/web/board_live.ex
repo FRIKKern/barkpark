@@ -277,9 +277,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # `parse_col/1`), then re-derives the pure view. It runs on the initial mount
   # and on every chip/selector push_patch.
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     socket =
       socket
+      |> assign(:list_path, Barkpark.Plugins.Tasks.Web.ListLive.list_path(uri))
       |> assign(:group_by, parse_group(params["group"]))
       |> assign(:filters, parse_filters(params))
 
@@ -2592,6 +2593,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           <p class="bp-sub">
             Every family of work, live — click a card for the full story.
           </p>
+          <.link navigate={@list_path} class="bp-chip" data-role="list-link">All tasks</.link>
         </div>
         <div class="bp-head-r">
           <header class="bp-momentum" data-role="momentum">

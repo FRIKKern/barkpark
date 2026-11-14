@@ -247,6 +247,7 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
     # ── other installed-plugin routes — counted, not mounted here ──
     %{route: "/studio/onixedit/ping", disposition: :reflect_only},
+    %{route: "/admin/projects/list", disposition: :reflect_only},
     %{route: "/admin/pulse", disposition: :reflect_only},
     %{route: "/admin/onixedit/staleness", disposition: :reflect_only},
     %{route: "/admin/github", disposition: :reflect_only},
@@ -256,6 +257,10 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       disposition: :reflect_only
     },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/projects", disposition: :reflect_only},
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/admin/projects/list",
+      disposition: :reflect_only
+    },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/fleet", disposition: :reflect_only},
     %{route: "/w/:workspace_slug/p/:project_slug/admin/pulse", disposition: :reflect_only},
     %{
