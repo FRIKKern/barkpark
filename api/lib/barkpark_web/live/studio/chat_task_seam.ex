@@ -138,8 +138,16 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
   def epic_goal(nil, _session, _principal), do: nil
 
   def epic_goal(reader, %{provider: provider, id: session_id}, principal) when is_atom(reader) do
-    goal = StudioChat.epic_goal(provider, session_id)
+    provider |> StudioChat.epic_goal(session_id) |> bound_epic_goal(principal)
+  end
 
+  @doc """
+  Hold a `StudioChat.epic_goal/2` answer to a dataset-bound token's dataset;
+  everyone else gets it back unchanged. The chat session JSON asks this too, so
+  the wire and the sidebar agree.
+  """
+  @spec bound_epic_goal(map() | nil, term()) :: map() | nil
+  def bound_epic_goal(goal, principal) do
     case bound_scope(principal) do
       [dataset: dataset] when is_map(goal) -> bound_epic_goal(goal, dataset, principal)
       _ -> goal
@@ -148,7 +156,8 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
 
   # `StudioChat.epic_goal/2` reads by workspace and names no dataset, so its
   # answer is only the epic's id here: the row and its children are read again
-  # inside the token's dataset.
+  # inside the token's dataset. The count is capped: `epic_children/2` stops at
+  # 500 rows across the workspace's datasets.
   defp bound_epic_goal(%{id: id}, dataset, %{workspace_id: ws}) when is_binary(ws) do
     epic =
       Repo.one(

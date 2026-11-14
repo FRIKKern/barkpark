@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.ChatEpicDatasetBoundTest do
   strip's agent lines, and the sidebar's epic-goal line. A token minted with an
   explicit dataset is held to that one, so neither read may hand it another
   dataset's task (task-b5b071d20c6956f9). An unbound token sees both (control).
+  The chat session JSON carries the same epic map and is held the same way.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -53,8 +54,8 @@ defmodule BarkparkWeb.Studio.ChatEpicDatasetBoundTest do
 
   # A session whose worker holds an OWN-dataset slice under `epic`, with a
   # production sibling under the same epic claimed and pulsed by a builder the
-  # session's rail names. Returns the mounted view's HTML and the sibling.
-  defp mount_chat(ws, scope, epic_dataset, epic_title, token_opts) do
+  # session's rail names. Returns the session, the rows and a raw token.
+  defp seed(ws, scope, epic_dataset, epic_title, token_opts) do
     sid = Ecto.UUID.generate()
     label = "build:" <> AgentTaskJoin.emitter_slug(@prod_child)
     {:ok, _} = StudioChat.create_session(%{id: sid, mode: "plan"}, {:workspace, ws.id})
@@ -72,10 +73,27 @@ defmodule BarkparkWeb.Studio.ChatEpicDatasetBoundTest do
     raw = "chat-epic-" <> Ecto.UUID.generate()
     perms = ["read", "write", "admin"]
     {:ok, _} = Auth.create_token(raw, "chat epic", @own, perms, ws.id, token_opts)
-    conn = scoped_conn() |> init_test_session(%{"api_token" => raw})
+    %{sid: sid, sibling: sibling, slice: slice, raw: raw}
+  end
 
-    {:ok, view, _} = live(conn, "/w/#{ws.slug}/p/default/studio/chat/#{sid}")
-    %{html: render(view), view: view, sid: sid, sibling: sibling, slice: slice}
+  defp mount_chat(ws, scope, epic_dataset, epic_title, token_opts) do
+    m = seed(ws, scope, epic_dataset, epic_title, token_opts)
+    conn = scoped_conn() |> init_test_session(%{"api_token" => m.raw})
+
+    {:ok, view, _} = live(conn, "/w/#{ws.slug}/p/default/studio/chat/#{m.sid}")
+    Map.merge(m, %{html: render(view), view: view})
+  end
+
+  # The same session over the token API: the show body and its list row.
+  defp session_json(ws, scope, epic_dataset, epic_title, token_opts) do
+    m = seed(ws, scope, epic_dataset, epic_title, token_opts)
+    get = &(build_conn() |> put_req_header("authorization", "Bearer " <> m.raw) |> get(&1))
+
+    show = get.("/v1/chat/sessions/#{m.sid}")
+    index = get.("/v1/chat/sessions")
+    row = Enum.find(json_response(index, 200)["sessions"], &(&1["id"] == m.sid))
+
+    %{show: json_response(show, 200), row: row, bodies: show.resp_body <> index.resp_body}
   end
 
   defp epic_line(%{view: view, sid: sid}) do
@@ -133,6 +151,39 @@ defmodule BarkparkWeb.Studio.ChatEpicDatasetBoundTest do
 
       assert epic_line(m) =~ @prod_epic
       assert agent_line?(m)
+    end
+  end
+
+  describe "the session JSON (GET /v1/chat/sessions and /v1/chat/sessions/:id)" do
+    test "a dataset-bound token's epic counts its own dataset's slices only",
+         %{ws: ws, scope: scope} do
+      j = session_json(ws, scope, @own, @own_epic, dataset_bound: true)
+
+      assert j.show["epic"]["title"] == @own_epic
+      assert j.show["epic"]["slices_total"] == 1
+      assert j.row["epic"]["slices_total"] == 1
+    end
+
+    test "a dataset-bound token's bodies do not carry a production epic",
+         %{ws: ws, scope: scope} do
+      j = session_json(ws, scope, @prod, @prod_epic, dataset_bound: true)
+
+      # The session is served and its list row carries the workflow; only the
+      # epic is withheld.
+      assert is_map(j.row["workflow"])
+      refute j.bodies =~ @prod_epic
+      refute Map.has_key?(j.show, "epic")
+      refute Map.has_key?(j.row, "epic")
+    end
+
+    test "an unbound token still gets the production epic and both slices (control)",
+         %{ws: ws, scope: scope} do
+      j = session_json(ws, scope, @prod, @prod_epic, [])
+
+      assert j.show["epic"]["title"] == @prod_epic
+      assert j.row["epic"]["title"] == @prod_epic
+      assert j.show["epic"]["slices_total"] == 2
+      assert j.row["epic"]["slices_total"] == 2
     end
   end
 
