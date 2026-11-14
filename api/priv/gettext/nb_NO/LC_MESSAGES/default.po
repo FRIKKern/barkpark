@@ -13569,3 +13569,220 @@ msgstr "Gå til fokusmodus"
 #, elixir-autogen, elixir-format
 msgid "Breadcrumb"
 msgstr "Brødsmulesti"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:149
+#, elixir-autogen, elixir-format
+msgid "%{count} search found nothing"
+msgid_plural "%{count} searches found nothing"
+msgstr[0] "%{count} søk fant ingenting"
+msgstr[1] "%{count} søk fant ingenting"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:226
+#: lib/barkpark_web/live/studio/search_live/view.ex:266
+#, elixir-autogen, elixir-format
+msgid "A search for"
+msgstr "Et søk etter"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:206
+#, elixir-autogen, elixir-format
+msgid "A synonym makes a search for one word also find another."
+msgstr "Et synonym gjør at et søk etter ett ord også finner et annet."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:164
+#: lib/barkpark_web/live/studio/search_live/view.ex:264
+#, elixir-autogen, elixir-format
+msgid "Add a synonym"
+msgstr "Legg til et synonym"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:227
+#: lib/barkpark_web/live/studio/search_live/view.ex:274
+#, elixir-autogen, elixir-format
+msgid "Also finds"
+msgstr "Finner også"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:347
+#: lib/barkpark_web/live/studio/search_live/view.ex:350
+#, elixir-autogen, elixir-format
+msgid "Both ways"
+msgstr "Begge veier"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:124
+#, elixir-autogen, elixir-format
+msgid "Compared with the period before"
+msgstr "Sammenlignet med perioden før"
+
+#: lib/barkpark_web/live/studio/search_live.ex:158
+#: lib/barkpark_web/live/studio/search_live.ex:173
+#, elixir-autogen, elixir-format
+msgid "Could not save the synonym. It may already exist."
+msgstr "Kunne ikke lagre synonymet. Det finnes kanskje allerede."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:254
+#, elixir-autogen, elixir-format
+msgid "Delete the synonym %{from} to %{to}"
+msgstr "Slett synonymet %{from} til %{to}"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:251
+#, elixir-autogen, elixir-format
+msgid "Delete the synonym %{from} to %{to}?"
+msgstr "Slette synonymet %{from} til %{to}?"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:228
+#: lib/barkpark_web/live/studio/search_live/view.ex:277
+#, elixir-autogen, elixir-format
+msgid "Direction"
+msgstr "Retning"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:134
+#, elixir-autogen, elixir-format
+msgid "Every top search found something."
+msgstr "Alle de vanligste søkene fant noe."
+
+#: lib/barkpark_web/live/studio/search_live.ex:134
+#: lib/barkpark_web/live/studio/search_live.ex:146
+#, elixir-autogen, elixir-format
+msgid "Fill in both words first."
+msgstr "Fyll inn begge ordene først."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:101
+#, elixir-autogen, elixir-format
+msgid "Found by a wider search"
+msgstr "Funnet med et bredere søk"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:99
+#: lib/barkpark_web/live/studio/search_live/view.ex:117
+#, elixir-autogen, elixir-format
+msgid "Found nothing"
+msgstr "Fant ingenting"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:65
+#, elixir-autogen, elixir-format
+msgid "Insights"
+msgstr "Innsikt"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:341
+#, elixir-autogen, elixir-format
+msgid "Last month"
+msgstr "Forrige måned"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:340
+#, elixir-autogen, elixir-format
+msgid "Last week"
+msgstr "Forrige uke"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:93
+#, elixir-autogen, elixir-format
+msgid "No searches were recorded in this period."
+msgstr "Ingen søk ble registrert i denne perioden."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:215
+#, elixir-autogen, elixir-format
+msgid "No synonyms yet."
+msgstr "Ingen synonymer ennå."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:346
+#: lib/barkpark_web/live/studio/search_live/view.ex:351
+#, elixir-autogen, elixir-format
+msgid "One way"
+msgstr "Én vei"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:173
+#, elixir-autogen, elixir-format
+msgid "People searched for the first word, found nothing, then found results with the second."
+msgstr "Folk søkte etter det første ordet, fant ingenting, og fant deretter treff med det andre."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:73
+#, elixir-autogen, elixir-format
+msgid "Period"
+msgstr "Periode"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:311
+#, elixir-autogen, elixir-format
+msgid "Save synonym"
+msgstr "Lagre synonym"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:50
+#, elixir-autogen, elixir-format
+msgid "Search surface"
+msgstr "Søkeområde"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:132
+#, elixir-autogen, elixir-format
+msgid "Searches that found nothing"
+msgstr "Søk som ikke fant noe"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:313
+#, elixir-autogen, elixir-format
+msgid "Show what it finds"
+msgstr "Vis hva det finner"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:171
+#, elixir-autogen, elixir-format
+msgid "Suggested synonyms"
+msgstr "Foreslåtte synonymer"
+
+#: lib/barkpark_web/live/studio/search_live.ex:182
+#, elixir-autogen, elixir-format
+msgid "Synonym deleted."
+msgstr "Synonymet er slettet."
+
+#: lib/barkpark_web/live/studio/search_live.ex:152
+#: lib/barkpark_web/live/studio/search_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Synonym saved."
+msgstr "Synonymet er lagret."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:205
+#, elixir-autogen, elixir-format
+msgid "Synonyms"
+msgstr "Synonymer"
+
+#: lib/barkpark_web/live/studio/search_live.ex:185
+#, elixir-autogen, elixir-format
+msgid "That synonym is already gone."
+msgstr "Det synonymet er allerede borte."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:66
+#, elixir-autogen, elixir-format
+msgid "The numbers cover finished days, weeks and months. Today's searches show up tomorrow."
+msgstr "Tallene dekker avsluttede dager, uker og måneder. Dagens søk vises i morgen."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:115
+#, elixir-autogen, elixir-format
+msgid "Times"
+msgstr "Ganger"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:106
+#, elixir-autogen, elixir-format
+msgid "Top searches"
+msgstr "Vanligste søk"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:44
+#, elixir-autogen, elixir-format
+msgid "What people searched for in %{dataset}, and the synonyms that help them find it."
+msgstr "Hva folk søkte etter i %{dataset}, og synonymene som hjelper dem å finne det."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:339
+#, elixir-autogen, elixir-format
+msgid "Yesterday"
+msgstr "I går"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:187
+#, elixir-autogen, elixir-format
+msgid "also finds"
+msgstr "finner også"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:241
+#, elixir-autogen, elixir-format
+msgid "suggested"
+msgstr "foreslått"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:293
+#, elixir-autogen, elixir-format
+msgid "“%{from}” finds %{before} now. “%{to}” finds %{after}."
+msgstr "«%{from}» finner %{before} nå. «%{to}» finner %{after}."
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:116
+#, elixir-autogen, elixir-format
+msgid "Trend"
+msgstr "Utvikling"
