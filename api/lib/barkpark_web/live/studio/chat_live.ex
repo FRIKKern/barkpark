@@ -5710,7 +5710,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp epic_goal_in_tenancy(socket, s, owners) do
     if epic_fold_permitted?(socket, Map.get(owners, s.id)) do
-      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s.provider, s.id)
+      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s, socket.assigns[:api_token])
     end
   end
 
@@ -6654,6 +6654,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         MapSet.to_list(ids),
         Keyword.get(hand_task_scope(socket), :workspace_id)
       )
+      |> ChatTaskSeam.only_bound(socket.assigns[:api_token])
       |> Map.new(fn d -> {d.doc_id, hand_epic_row(socket, d.doc_id, d.title, d.content)} end)
 
     assign(socket, hand_epic: %{ids: ids, rows: rows})
