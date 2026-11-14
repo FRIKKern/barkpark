@@ -123,6 +123,16 @@ func (c *Client) Publish(ctx context.Context, command RemoteCommand, cursor uint
 	}, nil)
 }
 
+// PostStatus sends a turn's status label out of the event sequence: no cursor,
+// no idempotency key, fenced by the lease and its epoch like an event
+// (task-768e7dc4449cc7b9). An old server answers 404.
+func (c *Client) PostStatus(ctx context.Context, command RemoteCommand, label string) error {
+	return c.do(ctx, http.MethodPost, "/v1/chat-host/leases/"+url.PathEscape(command.LeaseID)+"/status", true, map[string]any{
+		"epoch": command.Epoch,
+		"label": label,
+	}, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, authenticate bool, payload any, response any) error {
 	resp, err := c.send(ctx, method, path, authenticate, payload)
 	if err != nil {

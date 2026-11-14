@@ -106,7 +106,8 @@ func installStatusHelper(t *testing.T, env map[string]string) {
 }
 
 // runLabelledTurn runs one claude send_turn with the given labeler and returns
-// every event the host emitted. When a status event is emitted it creates gate,
+// every event the host emitted, with each label the host posted written in
+// where it was posted as {kind: status, label}. A posted label creates gate,
 // which the helper turn waits for before its text.
 func runLabelledTurn(t *testing.T, labeler StatusLabeler, gate string) ([]map[string]any, time.Duration) {
 	t.Helper()
@@ -126,6 +127,15 @@ func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log
 	handler.Log = log
 	var mu sync.Mutex
 	var events []map[string]any
+	handler.Status = statusPostFunc(func(_ context.Context, _ RemoteCommand, label string) error {
+		mu.Lock()
+		events = append(events, map[string]any{"kind": "status", "label": label})
+		mu.Unlock()
+		if gate != "" {
+			_ = os.WriteFile(gate, nil, 0o600)
+		}
+		return nil
+	})
 	started := time.Now()
 	err := handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
 		"provider": "claude", "operation": "send_turn", "session_id": "session-label",
@@ -134,9 +144,6 @@ func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-		if event["kind"] == "status" && gate != "" {
-			_ = os.WriteFile(gate, nil, 0o600)
-		}
 		return nil
 	})
 	elapsed := time.Since(started)
@@ -156,9 +163,9 @@ func kindsOf(events []map[string]any) []string {
 	return kinds
 }
 
-// A turn publishes ONE status event with the label, after turn_started and
-// before its first text. The helper turn holds its text until the label is out
-// (or 5 s pass), so without the label the turn still completes, with no status.
+// A turn posts ONE label, after turn_started and before its first text, and
+// never as one of its events. The helper turn holds its text until the label is
+// out (or 5 s pass), so without the label the turn still completes.
 func TestClaudeTurnPublishesItsStatusLabelBeforeTheFirstText(t *testing.T) {
 	labeler := StatusLabelFunc(func(context.Context, string) (string, error) { return tidesLabel, nil })
 	events, _ := runLabelledTurn(t, labeler, filepath.Join(t.TempDir(), "gate"))
@@ -168,9 +175,8 @@ func TestClaudeTurnPublishesItsStatusLabelBeforeTheFirstText(t *testing.T) {
 	if fmt.Sprint(kinds) != fmt.Sprint(want) {
 		t.Fatalf("events %v; want %v: one status label between turn_started and the first text", kinds, want)
 	}
-	status := events[2]
-	if status["label"] != tidesLabel || len(status) != 2 {
-		t.Fatalf("status event = %#v; want exactly {kind: status, label: %q}", status, tidesLabel)
+	if label := events[2]["label"]; label != tidesLabel {
+		t.Fatalf("posted label %v; want %q", label, tidesLabel)
 	}
 }
 
@@ -339,10 +345,23 @@ func TestTurnStatusPublishesTheLabelOnlyBetweenTurnStartedAndText(t *testing.T) 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			var kinds []string
-			status := &turnStatus{emit: func(event map[string]any) error {
-				kinds = append(kinds, fmt.Sprint(event["kind"]))
-				return nil
-			}}
+			posted := make(chan string, 4)
+			status := &turnStatus{
+				emit: func(event map[string]any) error {
+					kinds = append(kinds, fmt.Sprint(event["kind"]))
+					return nil
+				},
+				post: func(label string) { posted <- label },
+			}
+			// The label is posted on its own goroutine: after each step, take
+			// what it posted.
+			take := func(wait time.Duration) {
+				select {
+				case <-posted:
+					kinds = append(kinds, "status")
+				case <-time.After(wait):
+				}
+			}
 			for _, s := range c.steps {
 				if s.event != nil {
 					if err := status.forward(s.event); err != nil {
@@ -351,7 +370,9 @@ func TestTurnStatusPublishesTheLabelOnlyBetweenTurnStartedAndText(t *testing.T) 
 				} else {
 					status.offer(s.offer)
 				}
+				take(20 * time.Millisecond)
 			}
+			take(50 * time.Millisecond)
 			if fmt.Sprint(kinds) != fmt.Sprint(c.want) {
 				t.Fatalf("emitted %v; want %v", kinds, c.want)
 			}
@@ -359,52 +380,70 @@ func TestTurnStatusPublishesTheLabelOnlyBetweenTurnStartedAndText(t *testing.T) 
 	}
 }
 
-// After the turn ends (close), a label that arrives is never emitted, so no
-// event is published after Handle returned.
-func TestTurnStatusEmitsNothingAfterClose(t *testing.T) {
-	var kinds []string
-	status := &turnStatus{emit: func(event map[string]any) error {
-		kinds = append(kinds, fmt.Sprint(event["kind"]))
-		return nil
-	}}
+// After the turn ends (close), a label that arrives is never posted.
+func TestTurnStatusPostsNothingAfterClose(t *testing.T) {
+	posted := make(chan string, 1)
+	status := &turnStatus{
+		emit: func(map[string]any) error { return nil },
+		post: func(label string) { posted <- label },
+	}
 	_ = status.forward(map[string]any{"kind": "turn_started"})
 	status.close()
 	status.offer(tidesLabel)
-	if fmt.Sprint(kinds) != "[turn_started]" {
-		t.Fatalf("emitted %v after close", kinds)
+	select {
+	case label := <-posted:
+		t.Fatalf("posted %q after close", label)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
-// A refused label (an old or strict server answering 4xx) does not fail the
-// turn: the next event goes through forward as usual.
-func TestTurnStatusRefusedLabelDoesNotFailTheTurn(t *testing.T) {
-	var kinds []string
-	status := &turnStatus{emit: func(event map[string]any) error {
-		if event["kind"] == "status" {
-			return &StatusError{Code: http.StatusUnprocessableEntity, Status: "422"}
-		}
-		kinds = append(kinds, fmt.Sprint(event["kind"]))
-		return nil
-	}}
-	if err := status.forward(map[string]any{"kind": "turn_started"}); err != nil {
-		t.Fatal(err)
+// forward never holds its lock across emit: a label offered while the turn's
+// event is being published is not held behind it, and the event is not held
+// behind the label.
+func TestTurnStatusForwardHoldsNoLockAcrossEmit(t *testing.T) {
+	inEmit := make(chan struct{})
+	release := make(chan struct{})
+	posted := make(chan string, 1)
+	status := &turnStatus{
+		emit: func(event map[string]any) error {
+			if event["kind"] == "item_started" {
+				close(inEmit)
+				<-release
+			}
+			return nil
+		},
+		post: func(label string) { posted <- label },
 	}
-	status.offer(tidesLabel)
-	if err := status.forward(map[string]any{"kind": "text_delta", "delta": "hi"}); err != nil {
-		t.Fatalf("the text after a refused label failed: %v", err)
+	_ = status.forward(map[string]any{"kind": "turn_started"})
+	go func() {
+		_ = status.forward(map[string]any{"kind": "item_started", "item": map[string]any{"type": "tool_use"}})
+	}()
+	<-inEmit
+	offered := make(chan struct{})
+	go func() {
+		status.offer(tidesLabel)
+		close(offered)
+	}()
+	select {
+	case <-offered:
+	case <-time.After(time.Second):
+		t.Fatal("offer waited for an event being published")
 	}
-	if fmt.Sprint(kinds) != "[turn_started text_delta]" {
-		t.Fatalf("taken %v", kinds)
+	close(release)
+	select {
+	case <-posted:
+	case <-time.After(time.Second):
+		t.Fatal("the label was not posted")
 	}
 }
 
-// End to end through the Runner: a server that refuses the status kind (422)
-// gets the whole turn anyway, with no cursor gap: the text takes the cursor the
-// refused label did not use. A server that takes it gets it in order.
+// End to end through the Runner: an old server (404 on the status endpoint)
+// and a new one both get the whole turn, with no status among its events and
+// one label POST, never retried.
 func TestRunnerTurnWithAStatusLabelKeepsTheCursorWhetherOrNotTheServerTakesIt(t *testing.T) {
 	for name, refuse := range map[string]map[string]int{
-		"server refuses status": {"status": http.StatusUnprocessableEntity},
-		"server takes status":   nil,
+		"old server without the endpoint": {"status": http.StatusNotFound},
+		"server takes status":             nil,
 	} {
 		t.Run(name, func(t *testing.T) {
 			gate := filepath.Join(t.TempDir(), "gate")
@@ -426,10 +465,7 @@ func TestRunnerTurnWithAStatusLabelKeepsTheCursorWhetherOrNotTheServerTakesIt(t 
 			runUntilCompleted(t, server, handler)
 
 			_, kinds := server.snapshot()
-			want := []string{"session_started", "turn_started", "status", "text_delta", "turn_completed"}
-			if refuse != nil {
-				want = []string{"session_started", "turn_started", "text_delta", "turn_completed"}
-			}
+			want := []string{"session_started", "turn_started", "text_delta", "turn_completed"}
 			if fmt.Sprint(kinds) != fmt.Sprint(want) {
 				t.Fatalf("events taken %v; want %v", kinds, want)
 			}

@@ -1240,6 +1240,12 @@ defmodule PDS.Census do
     {:post, "/v1/auth/webauthn/step-up/challenge", "BarkparkWeb.WebauthnController", :step_up_challenge, :status_only_receipt},
     {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll, :status_only_receipt},
     {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat, :status_only_receipt},
+    # A turn's status label out of the cursor sequence (task-768e7dc4449cc7b9):
+    # ChatHosts.accept_status/3 writes NOTHING (no ExecutionEvent row, no cursor,
+    # no lease or session change); its one effect is a PubSub broadcast, and the
+    # 202 body `streamed: true|false` reports exactly whether that happened. So
+    # there is no stored row to read back and no `ok: true` to key on.
+    {:post, "/v1/chat-host/leases/:lease_id/status", "BarkparkWeb.ChatHostController", :status, :status_only_receipt},
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
     {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
     # THE ASKUSERQUESTION ANSWER SUBMIT (ct-bl-question-updatedinput). Same class,

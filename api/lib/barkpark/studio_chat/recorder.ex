@@ -578,6 +578,18 @@ defmodule Barkpark.StudioChat.Recorder do
     {:reply, :ok, touch(state)}
   end
 
+  # A host's out-of-sequence status label (ChatHosts.accept_status/3): streamed
+  # only while the turn is open and has no text, decided here so it is ordered
+  # against the turn's own projected events. Never stored, never touches state.
+  def handle_call({:offer_status, %Event{kind: :status} = event}, _from, state) do
+    if Map.get(state, :runtime_turn_open?, false) and state.runtime_text == "" do
+      broadcast(state, {:studio_chat_runtime_event, event})
+      {:reply, :streamed, state}
+    else
+      {:reply, :dropped, state}
+    end
+  end
+
   # Late-join query (charter D36a): a tab that opens AFTER the initialize ack
   # already fired still gets the held vocabulary. Returns the best available
   # list of `%{"name", "description", "argumentHint"}` maps (rich, then the

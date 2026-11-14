@@ -92,6 +92,24 @@ defmodule BarkparkWeb.Plugs.RateLimitChatHostTest do
     assert as_host(credential) |> post("/v1/chat-host/heartbeat", %{}) |> json_response(200)
   end
 
+  # The out-of-sequence status label (task-768e7dc4449cc7b9) rides the same
+  # mount, so it spends the host's bucket. This lease is on a managed session,
+  # so every POST passes the meter and is refused by the fence (409), never 429.
+  test "an enrolled host's status labels are metered on its own bucket, not the IP's",
+       %{credential: credential, fence: fence} do
+    statuses =
+      for _ <- 1..70 do
+        as_host(credential)
+        |> post("/v1/chat-host/leases/#{fence.lease_id}/status", %{
+          "epoch" => fence.epoch,
+          "label" => "Mulling it over"
+        })
+        |> Map.fetch!(:status)
+      end
+
+    assert Enum.frequencies(statuses) == %{409 => 70}
+  end
+
   test "a made-up Host credential is metered on the caller's IP, even rotated per request",
        _context do
     # A fresh random credential each request: if an unverified credential

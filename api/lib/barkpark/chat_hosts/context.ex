@@ -387,6 +387,49 @@ defmodule Barkpark.ChatHosts do
   end
 
   @doc """
+  A turn's status label posted OUT of the cursor sequence
+  (`POST /v1/chat-host/leases/:lease_id/status`, task-768e7dc4449cc7b9), so a
+  label in flight never holds the turn's next event.
+
+  The fence is `live_lease_for_host/2` (this host's live lease, in its
+  workspace, on a session it executes) plus the lease's integer `epoch`; every
+  miss is the one `{:error, :stale_fence}`. The label is checked by the same
+  rules as a `status` event. Nothing is written: no ExecutionEvent row, no
+  cursor, no lease or session change, so it cannot reach the expired-lease
+  close or the run-once rule. The Recorder streams it as the same runtime
+  `:status` event the cursor path does, but only while the turn is open and has
+  no text yet. Answers `{:ok, :streamed | :dropped}`.
+  """
+  def accept_status(%RegisteredHost{} = host, lease_id, attrs) when is_map(attrs) do
+    epoch = value(attrs, :epoch)
+
+    with %ExecutionLease{epoch: ^epoch} = lease when is_integer(epoch) <-
+           live_lease_for_host(host, lease_id),
+         {:ok, event} <- normalize_status_label(value(attrs, :label)) do
+      {:ok, stream_status(lease, event)}
+    else
+      {:error, :invalid_status_label} = refused -> refused
+      _miss -> {:error, :stale_fence}
+    end
+  end
+
+  defp stream_status(lease, event) do
+    status = %Barkpark.StudioChat.Runtime.Event{
+      provider: lease.provider,
+      session_id: lease.session_id,
+      kind: :status,
+      native: event
+    }
+
+    case Barkpark.StudioChat.Recorder.whereis(lease.session_id) do
+      pid when is_pid(pid) -> GenServer.call(pid, {:offer_status, status}, 2_000)
+      nil -> :dropped
+    end
+  catch
+    :exit, _ -> :dropped
+  end
+
+  @doc """
   Ends every turn whose host went silent: a `leased`/`running` lease that
   expired more than #{@expired_turn_grace}s ago (no heartbeat for
   #{@lease_ttl + @expired_turn_grace}s). A host that dies for good never sends
