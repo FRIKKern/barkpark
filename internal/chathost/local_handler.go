@@ -23,6 +23,11 @@ type LocalHandler struct {
 	// Images fetches the images a send_turn references (turn_images.go). Nil
 	// means the host cannot fetch: a turn that carries images is refused.
 	Images ImageFetcher
+	// StatusLabel makes a claude turn's 2 to 4 word status label
+	// (status_label.go). Nil means no label.
+	StatusLabel StatusLabeler
+	// Log receives the line a skipped status label leaves. Nil means os.Stderr.
+	Log io.Writer
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession
@@ -209,6 +214,9 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, image
 		return err
 	}
 	defer h.unregister(sessionID, session)
+	// The label's side call runs alongside the turn; the turn never waits for it.
+	emit, endStatus := h.startStatusLabel(ctx, content, emit)
+	defer endStatus()
 
 	if err := session.write(claudeUserFrame(content, images)); err != nil {
 		return err
