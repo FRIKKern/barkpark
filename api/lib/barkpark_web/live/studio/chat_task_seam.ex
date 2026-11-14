@@ -37,9 +37,14 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
       delegations in `Barkpark.Tasks.PaperResolver` — api-owned files.
     * `epic_children/3` and `epic_goal/3` are `Barkpark.StudioChat` reads of
       task documents; they are gated here so ChatLive has no ungated task
-      read at all.
+      read at all. Both span the workspace's datasets, so a dataset-bound
+      token's rows are narrowed here (`only_bound/2`, `epic_goal/3`).
   """
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.Tasks
   alias BarkparkWeb.Studio.StudioLive.PaperTaskSeam
@@ -124,10 +129,50 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
   def epic_children(reader, parent_ids, workspace_id) when is_atom(reader),
     do: StudioChat.epic_children(parent_ids, workspace_id)
 
-  @doc "The epic-goal line for a workflow session; nil when unavailable."
-  @spec epic_goal(t(), String.t() | nil, String.t()) :: map() | nil
-  def epic_goal(nil, _provider, _session_id), do: nil
+  @doc """
+  The epic-goal line for a workflow session row; nil when unavailable. A
+  dataset-bound token gets the line only when the epic is a task of its own
+  dataset, with the slice count taken over that dataset's children.
+  """
+  @spec epic_goal(t(), %{provider: String.t() | nil, id: String.t()}, term()) :: map() | nil
+  def epic_goal(nil, _session, _principal), do: nil
 
-  def epic_goal(reader, provider, session_id) when is_atom(reader),
-    do: StudioChat.epic_goal(provider, session_id)
+  def epic_goal(reader, %{provider: provider, id: session_id}, principal) when is_atom(reader) do
+    goal = StudioChat.epic_goal(provider, session_id)
+
+    case bound_scope(principal) do
+      [dataset: dataset] when is_map(goal) -> bound_epic_goal(goal, dataset, principal)
+      _ -> goal
+    end
+  end
+
+  # `StudioChat.epic_goal/2` reads by workspace and names no dataset, so its
+  # answer is only the epic's id here: the row and its children are read again
+  # inside the token's dataset.
+  defp bound_epic_goal(%{id: id}, dataset, %{workspace_id: ws}) when is_binary(ws) do
+    epic =
+      Repo.one(
+        from d in Document,
+          where: d.type == "task" and d.doc_id == ^id,
+          where: d.dataset == ^dataset and d.workspace_id == ^ws,
+          limit: 1
+      )
+
+    if epic do
+      slices = Enum.filter(StudioChat.epic_children([id], ws), &(&1.dataset == dataset))
+      done = Enum.count(slices, &((&1.content || %{})["lifecycle_status"] in ~w(done cancelled)))
+      content = epic.content || %{}
+
+      %{
+        id: id,
+        title: epic.title || content["title"] || id,
+        slices_done: done,
+        slices_total: length(slices),
+        wave_status:
+          if(content["wave_status"] in [nil, ""], do: nil, else: content["wave_status"])
+      }
+    end
+  end
+
+  defp bound_epic_goal(_goal, _dataset, _principal), do: nil
 end

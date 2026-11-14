@@ -155,7 +155,10 @@ defmodule BarkparkWeb.Studio.ChatTaskSeamTest do
       assert ChatTaskSeam.held_claims(nil, "w", workspace_id: Ecto.UUID.generate()) == []
       assert ChatTaskSeam.criteria_progress(nil, %{"acceptance_criteria" => [%{}]}) == nil
       assert ChatTaskSeam.epic_children(nil, ["p"], Ecto.UUID.generate()) == []
-      assert ChatTaskSeam.epic_goal(nil, "claude", Ecto.UUID.generate()) == nil
+
+      assert ChatTaskSeam.epic_goal(nil, %{provider: "claude", id: Ecto.UUID.generate()}, nil) ==
+               nil
+
       refute ChatTaskSeam.available?(nil)
     end
   end
