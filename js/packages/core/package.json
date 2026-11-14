@@ -45,7 +45,7 @@
     "size": "size-limit"
   },
   "optionalDependencies": {
-    "undici": "^6"
+    "undici": "^7"
   },
   "devDependencies": {
     "@types/node": "^20",
