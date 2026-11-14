@@ -27,9 +27,9 @@ admin out of their own workspace. `RequireAdmin` is unchanged and still
 answers only "is this bearer an admin SOMEWHERE".
 
 **Host reach** (Studio terminal, host chat turns, global `/v1/chat`) asks
-`HostExecutionGate` with the same lists. Unset, only an `admin` token homed
-in Default or no workspace, or a Default admin seat, is the operator; one
-homed elsewhere is NOT (#26234).
+`HostExecutionGate` with the same lists. Unset: an `admin` token homed in
+Default or no workspace, or a Default admin seat (host turns: or a Default
+`chat` token); no other (#26234).
 
 **Operator runbook.** On the instance host set `BARKPARK_OPERATOR_EMAILS` and/or
 `BARKPARK_OPERATOR_TOKEN_IDS` in the service env, then restart. Until then the
