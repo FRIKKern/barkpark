@@ -70,15 +70,14 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
 
   defp second(), do: person(BarkparkWeb.ConnCase.scoped_conn(), "b")
 
-  # The document header's co-presence dots: one per session on the document,
-  # this one included, and none for a person alone. The pane's own header
-  # draws them (`Desk.DocStatus`);
-  # the Studio's toolbar row that drew them before is hidden in the desk.
+  # The document header's avatars (TanStack's AvatarStack, `Desk.DocStatus`):
+  # one per OTHER person on the document, none for a person alone. The
+  # Studio's toolbar row that drew dots before is hidden in the desk.
   defp header_dots(view) do
     view
     |> render()
     |> LazyHTML.from_fragment()
-    |> LazyHTML.query("[data-pane-editing] > .pane-header .presence-dots .presence-dot")
+    |> LazyHTML.query("[data-pane-editing] > .pane-header .p-avatars .p-avatar:not(.more)")
     |> Enum.count()
   end
 
@@ -99,8 +98,8 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
     va = open(person(conn, "a"), "#{base};#{a}")
     vb = open(second(), "#{base};#{a}")
 
-    assert eventually(fn -> header_dots(va) == 2 and header_dots(vb) == 2 end),
-           "header dots: A #{header_dots(va)}, B #{header_dots(vb)} (want 2 each)"
+    assert eventually(fn -> header_dots(va) == 1 and header_dots(vb) == 1 end),
+           "header avatars: A #{header_dots(va)}, B #{header_dots(vb)} (want 1 each: the other)"
 
     assert eventually(fn -> online_others(va) == 1 and online_others(vb) == 1 end),
            "who's online: A #{online_others(va)}, B #{online_others(vb)} (want 1 each)"
@@ -121,14 +120,14 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesJ07PresenceTest do
   test "closing the document pane takes you off that document", %{conn: conn, base: base, a: a} do
     va = open(person(conn, "a"), "#{base};#{a}")
     vb = open(second(), "#{base};#{a}")
-    assert eventually(fn -> header_dots(va) == 2 end), "A never saw B arrive on Alpha"
+    assert eventually(fn -> header_dots(va) == 1 end), "A never saw B arrive on Alpha"
 
     # B closes the document's pane: the desk patches to the list.
     render_patch(vb, base)
     render_async(vb, 5_000)
     refute has_element?(vb, "[data-pane-editing]")
 
-    # Alone again: no dots, as in the TanStack Studio (`Desk.DocStatus`).
+    # Alone again: no avatar, as in the TanStack Studio (`Desk.DocStatus`).
     assert eventually(fn -> header_dots(va) == 0 end),
            "B closed Alpha's pane, yet A still shows #{header_dots(va)} people on Alpha"
 

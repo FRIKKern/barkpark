@@ -29,6 +29,9 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       pointer, blue with the focus. Generate is TanStack's secondary
       button (35 px, filled, ringed). A focused button, link or tab is
       outlined in the same blue, as TanStack's, not the Studio's green.
+    * Under the header, TanStack's title bar: the title, 13 px 600, 50 px;
+      85 px with its view tabs under it (Editor and JSON), pills as the
+      group tabs.
     * The pane is TanStack's page colour (`--dk-bg`, light and dark), and
       inputs sit on it. In dark, the boxed fields (array, object, code
       list, localized), an array's rows and a chosen reference sit on it
@@ -67,6 +70,15 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
         --dk-upload-fill: rgb(13 14 18); --dk-upload-ring: rgb(37 40 55); --dk-ghost-fg: rgb(189 191 203); --dk-hover-strong: rgb(42 45 63);
       }
+      .dk .dk-edit > .doc-title-bar { box-sizing: border-box; height: 50px; flex: none; display: flex; align-items: center; padding: 0 20px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
+      .dk .dk-edit > .doc-title-bar:has(.view-tabs) { height: 85px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 15px; padding: 2px 12px 0 20px; }
+      .dk .dk-edit > .doc-title-bar:not(:has(*)) { display: none; }
+      .dk .dk-edit > .doc-title-bar > .title-row { max-width: 100%; display: flex; min-width: 0; }
+      .dk .dk-edit > .doc-title-bar .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit .view-tabs { display: flex; gap: 4px; margin-left: -8px; }
+      .dk .dk-edit .view-tabs [role=tab] { font: inherit; font-size: 13px; font-weight: 500; padding: 3px 8px; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-edit .view-tabs [role=tab]:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-edit .view-tabs [role=tab][aria-selected="true"] { background: var(--dk-selected-fill); color: var(--dk-tab-selected-fg); }
       html[data-theme="dark"] .dk .dk-edit fieldset.bp-field-array, html[data-theme="dark"] .dk .dk-edit .bp-field-composite, html[data-theme="dark"] .dk .dk-edit .bp-field-codelist, html[data-theme="dark"] .dk .dk-edit .bp-field-localized, html[data-theme="dark"] .dk .dk-edit .bp-array-row, html[data-theme="dark"] .dk .dk-edit .ref-selected { background: var(--dk-bg); }
       .dk .dk-edit .editor-body.editor-panel-main { max-width: none; padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-edit .editor-meta { display: block; margin: 0 0 52px; color: var(--dk-muted); font-size: 13px; line-height: 19px; }

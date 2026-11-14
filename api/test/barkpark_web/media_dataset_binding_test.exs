@@ -113,6 +113,39 @@ defmodule BarkparkWeb.MediaDatasetBindingTest do
     end
   end
 
+  # `DELETE /media/:id` names no dataset and did not confine the row, so a
+  # bound token deleted another dataset's file (task-e50f48666c109098).
+  describe "delete by id (flat /media)" do
+    setup %{bound: bound, unbound: unbound} do
+      %{
+        own: uploaded!(upload(bound)),
+        other: uploaded!(upload(unbound, %{"dataset" => @other}))
+      }
+    end
+
+    test "a bound token cannot delete another dataset's file; its own it can",
+         %{bound: bound, own: own, other: other} do
+      missing = as(bound) |> delete("/media/#{Ecto.UUID.generate()}")
+      refused = as(bound) |> delete("/media/#{other.id}")
+
+      assert refused.status == 404
+      assert Repo.get(MediaFile, other.id)
+      # Another dataset's file answers exactly as a missing one.
+      assert strip_request_id(refused.resp_body) == strip_request_id(missing.resp_body)
+
+      assert (as(bound) |> delete("/media/#{own.id}")).status == 200
+      refute Repo.get(MediaFile, own.id)
+    end
+
+    test "an unbound token still deletes another dataset's file (control)",
+         %{unbound: unbound, other: other} do
+      assert (as(unbound) |> delete("/media/#{other.id}")).status == 200
+      refute Repo.get(MediaFile, other.id)
+    end
+
+    defp strip_request_id(body), do: Regex.replace(~r/"request_id":"[^"]*"/, body, "")
+  end
+
   describe "reads by id (scoped /w/:ws/p/:proj/media)" do
     test "meta: own dataset 200, another dataset 404" do
       ws = create_workspace!()
