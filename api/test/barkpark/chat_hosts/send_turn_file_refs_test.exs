@@ -89,6 +89,21 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
     assert Repo.aggregate(from(l in ExecutionLease, where: l.session_id == ^sid), :count) == 0
   end
 
+  test "codex on a host that lists files for claude is refused a file and leases nothing",
+       %{ws: ws} do
+    %{host: host, ref: ref, session_id: sid} =
+      open_host_session(ws, "codex-mac", @images ++ @files, "codex")
+
+    assert {:error, {:host_cannot_receive_attachments, "codex"}} =
+             Runtime.send_turn("codex", ref, [
+               text("read this"),
+               document("text/plain", Base.encode64(@csv), "notes.csv")
+             ])
+
+    assert ChatHosts.next_commands(host) == []
+    assert Repo.aggregate(from(l in ExecutionLease, where: l.session_id == ^sid), :count) == 0
+  end
+
   test "a document block that is not a well-formed named file is refused and leases nothing",
        %{ws: ws} do
     %{host: host, ref: ref} = open_host_session(ws, "strict-mac", @images ++ @files)
@@ -126,7 +141,7 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
   # its file types are then written past the heartbeat changeset, so this file
   # tests the lease alone; registered_host_readiness_test.exs tests that a real
   # heartbeat may carry the file types.
-  defp open_host_session(ws, name, attachments) do
+  defp open_host_session(ws, name, attachments, provider \\ "claude") do
     root = System.tmp_dir!()
     caps = caps(Enum.filter(attachments, &(&1 in @images)))
 
@@ -149,14 +164,14 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
       |> Session.create_changeset(%{
         id: session_id,
         owner_workspace_id: ws.id,
-        provider: "claude",
+        provider: provider,
         execution_target: "registered_host",
         execution_host_id: host.id
       })
       |> Repo.insert()
 
     {:ok, ref} =
-      Runtime.open("claude", %{
+      Runtime.open(provider, %{
         execution_target: "registered_host",
         session_id: session_id,
         workspace_id: ws.id,
@@ -176,6 +191,13 @@ defmodule Barkpark.ChatHosts.SendTurnFileRefsTest do
           "operations" => ~w(send_turn steer interrupt answer_approval close),
           "task_hands" => true,
           "attachments" => attachments
+        },
+        # Codex on a host takes no attachment of any kind.
+        "codex" => %{
+          "installed" => true,
+          "auth_ready" => true,
+          "operations" => ~w(send_turn steer interrupt answer_approval close),
+          "task_hands" => true
         }
       }
     }
