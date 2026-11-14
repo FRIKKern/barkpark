@@ -851,6 +851,8 @@ defmodule Barkpark.Plugins.Tasks do
       # design-language spec; the tasks plugin owns type:task, so the board
       # belongs in its namespace.
       {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops},
+      # The Tasks list beside the board (search, filters, paging); same gate.
+      {:live, "/projects/list", Barkpark.Plugins.Tasks.Web.ListLive, :index, auth: :ops},
       # Personal Dev Fleet desk tile — the read-only listener ROSTER
       # (Barkpark.Plugins.Tasks.Web.FleetLive), mounted at /admin/fleet (the
       # :ops bucket, admin-gated). Reads the flat global-per-dataset roster

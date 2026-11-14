@@ -22,6 +22,7 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
   # ruling's first pass (task-dc80c8cbf7d7473d).
   @flat [
     "/admin/projects",
+    "/admin/projects/list",
     "/admin/onixedit/bokbasen",
     "/admin/github",
     "/admin/fleet",
@@ -137,7 +138,7 @@ defmodule BarkparkWeb.OpsOperatorGateTest do
   # other dataset is held to that one, so it opens none of them
   # (task-6b02208a730fc4fd).
   describe "a dataset-bound token" do
-    @consoles ~w(/projects /onixedit/bokbasen /github /fleet /onixedit/staleness)
+    @consoles ~w(/projects /projects/list /onixedit/bokbasen /github /fleet /onixedit/staleness)
 
     test "bound to another dataset is turned away from every console, scoped and flat",
          %{ws_a: ws_a, proj_a: proj_a, default_id: d} do
