@@ -15,7 +15,8 @@ import (
 
 // A turn's status label: 2 to 4 words, such as "Explaining ocean tides", that
 // say what the assistant is about to do (task-a9983f9aeffb5430). A small side
-// call of the owner's own claude CLI makes it, started with the turn. It rides
+// call of the owner's own claude CLI makes it, started with the turn and run
+// below the turn's CPU priority (task-b235ae3b7f8fdc46). It rides
 // the turn's own event stream as one event:
 //
 //	{"kind": "status", "label": "Explaining ocean tides"}
@@ -50,6 +51,9 @@ const (
 	statusLabelRequestRunes = 2000
 	// How much of the side call's stdout is kept.
 	statusLabelOutputBytes = 4096
+
+	// The niceness the side call runs at, above the turn's 0.
+	statusLabelNice = "10"
 
 	defaultStatusLabelModel   = "sonnet"
 	defaultStatusLabelTimeout = 8 * time.Second
@@ -105,7 +109,7 @@ func (l *ClaudeStatusLabeler) StatusLabel(ctx context.Context, request string) (
 	}
 	defer os.RemoveAll(dir)
 
-	cmd := exec.CommandContext(ctx, "claude",
+	argv := []string{"claude",
 		"--print",
 		"--model", model,
 		"--effort", "low",
@@ -116,7 +120,15 @@ func (l *ClaudeStatusLabeler) StatusLabel(ctx context.Context, request string) (
 		"--safe-mode",
 		"--output-format", "text",
 		"--system-prompt", statusLabelPrompt,
-	)
+	}
+	// Below the turn's priority: on a loaded host the side call must take CPU
+	// only the turn's claude does not want (task-b235ae3b7f8fdc46). nice
+	// sets it before exec, so every thread claude starts inherits it, and it
+	// execs claude in place, so the pid the context kills is claude's.
+	if nice, err := exec.LookPath("nice"); err == nil {
+		argv = append([]string{nice, "-n", statusLabelNice}, argv...)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = providerEnv(nil)
 	cmd.Stdin = strings.NewReader(truncateRunes(request, statusLabelRequestRunes))
@@ -218,6 +230,10 @@ type turnStatus struct {
 
 // startStatusLabel starts the side call for one turn and returns the emit the
 // turn uses from now on, and the func that ends the label when the turn ends.
+// It starts with the turn, not at the turn's first line: measured on a loaded
+// Mac (task-b235ae3b7f8fdc46, 13 interleaved turns a variant), starting
+// together did not delay the first text, and starting at the first line made
+// the label lose to the text in 12 of 13 turns.
 // The end does not wait for the side call: it cancels it, and the side call
 // reaps its own child. A side call that fails or times out logs one line, so
 // labels that stop (a CLI that dropped a flag) are seen; the line never carries
@@ -229,23 +245,25 @@ func (h *LocalHandler) startStatusLabel(ctx context.Context, request string, emi
 	status := &turnStatus{emit: emit}
 	labelCtx, cancel := context.WithCancel(ctx)
 	labeler := h.StatusLabel
-	go func() {
-		label, err := labeler.StatusLabel(labelCtx, request)
-		if err != nil {
-			if labelCtx.Err() == nil {
-				h.logf("status label skipped: %v", err)
-			}
-			return
-		}
-		if label, ok := cleanStatusLabel(label); ok {
-			status.offer(label)
-		} else {
-			h.logf("status label skipped: the side call answered no 2 to 4 word label")
-		}
-	}()
+	go h.runStatusLabel(labelCtx, labeler, request, status)
 	return status.forward, func() {
 		cancel()
 		status.close()
+	}
+}
+
+func (h *LocalHandler) runStatusLabel(labelCtx context.Context, labeler StatusLabeler, request string, status *turnStatus) {
+	label, err := labeler.StatusLabel(labelCtx, request)
+	if err != nil {
+		if labelCtx.Err() == nil {
+			h.logf("status label skipped: %v", err)
+		}
+		return
+	}
+	if label, ok := cleanStatusLabel(label); ok {
+		status.offer(label)
+	} else {
+		h.logf("status label skipped: the side call answered no 2 to 4 word label")
 	}
 }
 
