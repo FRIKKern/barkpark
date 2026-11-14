@@ -56,7 +56,7 @@ defmodule Barkpark.StudioChat do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.StudioChat.{AgentTaskJoin, McpChip, Message, Session}
+  alias Barkpark.StudioChat.{AgentTaskJoin, Attachments, McpChip, Message, Session}
   alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
@@ -2964,9 +2964,8 @@ defmodule Barkpark.StudioChat do
   # png|jpeg|gif|webp (charter D25) and `Attachments.file_types/0` keep their
   # type, so a stored PDF's pointer never says PNG. Anything else (or a nil) falls
   # back to png; `Attachments.put/2`'s sniff is the real gate.
-  @image_media_types ~w(image/png image/jpeg image/gif image/webp)
-  @file_media_types Barkpark.StudioChat.Attachments.file_types()
-  defp normalize_media_type(mt) when mt in @image_media_types or mt in @file_media_types, do: mt
+  @kept_media_types Attachments.media_types() ++ Attachments.file_types()
+  defp normalize_media_type(mt) when mt in @kept_media_types, do: mt
   defp normalize_media_type("image/jpg"), do: "image/jpeg"
   defp normalize_media_type(_), do: "image/png"
 
