@@ -44,9 +44,9 @@ func printSchemaPullHelp(out *writer) {
 	out.outf("a schema file; pull never names or removes any other file.")
 	out.outf("A schema whose name contains /, \\, .. or a leading dot is skipped and named.")
 	out.outf("")
-	out.outf("The server lists each member of an array field's `of` with its type, to and")
-	out.outf("name only. A pulled file has no more than that, and a push of the file")
-	out.outf("replaces what the server stored for those members.")
+	out.outf("Fields are written as the server stores them. An older server can only")
+	out.outf("list the members of an array field without their own fields; pull says so,")
+	out.outf("and push then refuses a change to a schema with such members.")
 	out.outf("")
 	out.outf("flags:")
 	out.outf("  --prune      also remove the schema files whose schema is not on the server")
@@ -137,11 +137,11 @@ func loadSchemaPlan(out *writer, ctx manifest.Context, verb, dir string) (*schem
 		}
 		return nil, nil, useError(out, "validation_failed", fmt.Sprintf("schema %s: %v. Nothing was written.", verb, err), exitValidation)
 	}
-	server, err := fetchDatasetSchemas(ctx, schemaSyncDataset(ctx))
+	server, stored, err := fetchSyncSchemas(ctx, schemaSyncDataset(ctx))
 	if err != nil {
 		return nil, nil, useError(out, "request_failed", fmt.Sprintf("schema %s: reading the schemas of %s: %v", verb, exportScope(ctx), err), exitGeneric)
 	}
-	plan, err := buildSchemaPlan(exportScope(ctx), dir, local, server)
+	plan, err := buildSchemaPlan(exportScope(ctx), dir, local, server, stored)
 	if err != nil {
 		return nil, nil, useError(out, "failed", fmt.Sprintf("schema %s: %v", verb, err), exitGeneric)
 	}
@@ -157,6 +157,9 @@ func renderSchemaPlan(out *writer, p *schemaPlan, removedNote string) {
 	}
 	for _, c := range p.Changed {
 		out.outf("  ~ %s  changed (%s)", c.Name, c.summary())
+		if len(c.CutMembers) > 0 {
+			out.outf("      push would replace the stored members of: %s", strings.Join(c.CutMembers, ", "))
+		}
 	}
 	for _, n := range p.Removed {
 		out.outf("  - %s  %s", n, removedNote)
@@ -183,7 +186,7 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if err != nil {
 		return usageErrf(out, func() { printSchemaPullHelp(out) }, "schema pull: %v", err)
 	}
-	server, err := fetchDatasetSchemas(ctx, schemaSyncDataset(ctx))
+	server, stored, err := fetchSyncSchemas(ctx, schemaSyncDataset(ctx))
 	if err != nil {
 		return useError(out, "request_failed", fmt.Sprintf("schema pull: reading the schemas of %s: %v", exportScope(ctx), err), exitGeneric)
 	}
@@ -258,7 +261,7 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 		}
 	}
 
-	if out.emitStructured(map[string]any{"scope": exportScope(ctx), "dir": dir, "dry_run": g.dryRun, "written": written, "pruned": pruned, "stale": stale, "skipped": skipped}) {
+	if out.emitStructured(map[string]any{"scope": exportScope(ctx), "dir": dir, "dry_run": g.dryRun, "stored_fields": stored, "written": written, "pruned": pruned, "stale": stale, "skipped": skipped}) {
 		return exitOK
 	}
 	wrote, removed := "wrote", "removed"
@@ -281,8 +284,16 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if g.dryRun {
 		out.outf("dry run: nothing was written")
 	}
+	if !stored {
+		out.errf("note: %s", schemaServedNote)
+	}
 	return exitOK
 }
+
+// schemaServedNote is what pull and diff say on a server that cannot send
+// stored fields.
+const schemaServedNote = "this server lists the members of an array field without their own fields, so these files do not have them. " +
+	"`bp schema push` will not apply a change to a schema with such members until the server is updated."
 
 // runSchemaDiff is `bp schema diff <dir>`.
 func runSchemaDiff(out *writer, g globals, ctx manifest.Context, tail []string) int {
@@ -300,6 +311,9 @@ func runSchemaDiff(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 	if !out.emitStructured(schemaPlanPayload(plan)) {
 		renderSchemaPlan(out, plan, "removed (on the server only)")
+	}
+	if !plan.StoredFields {
+		out.errf("note: %s", schemaServedNote)
 	}
 	if plan.differs() {
 		return exitSchemaDiff
@@ -353,6 +367,21 @@ func runSchemaPush(out *writer, g globals, ctx manifest.Context, tail []string) 
 			}
 		}
 		return exitOK
+	}
+
+	// A server that cannot send stored fields has shown array members without
+	// their own fields. Applying a file built from that would replace the
+	// stored members, so the push stops before any write.
+	var cut []string
+	for _, c := range plan.Changed {
+		if len(c.CutMembers) > 0 {
+			cut = append(cut, fmt.Sprintf("%s (%s)", c.Name, strings.Join(c.CutMembers, ", ")))
+		}
+	}
+	if len(cut) > 0 {
+		return useError(out, "conflict", fmt.Sprintf("schema push: this server lists the members of an array field without their own fields, "+
+			"and the file has no more than that, so applying it would replace the stored members of %s. Nothing was written. "+
+			"Update the server so it can send stored fields, or write those members out in full in the file.", strings.Join(cut, "; ")), exitConflict)
 	}
 
 	// Both confirmations come before the first write, so a refusal leaves

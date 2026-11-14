@@ -46,32 +46,41 @@ func schemaCopyName(raw json.RawMessage) string {
 // removed. A non-2xx answer comes back as an error that carries the server's
 // message.
 func fetchDatasetSchemas(ctx manifest.Context, dataset string) ([]json.RawMessage, error) {
-	status, body, err := doRequest("GET", ctxScopedURL(ctx, "/v1/schemas/"+url.PathEscape(dataset)), ctxAuthHeaders(ctx), nil)
+	out, _, err := fetchSchemaList(ctx, dataset, "")
+	return out, err
+}
+
+// fetchSchemaList is fetchDatasetSchemas with a query string for the list
+// route. It also returns the envelope's `definition`, which a server sets to
+// "stored" when it answered `?definition=stored` (schema_sync_echo.go).
+func fetchSchemaList(ctx manifest.Context, dataset, query string) ([]json.RawMessage, string, error) {
+	status, body, err := doRequest("GET", ctxScopedURL(ctx, "/v1/schemas/"+url.PathEscape(dataset)+query), ctxAuthHeaders(ctx), nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if status < 200 || status >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", status, classifyError(status, body).errorMessage())
+		return nil, "", fmt.Errorf("HTTP %d: %s", status, classifyError(status, body).errorMessage())
 	}
 	var env struct {
-		Schemas []map[string]json.RawMessage `json:"schemas"`
+		Schemas    []map[string]json.RawMessage `json:"schemas"`
+		Definition string                       `json:"definition"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("the schema list did not parse: %v", err)
+		return nil, "", fmt.Errorf("the schema list did not parse: %v", err)
 	}
 	if env.Schemas == nil {
-		return nil, fmt.Errorf("the schema list has no schemas key")
+		return nil, "", fmt.Errorf("the schema list has no schemas key")
 	}
 	out := make([]json.RawMessage, 0, len(env.Schemas))
 	for _, s := range env.Schemas {
 		delete(s, "schemaHash")
 		b, err := json.Marshal(s)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out = append(out, b)
 	}
-	return out, nil
+	return out, env.Definition, nil
 }
 
 // exportSchemas writes the dataset's schemas to path, or only the schemas of

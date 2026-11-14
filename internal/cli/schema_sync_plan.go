@@ -79,6 +79,9 @@ type schemaChange struct {
 	FieldsRemoved []string `json:"fields_removed"`
 	FieldsChanged []string `json:"fields_changed"`
 	Keys          []string `json:"keys"`
+	// CutMembers names the array fields a push would damage on a server that
+	// cannot return stored fields. See schemaCutMembers.
+	CutMembers []string `json:"cut_members,omitempty"`
 }
 
 // schemaPlan is what `bp schema diff` prints and `bp schema push` applies.
@@ -92,6 +95,9 @@ type schemaPlan struct {
 	// Skipped are server schemas whose name cannot be a file name. No verb
 	// writes, compares or deletes them.
 	Skipped []string `json:"skipped"`
+	// StoredFields is true when the server sent each field list as stored
+	// (`?definition=stored`) and false when it sent the served form.
+	StoredFields bool `json:"stored_fields"`
 }
 
 func (p *schemaPlan) differs() bool {
@@ -176,143 +182,11 @@ func readSchemaDir(dir string) (map[string]json.RawMessage, error) {
 	return out, nil
 }
 
-// schemaElementSpec is the server's element_spec: a member of an `of` or `to`
-// list keeps only type, to and name; a bare string is a type name.
-func schemaElementSpec(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		out := map[string]any{}
-		for _, k := range []string{"type", "to", "name"} {
-			if val, ok := t[k]; ok {
-				out[k] = val
-			}
-		}
-		return out
-	case string:
-		return map[string]any{"type": t}
-	}
-	return map[string]any{"type": "string"}
-}
-
-func schemaElementSpecs(list []any) []any {
-	out := make([]any, len(list))
-	for i, v := range list {
-		out[i] = schemaElementSpec(v)
-	}
-	return out
-}
-
-// schemaCastFields is the rewrite the upsert makes to a field list before it
-// stores it (RichTextFormat.normalise_fields): `portableText` is stored as
-// richText with that format, and a portableDoc richText field gets the block
-// editor. It reaches into nested fields, `of` and the block vocabulary. The
-// third rewrite, Sanity's array of blocks, is not mirrored here: a file in
-// that shape differs from the server until it is pulled again.
-func schemaCastFields(list []any) []any {
-	out := make([]any, len(list))
-	for i, v := range list {
-		out[i] = schemaCastField(v)
-	}
-	return out
-}
-
-func schemaCastField(v any) any {
-	f, ok := v.(map[string]any)
-	if !ok {
-		return v
-	}
-	out := map[string]any{}
-	for k, val := range f {
-		out[k] = val
-	}
-	if out["type"] == "portableText" {
-		out["type"], out["format"] = "richText", "portableText"
-	}
-	if _, has := out["editor"]; !has && out["type"] == "richText" && out["format"] == "portableDoc" {
-		out["editor"] = "blocks"
-	}
-	if fields, ok := out["fields"].([]any); ok {
-		out["fields"] = schemaCastFields(fields)
-	}
-	switch of := out["of"].(type) {
-	case []any:
-		out["of"] = schemaCastFields(of)
-	case map[string]any:
-		out["of"] = schemaCastField(of)
-	}
-	if blocks, ok := out["blocks"].(map[string]any); ok {
-		nb := map[string]any{}
-		for k, val := range blocks {
-			nb[k] = val
-		}
-		for _, key := range []string{"of", "inline", "annotations"} {
-			entries, ok := nb[key].([]any)
-			if !ok {
-				continue
-			}
-			ne := make([]any, len(entries))
-			for i, e := range entries {
-				ne[i] = e
-				if m, ok := e.(map[string]any); ok {
-					if fields, ok := m["fields"].([]any); ok {
-						c := map[string]any{}
-						for k, val := range m {
-							c[k] = val
-						}
-						c["fields"] = schemaCastFields(fields)
-						ne[i] = c
-					}
-				}
-			}
-			nb[key] = ne
-		}
-		out["blocks"] = nb
-	}
-	return out
-}
-
-// schemaEchoField returns a field as the schema list echoes it, minus
-// `required?`. It mirrors serialize_field in schema.ex: an array field gets an
-// `of` list and a reference field a `to` list, built from the field's own
-// keys. The server derives `required?` from `validation`, which is compared.
-func schemaEchoField(v any) any {
-	f, ok := v.(map[string]any)
-	if !ok {
-		return v
-	}
-	out := map[string]any{}
-	for k, val := range f {
-		if k != "required?" {
-			out[k] = val
-		}
-	}
-	options, _ := f["options"].(map[string]any)
-	switch f["type"] {
-	case "array":
-		if of, ok := f["of"].([]any); ok {
-			out["of"] = schemaElementSpecs(of)
-		} else if list, ok := options["list"].([]any); ok {
-			out["of"] = schemaElementSpecs(list)
-		} else {
-			out["of"] = []any{map[string]any{"type": "string"}}
-		}
-	case "reference":
-		if to, ok := f["to"].([]any); ok {
-			out["to"] = schemaElementSpecs(to)
-		} else if refs, ok := options["references"].([]any); ok {
-			out["to"] = schemaElementSpecs(refs)
-		} else if ref, ok := f["refType"].(string); ok {
-			out["to"] = []any{map[string]any{"type": ref}}
-		} else {
-			out["to"] = []any{}
-		}
-	}
-	return out
-}
-
-// schemaComparableTop reduces a definition to what the server would echo for
-// it: the stored keys only, defaults filled in, fields in echo form.
-func schemaComparableTop(obj map[string]any) map[string]any {
+// schemaComparableTop reduces a definition to what the server would return
+// for it: the stored keys only, defaults filled in. With stored, the server
+// sent each field list as stored and fields are compared as written. Without
+// it the server sent the served form, so both sides are put in that form.
+func schemaComparableTop(obj map[string]any, stored bool) map[string]any {
 	out := map[string]any{}
 	for _, k := range schemaEchoKeys {
 		v, ok := schemaKeyValue(obj, k)
@@ -322,7 +196,11 @@ func schemaComparableTop(obj map[string]any) map[string]any {
 		if list, isList := v.([]any); isList && k.echo == "fields" {
 			fields := schemaCastFields(list)
 			for i, f := range fields {
-				fields[i] = schemaEchoField(f)
+				if stored {
+					fields[i] = schemaStoredField(f)
+				} else {
+					fields[i] = schemaEchoField(f)
+				}
 			}
 			v = fields
 		}
@@ -377,8 +255,8 @@ func schemaFieldsByName(obj map[string]any) map[string]string {
 
 // compareSchema returns the summary of one schema that differs, or nil when
 // local and server are equal.
-func compareSchema(name string, local, server map[string]any) *schemaChange {
-	l, s := schemaComparableTop(local), schemaComparableTop(server)
+func compareSchema(name string, local, server map[string]any, stored bool) *schemaChange {
+	l, s := schemaComparableTop(local, stored), schemaComparableTop(server, stored)
 	if schemaCanon(l) == schemaCanon(s) {
 		return nil
 	}
@@ -425,8 +303,8 @@ func compareSchema(name string, local, server map[string]any) *schemaChange {
 }
 
 // buildSchemaPlan compares the folder to the server's schema list.
-func buildSchemaPlan(scope, dir string, local map[string]json.RawMessage, server []json.RawMessage) (*schemaPlan, error) {
-	p := &schemaPlan{Scope: scope, Dir: dir, Added: []string{}, Changed: []schemaChange{}, Removed: []string{}, Skipped: []string{}}
+func buildSchemaPlan(scope, dir string, local map[string]json.RawMessage, server []json.RawMessage, stored bool) (*schemaPlan, error) {
+	p := &schemaPlan{Scope: scope, Dir: dir, StoredFields: stored, Added: []string{}, Changed: []schemaChange{}, Removed: []string{}, Skipped: []string{}}
 	onServer := map[string]bool{}
 	for _, raw := range server {
 		obj, err := decodeSchemaJSON(raw)
@@ -448,7 +326,10 @@ func buildSchemaPlan(scope, dir string, local map[string]json.RawMessage, server
 		if err != nil {
 			return nil, err
 		}
-		if ch := compareSchema(name, lobj, obj); ch != nil {
+		if ch := compareSchema(name, lobj, obj, stored); ch != nil {
+			if !stored {
+				ch.CutMembers = schemaCutMembers(lobj, obj)
+			}
 			p.Changed = append(p.Changed, *ch)
 		} else {
 			p.Unchanged++
