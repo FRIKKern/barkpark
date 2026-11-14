@@ -261,14 +261,47 @@ defmodule BarkparkWeb.ChatController do
     # claude-only values), so the row has to exist first. Deliberate precedence
     # flip: unknown session + bad body is now 404, not 400 — the tenant
     # not-found oracle outranks body shape (pinned in the controller tests).
-    with %StudioChat.Session{provider: provider} <- fetch_scoped(id, scope(conn)),
-         {:ok, ops} <- validate_patch(body, provider) do
-      Enum.each(ops, &apply_patch_op(id, &1))
+    with %StudioChat.Session{provider: provider} = session <- fetch_scoped(id, scope(conn)),
+         {:ok, ops} <- validate_patch(body, provider),
+         {:ok, ops, runtime} <- patch_steer(conn, session, ops) do
+      Enum.each(ops, &apply_patch_op(session, runtime, &1))
       json(conn, full_session_json(StudioChat.get_session(id), []))
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
+  end
+
+  # task-14e61a60450c4678: the steer is decided ONCE, here, against the one
+  # snapshot `fetch_scoped` read. A mode/model op equal to the snapshot is an
+  # echo (the TUI's leave-PATCH) and is dropped: it neither writes nor steers,
+  # so a stale echo can never undo a change that landed after this read. A real
+  # change on a session with a live runtime steers the running CLI, a host act
+  # like a turn, so it passes the `/messages` gate (a refusal writes nothing);
+  # apply then steers only the runtime this check saw — never one that came up
+  # after it. With no live runtime the change is persisted intent and passes,
+  # as the Studio tab's offline switch does.
+  @steered_patch_ops [:mode, :model_choice]
+  defp patch_steer(conn, session, ops) do
+    ops = Enum.reject(ops, fn {k, v} -> k in @steered_patch_ops and Map.get(session, k) == v end)
+
+    runtime =
+      if Enum.any?(ops, &(elem(&1, 0) in @steered_patch_ops)), do: live_runtime(session.id)
+
+    case runtime && HostExecutionGate.authorize_turn(conn.assigns[:api_token], session) do
+      {:error, _} = refused -> refused
+      _ -> {:ok, ops, runtime}
+    end
+  end
+
+  # The live runtime pid, or nil: a dead or absent Recorder, or one whose runtime
+  # never came up (`{:ok, nil}`), is the routine offline case — persist only.
+  defp live_runtime(id) do
+    with recorder when is_pid(recorder) <- Recorder.whereis(id),
+         {:ok, runtime} when is_pid(runtime) <- Recorder.session_pid(recorder),
+         do: runtime,
+         else: (_ -> nil)
   end
 
   # ── POST /v1/chat/sessions/:id/messages ────────────────────────────────────
@@ -1228,63 +1261,34 @@ defmodule BarkparkWeb.ChatController do
     ErrorResponse.emit_custom(conn, status, code, message)
   end
 
-  defp apply_patch_op(id, {:draft, value}), do: StudioChat.set_draft(id, value)
+  # `runtime` is what `patch_steer/3` saw and authorized (nil = persist only),
+  # and every mode/model op that reaches here is a change against its snapshot.
+  defp apply_patch_op(%{id: id}, _runtime, {:draft, value}), do: StudioChat.set_draft(id, value)
 
   # A mode PATCH also steers a LIVE runtime (best-effort) so a TUI-side toggle
   # takes effect mid-session, not just on the next spawn. `req_mode` already
   # fail-closed the value (D22 — bypassPermissions never arrives here); if the
-  # steer is lost, the Recorder's init-frame observation self-heals. Steer only
-  # on an actual CHANGE (the TUI's leave-PATCH echoes the current mode every
-  # exit); a dead or absent Recorder is the routine offline case — persist only.
-  defp apply_patch_op(id, {:mode, value}) do
-    prior = StudioChat.get_session(id)
+  # steer is lost, the Recorder's init-frame observation self-heals.
+  defp apply_patch_op(%{id: id} = session, runtime, {:mode, value}) do
     StudioChat.set_mode(id, value)
-
-    with %StudioChat.Session{mode: mode, provider: provider} when mode != value <- prior,
-         recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
-      Runtime.steer(provider, session, %{mode: value})
-    else
-      _ -> :ok
-    end
+    if runtime, do: Runtime.steer(session.provider, runtime, %{mode: value})
   end
 
-  # model_choice/effort_choice steer a LIVE runtime exactly like the mode block
-  # above (steer parity, charter t3code D26 sibling ruling): prior-read → set →
-  # change-guard (steer only on an actual CHANGE — the TUI leave-PATCH echoes
-  # current values) → Recorder.whereis → Runtime.steer, fail-soft on a dead or
-  # absent Recorder. An adapter that cannot steer the axis (claude has no effort
-  # steer) returns {:error, {:unsupported_steer, _}}, which is ignored — the
-  # persisted choice still lands and takes effect on the next spawn.
-  defp apply_patch_op(id, {:model_choice, value}) do
-    prior = StudioChat.get_session(id)
+  # model_choice steers a LIVE runtime exactly like the mode block above (steer
+  # parity, charter t3code D26 sibling ruling).
+  defp apply_patch_op(%{id: id} = session, runtime, {:model_choice, value}) do
     StudioChat.set_model_choice(id, value)
-
-    with %StudioChat.Session{model_choice: choice, provider: provider} when choice != value <-
-           prior,
-         recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
-      Runtime.steer(provider, session, %{model: value})
-    else
-      _ -> :ok
-    end
+    if runtime, do: Runtime.steer(session.provider, runtime, %{model: value})
   end
 
-  defp apply_patch_op(id, {:effort_choice, value}) do
-    prior = StudioChat.get_session(id)
-    StudioChat.set_effort_choice(id, value)
+  # effort_choice is intent only, as Studio's set-effort is: it rides the next
+  # spawn as --effort. No adapter applies an effort steer: claude has no effort
+  # axis ({:error, {:unsupported_steer, _}}) and codex's steer forwards only the
+  # turn `input`, so sending one was at best a no-op (task-14e61a60450c4678).
+  defp apply_patch_op(%{id: id}, _runtime, {:effort_choice, value}),
+    do: StudioChat.set_effort_choice(id, value)
 
-    with %StudioChat.Session{effort_choice: choice, provider: provider} when choice != value <-
-           prior,
-         recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
-      Runtime.steer(provider, session, %{effort: value})
-    else
-      _ -> :ok
-    end
-  end
-
-  defp apply_patch_op(id, {:title, value}), do: StudioChat.rename(id, value)
+  defp apply_patch_op(%{id: id}, _runtime, {:title, value}), do: StudioChat.rename(id, value)
 
   # ─────────────────────────────────────────────────────────────────────────
   # validation (fail BEFORE any store/runtime call — obligations D + E)
