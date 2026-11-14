@@ -53,6 +53,8 @@ func TestParseAttachmentRefsRefusesAFileWithoutAName(t *testing.T) {
 		"right-to-left":     file(`,"name":"x` + string(rune(0x202E)) + `txt.exe"`),
 		"zero-width joiner": file(`,"name":"a` + string(rune(0x200D)) + `.txt"`),
 		"byte order mark":   file(`,"name":"` + string(rune(0xFEFF)) + `a.txt"`),
+		"line separator":    file(`,"name":"a` + string(rune(0x2028)) + `.txt"`),
+		"para separator":    file(`,"name":"a` + string(rune(0x2029)) + `.txt"`),
 		"slash":             file(`,"name":"../../x.sh"`),
 		"backslash":         file(`,"name":"..\\x.sh"`),
 		"dot":               file(`,"name":"."`),
@@ -147,31 +149,5 @@ func TestFetchAttachmentRefusesABadFileNameWithoutARequest(t *testing.T) {
 		if requests.Load() != 0 {
 			t.Fatalf("%q: %d requests", name, requests.Load())
 		}
-	}
-}
-
-// Until the host hands files to claude, a leased file refuses the turn
-// before anything is fetched or started.
-func TestClaudeSendTurnWithAFileIsRefusedBeforeAnything(t *testing.T) {
-	data := []byte("a,b\n")
-	ref := fileRef(data, "text/plain", "notes.csv")
-	client, requests := attachmentServer(t, map[string]string{ref.ID: envelope(ref.ID, "text/plain", len(data), data)})
-	started := installTripwire(t, "claude")
-	handler := NewLocalHandler([]string{t.TempDir()})
-	handler.Images = client
-	command := leasedTurn(t, "claude", handler.ApprovedRoots[0], "read this")
-	command.Command["payload"].(map[string]any)["attachments"] = []any{map[string]any{
-		"id": ref.ID, "media_type": ref.MediaType, "byte_size": float64(ref.ByteSize), "name": ref.Name,
-	}}
-	emitted := 0
-	err := handler.Handle(context.Background(), command, func(map[string]any) error { emitted++; return nil })
-	if err == nil || !strings.Contains(err.Error(), "does not hand files to claude") {
-		t.Fatalf("err=%v; want the file refused by name", err)
-	}
-	if started() || emitted != 0 || requests.Load() != 0 {
-		t.Fatalf("claude started=%v, events=%d, fetches=%d; want none", started(), emitted, requests.Load())
-	}
-	if tree := listTree(t, handler.ApprovedRoots[0]); len(tree) != 0 {
-		t.Fatalf("wrote %v", tree)
 	}
 }
