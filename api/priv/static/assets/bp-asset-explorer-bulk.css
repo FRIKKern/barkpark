@@ -1,0 +1,78 @@
+/* Media library: tick boxes, the bulk bar, the not-deleted panel and the drop
+   zone (bp-asset-explorer-bulk.js). Studio tokens only, so it follows the
+   light and dark themes. The explorer's own rules live in root.html.heex. */
+
+/* A card and its tick box. The card is a <button>, so the box sits beside it
+   in this wrapper, not inside it. */
+.bp-ae-cell { position: relative; display: flex; min-width: 0; }
+.bp-ae-cell > .bp-ae-card,
+.bp-ae-cell > .bp-ae-list-row { flex: 1; min-width: 0; }
+.bp-ae-tick {
+  width: 18px; height: 18px; margin: 0; flex: none; cursor: pointer;
+  accent-color: var(--primary);
+}
+.bp-ae-tick:disabled { cursor: progress; }
+.bp-ae-tick:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Grid: the box sits over the thumbnail's corner. It shows on hover, on
+   keyboard focus, and on every card once anything is ticked. */
+.bp-ae-grid:not(.bp-ae-list) .bp-ae-tick {
+  position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.bp-ae-grid:not(.bp-ae-list) .bp-ae-cell:hover > .bp-ae-tick,
+.bp-ae-grid:not(.bp-ae-list) .bp-ae-tick:focus-visible,
+.bp-ae-grid:not(.bp-ae-list) .bp-ae-tick:checked,
+.bp-ae-grid.has-ticks:not(.bp-ae-list) .bp-ae-tick { opacity: 1; }
+@media (hover: none) {
+  .bp-ae-grid:not(.bp-ae-list) .bp-ae-tick { opacity: 1; }
+}
+
+/* List: the box has its own column, and the column heads move over with it. */
+.bp-ae-grid.bp-ae-list .bp-ae-cell { align-items: center; gap: 8px; }
+.bp-ae-grid.bp-ae-list .bp-ae-list-head { padding-left: 38px; }
+
+.bp-ae-cell.is-ticked > .bp-ae-card,
+.bp-ae-cell.is-ticked > .bp-ae-list-row {
+  background: var(--primary-soft); box-shadow: 0 0 0 2px var(--primary);
+}
+
+.bp-ae-bulk {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 16px; margin: 8px 16px 0;
+  background: var(--primary-soft); border: 1px solid var(--primary);
+  border-radius: var(--radius-sm); font-size: var(--text-sm);
+}
+.bp-ae-bulk[hidden] { display: none !important; }
+.bp-ae-bulk-count { font-weight: 600; margin-right: auto; }
+.bp-ae-bulk-add { width: auto; min-width: 150px; padding: 4px 8px; font-size: var(--text-xs); }
+
+.bp-ae-bulk-refused {
+  margin: 8px 16px 0; padding: 12px 16px; font-size: var(--text-sm);
+  background: var(--danger-soft); border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+}
+.bp-ae-bulk-refused[hidden] { display: none !important; }
+.bp-ae-bulk-refused:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+.bp-ae-bulk-refused-list {
+  margin: 8px 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto;
+}
+.bp-ae-bulk-refused-list li {
+  display: flex; justify-content: space-between; gap: 12px; padding: 2px 0;
+}
+.bp-ae-bulk-refused-name {
+  font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bp-ae-bulk-refused-list li > span:last-child { flex: none; }
+.bp-ae-bulk-refused-actions { display: flex; gap: 8px; }
+
+/* The drop zone: an outline round the grid and a label that stays in view
+   while the grid scrolls. Shown only while files are dragged over the grid. */
+.bp-ae-drop { position: sticky; top: 0; z-index: 3; height: 0; display: none; pointer-events: none; }
+.bp-ae-grid-wrap.is-drop-target { outline: 2px dashed var(--primary); outline-offset: -6px; background: var(--primary-soft); }
+.bp-ae-grid-wrap.is-drop-target > .bp-ae-drop { display: flex; justify-content: center; }
+.bp-ae-drop-label {
+  height: max-content; padding: 8px 16px; border-radius: var(--radius-lg);
+  background: var(--primary); color: var(--primary-fg);
+  font-size: var(--text-sm); font-weight: 600;
+}

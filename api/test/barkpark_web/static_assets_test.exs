@@ -17,8 +17,8 @@ defmodule BarkparkWeb.StaticAssetsTest do
   # The 27 files the root layout linked as plain /assets names before this
   # change, in page order.
   @root_files ~w(
-    bp-paper-editor-shell.css bp-media-picker.css
-    bp-rich-text-editor.js bp-search-intel.js bp-asset-explorer.js
+    bp-paper-editor-shell.css bp-media-picker.css bp-asset-explorer-bulk.css
+    bp-rich-text-editor.js bp-search-intel.js bp-asset-explorer-bulk.js bp-asset-explorer.js
     bp-asset-browser.js bp-media-picker.js bp-reference-picker.js
     bp-document-preview.js bp-overflow-menu.js bp-paper-editor.bundle.js
     phoenix.js phoenix_live_view.js

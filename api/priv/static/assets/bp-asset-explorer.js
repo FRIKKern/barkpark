@@ -445,6 +445,8 @@
       });
 
       this._bindScrollLoad();
+      // Bulk select, delete and drop-to-upload: bp-asset-explorer-bulk.js, loaded first.
+      if (window.BpAssetExplorerBulk) this._bulk = window.BpAssetExplorerBulk.attach(this);
 
       document.addEventListener("keydown", (e) => {
         if (!this.isConnected) return;
