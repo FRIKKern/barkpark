@@ -115,6 +115,15 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
   @spec in_binding?(String.t(), term()) :: boolean()
   def in_binding?(dataset, principal), do: bound_scope(principal) in [[], [dataset: dataset]]
 
+  @doc """
+  True when the principal may be sent a live ledger frame at all. The chat
+  events stream's `task` frame is the Recorder's re-broadcast of the ledger
+  dataset's stream and names no dataset, so the stream asks per frame.
+  """
+  @spec ledger_in_binding?(term()) :: boolean()
+  def ledger_in_binding?(principal),
+    do: in_binding?(Barkpark.StudioChat.TaskLedgerScope.resolve(nil).dataset, principal)
+
   @doc "A task row's `%{met, total}` criteria count through the plugin contract; nil when unavailable."
   @spec criteria_progress(t(), map() | nil) :: map() | nil
   def criteria_progress(nil, _content), do: nil
