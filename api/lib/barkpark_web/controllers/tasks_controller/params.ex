@@ -1267,15 +1267,14 @@ defmodule BarkparkWeb.TasksController.Params do
   # otherwise `bp task get <epic>` and `bp task ls --view=brief` report
   # DIFFERENT counts for one epic — one number with two meanings.
   #
-  # `scope` carries no `:dataset` today (`ScopeHelpers.scope_opts/1` emits
-  # workspace/project/caller_context only), so this always collapses — which is
-  # the correct default, because a caller who named no dataset is exactly the
-  # caller rule 3 refuses to pick for. The clause is written against `:dataset`
-  # anyway so that the day the scope carries one, a dataset-scoped count reads
-  # byte-identically instead of silently keeping the collapse.
+  # A scope naming no `:dataset` collapses — a caller who named no dataset is
+  # exactly the caller rule 3 refuses to pick for. A scope naming one (prime,
+  # `CountScope.of/1`) is NARROWED to it, not merely un-collapsed: a
+  # dataset-bound token must not count another dataset's children, and a twin
+  # id counts once (task-1b52dd91e600c773). `batch_live_parents/2` narrows too.
   defp collapse_cross_dataset(query, scope) do
     case Keyword.get(scope, :dataset) do
-      d when is_binary(d) and d != "" -> query
+      d when is_binary(d) and d != "" -> maybe_filter_dataset(query, d)
       _ -> TaskQuery.collapse_cross_dataset_twins(query)
     end
   end
@@ -1304,6 +1303,7 @@ defmodule BarkparkWeb.TasksController.Params do
           select: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
         )
         |> TaskQuery.collapse_twins()
+        |> maybe_filter_dataset(Keyword.get(scope, :dataset))
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()

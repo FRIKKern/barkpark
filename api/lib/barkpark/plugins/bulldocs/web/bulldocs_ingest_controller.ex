@@ -174,7 +174,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         ref = %Barkpark.Content.Document{
           doc_id: slug,
           type: "paper",
-          dataset: Content.paper_default_dataset(),
+          dataset: blank_to_nil(params["dataset"]) || Content.paper_default_dataset(),
           title: merged["title"],
           content: %{
             "blocks" => blocks,

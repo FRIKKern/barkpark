@@ -7,6 +7,10 @@ defmodule BarkparkWeb.ServerVitalsLive do
   topic and re-renders on each broadcast — the single `Barkpark.HostVitals.Sampler`
   is the one clock, so there is no per-socket timer here.
 
+  Host vitals are for the instance operator only. The view checks that itself,
+  at mount and on every tick (see "the gate" below), and renders nothing for
+  anyone else.
+
   Seeds from `Sampler.snapshot/0` (`:persistent_term`, free) so the bar is
   populated on first paint. Any `nil` metric renders as `—` (honest-meters law);
   memory/disk crossing 90% tint the value with the danger accent.
@@ -17,20 +21,54 @@ defmodule BarkparkWeb.ServerVitalsLive do
   alias Barkpark.HostVitals.Sampler
 
   @impl true
-  def mount(_params, _session, socket) do
-    if connected?(socket), do: BarkparkWeb.Endpoint.subscribe(Sampler.topic())
-    {:ok, assign(socket, :vitals, Sampler.snapshot()), layout: false}
+  def mount(_params, session, socket) do
+    socket = socket |> principal(session) |> then(&assign(&1, :vitals, allowed_snapshot(&1)))
+
+    if socket.assigns.vitals && connected?(socket),
+      do: BarkparkWeb.Endpoint.subscribe(Sampler.topic())
+
+    {:ok, socket, layout: false}
   end
 
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "tick", payload: snap}, socket) do
-    {:noreply, assign(socket, :vitals, snap)}
+    if host_vitals?(socket) do
+      {:noreply, assign(socket, :vitals, snap)}
+    else
+      BarkparkWeb.Endpoint.unsubscribe(Sampler.topic())
+      {:noreply, assign(socket, :vitals, nil)}
+    end
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
+  def render(%{vitals: nil} = assigns), do: ~H""
   def render(assigns), do: line(assigns)
+
+  # ── the gate ───────────────────────────────────────────────────────────────
+  # This view joins on its own signed session (it is sticky), so the layout's
+  # `host_vitals?` flag cannot be its only gate: a session issued before that
+  # flag existed, or before the operator allowlist was armed, would still
+  # join. It resolves the principal itself, from the same browser session the
+  # Studio mount reads, and asks the layout's question again at mount and on
+  # every tick. A session with no usable credential gets no vitals.
+
+  defp principal(socket, session) when is_map(session) do
+    {:cont, socket} = BarkparkWeb.LiveAuth.on_mount(:fetch_api_token, %{}, session, socket)
+    socket
+  end
+
+  defp principal(socket, _session), do: assign(socket, api_token: nil, current_user: nil)
+
+  defp allowed_snapshot(socket), do: if(host_vitals?(socket), do: Sampler.snapshot())
+
+  defp host_vitals?(socket) do
+    BarkparkWeb.StudioChrome.instance_admin?(
+      socket.assigns[:api_token],
+      socket.assigns[:current_user]
+    ) and BarkparkWeb.OpsOperatorGate.flat_operator?(socket)
+  end
 
   @doc """
   The host-vitals readout markup. Shared by the live `render/1` and the

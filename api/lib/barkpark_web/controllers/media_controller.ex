@@ -1133,14 +1133,23 @@ defmodule BarkparkWeb.MediaController do
   def put_blob(conn, %{"workspace_slug" => slug, "path" => path_parts}) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+    with {:bound, nil} <- {:bound, bound_dataset(conn)},
+         %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
          true <- TenancyAuth.workspace_admin?(token, workspace.id) do
       write_blob(conn, Enum.join(path_parts, "/"), workspace)
     else
+      # A blob key is claimed by workspace, never by dataset, and this route
+      # names none: a dataset-bound token is refused outright, as workspace
+      # import (its companion) refuses it. The answer depends on the token
+      # alone, so it says nothing about the slug.
+      {:bound, _dataset} ->
+        BarkparkWeb.ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       # Unknown slug, a real workspace the caller holds no seat in, OR a seat
       # below the owner|admin floor — all one 404. Never confirm a workspace
       # exists to a caller who may not write into it.
-      _ -> not_found(conn, "workspace not found")
+      _ ->
+        not_found(conn, "workspace not found")
     end
   end
 

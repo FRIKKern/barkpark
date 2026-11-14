@@ -101,6 +101,15 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
     end
   end
 
+  @doc """
+  True when `dataset` is one a dataset-bound token may read: its own. Always
+  true for everyone else. The Doing strip's live frames ride the LEDGER
+  dataset's stream and carry no dataset of their own, so the strip asks before
+  it subscribes: a token bound elsewhere takes no ledger subscription.
+  """
+  @spec in_binding?(String.t(), term()) :: boolean()
+  def in_binding?(dataset, principal), do: bound_scope(principal) in [[], [dataset: dataset]]
+
   @doc "A task row's `%{met, total}` criteria count through the plugin contract; nil when unavailable."
   @spec criteria_progress(t(), map() | nil) :: map() | nil
   def criteria_progress(nil, _content), do: nil

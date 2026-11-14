@@ -192,6 +192,11 @@ defmodule BarkparkWeb.StudioChrome do
           :instance_admin?,
           instance_admin?(s.assigns[:api_token], s.assigns[:current_user])
         )
+        # The footer's host vitals are the HOST's numbers. `instance_admin?`
+        # is true for any token holding `admin`, whatever its workspace, so
+        # the slot also asks the question the ops consoles ask: is this the
+        # instance operator (`OpsOperatorGate.flat_operator?/1`)?
+        |> then(&assign(&1, :host_vitals?, host_vitals?(&1)))
         # The top bar leaves out tabs to `:ops`-gated consoles for a viewer
         # that gate refuses (task-f859c5f7f3a0f9f5). Only LiveAuth's viewer
         # hook set this, so on Settings / Connectors (other live_sessions) the
@@ -861,7 +866,12 @@ defmodule BarkparkWeb.StudioChrome do
   #
   # NOT used for any workspace-scoped affordance — that is `shares_admin?`,
   # which is `Caps.admin?/1`. Do not re-merge these two.
-  defp instance_admin?(token, user), do: token_admin?(token) or account_admin?(user)
+  def instance_admin?(token, user), do: token_admin?(token) or account_admin?(user)
+
+  defp host_vitals?(socket),
+    do:
+      socket.assigns[:instance_admin?] == true and
+        BarkparkWeb.OpsOperatorGate.flat_operator?(socket)
 
   defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
   defp token_admin?(_), do: false
