@@ -357,7 +357,7 @@ defmodule Barkpark.ChatHosts do
           label
           |> String.replace(~r/[\s\p{C}]+/u, " ")
           |> String.trim()
-          |> String.slice(0, @status_label_max)
+          |> cut_status_label()
           |> String.trim_trailing(),
         else: ""
 
@@ -367,6 +367,24 @@ defmodule Barkpark.ChatHosts do
   end
 
   defp normalize_status_label(_label), do: {:error, :invalid_status_label}
+
+  # Whole graphemes while the label stays within @status_label_max codepoints,
+  # so combining marks cannot carry a "short" label past 4 * @status_label_max
+  # bytes (the Go host counts the same codepoints).
+  defp cut_status_label(label) do
+    label
+    |> String.graphemes()
+    |> Enum.reduce_while({[], 0}, fn grapheme, {kept, count} ->
+      count = count + length(String.codepoints(grapheme))
+
+      if count > @status_label_max,
+        do: {:halt, {kept, count}},
+        else: {:cont, {[grapheme | kept], count}}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join()
+  end
 
   @doc """
   Ends every turn whose host went silent: a `leased`/`running` lease that

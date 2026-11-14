@@ -97,6 +97,12 @@ func installStatusHelper(t *testing.T, env map[string]string) {
 // which the helper turn waits for before its text.
 func runLabelledTurn(t *testing.T, labeler StatusLabeler, gate string) ([]map[string]any, time.Duration) {
 	t.Helper()
+	return runLabelledTurnLogged(t, labeler, gate, &syncBuffer{})
+}
+
+// runLabelledTurnLogged is runLabelledTurn with the handler's log in log.
+func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log *syncBuffer) ([]map[string]any, time.Duration) {
+	t.Helper()
 	env := map[string]string{"BARKPARK_STATUS_HELPER": "turn"}
 	if gate != "" {
 		env["BARKPARK_STATUS_HELPER_GATE"] = gate
@@ -104,6 +110,7 @@ func runLabelledTurn(t *testing.T, labeler StatusLabeler, gate string) ([]map[st
 	installStatusHelper(t, env)
 	handler := NewLocalHandler([]string{t.TempDir()})
 	handler.StatusLabel = labeler
+	handler.Log = log
 	var mu sync.Mutex
 	var events []map[string]any
 	started := time.Now()
@@ -212,6 +219,59 @@ func TestClaudeTurnWithAFailingLabelIsUnchanged(t *testing.T) {
 				t.Fatalf("events %v; want %v", kindsOf(events), want)
 			}
 		})
+	}
+}
+
+// A side call that fails or answers no usable label leaves one log line,
+// without the person's text. One the turn's end cancelled leaves none.
+func TestClaudeTurnLogsASkippedLabelWithoutThePersonsText(t *testing.T) {
+	waitFor := func(log *syncBuffer, want string) string {
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if strings.Contains(log.String(), want) {
+				break
+			}
+		}
+		return log.String()
+	}
+	failing := &syncBuffer{}
+	runLabelledTurnLogged(t, StatusLabelFunc(func(context.Context, string) (string, error) {
+		return "", errors.New("status label call: exit status 1")
+	}), "", failing)
+	got := waitFor(failing, "status label skipped")
+	if strings.Count(got, "status label skipped: status label call: exit status 1") != 1 {
+		t.Fatalf("log %q; want one line naming the failure", got)
+	}
+	if strings.Contains(got, "ocean tides") {
+		t.Fatalf("log %q carries the person's text", got)
+	}
+
+	unusable := &syncBuffer{}
+	runLabelledTurnLogged(t, StatusLabelFunc(func(context.Context, string) (string, error) { return "Thinking", nil }), "", unusable)
+	if got := waitFor(unusable, "status label skipped"); strings.Count(got, "status label skipped") != 1 {
+		t.Fatalf("log %q; want one line for an unusable label", got)
+	}
+
+	cancelled := &syncBuffer{}
+	ended := make(chan struct{})
+	runLabelledTurnLogged(t, StatusLabelFunc(func(ctx context.Context, _ string) (string, error) {
+		<-ctx.Done()
+		defer close(ended)
+		return "", ctx.Err()
+	}), "", cancelled)
+	<-ended
+	time.Sleep(50 * time.Millisecond)
+	if got := cancelled.String(); got != "" {
+		t.Fatalf("a label the turn's end cancelled logged %q", got)
+	}
+}
+
+// A side call past its timeout says so in its error, which is what gets logged.
+func TestClaudeStatusLabelerSaysItTimedOut(t *testing.T) {
+	record := filepath.Join(t.TempDir(), "pid")
+	installStatusHelper(t, map[string]string{"BARKPARK_STATUS_HELPER": "hang", "BARKPARK_STATUS_HELPER_RECORD": record})
+	_, err := (&ClaudeStatusLabeler{Timeout: 300 * time.Millisecond}).StatusLabel(context.Background(), "say hi")
+	if err == nil || !strings.Contains(err.Error(), "timed out after 300ms") {
+		t.Fatalf("err = %v; want it to say the call timed out", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package chathost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -126,6 +127,9 @@ func (l *ClaudeStatusLabeler) StatusLabel(ctx context.Context, request string) (
 	cmd.WaitDelay = providerWaitDelay
 	// Run waits for the child on every path, so it is never left a zombie.
 	if err := cmd.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("status label call timed out after %v", timeout)
+		}
 		return "", fmt.Errorf("status label call: %w", err)
 	}
 	label, ok := cleanStatusLabel(out.String())
@@ -215,7 +219,9 @@ type turnStatus struct {
 // startStatusLabel starts the side call for one turn and returns the emit the
 // turn uses from now on, and the func that ends the label when the turn ends.
 // The end does not wait for the side call: it cancels it, and the side call
-// reaps its own child.
+// reaps its own child. A side call that fails or times out logs one line, so
+// labels that stop (a CLI that dropped a flag) are seen; the line never carries
+// the person's text. One the turn's end cancelled logs nothing.
 func (h *LocalHandler) startStatusLabel(ctx context.Context, request string, emit func(map[string]any) error) (func(map[string]any) error, func()) {
 	if h.StatusLabel == nil || strings.TrimSpace(request) == "" {
 		return emit, func() {}
@@ -226,16 +232,29 @@ func (h *LocalHandler) startStatusLabel(ctx context.Context, request string, emi
 	go func() {
 		label, err := labeler.StatusLabel(labelCtx, request)
 		if err != nil {
+			if labelCtx.Err() == nil {
+				h.logf("status label skipped: %v", err)
+			}
 			return
 		}
 		if label, ok := cleanStatusLabel(label); ok {
 			status.offer(label)
+		} else {
+			h.logf("status label skipped: the side call answered no 2 to 4 word label")
 		}
 	}()
 	return status.forward, func() {
 		cancel()
 		status.close()
 	}
+}
+
+func (h *LocalHandler) logf(format string, args ...any) {
+	w := h.Log
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, "barkpark-chat-host: "+format+"\n", args...)
 }
 
 func (s *turnStatus) forward(event map[string]any) error {

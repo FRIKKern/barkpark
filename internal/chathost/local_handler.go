@@ -26,6 +26,8 @@ type LocalHandler struct {
 	// StatusLabel makes a claude turn's 2 to 4 word status label
 	// (status_label.go). Nil means no label.
 	StatusLabel StatusLabeler
+	// Log receives the line a skipped status label leaves. Nil means os.Stderr.
+	Log io.Writer
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession

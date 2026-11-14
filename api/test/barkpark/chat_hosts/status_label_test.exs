@@ -99,6 +99,23 @@ defmodule Barkpark.ChatHosts.StatusLabelTest do
     refute native["label"] =~ ~r/\s\s|\n|^\s|\s$/
   end
 
+  test "a label of few graphemes but many combining marks is cut by codepoints, not let through by its grapheme count" do
+    {sid, post} = host_turn()
+    :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+    assert {:ok, :accepted} = post.(%{"kind" => "turn_started"})
+
+    # 12 graphemes, each a letter carrying 166 combining acute accents: 2004
+    # codepoints, 4008 bytes. String.slice/3 by graphemes kept all of it.
+    heavy = String.duplicate("a" <> String.duplicate("́", 166), 12)
+    assert String.length(heavy) == 12
+    assert {:ok, :accepted} = post.(%{"kind" => "status", "label" => "Mulling " <> heavy})
+
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :status, native: native}}, 2_000
+    assert length(String.codepoints(native["label"])) <= 60
+    assert byte_size(native["label"]) <= 240
+    assert String.starts_with?(native["label"], "Mulling")
+  end
+
   test "a label that is not text is refused and moves no cursor" do
     {_sid, post} = host_turn()
     assert {:ok, :accepted} = post.(%{"kind" => "turn_started"})
