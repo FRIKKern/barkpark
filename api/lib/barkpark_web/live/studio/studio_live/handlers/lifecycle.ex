@@ -85,7 +85,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # document in another project of the workspace shares; replacing the form
   # with it streamed an unshared project's content to a share viewer, and could
   # autosave it into this project's document for a member.
+  #
+  # A frame older than this tab's own last save is read as that save
+  # (`fresher/2`): the save was written over it, so the store already holds
+  # what it carried.
   def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
+    doc_data = fresher(doc_data, socket.assigns[:editor_doc])
+
     cond do
       sender == self() or is_nil(socket.assigns[:editor_doc]) ->
         {:noreply, socket}
@@ -119,6 +125,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          )}
     end
   end
+
+  # Two people save one field at once: B's save lands, then this tab's save
+  # is written over it, and only then does B's frame reach this process (it
+  # was busy saving). The frame still carries B's text alone; put in the form
+  # and told to the page, it replaced the text both saves left with B's post
+  # until the next change (task-e7088bb3b4139db7). `editor_doc` is this tab's
+  # last save, so a frame stamped before it is stale and that save stands.
+  defp fresher(%{updated_at: %DateTime{} = sent} = frame, %{updated_at: %DateTime{} = own} = doc),
+    do: if(DateTime.compare(sent, own) == :lt, do: doc, else: frame)
+
+  defp fresher(frame, _doc), do: frame
 
   defp keep_unsaved_fields(socket, doc_data) do
     keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()

@@ -221,6 +221,53 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   # CANONICAL error envelope (error.code "halted" + message), NOT the bare
   # %{error: "halted", reason: reason} the controller used to emit — both legacy
   # halt branches now fall through to action_fallback → Errors.to_envelope.
+  # `LegacyController` names `production` itself and the routes name no
+  # dataset, so the request-level fence has nothing to compare. A token minted
+  # with an explicit OTHER dataset is held to that one (task-9be63376028634e4).
+  describe "a dataset-bound token" do
+    defp bound(conn, dataset) do
+      raw = "legacy-bound-#{System.unique_integer([:positive])}"
+      perms = ["read", "write", "admin"]
+      {:ok, _} = Auth.create_token(raw, "legacy bound", dataset, perms, nil, dataset_bound: true)
+      put_req_header(conn, "authorization", "Bearer " <> raw)
+    end
+
+    test "bound to another dataset is refused every legacy document route", %{conn: conn} do
+      {:ok, _} =
+        Content.create_document(@type_name, %{"doc_id" => "legacy-bound-seed"}, "production")
+
+      conn = bound(conn, "bound-own")
+      before = length(Content.list_documents(@type_name, "production"))
+
+      for resp <- [
+            get(conn, "/api/documents/#{@type_name}"),
+            get(conn, "/api/documents/#{@type_name}/legacy-bound-seed"),
+            post(conn, "/api/documents/#{@type_name}", %{
+              "id" => "legacy-bound-write",
+              "title" => "LEGACY-BOUND-WRITE"
+            }),
+            delete(conn, "/api/documents/#{@type_name}/legacy-bound-seed")
+          ] do
+        assert json_response(resp, 403)["error"]["reason"] == "dataset_not_bound"
+      end
+
+      assert length(Content.list_documents(@type_name, "production")) == before
+    end
+
+    test "bound to production still reads and writes (control)", %{conn: conn} do
+      conn = bound(conn, "production")
+
+      assert conn |> get("/api/documents/#{@type_name}") |> json_response(200)
+
+      assert conn
+             |> post("/api/documents/#{@type_name}", %{
+               "id" => "legacy-prod-write",
+               "title" => "LEGACY-PROD-WRITE"
+             })
+             |> json_response(201)
+    end
+  end
+
   describe "lifecycle-hook veto (halt) → canonical envelope" do
     setup do
       original = Barkpark.PluginEnv.capture()

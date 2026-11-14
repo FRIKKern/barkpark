@@ -75,6 +75,25 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     refute has_element?(view, @dialog)
   end
 
+  # Final re-shoot, tell 3: TanStack draws Inspect over the doc pane's form,
+  # its header and footer still there, not over the page. The desk's sits in
+  # the edit pane's form (`.dk-edit-body`), in its dim layer, and is no modal
+  # that bp-desk.js would lift over the navbar.
+  test "Inspect sits in the edit pane's form, in its layer", c do
+    view = open(c)
+    inspect_open(view)
+
+    assert has_element?(
+             view,
+             "[data-pane-editing] > .pane-body.dk-edit-body > .dk-inspect-layer[data-desk-inspect-layer] > dialog[data-desk-inspect]"
+           )
+
+    refute has_element?(
+             view,
+             "[data-pane-editing] > div:not(.pane-body) dialog[data-desk-inspect]"
+           )
+  end
+
   test "desk-inspect opens Inspecting <title>, Parsed first, with the document's JSON", c do
     view = open(c)
     inspect_open(view)
@@ -117,10 +136,10 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     parsed = view |> element(~s{#{@dialog} [role="tabpanel"]:not([hidden])}) |> render()
 
     assert parsed =~
-             ~r/<details open="">\s*<summary><span class="dk-inspect-count">\{…\} \d+ properties<\/span><\/summary>/
+             ~r/<details open="">\s*<summary><span class="dk-inspect-count"[^>]*>\{…\} \d+ properties<\/span><\/summary>/
 
     assert parsed =~
-             ~r/<details open="">\s*<summary><span class="dk-inspect-key">meta:<\/span>\s*<span class="dk-inspect-count">\{…\} 1 property<\/span>/
+             ~r/<details open="">\s*<summary><span class="dk-inspect-key">meta:<\/span>\s*<span class="dk-inspect-count"[^>]*>\{…\} 1 property<\/span>/
 
     assert parsed =~
              ~r/<span class="dk-inspect-key">tag:<\/span><span class="dk-inspect-value" data-type="string">deep<\/span>/
@@ -166,6 +185,28 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
     assert has_element?(view, @dialog)
   end
 
+  # In split view (`|,`) the editor is the split pane on the right. Ctrl+Alt+I
+  # there opens Inspect in that pane; closing takes it out of the URL.
+  test "in split view it opens in the split pane's editor and closes again", c do
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};#{c.id}|,")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+
+    inspect_open(view)
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}|,inspect=on")
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing][data-pane-index="3"] dialog[data-desk-inspect])
+           )
+
+    assert has_element?(view, "#{@dialog} h2", "Inspecting Looked at")
+
+    render_hook(view, "desk-inspect", %{"open" => false})
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}|,")
+    refute has_element?(view, @dialog)
+  end
+
   test "a link with inspect=on opens the document with it open", c do
     {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=on")
     render_async(view, 5_000)
@@ -184,5 +225,27 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
 
     refute has_element?(view, @dialog)
     assert render(view) =~ "Other views and inspectors are not shown here."
+  end
+
+  # TanStack's InspectDialog: a search box over Parsed (`bp-desk.js` filters).
+  test "Parsed has TanStack's search box, and each count carries its words for one and many", c do
+    view = open(c)
+    inspect_open(view)
+    parsed = ~s{#{@dialog} [role="tabpanel"]:not([hidden])}
+
+    assert has_element?(
+             view,
+             ~s(#{parsed} > label.dk-inspect-search > input[data-desk-inspect-search][aria-label="Search"][placeholder="Search"])
+           )
+
+    assert has_element?(view, ~s(#{parsed} > label.dk-inspect-search > svg[data-desk-glyph]))
+
+    html = view |> element(parsed) |> render()
+
+    assert html =~
+             ~r/class="dk-inspect-count" data-brace="\{…\}" data-one="1 property" data-other="\{n\} properties"/
+
+    # The raw view has no search: TanStack's box is over the tree only.
+    refute has_element?(view, ~s{#{@dialog} [role="tabpanel"][hidden] [data-desk-inspect-search]})
   end
 end

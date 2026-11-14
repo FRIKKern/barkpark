@@ -135,6 +135,82 @@ try {
     assert.equal(other.open, false, "only array rows are opened");
   }
 
+  // task-bc277388a704d276: an array of several member types adds through a
+  // type menu. The patch closes the menu and hides the pressed button.
+  {
+    const typedRow = (i, heading, open, count) =>
+      `<li class="bp-array-row bp-array-row-item" data-row-index="${i}" data-member-type="sec">` +
+      `<div class="bp-array-row-body"><details class="bp-array-item"${open ? " open" : ""}>` +
+      `<summary>Section</summary>` +
+      `<div class="bp-composite"><input type="text" name="doc[sections][${i}].heading" value="${heading}"></div>` +
+      `</details></div>` +
+      `<div class="bp-array-row-actions">` +
+      `<button type="button" class="bp-array-btn bp-array-btn-up" phx-value-action="move_up" phx-value-index="${i}"${i === 0 ? " disabled" : ""}>▲</button>` +
+      `<button type="button" class="bp-array-btn bp-array-btn-down" phx-value-action="move_down" phx-value-index="${i}"${i === count - 1 ? " disabled" : ""}>▼</button>` +
+      `<button type="button" class="bp-array-btn bp-array-btn-remove" phx-value-action="remove_row" phx-value-index="${i}">×</button>` +
+      `</div></li>`;
+    const menu =
+      `<details class="bp-array-add-menu" data-add-member-menu>` +
+      `<summary class="bp-array-btn bp-array-btn-add">+ Add item</summary>` +
+      `<ul class="bp-array-add-members" role="list">` +
+      `<li><button type="button" class="bp-array-add-member" phx-value-action="add_row" phx-value-member="sec">Section</button></li>` +
+      `</ul></details>`;
+    // The server render: rows as given ([heading, open]), the menu closed.
+    const renderTyped = (fieldset, rows) => {
+      fieldset.querySelector("ol.bp-array-rows").innerHTML = rows
+        .map(([h, open], i) => typedRow(i, h, open, rows.length))
+        .join("");
+      fieldset.querySelector("details.bp-array-add-menu").outerHTML = menu;
+    };
+    const mountTyped = (rows) => {
+      document.body.innerHTML =
+        `<fieldset class="bp-field bp-field-array" data-typed-array id="bp-array-sections"><legend>Sections</legend>` +
+        `<ol class="bp-array-rows"></ol>${menu}</fieldset>`;
+      const el = document.getElementById("bp-array-sections");
+      renderTyped(el, rows);
+      return el;
+    };
+
+    {
+      const el = mountTyped([["One", false]]);
+      el.querySelector("details.bp-array-add-menu").open = true;
+      const button = el.querySelector(".bp-array-add-member");
+      button.focus();
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      renderTyped(el, [["One", false], ["", true]]);
+      await settle();
+      assert.notEqual(document.activeElement, document.body, "Add from the type menu never drops focus to body");
+      assert.equal(
+        document.activeElement.getAttribute("name"),
+        "doc[sections][1].heading",
+        "Add from the type menu puts focus in the new row's first field"
+      );
+    }
+
+    {
+      // The new row drawn closed: its first field cannot take focus, so its summary.
+      const el = mountTyped([["One", false]]);
+      const button = el.querySelector(".bp-array-add-member");
+      button.focus();
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      renderTyped(el, [["One", false], ["Two", false]]);
+      await settle();
+      assert.equal(document.activeElement.tagName, "SUMMARY", "a closed new row: focus on its summary");
+      assert.equal(document.activeElement.closest("li").dataset.rowIndex, "1");
+    }
+
+    {
+      // No rows left: the type menu's summary is the field's Add.
+      const el = mountTyped([["Only", false]]);
+      const button = el.querySelector(".bp-array-btn-remove");
+      button.focus();
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      renderTyped(el, []);
+      await settle();
+      assert.ok(document.activeElement.matches("details.bp-array-add-menu > summary"), "removing the only row focuses the type menu");
+    }
+  }
+
   console.log("array focus: all checks passed");
 } finally {
   window.close();

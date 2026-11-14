@@ -22,14 +22,67 @@ defmodule BarkparkWeb.Studio.Desk.InspectLookTest do
     end
   end
 
-  test "the card: radius 6, no border, the popover shadow, TanStack's backdrop" do
+  test "the card: radius 6, no border, the popover shadow" do
     card = rule(".dk .dk-inspect")
 
     for want <- ["border: 0", "border-radius: 6px", "box-shadow: var(--dk-popover-shadow)"],
         do: assert(card =~ want)
 
-    assert rule(".dk .dk-inspect::backdrop") =~ "background: var(--dk-backdrop)"
     assert rule(".dk .dk-inspect-head h2 em") =~ "font-style: italic"
+  end
+
+  # Final re-shoot, tell 3: TanStack's `.inspect-backdrop` dims the doc
+  # pane's form only, the card 12 px in and stretched across, centred while
+  # short (`place-items: center stretch`), and the whole window below 600 px.
+  test "Inspect is TanStack's layer over the edit pane's form, not the page's backdrop" do
+    refute @css =~ ".dk-inspect::backdrop"
+
+    layer = rule(".dk .dk-inspect-layer")
+
+    for want <- [
+          "position: absolute",
+          "position-anchor: --dk-edit-body",
+          "top: anchor(top)",
+          "right: anchor(right)",
+          "bottom: anchor(bottom)",
+          "left: anchor(left)",
+          "place-items: center stretch",
+          "padding: 12px",
+          "background: var(--dk-backdrop)"
+        ],
+        do: assert(layer =~ want, "the layer has #{want}")
+
+    # The form is the anchor and stays unpositioned: the Studio's own
+    # dialogs in it mean the page (see Style's moduledoc).
+    body = rule(".dk .dk-edit-body")
+    assert body =~ "anchor-name: --dk-edit-body"
+    refute body =~ "position"
+
+    assert rule(".dk .dk-inspect-layer:not(:has(> dialog[open]))") =~ "display: none"
+
+    assert @css =~
+             ~r/@media \(max-width: 599px\) \{ \.dk \.dk-inspect-layer \{ position: fixed; inset: 0; \} \}/
+
+    card = rule(".dk .dk-inspect")
+
+    for want <- ["position: static", "margin: 0", "width: auto", "max-height: 100%"],
+        do: assert(card =~ want)
+  end
+
+  # Anchor positioning is in Chrome 125+, Safari 26+ and Firefox 147+, not
+  # in older Safari or Firefox ESR 140. There the card is today's: centred on
+  # the page over a dimmed window, never left unplaced.
+  test "with no anchor positioning, Inspect is the page-centred card" do
+    [_, block] =
+      Regex.run(~r/@supports not \(anchor-name: --x\) \{(.*?\})\s*\}/s, @css) ||
+        flunk("no @supports not (anchor-name) fallback for Inspect")
+
+    [_, layer] = Regex.run(~r/\.dk \.dk-inspect-layer \{([^}]*)\}/, block)
+    for want <- ["position: fixed", "inset: 0", "place-items: center"], do: assert(layer =~ want)
+
+    [_, card] = Regex.run(~r/\.dk \.dk-inspect \{([^}]*)\}/, block)
+    assert card =~ "width: min(774px, calc(100vw - 32px))"
+    assert card =~ "max-height: calc(100vh - 64px)"
   end
 
   test "the tabs are TanStack's pills: 3 8, radius 3, the selected fill" do
@@ -68,5 +121,15 @@ defmodule BarkparkWeb.Studio.Desk.InspectLookTest do
 
     assert focus =~ "var(--dk-focus)"
     refute focus =~ "var(--primary)"
+  end
+
+  test "the search box is TanStack's: the UI font at 15/23, a ringed input, the magnifier inside" do
+    assert rule(".dk .dk-inspect-search") =~ "font: 15px/23px 'Inter Variable', Inter"
+    assert rule(".dk .dk-inspect-search > svg") =~ "left: 6px"
+    input = rule(".dk .dk-inspect-search-input")
+    assert input =~ "padding: 6px 12px 6px 35px"
+    assert input =~ "box-shadow: inset 0 0 0 1px var(--dk-field-ring)"
+    assert rule(".dk .dk-inspect-search-input:focus") =~ "var(--dk-focus-ring)"
+    assert rule(".dk .dk-inspect-tree li[hidden]") =~ "display: none"
   end
 end

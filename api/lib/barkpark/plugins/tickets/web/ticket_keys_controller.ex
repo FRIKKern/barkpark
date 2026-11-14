@@ -22,6 +22,10 @@ defmodule BarkparkWeb.TicketKeysController do
   alias Barkpark.Plugins.Tickets.{Handoff, Keys}
   alias BarkparkWeb.ErrorResponse
 
+  # A dataset-bound token manages only its own dataset's keys. It runs as a
+  # plug so the anchored `delete/2` body below stays byte-identical.
+  plug :confine_bound_token when action in [:rotate, :pause, :unpause, :delete]
+
   @doc """
   `POST /v1/plugins/tickets/keys` — mint a named ticket key.
 
@@ -62,7 +66,13 @@ defmodule BarkparkWeb.TicketKeysController do
 
   @doc "`GET /v1/plugins/tickets/keys` — list the operator's ticket keys."
   def index(conn, _params) do
-    keys = conn |> current_workspace_id() |> Keys.list() |> Enum.map(&key_json/1)
+    keys =
+      conn
+      |> current_workspace_id()
+      |> Keys.list()
+      |> Keys.confine(bound_dataset(conn))
+      |> Enum.map(&key_json/1)
+
     json(conn, %{keys: keys})
   end
 
@@ -106,6 +116,15 @@ defmodule BarkparkWeb.TicketKeysController do
   end
 
   # ── helpers ────────────────────────────────────────────────────────────
+
+  defp bound_dataset(conn), do: ApiToken.bound_dataset(conn.assigns[:api_token])
+
+  # Another dataset's key answers exactly as a missing one does.
+  defp confine_bound_token(conn, _opts) do
+    if Keys.manageable?(conn.path_params["id"], current_workspace_id(conn), bound_dataset(conn)),
+      do: conn,
+      else: conn |> not_found("ticket key not found") |> halt()
+  end
 
   defp stamp_response(conn, {:ok, key}), do: json(conn, %{key: key_json(key)})
   defp stamp_response(conn, {:error, :not_found}), do: not_found(conn, "ticket key not found")

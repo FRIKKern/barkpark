@@ -1514,10 +1514,9 @@
       // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I while a
       // document is open asks the page for it (by the key's place: Alt changes
       // the letter on a Mac); the page puts `inspect=on` in the URL, and it
-      // opens as a modal when it is mounted. Escape or its close
-      // button closes it, which tells the page, and the browser gives the
-      // focus back to where it was. Its two tabs switch here, by click or
-      // the arrow keys.
+      // opens in the edit pane when it is mounted. Escape or its close
+      // button closes it, which tells the page, and the focus goes back to
+      // where it was. Its two tabs switch here, by click or the arrow keys.
       hook._onInspectKey = function (e) {
         if (!e.ctrlKey || !e.altKey || e.metaKey || e.shiftKey || e.code !== "KeyI") return;
         // As soon as a document is open, wherever the focus is: a click on
@@ -1528,10 +1527,59 @@
       };
       // Each dialog element opens once: after Escape it stays shut until the
       // page draws a new one (Back to `inspect=on`).
+      //
+      // TanStack's place for it: inside the edit pane, over its form only
+      // (`.dk-inspect-layer`). A modal would lift it over the whole page, so
+      // it opens with show() and keeps a modal's keys itself, as TanStack's
+      // DialogBox: the focus starts on its close button, Tab goes round
+      // inside it, and Escape closes it. Closed (Escape, its button, a press
+      // on the dim area), the focus goes back to where it was.
       hook._showInspect = function (dialog) {
         if (!dialog || dialog.open || dialog._deskShown || !dialog.isConnected) return;
         dialog._deskShown = true;
-        dialog.showModal();
+        dialog._deskOpener = root.ownerDocument.activeElement;
+        dialog.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            return dialog.close();
+          }
+          if (e.key !== "Tab" || e.ctrlKey || e.altKey || e.metaKey) return;
+          var stops = hook._inspectStops(dialog);
+          if (!stops.length) return;
+          var at = root.ownerDocument.activeElement;
+          var i = stops.indexOf(at);
+          var to = e.shiftKey ? (i <= 0 ? stops[stops.length - 1] : null) : i === stops.length - 1 || i < 0 ? stops[0] : null;
+          if (!to) return;
+          e.preventDefault();
+          to.focus();
+        });
+        dialog.show();
+        var close = dialog.querySelector(".dk-inspect-close");
+        if (close) close.focus();
+      };
+      // What Tab can reach in the dialog: shown, and not a tab or a branch
+      // out of turn (a folded branch's insides, the other tab, a key the
+      // search left out).
+      hook._inspectStops = function (dialog) {
+        var all = dialog.querySelectorAll("button, input, summary, a[href], [tabindex]");
+        return Array.prototype.filter.call(all, function (el) {
+          if (el.disabled || el.getAttribute("tabindex") === "-1") return false;
+          for (var p = el.parentElement; p && p !== dialog; p = p.parentElement) {
+            if (p.hidden) return false;
+            if (p.tagName === "DETAILS" && !p.open && !(el.tagName === "SUMMARY" && el.parentElement === p)) return false;
+          }
+          return true;
+        });
+      };
+      // A press on the dim round the card closes it, as TanStack's backdrop's
+      // (on the press, and the focus does not move to the page first).
+      hook._onInspectLayer = function (e) {
+        if (!e.target.matches || !e.target.matches("[data-desk-inspect-layer]")) return;
+        var dialog = e.target.querySelector("dialog[data-desk-inspect][open]");
+        if (!dialog) return;
+        e.preventDefault();
+        dialog.close();
       };
       // Sanity's document shortcuts, from inside the edit pane only
       // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
@@ -1580,7 +1628,10 @@
       });
       hook._inspectSeen.observe(root, { childList: true, subtree: true });
       hook._onInspectClose = function (e) {
-        if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook.pushEvent("desk-inspect", { open: false });
+        if (!e.target.matches || !e.target.matches("dialog[data-desk-inspect]")) return;
+        var back = e.target._deskOpener;
+        if (back && back.isConnected && back.focus && back !== root.ownerDocument.body) back.focus();
+        hook.pushEvent("desk-inspect", { open: false });
       };
       hook._inspectTab = function (tab) {
         var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
@@ -1604,11 +1655,57 @@
         var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
         hook._inspectTab(tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]);
       };
+      // Inspect's search (TanStack's InspectDialog `matches`): a node stays
+      // while its key, its value or anything under it holds the words, in any
+      // case; a branch that holds one opens; each count says how many of its
+      // keys it shows. Cleared, every branch is as it was before the search.
+      hook._inspectFilter = function (input) {
+        var q = input.value.trim().toLowerCase();
+        var panel = input.closest(".dk-inspect-panel");
+        var top = panel && panel.querySelector(".dk-inspect-tree > li");
+        if (!top) return;
+        var kids = function (el, sel) {
+          return Array.prototype.filter.call(el ? el.children : [], function (c) { return c.matches(sel); });
+        };
+        var has = function (el) { return !!el && el.textContent.toLowerCase().indexOf(q) !== -1; };
+        var walk = function (li, isTop) {
+          var details = kids(li, "details")[0];
+          var holder = details ? kids(details, "summary")[0] : li;
+          var key = kids(holder, ".dk-inspect-key")[0];
+          var hit = !q || isTop || has(key);
+          if (details) {
+            var shown = kids(kids(details, "ul")[0], "li").filter(function (c) { return walk(c, false); }).length;
+            if (shown > 0) hit = true;
+            var count = kids(holder, ".dk-inspect-count")[0];
+            if (count && count.dataset.one) {
+              var words = shown === 1 ? count.dataset.one : count.dataset.other.replace("{n}", String(shown));
+              count.textContent = count.dataset.brace + " " + words;
+            }
+            if (q) {
+              if (!("deskOpen" in details.dataset)) details.dataset.deskOpen = details.open ? "1" : "";
+              details.open = true;
+            } else if ("deskOpen" in details.dataset) {
+              details.open = details.dataset.deskOpen === "1";
+              delete details.dataset.deskOpen;
+            }
+          } else if (!hit) {
+            hit = has(kids(li, ".dk-inspect-value")[0]);
+          }
+          li.hidden = !hit;
+          return hit;
+        };
+        walk(top, true);
+      };
+      hook._onInspectSearch = function (e) {
+        if (e.target.matches && e.target.matches("[data-desk-inspect-search]")) hook._inspectFilter(e.target);
+      };
+      root.addEventListener("input", hook._onInspectSearch);
       root.addEventListener("keydown", hook._onInspectKey);
       root.addEventListener("keydown", hook._onDocKey);
       root.addEventListener("desk:show-modal", hook._onShowModal);
       // `close` does not bubble: caught on the way down.
       root.addEventListener("close", hook._onInspectClose, true);
+      root.addEventListener("mousedown", hook._onInspectLayer);
       root.addEventListener("click", hook._onInspectTab);
       root.addEventListener("keydown", hook._onInspectTab);
     },
@@ -1678,6 +1775,7 @@
       root.removeEventListener("desk:show-modal", this._onShowModal);
       if (this._inspectSeen) this._inspectSeen.disconnect();
       root.removeEventListener("close", this._onInspectClose, true);
+      root.removeEventListener("mousedown", this._onInspectLayer);
       root.removeEventListener("click", this._onInspectTab);
       root.removeEventListener("keydown", this._onInspectTab);
       window.clearTimeout(this._toastTimer);

@@ -34,6 +34,9 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
   def init(opts), do: opts
 
   def call(conn, _opts) do
+    # The chat API refuses unknown keys, so the `dataset` a bound token was
+    # given upstream (`BoundDataset.resolve/2`) is taken out again here.
+    conn = BarkparkWeb.Plugs.BoundDataset.unfill(conn)
     token = conn.assigns[:api_token]
 
     case chat_scope(token) do

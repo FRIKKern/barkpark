@@ -55,7 +55,7 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
         else
           case admin_token(presented) do
             %ApiToken{} = token ->
-              conn |> assign(:api_token, token) |> refuse_draft_only_write(token)
+              admit(conn, token)
 
             nil ->
               reject(conn)
@@ -64,6 +64,19 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
 
       _ ->
         reject(conn)
+    end
+  end
+
+  # The token's dataset binding is held here as at every other token door
+  # (`BoundDataset.resolve/2`): a named other dataset is refused, and a request
+  # naming none gets the token's own. This plug used to run no fence at all.
+  defp admit(conn, token) do
+    case BarkparkWeb.Plugs.BoundDataset.resolve(conn, token) do
+      {:ok, conn} ->
+        conn |> assign(:api_token, token) |> refuse_draft_only_write(token)
+
+      {:error, :forbidden_dataset} ->
+        BarkparkWeb.ErrorResponse.emit(conn, {:error, :forbidden_dataset})
     end
   end
 

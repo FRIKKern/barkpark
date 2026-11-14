@@ -40,8 +40,15 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   (`:focus-visible`): a click opens a menu with nothing lit.
 
   Inspect (`.dk-inspect`) is TanStack's card: radius 6, the popover shadow,
-  the page dimmed by its backdrop, its tree in a monospace with its syntax
-  colours (styles.css `--syntax-*`), light and dark.
+  in TanStack's place (`.inspect-backdrop`): a dim layer over the edit
+  pane's form only, the card 12 px in, centred while short; below 600 px it
+  takes the whole window. The layer is anchored to the form
+  (`anchor-name: --dk-edit-body`), not boxed in by it: the form stays
+  unpositioned, for the reason below. A browser with no anchor positioning
+  gets the card centred on the page instead (`@supports not`). Its tree in a monospace with its syntax
+  colours (styles.css `--syntax-*`), light and dark. Its search box is
+  TanStack's `.inspect-search`: the UI font at 15 px, a ringed input with
+  the magnifier inside.
 
   The edit pane (`.dk-edit`) is not positioned: the Studio draws a dialog's
   backdrop `position: absolute; inset: 0` inside its shell and means the
@@ -77,6 +84,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       /* The read-only document pane's values (`PaneComponent`), as TanStack's disabled form: its --input-fg, --bg-soft fill, --line ring and the ring under the pointer. */
       .dk { --dk-field-fg: #0d0e12; --dk-field-fill: #f6f6f8; --dk-field-ring: #e3e4e8; --dk-field-hover-ring: #bbbdc9; }
       html[data-theme="dark"] .dk { --dk-field-fg: #e4e5e9; --dk-field-fill: #191a24; --dk-field-ring: #3d4258; --dk-field-hover-ring: #3d4258; }
+      /* The page behind the desk, in dark: TanStack's #13141b, not the Studio's #09090b. */
+      html[data-theme="dark"] body:has(.dk) { background: #13141b; }
       /* studio-literal-check: skip-end */
       .dk { background: var(--dk-bg); }
       .dk .dk-pane { box-sizing: border-box; flex: 1 1 0; width: auto; min-width: 321px; max-width: 351px; border-right-color: var(--border); background: var(--dk-bg); }
@@ -104,6 +113,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected[data-desk-opens="doc"] { background: var(--dk-hover-strong); color: var(--dk-fg); }
       .dk [data-pane-index]:has(~ [data-pane-index]:not([data-desk-leaving]) ~ [data-pane-index]:not([data-desk-leaving])) .dk-row > a.pane-item.selected .dk-row-sub { color: var(--dk-muted); }
       .dk .dk-note { padding: 16px; color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+      .dk .list-rows:has(> p.dk-note:only-child) { display: grid; place-items: center; padding: 0 12px; }
+      .dk .list-rows > p.dk-note:only-child { margin: 16px 8px; padding: 0; color: var(--dk-muted); font-size: 15px; line-height: 23px; text-align: center; }
       .dk .dk-lost { padding-top: 0; }
       .dk .dk-lost summary { cursor: pointer; color: var(--fg); }
       .dk .dk-lost-text { margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--border-subtle); color: var(--fg); white-space: pre-wrap; max-height: 12em; overflow: auto; }
@@ -122,6 +133,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-fields dd.dk-refs { display: grid; gap: 8px; min-height: 0; padding: 0; background: none; box-shadow: none; white-space: normal; }
       .dk .dk-fields .dk-refs > * { box-sizing: border-box; display: block; min-width: 0; min-height: 35px; margin: 0; padding: 6px 12px; border: 0; border-radius: 3px; background: var(--dk-field-fill); box-shadow: inset 0 0 0 1px var(--dk-field-ring); color: var(--dk-field-fg); font-size: 15px; line-height: 23px; overflow-wrap: anywhere; text-decoration: none; }
       .dk .dk-fields .dk-refs > .dk-ref-missing, .dk .dk-fields .dk-refs > .dk-ref-none { color: var(--dk-muted); }
+      .dk .dk-fields .dk-refs > .ref-box { display: flex; align-items: center; gap: 4px; padding: 5px; }
+      .dk .dk-fields .ref-box > .preview { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 49px; padding: 5px 8px; border-radius: 3px; font-size: 13px; line-height: 19px; color: var(--dk-fg); }
+      .dk .dk-fields .ref-box .text { flex: 1; min-width: 0; margin-right: 20px; display: flex; flex-direction: column; }
+      .dk .dk-fields .ref-box .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-fields .ref-box .s { margin-top: -2px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-fields a.dk-ref:hover { background: var(--dk-field-fill); box-shadow: inset 0 0 0 1px var(--dk-field-hover-ring); }
       .dk .dk-fields a.dk-ref[aria-current] { background: var(--dk-row-chain-bg); color: var(--dk-row-chain-fg); }
       .dk .dk-fields a.dk-ref:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
@@ -151,9 +167,16 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit-footer .dk-doc-menu-button { display: inline-grid; place-items: center; box-sizing: border-box; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-foot-icon); font-size: 17px; line-height: 1; cursor: pointer; }
       .dk .dk-edit-footer .dk-doc-menu-button:hover { background: var(--dk-foot-hover); }
       .dk .form-switch input[type="checkbox"] { left: 0; top: 50%; width: 34px; height: 20px; margin: -10px 0 0; z-index: 1; cursor: pointer; }
-      .dk .dk-inspect { margin: auto; width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      .dk .dk-edit-body { anchor-name: --dk-edit-body; }
+      .dk .dk-inspect-layer { position: absolute; position-anchor: --dk-edit-body; top: anchor(top); right: anchor(right); bottom: anchor(bottom); left: anchor(left); z-index: 60; box-sizing: border-box; display: grid; place-items: center stretch; grid-template-rows: minmax(0, 1fr); padding: 12px; background: var(--dk-backdrop); }
+      .dk .dk-inspect-layer:not(:has(> dialog[open])) { display: none; }
+      @media (max-width: 599px) { .dk .dk-inspect-layer { position: fixed; inset: 0; } }
+      .dk .dk-inspect { position: static; margin: 0; width: auto; max-height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      /* No anchor positioning (Safari before 26, Firefox before 147, Firefox ESR 140): the
+         card as it was before it moved into the pane, centred on the page over a dimmed
+         window, so it is never drawn unplaced. */
+      @supports not (anchor-name: --x) { .dk .dk-inspect-layer { position: fixed; inset: 0; place-items: center; padding: 16px; } .dk .dk-inspect { width: min(774px, calc(100vw - 32px)); max-height: calc(100vh - 64px); } }
       .dk .dk-inspect[open] { display: flex; flex-direction: column; }
-      .dk .dk-inspect::backdrop { background: var(--dk-backdrop); }
       .dk .dk-inspect-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0 20px; }
       .dk .dk-inspect-head h2 { flex: 1 1 auto; margin: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-inspect-head h2 em { font-style: italic; }
@@ -180,6 +203,13 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-inspect-key { margin-right: 1ch; color: var(--dk-syntax-property); }
       .dk .dk-inspect-count, .dk .dk-inspect-value { color: var(--dk-syntax-constant); }
       .dk .dk-inspect-value[data-type="string"] { color: var(--dk-syntax-string); }
+      .dk .dk-inspect-search { position: relative; display: block; margin-bottom: 12px; font: 15px/23px 'Inter Variable', Inter, -apple-system, system-ui, sans-serif; }
+      .dk .dk-inspect-search > svg { position: absolute; left: 6px; top: 50%; width: 21px; height: 21px; transform: translateY(-50%); color: var(--dk-muted); pointer-events: none; }
+      .dk .dk-inspect-search-input { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 6px 12px 6px 35px; border: 0; border-radius: 3px; background: var(--dk-bg); color: var(--dk-field-fg); font: inherit; box-shadow: inset 0 0 0 1px var(--dk-field-ring); }
+      .dk .dk-inspect-search-input::placeholder { color: var(--dk-placeholder); }
+      .dk .dk-inspect-search-input:hover:not(:focus) { box-shadow: inset 0 0 0 1px var(--dk-field-hover-ring); }
+      .dk .dk-inspect-search-input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-inspect-tree li[hidden] { display: none; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -336,6 +366,12 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav .dk-nav-tab { min-height: 44px; display: inline-flex; align-items: center; }
         .studio-shell:has(.dk) .dk-nav .dk-nav-more { width: 44px; height: 44px; }
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item { min-height: 44px; }
+      }
+      /* Under 900 px the text tabs give way and More lists them first, as TanStack's bar moves its tools into its menu there: the bar stays one 52 px row (after the touch block, whose tabs are inline-flex). */
+      .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: none; }
+      @media (max-width: 899px) {
+        .studio-shell:has(.dk) .dk-nav .dk-nav-tab { display: none; }
+        .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
     </style>
     """

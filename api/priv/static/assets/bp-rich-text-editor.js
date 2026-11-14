@@ -50,6 +50,7 @@ class BpRichTextEditor extends HTMLElement {
     // the field bridge, so nothing saved (task-1647a0c1c37cf069).
     if (this._editor) {
       this._listen();
+      this._refocus();
       return;
     }
 
@@ -110,8 +111,40 @@ class BpRichTextEditor extends HTMLElement {
       const text = cb ? cb.getData("text/plain") : "";
       document.execCommand("insertText", false, text);
     };
+    // A move takes the focus: Chrome blurs the text before it is taken out
+    // (focusout, no relatedTarget, still connected), and the selection is
+    // gone by `disconnectedCallback`. So the blur keeps where the caret was,
+    // for this task only; a move puts it back (task-8205f1f56b0b9c2d).
+    this._onFocusOut = (e) => {
+      if (e.relatedTarget) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || !this._editor.contains(sel.anchorNode)) return;
+      const r = sel.getRangeAt(0);
+      // Plain points, not a Range: a live Range collapses when its nodes are
+      // taken out.
+      this._blurredAt = [r.startContainer, r.startOffset, r.endContainer, r.endOffset];
+      queueMicrotask(() => { this._blurredAt = null; });
+    };
     this._listen();
     this._loadLinkTitles();
+  }
+
+  // After a move: when the text had the focus as it was taken out and nothing
+  // else took it since, the text takes it back with its selection.
+  _refocus() {
+    const at = this._movedAt;
+    this._movedAt = null;
+    const active = document.activeElement;
+    if (!at || (active && active !== document.body)) return;
+    this._editor.focus({ preventScroll: true });
+    try {
+      const range = document.createRange();
+      range.setStart(at[0], at[1]);
+      range.setEnd(at[2], at[3]);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_e) { /* the text changed under the caret: the focus is enough */ }
   }
 
   // The listeners `disconnectedCallback` takes off. Adding the same function
@@ -122,11 +155,16 @@ class BpRichTextEditor extends HTMLElement {
     this._editor.addEventListener("click", this._onBlockClick);
     this._editor.addEventListener("keydown", this._onBlockKey);
     this._editor.addEventListener("paste", this._onPaste);
+    this._editor.addEventListener("focusout", this._onFocusOut);
   }
 
   disconnectedCallback() {
     if (this._onSelection) document.removeEventListener("selectionchange", this._onSelection);
+    // Taken out in the same task as the blur: a move, if it comes back.
+    this._movedAt = this._blurredAt || null;
+    if (this._movedAt) queueMicrotask(() => { this._movedAt = null; });
     if (this._editor) {
+      if (this._onFocusOut) this._editor.removeEventListener("focusout", this._onFocusOut);
       if (this._onInput) this._editor.removeEventListener("input", this._onInput);
       if (this._onPaste) this._editor.removeEventListener("paste", this._onPaste);
       if (this._onBlockClick) this._editor.removeEventListener("click", this._onBlockClick);

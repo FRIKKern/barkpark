@@ -30,7 +30,13 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       button (35 px, filled, ringed). A focused button, link or tab is
       outlined in the same blue, as TanStack's, not the Studio's green.
     * The pane is TanStack's page colour (`--dk-bg`, light and dark), and
-      inputs sit on it.
+      inputs sit on it. In dark, the boxed fields (array, object, code
+      list, localized), an array's rows and a chosen reference sit on it
+      too, not on the Studio's near-black card.
+    * A picked reference is TanStack's card (`.ref-box`, :677, :739-745):
+      a 1 px inset ring, 5 px in, the type's tile, the title and the type,
+      and one "…" menu with Clear and Replace. bp-reference-picker draws it
+      in the edit pane; the menu wears the desk's `.dk-menu`.
   """
 
   use Phoenix.Component
@@ -55,6 +61,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);
         --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
       }
+      html[data-theme="dark"] .dk .dk-edit fieldset.bp-field-array, html[data-theme="dark"] .dk .dk-edit .bp-field-composite, html[data-theme="dark"] .dk .dk-edit .bp-field-codelist, html[data-theme="dark"] .dk .dk-edit .bp-field-localized, html[data-theme="dark"] .dk .dk-edit .bp-array-row, html[data-theme="dark"] .dk .dk-edit .ref-selected { background: var(--dk-bg); }
       .dk .dk-edit .editor-body.editor-panel-main { max-width: none; padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-edit .editor-meta { display: block; margin: 0 0 52px; color: var(--dk-muted); font-size: 13px; line-height: 19px; }
       .dk .dk-edit .dk-kind { font-size: 13px; line-height: 19px; color: var(--dk-muted); }
@@ -83,6 +90,20 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit button[phx-click="slug-generate"]:hover:not(:disabled) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }
       .dk .dk-edit :where(button, a, [role=tab], [tabindex]):focus-visible { outline: 1px solid var(--dk-focus-ring); outline-offset: -1px; }
       .dk .dk-edit .field-errors, .dk .dk-edit .field-error { font-size: 13px; color: var(--dk-danger-text); }
+      .dk .dk-edit .ref-box { box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--dk-line); }
+      .dk .dk-edit .ref-box:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-edit .ref-box > .preview { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 49px; padding: 5px 8px; border-radius: 3px; font-size: 13px; line-height: 19px; color: var(--dk-fg); }
+      .dk .dk-edit .ref-box > .preview > .text { flex: 1; min-width: 0; margin-right: 20px; display: flex; flex-direction: column; }
+      .dk .dk-edit .ref-box .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit .ref-box .s { margin-top: -2px; color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-edit .ref-box .dk-media svg { width: 21px; height: 21px; }
+      .dk .dk-edit .ref-box > .menu-wrap { position: relative; flex: none; }
+      .dk .dk-edit .ref-box .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); }
+      .dk .dk-edit .ref-box .icon-btn svg { width: 21px; height: 21px; }
+      .dk .dk-edit .ref-box .icon-btn:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-edit .ref-box .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
+      .dk .dk-edit .ref-box .ref-menu { position: absolute; z-index: 10; right: 0; top: 30px; display: flex; flex-direction: column; gap: 4px; }
+      .dk .dk-edit .ref-box .ref-menu[hidden] { display: none; }
     </style>
     """
   end
