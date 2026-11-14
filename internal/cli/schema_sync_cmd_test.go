@@ -224,9 +224,7 @@ func runSync(run func(*writer, globals, manifest.Context, []string) int, s *sync
 // difference, and a schema whose name could leave the folder is skipped.
 func TestSchemaPullDiffPushRoundTrip(t *testing.T) {
 	s := newSyncFakeServer(t)
-	s.seed(syncSchema("post", "title", "body"))
-	s.seed(syncSchema("author", "name"))
-	s.seed(syncSchema("../evil", "x"))
+	s.seed(syncSchema("post", "title", "body"), syncSchema("author", "name"), syncSchema("../evil", "x"))
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "schemas")
 
@@ -278,9 +276,7 @@ func TestSchemaPullDiffPushRoundTrip(t *testing.T) {
 // with the field-level summary, and the exit code says there is a difference.
 func TestSchemaDiffPlansAddedChangedRemoved(t *testing.T) {
 	s := newSyncFakeServer(t)
-	s.seed(syncSchema("post", "title", "body", "legacy"))
-	s.seed(syncSchema("author", "name"))
-	s.seed(syncSchema("tag", "label"))
+	s.seed(syncSchema("post", "title", "body", "legacy"), syncSchema("author", "name"), syncSchema("tag", "label"))
 	dir := t.TempDir()
 	post := syncSchema("post", "title", "body", "subtitle")
 	post["title"] = "Article"
@@ -412,9 +408,9 @@ func TestSchemaPushReachesDiffZeroForEveryFileShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &pulled); err != nil {
 		t.Fatal(err)
 	}
-	delete(pulled, "icon")
-	delete(pulled, "singleton")
-	delete(pulled, "groups")
+	for _, k := range []string{"icon", "singleton", "groups"} {
+		delete(pulled, k)
+	}
 	writeSyncFile(t, dir, "post", pulled)
 	step("diff after removing keys", runSchemaDiff, exitSchemaDiff)
 	step("push after removing keys", runSchemaPush, exitOK)
