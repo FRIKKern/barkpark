@@ -327,10 +327,7 @@ defmodule BarkparkWeb.LiveAuth do
     granted =
       Enum.find_value(candidates, fn
         {:ok, api_token, _raw} ->
-          if Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) and
-               admin_seat_ok?(allowed_perms, api_token) do
-            api_token
-          end
+          if token_grant?(allowed_perms, api_token), do: api_token
 
         :error ->
           nil
@@ -643,6 +640,20 @@ defmodule BarkparkWeb.LiveAuth do
   @spec ops_access?(Auth.ApiToken.t() | nil, Barkpark.Accounts.User.t() | nil) :: boolean()
   def ops_access?(api_token, user) do
     token_ops?(api_token) or default_workspace_admin?(user)
+  end
+
+  @doc """
+  Whether `token` passes the token arm of the `:admin` gate (`on_mount(:admin, …)`):
+  it holds `admin` AND still has its admin seat. The gate's own rule, so a view
+  that re-checks an open socket asks what a fresh mount asks.
+  """
+  @spec admin_token?(term()) :: boolean()
+  def admin_token?(%Auth.ApiToken{} = token), do: token_grant?(["admin"], token)
+  def admin_token?(_token), do: false
+
+  defp token_grant?(allowed_perms, token) do
+    Enum.any?(allowed_perms, &Auth.has_permission?(token, &1)) and
+      admin_seat_ok?(allowed_perms, token)
   end
 
   defp token_ops?(%Auth.ApiToken{} = token),
