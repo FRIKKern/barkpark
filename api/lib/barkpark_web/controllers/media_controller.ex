@@ -21,6 +21,21 @@ defmodule BarkparkWeb.MediaController do
 
   action_fallback BarkparkWeb.FallbackController
 
+  # `delete/2` names no dataset, so a dataset-bound token is held to the ROW's
+  # dataset, as the reads are (`confine_bound_dataset/2`). It runs as a plug so
+  # the anchored `delete/2` body stays byte-identical.
+  plug :confine_bound_delete when action in [:delete]
+
+  defp confine_bound_delete(conn, _opts) do
+    with dataset when is_binary(dataset) <- bound_dataset(conn),
+         {:ok, %MediaFile{} = file} <- Media.get_file(conn.path_params["id"], scope_opts(conn)),
+         {:error, :not_found} <- confine_bound_dataset(conn, file) do
+      conn |> BarkparkWeb.FallbackController.call({:error, :not_found}) |> halt()
+    else
+      _ -> conn
+    end
+  end
+
   # ── Unscoped-read confinement (task-2e4a3692adf5c565) ───────────────────────
   #
   # `AssignDefaultScope` passes the conn through UNTOUCHED when nothing is
