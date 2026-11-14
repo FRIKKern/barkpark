@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -389,6 +390,13 @@ func TestProviderHelperProcess(t *testing.T) {
 			write(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "codex-thread", "turnId": "codex-turn", "item": item}})
 			write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "codex-thread", "turnId": "codex-turn", "item": item}})
 			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "codex-thread", "turn": map[string]any{"id": "codex-turn", "status": "completed"}}})
+			if os.Getenv("BARKPARK_HELPER_STDERR_CHILD") != "" {
+				// A grandchild (an MCP server, say) that outlives codex and
+				// keeps the inherited stderr open. It exits on its own.
+				child := exec.Command("sleep", "5")
+				child.Stderr = os.Stderr
+				_ = child.Start()
+			}
 			os.Exit(0)
 		default:
 			write(map[string]any{"id": request["id"], "error": map[string]any{"message": "unexpected method"}})

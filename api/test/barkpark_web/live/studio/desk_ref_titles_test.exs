@@ -128,10 +128,16 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
   @read_only ~s([data-pane-index="2"])
   @edit "[data-pane-editing]"
 
-  # The pane's one link shows `name`, and no longer `old`.
+  # The pane's one link shows `name`, and no longer `old`. The edit pane's
+  # links are in its "…" menu ("Open reference: <title>").
   defp shows?(view, pane, name, old \\ nil) do
-    has_element?(view, pane <> " a[data-desk-ref]", name) and
-      (old == nil or not has_element?(view, pane <> " a[data-desk-ref]", old))
+    link =
+      if pane == @edit,
+        do: ~s( .pane-header a[data-desk-doc-action="open-reference"]),
+        else: " a[data-desk-ref]"
+
+    has_element?(view, pane <> link, name) and
+      (old == nil or not has_element?(view, pane <> link, old))
   end
 
   defp strip(view, pane), do: view |> element(pane) |> render() |> String.slice(0, 600)

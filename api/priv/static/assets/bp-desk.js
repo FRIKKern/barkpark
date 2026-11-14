@@ -11,7 +11,7 @@
 //              link and a search hit are answered the same way.
 //   * INTENT — hovering or focusing a row asks the server to read the pane it
 //              opens ("warm"), so the click that follows opens it with data.
-//   * LAYOUT — panes that do not fit collapse to 51 px strips, by the rule the
+//   * LAYOUT — panes that do not fit collapse to 52 px strips, by the rule the
 //              TanStack Studio uses (Sanity's own, see collapsed() below), from
 //              the width the browser measures. A click on a strip opens it.
 //   * NARROW — below 600 px the desk shows one pane, the last, and its close
@@ -75,6 +75,9 @@
   //    kept exact).
   // Ported from Sanity (MIT, Copyright (c) 2016 - 2026 Sanity.io).
   var STRIP = 51;
+  // A strip is drawn 1 px wider than the accounting above, as the TanStack
+  // Studio draws it (`calc(var(--strip) + 1px)`): 52 px, its border included.
+  var STRIP_DRAWN = STRIP + 1;
   var MIN = { types: 320, menu: 320, list: 320, doc: 600 };
 
   function collapsed(kinds, width, focus) {
@@ -100,7 +103,7 @@
   function stripRules(index) {
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
-      pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
+      pane + " { width: " + STRIP_DRAWN + "px; min-width: " + STRIP_DRAWN + "px; flex: 0 0 " + STRIP_DRAWN + "px; cursor: pointer; overflow: hidden; }\n" +
       // A strip reads its title alone: every control in its header goes too.
       pane + " > :not(.pane-header), " + pane + " > .pane-header > :not(.pane-header-title), " + pane + " .dk-close { display: none; }\n" +
       pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
@@ -179,13 +182,13 @@
   }
 
   // A pane is never narrower than its minimum, nor wider than the desk less
-  // what the other panes need (a strip its 51 px, an open pane the width it
+  // what the other panes need (a strip its 52 px, an open pane the width it
   // was given or its minimum): widening one never pushes another off screen.
   function clampWidth(root, pane, px, widths) {
     var rest = 0;
     panes(root).forEach(function (el) {
       if (el === pane || el.hasAttribute("data-desk-leaving")) return;
-      rest += el.hasAttribute("data-pane-collapsed") ? STRIP : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
+      rest += el.hasAttribute("data-pane-collapsed") ? STRIP_DRAWN : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
     });
     var room = root.clientWidth ? Math.max(PANE_MIN, root.clientWidth - rest) : Infinity;
     return Math.max(PANE_MIN, Math.min(Math.round(px), room));

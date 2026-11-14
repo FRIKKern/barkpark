@@ -1,8 +1,9 @@
 defmodule BarkparkWeb.Studio.DeskEditorStripTest do
   @moduledoc """
-  Journey J08 in the desk's editor pane: the strip of links above the editor
-  (`nav.dk-edit-refs a[data-desk-ref]`), the only way to open a reference in
-  the next pane, follows what the editor saves. A reference picked or
+  Journey J08 in the desk's editor pane: the reference links in the pane's
+  "…" menu ("Open reference: <title>"; they were a strip of links above the
+  editor until LOOKS "doc pane top 2"), the way to open a reference in the
+  next pane, follow what the editor saves. A reference picked or
   cleared shows at once, with no reload (`EditorHost` reads the targets again
   when the ids the document holds change).
 
@@ -108,8 +109,10 @@ defmodule BarkparkWeb.Studio.DeskEditorStripTest do
     end
   end
 
+  @ref ~s(section[data-pane-editing] > .pane-header a[data-desk-doc-action="open-reference"])
+
   defp strip_link?(view, base, chain, text),
-    do: has_element?(view, ~s(nav.dk-edit-refs a[data-desk-ref][href="#{base}/#{chain}"]), text)
+    do: has_element?(view, ~s(#{@ref}[href="#{base}/#{chain}"]), "Open reference: " <> text)
 
   test "a reference picked in the editor shows in the link strip without a reload", c do
     {:ok, view, _html} = live(admin(c.conn), "#{c.base}/#{c.post};#{c.one}")
@@ -157,31 +160,32 @@ defmodule BarkparkWeb.Studio.DeskEditorStripTest do
 
   # Measured in a browser: when the row of links only came into the page with
   # its first link, the patch that added it rebuilt the editor below, and the
-  # focus (on the picker's Change button after a pick) fell to the page.
-  test "the strip's row is in the page before its first link, so a pick does not rebuild the editor",
+  # focus (on the picker's Change button after a pick) fell to the page. The
+  # links are now in the header's menu, which is there with or without them.
+  test "no row of links above the editor; the menu keeps its place when the last link goes",
        c do
     {:ok, view, _html} = live(admin(c.conn), "#{c.base}/#{c.post};#{c.one}")
     settle(view)
     pane = "section[data-pane-editing]"
-    assert has_element?(view, "#{pane} > nav.dk-edit-refs[id] a[data-desk-ref]")
-    refute has_element?(view, ~s(#{pane} > nav.dk-edit-refs[style*="display: none"]))
+    refute has_element?(view, "#{pane} nav.dk-edit-refs")
+    refute has_element?(view, "#{pane} > nav")
+    assert has_element?(view, @ref)
 
     view |> form("#editor-form") |> render_change(%{"doc" => %{"author" => ""}})
 
-    assert poll(view, fn ->
-             has_element?(view, ~s(#{pane} > nav.dk-edit-refs[id][style*="display: none"]))
-           end),
-           "with no link left the row is gone from the page, or still shown: " <>
-             inspect(strip(view))
+    assert poll(view, fn -> not has_element?(view, @ref) end),
+           "the cleared reference is still in the menu: " <> inspect(strip(view))
 
-    refute has_element?(view, "#{pane} > nav.dk-edit-refs a[data-desk-ref]")
+    assert has_element?(view, ~s(#{pane} > .pane-header [role="menu"][id$="-actions"]))
     assert has_element?(view, "#{pane} > .pane-body[id] #editor-form")
   end
 
   defp strip(view) do
     view
     |> render()
-    |> then(&Regex.scan(~r/<a[^>]*data-desk-ref[^>]*>\s*([^<]*?)\s*<\/a>/, &1))
+    |> then(
+      &Regex.scan(~r/<a[^>]*data-desk-doc-action="open-reference"[^>]*>\s*([^<]*?)\s*</, &1)
+    )
     |> Enum.map(&List.last/1)
   end
 end

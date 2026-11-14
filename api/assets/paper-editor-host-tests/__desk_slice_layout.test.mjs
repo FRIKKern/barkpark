@@ -80,8 +80,8 @@ const sheet = () => window.document.getElementById("bp-desk-layout").textContent
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 assert.deepEqual(strips(), [T, T, F, F], "four panes at 1024 px");
-assert.match(sheet(), /\[data-pane-index="0"\][^{]*\{ width: 51px/);
-assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 51px/);
+assert.match(sheet(), /\[data-pane-index="0"\][^{]*\{ width: 52px/);
+assert.match(sheet(), /\[data-pane-index="1"\][^{]*\{ width: 52px/);
 assert.doesNotMatch(sheet(), /\[data-pane-index="2"\]/, "an open pane has no strip rule");
 assert.equal(panesOf()[0].getAttribute("role"), "button", "a strip is a button");
 assert.equal(panesOf()[0].getAttribute("tabindex"), "0", "that the keyboard reaches");
@@ -129,10 +129,10 @@ assert.match(sheet(), /\[data-pane-index="2"\][^{]*\{ width: 320px;/, "never und
 assert.equal(separators()[0].getAttribute("aria-valuenow"), "320");
 assert.ok(!arrow("ArrowDown").defaultPrevented, "other keys are not the separator's");
 // Nor so wide that another pane is pushed off screen: of 1200 px two strips
-// take 102 and the document needs 600, which leaves 498 for this one.
-assert.equal(separators()[0].getAttribute("aria-valuemax"), "498", "the most the pane can be");
+// take 104 (52 each, as drawn) and the document needs 600, which leaves 496.
+assert.equal(separators()[0].getAttribute("aria-valuemax"), "496", "the most the pane can be");
 for (let i = 0; i < 30; i++) arrow("ArrowRight");
-assert.equal(separators()[0].getAttribute("aria-valuenow"), "498", "never past its maximum");
+assert.equal(separators()[0].getAttribute("aria-valuenow"), "496", "never past its maximum");
 for (let i = 0; i < 30; i++) arrow("ArrowLeft");
 assert.equal(separators()[0].getAttribute("aria-valuenow"), "320");
 // A patch that re-draws the panes drops the separators. The focused one comes
@@ -253,7 +253,7 @@ assert.deepEqual(strips(), [T, T, F, F], "back to the rule's own focus: the last
 width = 2000;
 hook._layout();
 assert.deepEqual(strips(), [F, F, F, F]);
-assert.doesNotMatch(sheet(), /width: 51px/, "no strip rule is left behind");
+assert.doesNotMatch(sheet(), /width: 52px/, "no strip rule is left behind");
 assert.equal(separators().length, 3, "every open pane but the last has a separator");
 
 // The editor pane has no header of its own: as a strip it shows its title, not a slice of its form.

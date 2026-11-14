@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
-  alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
+  alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias Phoenix.LiveView.JS
 
@@ -2080,10 +2080,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             editor_form={@editor_form}
             editor_is_draft={@editor_is_draft}
             dataset={@dataset}
-            validation_errors={@validation_errors}
+            validation_errors={RefusedSave.marks(@validation_errors, assigns)}
             validation_warnings={@validation_warnings}
             cross_violations={@cross_violations}
-            save_status={@save_status}
+            save_status={RefusedSave.status(assigns)}
             doc_conflict={@doc_conflict}
             editor_form_gen={Map.get(assigns, :editor_form_gen, 0)}
             paper_halt={@paper_halt}

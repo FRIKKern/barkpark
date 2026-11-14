@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
@@ -333,7 +334,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
       {%{}, [_ | _] = path} ->
         form = StudioLive.Path.put_value_at(base_form(socket), path, code)
-        socket = assign(socket, editor_form: form)
+        socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
         saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
         {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
@@ -393,6 +394,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         saved =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"])
+          |> RefusedSave.target(keys)
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
 
@@ -662,7 +664,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, settle_dirty(Shared.do_autosave(socket, new_form, :array_op))}
+      # A refused array change is held under its own field (`RefusedSave`).
+      keys = Enum.take(key_path, 1)
+      saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
+      {:noreply, settle_dirty(saved, keys)}
     end
   end
 
@@ -748,9 +753,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   #
   # A landed save also takes down the "Updated by another user" banner: what
   # it said was kept is now saved (#25880 review).
-  defp settle_dirty(socket, keys \\ []) do
+  defp settle_dirty(socket, keys) do
     if socket.assigns[:save_status] == "Saved" do
-      assign(socket, editor_dirty: false, editor_unsaved_keys: MapSet.new(), doc_conflict: false)
+      # A field the store refused earlier is still not saved (`RefusedSave`).
+      held = MapSet.new(RefusedSave.keys(socket))
+      dirty? = MapSet.size(held) > 0
+      assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
     else
       unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 

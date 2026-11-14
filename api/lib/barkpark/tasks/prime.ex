@@ -37,6 +37,9 @@ defmodule Barkpark.Tasks.Prime do
   ## Options
     * `:workspace_id` — binary uuid; fails CLOSED (zero rows) when nil.
     * `:project_id`   — binary uuid; narrows within the workspace.
+    * `:dataset`      — string; narrows all three reads to that dataset. Absent
+      spans every dataset of the scope. A dataset-bound token always carries
+      one (`BarkparkWeb.Plugs.BoundDataset`).
     * `:worker`       — string; narrows `in_progress` to that worker's claims.
     * `:limit`        — integer bound for the `recent_events` slice.
 
@@ -48,15 +51,16 @@ defmodule Barkpark.Tasks.Prime do
     project_id = Keyword.get(opts, :project_id)
     worker = Keyword.get(opts, :worker)
     limit = Keyword.get(opts, :limit)
+    dataset = Keyword.get(opts, :dataset)
 
     %{
-      in_progress: in_progress(workspace_id, project_id, worker),
-      recent_events: recent_events(workspace_id, limit),
-      counts: lifecycle_counts(workspace_id, project_id)
+      in_progress: in_progress(workspace_id, project_id, worker, dataset),
+      recent_events: recent_events(workspace_id, limit, dataset),
+      counts: lifecycle_counts(workspace_id, project_id, dataset)
     }
   end
 
-  defp in_progress(workspace_id, project_id, worker) do
+  defp in_progress(workspace_id, project_id, worker, dataset) do
     from(d in Document,
       where: d.type == "task",
       where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
@@ -66,10 +70,11 @@ defmodule Barkpark.Tasks.Prime do
     |> maybe_filter_workspace(workspace_id)
     |> maybe_filter_project(project_id)
     |> maybe_filter_claim_worker(worker)
+    |> maybe_filter_dataset(dataset)
     |> Repo.all()
   end
 
-  defp recent_events(workspace_id, limit) do
+  defp recent_events(workspace_id, limit, dataset) do
     from(e in MutationEvent,
       where: e.type == "task" and like(e.mutation, "task.%"),
       order_by: [desc: e.inserted_at],
@@ -77,6 +82,7 @@ defmodule Barkpark.Tasks.Prime do
       select: %{event: e.mutation, doc_id: e.doc_id, at: e.inserted_at}
     )
     |> maybe_filter_event_workspace(workspace_id)
+    |> maybe_filter_dataset(dataset)
     |> Repo.all()
   end
 
@@ -101,11 +107,12 @@ defmodule Barkpark.Tasks.Prime do
   # is precisely the divergent pair above — and delete the claim the caller is
   # rehydrating from its own prime. Same distinction `collapse_twins/1` already
   # draws for `StudioChat`'s claim lookups.
-  defp lifecycle_counts(workspace_id, project_id) do
+  defp lifecycle_counts(workspace_id, project_id, dataset) do
     from(d in Document, where: d.type == "task")
     |> TaskQuery.collapse_twins()
     |> maybe_filter_workspace(workspace_id)
     |> maybe_filter_project(project_id)
+    |> maybe_filter_dataset(dataset)
     |> group_by_lifecycle()
     |> Repo.all()
     |> Map.new()
@@ -132,6 +139,12 @@ defmodule Barkpark.Tasks.Prime do
 
   defp maybe_filter_project(query, p_id),
     do: from(d in query, where: d.project_id == ^p_id)
+
+  # Documents and mutation events both carry `dataset`.
+  defp maybe_filter_dataset(query, nil), do: query
+
+  defp maybe_filter_dataset(query, dataset) when is_binary(dataset),
+    do: from(r in query, where: r.dataset == ^dataset)
 
   defp maybe_filter_claim_worker(query, nil), do: query
 

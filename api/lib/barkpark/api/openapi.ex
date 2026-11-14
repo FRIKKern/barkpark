@@ -345,7 +345,7 @@ defmodule Barkpark.Api.OpenApi do
       end
 
     body_fields =
-      (Map.get(cmd, "args", []) || [])
+      ((Map.get(cmd, "args", []) || []) ++ Enum.reject(flags, &client_consumed_flag?/1))
       |> Enum.reject(fn a -> Map.get(a, "name") in placeholders end)
 
     %{
@@ -361,12 +361,28 @@ defmodule Barkpark.Api.OpenApi do
         "An atomic batch of mutations (create/patch/publish/unpublish/delete)."
 
       body_fields != [] ->
-        names = body_fields |> Enum.map(&Map.get(&1, "name")) |> Enum.join(", ")
+        names = Enum.map_join(body_fields, ", ", &body_field_name/1)
         "Request body fields: #{names}."
 
       true ->
         "Request body."
     end
+  end
+
+  # A repeatable flag is a list on the wire (the CLI's buildBody ships it as a
+  # JSON array even at length one), so the description says so.
+  defp body_field_name(%{"repeatable" => true} = field), do: "#{field["name"]} (array)"
+  defp body_field_name(field), do: Map.get(field, "name")
+
+  # A write command's flags are body fields (task-5a889361f1a2ebd6), except the
+  # ones the CLI consumes itself: `file` IS the body (or seeds it), `set` folds
+  # arbitrary key=value fields in, and `quiet`/`all` never leave the client.
+  # Mirrors the clientConsumed set in commandFlagBelongsInBody
+  # (internal/cli/run.go); change the two together.
+  @client_consumed_flags ~w(file set quiet all)
+
+  defp client_consumed_flag?(flag) do
+    Map.get(flag, "name") in @client_consumed_flags or Map.get(flag, "type") == "file"
   end
 
   # ── Responses ──────────────────────────────────────────────────────────────
