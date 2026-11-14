@@ -14,6 +14,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   published and the draft view. The desk has no published view, so here
   they only say the state.
 
+  The pills' state is in colour, so each also says it in words for screen
+  readers ("Not published", "Draft: unpublished changes", …); the visible
+  word is hidden from them, so the pill is read once.
+
   Before the pills, the TanStack Studio's avatar stack (`AvatarStack`,
   Sanity's): one avatar per other person in the document (several tabs are
   one person; you are not shown), their initials on their colour, up to
@@ -61,7 +65,8 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         title={!@published? && gettext("Unpublished")}
       >
         <span class="dk-chip-dot dk-chip-dot-published" aria-hidden="true"></span>
-        <span class="dk-chip-label">{gettext("Published")}</span>
+        <span class="dk-chip-label" aria-hidden="true">{gettext("Published")}</span>
+        <span class="sr-only">{if @published?, do: gettext("Published"), else: gettext("Not published")}</span>
       </span>
       <span
         class="dk-chip"
@@ -70,7 +75,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         title={@draft? && gettext("Edited")}
       >
         <span class="dk-chip-dot dk-chip-dot-draft" aria-hidden="true"></span>
-        <span class="dk-chip-label">{gettext("Draft")}</span>
+        <span class="dk-chip-label" aria-hidden="true">{gettext("Draft")}</span>
+        <span class="sr-only">
+          {if @draft?, do: gettext("Draft: unpublished changes"), else: gettext("Draft: no changes")}
+        </span>
       </span>
     </span>
     """

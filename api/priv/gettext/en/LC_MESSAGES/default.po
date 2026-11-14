@@ -364,6 +364,21 @@ msgstr ""
 msgid "Edited %{ago}"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:53
+#, elixir-autogen, elixir-format
+msgid "Not published"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:64
+#, elixir-autogen, elixir-format
+msgid "Draft: unpublished changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:64
+#, elixir-autogen, elixir-format
+msgid "Draft: no changes"
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Drop or paste an image to replace it"
