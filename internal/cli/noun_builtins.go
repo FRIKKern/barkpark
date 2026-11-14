@@ -178,6 +178,30 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun:    "schema",
+		Verb:    "pull",
+		Summary: "Write every schema of the dataset to a folder, one <name>.json per schema.",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runSchemaPull(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "schema",
+		Verb:    "diff",
+		Summary: "Compare a folder of schema files to the dataset (exits 1 when they differ).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runSchemaDiff(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "schema",
+		Verb:    "push",
+		Summary: "Apply a folder of schema files to the dataset; --prune also deletes the rest.",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runSchemaPush(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "server",
 		Verb:    "ls",
 		Summary: "List saved servers (the singular-noun spelling of `bp servers`).",

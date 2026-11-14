@@ -9,8 +9,8 @@ defmodule BarkparkWeb.SchemaController do
 
   action_fallback BarkparkWeb.FallbackController
 
-  def index(conn, %{"dataset" => dataset}) do
-    envelope = Content.list_schemas_for_sdk(dataset, scope_opts(conn))
+  def index(conn, %{"dataset" => dataset} = params) do
+    envelope = Content.SchemaStoredFields.index(dataset, scope_opts(conn), params)
     json(conn, Map.put(envelope, :_schemaVersion, 1))
   end
 

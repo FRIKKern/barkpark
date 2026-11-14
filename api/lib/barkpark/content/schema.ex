@@ -106,7 +106,15 @@ defmodule Barkpark.Content.Schema do
     )
   end
 
-  defp do_list_schemas(dataset, opts) do
+  defp do_list_schemas(dataset, opts),
+    do: dataset |> list_stored_schemas(opts) |> inline_catalog(dataset, opts)
+
+  @doc """
+  The dataset's schema rows as stored: the query `list_schemas/2` runs (same
+  dataset and workspace scope, same grant narrowing), before named object
+  types are inlined into the fields. Not cached.
+  """
+  def list_stored_schemas(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -128,7 +136,6 @@ defmodule Barkpark.Content.Schema do
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
     |> Repo.all()
     |> Enum.uniq_by(& &1.name)
-    |> inline_catalog(dataset, opts)
   end
 
   # THE ARITY IS THE TENANT FENCE (task-be3b3aa6da5df3a2, instance 1). `opts`
