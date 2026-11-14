@@ -103,6 +103,9 @@ USAGE
 # delivery tool that silently reports "no reds" when it could not read is the
 # original defect wearing this file's name.
 _mro_selftest() {
+  # The arms own their inputs: a shared reading named by the caller's
+  # environment must never steer them (task-0f8b982c7d014258).
+  unset MRO_PREDICATE_OUT MRO_REUSE_MAX_MIN
   local d fails=0 pass=0 out rc
   _ok(){ printf 'PASS %-30s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
   _no(){ printf 'FAIL %-30s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
@@ -262,6 +265,12 @@ PMARK
   # REFUSAL 1: a blind reading is never inherited.
   printf '2H PREDICATE: CANNOT READ -- feed unreadable\n' > "$d/share"; echo 4 > "$d/share.rc"
   _shared "a blind shared reading is re-read" 1 "fresh read"
+  # …each half of that test on its own: exit 4 beside a TRUE line (the
+  # predicate's "too few workflows" path), and exit 1 beside a blind line.
+  printf '2H PREDICATE: TRUE -- nothing red\n' > "$d/share"; echo 4 > "$d/share.rc"
+  _shared "exit 4 with a TRUE line is re-read" 1 "fresh read"
+  printf '2H PREDICATE: CANNOT READ -- feed unreadable\n' > "$d/share"; echo 1 > "$d/share.rc"
+  _shared "exit 1 with a blind line is re-read" 1 "fresh read"
   # REFUSAL 2: a stale file is not this run's reading.
   _share_red; touch -t 202001010000 "$d/share"
   _shared "a stale shared reading is re-read" 1 "fresh read"

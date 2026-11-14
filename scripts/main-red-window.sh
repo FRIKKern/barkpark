@@ -246,6 +246,9 @@ do_verdict() {
 # PAIR — the same ledger shape with one property moved — because an arm that
 # only ever sees one answer cannot tell a working rule from a hard-wired one.
 _selftest() {
+  # The arms own their inputs: never write a synthetic reading into a file the
+  # caller's environment names (task-0f8b982c7d014258).
+  unset MRW_PREDICATE_OUT MRW_PREDICATE
   local d pass=0 fails=0 out rc
   _ok(){ printf 'PASS %-38s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
   _no(){ printf 'FAIL %-38s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
