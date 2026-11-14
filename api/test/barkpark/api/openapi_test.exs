@@ -257,6 +257,45 @@ defmodule Barkpark.Api.OpenApiTest do
     refute Map.has_key?(post["requestBody"]["content"], "application/json")
   end
 
+  # task-5a889361f1a2ebd6. request_body/2 read body fields from the command's
+  # ARGS only, so a write command's flags reached neither the query string
+  # (GET/HEAD only) nor the body description. chat.update_session, whose whole
+  # body is five flags, was described as a bare "Request body.", and a new
+  # repeatable flag on chat.send_message left the artifact unchanged — the
+  # drift gate could not see a body-flag change at all.
+  test "a write command's flags are named as body fields; a repeatable one as an array",
+       %{spec: spec} do
+    update = get_in(spec, ["paths", "/v1/chat/sessions/{id}", "patch"])
+    assert update["operationId"] == "chat.update_session"
+
+    assert update["requestBody"]["description"] ==
+             "Request body fields: draft, mode, model_choice, effort_choice, title."
+
+    send = get_in(spec, ["paths", "/v1/chat/sessions/{id}/messages", "post"])
+    assert send["operationId"] == "chat.send_message"
+
+    assert send["requestBody"]["description"] ==
+             "Request body fields: content, attachments (array)."
+  end
+
+  # The control: the flags the CLI consumes itself (`file` is the body, `set`
+  # folds arbitrary key=value fields in, `quiet`/`all` never leave the client)
+  # are not body fields, so they must not be named as ones.
+  test "client-consumed flags (file, set, quiet, all) are not named as body fields", %{
+    manifest: manifest
+  } do
+    patch = Enum.find(manifest["commands"], &(&1["id"] == "doc.patch"))
+    flag_names = Enum.map(patch["flags"], & &1["name"])
+    assert "file" in flag_names and "set" in flag_names, "doc.patch lost file/set — vacuous"
+
+    spec = OpenApi.spec(%{manifest | "commands" => [patch]})
+
+    desc =
+      get_in(spec, ["paths", "/v1/data/mutate/{dataset}", "post", "requestBody", "description"])
+
+    assert desc == "Request body fields: type, id."
+  end
+
   test "scoped commands emit a /w/.../p/... mirror path", %{spec: spec} do
     scoped =
       get_in(spec, [

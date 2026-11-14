@@ -365,4 +365,27 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
     # TanStack's dark --focus-ring.
     assert dark =~ "--dk-focus-ring: #596ffc;"
   end
+
+  # seat-visual: TanStack centres an empty list's words ("No documents here
+  # yet.", "No results found") in the whole list area, 15/23 muted, inside the
+  # rows' 0 12 padding. The desk put them top-left, 13 px, with no padding.
+  test "an empty list's note sits centred in the list, as TanStack's" do
+    box = rule(@css, ".dk .list-rows:has(> p.dk-note:only-child)")
+    assert box =~ "display: grid"
+    assert box =~ "place-items: center"
+    assert box =~ "padding: 0 12px"
+
+    note = rule(@css, ".dk .list-rows > p.dk-note:only-child")
+    assert note =~ "margin: 16px 8px"
+    assert note =~ "font-size: 15px"
+    assert note =~ "line-height: 23px"
+    assert note =~ "text-align: center"
+    assert note =~ "color: var(--dk-muted)"
+  end
+
+  # seat-visual: in dark, TanStack's page is #13141b; the desk's body stayed
+  # the Studio's #09090b under the panes.
+  test "in dark, the page behind the desk is the pane colour" do
+    assert rule(@css, "html[data-theme=\"dark\"] body:has(.dk)") =~ "background: #13141b"
+  end
 end

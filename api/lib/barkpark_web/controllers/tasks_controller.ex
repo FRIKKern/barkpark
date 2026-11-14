@@ -399,7 +399,7 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, filters} <- Params.parse_route_filters(params, :prime),
          {:ok, worker} <- Params.prime_worker(params, filters),
          {:ok, order} <- Params.parse_ready_order(params["order"]) do
-      scope = scope_opts(conn)
+      scope = Params.put_opt(scope_opts(conn), :dataset, dataset_param(params))
       limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
       view = Params.parse_view(params["view"])
 
@@ -929,7 +929,7 @@ defmodule BarkparkWeb.TasksController do
             # byte-identical to one issued before this key existed.
             |> Params.put_opt(:priming_start, priming_start)
             |> Keyword.merge(Params.execution_policy_opts(params))
-            |> Keyword.merge(scope_opts(conn))
+            |> Keyword.merge(Params.put_opt(scope_opts(conn), :dataset, dataset_param(params)))
 
           case Tasks.claim(worker_id, opts) do
             {:ok, nil} ->

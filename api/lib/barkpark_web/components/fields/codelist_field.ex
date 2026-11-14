@@ -121,6 +121,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put(:empty_phrase, @no_codelist_phrase)
       |> Map.put(:use_combobox, use_combobox?)
       |> Map.put(:use_tree, use_tree?)
+      |> Map.put(:unknown_value, unknown_value(assigns.value, options))
 
     # The editor's field label cannot point at this control (`FieldInputs.
     # label_target/3` has no id for it, and the tree variant has no single
@@ -189,6 +190,12 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             aria-label={@title}
           >
             <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
+            <%!-- A stored code the list does not hold is its own selected
+                  option, so a change to another field posts it back instead
+                  of "" (task-dcc3a1b86c09e869). --%>
+            <option :if={@unknown_value} value={@unknown_value} selected data-codelist-unknown="true">
+              <%= gettext("%{code} (not in list)", code: @unknown_value) %>
+            </option>
             <%= for opt <- @options do %>
               <option value={opt.value} selected={@value == opt.value}>
                 <%= opt.value %> — <%= opt.label %>
@@ -227,6 +234,12 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       segments -> "f-" <> Enum.join(segments, "-")
     end
   end
+
+  defp unknown_value(value, options) when is_binary(value) and value != "" do
+    if Enum.any?(options, &(&1.value == value)), do: nil, else: value
+  end
+
+  defp unknown_value(_value, _options), do: nil
 
   defp default_loader(plugin_name, list_id) do
     Code.ensure_loaded?(Barkpark.Content.Codelists) and

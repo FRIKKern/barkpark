@@ -55,9 +55,11 @@ press("row", { shiftKey: true });
 press("row", { code: "KeyP" });
 assert.deepEqual(inspects(), [], "Ctrl+Alt+Shift+I and Ctrl+Alt+P ask for nothing");
 
-// The dialog opens when the page draws it. jsdom has no showModal: counted here.
+// The dialog opens when the page draws it, in its pane, with show() (no
+// modal: that would lift it over the page). jsdom has no show: counted here.
 const shown = [];
-window.HTMLDialogElement.prototype.showModal = function () { shown.push(this.id); this.setAttribute("open", ""); };
+window.HTMLDialogElement.prototype.show = function () { shown.push(this.id); this.setAttribute("open", ""); };
+window.HTMLDialogElement.prototype.showModal = function () { throw new Error("Inspect is no modal"); };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const draw = (id) => {
   doc.getElementById("p1").insertAdjacentHTML("beforeend", `<dialog id="${id}" data-desk-inspect><h2>Inspecting Post A</h2></dialog>`);

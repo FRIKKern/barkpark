@@ -11,7 +11,7 @@
 //              link and a search hit are answered the same way.
 //   * INTENT — hovering or focusing a row asks the server to read the pane it
 //              opens ("warm"), so the click that follows opens it with data.
-//   * LAYOUT — panes that do not fit collapse to 51 px strips, by the rule the
+//   * LAYOUT — panes that do not fit collapse to 52 px strips, by the rule the
 //              TanStack Studio uses (Sanity's own, see collapsed() below), from
 //              the width the browser measures. A click on a strip opens it.
 //   * NARROW — below 600 px the desk shows one pane, the last, and its close
@@ -75,6 +75,9 @@
   //    kept exact).
   // Ported from Sanity (MIT, Copyright (c) 2016 - 2026 Sanity.io).
   var STRIP = 51;
+  // A strip is drawn 1 px wider than the accounting above, as the TanStack
+  // Studio draws it (`calc(var(--strip) + 1px)`): 52 px, its border included.
+  var STRIP_DRAWN = STRIP + 1;
   var MIN = { types: 320, menu: 320, list: 320, doc: 600 };
 
   function collapsed(kinds, width, focus) {
@@ -100,7 +103,7 @@
   function stripRules(index) {
     var pane = '#desk-panes > [data-pane-index="' + index + '"]:not([data-desk-leaving])';
     return (
-      pane + " { width: " + STRIP + "px; min-width: " + STRIP + "px; flex: 0 0 " + STRIP + "px; cursor: pointer; overflow: hidden; }\n" +
+      pane + " { width: " + STRIP_DRAWN + "px; min-width: " + STRIP_DRAWN + "px; flex: 0 0 " + STRIP_DRAWN + "px; cursor: pointer; overflow: hidden; }\n" +
       // A strip reads its title alone: every control in its header goes too.
       pane + " > :not(.pane-header), " + pane + " > .pane-header > :not(.pane-header-title), " + pane + " .dk-close { display: none; }\n" +
       pane + " > .pane-header { height: 100%; min-height: 0; padding: 16px 0; border-bottom: 0; justify-content: flex-start; writing-mode: vertical-rl; }\n" +
@@ -179,13 +182,13 @@
   }
 
   // A pane is never narrower than its minimum, nor wider than the desk less
-  // what the other panes need (a strip its 51 px, an open pane the width it
+  // what the other panes need (a strip its 52 px, an open pane the width it
   // was given or its minimum): widening one never pushes another off screen.
   function clampWidth(root, pane, px, widths) {
     var rest = 0;
     panes(root).forEach(function (el) {
       if (el === pane || el.hasAttribute("data-desk-leaving")) return;
-      rest += el.hasAttribute("data-pane-collapsed") ? STRIP : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
+      rest += el.hasAttribute("data-pane-collapsed") ? STRIP_DRAWN : widths[el.id] || MIN[el.getAttribute("data-pane-kind")] || MIN.list;
     });
     var room = root.clientWidth ? Math.max(PANE_MIN, root.clientWidth - rest) : Infinity;
     return Math.max(PANE_MIN, Math.min(Math.round(px), room));
@@ -1514,10 +1517,9 @@
       // The Inspect dialog (desk/inspect_dialog.ex). Ctrl+Alt+I while a
       // document is open asks the page for it (by the key's place: Alt changes
       // the letter on a Mac); the page puts `inspect=on` in the URL, and it
-      // opens as a modal when it is mounted. Escape or its close
-      // button closes it, which tells the page, and the browser gives the
-      // focus back to where it was. Its two tabs switch here, by click or
-      // the arrow keys.
+      // opens in the edit pane when it is mounted. Escape or its close
+      // button closes it, which tells the page, and the focus goes back to
+      // where it was. Its two tabs switch here, by click or the arrow keys.
       hook._onInspectKey = function (e) {
         if (!e.ctrlKey || !e.altKey || e.metaKey || e.shiftKey || e.code !== "KeyI") return;
         // As soon as a document is open, wherever the focus is: a click on
@@ -1528,10 +1530,59 @@
       };
       // Each dialog element opens once: after Escape it stays shut until the
       // page draws a new one (Back to `inspect=on`).
+      //
+      // TanStack's place for it: inside the edit pane, over its form only
+      // (`.dk-inspect-layer`). A modal would lift it over the whole page, so
+      // it opens with show() and keeps a modal's keys itself, as TanStack's
+      // DialogBox: the focus starts on its close button, Tab goes round
+      // inside it, and Escape closes it. Closed (Escape, its button, a press
+      // on the dim area), the focus goes back to where it was.
       hook._showInspect = function (dialog) {
         if (!dialog || dialog.open || dialog._deskShown || !dialog.isConnected) return;
         dialog._deskShown = true;
-        dialog.showModal();
+        dialog._deskOpener = root.ownerDocument.activeElement;
+        dialog.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            return dialog.close();
+          }
+          if (e.key !== "Tab" || e.ctrlKey || e.altKey || e.metaKey) return;
+          var stops = hook._inspectStops(dialog);
+          if (!stops.length) return;
+          var at = root.ownerDocument.activeElement;
+          var i = stops.indexOf(at);
+          var to = e.shiftKey ? (i <= 0 ? stops[stops.length - 1] : null) : i === stops.length - 1 || i < 0 ? stops[0] : null;
+          if (!to) return;
+          e.preventDefault();
+          to.focus();
+        });
+        dialog.show();
+        var close = dialog.querySelector(".dk-inspect-close");
+        if (close) close.focus();
+      };
+      // What Tab can reach in the dialog: shown, and not a tab or a branch
+      // out of turn (a folded branch's insides, the other tab, a key the
+      // search left out).
+      hook._inspectStops = function (dialog) {
+        var all = dialog.querySelectorAll("button, input, summary, a[href], [tabindex]");
+        return Array.prototype.filter.call(all, function (el) {
+          if (el.disabled || el.getAttribute("tabindex") === "-1") return false;
+          for (var p = el.parentElement; p && p !== dialog; p = p.parentElement) {
+            if (p.hidden) return false;
+            if (p.tagName === "DETAILS" && !p.open && !(el.tagName === "SUMMARY" && el.parentElement === p)) return false;
+          }
+          return true;
+        });
+      };
+      // A press on the dim round the card closes it, as TanStack's backdrop's
+      // (on the press, and the focus does not move to the page first).
+      hook._onInspectLayer = function (e) {
+        if (!e.target.matches || !e.target.matches("[data-desk-inspect-layer]")) return;
+        var dialog = e.target.querySelector("dialog[data-desk-inspect][open]");
+        if (!dialog) return;
+        e.preventDefault();
+        dialog.close();
       };
       // Sanity's document shortcuts, from inside the edit pane only
       // (keyboard.spec:51, :178): Ctrl+Alt+P publishes, Ctrl+Alt+D asks to
@@ -1580,7 +1631,10 @@
       });
       hook._inspectSeen.observe(root, { childList: true, subtree: true });
       hook._onInspectClose = function (e) {
-        if (e.target.matches && e.target.matches("dialog[data-desk-inspect]")) hook.pushEvent("desk-inspect", { open: false });
+        if (!e.target.matches || !e.target.matches("dialog[data-desk-inspect]")) return;
+        var back = e.target._deskOpener;
+        if (back && back.isConnected && back.focus && back !== root.ownerDocument.body) back.focus();
+        hook.pushEvent("desk-inspect", { open: false });
       };
       hook._inspectTab = function (tab) {
         var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-desk-inspect-tab]"));
@@ -1654,6 +1708,7 @@
       root.addEventListener("desk:show-modal", hook._onShowModal);
       // `close` does not bubble: caught on the way down.
       root.addEventListener("close", hook._onInspectClose, true);
+      root.addEventListener("mousedown", hook._onInspectLayer);
       root.addEventListener("click", hook._onInspectTab);
       root.addEventListener("keydown", hook._onInspectTab);
     },
@@ -1723,6 +1778,7 @@
       root.removeEventListener("desk:show-modal", this._onShowModal);
       if (this._inspectSeen) this._inspectSeen.disconnect();
       root.removeEventListener("close", this._onInspectClose, true);
+      root.removeEventListener("mousedown", this._onInspectLayer);
       root.removeEventListener("click", this._onInspectTab);
       root.removeEventListener("keydown", this._onInspectTab);
       window.clearTimeout(this._toastTimer);
