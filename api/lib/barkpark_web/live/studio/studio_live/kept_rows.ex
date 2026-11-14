@@ -54,8 +54,10 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptRows do
   defp rows(%{} = posted, stored) do
     siblings = if is_list(stored), do: stored, else: []
 
+    # `kept <- [..]`, not `kept = ..`: a posted `false` or `nil` is a value
+    # to keep, and a bare match in a `for` filters a falsy one out.
     for {key, value} <- posted,
-        kept = walk(value, child(stored, key), siblings),
+        kept <- [walk(value, child(stored, key), siblings)],
         kept != :drop,
         into: %{},
         do: {key, kept}
