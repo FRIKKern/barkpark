@@ -54,6 +54,19 @@ const BP_MP_ICONS = {
   ellipsis: BP_MP_SVG + '<path fill="currentColor" d="M6.5 11C7.32843 11 8 11.6716 8 12.5C8 13.3284 7.32843 14 6.5 14C5.67157 14 5 13.3284 5 12.5C5 11.6716 5.67157 11 6.5 11Z"/><path fill="currentColor" d="M12.5 11C13.3284 11 14 11.6716 14 12.5C14 13.3284 13.3284 14 12.5 14C11.6716 14 11 13.3284 11 12.5C11 11.6716 11.6716 11 12.5 11Z"/><path fill="currentColor" d="M18.5 11C19.3284 11 20 11.6716 20 12.5C20 13.3284 19.3284 14 18.5 14C17.6716 14 17 13.3284 17 12.5C17 11.6716 17.6716 11 18.5 11Z"/></svg>'
 };
 
+// Clicks a made-up link: `download` saves, `target` opens a tab. Every link
+// carries rel=noopener so an opened page cannot reach back into the Studio.
+function bpMediaPickerClickLink(href, opts) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  if (opts && typeof opts.download === "string") a.setAttribute("download", opts.download);
+  if (opts && opts.target) a.target = opts.target;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // The image a paste carries: a pasted file first, then a file item (a
 // screenshot arrives as an item). Anything that is not an image is no image.
 function bpMediaPickerPastedImage(data) {
@@ -441,7 +454,36 @@ class BpMediaPicker extends HTMLElement {
 
   disconnectedCallback() {
     this._mounted = false;
+    const hadFocus = this._menuHasFocus();
     this._closeContextMenu();
+    // A remote save re-mounts the field (its wrapper's id changes), so the
+    // menu goes with this element. If focus was in it, land it on the new
+    // picker's "…" instead of <body>.
+    if (hadFocus && this._bar && this.id) {
+      const id = this.id;
+      setTimeout(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        const next = Array.prototype.find.call(document.querySelectorAll("bp-media-picker"), (p) => p.id === id && p.isConnected);
+        if (next && typeof next._focusAfterMenu === "function") next._focusAfterMenu();
+      }, 0);
+    }
+  }
+
+  // Focus is in the open menu, or on the "…" that opened it.
+  _menuHasFocus() {
+    const a = document.activeElement;
+    return !!(a && ((this._menuEl && this._menuEl.contains(a)) || (this._menuAnchor && this._menuAnchor.contains(a))));
+  }
+
+  // Where focus goes when the menu is gone under it: the "…", else the
+  // field's own focusable box.
+  _focusAfterMenu() {
+    // In this order (a selector list would answer in document order, and the
+    // frame comes before its own "…").
+    for (const sel of [".bp-mp-options", ".bp-mp-frame", ".bp-mp-bar", ".bp-mp-empty"]) {
+      const t = this.querySelector(sel);
+      if (t && typeof t.focus === "function") return t.focus();
+    }
   }
 
   // Ghost chrome (pd-doctrine rule 6): drop the visible actions row; actions
@@ -859,6 +901,11 @@ class BpMediaPicker extends HTMLElement {
         return;
       }
       if (e.key === "Tab") {
+        // Focus goes back where the menu opened first, so the browser's Tab
+        // moves on from there (the menu lives at the end of <body>, so a Tab
+        // from inside it landed on the page's first stop, the skip link).
+        const back = this._menuPrevFocus;
+        if (back && typeof back.focus === "function" && back.isConnected !== false) back.focus();
         this._closeContextMenu();
         return;
       }
@@ -951,16 +998,37 @@ class BpMediaPicker extends HTMLElement {
     }
   }
 
-  _downloadImage() {
+  // Download. A browser honours `download` only on the page's own origin; on
+  // another (a media CDN, an S3 public base, an imported image) a plain
+  // <a download> click NAVIGATES this tab to the image and the editor is
+  // gone. So another origin's image is fetched and saved from a blob; if CORS
+  // refuses, it opens in a NEW tab. Never in this one.
+  async _downloadImage() {
     const href = this._imageUrl();
     if (!href) return;
-    const a = document.createElement("a");
-    a.href = href;
-    a.setAttribute("download", "");
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(href).origin === new URL(document.baseURI).origin;
+    } catch (_e) {
+      sameOrigin = false;
+    }
+    if (sameOrigin) return bpMediaPickerClickLink(href, { download: "" });
+    let name = "image";
+    try {
+      name = decodeURIComponent(new URL(href).pathname.split("/").pop() || "") || "image";
+    } catch (_e) {
+      /* keep "image" */
+    }
+    try {
+      const r = await fetch(href, { mode: "cors", credentials: "omit" });
+      if (!r.ok) throw new Error("download " + r.status);
+      const blob = await r.blob();
+      const objUrl = URL.createObjectURL(blob);
+      bpMediaPickerClickLink(objUrl, { download: name });
+      setTimeout(() => URL.revokeObjectURL(objUrl), 0);
+    } catch (_e) {
+      bpMediaPickerClickLink(href, { target: "_blank" });
+    }
   }
 
   _copyImageUrl() {
@@ -1002,6 +1070,17 @@ class BpMediaPicker extends HTMLElement {
 
   _renderPreview() {
     if (!this._previewEl) return;
+    // chrome="bar": the menu's "…" is about to be redrawn, so close the menu,
+    // and if focus was in it, put it on the new "…" rather than let it drop
+    // to <body>. (The old Studio's menu has no anchor and stays as it was.)
+    const open = this._bar && this._menuEl;
+    const hadFocus = open ? this._menuHasFocus() : false;
+    if (open) this._closeContextMenu();
+    this._renderPreviewBody();
+    if (hadFocus) this._focusAfterMenu();
+  }
+
+  _renderPreviewBody() {
     if (this._bar) {
       this.removeAttribute("data-bar-empty");
       this.removeAttribute("data-bar-filled");

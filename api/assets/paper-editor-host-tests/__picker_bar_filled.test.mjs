@@ -148,6 +148,81 @@ await check("a paste replaces the image only on the frame, never on the … butt
   el.remove();
 });
 
+await check("Download of an image on ANOTHER origin never navigates this tab: a blob download, or a new tab when CORS refuses", async () => {
+  const XO = "http://127.0.0.1:9/media/cdn%20cover.png";
+  const el = mount({ chrome: "bar", value: JSON.stringify({ url: XO, assetId: "a2" }) });
+  const clicked = [];
+  const orig = window.HTMLAnchorElement.prototype.click;
+  window.HTMLAnchorElement.prototype.click = function () {
+    clicked.push({ href: this.href, download: this.getAttribute("download"), target: this.target, rel: this.rel });
+  };
+  const made = [];
+  const origCreate = URL.createObjectURL, origRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = (b) => (made.push(b), "blob:http://localhost/1");
+  URL.revokeObjectURL = () => {};
+  const origFetch = globalThis.fetch;
+  const download = async () => {
+    el.querySelector(".bp-mp-options").click();
+    [...document.querySelectorAll(".bp-mp-menu-item")].find((b) => b.textContent.trim() === "Download").click();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+  try {
+    const fetched = [];
+    globalThis.fetch = async (u, o) => (fetched.push([u, o && o.mode]), { ok: true, blob: async () => ({ size: 3 }) });
+    await download();
+    assert.deepEqual(fetched, [[XO, "cors"]], "the image is fetched, not navigated to");
+    assert.deepEqual(clicked, [{ href: "blob:http://localhost/1", download: "cdn cover.png", target: "", rel: "noopener" }], "saved from a blob, under its own name");
+
+    clicked.length = 0;
+    globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+    await download();
+    assert.equal(clicked.length, 1);
+    assert.equal(clicked[0].href, XO);
+    assert.equal(clicked[0].target, "_blank", "CORS refused: a NEW tab, never this one");
+    assert.equal(clicked[0].rel, "noopener");
+  } finally {
+    window.HTMLAnchorElement.prototype.click = orig;
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+    globalThis.fetch = origFetch;
+    el.remove();
+  }
+});
+
+await check("Tab out of the open menu moves on from the …, not from the top of the page", () => {
+  const el = mount({ chrome: "bar", value: VALUE });
+  const opts = el.querySelector(".bp-mp-options");
+  opts.click();
+  assert.equal(document.activeElement, document.querySelector(".bp-mp-menu-item"));
+  press("Tab");
+  assert.equal(menu(), null, "Tab closes the menu");
+  assert.equal(document.activeElement, opts, "focus is back on the … for the browser's Tab to move on from");
+  el.remove();
+});
+
+await check("the image swaps under an open menu (a remote save): focus lands on the new …, not <body>", async () => {
+  const OTHER = JSON.stringify({ url: "/media/other.png", assetId: "a3" });
+  // The same element gets the new value.
+  const el = mount({ chrome: "bar", value: VALUE, id: "cover" });
+  el.querySelector(".bp-mp-options").click();
+  el.value = OTHER;
+  assert.equal(menu(), null, "the menu is closed");
+  assert.equal(el.querySelector("img").getAttribute("src"), "/media/other.png");
+  assert.equal(document.activeElement, el.querySelector(".bp-mp-options"), "focus on the new …");
+
+  // LiveView re-mounts the field (its phx-update=ignore wrapper's id moves).
+  el.querySelector(".bp-mp-options").click();
+  const fresh = document.createElement("bp-media-picker");
+  fresh.setAttribute("chrome", "bar");
+  fresh.setAttribute("id", "cover");
+  fresh.setAttribute("value", VALUE);
+  el.replaceWith(fresh);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(menu(), null);
+  assert.equal(document.activeElement, fresh.querySelector(".bp-mp-options"), "focus on the re-mounted picker's …");
+  fresh.remove();
+});
+
 await check("a broken image drops the flag, so the row with Remove comes back", () => {
   const el = mount({ chrome: "bar", value: VALUE });
   el.querySelector("img").dispatchEvent(new window.Event("error"));
