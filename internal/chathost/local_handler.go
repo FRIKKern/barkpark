@@ -74,11 +74,11 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 
 	cwd, _ := payload["cwd"].(string)
 	content := textContent(payload["content"])
-	// The image references ride payload.attachments
+	// The picture and file references ride payload.attachments
 	// (StudioChat.TurnAttachments.to_references/1). A bad one refuses the turn.
 	refs, err := ParseAttachmentRefs(payload)
 	if err != nil {
-		return fmt.Errorf("refused the images of this turn, so %s was not started: %w", provider, err)
+		return fmt.Errorf("refused the attachments of this turn, so %s was not started: %w", provider, err)
 	}
 	// Empty text is a turn only when at least one image comes with it.
 	if cwd == "" || (content == "" && len(refs) == 0) {
@@ -96,6 +96,14 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	}
 	switch provider {
 	case "claude":
+		// The host does not advertise the file types yet, so the server leases
+		// it no file; one that arrives anyway is refused by name, not sent to
+		// claude as a picture.
+		for _, ref := range refs {
+			if isFileMediaType(ref.MediaType) {
+				return fmt.Errorf("this host does not hand files to claude yet: this turn carries a %s file, so it was refused and claude was not started", ref.MediaType)
+			}
+		}
 		var images []Attachment
 		if len(refs) > 0 {
 			if images, err = h.fetchTurnImages(ctx, remote, refs); err != nil {
