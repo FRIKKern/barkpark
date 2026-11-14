@@ -406,7 +406,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-pane-editing
       data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
-      data-desk-save={assigns[:save_status] || ""}
+      data-desk-save={BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns)}
       aria-label={@page_title}
     >
       <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;

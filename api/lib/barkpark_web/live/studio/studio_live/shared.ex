@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -531,7 +531,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> assign(save_status: "Read-only")
 
       true ->
-        autosave_write(socket, params, trigger)
+        RefusedSave.write(socket, params, trigger, &autosave_write/3)
     end
   end
 
@@ -670,11 +670,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
         {:error, {:halted, reason}} ->
           socket
-          |> assign(save_status: "Save cancelled")
+          |> RefusedSave.failed("Save cancelled", reason)
           |> put_flash(:error, gettext("Save cancelled: %{reason}", reason: reason))
 
-        {:error, _} ->
-          assign(socket, save_status: "Save failed")
+        {:error, reason} ->
+          RefusedSave.failed(socket, "Save failed", reason)
       end
     else
       # NOT a silent drop. When the post carried nothing new the store already
