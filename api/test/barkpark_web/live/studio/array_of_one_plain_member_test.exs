@@ -224,4 +224,54 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
     assert {"Typed", ["a" | rest]} = stored(c, c.plain)
     refute Enum.any?(rest, &is_map/1)
   end
+
+  # #26168 re-read: another editor's save moved or removed the kept row after
+  # this page drew it. The page then posts the form it drew.
+  describe "the page posts its old form after another save" do
+    defp remote(c, tags) do
+      {:ok, _} =
+        Content.upsert_document(
+          c.type,
+          %{"doc_id" => c.junk, "title" => "Here", "content" => %{"tags" => tags}},
+          @dataset
+        )
+    end
+
+    defp old_form(view, c) do
+      render(view)
+
+      change(view, ["doc", "title"], %{
+        "title" => "Typed",
+        "tags" => %{"0" => %{"_json" => Jason.encode!(@junk)}, "1" => "b"}
+      })
+
+      stored(c, c.junk)
+    end
+
+    test "the kept row moved: it is still in the list", c do
+      view = studio(c, c.junk)
+      remote(c, ["b", @junk])
+
+      assert {"Typed", tags} = old_form(view, c)
+      assert Enum.sort_by(tags, &is_map/1) == ["b", @junk]
+    end
+
+    test "the kept row was removed: no row comes back, and no empty row", c do
+      view = studio(c, c.junk)
+      remote(c, ["b"])
+
+      assert {"Typed", tags} = old_form(view, c)
+      refute @junk in tags
+      refute nil in tags
+      assert "b" in tags
+    end
+
+    test "the kept row's content changed: the newer content is kept", c do
+      view = studio(c, c.junk)
+      newer = Map.put(@junk, "note", "remote")
+      remote(c, [newer, "b"])
+
+      assert old_form(view, c) == {"Typed", [newer, "b"]}
+    end
+  end
 end
