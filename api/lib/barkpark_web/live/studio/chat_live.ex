@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.{ChatHostGate, ChatSteer}
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer}
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -2322,6 +2322,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
                 <%= gettext("attachment missing") %>
               </div>
+              <ChatAttachmentChip.chip :if={img[:file]} file={img.file} />
               <img
                 :if={img[:data_uri]}
                 src={img.data_uri}
@@ -6361,14 +6362,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp replay_image(%{"path" => path, "media_type" => media_type}) when is_binary(path) do
-    case StudioChat.read_attachment(path) do
-      {:ok, bytes} -> %{data_uri: data_uri(media_type, bytes)}
-      {:error, :missing} -> %{missing: true}
-    end
-  end
-
-  defp replay_image(_), do: %{missing: true}
+  # An image reads its bytes; a file pointer becomes a name-and-size chip.
+  defp replay_image(pointer), do: ChatAttachmentChip.replay(pointer)
 
   defp replay_approval_status("allowed", _live?), do: :allowed
   defp replay_approval_status("denied", _live?), do: :denied
