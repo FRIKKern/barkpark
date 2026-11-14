@@ -777,14 +777,23 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
       cd="$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.committedDate // empty' 2>/dev/null)"
       [ -z "${cd:-}" ] || cds="$(jq -c --argjson n "$n" --arg c "$cd" '. + {($n|tostring): $c}' <<<"$cds" 2>/dev/null || printf '%s' "$cds")"
     fi
-    map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>"$WATCH_TMP/enrich.err")" || {
+    printf '%s' "$roll" > "$WATCH_TMP/roll.json"
+    map="$(jq -c --argjson n "$n" --slurpfile r "$WATCH_TMP/roll.json" '. + {($n | tostring): $r[0]}' <<<"$map" 2>"$WATCH_TMP/enrich.err")" || {
       red "  the rollup for #$n could not be added to the map: $(enrich_err)"; return 2; }
   done
 
   # EVERY conflicting row must come back carrying its rollup. A row that asked
   # for one and did not get one is a failed read, and it fails here rather than
   # being handed to the verdict as an empty list.
-  out="$(jq -c --argjson m "$map" --argjson s "$mss" --argjson c "$cds" '
+  # BY FILE, NEVER BY ARGV (task-d5ebbb1e3cce40ea). The map is one rollup per
+  # CONFLICTING row, ~12 KB each live: about eleven rows put it past Linux's
+  # 131072-byte cap on ONE argv word and execve failed E2BIG. Same class as the
+  # header's D44, same idiom: --slurpfile wraps each file in an outer array.
+  printf '%s' "$map" > "$WATCH_TMP/map.json"
+  printf '%s' "$mss" > "$WATCH_TMP/mss.json"
+  printf '%s' "$cds" > "$WATCH_TMP/cds.json"
+  out="$(jq -c --slurpfile m_in "$WATCH_TMP/map.json" --slurpfile s_in "$WATCH_TMP/mss.json" --slurpfile c_in "$WATCH_TMP/cds.json" '
+      $m_in[0] as $m | $s_in[0] as $s | $c_in[0] as $c |
       [ .[] | if .mergeable == "CONFLICTING"
               then . + { statusCheckRollup: ($m[(.number|tostring)] // null),
                          mergeStateStatus: ($s[(.number|tostring)] // .mergeStateStatus),
