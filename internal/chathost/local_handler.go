@@ -23,6 +23,11 @@ type LocalHandler struct {
 	// Images fetches the images a send_turn references (turn_images.go). Nil
 	// means the host cannot fetch: a turn that carries images is refused.
 	Images ImageFetcher
+	// StatusLabel makes a claude turn's 2 to 4 word status label
+	// (status_label.go). Nil means no label.
+	StatusLabel StatusLabeler
+	// Log receives the line a skipped status label leaves. Nil means os.Stderr.
+	Log io.Writer
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession
@@ -69,11 +74,11 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 
 	cwd, _ := payload["cwd"].(string)
 	content := textContent(payload["content"])
-	// The image references ride payload.attachments
+	// The picture and file references ride payload.attachments
 	// (StudioChat.TurnAttachments.to_references/1). A bad one refuses the turn.
 	refs, err := ParseAttachmentRefs(payload)
 	if err != nil {
-		return fmt.Errorf("refused the images of this turn, so %s was not started: %w", provider, err)
+		return fmt.Errorf("refused the attachments of this turn, so %s was not started: %w", provider, err)
 	}
 	// Empty text is a turn only when at least one image comes with it.
 	if cwd == "" || (content == "" && len(refs) == 0) {
@@ -91,6 +96,14 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	}
 	switch provider {
 	case "claude":
+		// The host does not advertise the file types yet, so the server leases
+		// it no file; one that arrives anyway is refused by name, not sent to
+		// claude as a picture.
+		for _, ref := range refs {
+			if isFileMediaType(ref.MediaType) {
+				return fmt.Errorf("this host does not hand files to claude yet: this turn carries a %s file, so it was refused and claude was not started", ref.MediaType)
+			}
+		}
 		var images []Attachment
 		if len(refs) > 0 {
 			if images, err = h.fetchTurnImages(ctx, remote, refs); err != nil {
@@ -209,6 +222,9 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, image
 		return err
 	}
 	defer h.unregister(sessionID, session)
+	// The label's side call runs alongside the turn; the turn never waits for it.
+	emit, endStatus := h.startStatusLabel(ctx, content, emit)
+	defer endStatus()
 
 	if err := session.write(claudeUserFrame(content, images)); err != nil {
 		return err

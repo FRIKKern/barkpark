@@ -334,7 +334,7 @@ defmodule BarkparkWeb.ChatController do
 
   @doc """
   Send a user turn. `{content, attachments?}` → 202 `{accepted:true}`, where
-  `attachments` names up to four images stored for THIS session (resolved after
+  `attachments` names up to four images or files stored for THIS session (after
   the tenant oracle, `ChatUserTurn`). Brings the runtime up (`Recorder.ensure/1`)
   and dispatches through the single Session process; the server does not
   distinguish queued (the client badges from local turn state, D12).
@@ -345,7 +345,7 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, {content, attachment_ids}} <- validate_content(body),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
-         {:ok, turn} <- ChatUserTurn.resolve(session.id, content, attachment_ids) do
+         {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
       case ensure_and_send(id, session, turn.content, conn) do
         :ok ->
           # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send

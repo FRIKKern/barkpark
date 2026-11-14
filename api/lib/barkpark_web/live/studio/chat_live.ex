@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.ChatHostGate
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer}
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -1187,9 +1187,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── composer command routing (charter D36b) — shared by the selectors and
   #    the slash builtins, kept OUT of the handle_event group ─────────────────
 
-  # Switch permission mode — shared by the header selector and the /plan slash
-  # builtin. See the `set_mode` ack handler for the ack-driven
-  # persistence contract (D23): a live switch persists only the confirmed value.
+  # Switch permission mode (header selector, /plan, /autopilot). A live switch persists only the
+  # acked value (D23, see the `set_mode` ack handler); one the runtime refuses changes nothing.
   defp change_mode(socket, mode) do
     cond do
       mode == socket.assigns.mode ->
@@ -1198,17 +1197,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
       refused = host_refused(socket, :steer) ->
         refused
 
-      session = socket.assigns.session ->
-        # Optimistic: move the selector now, but DON'T persist yet — the persisted
-        # mode is the last ACKED value (D23). Remember the request_id (latest-
-        # outstanding correlation) and the revert target: the last known-good
-        # mode, never an intermediate optimistic value of a rapid-switch chain.
-        {:ok, request_id} = Runtime.steer(socket.assigns.provider, session, %{mode: mode})
-        revert_to = revert_target(socket)
+      socket.assigns.session ->
+        # Optimistic: move the selector now, persist on the ack. Keep the request_id (latest-
+        # outstanding correlation) and the revert target: the last known-good mode.
+        case ChatSteer.steer(socket.assigns, %{mode: mode}) do
+          {:ok, req} ->
+            socket
+            |> assign(mode: mode, pending_mode: %{req: req, revert_to: revert_target(socket)})
+            |> append_message(:system, "Permission mode → #{mode_label(mode)}.")
 
-        socket
-        |> assign(mode: mode, pending_mode: %{req: request_id, revert_to: revert_to})
-        |> append_message(:system, "Permission mode → #{mode_label(mode)}.")
+          {:error, line} ->
+            append_message(socket, :system, line)
+        end
 
       true ->
         persist_mode(socket, mode)
@@ -1216,19 +1216,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Switch the brain — shared by the header picker and the /model slash builtin.
-  # `choice` is an already-normalized alias or nil (= CLI default).
+  # Switch the brain (header picker, /model). `choice` is a normalized alias or nil (CLI default).
   defp change_model(socket, choice) do
-    with nil <- host_refused(socket, :steer) do
+    with nil <- host_refused(socket, :steer),
+         {:ok, _} <- ChatSteer.steer(socket.assigns, %{model: choice || "default"}) do
       label = if choice, do: model_label(choice), else: "the CLI default"
       if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
-
-      if session = socket.assigns[:session],
-        do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
 
       socket
       |> assign(model_choice: choice || "default")
       |> append_message(:system, "Model → #{label}.")
+    else
+      {:error, line} -> append_message(socket, :system, line)
+      refused -> refused
     end
   end
 
@@ -2322,6 +2322,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
                 <%= gettext("attachment missing") %>
               </div>
+              <ChatAttachmentChip.chip :if={img[:file]} file={img.file} />
               <img
                 :if={img[:data_uri]}
                 src={img.data_uri}
@@ -6085,7 +6086,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     attachments =
       consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, _entry ->
         # (entry ignored: the media type comes from the BYTES, not client_type)
-        # `Attachments.put/2` is the ONE store seam both surfaces write through
+        # `Attachments.put_image/2` writes the ONE store both surfaces write to
         # (ct-bl-chat-attachments): the Studio composer and the
         # `POST /v1/chat/sessions/:id/attachments` transport route land in the
         # SAME content-addressed store, so a Studio-pasted image is readable by
@@ -6094,7 +6095,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # of trusting `entry.client_type` — a client-declared type is caller
         # input, and the type the store records is what is served back.
         with {:ok, bytes} <- File.read(tmp_path),
-             {:ok, pointer} <- Attachments.put(store_id, bytes) do
+             {:ok, pointer} <- Attachments.put_image(store_id, bytes) do
           {:ok, Map.put(pointer, :bytes, bytes)}
         else
           {:error, reason} ->
@@ -6361,14 +6362,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp replay_image(%{"path" => path, "media_type" => media_type}) when is_binary(path) do
-    case StudioChat.read_attachment(path) do
-      {:ok, bytes} -> %{data_uri: data_uri(media_type, bytes)}
-      {:error, :missing} -> %{missing: true}
-    end
-  end
-
-  defp replay_image(_), do: %{missing: true}
+  # An image reads its bytes; a file pointer becomes a name-and-size chip.
+  defp replay_image(pointer), do: ChatAttachmentChip.replay(pointer)
 
   defp replay_approval_status("allowed", _live?), do: :allowed
   defp replay_approval_status("denied", _live?), do: :denied

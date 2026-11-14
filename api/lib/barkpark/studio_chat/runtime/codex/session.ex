@@ -175,16 +175,30 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     {:noreply, send_request(state, "turn/start", params, {:reply, from, :send_turn})}
   end
 
+  # turn/steer (pinned schema 0.144.1, v2/TurnSteerParams.json) carries only
+  # `input`. No request in that schema changes a live thread's approval policy
+  # or model in place (those overrides ride turn/start), so a steer with no
+  # input — a mode, model or effort steer — is answered unsupported, the way
+  # claude answers effort, and nothing is sent. Forwarding it went out as
+  # `"input":[]`: the change was lost and the caller was told :ok
+  # (task-f1df9985c3ff5edb).
   def handle_call({:request, :steer, params}, from, state) do
-    input = Map.get(params, :input) || Map.get(params, "input") || Map.get(params, :content)
+    case normalize_input(steer_input(params)) do
+      [] ->
+        {:reply, {:error, {:unsupported_steer, params}}, state}
 
-    wire = %{
-      "threadId" => state.thread_id,
-      "expectedTurnId" => state.turn_id,
-      "input" => normalize_input(input)
-    }
+      [%{"type" => "text", "text" => ""}] ->
+        {:reply, {:error, {:unsupported_steer, params}}, state}
 
-    {:noreply, send_request(state, "turn/steer", wire, {:reply, from, :steer})}
+      input ->
+        wire = %{
+          "threadId" => state.thread_id,
+          "expectedTurnId" => state.turn_id,
+          "input" => input
+        }
+
+        {:noreply, send_request(state, "turn/steer", wire, {:reply, from, :steer})}
+    end
   end
 
   def handle_call({:request, :interrupt, _params}, from, state) do
@@ -494,6 +508,11 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp readiness(_result) do
     %{ready?: false, authed?: false, account: nil, reason: :malformed_response}
   end
+
+  defp steer_input(params) when is_map(params),
+    do: Map.get(params, :input) || Map.get(params, "input") || Map.get(params, :content)
+
+  defp steer_input(_params), do: nil
 
   defp normalize_input(content) when is_binary(content),
     do: [%{"type" => "text", "text" => content}]
