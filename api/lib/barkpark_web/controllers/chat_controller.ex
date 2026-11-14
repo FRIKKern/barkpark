@@ -125,9 +125,15 @@ defmodule BarkparkWeb.ChatController do
   mode?, model?, effort?}`; the public id is server-minted and cwd is ALWAYS the
   selected provider adapter's managed cwd (D22). No runtime is spawned here — the
   subprocess comes up on the first send (`Recorder.ensure/1`).
+
+  A `mode` or `model` other than the defaults is a saved setting the next spawn
+  starts from, whoever takes the turn, so it takes the host-turn check
+  (`authorize_create_choices/2`) exactly as a PATCH of them does
+  (task-7321bf17168e60ff). Effort is not a permission and stays free.
   """
   def create(conn, params) do
-    with {:ok, attrs} <- validate_create(params) do
+    with {:ok, attrs} <- validate_create(params),
+         :ok <- authorize_create_choices(conn, attrs) do
       id = Ecto.UUID.generate()
 
       # Thread the caller's CREATE scope into the sealed store (charter
@@ -170,8 +176,28 @@ defmodule BarkparkWeb.ChatController do
           )
       end
     else
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
+  end
+
+  # The defaults are what a PATCH echo is: nothing a spawn would not start from
+  # anyway. Any other first mode or model is checked against the row the create
+  # would make (its provider, target and owner).
+  defp authorize_create_choices(_conn, %{mode: mode, default_mode: mode, model: nil}), do: :ok
+
+  defp authorize_create_choices(conn, attrs) do
+    owner =
+      case create_scope(conn) do
+        {:workspace, ws} -> ws
+        :global -> nil
+      end
+
+    HostExecutionGate.authorize_turn(conn.assigns[:api_token], %{
+      provider: attrs.provider,
+      execution_target: attrs.execution_target,
+      owner_workspace_id: owner
+    })
   end
 
   # ── GET /v1/chat/sessions?archived= ────────────────────────────────────────
@@ -1319,6 +1345,7 @@ defmodule BarkparkWeb.ChatController do
          execution_target: target,
          execution_host_id: host_id,
          mode: mode || default_mode,
+         default_mode: default_mode,
          model: model,
          effort: effort
        }}

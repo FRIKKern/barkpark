@@ -4793,7 +4793,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
-        # The refusal above rides the same road for the same reason.
+        # The refusals (no workspace above, no host turn) ride the same road.
         case create_session_row(socket, id, scope) do
           {:ok, _} ->
             socket
@@ -4807,6 +4807,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
               :system,
               "⚠ Couldn't start a new chat — this login isn't authorized in any workspace, and every chat session has to belong to one. Your message was kept; ask an admin for workspace access."
             )
+            |> assign(session: nil, status: :offline)
+
+          {:error, :host_execution_not_permitted} ->
+            socket
+            |> append_message(:system, spawn_error_text(:host_execution_not_permitted))
             |> assign(session: nil, status: :offline)
 
           {:error, reason} ->
@@ -4830,19 +4835,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the ruling above `ensure_session/1`).
   defp create_session_row(_socket, _id, :unauthorized), do: {:error, :unauthorized_workspace}
 
-  defp create_session_row(socket, id, scope) do
-    StudioChat.create_session(
-      %{
-        id: id,
-        provider: socket.assigns.provider,
-        execution_target: socket.assigns.execution_target,
-        execution_host_id: socket.assigns.execution_host_id,
-        cwd: Runtime.cwd(socket.assigns.provider),
-        mode: socket.assigns.mode
-      },
-      scope
-    )
-  end
+  # A principal the spawn would refuse creates no row (ChatHostGate).
+  defp create_session_row(socket, id, scope),
+    do: ChatHostGate.create_session(socket.assigns, id, scope)
 
   # Bring the runtime up for `store_id` (fresh: `--session-id`; reopen:
   # `--resume`) — via the RECORDER, never a tab-owned process (wave 4, charter
