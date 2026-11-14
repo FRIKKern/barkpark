@@ -179,15 +179,19 @@ jobs:
       #     intact; a lost cron row shows up as a gap, which refuses.
       #   · A cancellation that kills the VM before the always() save loses that
       #     run's row. Same treatment: a gap, not a green.
-      #   · THE PREDICATE IS RUN TWICE PER HOUR — once by --record here and once
-      #     by the ownership step below — roughly doubling this job's GitHub
-      #     reads (~110 endpoints each; still far inside the 5000/h limit).
-      #     Sharing one reading would mean restructuring main-red-owner.sh, and
-      #     it is not obviously the right trade: the ledger row carries the
-      #     verdict line from ITS OWN run VERBATIM, so it can be audited against
-      #     the instrument rather than against a paraphrase of a sibling step's
-      #     output. Two independent readings of a feed with a known intermittent
-      #     staleness fault is a property, not only a cost.
+      #   · THE PREDICATE IS READ ONCE PER RUN (task-0f8b982c7d014258). It used
+      #     to be read twice — by --record here and again by the ownership step
+      #     — on the estimate of ~110 endpoints a read. MEASURED 2026-11-14: one
+      #     read is 243 API requests, so a run spent ~486, on every main push,
+      #     and the Actions token's hourly budget ran out on 2026-11-13 (this
+      #     workflow, cron-overdue-probe and task-lease-renew all red). --record
+      #     now leaves its reading VERBATIM in MRW_PREDICATE_OUT and the
+      #     ownership step reuses it — only when it SPOKE (TRUE/FALSE, exit 0/1)
+      #     and is minutes old; a blind or missing reading is read afresh. The
+      #     ledger row still carries the verdict line of its own run. What was
+      #     given up: a second, independent reading seconds later. The stale-feed
+      #     fault that second reading guarded is refused inside the predicate
+      #     itself (its freshness control), per workflow.
       - name: Restore the 24 h window ledger (best effort)
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6
@@ -226,7 +230,11 @@ jobs:
           set -uo pipefail
           L="$RUNNER_TEMP/main-red-window.jsonl"
           rc=0
-          bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY" || rc=$?
+          # The budget line is the standing measurement: `rate_limit` is free.
+          gh api rate_limit --jq '.resources.core | "api budget before the read: limit \(.limit) used \(.used) remaining \(.remaining)"' || true
+          MRW_PREDICATE_OUT="$RUNNER_TEMP/main-red-predicate.out" \
+            bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY" || rc=$?
+          gh api rate_limit --jq '.resources.core | "api budget after the read:  limit \(.limit) used \(.used) remaining \(.remaining)"' || true
           echo "record exit=$rc  (0=poll was TRUE, 1=poll was not TRUE — both are DATA)"
           if [ "$rc" -gt 1 ]; then
             echo "TERMINAL: the ledger could not be appended to (exit $rc) — this run records NOTHING"
@@ -319,9 +327,11 @@ jobs:
           # anything run between it and the capture. Do NOT put the `|| :` back.
           set -o pipefail
           set +e
-          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
+          MRO_PREDICATE_OUT="$RUNNER_TEMP/main-red-predicate.out" \
+            bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
           rc=${PIPESTATUS[0]}
           set -e
+          gh api rate_limit --jq '.resources.core | "api budget after ownership: limit \(.limit) used \(.used) remaining \(.remaining)"' || true
           {
             echo "## main-red-owner"
             echo
