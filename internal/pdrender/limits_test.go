@@ -18,10 +18,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const (
-	limitDocTime  = time.Second
-	limitDocAlloc = 100 << 20
-)
+// limitDocTime lives in limits_bound_test.go and limits_bound_race_test.go:
+// the race detector needs a wider bound.
+const limitDocAlloc = 100 << 20
 
 var limitEdgeWidth = map[string]int{"flat line at the largest value": 200}
 

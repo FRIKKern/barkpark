@@ -74,6 +74,7 @@ defmodule Barkpark.StudioChat.Attachments do
   """
 
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.AttachmentName
 
   # The accepted image set (charter D25). Kept in step with the Studio
   # composer's `allow_upload` accept-list.
@@ -202,8 +203,9 @@ defmodule Barkpark.StudioChat.Attachments do
 
   @doc """
   The jsonb pointer persisted on a message row — `path`/`media_type`/`sha256`/
-  `byte_size` ONLY, never the bytes (charter D7/D25). Accepts the atom-keyed map
-  `put/2` returns and normalises it to string keys.
+  `byte_size`, plus `name` when the attachment was sent with one, and never the
+  bytes (charter D7/D25). Accepts the atom-keyed map `put/2` returns and
+  normalises it to string keys.
   """
   @spec pointer_json(map()) :: map()
   def pointer_json(pointer) when is_map(pointer) do
@@ -213,37 +215,37 @@ defmodule Barkpark.StudioChat.Attachments do
       "sha256" => get(pointer, :sha256),
       "byte_size" => get(pointer, :byte_size)
     }
+    |> put_name("name", get(pointer, :name))
   end
 
   @doc """
   The user turn's content-block list, the one both surfaces hand
   `Runtime.send_turn/3`: a text block (omitted when `text` is empty, an
-  image-only turn) followed by one base64 image block per attachment, in order
-  (charter D25 wire shape). Each attachment is a map with `:media_type` and
-  `:bytes`, as `fetch/2` returns and the Studio composer carries after `put/2`.
+  attachment-only turn) followed by one block per attachment, in order. An
+  image is a base64 image block (charter D25 wire shape). A text file or PDF is
+  a base64 document block titled with its `:name`, the Messages API shape; only
+  `BarkparkWeb.ChatUserTurn` builds those, for a registered-host session. Each
+  attachment is a map with `:media_type` and `:bytes`, as `fetch/2` returns and
+  the Studio composer carries after `put_image/2`.
   """
   @spec user_content(String.t(), [map()]) :: [map()]
   def user_content(text, attachments) when is_list(attachments) do
     text_blocks = if text == "", do: [], else: [%{"type" => "text", "text" => text}]
-
-    image_blocks =
-      Enum.map(attachments, fn a ->
-        %{
-          "type" => "image",
-          "source" => %{
-            "type" => "base64",
-            "media_type" => a.media_type,
-            "data" => Base.encode64(a.bytes)
-          }
-        }
-      end)
-
-    text_blocks ++ image_blocks
+    text_blocks ++ Enum.map(attachments, &attachment_block/1)
   end
+
+  defp attachment_block(%{media_type: type} = a) when type in @file_types do
+    %{"type" => "document", "source" => base64_source(a), "title" => Map.fetch!(a, :name)}
+  end
+
+  defp attachment_block(a), do: %{"type" => "image", "source" => base64_source(a)}
+
+  defp base64_source(a),
+    do: %{"type" => "base64", "media_type" => a.media_type, "data" => Base.encode64(a.bytes)}
 
   @doc """
   Project ONE stored pointer to the WIRE reference: `{id, media_type, byte_size,
-  url}`.
+  url}`, plus `name` when the pointer carries a valid one.
 
   The store `path` is DROPPED here — this is the single place the server decides
   what a client is allowed to learn about an attachment, and a filesystem path is
@@ -262,6 +264,7 @@ defmodule Barkpark.StudioChat.Attachments do
         byte_size: byte_size_or_nil(get(pointer, :byte_size)),
         url: url(session_id, id)
       }
+      |> put_name(:name, get(pointer, :name))
     end
   end
 
@@ -335,6 +338,11 @@ defmodule Barkpark.StudioChat.Attachments do
 
   defp byte_size_or_nil(n) when is_integer(n) and n >= 0, do: n
   defp byte_size_or_nil(_), do: nil
+
+  # A name rides a pointer or a reference only when it passes the name rule,
+  # so a row written by hand cannot put a newline or a path on the wire.
+  defp put_name(map, key, name),
+    do: if(AttachmentName.valid?(name), do: Map.put(map, key, name), else: map)
 
   # Pointers arrive atom-keyed from `put/2` and string-keyed from jsonb.
   defp get(map, key) do

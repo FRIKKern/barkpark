@@ -12,6 +12,8 @@ defmodule Barkpark.StudioChat.AttachmentName do
     * holds a Unicode control (Cc) or format (Cf) character, which covers
       newline, tab, NUL, DEL, the zero-width characters and the bidi
       overrides such as U+202E;
+    * holds the line separator U+2028 or the paragraph separator U+2029
+      (Zl, Zp), which a reader may also break a line on;
     * holds `/` or `\\`;
     * is `.` or `..`.
 
@@ -33,7 +35,7 @@ defmodule Barkpark.StudioChat.AttachmentName do
   def valid?(name) when is_binary(name) do
     name != "" and byte_size(name) <= @max_bytes and String.valid?(name) and
       name not in [".", ".."] and not String.contains?(name, ["/", "\\"]) and
-      not Regex.match?(~r/[\p{Cc}\p{Cf}]/u, name)
+      not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, name)
   end
 
   def valid?(_), do: false
