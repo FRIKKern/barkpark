@@ -40,16 +40,21 @@ defmodule BarkparkWeb.ChatAttachmentController do
       GET  /v1/chat/sessions/:id/attachments/:attachment_id           -> 200
 
   Both answer JSON `{"attachment": {...}}`. The read returns the bytes as base64
-  inside that envelope rather than as a raw body: the store accepts only images
-  whose type is sniffed from their own magic bytes (`StudioChat.Attachments`), so
-  a JSON envelope means the server never echoes caller-supplied bytes back under
-  a caller-influenced `Content-Type` — the stored-XSS shape a raw byte route
-  invites is unrepresentable here.
+  inside that envelope rather than as a raw body. The store accepts the four
+  images, UTF-8 text and PDF, each with its type sniffed from the bytes
+  (`StudioChat.Attachments`); HTML, SVG and script are stored and reported as
+  `text/plain`. Because the bytes only ever travel inside a JSON body, the
+  server never serves caller-supplied bytes under a caller-influenced
+  `Content-Type`, so there is no `Content-Disposition` to get wrong and the
+  stored-XSS shape a raw byte route invites is unrepresentable here. A raw
+  download route, if one is ever added, must copy
+  `BarkparkWeb.TicketsAttachmentsController`:
+  a server-derived type, `nosniff`, and `Content-Disposition: attachment`.
 
   Strict body validation follows D22: a non-object body, an unknown key, a
-  non-string `data`, invalid base64, an over-cap payload, or bytes that are not
-  one of the four accepted images all fail with the canonical envelope BEFORE
-  anything is written.
+  non-string `data`, invalid base64, an over-cap payload, or bytes of any other
+  type (zip, an executable, gzip, UTF-16 or invalid UTF-8 text) all fail with
+  the canonical envelope BEFORE anything is written.
   """
 
   use BarkparkWeb, :controller
@@ -167,7 +172,9 @@ defmodule BarkparkWeb.ChatAttachmentController do
         {:error, "attachment exceeds #{Attachments.max_bytes()} bytes"}
 
       {:error, :unsupported_media_type} ->
-        {:error, "attachment must be one of: #{Enum.join(Attachments.media_types(), ", ")}"}
+        {:error,
+         "attachment must be UTF-8 text, a PDF, or one of: " <>
+           Enum.join(Attachments.media_types(), ", ")}
 
       {:error, _reason} ->
         {:error, "attachment could not be stored"}

@@ -290,8 +290,13 @@ defmodule Barkpark.ChatHosts do
     epoch = value(attrs, :epoch)
     cursor = value(attrs, :cursor)
     key = value(attrs, :idempotency_key)
-    event = value(attrs, :event, %{})
 
+    with {:ok, event} <- normalize_status_event(value(attrs, :event, %{})) do
+      accept_fenced_event(host, lease_id, epoch, cursor, key, event)
+    end
+  end
+
+  defp accept_fenced_event(host, lease_id, epoch, cursor, key, event) do
     Repo.transaction(fn ->
       lease = ExecutionLease |> where([l], l.id == ^lease_id) |> lock("FOR UPDATE") |> Repo.one()
 
@@ -324,6 +329,61 @@ defmodule Barkpark.ChatHosts do
       other ->
         other
     end
+  end
+
+  # A `status` event is the host's 2-4 word label for the running turn
+  # (task-a9983f9aeffb5430), shown on a client's working line. It is checked
+  # before the fence, so a refusal takes no cursor and the host's next event
+  # lands where the label would have: the label must be text; whitespace runs
+  # fold to one space and it is cut to @status_label_max characters. Only
+  # `kind` and `label` are kept, so what is stored and streamed is exactly that,
+  # and a retry of the same label normalizes to the same payload (a duplicate,
+  # not a cursor_conflict). It is never a message row and never moves the
+  # session's status (the Recorder's catch-all leaves both alone).
+  @status_label_max 60
+
+  defp normalize_status_event(%{} = event) do
+    if value(event, :kind) == "status",
+      do: normalize_status_label(value(event, :label)),
+      else: {:ok, event}
+  end
+
+  defp normalize_status_event(event), do: {:ok, event}
+
+  defp normalize_status_label(label) when is_binary(label) do
+    label =
+      if String.valid?(label),
+        do:
+          label
+          |> String.replace(~r/[\s\p{C}]+/u, " ")
+          |> String.trim()
+          |> cut_status_label()
+          |> String.trim_trailing(),
+        else: ""
+
+    if label == "",
+      do: {:error, :invalid_status_label},
+      else: {:ok, %{"kind" => "status", "label" => label}}
+  end
+
+  defp normalize_status_label(_label), do: {:error, :invalid_status_label}
+
+  # Whole graphemes while the label stays within @status_label_max codepoints,
+  # so combining marks cannot carry a "short" label past 4 * @status_label_max
+  # bytes (the Go host counts the same codepoints).
+  defp cut_status_label(label) do
+    label
+    |> String.graphemes()
+    |> Enum.reduce_while({[], 0}, fn grapheme, {kept, count} ->
+      count = count + length(String.codepoints(grapheme))
+
+      if count > @status_label_max,
+        do: {:halt, {kept, count}},
+        else: {:cont, {[grapheme | kept], count}}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join()
   end
 
   @doc """
@@ -422,22 +482,18 @@ defmodule Barkpark.ChatHosts do
   # running to project the close. Only a `working` row moves: an `active` or
   # `exited` session has no open turn to close, so its status stays and the
   # close is marked projected instead of sent, because the recorder would mark
-  # any session it gets an error for `exited`. A newer turn on a live lease
-  # keeps its status; the close still goes to the recorder, which holds this
-  # lease's turn open until it does.
+  # any session it gets an error for `exited`. When another live lease holds
+  # the session, its status stays and the close is not sent either: a
+  # Runtime.Event carries no lease id, so the recorder would end whatever turn
+  # it has open (the newer lease's) and mark the session `exited`. The live
+  # lease's own close ends the recorder's turn (task-d8685be32b21e31b).
   defp settle_ended_turn(execution_event, lease) do
     Transport.complete(lease.id)
 
-    cond do
-      not is_nil(live_report_fence(lease.session_id)) ->
-        project_event(execution_event, lease)
-
-      match?({1, _}, exit_if_working(lease.session_id)) ->
-        project_event(execution_event, lease)
-
-      true ->
-        mark_projected(execution_event.id)
-    end
+    if is_nil(live_report_fence(lease.session_id)) and
+         match?({1, _}, exit_if_working(lease.session_id)),
+       do: project_event(execution_event, lease),
+       else: mark_projected(execution_event.id)
   end
 
   defp exit_if_working(session_id) do
@@ -937,6 +993,7 @@ defmodule Barkpark.ChatHosts do
   defp normalize_host_kind("item_started", _event), do: :item_started
   defp normalize_host_kind("item_completed", _event), do: :item_completed
   defp normalize_host_kind("error", _event), do: :error
+  defp normalize_host_kind("status", _event), do: :status
 
   defp normalize_host_kind("terminal", event) do
     case value(event, :terminal_state) do

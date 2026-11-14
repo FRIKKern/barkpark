@@ -180,9 +180,9 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
         {%{}, "missing data"},
         {%{data: 42}, "non-string data"},
         {%{data: "!!!not base64!!!"}, "invalid base64"},
-        {%{data: Base.encode64("plain text, not an image")}, "not an accepted image"},
-        {%{data: Base.encode64(@png), media_type: "image/png"}, "unknown key"},
-        {%{data: Base.encode64("<svg xmlns='http://www.w3.org/2000/svg'/>")}, "svg is refused"}
+        {%{data: Base.encode64(zip_bytes())}, "a zip is not an accepted type"},
+        {%{data: Base.encode64("text" <> <<0>> <> "with a NUL")}, "text with a NUL byte"},
+        {%{data: Base.encode64(@png), media_type: "image/png"}, "unknown key"}
       ]
 
       for {body, why} <- bad_bodies do
@@ -206,6 +206,32 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
 
       refute File.dir?(Path.join(dir, sid)),
              "a refused upload must not create the session's store directory"
+    end
+
+    test "an HTML or SVG upload is stored and served as text/plain inside the JSON envelope",
+         %{admin: admin, sid: sid} do
+      html = "<!doctype html><html><body><script>alert(1)</script></body></html>"
+      svg = "<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>"
+
+      for bytes <- [html, svg] do
+        created = upload(admin, sid, bytes) |> json_response(201)
+
+        assert created["attachment"]["media_type"] == "text/plain",
+               "markup must be stored as text/plain, never under its own type"
+
+        conn = json_conn(admin) |> get(created["attachment"]["url"])
+
+        assert [content_type] = get_resp_header(conn, "content-type")
+
+        assert content_type =~ "application/json",
+               "the owner read must answer JSON, never a raw body; got #{content_type}"
+
+        refute conn.resp_body == bytes, "the bytes must never be the response body"
+
+        read = json_response(conn, 200)["attachment"]
+        assert read["media_type"] == "text/plain"
+        assert Base.decode64!(read["data"]) == bytes
+      end
     end
   end
 
@@ -524,6 +550,11 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
 
       assert message["metadata"] == %{"origin" => "api"}
     end
+  end
+
+  defp zip_bytes do
+    {:ok, {_, zip}} = :zip.create(~c"notes.zip", [{~c"notes.txt", "hello"}], [:memory])
+    zip
   end
 
   defp ensure_dataset!(project, slug) do
