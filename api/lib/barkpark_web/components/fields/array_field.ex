@@ -112,6 +112,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               idx={row.idx}
               preview={row.preview}
               open={row.fresh? or row_findings?(assigns, row.idx)}
+              finding={row_findings?(assigns, row.idx)}
               row_id={row.row_id}
               body={
                 ObjectForm.object_form(%{
@@ -260,6 +261,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
+      |> Map.put(:dup_keys, dup_keys(assigns[:value]))
       |> Map.put(:ordered?, !!assigns.field.ordered)
       |> Map.put(:progress, checklist_progress(assigns.field, assigns[:value]))
 
@@ -407,7 +409,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           preview: preview,
           # A row carrying a finding opens so the author sees it (E1.11).
           open: row_empty?(row_value) or row_findings?(assigns, idx),
-          row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
+          finding: row_findings?(assigns, idx),
+          row_id:
+            item_row_id(
+              assigns.field.name,
+              assigns.path,
+              idx,
+              row_value,
+              Map.get(assigns, :dup_keys, %{})
+            ),
           body:
             CompositeField.composite_field(%{
               field: item,
@@ -450,7 +460,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
             media: media_url(map, preview_ctx(assigns))
           },
           open: map == %{},
-          row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
+          finding: false,
+          row_id:
+            item_row_id(
+              assigns.field.name,
+              assigns.path,
+              idx,
+              row_value,
+              Map.get(assigns, :dup_keys, %{})
+            ),
           body:
             image_row(%{
               wrap_id: ref_row_id(assigns.field, row_path, map, idx),
@@ -541,9 +559,26 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end
   end
 
+  # task-7f47b7ad78b08048: whether a row is open is the person's, as Sanity's.
+  # `open` is the row's state when it is first drawn (a new or empty row, one
+  # with a finding); after that a patch leaves the browser's `open` alone
+  # (`JS.ignore_attributes`). It used to be worked out again on every render,
+  # so the save after the first keys in a new or opened row closed it, hid the
+  # focused field and dropped the next keys. A finding that arrives later
+  # still opens the row: `data-row-finding` comes with it, and
+  # `bp-array-focus.js` opens a row that gains it. The server only opens.
   defp item_row(assigns) do
+    assigns = Map.put_new(assigns, :finding, false)
+
     ~H"""
-    <details class="bp-array-item" id={@row_id} open={@open} data-row-index={@idx}>
+    <details
+      class="bp-array-item"
+      id={@row_id}
+      open={@open}
+      data-row-index={@idx}
+      data-row-finding={@finding}
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
       <summary class="bp-array-item-summary">
         <span :if={@preview.media} class="bp-array-item-media" aria-hidden="true">
           <img src={@preview.media} alt="" loading="lazy" />
@@ -680,6 +715,35 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp row_empty?(_), do: false
 
   defp composite_rows?(field), do: subfield_attr(element_field(field), :type) == "composite"
+
+  # A row's <details> id. Its open state is the browser's (task-7f47b7ad78b08048),
+  # kept on the element LiveView matches by id, so the id follows the row's
+  # `_key` when it has one: after a move or a remove, the open state stays with
+  # the row, not with the position. A row without a key, or whose key another
+  # row shares, keeps its index id: two elements never share an id.
+  defp item_row_id(field_name, path, idx, row, dupes) do
+    case is_map(row) && row["_key"] do
+      key when is_binary(key) and key != "" and not is_map_key(dupes, key) ->
+        "bp-item-" <> sanitize_id("#{field_name}#{path}") <> "-k-" <> sanitize_id(key)
+
+      _ ->
+        "bp-item-" <> sanitize_id("#{field_name}#{path}[#{idx}]")
+    end
+  end
+
+  # The `_key`s more than one row of `list` carries.
+  defp dup_keys(list) when is_list(list) do
+    list
+    |> Enum.flat_map(fn
+      %{"_key" => k} when is_binary(k) -> [k]
+      _ -> []
+    end)
+    |> Enum.frequencies()
+    |> Enum.filter(fn {_k, n} -> n > 1 end)
+    |> Map.new()
+  end
+
+  defp dup_keys(_), do: %{}
 
   defp sanitize_id(s), do: s |> String.replace(~r/[^A-Za-z0-9_-]+/, "-") |> String.trim("-")
 
@@ -855,6 +919,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp leaf_display(v), do: Jason.encode!(v)
 
   defp typed_rows(field, types, value, path) when is_list(value) do
+    dupes = dup_keys(value)
+
     value
     |> Enum.with_index()
     |> Enum.map(fn {row, idx} ->
@@ -872,7 +938,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value: row_map,
         path: row_path,
         preview: %{preview | title: typed_title(member, row_map, preview.title)},
-        row_id: "bp-item-" <> sanitize_id("#{field.name}#{row_path}"),
+        row_id: item_row_id(field.name, path, idx, row_map, dupes),
         fresh?: fresh_row?(member, row_map)
       }
     end)
