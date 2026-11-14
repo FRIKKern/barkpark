@@ -100,9 +100,9 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       active: "Media"
     },
     %{
-      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/search",
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_search",
       disposition: :mount,
-      url: {:scoped, "/d/production/studio/search"},
+      url: {:scoped, "/d/production/studio/_search"},
       active: "Search"
     },
     %{

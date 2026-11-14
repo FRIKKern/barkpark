@@ -2263,7 +2263,7 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/", StudioLive)
       live("/media", MediaLive)
-      live("/search", SearchLive)
+      live("/_search", SearchLive)
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
 

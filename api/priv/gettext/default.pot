@@ -13617,11 +13617,6 @@ msgstr ""
 msgid "Delete the synonym %{from} to %{to}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/search_live/view.ex:251
-#, elixir-autogen, elixir-format
-msgid "Delete the synonym %{from} to %{to}?"
-msgstr ""
-
 #: lib/barkpark_web/live/studio/search_live/view.ex:228
 #: lib/barkpark_web/live/studio/search_live/view.ex:277
 #, elixir-autogen, elixir-format
@@ -13780,4 +13775,29 @@ msgstr ""
 #: lib/barkpark_web/live/studio/search_live/view.ex:116
 #, elixir-autogen, elixir-format
 msgid "Trend"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Delete?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Delete for every workspace?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Yes, delete"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "every workspace"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/search_live.ex:250
+#, elixir-autogen, elixir-format
+msgid "A synonym cannot hold that character. Remove it and try again."
 msgstr ""

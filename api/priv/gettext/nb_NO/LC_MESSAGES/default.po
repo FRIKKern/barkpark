@@ -13622,11 +13622,6 @@ msgstr "Kunne ikke lagre synonymet. Det finnes kanskje allerede."
 msgid "Delete the synonym %{from} to %{to}"
 msgstr "Slett synonymet %{from} til %{to}"
 
-#: lib/barkpark_web/live/studio/search_live/view.ex:251
-#, elixir-autogen, elixir-format
-msgid "Delete the synonym %{from} to %{to}?"
-msgstr "Slette synonymet %{from} til %{to}?"
-
 #: lib/barkpark_web/live/studio/search_live/view.ex:228
 #: lib/barkpark_web/live/studio/search_live/view.ex:277
 #, elixir-autogen, elixir-format
@@ -13786,3 +13781,28 @@ msgstr "«%{from}» finner %{before} nå. «%{to}» finner %{after}."
 #, elixir-autogen, elixir-format
 msgid "Trend"
 msgstr "Utvikling"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Delete?"
+msgstr "Slette?"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Delete for every workspace?"
+msgstr "Slette for alle arbeidsområder?"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "Yes, delete"
+msgstr "Ja, slett"
+
+#: lib/barkpark_web/live/studio/search_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "every workspace"
+msgstr "alle arbeidsområder"
+
+#: lib/barkpark_web/live/studio/search_live.ex:250
+#, elixir-autogen, elixir-format
+msgid "A synonym cannot hold that character. Remove it and try again."
+msgstr "Et synonym kan ikke inneholde det tegnet. Fjern det og prøv igjen."

@@ -55,9 +55,60 @@ defmodule BarkparkWeb.Studio.SearchLiveTest do
 
     assert view |> element("[data-test-id=search-synonym-row]") |> render() =~ "sofa"
 
-    view |> element("[data-test-id=search-synonym-row] button") |> render_click()
+    # Delete takes two clicks; a lone delete event deletes nothing.
+    render_click(view, "rule_delete", %{"id" => id})
+    assert [_] = Synonyms.list("documents", @dataset, ctx.ws.id)
+
+    view |> element("[data-test-id=search-synonym-row] button", "Delete") |> render_click()
+    assert view |> element("[data-test-id=search-synonym-confirm]") |> render() =~ "Delete?"
+
+    view
+    |> element("[data-test-id=search-synonym-confirm] button", "Yes, delete")
+    |> render_click()
+
     assert Synonyms.list("documents", @dataset, ctx.ws.id) == []
     refute render(view) =~ id
+  end
+
+  test "a shared synonym says so, and a NUL in a synonym is a form error", ctx do
+    {:ok, shared} =
+      Synonyms.create("documents", @dataset, %{"from" => "tv", "to" => "telly"}, nil)
+
+    {:ok, view, html} = live(sign_in(ctx.conn, ctx.ws, "admin"), path(ctx.ws))
+
+    assert html =~ "every workspace"
+    render_click(view, "rule_delete_ask", %{"id" => shared.id})
+    assert render(view) =~ "Delete for every workspace?"
+
+    html = render_submit(view, "rule_save", %{"rule" => %{"from" => "di\0van", "to" => "sofa"}})
+    assert html =~ "cannot hold that character"
+    assert [%{from: "tv"}] = Synonyms.list("documents", @dataset, ctx.ws.id)
+  end
+
+  test "a document type named search still opens in the desk", ctx do
+    conn = sign_in(ctx.conn, ctx.ws, "admin")
+    base = String.replace_suffix(path(ctx.ws), "/_search", "")
+
+    proj = Tenancy.get_project(ctx.ws.slug, "default")
+
+    {:ok, _} =
+      Barkpark.Content.upsert_schema(
+        %{
+          "name" => "search",
+          "title" => "Saved lookups",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Name", "type" => "string"}]
+        },
+        @dataset,
+        workspace_id: ctx.ws.id,
+        project_id: proj.id
+      )
+
+    {:ok, view, html} = live(conn, base <> "/search")
+    assert view.module == BarkparkWeb.Studio.StudioLive
+    assert html =~ "Saved lookups"
+
+    assert redirected_to(get(conn, "/studio/#{@dataset}/_search"), 302) =~ "/studio/_search"
   end
 
   test "a member who is not an admin is refused", ctx do
@@ -91,7 +142,7 @@ defmodule BarkparkWeb.Studio.SearchLiveTest do
     refute refused.resp_body =~ "secret roadmap"
   end
 
-  defp path(ws), do: "/w/#{ws.slug}/p/default/d/#{@dataset}/studio/search"
+  defp path(ws), do: "/w/#{ws.slug}/p/default/d/#{@dataset}/studio/_search"
 
   defp workspace!(name) do
     ws = create_workspace!("#{name}-#{System.unique_integer([:positive])}")

@@ -609,7 +609,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     base_re = Regex.escape(base)
 
     structure_active =
-      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|search(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|api-tester(?:/|$)).*)")
 
     media_path = "#{base}/media"
     api_path = "#{base}/api-tester"
@@ -661,9 +661,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # The Search tab: search insights and synonyms for the dataset the page is
   # on. Admin-only, like the page (`Studio.SearchLive` asks again at mount and
   # on every event). Dataset-ful like Media, so it derives from `base`; the
-  # flat spelling rides the flat-to-scoped 302.
+  # flat spelling rides the flat-to-scoped 302. The underscore keeps the path
+  # clear of a document type named `search`, as `_desk` and `_account` do.
   defp search_entry(base, true) do
-    path = "#{base}/search"
+    path = "#{base}/_search"
     [%{label: gettext("Search"), path: path, icon: "search", order: 35, active_when: path}]
   end
 

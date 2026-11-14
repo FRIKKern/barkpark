@@ -29,6 +29,8 @@ defmodule BarkparkWeb.Studio.SearchLive.View do
   attr :rule, :map, required: true
   attr :preview, :map, default: nil
   attr :rule_error, :string, default: nil
+  attr :shared, :any, required: true
+  attr :confirm_delete, :string, default: nil
 
   def page(assigns) do
     assigns =
@@ -247,22 +249,54 @@ defmodule BarkparkWeb.Studio.SearchLive.View do
                   <span :if={s.source == "auto"} class="badge badge-muted" style="margin-left: 6px;">
                     {gettext("suggested")}
                   </span>
+                  <span
+                    :if={s.id in @shared}
+                    class="badge badge-muted"
+                    style="margin-left: 6px;"
+                    data-test-id="search-synonym-shared"
+                  >
+                    {gettext("every workspace")}
+                  </span>
                 </td>
                 <td style={@num}>
                   <button
+                    :if={s.id != @confirm_delete}
                     type="button"
                     class="btn btn-sm btn-destructive"
-                    phx-click="rule_delete"
+                    phx-click="rule_delete_ask"
                     phx-value-id={s.id}
-                    data-confirm={
-                      gettext("Delete the synonym %{from} to %{to}?", from: s.from, to: s.to)
-                    }
                     aria-label={
                       gettext("Delete the synonym %{from} to %{to}", from: s.from, to: s.to)
                     }
                   >
                     {gettext("Delete")}
                   </button>
+                  <span
+                    :if={s.id == @confirm_delete}
+                    role="group"
+                    aria-label={
+                      gettext("Delete the synonym %{from} to %{to}", from: s.from, to: s.to)
+                    }
+                    data-test-id="search-synonym-confirm"
+                    style="display: inline-flex; align-items: center; gap: 8px;"
+                  >
+                    <span>
+                      {if s.id in @shared,
+                        do: gettext("Delete for every workspace?"),
+                        else: gettext("Delete?")}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-destructive"
+                      phx-click="rule_delete"
+                      phx-value-id={s.id}
+                    >
+                      {gettext("Yes, delete")}
+                    </button>
+                    <button type="button" class="btn btn-sm" phx-click="rule_delete_cancel">
+                      {gettext("Cancel")}
+                    </button>
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -363,7 +397,7 @@ defmodule BarkparkWeb.Studio.SearchLive.View do
       |> Enum.reject(fn {_key, value, default} -> value == default end)
       |> Enum.map(fn {key, value, _default} -> {key, value} end)
 
-    base = Paths.studio_path(scope_prefix, ["search"], dataset)
+    base = Paths.studio_path(scope_prefix, ["_search"], dataset)
     if query == [], do: base, else: base <> "?" <> URI.encode_query(query)
   end
 

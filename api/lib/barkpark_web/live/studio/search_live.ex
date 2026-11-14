@@ -63,6 +63,8 @@ defmodule BarkparkWeb.Studio.SearchLive do
          period: "week",
          insights: nil,
          synonyms: [],
+         shared: MapSet.new(),
+         confirm_delete: nil,
          rule: @blank_rule,
          preview: nil,
          rule_error: nil
@@ -91,7 +93,8 @@ defmodule BarkparkWeb.Studio.SearchLive do
            surface: pick(params["surface"], @surfaces, "documents"),
            period: pick(params["period"], @periods, "week"),
            preview: nil,
-           rule_error: nil
+           rule_error: nil,
+           confirm_delete: nil
          )
          |> load()}
     end
@@ -111,6 +114,8 @@ defmodule BarkparkWeb.Studio.SearchLive do
         rule={@rule}
         preview={@preview}
         rule_error={@rule_error}
+        shared={@shared}
+        confirm_delete={@confirm_delete}
       />
     </.studio_page_scroll>
     """
@@ -120,7 +125,8 @@ defmodule BarkparkWeb.Studio.SearchLive do
   # whose seat changed after mount, or from markup that was never rendered.
   @impl true
   def handle_event(event, params, socket)
-      when event in ~w(rule_change rule_preview rule_save rule_delete rule_prefill rule_promote) do
+      when event in ~w(rule_change rule_preview rule_save rule_prefill rule_promote
+                       rule_delete_ask rule_delete_cancel rule_delete) do
     if admin?(socket),
       do: {:noreply, event(event, params, socket)},
       else: {:noreply, refuse(socket)}
@@ -140,19 +146,24 @@ defmodule BarkparkWeb.Studio.SearchLive do
   end
 
   defp event("rule_change", params, socket),
-    do: assign(socket, rule: rule_from(params), preview: nil, rule_error: nil)
+    do: assign(socket, rule: shown(rule_from(params)), preview: nil, rule_error: nil)
 
-  defp event("rule_prefill", %{"from" => from}, socket) when is_binary(from),
-    do: assign(socket, rule: %{@blank_rule | "from" => from}, preview: nil, rule_error: nil)
+  defp event("rule_prefill", %{"from" => from}, socket) when is_binary(from) do
+    if Text.text?(from),
+      do: assign(socket, rule: %{@blank_rule | "from" => from}, preview: nil, rule_error: nil),
+      else: socket
+  end
 
   defp event("rule_preview", _params, socket) do
     %{surface: surface, dataset: dataset, rule: rule} = socket.assigns
 
-    if blank?(rule["from"]) or blank?(rule["to"]) do
-      assign(socket, preview: nil, rule_error: gettext("Fill in both words first."))
-    else
-      preview = Synonyms.preview(surface, dataset, rule["from"], rule, workspace_id(socket))
-      assign(socket, preview: preview, rule_error: nil)
+    case rule_problem(rule) do
+      nil ->
+        preview = Synonyms.preview(surface, dataset, rule["from"], rule, workspace_id(socket))
+        assign(socket, preview: preview, rule_error: nil)
+
+      problem ->
+        assign(socket, preview: nil, rule_error: problem)
     end
   end
 
@@ -160,40 +171,48 @@ defmodule BarkparkWeb.Studio.SearchLive do
     rule = if is_map(params["rule"]), do: rule_from(params), else: socket.assigns.rule
     %{surface: surface, dataset: dataset} = socket.assigns
 
-    if blank?(rule["from"]) or blank?(rule["to"]) do
-      assign(socket, rule: rule, rule_error: gettext("Fill in both words first."))
+    with nil <- rule_problem(rule),
+         {:ok, _row} <- Synonyms.create(surface, dataset, rule, workspace_id(socket)) do
+      socket
+      |> assign(rule: @blank_rule, preview: nil, rule_error: nil)
+      |> put_flash(:info, gettext("Synonym saved."))
+      |> load()
     else
-      case Synonyms.create(surface, dataset, rule, workspace_id(socket)) do
-        {:ok, _row} ->
-          socket
-          |> assign(rule: @blank_rule, preview: nil, rule_error: nil)
-          |> put_flash(:info, gettext("Synonym saved."))
-          |> load()
+      {:error, _changeset} ->
+        assign(socket,
+          rule: rule,
+          rule_error: gettext("Could not save the synonym. It may already exist.")
+        )
 
-        {:error, _changeset} ->
-          assign(socket,
-            rule: rule,
-            rule_error: gettext("Could not save the synonym. It may already exist.")
-          )
-      end
+      problem ->
+        assign(socket, rule: shown(rule), rule_error: problem)
     end
   end
 
   defp event("rule_promote", %{"from" => from, "to" => to}, socket)
        when is_binary(from) and is_binary(to) do
     %{surface: surface, dataset: dataset} = socket.assigns
+    rule = %{"from" => from, "to" => to}
 
-    case Synonyms.promote(surface, dataset, %{"from" => from, "to" => to}, workspace_id(socket)) do
-      {:ok, _row} ->
-        socket |> put_flash(:info, gettext("Synonym saved.")) |> load()
-
-      {:error, _reason} ->
-        put_flash(socket, :error, gettext("Could not save the synonym. It may already exist."))
+    with nil <- rule_problem(rule),
+         {:ok, _row} <- Synonyms.promote(surface, dataset, rule, workspace_id(socket)) do
+      socket |> put_flash(:info, gettext("Synonym saved.")) |> load()
+    else
+      _ -> put_flash(socket, :error, gettext("Could not save the synonym. It may already exist."))
     end
   end
 
-  defp event("rule_delete", %{"id" => id}, socket) when is_binary(id) do
+  # Delete takes two clicks: the first asks, the second deletes. The second is
+  # held to the row the first one named, so a lone `rule_delete` deletes nothing.
+  defp event("rule_delete_ask", %{"id" => id}, socket) when is_binary(id),
+    do: assign(socket, confirm_delete: id)
+
+  defp event("rule_delete_cancel", _params, socket), do: assign(socket, confirm_delete: nil)
+
+  defp event("rule_delete", %{"id" => id}, %{assigns: %{confirm_delete: id}} = socket)
+       when is_binary(id) do
     %{surface: surface, dataset: dataset} = socket.assigns
+    socket = assign(socket, confirm_delete: nil)
 
     case Synonyms.delete(id, surface, dataset, workspace_id(socket)) do
       :ok ->
@@ -213,8 +232,25 @@ defmodule BarkparkWeb.Studio.SearchLive do
 
     assign(socket,
       insights: Intelligence.insights(surface, dataset, period: period, workspace_id: ws_id),
-      synonyms: Synonyms.list(surface, dataset, ws_id)
+      synonyms: Synonyms.list(surface, dataset, ws_id),
+      # The rows with no workspace: every workspace on this dataset name reads
+      # them. A nil workspace lists that shared layer alone.
+      shared: MapSet.new(Synonyms.list(surface, dataset, nil), & &1.id)
     )
+  end
+
+  # What stops a rule being saved or previewed, in words; nil when nothing does.
+  defp rule_problem(rule) do
+    cond do
+      blank?(rule["from"]) or blank?(rule["to"]) ->
+        gettext("Fill in both words first.")
+
+      not (Text.text?(rule["from"]) and Text.text?(rule["to"])) ->
+        gettext("A synonym cannot hold that character. Remove it and try again.")
+
+      true ->
+        nil
+    end
   end
 
   # The workspace seat, asked live, and only for a workspace the URL resolved.
@@ -245,6 +281,12 @@ defmodule BarkparkWeb.Studio.SearchLive do
   end
 
   defp rule_from(_params), do: @blank_rule
+
+  # The rule as the form may show it: a value that is not text (a NUL, bytes
+  # that are not UTF-8) cannot be sent to the page, so its field goes blank.
+  defp shown(rule) do
+    Map.new(rule, fn {key, value} -> {key, if(Text.text?(value), do: value, else: "")} end)
+  end
 
   defp text(value) when is_binary(value), do: value
   defp text(_value), do: ""
