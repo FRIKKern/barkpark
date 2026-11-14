@@ -6085,7 +6085,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     attachments =
       consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, _entry ->
         # (entry ignored: the media type comes from the BYTES, not client_type)
-        # `Attachments.put/2` is the ONE store seam both surfaces write through
+        # `Attachments.put_image/2` writes the ONE store both surfaces write to
         # (ct-bl-chat-attachments): the Studio composer and the
         # `POST /v1/chat/sessions/:id/attachments` transport route land in the
         # SAME content-addressed store, so a Studio-pasted image is readable by
@@ -6094,7 +6094,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # of trusting `entry.client_type` — a client-declared type is caller
         # input, and the type the store records is what is served back.
         with {:ok, bytes} <- File.read(tmp_path),
-             {:ok, pointer} <- Attachments.put(store_id, bytes) do
+             {:ok, pointer} <- Attachments.put_image(store_id, bytes) do
           {:ok, Map.put(pointer, :bytes, bytes)}
         else
           {:error, reason} ->

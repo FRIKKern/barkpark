@@ -92,8 +92,8 @@ defmodule BarkparkWeb.ChatUserTurn do
   end
 
   # Every id must read back as one of the accepted images. `fetch/2` re-sniffs
-  # the bytes, so a file in the store that is not one (which `put/2` never
-  # writes) is the same miss as an absent one.
+  # the bytes, so a stored text file or PDF, which a message cannot name yet,
+  # is the same miss as an absent one.
   defp fetch_all(session_id, ids) do
     Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
       case Attachments.fetch(session_id, id) do
