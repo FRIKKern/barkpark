@@ -10,7 +10,7 @@
     "docs:reference:check": "typedoc --options tooling/typedoc/typedoc.json --emit none --logLevel Verbose"
   },
   "devDependencies": {
-    "@lhci/cli": "^0.15.0",
+    "@lhci/cli": "^0.16.0",
     "shiki-twoslash": "^3.1.2",
     "twoslash": "^0.3.9",
     "typedoc": "^0.28.20",
