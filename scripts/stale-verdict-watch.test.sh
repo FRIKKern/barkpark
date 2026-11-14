@@ -2139,7 +2139,8 @@ v_pad="$(jq -c -n --arg t "$OLD" '[ range(0; 400) | {__typename:"CheckRun",
   conclusion:"SUCCESS", completedAt:$t} ]')"
 v_req="$(jq -c --arg t "$OLD" '[ .protection.required_status_checks.checks[].context
   | {__typename:"CheckRun", name: ., status:"COMPLETED", conclusion:"SUCCESS", completedAt:$t} ]' "$SPEC")"
-jq -c -n --slurpfile p <(printf '%s' "$v_pad") --slurpfile r <(printf '%s' "$v_req") \
+printf '%s' "$v_pad" > "$TMP/v-pad.json"; printf '%s' "$v_req" > "$TMP/v-req.json"
+jq -c -n --slurpfile p "$TMP/v-pad.json" --slurpfile r "$TMP/v-req.json" \
   '($r[0] + $p[0]) as $roll | {"9501": $roll, "9502": $roll, "9503": $roll}' > "$TMP/v-rollup.json"
 jq -c -n '[ 9501, 9502, 9503 | {number: ., mergeable:"CONFLICTING", mergeStateStatus:"DIRTY",
   headRefOid:"0123456789abcdef0123456789abcdef01234567",
