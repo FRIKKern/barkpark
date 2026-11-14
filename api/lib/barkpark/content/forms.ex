@@ -816,14 +816,15 @@ defmodule Barkpark.Content.Forms do
 
   defp coerce_field_value(_field, val), do: val
 
-  # A stored row the editor has no input for (an object in a list of plain
-  # values) is posted back as its JSON under `_json`, and saved as it was
-  # (`ArrayField`'s kept row, task-7655868c8b346c43).
+  # A stored row the editor has no input for (an object or a list in a list of
+  # plain values) is posted back as its JSON under `_json`, and saved as it
+  # was (`ArrayField`'s kept row, task-7655868c8b346c43). Inside an object the
+  # input's name is dotted (`doc[box].notes[0][_json]`), and the dot-path fold
+  # writes `_json` into the stored row it seeded: the JSON is still the row.
   defp kept_row(%{"type" => type}, %{"_json" => json} = row)
-       when type in ~w(string text number boolean url email date datetime) and
-              map_size(row) == 1 and is_binary(json) do
+       when type in ~w(string text number boolean url email date datetime) and is_binary(json) do
     case Jason.decode(json) do
-      {:ok, %{} = stored} -> stored
+      {:ok, stored} when is_map(stored) or is_list(stored) -> stored
       _ -> row
     end
   end

@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
@@ -242,7 +243,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, socket) do
+    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -384,7 +385,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, socket) do
+    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
       %{"doc" => doc} ->
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).

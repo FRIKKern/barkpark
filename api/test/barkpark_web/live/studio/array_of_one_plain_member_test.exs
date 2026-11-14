@@ -177,4 +177,51 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
 
     assert stored(c, c.junk) == {"Here", ["b"]}
   end
+
+  # #26168 review: the post is the rendered form's own, as the browser sends
+  # it. A kept row inside an object has a dotted name, which the dot-path fold
+  # writes into the stored row; a stored list row is kept like an object.
+  for {name, open} <- [{"the old Studio", :studio}, {"the desk", :desk}] do
+    test "#{name}: a title edit leaves a kept row in an object, and a list row, as they were",
+         c do
+      odd = %{
+        "tags" => [["a", "b"], @junk, "s"],
+        "box" => %{"notes" => [%{"_key" => "in1", "_type" => "text"}, "n"]}
+      }
+
+      id = "aop-odd-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.create_document(
+          c.type,
+          %{"doc_id" => id, "title" => "Here", "content" => odd},
+          @dataset
+        )
+
+      view = unquote(open)(c, id)
+
+      view
+      |> form("#editor-form", %{"doc" => %{"title" => "Typed"}})
+      |> render_change(%{"_target" => ["doc", "title"]})
+
+      {doc, _draft?, _published?} = Content.fetch_doc_with_draft(c.type, id, @dataset)
+      assert doc.title == "Typed"
+      assert Map.take(doc.content, ["tags", "box"]) == odd
+    end
+  end
+
+  # #26168 review: the hidden `_json` input exists only on a row that holds an
+  # object or a list. Posted anywhere else it is not a kept row.
+  test "a _json posted on a string row, or on no row, writes nothing there", c do
+    view = studio(c, c.plain)
+    forged = Jason.encode!(%{"_ref" => "x", "_type" => "reference"})
+
+    change(view, ["doc", "title"], %{
+      "title" => "Typed",
+      "tags" => %{"0" => %{"_json" => forged}, "1" => %{"_json" => forged}}
+    })
+
+    assert {"Typed", ["a" | rest]} = stored(c, c.plain)
+    refute Enum.any?(rest, &is_map/1)
+  end
 end

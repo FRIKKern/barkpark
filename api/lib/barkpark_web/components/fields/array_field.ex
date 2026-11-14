@@ -530,10 +530,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           readonly: assigns.readonly
         })
 
-      # A stored object in a list of plain values (task-7655868c8b346c43): no
-      # input can hold it, so it is shown as it is and posted back unchanged
-      # (`Forms.coerce_params/2` reads `_json`). The row can still be removed.
-      type when is_map(row_value) and type in @plain_row_types ->
+      # A stored object or list in a list of plain values
+      # (task-7655868c8b346c43): no input can hold it, so it is shown as it is
+      # and posted back unchanged (`Forms.coerce_params/2` reads `_json`). The
+      # row can still be removed.
+      type when (is_map(row_value) or is_list(row_value)) and type in @plain_row_types ->
         kept_row(%{input_name: row_path <> "[_json]", json: Jason.encode!(row_value)})
 
       _ ->
