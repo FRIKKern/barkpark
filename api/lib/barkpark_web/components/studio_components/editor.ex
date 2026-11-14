@@ -165,7 +165,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # `<legend>`, as Sanity draws an object field (TanStack `Fields.tsx`).
   attr :fieldset, :boolean, default: false
   # The desk shows no "*" (TanStack's form has none) and hides it from screen
-  # readers too: its required inputs say `aria-required` instead.
+  # readers too. The label says "required" in words instead (sr-only), for
+  # every control: a boolean, image, reference, rich text or color field has
+  # no `aria-required` of its own. A text input that has one is read
+  # "required" twice; that is the price of no field going silent.
   attr :mark_hidden, :boolean, default: false
   slot :inner_block, required: true
 
@@ -174,11 +177,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <.dynamic_tag tag_name={if @fieldset, do: "fieldset", else: "div"} class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <%= if @fieldset do %><legend class="editor-field-label">
         <%= @label %>
-        <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><% end %>
+        <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </legend><% else %><label class="editor-field-label" for={@for}>
         <%= @label %>
-        <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><% end %>
+        <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label><% end %>
       <p :if={@description} class="editor-field-description"><%= @description %></p>

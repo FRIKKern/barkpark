@@ -7,8 +7,9 @@ defmodule BarkparkWeb.Studio.DeskPaneAuditTest do
       (task-130c7744986719ec);
     * the Classic editor's block-identity alert is shown under the header,
       not hidden with the old toolbar row (task-012fea3af50e3881);
-    * a required field's input says so (`aria-required`), and its "*" is
-      not read out as "star" (task-c638865f3fdf5019).
+    * a required field's input says so (`aria-required`), its "*" is not
+      read out as "star", and its label says "required" in words, so a
+      control with no `aria-required` is not silent (task-c638865f3fdf5019).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -46,6 +47,18 @@ defmodule BarkparkWeb.Studio.DeskPaneAuditTest do
               "validation" => %{"required" => true}
             },
             %{"name" => "note", "title" => "Note", "type" => "string"},
+            %{
+              "name" => "agree",
+              "title" => "Agree",
+              "type" => "boolean",
+              "validation" => %{"required" => true}
+            },
+            %{
+              "name" => "cover",
+              "title" => "Cover",
+              "type" => "image",
+              "validation" => %{"required" => true}
+            },
             %{"name" => "body", "title" => "Body", "type" => "richText"}
           ]
         },
@@ -167,6 +180,23 @@ defmodule BarkparkWeb.Studio.DeskPaneAuditTest do
     refute has_element?(view, ~s|#{@pane} #editor-form .field-required:not([aria-hidden="true"])|)
   end
 
+  # A required boolean or image has no `aria-required` of its own, so with
+  # the "*" hidden the label must say "required" in words, or the field is
+  # silent (review of #26109).
+  test "every required field's label says required in words; an optional one does not", c do
+    view = open(c, doc!(c))
+    html = view |> element("#{@pane} #editor-form") |> render()
+
+    for label <- ~w(Title Subtitle Agree Cover) do
+      assert html =~
+               ~r/<(label|legend)[^>]*class="editor-field-label"[^>]*>\s*#{label}\s*<span class="field-required" aria-hidden="true">\*<\/span><span class="sr-only">required<\/span>/,
+             "#{label} says required"
+    end
+
+    refute html =~ ~r/>\s*Note\s*<span class="field-required"/
+    refute html =~ ~r/>\s*Note\s*<span class="sr-only">/
+  end
+
   # Control: the old Studio keeps its visible "*" as it was, and its
   # required inputs say so too.
   test "the old Studio keeps its * and marks the input required", c do
@@ -177,5 +207,6 @@ defmodule BarkparkWeb.Studio.DeskPaneAuditTest do
 
     assert has_element?(view, ~s|#editor-form .field-required:not([aria-hidden])|)
     assert has_element?(view, ~s(#editor-form input[name="doc[subtitle]"][aria-required="true"]))
+    refute has_element?(view, "#editor-form .editor-field-label .sr-only")
   end
 end
