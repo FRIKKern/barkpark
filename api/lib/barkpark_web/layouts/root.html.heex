@@ -5558,6 +5558,10 @@
         before the inline script below folds it into Hooks and connects the
         LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-paper-editor-hooks.js")}></script>
+  <%!-- Find and replace in the paper editor (task-c1bf7f10239f73bf): a
+        document-level key listener, no hook, so `async` (never `defer`: a
+        deferred script holds DOMContentLoaded and the socket with it). --%>
+  <script src={BarkparkWeb.StaticAssets.path("bp-paper-find-bar.js")} async></script>
   <%!-- Array fields keep keyboard focus on the row a button acted on
         (task-278c7992ed05a30b): a document-level listener, no phx-hook
         (array fields stay a pure round-trip, Decision 13). Bottom of

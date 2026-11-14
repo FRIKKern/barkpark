@@ -13567,3 +13567,48 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Breadcrumb"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:312
+#, elixir-autogen, elixir-format
+msgid "%{index} of %{count}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:314
+#, elixir-autogen, elixir-format
+msgid "Find"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:315
+#, elixir-autogen, elixir-format
+msgid "Find and replace"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:316
+#, elixir-autogen, elixir-format
+msgid "Match case"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:317
+#, elixir-autogen, elixir-format
+msgid "Next match"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:321
+#, elixir-autogen, elixir-format
+msgid "Replace all"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:322
+#, elixir-autogen, elixir-format
+msgid "Replace with"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:323
+#, elixir-autogen, elixir-format
+msgid "Replaced %{count}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:324
+#, elixir-autogen, elixir-format
+msgid "Show replace"
+msgstr ""
