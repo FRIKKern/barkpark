@@ -13804,3 +13804,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "A synonym cannot hold that character. Remove it and try again."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgid "Field actions"
+msgstr ""
