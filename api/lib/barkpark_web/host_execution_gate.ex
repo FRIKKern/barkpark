@@ -73,14 +73,18 @@ defmodule BarkparkWeb.HostExecutionGate do
       TenancyAuth.workspace_admin?(token, default)
   end
 
-  defp default_workspace_id do
+  @doc "The Default workspace's id, or nil on an instance that has none."
+  @spec default_workspace_id() :: binary() | nil
+  def default_workspace_id do
     case Tenancy.get_default_workspace() do
       %{id: id} -> id
       _ -> nil
     end
   end
 
-  defp allowlist_armed? do
+  @doc "True when the platform operator allowlist names at least one principal."
+  @spec allowlist_armed?() :: boolean()
+  def allowlist_armed? do
     case RequirePlatformOperator.allowlist() do
       %{emails: [], token_ids: []} -> false
       _ -> true
