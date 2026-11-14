@@ -761,6 +761,14 @@ jobs:
       - name: go test (race detector)
         run: go test -race ./...
 
+      # The pdrender limit docs carry a 1 s render-time bound, a claim about
+      # the reader as it ships, without the race detector. The detector slows
+      # some code 14 times and some code barely at all, so the race run above
+      # holds only a 5 s backstop; this run holds the 1 s bound
+      # (task-bfaa6c61e434767c).
+      - name: go test (pdrender render-time bound, no race detector)
+        run: go test -count=1 -v -run '^TestLimitDocsRenderWithinTheirBound$' ./internal/pdrender/
+
       # ── govulncheck — ADVISORY BY CONSTRUCTION, and this comment is the
       # reason, not a disclaimer (task-c33fee1e82700787).
       #
