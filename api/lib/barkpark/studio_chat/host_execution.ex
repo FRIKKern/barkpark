@@ -26,7 +26,11 @@ defmodule Barkpark.StudioChat.HostExecution do
   instance host.
   """
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.Repo
   alias Barkpark.StudioChat.Provider.Claude
+  alias Barkpark.StudioChat.Session
   alias Barkpark.Tenancy
 
   @reason "host_execution_not_permitted"
@@ -50,6 +54,25 @@ defmodule Barkpark.StudioChat.HostExecution do
   def workspace_may_host_exec?(nil), do: true
   def workspace_may_host_exec?(ws_id) when is_binary(ws_id), do: ws_id == default_workspace_id()
   def workspace_may_host_exec?(_), do: false
+
+  @doc """
+  `workspace_may_host_exec?/1` for the workspace that owns session `session_id`,
+  read from its row — for work that runs on the host on a session's behalf with
+  no principal at the door (the title job, task-dfe28132e8d842ad). A session
+  with no row is refused: nothing vouches for it.
+  """
+  @spec session_may_host_exec?(term()) :: boolean()
+  def session_may_host_exec?(session_id) when is_binary(session_id) do
+    with {:ok, id} <- Ecto.UUID.cast(session_id),
+         {owner} <-
+           Repo.one(from(s in Session, where: s.id == ^id, select: {s.owner_workspace_id})) do
+      workspace_may_host_exec?(owner)
+    else
+      _ -> false
+    end
+  end
+
+  def session_may_host_exec?(_), do: false
 
   @doc """
   True when a managed turn of `provider` for a session owned by `workspace_id`
