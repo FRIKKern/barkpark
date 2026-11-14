@@ -57,12 +57,20 @@ defmodule Barkpark.StudioChat.Attachments do
 
   ## Media types are SNIFFED, never trusted
 
-  The accepted set is png/jpeg/gif/webp (charter D25). The type is derived from
-  the bytes' magic prefix, not from anything the caller declared: an upload whose
-  bytes are not one of those four is refused. That closes the obvious hazard of a
-  chat-owned byte route — an `image/svg+xml` or `text/html` payload echoed back
-  under a caller-chosen content type is a stored-XSS primitive, and a sniffed
-  allowlist makes it unrepresentable rather than merely discouraged.
+  The accepted set is the four images png/jpeg/gif/webp (charter D25) and two
+  file types (`/papers/chat-host-file-attachments-plan`): `application/pdf`
+  when the bytes start with `%PDF-`, and `text/plain` when they are valid UTF-8
+  with no NUL byte. The type is derived from the bytes, not from anything the
+  caller declared, and anything else is refused. Every text is `text/plain`:
+  HTML, SVG and JavaScript are never stored or reported under their own type,
+  and the only HTTP reads answer a JSON envelope with the bytes in base64, so
+  no browser ever receives these bytes as a document. That keeps the stored-XSS
+  shape of a chat-owned byte route unrepresentable.
+
+  Zip and everything built on it, executables (PE, ELF, Mach-O), gzip, UTF-16
+  text and invalid UTF-8 all fail both rules and are refused. `media_types/0`
+  stays the four images: the Studio composer (`put_image/2`), the leased
+  reference and the message body read it, and none of them takes a file yet.
   """
 
   alias Barkpark.StudioChat
@@ -71,15 +79,22 @@ defmodule Barkpark.StudioChat.Attachments do
   # composer's `allow_upload` accept-list.
   @media_types ~w(image/png image/jpeg image/gif image/webp)
 
+  # The sniffed non-image types (`sniff_file_type/1`).
+  @file_types ~w(text/plain application/pdf)
+
   # Per-attachment byte ceiling — the SAME 3 MB the Studio composer's
   # allow_upload enforces (base64 inflates x4/3, so the provider wire payload
   # stays under the ~5 MB-per-image cap). This is the chat limit, NOT the
   # endpoint-wide 100 MB parser ceiling.
   @max_bytes 3_000_000
 
-  @doc "The accepted media types (png | jpeg | gif | webp)."
+  @doc "The accepted image types (png | jpeg | gif | webp)."
   @spec media_types() :: [String.t()]
   def media_types, do: @media_types
+
+  @doc "The accepted file types besides images (text/plain | application/pdf)."
+  @spec file_types() :: [String.t()]
+  def file_types, do: @file_types
 
   @doc "The per-attachment byte ceiling."
   @spec max_bytes() :: pos_integer()
@@ -90,18 +105,30 @@ defmodule Barkpark.StudioChat.Attachments do
   pointer map `%{path, media_type, sha256, byte_size}`.
 
   The media type is sniffed from the bytes (never taken from the caller); bytes
-  that are not one of the four accepted images are refused with
+  that are not one of the four images, UTF-8 text or a PDF are refused with
   `{:error, :unsupported_media_type}`, and anything over `max_bytes/0` with
   `{:error, :too_large}`. Empty bytes are `{:error, :empty}`.
 
-  This is the ONE writer both surfaces use — the Studio composer's
-  `consume_attachments/1` and the transport's upload route both land here, so
+  This is the writer the transport's upload route uses. The Studio composer
+  writes through `put_image/2`, the same store with the images-only rule, so
   "Studio uploads go to the same content-addressed store" is true by
   construction rather than by convention.
   """
   @spec put(String.t(), binary()) ::
           {:ok, map()} | {:error, :empty | :too_large | :unsupported_media_type | term()}
-  def put(session_id, bytes) when is_binary(session_id) and is_binary(bytes) do
+  def put(session_id, bytes), do: put(session_id, bytes, @media_types ++ @file_types)
+
+  @doc """
+  `put/2` limited to the four images. The Studio composer's upload accepts only
+  images, and the browser's declared type is caller input, so a text file
+  renamed `x.png` must still be refused here rather than stored as text and
+  sent to the provider as an image block.
+  """
+  @spec put_image(String.t(), binary()) ::
+          {:ok, map()} | {:error, :empty | :too_large | :unsupported_media_type | term()}
+  def put_image(session_id, bytes), do: put(session_id, bytes, @media_types)
+
+  defp put(session_id, bytes, accepted) when is_binary(session_id) and is_binary(bytes) do
     cond do
       bytes == "" ->
         {:error, :empty}
@@ -110,14 +137,15 @@ defmodule Barkpark.StudioChat.Attachments do
         {:error, :too_large}
 
       true ->
-        case sniff_media_type(bytes) do
-          nil -> {:error, :unsupported_media_type}
-          media_type -> StudioChat.store_attachment(session_id, bytes, media_type)
-        end
+        media_type = sniff_media_type(bytes)
+
+        if media_type in accepted,
+          do: StudioChat.store_attachment(session_id, bytes, media_type),
+          else: {:error, :unsupported_media_type}
     end
   end
 
-  def put(_, _), do: {:error, :unsupported_media_type}
+  defp put(_, _, _), do: {:error, :unsupported_media_type}
 
   @doc """
   Read one attachment back by its opaque `attachment_id`, scoped to
@@ -271,15 +299,21 @@ defmodule Barkpark.StudioChat.Attachments do
 
   # ── media-type sniffing ─────────────────────────────────────────────────────
   #
-  # Magic prefixes for the four accepted images. Anything else is nil — which
-  # `put/2` turns into a refusal, so an SVG/HTML/script payload can never enter
-  # the chat store and can never be served back out of it.
+  # Magic prefixes for the four accepted images, then `%PDF-`, then UTF-8 text.
+  # Anything else is nil, which `put/3` turns into a refusal. An SVG, HTML or
+  # script payload sniffs as text/plain and is only ever reported as that.
   defp sniff_media_type(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: "image/png"
   defp sniff_media_type(<<0xFF, 0xD8, 0xFF, _::binary>>), do: "image/jpeg"
   defp sniff_media_type(<<"GIF87a", _::binary>>), do: "image/gif"
   defp sniff_media_type(<<"GIF89a", _::binary>>), do: "image/gif"
   defp sniff_media_type(<<"RIFF", _size::binary-size(4), "WEBP", _::binary>>), do: "image/webp"
-  defp sniff_media_type(_), do: nil
+  defp sniff_media_type(<<"%PDF-", _::binary>>), do: "application/pdf"
+  defp sniff_media_type(bytes), do: if(text?(bytes), do: "text/plain")
+
+  # Valid UTF-8 with no NUL byte. UTF-16 fails both legs (its byte order mark
+  # is not UTF-8, and its ASCII carries a NUL per character), and every zip,
+  # PE, ELF and Mach-O header holds a NUL or a byte that is not UTF-8.
+  defp text?(bytes), do: String.valid?(bytes) and not String.contains?(bytes, <<0>>)
 
   # ── pointer helpers ─────────────────────────────────────────────────────────
 
@@ -296,7 +330,7 @@ defmodule Barkpark.StudioChat.Attachments do
   defp path_leaf(path) when is_binary(path), do: path |> Path.split() |> List.last()
   defp path_leaf(_), do: nil
 
-  defp media_type_or_default(mt) when mt in @media_types, do: mt
+  defp media_type_or_default(mt) when mt in @media_types or mt in @file_types, do: mt
   defp media_type_or_default(_), do: "application/octet-stream"
 
   defp byte_size_or_nil(n) when is_integer(n) and n >= 0, do: n

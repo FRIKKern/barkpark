@@ -4925,13 +4925,13 @@ defmodule Barkpark.Plugins.Capabilities do
         "chat.upload_attachment",
         "chat",
         "upload-attachment",
-        "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "Upload an attachment to a chat session's chat-owned store (png|jpeg|gif|webp, UTF-8 text or PDF, type sniffed from the bytes; base64 body).",
         "POST",
         "/v1/chat/sessions/:id/attachments",
         "admin",
         args: [
           arg("id", true, "string", "Chat session id."),
-          arg("data", true, "string", "Base64-encoded image bytes (≤3 MB decoded).")
+          arg("data", true, "string", "Base64-encoded file bytes (≤3 MB decoded).")
         ],
         writes: true,
         default_output: "json"

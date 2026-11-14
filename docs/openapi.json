@@ -10616,7 +10616,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "summary": "Upload an attachment to a chat session's chat-owned store (png|jpeg|gif|webp, UTF-8 text or PDF, type sniffed from the bytes; base64 body).",
         "tags": [
           "chat"
         ],

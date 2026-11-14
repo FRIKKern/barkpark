@@ -757,12 +757,16 @@ defmodule Barkpark.StudioChatTest do
       assert {:error, :missing} = StudioChat.read_attachment(nil)
     end
 
-    test "jpg normalizes to image/jpeg; an unknown type falls back to image/png" do
+    test "jpg normalizes to image/jpeg; the file types are kept; an unknown type falls back to image/png" do
       s = new_session()
       {:ok, a} = StudioChat.store_attachment(s.id, "x", "image/jpg")
-      {:ok, b} = StudioChat.store_attachment(s.id, "y", "application/pdf")
+      {:ok, b} = StudioChat.store_attachment(s.id, "y", "application/zip")
+      {:ok, pdf} = StudioChat.store_attachment(s.id, "%PDF-1.7", "application/pdf")
+      {:ok, txt} = StudioChat.store_attachment(s.id, "notes", "text/plain")
       assert a.media_type == "image/jpeg"
       assert b.media_type == "image/png"
+      assert pdf.media_type == "application/pdf"
+      assert txt.media_type == "text/plain"
     end
 
     test "delete_session removes the session's attachment dir (files never outlive the row)",
