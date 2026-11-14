@@ -16,6 +16,7 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
   alias Barkpark.ChatHosts
   alias Barkpark.ChatHosts.ExecutionLease
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime.{Command, Event}
   alias Barkpark.StudioChat.Session
   alias Barkpark.Tenancy
@@ -215,6 +216,50 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
     assert rows(session_id, lease_id) == before
   end
 
+  # task-d8685be32b21e31b: a Runtime.Event carries no lease id, so a recorder
+  # that gets the old lease's close cannot tell it from the newer turn's and
+  # would end the newer turn and mark the session exited.
+  test "an older lease's close refused as lease_expired leaves the newer live turn working, with a recorder running" do
+    %{host: host, session_id: session_id} = host_session()
+    recorder = start_recorder!(session_id)
+    old = leased_turn(host, session_id, "old")
+    new = leased_turn(host, session_id, "new")
+    # Precondition: the recorder took the newer turn_started.
+    assert StudioChat.get_session(session_id).status == "working"
+
+    expire!(old.lease_id, -1)
+
+    assert {:error, :lease_expired} =
+             ChatHosts.accept_event(host, %{
+               lease_id: old.lease_id,
+               epoch: old.epoch,
+               cursor: 2,
+               idempotency_key: "close-old",
+               event: %{"kind" => "terminal", "terminal_state" => "failed"}
+             })
+
+    assert Repo.get!(ExecutionLease, old.lease_id).status == "completed"
+    assert ChatHosts.live_report_fence(session_id).id == new.lease_id
+    assert Process.alive?(recorder)
+    assert StudioChat.get_session(session_id).status == "working"
+    # Not left for replay either: a recorder replaying it would do the same.
+    assert ChatHosts.replay_unprojected(session_id) == []
+  end
+
+  test "the sweep ends an older silent lease and leaves the newer live turn working, with a recorder running" do
+    %{host: host, session_id: session_id} = host_session()
+    start_recorder!(session_id)
+    old = leased_turn(host, session_id, "old")
+    _new = leased_turn(host, session_id, "new")
+    assert StudioChat.get_session(session_id).status == "working"
+
+    expire!(old.lease_id, -120)
+
+    assert 1 = ChatHosts.end_expired_turns(DateTime.utc_now())
+    assert Repo.get!(ExecutionLease, old.lease_id).status == "completed"
+    assert StudioChat.get_session(session_id).status == "working"
+  end
+
   test "a live lease is never swept" do
     %{session_id: session_id, lease_id: lease_id} = running_turn()
 
@@ -224,6 +269,14 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
   end
 
   defp running_turn do
+    %{host: host, session_id: session_id} = host_session()
+    %{lease_id: lease_id, epoch: epoch} = leased_turn(host, session_id, "1")
+    {:ok, _} = StudioChat.update_status(session_id, "working")
+
+    %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch}
+  end
+
+  defp host_session do
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "chat-host-exp-turn-#{suffix}", name: "W"})
     root = System.tmp_dir!()
@@ -245,12 +298,17 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
       })
       |> Repo.insert()
 
+    %{host: host, session_id: session_id}
+  end
+
+  # One leased command on the session whose turn has started (cursor 1).
+  defp leased_turn(host, session_id, tag) do
     command = %Command{
       operation: :start,
       provider: "claude",
       session_id: session_id,
-      idempotency_key: "command-#{suffix}",
-      payload: %{cwd: root, content: "hello"}
+      idempotency_key: "command-#{tag}-#{System.unique_integer([:positive])}",
+      payload: %{cwd: System.tmp_dir!(), content: "hello"}
     }
 
     {:ok, %{lease_id: lease_id, epoch: epoch}} = ChatHosts.lease_and_enqueue(host, command, [])
@@ -260,13 +318,35 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
         lease_id: lease_id,
         epoch: epoch,
         cursor: 1,
-        idempotency_key: "started-1",
-        event: %{"kind" => "turn_started", "turn_id" => "turn-1"}
+        idempotency_key: "started-#{tag}",
+        event: %{"kind" => "turn_started", "turn_id" => "turn-#{tag}"}
       })
 
-    {:ok, _} = StudioChat.update_status(session_id, "working")
+    %{lease_id: lease_id, epoch: epoch}
+  end
 
-    %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch}
+  # A live Recorder for the session. It only needs SOME runtime to start; `cat`
+  # runs no CLI. Events reach it through the host ingress.
+  defp start_recorder!(session_id) do
+    prev = Application.get_env(:barkpark, :claude_chat)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+    Application.put_env(:barkpark, :public_demo_studio, false)
+
+    {:ok, recorder} = Recorder.ensure(%{session_id: session_id, mode: "plan", resume: false})
+
+    on_exit(fn ->
+      if Process.alive?(recorder),
+        do: DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+
+      if prev,
+        do: Application.put_env(:barkpark, :claude_chat, prev),
+        else: Application.delete_env(:barkpark, :claude_chat)
+
+      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+
+    recorder
   end
 
   defp put_floor!(seconds_from_now),
