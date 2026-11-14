@@ -13,7 +13,8 @@ defmodule BarkparkWeb.Studio.ChatPickerDatasetBoundTest do
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Auth, Content, Tasks, Tenancy}
+  alias Barkpark.{Auth, Content, StudioChat, Tasks, Tenancy}
+  alias BarkparkWeb.Studio.ClaudeChat
 
   @own "bound-own"
   @prod "production"
@@ -70,6 +71,57 @@ defmodule BarkparkWeb.Studio.ChatPickerDatasetBoundTest do
 
     assert listed?(html, ctx.tasks[@own])
     assert listed?(html, ctx.tasks[@prod])
+  end
+
+  # The Doing strip: claims held by this chat session's worker. The hydrate
+  # was narrowed with the picker; a live `document_changed` frame was not, so a
+  # production claim still reached a bound token's strip until reload
+  # (task-e59ce6fd3e7ab3f8).
+  describe "the Doing strip" do
+    defp strip(ws, tasks, opts, claim_when) do
+      raw = "chat-bound-" <> Ecto.UUID.generate()
+      perms = ["read", "write", "admin"]
+      {:ok, _} = Auth.create_token(raw, "chat bound", @own, perms, ws.id, opts)
+      conn = scoped_conn() |> init_test_session(%{"api_token" => raw})
+
+      {:ok, session} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"}, {:workspace, ws.id})
+
+      path = "/w/#{ws.slug}/p/default/studio/chat/#{session.id}"
+      claim = fn -> claim_both!(tasks, ws, ClaudeChat.worker_id(session.id)) end
+
+      if claim_when == :before_mount, do: claim.()
+      {:ok, view, _} = live(conn, path)
+      if claim_when == :after_mount, do: claim.()
+
+      ~r/data-role="chat-hand-task"\s+data-task-id="([^"]+)"/
+      |> Regex.scan(render(view), capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.sort()
+    end
+
+    defp claim_both!(tasks, ws, worker) do
+      for {ds, task} <- tasks do
+        {:ok, _} = Tasks.claim_by_id(task.doc_id, worker, workspace_id: ws.id, dataset: ds)
+      end
+    end
+
+    test "a dataset-bound token's strip hydrates with its own dataset's claim only",
+         %{ws: ws, tasks: tasks} do
+      own = [tasks[@own].doc_id]
+
+      assert strip(ws, tasks, [dataset_bound: true], :before_mount) == own
+    end
+
+    test "a live frame for a production claim does not reach a bound token's strip",
+         %{ws: ws, tasks: tasks} do
+      refute tasks[@prod].doc_id in strip(ws, tasks, [dataset_bound: true], :after_mount)
+    end
+
+    test "an unbound token still gets the production claim by live frame (control)",
+         %{ws: ws, tasks: tasks} do
+      assert tasks[@prod].doc_id in strip(ws, tasks, [], :after_mount)
+    end
   end
 
   defp upsert_task_schemas!(dataset, scope) do

@@ -6506,7 +6506,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       TaskLedgerScope.resolve(ledger_workspace_id(socket))
 
     if connected?(socket) and is_binary(workspace_id) and
-         ChatTaskSeam.available?(socket.assigns.task_reader) do
+         ChatTaskSeam.available?(socket.assigns.task_reader) and
+         ChatTaskSeam.in_binding?(dataset, socket.assigns[:api_token]) do
       Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
