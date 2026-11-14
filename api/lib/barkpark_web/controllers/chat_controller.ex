@@ -95,6 +95,7 @@ defmodule BarkparkWeb.ChatController do
   alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
+  alias BarkparkWeb.Studio.ChatTaskSeam
 
   # Wire bounds (charter "Security, validation, and transport verification
   # obligations"). These are the CHAT limits — NOT the endpoint-wide 100 MB
@@ -160,7 +161,7 @@ defmodule BarkparkWeb.ChatController do
 
           conn
           |> put_status(:created)
-          |> json(full_session_json(StudioChat.get_session(id), []))
+          |> json(full_session_json(StudioChat.get_session(id), [], conn.assigns[:api_token]))
 
         {:error, reason} ->
           # A create_session failure is a store/spawn defect, NOT runtime
@@ -212,7 +213,7 @@ defmodule BarkparkWeb.ChatController do
       # would allow). `:global` stays unfiltered (admin sidebar unchanged).
       sessions = StudioChat.list_sessions([archived: archived?], store_scope(scope(conn)))
 
-      json(conn, %{sessions: Enum.map(sessions, &sidebar_json/1)})
+      json(conn, %{sessions: Enum.map(sessions, &sidebar_json(&1, conn.assigns[:api_token]))})
     else
       {:error, message} -> bad_request(conn, message)
     end
@@ -263,7 +264,7 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, since} <- validate_since(params),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
       messages = id |> StudioChat.list_messages(store_scope(scope(conn))) |> filter_since(since)
-      json(conn, full_session_json(session, messages))
+      json(conn, full_session_json(session, messages, conn.assigns[:api_token]))
     else
       nil -> not_found(conn)
       {:error, message} -> bad_request(conn, message)
@@ -291,7 +292,7 @@ defmodule BarkparkWeb.ChatController do
          {:ok, ops} <- validate_patch(body, provider),
          {:ok, ops, runtime} <- patch_steer(conn, session, ops) do
       Enum.each(ops, &apply_patch_op(session, runtime, &1))
-      json(conn, full_session_json(StudioChat.get_session(id), []))
+      json(conn, full_session_json(StudioChat.get_session(id), [], conn.assigns[:api_token]))
     else
       nil -> not_found(conn)
       {:error, :host_execution_not_permitted} -> host_refused(conn)
@@ -551,7 +552,7 @@ defmodule BarkparkWeb.ChatController do
   defp respond_archived(conn, result) do
     case result do
       {:ok, %StudioChat.Session{} = session} ->
-        json(conn, full_session_json(session, []))
+        json(conn, full_session_json(session, [], conn.assigns[:api_token]))
 
       :noop ->
         not_found(conn)
@@ -894,8 +895,11 @@ defmodule BarkparkWeb.ChatController do
         # authoritative — this clause ignores the tuple's sid, exactly like the
         # workflow clause above. Secret-safe by construction (D23): the payload
         # is a fixed set of ledger fields the Recorder built, never an inspect
-        # or a raw document.
-        chunk_or_stop(conn, sse_task_frame(transition))
+        # or a raw document. The frame is a task of the ledger dataset, so a
+        # token bound to another dataset is not sent it.
+        if ChatTaskSeam.ledger_in_binding?(conn.assigns[:api_token]),
+          do: chunk_or_stop(conn, sse_task_frame(transition)),
+          else: stream_loop(conn)
 
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
@@ -1614,7 +1618,7 @@ defmodule BarkparkWeb.ChatController do
 
   # The FULL continuity struct (D14) plus messages. `list_sessions` deliberately
   # OMITS draft/rail/choices — this is the read that carries them.
-  defp full_session_json(%StudioChat.Session{} = s, messages) do
+  defp full_session_json(%StudioChat.Session{} = s, messages, principal) do
     %{
       id: s.id,
       provider: s.provider,
@@ -1670,7 +1674,7 @@ defmodule BarkparkWeb.ChatController do
       context: session_context_json(s),
       messages: Enum.map(messages, &message_json/1)
     }
-    |> put_workflow_epic(s)
+    |> put_workflow_epic(s, principal)
   end
 
   # The epic-goal map on the SHOW read (wsc-bl-epic-on-session-json, half 2).
@@ -1680,10 +1684,10 @@ defmodule BarkparkWeb.ChatController do
   # only when the ledger resolves an epic (`StudioChat.epic_goal/2` — the
   # session's own claim, else its rail's builders via the agent↔task join);
   # otherwise the key is absent, never null.
-  defp put_workflow_epic(json, %StudioChat.Session{} = s) do
+  defp put_workflow_epic(json, %StudioChat.Session{} = s, principal) do
     case StudioChat.workflow_summary(s.rail_snapshot) do
       nil -> json
-      _workflow -> put_epic(json, s)
+      _workflow -> put_epic(json, s, principal)
     end
   end
 
@@ -1809,7 +1813,7 @@ defmodule BarkparkWeb.ChatController do
   # goal map (D9). The raw rail_snapshot (measured 38kB for a 29-agent run)
   # still NEVER rides a list surface; plain sessions keep the exact shape
   # above, key for key.
-  defp sidebar_json(%StudioChat.Session{} = s) do
+  defp sidebar_json(%StudioChat.Session{} = s, principal) do
     base = %{
       id: s.id,
       provider: s.provider,
@@ -1838,12 +1842,13 @@ defmodule BarkparkWeb.ChatController do
 
     case StudioChat.workflow_summary(s.rail_snapshot) do
       nil -> base
-      workflow -> base |> Map.put(:workflow, workflow) |> put_epic(s)
+      workflow -> base |> Map.put(:workflow, workflow) |> put_epic(s, principal)
     end
   end
 
-  defp put_epic(json, %StudioChat.Session{} = s) do
-    case StudioChat.epic_goal(s.provider, s.id) do
+  # A dataset-bound token's epic is held to its dataset (ChatTaskSeam).
+  defp put_epic(json, %StudioChat.Session{} = s, principal) do
+    case s.provider |> StudioChat.epic_goal(s.id) |> ChatTaskSeam.bound_epic_goal(principal) do
       nil -> json
       epic -> Map.put(json, :epic, epic)
     end

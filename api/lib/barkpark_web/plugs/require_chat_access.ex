@@ -8,11 +8,15 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
 
   ## Scope resolution (Connectors charter D18/D19a)
 
-    * a token carrying the global `admin` permission => `:global`
-      (instance-global authority — the live admin token and `bp chat` keep
-      reading/controlling every session on the instance, D21) — but only for an
-      instance principal: with the platform operator allowlist armed, only a
-      token it names (task-6ca882967fd95dda, `BarkparkWeb.HostExecutionGate`)
+    * a token carrying the `admin` permission => `:global` (instance-global
+      authority — the live admin token and `bp chat` keep reading/controlling
+      every session on the instance, D21) — but only for the instance
+      operator. With the platform operator allowlist armed, that is a token it
+      names (task-6ca882967fd95dda, `BarkparkWeb.HostExecutionGate`). With it
+      unset, that is an admin token of the Default workspace or of no
+      workspace (task-f98c47f23e7bde9a)
+    * allowlist unset, an `admin` token of any other workspace =>
+      `{:workspace, workspace_id}`: its own tenant's chat, never another's
     * a workspace-bound token carrying the `chat` permission =>
       `{:workspace, workspace_id}` (a Connector confined to its own tenant)
     * neither => 403 (canonical request-id envelope, same shape as RequireAdmin)
@@ -30,6 +34,7 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
 
   import Plug.Conn
   alias Barkpark.Auth
+  alias BarkparkWeb.HostExecutionGate
 
   def init(opts), do: opts
 
@@ -71,25 +76,40 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
     |> halt()
   end
 
-  # `:global` for a global-admin token (D21 authority preserved); otherwise a
-  # tenant scope only for a workspace-bound `chat` token; otherwise deny.
+  # `:global` for the instance operator's admin token (D21 authority
+  # preserved); a tenant scope for any other workspace-bound admin token and
+  # for a workspace-bound `chat` token; otherwise deny.
   defp chat_scope(nil), do: nil
 
   defp chat_scope(token) do
     cond do
+      not Auth.has_permission?(token, "admin") ->
+        chat_seat(token)
+
       # Instance-global chat reach is instance-host reach (task-6ca882967fd95dda):
       # with the operator allowlist armed, an admin-bit token outside it no
       # longer gets `:global` — it falls through to its workspace binding (if it
       # carries `chat`) or is refused.
-      Auth.has_permission?(token, "admin") and
-          BarkparkWeb.HostExecutionGate.instance_principal?(token) ->
+      HostExecutionGate.allowlist_armed?() ->
+        if HostExecutionGate.instance_principal?(token), do: :global, else: chat_seat(token)
+
+      # Allowlist unset (task-f98c47f23e7bde9a): the instance operator is the
+      # admin token of the Default workspace or of no workspace. An admin token
+      # of any other workspace is that tenant's admin: its own workspace's chat,
+      # with or without the `chat` permission, never another tenant's.
+      # A no-workspace token needs no lookup.
+      is_nil(token.workspace_id) or
+          token.workspace_id == HostExecutionGate.default_workspace_id() ->
         :global
 
-      Auth.has_permission?(token, "chat") and not is_nil(token.workspace_id) ->
-        {:workspace, token.workspace_id}
-
       true ->
-        nil
+        {:workspace, token.workspace_id}
     end
+  end
+
+  defp chat_seat(token) do
+    if Auth.has_permission?(token, "chat") and not is_nil(token.workspace_id),
+      do: {:workspace, token.workspace_id},
+      else: nil
   end
 end
