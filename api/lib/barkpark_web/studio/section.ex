@@ -25,14 +25,14 @@ defmodule BarkparkWeb.Studio.Section do
   the media surface — so the dataset segment is dropped by identity
   against the known dataset rather than by position alone.
 
-  Anything that is not `media` or `api-tester` (a plugin surface such as
+  Anything that is not `media`, `_search` or `api-tester` (a plugin surface such as
   `/studio/tickets`, the flat `chat`/`tmux` singletons, an unparseable or
   nil path) answers `:structure`, whose suffix is `""` — the same answer
   the retired `section_suffix/1` gave through its catch-all clause and
   the `|| :structure` default at the layout call site.
   """
 
-  @type t :: :structure | :media | :api_tester
+  @type t :: :structure | :media | :search | :api_tester
 
   @doc "The section `current_path` is on. Never raises; defaults to `:structure`."
   @spec from_path(String.t() | nil, String.t() | nil) :: t()
@@ -51,13 +51,14 @@ defmodule BarkparkWeb.Studio.Section do
 
   @doc """
   The raw path suffix a dataset switch must preserve, derived from
-  `current_path`. `""` / `"/media"` / `"/api-tester"`.
+  `current_path`. `""` / `"/media"` / `"/_search"` / `"/api-tester"`.
   """
   @spec suffix(String.t() | nil, String.t() | nil) :: String.t()
   def suffix(current_path, dataset \\ nil),
     do: current_path |> from_path(dataset) |> suffix_for()
 
   defp suffix_for(:media), do: "/media"
+  defp suffix_for(:search), do: "/_search"
   defp suffix_for(:api_tester), do: "/api-tester"
   defp suffix_for(_), do: ""
 
@@ -72,6 +73,7 @@ defmodule BarkparkWeb.Studio.Section do
   defp drop_dataset(segments, _dataset), do: segments
 
   defp classify(["media" | _]), do: :media
+  defp classify(["_search" | _]), do: :search
   defp classify(["api-tester" | _]), do: :api_tester
   defp classify(_), do: :structure
 end
