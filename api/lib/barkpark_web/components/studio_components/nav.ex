@@ -609,7 +609,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     base_re = Regex.escape(base)
 
     structure_active =
-      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|api-tester(?:/|$)).*)")
 
     media_path = "#{base}/media"
     api_path = "#{base}/api-tester"
@@ -651,11 +651,24 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         active_when: api_path
       }
     ] ++
+      search_entry(base, admin?) ++
       tmux_console_entry(admin?, return_path) ++
       claude_chat_entry(scope_prefix, admin?, return_path) ++
       styleguide_entry(admin?, return_path) ++
       connectors_entry(scope_prefix, admin?) ++ settings_entry(base, scope_prefix, admin?)
   end
+
+  # The Search tab: search insights and synonyms for the dataset the page is
+  # on. Admin-only, like the page (`Studio.SearchLive` asks again at mount and
+  # on every event). Dataset-ful like Media, so it derives from `base`; the
+  # flat spelling rides the flat-to-scoped 302. The underscore keeps the path
+  # clear of a document type named `search`, as `_desk` and `_account` do.
+  defp search_entry(base, true) do
+    path = "#{base}/_search"
+    [%{label: gettext("Search"), path: path, icon: "search", order: 35, active_when: path}]
+  end
+
+  defp search_entry(_base, _admin?), do: []
 
   # The Connectors tab (connectors D49). Admin-only. Scope-prefixed EXACTLY like
   # Settings, and for the same reason: the catalog is scoped-in-substance (an
