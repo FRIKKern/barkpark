@@ -12,6 +12,7 @@ defmodule Barkpark.ChatHosts do
   @credential_ttl 30 * 24 * 60 * 60
   @lease_ttl 60
   @expired_turn_grace 90
+  @expired_turn_window 600
   @online_window 90
 
   def issue_enrollment(workspace_id, attrs) when is_binary(workspace_id) and is_map(attrs) do
@@ -329,23 +330,34 @@ defmodule Barkpark.ChatHosts do
   the lease. Each lease is re-read under `FOR UPDATE`, so a heartbeat or a
   second BEAM sweeping at the same time ends nothing twice. Returns how many
   turns it ended.
+
+  It touches only what is stuck now, never older rows: the lease's session
+  must be `working`, and the lease must have expired within the last
+  #{@expired_turn_window}s past the grace (two ticks of the 300 s
+  `AgentStateSweeper`). A lease that expired before that window, such as one
+  left over from before this sweep existed, is left as it is.
   """
   def end_expired_turns(now \\ DateTime.utc_now()) do
     cutoff = DateTime.add(now, -@expired_turn_grace)
+    oldest = DateTime.add(cutoff, -@expired_turn_window)
 
     from(l in ExecutionLease,
+      join: s in Barkpark.StudioChat.Session,
+      on: s.id == l.session_id,
+      where: s.status == "working",
       where: l.status in ["leased", "running"],
-      where: is_nil(l.revoked_at) and l.expires_at < ^cutoff,
+      where: is_nil(l.revoked_at) and l.expires_at < ^cutoff and l.expires_at >= ^oldest,
       select: l.id
     )
     |> Repo.all()
-    |> Enum.count(&end_expired_turn_by_id(&1, cutoff))
+    |> Enum.count(&end_expired_turn_by_id(&1, cutoff, oldest))
   end
 
-  defp end_expired_turn_by_id(lease_id, cutoff) do
+  defp end_expired_turn_by_id(lease_id, cutoff, oldest) do
     Repo.transaction(fn ->
       ExecutionLease
-      |> where([l], l.id == ^lease_id and is_nil(l.revoked_at) and l.expires_at < ^cutoff)
+      |> where([l], l.id == ^lease_id and is_nil(l.revoked_at))
+      |> where([l], l.expires_at < ^cutoff and l.expires_at >= ^oldest)
       |> lock("FOR UPDATE")
       |> Repo.one()
       |> case do
@@ -393,15 +405,32 @@ defmodule Barkpark.ChatHosts do
   defp end_expired_turn(_lease, _reason), do: Repo.rollback(:lease_expired)
 
   # After commit. The session row leaves `working` even when no recorder is
-  # running to project the close; a newer turn on a live lease keeps its own
-  # status.
+  # running to project the close. Only a `working` row moves: an `active` or
+  # `exited` session has no open turn to close, so its status stays and the
+  # close is marked projected instead of sent, because the recorder would mark
+  # any session it gets an error for `exited`. A newer turn on a live lease
+  # keeps its status; the close still goes to the recorder, which holds this
+  # lease's turn open until it does.
   defp settle_ended_turn(execution_event, lease) do
     Transport.complete(lease.id)
 
-    if is_nil(live_report_fence(lease.session_id)),
-      do: Barkpark.StudioChat.mark_exited(lease.session_id)
+    cond do
+      not is_nil(live_report_fence(lease.session_id)) ->
+        project_event(execution_event, lease)
 
-    project_event(execution_event, lease)
+      match?({1, _}, exit_if_working(lease.session_id)) ->
+        project_event(execution_event, lease)
+
+      true ->
+        mark_projected(execution_event.id)
+    end
+  end
+
+  defp exit_if_working(session_id) do
+    now = DateTime.utc_now()
+
+    from(s in Barkpark.StudioChat.Session, where: s.id == ^session_id and s.status == "working")
+    |> Repo.update_all(set: [status: "exited", last_active_at: now, updated_at: now])
   end
 
   defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)

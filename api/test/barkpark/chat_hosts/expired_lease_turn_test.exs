@@ -100,6 +100,54 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
     assert StudioChat.get_session(session_id).status == "exited"
   end
 
+  test "ending a turn never flips a session that is not working" do
+    %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch} = running_turn()
+    {:ok, _} = StudioChat.update_status(session_id, "active")
+    expire!(lease_id, -1)
+
+    assert {:error, :lease_expired} =
+             ChatHosts.accept_event(host, %{
+               lease_id: lease_id,
+               epoch: epoch,
+               cursor: 2,
+               idempotency_key: "close-1",
+               event: %{"kind" => "terminal", "terminal_state" => "failed"}
+             })
+
+    assert StudioChat.get_session(session_id).status == "active"
+    # No recorder replay either: it would mark the session exited.
+    assert length(ChatHosts.replay_unprojected(session_id)) == 1
+  end
+
+  test "the sweep leaves a lease on a session that is not working exactly as it was" do
+    %{session_id: session_id, lease_id: lease_id} = running_turn()
+    {:ok, _} = StudioChat.update_status(session_id, "active")
+    expire!(lease_id, -120)
+    before = Repo.get!(ExecutionLease, lease_id)
+
+    assert 0 = ChatHosts.end_expired_turns(DateTime.utc_now())
+
+    assert Repo.get!(ExecutionLease, lease_id) == before
+    assert StudioChat.get_session(session_id).status == "active"
+    assert length(ChatHosts.replay_unprojected(session_id)) == 1
+  end
+
+  test "the sweep leaves a lease that expired long ago, and its session, exactly as they were" do
+    # Rows already stuck before this code ran are not repaired by a deploy:
+    # the sweep looks back only over its last two ticks.
+    %{session_id: session_id, lease_id: lease_id} = running_turn()
+    expire!(lease_id, -3600)
+    lease_before = Repo.get!(ExecutionLease, lease_id)
+    session_before = Repo.get!(Session, session_id)
+
+    assert 0 = ChatHosts.end_expired_turns(DateTime.utc_now())
+    Barkpark.StudioChat.AgentStateSweeper.sweep()
+
+    assert Repo.get!(ExecutionLease, lease_id) == lease_before
+    assert Repo.get!(Session, session_id).status == session_before.status
+    assert length(ChatHosts.replay_unprojected(session_id)) == 1
+  end
+
   test "a live lease is never swept" do
     %{session_id: session_id, lease_id: lease_id} = running_turn()
 
