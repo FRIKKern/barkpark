@@ -80,7 +80,7 @@ func TestSchemaPushRefusesCutDownMembersOnAnOlderServer(t *testing.T) {
 	want := storedMember(t, s)
 	dir := t.TempDir()
 	code, _, stderr := runSync(runSchemaPull, s, globals{}, dir)
-	if code != exitOK || !strings.Contains(stderr, "without their own fields") {
+	if code != exitOK || !strings.Contains(stderr, "cannot send fields as stored") {
 		t.Fatalf("pull exit = %d, want the note about cut-down members; stderr=%s", code, stderr)
 	}
 	if code, stdout, _ := runSync(runSchemaDiff, s, globals{}, dir); code != exitOK {
@@ -89,7 +89,7 @@ func TestSchemaPushRefusesCutDownMembersOnAnOlderServer(t *testing.T) {
 	retitleSyncFile(t, dir, "table")
 	retitleSyncFile(t, dir, "post")
 	code, stdout, stderr := runSync(runSchemaPush, s, globals{}, dir)
-	if code != exitConflict || !strings.Contains(stderr, "table (rows)") || !strings.Contains(stdout, "push would replace the stored members of: rows") {
+	if code != exitConflict || !strings.Contains(stderr, "table (rows)") || !strings.Contains(stdout, "push would replace the stored definition of: rows") {
 		t.Fatalf("push exit = %d, want %d naming table (rows); stdout=%s stderr=%s", code, exitConflict, stdout, stderr)
 	}
 	if posts, _ := s.writes(); len(posts) != 0 {
@@ -107,5 +107,78 @@ func TestSchemaPushRefusesCutDownMembersOnAnOlderServer(t *testing.T) {
 	}
 	if got := storedMember(t, s); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after the full push the server holds member %v, want %v", got, want)
+	}
+}
+
+// A FIELD OF A NAMED TYPE STAYS A REFERENCE. The stored read serves
+// {"name":"seo","type":"seo"} as stored, so pull, a title edit and push leave
+// the row pointing at the type. An older server serves a copy of the type; a
+// push of that copy is refused.
+func TestSchemaPushKeepsNamedTypeReferences(t *testing.T) {
+	ref := map[string]any{"name": "seo", "type": "seo"}
+	seed := func(old bool) (*syncFakeServer, string) {
+		s := newSyncFakeServer(t)
+		s.old = old
+		seo := syncSchema("seo", "metaTitle")
+		seo["kind"] = "object"
+		s.seed(seo, map[string]any{"name": "article", "title": "Article", "fields": []any{ref}})
+		dir := t.TempDir()
+		if code, _, stderr := runSync(runSchemaPull, s, globals{}, dir); code != exitOK {
+			t.Fatalf("pull exit = %d; stderr=%s", code, stderr)
+		}
+		if code, stdout, _ := runSync(runSchemaDiff, s, globals{}, dir); code != exitOK {
+			t.Fatalf("diff after pull exit = %d; stdout=%s", code, stdout)
+		}
+		retitleSyncFile(t, dir, "article")
+		return s, dir
+	}
+	storedRef := func(s *syncFakeServer) any { return s.stored("article", "fields").([]any)[0] }
+
+	s, dir := seed(false)
+	if code, stdout, stderr := runSync(runSchemaPush, s, globals{}, dir); code != exitOK {
+		t.Fatalf("push exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if got := storedRef(s); !reflect.DeepEqual(got, ref) || s.stored("article", "title") != "Renamed" {
+		t.Fatalf("after push the server holds field %v and title %v, want the reference %v", got, s.stored("article", "title"), ref)
+	}
+
+	s, dir = seed(true)
+	code, _, stderr := runSync(runSchemaPush, s, globals{}, dir)
+	if posts, _ := s.writes(); code != exitConflict || !strings.Contains(stderr, "article (seo)") || len(posts) != 0 {
+		t.Fatalf("push to an older server exit = %d, want %d naming article (seo) and no write; posts=%v stderr=%s", code, exitConflict, posts, stderr)
+	}
+	if got := storedRef(s); !reflect.DeepEqual(got, ref) {
+		t.Fatalf("the refused push changed the stored field to %v", got)
+	}
+}
+
+// A FILE WITHOUT visibility LEAVES A PRIVATE SCHEMA PRIVATE. The plan says so,
+// the push does not send the key, and a file that sets it still changes it.
+func TestSchemaPushKeepsVisibilityTheFileDoesNotSet(t *testing.T) {
+	s := newSyncFakeServer(t)
+	secret := syncSchema("secret", "code")
+	secret["visibility"] = "private"
+	s.seed(secret)
+	dir := t.TempDir()
+	short := syncSchema("secret", "code")
+	short["title"] = "Renamed"
+	writeSyncFile(t, dir, "secret", short)
+	code, stdout, stderr := runSync(runSchemaPush, s, globals{}, dir)
+	if code != exitOK || !strings.Contains(stdout, "~ secret  changed (keys: title)") || !strings.Contains(stdout, "= secret  stays private") {
+		t.Fatalf("push exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if vis := s.stored("secret", "visibility"); vis != "private" || s.stored("secret", "title") != "Renamed" {
+		t.Fatalf("after push visibility = %v, title = %v; want private and Renamed", vis, s.stored("secret", "title"))
+	}
+	if code, stdout, _ := runSync(runSchemaDiff, s, globals{}, dir); code != exitOK {
+		t.Fatalf("diff after push exit = %d; stdout=%s", code, stdout)
+	}
+	short["visibility"] = "public"
+	writeSyncFile(t, dir, "secret", short)
+	if code, stdout, _ := runSync(runSchemaPush, s, globals{}, dir); code != exitOK || !strings.Contains(stdout, "keys: visibility") {
+		t.Fatalf("push of an explicit visibility exit = %d; stdout=%s", code, stdout)
+	}
+	if vis := s.stored("secret", "visibility"); vis != "public" {
+		t.Fatalf("an explicit visibility was not applied: %v", vis)
 	}
 }

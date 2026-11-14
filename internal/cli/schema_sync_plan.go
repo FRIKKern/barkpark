@@ -17,7 +17,8 @@ package cli
 //     exactly: false, "", [] and {} are values there.
 //   - The upsert keeps the stored value of a key the request leaves out. So
 //     schemaPushBody sends every compared key, with the default for the ones
-//     the file leaves out, and a key removed from a file is cleared.
+//     the file leaves out, and a key removed from a file is cleared. The one
+//     exception is `visibility`: a file that leaves it out keeps the server's.
 
 import (
 	"bytes"
@@ -98,6 +99,9 @@ type schemaPlan struct {
 	// StoredFields is true when the server sent each field list as stored
 	// (`?definition=stored`) and false when it sent the served form.
 	StoredFields bool `json:"stored_fields"`
+	// VisibilityKept names the schemas that are not public on the server and
+	// whose file does not set `visibility`. A push leaves it as it is.
+	VisibilityKept []string `json:"visibility_kept"`
 }
 
 func (p *schemaPlan) differs() bool {
@@ -222,8 +226,8 @@ func schemaPushBody(raw json.RawMessage) (json.RawMessage, error) {
 		if k.echo == "title" {
 			continue // required; the server names it when it is missing
 		}
-		if _, ok := schemaKeyValue(obj, k); ok {
-			continue
+		if _, ok := schemaKeyValue(obj, k); ok || k.echo == "visibility" {
+			continue // an omitted visibility keeps the server's; see buildSchemaPlan
 		}
 		name := k.cast
 		if name == "" {
@@ -304,7 +308,7 @@ func compareSchema(name string, local, server map[string]any, stored bool) *sche
 
 // buildSchemaPlan compares the folder to the server's schema list.
 func buildSchemaPlan(scope, dir string, local map[string]json.RawMessage, server []json.RawMessage, stored bool) (*schemaPlan, error) {
-	p := &schemaPlan{Scope: scope, Dir: dir, StoredFields: stored, Added: []string{}, Changed: []schemaChange{}, Removed: []string{}, Skipped: []string{}}
+	p := &schemaPlan{Scope: scope, Dir: dir, StoredFields: stored, Added: []string{}, Changed: []schemaChange{}, Removed: []string{}, Skipped: []string{}, VisibilityKept: []string{}}
 	onServer := map[string]bool{}
 	for _, raw := range server {
 		obj, err := decodeSchemaJSON(raw)
@@ -325,6 +329,15 @@ func buildSchemaPlan(scope, dir string, local map[string]json.RawMessage, server
 		lobj, err := decodeSchemaJSON(lraw)
 		if err != nil {
 			return nil, err
+		}
+		// Visibility is access control. A file that does not set it keeps the
+		// server's value: the push does not send the key, and the plan says so
+		// when that value is not the default.
+		if v, ok := lobj["visibility"]; !ok || v == nil {
+			lobj["visibility"] = obj["visibility"]
+			if vis, _ := obj["visibility"].(string); vis != "" && vis != "public" {
+				p.VisibilityKept = append(p.VisibilityKept, name)
+			}
 		}
 		if ch := compareSchema(name, lobj, obj, stored); ch != nil {
 			if !stored {

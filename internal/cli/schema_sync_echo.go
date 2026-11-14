@@ -8,7 +8,10 @@ package cli
 // field's `to` is cut down to type, to and name (serialize_field in
 // api/lib/barkpark/content/schema.ex). A member's own nested fields are not
 // served, so a file pulled from that list and pushed back would replace the
-// stored members with the cut-down ones.
+// stored members with the cut-down ones. The default list also inlines a field
+// of a named object type into a composite that carries a copy of the type's
+// fields and a `namedType` key; pushing that back would store the copy and
+// cut the field loose from its type.
 //
 // fetchSyncSchemas therefore asks for `?definition=stored`, which serves each
 // field list as stored (api/lib/barkpark/content/schema_stored_fields.ex). A
@@ -19,6 +22,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -52,13 +56,15 @@ var schemaScalarMembers = map[string]bool{
 	"slug": true, "url": true, "email": true, "color": true, "image": true, "file": true, "reference": true,
 }
 
-// schemaCutMembers names the array fields of a changed schema that a push
-// could damage when the server sent the served form. A field is named when
+// schemaCutMembers names the fields of a changed schema that a push could
+// damage when the server sent the served form. An array field is named when
 // the server lists a member for it that can have fields of its own (a type
 // outside schemaScalarMembers) and the file's `of` for that field holds
 // nothing beyond type, to and name. The stored member may then have nested
 // fields that neither side can see, and the push would replace it. A file
-// that writes the members out in full is not named.
+// that writes the members out in full is not named. Any field is named when
+// the file carries a `namedType` key in it: that is the served copy of a
+// named object type, not the stored reference to it.
 func schemaCutMembers(local, server map[string]any) []string {
 	localOf := map[string]any{}
 	list, _ := local["fields"].([]any)
@@ -70,6 +76,12 @@ func schemaCutMembers(local, server map[string]any) []string {
 		}
 	}
 	var out []string
+	for _, f := range list {
+		if m, ok := f.(map[string]any); ok && strings.Contains(schemaCanon(m), `"namedType":`) {
+			name, _ := m["name"].(string)
+			out = append(out, name)
+		}
+	}
 	list, _ = server["fields"].([]any)
 	for _, f := range list {
 		m, _ := f.(map[string]any)

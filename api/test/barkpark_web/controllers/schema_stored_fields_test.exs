@@ -57,4 +57,27 @@ defmodule BarkparkWeb.SchemaStoredFieldsTest do
     assert [%{"of" => [%{"type" => "object", "name" => "row"} = member]}] = schema["fields"]
     refute Map.has_key?(member, "fields")
   end
+
+  test "definition=stored serves a named-type field as stored, not the inlined copy",
+       %{conn: conn} do
+    seo = %{
+      "name" => "stored_fields_seo",
+      "title" => "SEO",
+      "kind" => "object",
+      "fields" => [%{"name" => "metaTitle", "type" => "string"}]
+    }
+
+    ref = %{"name" => "seo", "type" => "stored_fields_seo"}
+    widget = %{"name" => "stored_fields_widget", "title" => "Widget", "fields" => [ref]}
+
+    for body <- [seo, widget] do
+      assert conn |> authed() |> post(~p"/v1/schemas/test", Jason.encode!(body)) |> response(201)
+    end
+
+    {_envelope, schema} = listed(conn, ~p"/v1/schemas/test?definition=stored")
+    assert schema["fields"] == [ref]
+
+    {_envelope, schema} = listed(conn, ~p"/v1/schemas/test")
+    assert [%{"namedType" => "stored_fields_seo", "fields" => [_]}] = schema["fields"]
+  end
 end

@@ -9,11 +9,18 @@ defmodule Barkpark.Content.SchemaStoredFields do
   `fields` are not served. A client that pulls a schema, edits it and posts it
   back would therefore replace the stored members with the cut-down ones.
 
-  With `definition=stored` the list carries the field list exactly as the row
-  holds it, and the envelope says so with `definition: "stored"`. A client
-  that sees no such key is talking to a server without this read and has the
-  cut-down form. Everything else in the envelope, `schemaHash` included, is the
-  default list's.
+  The default list also inlines a field of a named object type: the stored
+  `{"name": "seo", "type": "seo"}` is served as a composite carrying a copy of
+  the type's fields. Posting that back would store the copy and cut the field
+  loose from its type.
+
+  With `definition=stored` the list carries each field list as the row holds
+  it, before named types are inlined, and the envelope says so with
+  `definition: "stored"`. A client that sees no such key is talking to a
+  server without this read and has the served form. The set of schemas is the
+  default list's: the rows come from the same query, with the same scope and
+  grant narrowing. Everything else in the envelope, `schemaHash` included, is
+  the default list's.
   """
 
   alias Barkpark.Content
@@ -24,14 +31,17 @@ defmodule Barkpark.Content.SchemaStoredFields do
     envelope = Content.list_schemas_for_sdk(dataset, opts)
 
     if params["definition"] == "stored" do
-      # `list_schemas/2` is memoized per request, so this is the same list the
-      # envelope was built from, in the same order.
-      rows = Content.list_schemas(dataset, opts)
+      stored =
+        dataset
+        |> Content.Schema.list_stored_schemas(opts)
+        |> Map.new(&{&1.name, &1.fields || []})
 
+      # Paired by name. A schema the stored query no longer returns is left
+      # out, so a served copy never stands in for a stored field list.
       schemas =
-        Enum.zip_with(envelope.schemas, rows, fn served, row ->
-          %{served | fields: row.fields || []}
-        end)
+        for %{name: name} = served <- envelope.schemas, is_map_key(stored, name) do
+          %{served | fields: Map.fetch!(stored, name)}
+        end
 
       envelope |> Map.put(:schemas, schemas) |> Map.put(:definition, "stored")
     else

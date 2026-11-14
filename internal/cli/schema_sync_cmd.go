@@ -44,9 +44,9 @@ func printSchemaPullHelp(out *writer) {
 	out.outf("a schema file; pull never names or removes any other file.")
 	out.outf("A schema whose name contains /, \\, .. or a leading dot is skipped and named.")
 	out.outf("")
-	out.outf("Fields are written as the server stores them. An older server can only")
-	out.outf("list the members of an array field without their own fields; pull says so,")
-	out.outf("and push then refuses a change to a schema with such members.")
+	out.outf("Fields are written as the server stores them. An older server cannot send")
+	out.outf("them that way (array members lose their own fields, a named type comes as")
+	out.outf("a copy); pull says so, and push then refuses a change to such a schema.")
 	out.outf("")
 	out.outf("flags:")
 	out.outf("  --prune      also remove the schema files whose schema is not on the server")
@@ -65,8 +65,8 @@ func printSchemaDiffHelp(out *writer) {
 	out.outf("removed (on the server only) and the count of unchanged schemas.")
 	out.outf("")
 	out.outf("Only the keys the server stores are compared. A top-level key the file")
-	out.outf("leaves out counts as its default (visibility public, kind document, an")
-	out.outf("empty list or object), and the keys the server adds to a field (required?,")
+	out.outf("leaves out counts as its default (kind document, an empty list or object;")
+	out.outf("a file without visibility keeps the server's), and the keys the server adds to a field (required?,")
 	out.outf("the of list of an array, the to list of a reference) are worked out the same")
 	out.outf("way for both sides. Every other value must match exactly. Nothing is written.")
 	out.outf("")
@@ -83,7 +83,8 @@ func printSchemaPushHelp(out *writer) {
 	out.outf("Prints the same plan as `bp schema diff`, then applies the added and the")
 	out.outf("changed schemas. Each <name>.json must define the schema <name>. A file")
 	out.outf("that does not parse stops the push before anything is written. A key that")
-	out.outf("a file leaves out is reset to its default on the server.")
+	out.outf("a file leaves out is reset to its default on the server. The exception is")
+	out.outf("visibility: a file that does not set it leaves a private schema private.")
 	out.outf("")
 	out.outf("Schemas that are on the server only are left alone unless you pass --prune.")
 	out.outf("Until they are pruned or pulled, `bp schema diff` keeps exiting 1 for them.")
@@ -158,11 +159,14 @@ func renderSchemaPlan(out *writer, p *schemaPlan, removedNote string) {
 	for _, c := range p.Changed {
 		out.outf("  ~ %s  changed (%s)", c.Name, c.summary())
 		if len(c.CutMembers) > 0 {
-			out.outf("      push would replace the stored members of: %s", strings.Join(c.CutMembers, ", "))
+			out.outf("      push would replace the stored definition of: %s", strings.Join(c.CutMembers, ", "))
 		}
 	}
 	for _, n := range p.Removed {
 		out.outf("  - %s  %s", n, removedNote)
+	}
+	for _, n := range p.VisibilityKept {
+		out.outf("  = %s  stays private: the file does not set visibility", n)
 	}
 	for _, n := range p.Skipped {
 		out.outf("  ! %q  skipped: the name cannot be a file name", n)
@@ -292,8 +296,8 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 
 // schemaServedNote is what pull and diff say on a server that cannot send
 // stored fields.
-const schemaServedNote = "this server lists the members of an array field without their own fields, so these files do not have them. " +
-	"`bp schema push` will not apply a change to a schema with such members until the server is updated."
+const schemaServedNote = "this server cannot send fields as stored: the members of an array field come without their own fields, " +
+	"and a field of a named type comes as a copy of that type. `bp schema push` will not apply a change to a schema with such fields until the server is updated."
 
 // runSchemaDiff is `bp schema diff <dir>`.
 func runSchemaDiff(out *writer, g globals, ctx manifest.Context, tail []string) int {
@@ -379,9 +383,9 @@ func runSchemaPush(out *writer, g globals, ctx manifest.Context, tail []string) 
 		}
 	}
 	if len(cut) > 0 {
-		return useError(out, "conflict", fmt.Sprintf("schema push: this server lists the members of an array field without their own fields, "+
-			"and the file has no more than that, so applying it would replace the stored members of %s. Nothing was written. "+
-			"Update the server so it can send stored fields, or write those members out in full in the file.", strings.Join(cut, "; ")), exitConflict)
+		return useError(out, "conflict", fmt.Sprintf("schema push: this server cannot send fields as stored, and the file has what it served instead, "+
+			"so applying it would replace the stored definition of %s. Nothing was written. "+
+			"Update the server so it can send stored fields, or write those fields out in the file as they should be stored.", strings.Join(cut, "; ")), exitConflict)
 	}
 
 	// Both confirmations come before the first write, so a refusal leaves

@@ -150,6 +150,7 @@ func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		stored := !s.old && r.URL.Query().Get("definition") == "stored"
 		for _, row := range s.schemas {
 			served := syncFakeEcho(row)
+			s.inlineNamedTypes(served)
 			if stored {
 				served["fields"], env["definition"] = row["fields"], "stored"
 			}
@@ -175,6 +176,20 @@ func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"deleted": name, "id": "row-" + name, "dataset": "production"})
 	default:
 		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// inlineNamedTypes does to a served schema what inline_catalog does: a field
+// whose type names an object schema is served as a composite with a copy of
+// that schema's fields and a namedType key. The stored row keeps the reference.
+func (s *syncFakeServer) inlineNamedTypes(served map[string]any) {
+	fields, _ := served["fields"].([]any)
+	for _, f := range fields {
+		m, _ := f.(map[string]any)
+		name, _ := m["type"].(string)
+		if target := s.schemas[name]; target != nil && target["kind"] == "object" {
+			m["type"], m["namedType"], m["fields"] = "composite", name, target["fields"]
+		}
 	}
 }
 
