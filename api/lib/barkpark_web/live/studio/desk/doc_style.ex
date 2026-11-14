@@ -44,6 +44,9 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       :1894-1898, :1952-1956, :2485-2487): one 43 px box on the upload
       fill, the image icon and "Drag or paste image here", then ghost
       Upload and Select. bp-media-picker draws it for `chrome="bar"`.
+      Set, it is TanStack's frame (`.image-preview`, :1899-1907): 270 px
+      on the soft fill, the image contained, a 25 px "…" on the glass
+      fill 6 px in from the top right.
   """
 
   use Phoenix.Component
@@ -58,7 +61,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-danger-text: rgb(189 51 40); --dk-placeholder: rgb(148 153 173);
         --dk-bg-soft: rgb(246 246 248); --dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);
         --dk-btn2-hover-bg: rgb(238 238 241); --dk-btn2-hover-fg: rgb(53 58 77); --dk-btn2-hover-ring: rgb(222 222 228);
-        --dk-upload-fill: rgb(246 246 248); --dk-upload-ring: rgb(219 220 226); --dk-ghost-fg: rgb(56 61 81); --dk-hover-strong: rgb(233 234 238);
+        --dk-upload-fill: rgb(246 246 248); --dk-upload-ring: rgb(219 220 226); --dk-ghost-fg: rgb(56 61 81); --dk-hover-strong: rgb(233 234 238); --dk-glass: rgb(255 255 255 / 0.88);
         --bg: var(--dk-bg); background: var(--bg);
       }
       html[data-theme="dark"] .dk .dk-edit {
@@ -68,7 +71,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-danger-text: rgb(255 123 114); --dk-placeholder: rgb(85 92 117);
         --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);
         --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
-        --dk-upload-fill: rgb(13 14 18); --dk-upload-ring: rgb(37 40 55); --dk-ghost-fg: rgb(189 191 203); --dk-hover-strong: rgb(42 45 63);
+        --dk-upload-fill: rgb(13 14 18); --dk-upload-ring: rgb(37 40 55); --dk-ghost-fg: rgb(189 191 203); --dk-hover-strong: rgb(42 45 63); --dk-glass: rgb(19 20 27 / 0.85);
       }
       .dk .dk-edit > .doc-title-bar { box-sizing: border-box; height: 50px; flex: none; display: flex; align-items: center; padding: 0 20px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
       .dk .dk-edit > .doc-title-bar:has(.view-tabs) { height: 85px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 15px; padding: 2px 12px 0 20px; }
@@ -123,7 +126,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .ref-box .ref-menu { position: absolute; z-index: 10; right: 0; top: 30px; display: flex; flex-direction: column; gap: 4px; }
       .dk .dk-edit .ref-box .ref-menu[hidden] { display: none; }
       .dk .dk-edit bp-media-picker[chrome="bar"] { display: block; container-type: inline-size; }
-      .dk .dk-edit bp-media-picker[data-bar-empty] .bp-mp-actions { display: none; }
+      .dk .dk-edit bp-media-picker:is([data-bar-empty], [data-bar-filled]) .bp-mp-actions { display: none; }
       .dk .dk-edit .bp-mp-bar { box-sizing: border-box; margin: 1px; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 43px; padding: 8px 13px 8px 12px; border-radius: 3px; background: var(--dk-upload-fill); box-shadow: inset 0 0 0 1px var(--dk-upload-ring); font-size: 13px; line-height: 19px; color: var(--dk-muted); }
       .dk .dk-edit .bp-mp-bar:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
       .dk .dk-edit bp-media-picker.bp-mp-drag-over .bp-mp-bar { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
@@ -136,7 +139,13 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         .dk .dk-edit .bp-mp-bar { flex-direction: column; align-items: stretch; gap: 14px; padding: 7px 12px 13px 12px; }
         .dk .dk-edit .bp-mp-bar-actions { display: flex; justify-content: center; }
       }
-      @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .bp-mp-bar button { min-height: 44px; } }
+      .dk .dk-edit .bp-mp-frame { position: relative; display: grid; place-items: center; height: 270px; overflow: hidden; border-radius: 3px; background: var(--dk-bg-soft); }
+      .dk .dk-edit .bp-mp-frame:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
+      .dk .dk-edit .bp-mp-frame .bp-mp-preview-img { display: block; max-width: 100%; max-height: 270px; object-fit: contain; border: 0; border-radius: 0; background: none; }
+      .dk .dk-edit .bp-mp-frame-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
+      .dk .dk-edit .bp-mp-options { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: var(--dk-glass); box-shadow: inset 0 0 0 1px var(--dk-line); color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-edit .bp-mp-options svg { width: 21px; height: 21px; }
+      @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .bp-mp-bar button { min-height: 44px; } .dk .dk-edit .bp-mp-options { width: 44px; height: 44px; } }
     </style>
     """
   end

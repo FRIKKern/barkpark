@@ -39,15 +39,33 @@
 // The desk (field_inputs.ex, id_prefix "") asks for TanStack's empty image:
 // ONE focusable box, the image icon and "Drag or paste image here", then
 // Upload and Select. A paste on the box uploads the image, as a drop does.
-// While the field is empty the host carries `data-bar-empty` so the desk's
-// sheet can drop the actions row; with an image set the bar picker is the
-// default one. Opt-in like ghost: absent → nothing here changes.
+// With an image set it is TanStack's frame (.image-preview): the image,
+// named "Preview of uploaded image", and a "…" button whose menu holds
+// Upload, Select, Download, Copy URL and Remove (the ghost menu's machinery,
+// anchored to the button). The host carries `data-bar-empty` or
+// `data-bar-filled` so the desk's sheet can drop the actions row; a broken
+// image keeps it (Remove lives there). Opt-in like ghost: absent → nothing
+// here changes.
 const BP_MP_SVG = '<svg width="21" height="21" viewBox="0 0 25 25" fill="none" aria-hidden="true">';
 const BP_MP_ICONS = {
   image: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M5.5 15.5L8.79289 12.2071C9.18342 11.8166 9.81658 11.8166 10.2071 12.2071L12.8867 14.8867C13.2386 15.2386 13.7957 15.2782 14.1938 14.9796L15.1192 14.2856C15.3601 14.1049 15.6696 14.0424 15.9618 14.1154L19.5 15M5.5 6.5H19.5V18.5H5.5V6.5ZM15.5 10.5C15.5 11.0523 15.0523 11.5 14.5 11.5C13.9477 11.5 13.5 11.0523 13.5 10.5C13.5 9.94772 13.9477 9.5 14.5 9.5C15.0523 9.5 15.5 9.94772 15.5 10.5Z"/></svg>',
   upload: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M12.5 6V15.5M5.5 15.5H19.5V19.5H5.5V15.5Z"/><path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M7.5 11L12.5 6L17.5 11"/></svg>',
-  search: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M15.0355 15.0355L20 20M16.5 11.5C16.5 14.2614 14.2614 16.5 11.5 16.5C8.73858 16.5 6.5 14.2614 6.5 11.5C6.5 8.73858 8.73858 6.5 11.5 6.5C14.2614 6.5 16.5 8.73858 16.5 11.5Z"/></svg>'
+  search: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M15.0355 15.0355L20 20M16.5 11.5C16.5 14.2614 14.2614 16.5 11.5 16.5C8.73858 16.5 6.5 14.2614 6.5 11.5C6.5 8.73858 8.73858 6.5 11.5 6.5C14.2614 6.5 16.5 8.73858 16.5 11.5Z"/></svg>',
+  ellipsis: BP_MP_SVG + '<path fill="currentColor" d="M6.5 11C7.32843 11 8 11.6716 8 12.5C8 13.3284 7.32843 14 6.5 14C5.67157 14 5 13.3284 5 12.5C5 11.6716 5.67157 11 6.5 11Z"/><path fill="currentColor" d="M12.5 11C13.3284 11 14 11.6716 14 12.5C14 13.3284 13.3284 14 12.5 14C11.6716 14 11 13.3284 11 12.5C11 11.6716 11.6716 11 12.5 11Z"/><path fill="currentColor" d="M18.5 11C19.3284 11 20 11.6716 20 12.5C20 13.3284 19.3284 14 18.5 14C17.6716 14 17 13.3284 17 12.5C17 11.6716 17.6716 11 18.5 11Z"/></svg>'
 };
+
+// Clicks a made-up link: `download` saves, `target` opens a tab. Every link
+// carries rel=noopener so an opened page cannot reach back into the Studio.
+function bpMediaPickerClickLink(href, opts) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  if (opts && typeof opts.download === "string") a.setAttribute("download", opts.download);
+  if (opts && opts.target) a.target = opts.target;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 // The image a paste carries: a pasted file first, then a file item (a
 // screenshot arrives as an item). Anything that is not an image is no image.
@@ -85,12 +103,19 @@ function bpMediaPickerStrings(el) {
   }
 }
 
-function bpMediaPickerMenuItems({ hasValue, canUpload, busy, strings } = {}) {
+// chrome="bar" (`variant: "bar"`) is TanStack's "…" menu on a set image
+// (ImageInput.tsx): Upload, Select, Download, Copy URL, Remove.
+function bpMediaPickerMenuItems({ hasValue, canUpload, busy, strings, variant } = {}) {
   const t = (k, fallback) => (strings && typeof strings[k] === "string" ? strings[k] : fallback);
   const items = [];
-  if (canUpload !== false) items.push({ id: "upload", label: t("upload", "Upload file") });
-  items.push({ id: "browse", label: t("browse", "Browse library") });
-  if (hasValue) items.push({ id: "remove", label: t("remove", "Remove image"), destructive: true });
+  const bar = variant === "bar";
+  if (canUpload !== false) items.push({ id: "upload", label: bar ? t("upload_button", "Upload") : t("upload", "Upload file") });
+  items.push({ id: "browse", label: bar ? t("select", "Select") : t("browse", "Browse library") });
+  if (bar && hasValue) {
+    items.push({ id: "download", label: t("download", "Download") });
+    items.push({ id: "copy_url", label: t("copy_url", "Copy URL") });
+  }
+  if (hasValue) items.push({ id: "remove", label: bar ? t("remove_short", "Remove") : t("remove", "Remove image"), destructive: true });
   if (busy) for (const item of items) item.disabled = true;
   return items;
 }
@@ -429,7 +454,36 @@ class BpMediaPicker extends HTMLElement {
 
   disconnectedCallback() {
     this._mounted = false;
+    const hadFocus = this._menuHasFocus();
     this._closeContextMenu();
+    // A remote save re-mounts the field (its wrapper's id changes), so the
+    // menu goes with this element. If focus was in it, land it on the new
+    // picker's "…" instead of <body>.
+    if (hadFocus && this._bar && this.id) {
+      const id = this.id;
+      setTimeout(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        const next = Array.prototype.find.call(document.querySelectorAll("bp-media-picker"), (p) => p.id === id && p.isConnected);
+        if (next && typeof next._focusAfterMenu === "function") next._focusAfterMenu();
+      }, 0);
+    }
+  }
+
+  // Focus is in the open menu, or on the "…" that opened it.
+  _menuHasFocus() {
+    const a = document.activeElement;
+    return !!(a && ((this._menuEl && this._menuEl.contains(a)) || (this._menuAnchor && this._menuAnchor.contains(a))));
+  }
+
+  // Where focus goes when the menu is gone under it: the "…", else the
+  // field's own focusable box.
+  _focusAfterMenu() {
+    // In this order (a selector list would answer in document order, and the
+    // frame comes before its own "…").
+    for (const sel of [".bp-mp-options", ".bp-mp-frame", ".bp-mp-bar", ".bp-mp-empty"]) {
+      const t = this.querySelector(sel);
+      if (t && typeof t.focus === "function") return t.focus();
+    }
   }
 
   // Ghost chrome (pd-doctrine rule 6): drop the visible actions row; actions
@@ -615,6 +669,13 @@ class BpMediaPicker extends HTMLElement {
         if (!this._openBrowser()) this._fileInput.click();
         return;
       }
+      // The frame's "…": a toggle for the image's menu, under the button.
+      const options = e.target.closest(".bp-mp-options");
+      if (options) {
+        if (this._menuAnchor === options) this._closeContextMenu(true);
+        else this._openContextMenu(0, 0, options);
+        return;
+      }
       // Gyldendal parity E1: with `hotspot`, a click on the image IS the
       // focal-point gesture (Sanity's hotspot without the crop rectangle).
       if (this._wantsHotspot()) {
@@ -677,11 +738,14 @@ class BpMediaPicker extends HTMLElement {
         if (f) this._takeFile(f);
       });
       // The bar's "or paste": an image pasted while focus is in the EMPTY bar
-      // uploads, as a drop does. A filled field says nothing about paste, so a
-      // paste there does nothing, as in the old Studio. Text pastes (the alt
-      // input) pass through.
+      // uploads, as a drop does. A set image takes a paste only on its frame,
+      // whose name says so ("Drop or paste an image to replace it"); anywhere
+      // else in a filled field (the "…", its menu) a paste does nothing, as in
+      // the old Studio. Text pastes (the alt input) pass through.
       this.addEventListener("paste", (e) => {
-        if (!this._isBar() || this._busy || !this.hasAttribute("data-bar-empty")) return;
+        if (!this._isBar() || this._busy) return;
+        const onFrame = this.hasAttribute("data-bar-filled") && e.target && e.target.classList && e.target.classList.contains("bp-mp-frame");
+        if (!this.hasAttribute("data-bar-empty") && !onFrame) return;
         const f = bpMediaPickerPastedImage(e.clipboardData);
         if (!f) return;
         e.preventDefault();
@@ -740,7 +804,9 @@ class BpMediaPicker extends HTMLElement {
   // Studio `.btn` styling; container styling is inlined so the menu is fully
   // self-contained (it appends to <body>, outside the light-DOM WC). Dismisses
   // on Escape, click-away, or after an action fires.
-  _openContextMenu(x, y) {
+  // `anchor` (chrome="bar"'s "…" button): the menu opens under it, right
+  // edges aligned, the button says it is expanded, and focus returns to it.
+  _openContextMenu(x, y, anchor) {
     this._closeContextMenu();
 
     const hasValue = !!(
@@ -750,15 +816,17 @@ class BpMediaPicker extends HTMLElement {
     );
     // busy mirrors default chrome's _setBusy: items stay VISIBLE but disabled
     // while an upload is in flight — never a menu item that silently no-ops.
-    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy, strings: this._strings });
+    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy, strings: this._strings, variant: this._bar ? "bar" : undefined });
 
     // Focus-restore anchor: whatever was focused before the menu opened (the
     // empty-state card, usually) so Escape lands the keyboard user back where
     // they were instead of dropping focus to <body>.
-    this._menuPrevFocus =
-      document.activeElement && document.activeElement !== document.body
+    this._menuPrevFocus = anchor ||
+      (document.activeElement && document.activeElement !== document.body
         ? document.activeElement
-        : this.querySelector(".bp-mp-empty");
+        : this.querySelector(".bp-mp-empty"));
+    this._menuAnchor = anchor || null;
+    if (anchor) anchor.setAttribute("aria-expanded", "true");
 
     const menu = document.createElement("div");
     menu.className = "bp-mp-menu";
@@ -797,6 +865,12 @@ class BpMediaPicker extends HTMLElement {
     document.body.appendChild(menu);
     this._menuEl = menu;
 
+    if (anchor && typeof anchor.getBoundingClientRect === "function" && typeof menu.getBoundingClientRect === "function") {
+      const a = anchor.getBoundingClientRect();
+      menu.style.left = Math.max(0, a.right - menu.getBoundingClientRect().width) + "px";
+      menu.style.top = a.bottom + 4 + "px";
+    }
+
     // Clamp inside the viewport so a right-click near an edge stays reachable.
     if (typeof menu.getBoundingClientRect === "function" && typeof window !== "undefined") {
       const r = menu.getBoundingClientRect();
@@ -827,6 +901,11 @@ class BpMediaPicker extends HTMLElement {
         return;
       }
       if (e.key === "Tab") {
+        // Focus goes back where the menu opened first, so the browser's Tab
+        // moves on from there (the menu lives at the end of <body>, so a Tab
+        // from inside it landed on the page's first stop, the skip link).
+        const back = this._menuPrevFocus;
+        if (back && typeof back.focus === "function" && back.isConnected !== false) back.focus();
         this._closeContextMenu();
         return;
       }
@@ -843,7 +922,9 @@ class BpMediaPicker extends HTMLElement {
         if (typeof its[next].focus === "function") its[next].focus();
       }
     };
+    // A press on the "…" button itself is left to its click, which toggles.
     this._menuAwayHandler = (e) => {
+      if (this._menuAnchor && this._menuAnchor.contains(e.target)) return;
       if (this._menuEl && !this._menuEl.contains(e.target)) this._closeContextMenu();
     };
     // A fixed-position menu must not drift away from its field — any scroll
@@ -888,6 +969,8 @@ class BpMediaPicker extends HTMLElement {
       }
       this._menuViewportHandler = null;
     }
+    if (this._menuAnchor) this._menuAnchor.setAttribute("aria-expanded", "false");
+    this._menuAnchor = null;
     const prev = this._menuPrevFocus;
     this._menuPrevFocus = null;
     if (restoreFocus && prev && typeof prev.focus === "function" && prev.isConnected !== false) {
@@ -897,8 +980,61 @@ class BpMediaPicker extends HTMLElement {
 
   _runMenuAction(id) {
     if (id === "upload") this.openFileDialog();
-    else if (id === "browse") this.openBrowser();
-    else if (id === "remove") this._removeAndFocusEmpty();
+    else if (id === "browse") {
+      if (!this.openBrowser() && this._bar) this.openFileDialog();
+    } else if (id === "remove") this._removeAndFocusEmpty();
+    else if (id === "download") this._downloadImage();
+    else if (id === "copy_url") this._copyImageUrl();
+  }
+
+  // The image's own address, absolute (Copy URL hands it to another app).
+  _imageUrl() {
+    const url = this._meta.url || (this._isReferenceMode() ? "" : bpParseMediaValue(this._value).url);
+    if (!url) return "";
+    try {
+      return new URL(url, document.baseURI).href;
+    } catch (_e) {
+      return url;
+    }
+  }
+
+  // Download. A browser honours `download` only on the page's own origin; on
+  // another (a media CDN, an S3 public base, an imported image) a plain
+  // <a download> click NAVIGATES this tab to the image and the editor is
+  // gone. So another origin's image is fetched and saved from a blob; if CORS
+  // refuses, it opens in a NEW tab. Never in this one.
+  async _downloadImage() {
+    const href = this._imageUrl();
+    if (!href) return;
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(href).origin === new URL(document.baseURI).origin;
+    } catch (_e) {
+      sameOrigin = false;
+    }
+    if (sameOrigin) return bpMediaPickerClickLink(href, { download: "" });
+    let name = "image";
+    try {
+      name = decodeURIComponent(new URL(href).pathname.split("/").pop() || "") || "image";
+    } catch (_e) {
+      /* keep "image" */
+    }
+    try {
+      const r = await fetch(href, { mode: "cors", credentials: "omit" });
+      if (!r.ok) throw new Error("download " + r.status);
+      const blob = await r.blob();
+      const objUrl = URL.createObjectURL(blob);
+      bpMediaPickerClickLink(objUrl, { download: name });
+      setTimeout(() => URL.revokeObjectURL(objUrl), 0);
+    } catch (_e) {
+      bpMediaPickerClickLink(href, { target: "_blank" });
+    }
+  }
+
+  _copyImageUrl() {
+    const href = this._imageUrl();
+    const clip = typeof navigator !== "undefined" && navigator.clipboard;
+    if (href && clip && typeof clip.writeText === "function") clip.writeText(href).catch(() => {});
   }
 
   // Keyboard continuity after the destructive action: the field just went
@@ -934,7 +1070,21 @@ class BpMediaPicker extends HTMLElement {
 
   _renderPreview() {
     if (!this._previewEl) return;
-    if (this._bar) this.removeAttribute("data-bar-empty");
+    // chrome="bar": the menu's "…" is about to be redrawn, so close the menu,
+    // and if focus was in it, put it on the new "…" rather than let it drop
+    // to <body>. (The old Studio's menu has no anchor and stays as it was.)
+    const open = this._bar && this._menuEl;
+    const hadFocus = open ? this._menuHasFocus() : false;
+    if (open) this._closeContextMenu();
+    this._renderPreviewBody();
+    if (hadFocus) this._focusAfterMenu();
+  }
+
+  _renderPreviewBody() {
+    if (this._bar) {
+      this.removeAttribute("data-bar-empty");
+      this.removeAttribute("data-bar-filled");
+    }
     // In reference mode the value is an asset ID, never a URL: falling back to
     // parsing it painted <img src="a97bf457-…">, whose late error event then
     // replaced the resolved preview with "Image unavailable".
@@ -951,11 +1101,24 @@ class BpMediaPicker extends HTMLElement {
     if (url) {
       const safeUrl = url.replace(/"/g, "&quot;");
       const hotspot = this._wantsHotspot();
-      const safeAlt = (this._meta.alt || "").replace(/"/g, "&quot;");
-      this._previewEl.innerHTML =
+      // chrome="bar" names the preview as TanStack does; the alt the author
+      // types is the image's, for readers, not this editor's preview.
+      const safeAlt = this._bar
+        ? this._attr(this._t("preview_alt", "Preview of uploaded image"))
+        : (this._meta.alt || "").replace(/"/g, "&quot;");
+      const inner =
         (hotspot ? '<div class="bp-mp-hotspot" title="' + this._attr(this._t("focal", "Click the image to set its focal point")) + '">' : "") +
         '<img class="bp-mp-preview-img" src="' + safeUrl + '" alt="' + safeAlt + '" />' +
         (hotspot ? '<span class="bp-mp-focal" aria-hidden="true" hidden></span></div>' : "");
+      // chrome="bar", set: TanStack's frame (.image-preview), focusable so a
+      // paste replaces the image, its "…" menu in the top right.
+      this._previewEl.innerHTML = this._bar
+        ? '<div class="bp-mp-frame" role="group" tabindex="0" aria-label="' +
+          this._attr(this._t("replace_label", "Drop or paste an image to replace it")) + '">' + inner +
+          '<div class="bp-mp-frame-actions"><button type="button" class="bp-mp-options" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+          this._attr(this._t("options_menu", "Open image options menu")) + '">' + BP_MP_ICONS.ellipsis + "</button></div></div>"
+        : inner;
+      if (this._bar) this.setAttribute("data-bar-filled", "");
       if (hotspot) this._renderFocalMarker();
       // A dead asset URL must not collapse to an invisible sliver — swap in
       // an explicit broken-state card (Remove stays visible to clear it).
@@ -963,6 +1126,8 @@ class BpMediaPicker extends HTMLElement {
       img.addEventListener("error", () => {
         // A stale image's error must not overwrite a newer preview.
         if (!img.isConnected) return;
+        // The broken card needs the actions row back (Remove lives there).
+        if (this._bar) this.removeAttribute("data-bar-filled");
         this._previewEl.innerHTML =
           '<div class="bp-mp-empty bp-mp-broken" role="button" tabindex="0" aria-label="' +
           this._attr(this._t("replace", "Replace image")) +

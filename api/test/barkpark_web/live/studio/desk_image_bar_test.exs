@@ -100,13 +100,39 @@ defmodule BarkparkWeb.Studio.DeskImageBarTest do
     assert nb["upload_button"] == "Last opp"
     assert nb["select"] == "Velg"
     assert nb["bar_label"] == "Slipp, lim inn eller last opp et bilde"
+
+    # The set image's frame and its "…" menu (task-19de214155da3f2a).
+    assert Map.take(nb, ~w(replace_label preview_alt options_menu download copy_url remove_short)) ==
+             %{
+               "replace_label" => "Slipp eller lim inn et bilde for å erstatte det",
+               "preview_alt" => "Forhåndsvisning av opplastet bilde",
+               "options_menu" => "Åpne bildeinnstillingsmeny",
+               "download" => "Last ned",
+               "copy_url" => "Kopier URL",
+               "remove_short" => "Fjern"
+             }
+  end
+
+  test "a set image's frame is TanStack's: 270 px on the soft fill, a 25 px … on the glass, 6 px in" do
+    css = rendered_to_string(BarkparkWeb.Studio.Desk.DocStyle.sheet(%{}))
+
+    assert css =~
+             ".dk .dk-edit .bp-mp-frame { position: relative; display: grid; place-items: center; height: 270px; overflow: hidden; border-radius: 3px; background: var(--dk-bg-soft); }"
+
+    assert css =~ ".dk .dk-edit .bp-mp-frame-actions { position: absolute; top: 6px; right: 6px;"
+
+    assert css =~
+             "width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: var(--dk-glass);"
+
+    assert css =~ "--dk-glass: rgb(255 255 255 / 0.88);"
+    assert css =~ "--dk-glass: rgb(19 20 27 / 0.85);"
   end
 
   test "the bar's look is TanStack's: 43 px on the upload fill, ghost buttons, stacked under 440 px" do
     css = rendered_to_string(BarkparkWeb.Studio.Desk.DocStyle.sheet(%{}))
 
     assert css =~
-             ~s(.dk .dk-edit bp-media-picker[data-bar-empty] .bp-mp-actions { display: none; })
+             ~s|.dk .dk-edit bp-media-picker:is([data-bar-empty], [data-bar-filled]) .bp-mp-actions { display: none; }|
 
     assert css =~
              "min-height: 43px; padding: 8px 13px 8px 12px; border-radius: 3px; background: var(--dk-upload-fill);"
