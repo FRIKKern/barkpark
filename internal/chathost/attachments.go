@@ -143,7 +143,7 @@ func (r AttachmentRef) validate() *AttachmentError {
 	}
 	if isFileMediaType(r.MediaType) {
 		if !validAttachmentName(r.Name) {
-			return refuse("the file name is empty, over %d bytes, a dot name, or holds a slash, a backslash, or a control or format character", MaxAttachmentNameBytes)
+			return refuse("the file name is empty, over %d bytes, a dot name, or holds a slash, a backslash, or a control, format or line or paragraph separator character", MaxAttachmentNameBytes)
 		}
 	} else if r.Name != "" {
 		return refuse("a picture reference carries no name")
@@ -154,9 +154,10 @@ func (r AttachmentRef) validate() *AttachmentError {
 // validAttachmentName is the server's rule for a file's name
 // (Barkpark.StudioChat.AttachmentName.valid?/1). It is refused, never
 // cleaned, when it is empty, over 255 bytes, not UTF-8, "." or "..", holds a
-// slash or a backslash, or holds a Unicode control (Cc) or format (Cf)
-// character, which covers newlines, NUL, DEL, zero-width characters and bidi
-// overrides. The name is shown to the provider quoted and is never part of a
+// slash or a backslash, or holds a Unicode control (Cc), format (Cf), line
+// separator (Zl) or paragraph separator (Zp) character. That covers
+// newlines, NUL, DEL, zero-width characters, bidi overrides, U+2028 and
+// U+2029. The name is shown to the provider quoted and is never part of a
 // path.
 func validAttachmentName(name string) bool {
 	if name == "" || len(name) > MaxAttachmentNameBytes || !utf8.ValidString(name) ||
@@ -164,7 +165,7 @@ func validAttachmentName(name string) bool {
 		return false
 	}
 	for _, r := range name {
-		if unicode.In(r, unicode.Cc, unicode.Cf) {
+		if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
 			return false
 		}
 	}

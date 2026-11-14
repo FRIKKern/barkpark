@@ -272,9 +272,61 @@ func writeReplacing(session *os.Root, name string, data []byte) error {
 	return nil
 }
 
+// TouchTurnFiles marks the session folder of cwd as used now. The sweep goes
+// by the folder's mtime, so a session whose turns keep coming keeps the files
+// its earlier turns named, even when no new file comes. No folder means
+// nothing to do; a link, or a folder path that is not a real folder, is
+// refused and left alone.
+func TouchTurnFiles(approvedRoots []string, cwd, sessionID string, now time.Time) error {
+	if !isSessionUUID(sessionID) {
+		return refuseFile("the session id is not a lowercase UUID")
+	}
+	base, err := ResolveApprovedPath(approvedRoots, cwd)
+	if err != nil {
+		return failFile("the working folder is not approved", err)
+	}
+	project, err := os.OpenRoot(base)
+	if err != nil {
+		return failFile("open the working folder", err)
+	}
+	defer project.Close()
+
+	sessionRel := filepath.Join(turnFilesFolder, sessionID)
+	var checked fs.FileInfo
+	for _, rel := range []string{".barkpark", turnFilesFolder, sessionRel} {
+		info, err := project.Lstat(rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return failFile("read "+rel, err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return refuseFile("%s is a link", rel)
+		}
+		if !info.IsDir() {
+			return refuseFile("%s is not a folder", rel)
+		}
+		checked = info
+	}
+	session, err := project.OpenRoot(sessionRel)
+	if err != nil {
+		return failFile("open the session folder", err)
+	}
+	defer session.Close()
+	if opened, err := session.Stat("."); err != nil || !os.SameFile(checked, opened) {
+		return refuseFile("the session folder changed while it was opened, through a link")
+	}
+	if err := session.Chtimes(".", now, now); err != nil {
+		return failFile("mark the session folder as used", err)
+	}
+	return nil
+}
+
 // SweepTurnFiles removes the session folders under cwd's attachments folder
 // that were last changed more than TurnFileMaxAge before now, except
-// keepSessionID's. No command tells a host that a session was deleted, so a
+// keepSessionID's. A folder's mtime moves when a file is written into it and
+// when a turn of its session runs (TouchTurnFiles). No command tells a host that a session was deleted, so a
 // write sweeps. It removes only real folders whose name is a lowercase UUID,
 // never follows a link, and removes nothing outside the attachments folder.
 // No attachments folder means nothing to do; a linked one is refused.

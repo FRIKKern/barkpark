@@ -98,6 +98,7 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	case "claude":
 		// Pictures ride the turn as image blocks. Files are written under the
 		// session folder first and named in the turn (turn_files.go).
+		h.touchTurnFiles(resolved, sessionID)
 		var images []Attachment
 		var files []TurnFile
 		if len(refs) > 0 {

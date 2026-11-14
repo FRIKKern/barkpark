@@ -465,6 +465,55 @@ func TestSweepRefusesALinkedAttachmentsFolder(t *testing.T) {
 	}
 }
 
+// A session folder idle for more than 7 days that a turn touches again is
+// kept by the next sweep, with the files its earlier turns named.
+func TestTouchTurnFilesKeepsAResumedSessionFromTheSweep(t *testing.T) {
+	roots, cwd, _ := turnFileWorld(t)
+	data := []byte("an earlier turn's file")
+	file, err := WriteTurnFile(roots, cwd, testSessionID, fileRef(data, "text/plain", "a.txt"), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	stale := now.Add(-8 * 24 * time.Hour)
+	for _, path := range []string{file.Path, sessionFolder(cwd)} {
+		if err := os.Chtimes(path, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := TouchTurnFiles(roots, cwd, testSessionID, now); err != nil {
+		t.Fatal(err)
+	}
+	const otherID = "77777777-7777-4777-8777-777777777777"
+	if removed, err := SweepTurnFiles(roots, cwd, otherID, now); err != nil || removed != 0 {
+		t.Fatalf("removed=%d err=%v; want the touched session kept", removed, err)
+	}
+	wantFile(t, file.Path, data, 0o600)
+}
+
+func TestTouchTurnFilesCreatesNothingAndNeverFollowsALink(t *testing.T) {
+	roots, cwd, outside := turnFileWorld(t)
+	if err := TouchTurnFiles(roots, cwd, testSessionID, time.Now()); err != nil {
+		t.Fatalf("no folder: %v", err)
+	}
+	if tree := listTree(t, cwd); len(tree) != 0 {
+		t.Fatalf("touch created %v", tree)
+	}
+
+	stale := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(outside, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(cwd, ".barkpark", "attachments"))
+	mustSymlink(t, outside, sessionFolder(cwd))
+	err := TouchTurnFiles(roots, cwd, testSessionID, time.Now())
+	wantTurnFileRefused(t, err, "link")
+	if info, _ := os.Stat(outside); !info.ModTime().Equal(stale) {
+		t.Fatalf("the link's target was touched: mtime %v", info.ModTime())
+	}
+	wantTurnFileRefused(t, TouchTurnFiles(roots, cwd, "../x", time.Now()), "session id")
+}
+
 func TestSweepWithNoAttachmentsFolderDoesNothing(t *testing.T) {
 	roots, cwd, _ := turnFileWorld(t)
 	removed, err := SweepTurnFiles(roots, cwd, testSessionID, time.Now())

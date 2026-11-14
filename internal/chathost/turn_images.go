@@ -122,11 +122,24 @@ func (h *LocalHandler) saveTurnFiles(cwd, sessionID string, refs []AttachmentRef
 	return images, written, nil
 }
 
+// touchTurnFiles marks the session's file folder as used by this turn, so the
+// 7-day sweep keeps the files an earlier turn named while the session is in
+// use. It runs for every claude turn, with or without files; a session id
+// that is not a UUID has no folder. A failure is logged and the turn goes on.
+func (h *LocalHandler) touchTurnFiles(cwd, sessionID string) {
+	if !isSessionUUID(sessionID) {
+		return
+	}
+	if err := TouchTurnFiles(h.ApprovedRoots, cwd, sessionID, time.Now()); err != nil {
+		h.logf("the chat files of this session were not marked as used: %v", err)
+	}
+}
+
 // fileLine is the sentence that tells claude where a file is. The name and
-// the path are quoted with strconv.Quote, so a quote, a line or paragraph
-// separator or any other character that is not printable cannot end the
-// sentence or start a new line; the server's name rule already refuses
-// control and format characters.
+// the path are quoted with strconv.Quote, so a quote or any character that is
+// not printable cannot end the sentence or start a new line. The name rule
+// (validAttachmentName) already refuses control, format and line or
+// paragraph separator characters; the path is the host's own.
 func fileLine(file TurnFile) string {
 	return fmt.Sprintf("Attached file %s (%d bytes, %s) saved at %s",
 		strconv.Quote(file.Name), file.ByteSize, file.MediaType, strconv.Quote(file.Path))

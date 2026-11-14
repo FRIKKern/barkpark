@@ -53,6 +53,8 @@ func TestParseAttachmentRefsRefusesAFileWithoutAName(t *testing.T) {
 		"right-to-left":     file(`,"name":"x` + string(rune(0x202E)) + `txt.exe"`),
 		"zero-width joiner": file(`,"name":"a` + string(rune(0x200D)) + `.txt"`),
 		"byte order mark":   file(`,"name":"` + string(rune(0xFEFF)) + `a.txt"`),
+		"line separator":    file(`,"name":"a` + string(rune(0x2028)) + `.txt"`),
+		"para separator":    file(`,"name":"a` + string(rune(0x2029)) + `.txt"`),
 		"slash":             file(`,"name":"../../x.sh"`),
 		"backslash":         file(`,"name":"..\\x.sh"`),
 		"dot":               file(`,"name":"."`),
