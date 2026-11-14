@@ -28,6 +28,12 @@ defmodule Barkpark.StudioChat.FleetHubTitleTest do
     def run(_binary, _args), do: {:ok, ~s({"title":"Fleet title"})}
   end
 
+  defmodule HostAllowed do
+    # Made-up session ids with no row; the host rule itself is pinned by
+    # titles_host_gate_test.exs.
+    def session_may_host_exec?(_session_id), do: true
+  end
+
   defmodule AcceptingStore do
     def maybe_set_ai_title(_session_id, title), do: {:ok, title}
   end
@@ -40,9 +46,15 @@ defmodule Barkpark.StudioChat.FleetHubTitleTest do
     Application.put_env(:barkpark, :studio_chat_title_http_adapter, FailingAdapter)
     Application.put_env(:barkpark, :studio_chat_title_cli, FakeCli)
     Application.put_env(:barkpark, :studio_chat_store, AcceptingStore)
+    Application.put_env(:barkpark, :studio_chat_title_host_rule, HostAllowed)
 
     on_exit(fn ->
-      for k <- [:studio_chat_title_http_adapter, :studio_chat_title_cli, :studio_chat_store] do
+      for k <- [
+            :studio_chat_title_http_adapter,
+            :studio_chat_title_cli,
+            :studio_chat_store,
+            :studio_chat_title_host_rule
+          ] do
         Application.delete_env(:barkpark, k)
       end
     end)

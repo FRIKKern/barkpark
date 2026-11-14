@@ -13,8 +13,10 @@ defmodule Barkpark.StudioChat.Titles do
        Haiku call with structured output (`output_config.format` json_schema
        `{title}`) and `effort: "low"`, mirroring `Barkpark.Tasks.Judge`.
     2. **Claude CLI one-shot** — when no key (or the API call failed) but the
-       host has the `claude` binary. `--no-session-persistence` keeps the
-       throwaway call out of `~/.claude/projects` (D1 hygiene); the call is
+       host has the `claude` binary, and ONLY for a session whose owner may
+       run on the instance host (`HostExecution.session_may_host_exec?/1`).
+       `--no-session-persistence` keeps the throwaway call out of
+       `~/.claude/projects` (D1 hygiene); the call is
        time-boxed with `Task.yield/2` + `Task.shutdown(_, :brutal_kill)` because
        `System.cmd` has no timeout, and the dev host's cmux-wrapped `claude` can
        return empty stdout under concurrency — so fallback-on-empty is not
@@ -27,6 +29,8 @@ defmodule Barkpark.StudioChat.Titles do
     * `:studio_chat_title_http_adapter` — the Anthropic HTTP call (default
       `ReqAdapter`), mirroring the judge's adapter seam.
     * `:studio_chat_title_cli` — the CLI runner (default `CliRunner`).
+    * `:studio_chat_title_host_rule` — the module `kick_title/2` asks
+      `session_may_host_exec?/1` (default `Barkpark.StudioChat.HostExecution`).
     * `:studio_chat_store` — the persistence layer whose `maybe_set_ai_title/2`
       holds the clobber guard (default `Barkpark.StudioChat`, delivered by the
       store slice).
@@ -159,20 +163,23 @@ defmodule Barkpark.StudioChat.Titles do
   # ── Strategy ─────────────────────────────────────────────────────────────
 
   @doc """
-  Produce a title for `first_message`, trying the API then the CLI then the
-  derived fallback. Never raises; always returns a non-empty binary.
+  Produce a title for `first_message`, trying the API then the CLI (a process
+  ON THE INSTANCE HOST; `host_cli: false` skips it) then the derived fallback.
+  Never raises; always returns a non-empty binary.
   """
-  @spec generate(String.t()) :: String.t()
-  def generate(first_message) when is_binary(first_message) do
+  @spec generate(term(), keyword()) :: String.t()
+  def generate(first_message, opts \\ [])
+
+  def generate(first_message, opts) when is_binary(first_message) do
     with :error <- try_api(first_message),
-         :error <- try_cli(first_message) do
+         :error <- try_host_cli(first_message, Keyword.get(opts, :host_cli, true)) do
       derived_title(first_message)
     else
       title when is_binary(title) -> title
     end
   end
 
-  def generate(_), do: @default_title
+  def generate(_, _opts), do: @default_title
 
   @doc """
   Fire-and-forget: generate a title for `session_id` off the request path (a
@@ -193,7 +200,7 @@ defmodule Barkpark.StudioChat.Titles do
   @spec kick_title(term(), String.t()) :: DynamicSupervisor.on_start_child()
   def kick_title(session_id, first_message) when is_binary(first_message) do
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-      title = generate(first_message)
+      title = generate(first_message, host_cli: host_cli_allowed?(session_id))
 
       try do
         # Accepted-write shapes: the canonical store returns {:ok, %Session{}}
@@ -271,6 +278,17 @@ defmodule Barkpark.StudioChat.Titles do
   rescue
     _ -> :error
   end
+
+  # No acting principal here: the host rule is asked of the SESSION's owner
+  # workspace. A failed owner read refuses (task-dfe28132e8d842ad).
+  defp host_cli_allowed?(session_id) do
+    host_rule().session_may_host_exec?(session_id) == true
+  rescue
+    _ -> false
+  end
+
+  defp try_host_cli(first_message, true), do: try_cli(first_message)
+  defp try_host_cli(_first_message, _refused), do: :error
 
   # Time-boxed CLI one-shot; :error on unavailable binary, timeout, crash,
   # empty stdout, or unparseable output.
@@ -413,6 +431,14 @@ defmodule Barkpark.StudioChat.Titles do
 
   defp cli_runner,
     do: Application.get_env(:barkpark, :studio_chat_title_cli, __MODULE__.CliRunner)
+
+  defp host_rule do
+    Application.get_env(
+      :barkpark,
+      :studio_chat_title_host_rule,
+      Barkpark.StudioChat.HostExecution
+    )
+  end
 
   defp store, do: Application.get_env(:barkpark, :studio_chat_store, Barkpark.StudioChat)
 
