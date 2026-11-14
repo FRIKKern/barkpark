@@ -287,7 +287,7 @@ func TestSendTurnBadImageReferenceNeverStartsClaude(t *testing.T) {
 	bad := AttachmentRef{ID: "../../etc/passwd", MediaType: "image/png", ByteSize: 4}
 	err := handler.Handle(context.Background(), leasedTurn(t, "claude", handler.ApprovedRoots[0], "look", bad),
 		func(map[string]any) error { return nil })
-	if err == nil || !strings.Contains(err.Error(), "refused the images of this turn") {
+	if err == nil || !strings.Contains(err.Error(), "refused the attachments of this turn") {
 		t.Fatalf("err=%v; want the reference refused", err)
 	}
 	if started() || requests.Load() != 0 {
