@@ -8,7 +8,7 @@
       "operations": ["send_turn", "steer", "interrupt", "answer_approval", "close"],
       "task_hands": true,
       "version": "2.1.0 (Claude Code)",
-      "attachments": ["image/png", "image/jpeg", "image/gif", "image/webp"]
+      "attachments": ["image/png", "image/jpeg", "image/gif", "image/webp", "text/plain", "application/pdf"]
     },
     "codex": {
       "installed": true,

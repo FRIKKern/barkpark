@@ -57,8 +57,9 @@ func TestCapabilitiesShapeMatchesServerFixture(t *testing.T) {
 		if !reflect.DeepEqual(got["operations"], want["operations"]) {
 			t.Errorf("%s operations = %#v, server fixture has %#v", name, got["operations"], want["operations"])
 		}
-		// The image types are a fixed list per provider: claude's four, in the
-		// fixture's order, and no key at all for codex.
+		// The attachment types are a fixed list per provider: claude's four
+		// pictures and two file types, in the fixture's order, and no key at
+		// all for codex.
 		if !reflect.DeepEqual(got["attachments"], want["attachments"]) {
 			t.Errorf("%s attachments = %#v, server fixture has %#v", name, got["attachments"], want["attachments"])
 		}
@@ -80,11 +81,12 @@ func TestCapabilitiesShapeMatchesServerFixture(t *testing.T) {
 	}
 }
 
-// Needs no fixture: claude lists the four image types, codex has no such key.
+// Needs no fixture: claude lists the four picture types and the two file
+// types, codex has no such key.
 func TestOnlyClaudeAdvertisesAttachments(t *testing.T) {
 	providers, _ := capabilities()["providers"].(map[string]any)
 	claude, _ := providers["claude"].(map[string]any)
-	want := []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+	want := []string{"image/png", "image/jpeg", "image/gif", "image/webp", "text/plain", "application/pdf"}
 	if !reflect.DeepEqual(claude["attachments"], want) {
 		t.Errorf("claude attachments = %#v, want %#v", claude["attachments"], want)
 	}

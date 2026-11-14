@@ -35,8 +35,9 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
        )
 
   @fixture Path.expand("../../support/fixtures/chat_host_go_capabilities.json", __DIR__)
-  # The same map plus `providers.claude.attachments` (the four image types): a
-  # host that says it can take image references (Paper chat-host-attachments-plan).
+  # The same map plus `providers.claude.attachments` (the four image types,
+  # text/plain and application/pdf): a host that says it can take picture and
+  # file references (Papers chat-host-attachments-plan, chat-host-file-attachments-plan).
   @attachments_fixture Path.expand(
                          "../../support/fixtures/chat_host_go_capabilities_attachments.json",
                          __DIR__

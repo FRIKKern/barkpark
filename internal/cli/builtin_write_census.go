@@ -254,6 +254,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"decodes a name equal to the name sent, so an empty or HTML 200 stops the import before any media " +
 			"or document is written.",
 	},
+	{
+		File: "internal/cli/schema_sync_cmd.go", Func: "deleteSchemaForPush", Sites: 1,
+		Endpoint: "DELETE /v1/schemas/:dataset/:name (one schema of a bp schema push --prune)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through builtinWriteReceiptErr, and the schema counts as deleted only when the receipt " +
+			"decodes a deleted name equal to the name sent, so an empty or HTML 200 stops the push and is not " +
+			"reported as a delete.",
+	},
 	// ---- migrate ---------------------------------------------------------
 	{
 		File: "internal/cli/migrate_cmd.go", Func: "migrateSchemas", Sites: 1,
