@@ -290,8 +290,13 @@ defmodule Barkpark.ChatHosts do
     epoch = value(attrs, :epoch)
     cursor = value(attrs, :cursor)
     key = value(attrs, :idempotency_key)
-    event = value(attrs, :event, %{})
 
+    with {:ok, event} <- normalize_status_event(value(attrs, :event, %{})) do
+      accept_fenced_event(host, lease_id, epoch, cursor, key, event)
+    end
+  end
+
+  defp accept_fenced_event(host, lease_id, epoch, cursor, key, event) do
     Repo.transaction(fn ->
       lease = ExecutionLease |> where([l], l.id == ^lease_id) |> lock("FOR UPDATE") |> Repo.one()
 
@@ -325,6 +330,43 @@ defmodule Barkpark.ChatHosts do
         other
     end
   end
+
+  # A `status` event is the host's 2-4 word label for the running turn
+  # (task-a9983f9aeffb5430), shown on a client's working line. It is checked
+  # before the fence, so a refusal takes no cursor and the host's next event
+  # lands where the label would have: the label must be text; whitespace runs
+  # fold to one space and it is cut to @status_label_max characters. Only
+  # `kind` and `label` are kept, so what is stored and streamed is exactly that,
+  # and a retry of the same label normalizes to the same payload (a duplicate,
+  # not a cursor_conflict). It is never a message row and never moves the
+  # session's status (the Recorder's catch-all leaves both alone).
+  @status_label_max 60
+
+  defp normalize_status_event(%{} = event) do
+    if value(event, :kind) == "status",
+      do: normalize_status_label(value(event, :label)),
+      else: {:ok, event}
+  end
+
+  defp normalize_status_event(event), do: {:ok, event}
+
+  defp normalize_status_label(label) when is_binary(label) do
+    label =
+      if String.valid?(label),
+        do:
+          label
+          |> String.replace(~r/[\s\p{C}]+/u, " ")
+          |> String.trim()
+          |> String.slice(0, @status_label_max)
+          |> String.trim_trailing(),
+        else: ""
+
+    if label == "",
+      do: {:error, :invalid_status_label},
+      else: {:ok, %{"kind" => "status", "label" => label}}
+  end
+
+  defp normalize_status_label(_label), do: {:error, :invalid_status_label}
 
   @doc """
   Ends every turn whose host went silent: a `leased`/`running` lease that
@@ -937,6 +979,7 @@ defmodule Barkpark.ChatHosts do
   defp normalize_host_kind("item_started", _event), do: :item_started
   defp normalize_host_kind("item_completed", _event), do: :item_completed
   defp normalize_host_kind("error", _event), do: :error
+  defp normalize_host_kind("status", _event), do: :status
 
   defp normalize_host_kind("terminal", event) do
     case value(event, :terminal_state) do
