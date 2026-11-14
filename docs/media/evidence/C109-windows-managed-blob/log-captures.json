@@ -1,0 +1,498 @@
+{
+  "version": 1,
+  "meaning": "Base64 companions preserve the exact published redacted captured bytes; .log is a normalized readable rendering. Original process bytes remain private where captured. No private raw stream is published.",
+  "captures": [
+    {
+      "file": "build/build.log",
+      "capturedBytes": 146581,
+      "capturedSha256": "915755b360de7805f59a6f88c265e9f4a7c1f70bf6f3ff4acf1f2a279a48c19e",
+      "readableSha256": "bb43ec64f88eb2d2a969322bd6cf63d8b97edc99629c855b68082a9f41fdbe88"
+    },
+    {
+      "file": "gates/doc-anchors.log",
+      "capturedBytes": 31698,
+      "capturedSha256": "e03c8f054272b953eb26f0e85ed17cb02e4387c77cabd6be5a15b323597f1543",
+      "readableSha256": "09ba6d35357b53af8b1b8a775471d851281c06c54388b911016e81969bd3a649"
+    },
+    {
+      "file": "gates/doc-budgets.log",
+      "capturedBytes": 13751,
+      "capturedSha256": "edc0d4912ba20c3d16893778347bb78d27ea4b9bc404ce6e9487cae8b1ae9a5e",
+      "readableSha256": "aeb9d80c01d9e67f7e6d259a9f01c84b3322025a3c60211c74c7ec8beee621af"
+    },
+    {
+      "file": "gates/retained-ci-binding-failure.log",
+      "capturedBytes": 30306,
+      "capturedSha256": "51a6679a4ef861c6daff589ed1f11c15019409380d7a1f72c450979cf5ccb627",
+      "readableSha256": "2f25e7203d15118accae9654e18a2f1237c306a6b9121ce900bd91ae044ed909"
+    },
+    {
+      "file": "gates/retained-ci-scan-failure.log",
+      "capturedBytes": 50748,
+      "capturedSha256": "d4c9997cbbcc074d2ddd634c5c6506a74293cf987106e20f892f005436f77b5f",
+      "readableSha256": "2f19294d0804ddc94f3739f42019e1480d14d34f4b76f4492ac35e381cfc0271"
+    },
+    {
+      "file": "gates/security-bindings.log",
+      "capturedBytes": 553,
+      "capturedSha256": "5ef0a089b7c0aa8a120fffb2d811561be197a0c469b544b79de0c83096c03696",
+      "readableSha256": "06571bfa987de9f6c200e9b1bd9318a0a589c45a9fd04400110646a8bf0c6b0d"
+    },
+    {
+      "file": "native/exunit-commit.log",
+      "capturedBytes": 3990,
+      "capturedSha256": "555ce16b77ba1277395a0a38d5d2dd29b553a55f17b9fa879bc6642e98bc0689",
+      "readableSha256": "aa97b62b47d3905a3b69c403382bf997c73d65264d47aed878b269a7d57d2510"
+    },
+    {
+      "file": "native/exunit-effect-failure.log",
+      "capturedBytes": 3453,
+      "capturedSha256": "d8f802f6188bbf8c3c8c8f04d66c73d7e467938d48ab97ab5d1f253e565d4358",
+      "readableSha256": "3fd392c52da271d5e45d1f4e5977d04ec384c368ae1b548e2754ae41f3a0be09"
+    },
+    {
+      "file": "native/exunit-fence-resume.log",
+      "capturedBytes": 3137,
+      "capturedSha256": "cc974bac1f58954f14819dd9a2fa33a819e748a6246eba520aae620903e3bf65",
+      "readableSha256": "ef4ab87a50b861ee63c98136736cbb90fcba088f9068d1920bde4b5c34503ca8"
+    },
+    {
+      "file": "native/exunit-fence.log",
+      "capturedBytes": 3135,
+      "capturedSha256": "59ec2b24f7e55e4e1fb293cf9fbcd59b00e91a7808458df2cf8a71cddc28bb73",
+      "readableSha256": "24771f76c984585ed3426aea5981fe95162a3d5ac7de2f0f970002e116b9a1b9"
+    },
+    {
+      "file": "native/exunit-interrupt.log",
+      "capturedBytes": 3100,
+      "capturedSha256": "146fc8fa6e5d23a9593d7f5bf8736ed132652cd2d014e2921c665c6457c93041",
+      "readableSha256": "146fc8fa6e5d23a9593d7f5bf8736ed132652cd2d014e2921c665c6457c93041"
+    },
+    {
+      "file": "native/exunit-resume.log",
+      "capturedBytes": 3278,
+      "capturedSha256": "6529638a8e3fa530ebeb14bfad5bc5f2604131e7b27aab33d7d91827e790d806",
+      "readableSha256": "a492fee5e8f4f55ce188bebb7d95488b280fc97bb04ce500a52e99d9280df733"
+    },
+    {
+      "file": "native/exunit-unit.log",
+      "capturedBytes": 5242,
+      "capturedSha256": "967ef61c82b6f5878b4b47e09764bb6a1efb1a24372df5fdec9408de39f0f36e",
+      "readableSha256": "63aee218a5d7731d0b2a9088502e36671dbaffd0f24f47bcddbfb4c71c2898ce"
+    },
+    {
+      "file": "native/exunit-writer.log",
+      "capturedBytes": 3135,
+      "capturedSha256": "9668ec69663bda049d8e838fa71502d6c8b70e4897fd958fb3b185334cb23ca9",
+      "readableSha256": "91fa7feb163517910c7153b6904bd923f49c7fb78deda3be2cf22aa67f323c2a"
+    },
+    {
+      "file": "native/host-1.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "native/host-2.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "native/host-3.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "native/pg-immediate-12.log",
+      "capturedBytes": 58,
+      "capturedSha256": "3589d2bd01f8295cc7c9ec3f5e07625fcd347ccb6f33f2d80edafe5f5217c1fb",
+      "readableSha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    {
+      "file": "native/pg-immediate-5.log",
+      "capturedBytes": 58,
+      "capturedSha256": "3589d2bd01f8295cc7c9ec3f5e07625fcd347ccb6f33f2d80edafe5f5217c1fb",
+      "readableSha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    {
+      "file": "native/sql-1.log",
+      "capturedBytes": 4,
+      "capturedSha256": "e25121d10d0bc0bce19d39cc63cfa89e186972b63c621fce4a146eb2b7153640",
+      "readableSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "native/sql-10.log",
+      "capturedBytes": 115,
+      "capturedSha256": "d02ec4e6b360a7b29af894028ee3c5b745b297123cb3863612d16954aaf49b6f",
+      "readableSha256": "37640038f3630d4153be0e3784d4ebd2ed7a4c8c03be6b5a8c7848a2d798cef2"
+    },
+    {
+      "file": "native/sql-11.log",
+      "capturedBytes": 248,
+      "capturedSha256": "a8ba4acc57979312ce572098cfb40362d70ff68363f7f52dcc3616833ef18ad7",
+      "readableSha256": "6d66e89e6549ffb10bb586c26b56d75d22d42a2970f602ee867ab392dc49c9fc"
+    },
+    {
+      "file": "native/sql-12.log",
+      "capturedBytes": 6157,
+      "capturedSha256": "01d1812b59ebe8494ea9ae4d17cb0ad1c04f5791418b6149e01e19ec1cb69df3",
+      "readableSha256": "35ed2bc2e8c8e5fc90950a2fe94b58b7608638199cd80792b737e070fea026a5"
+    },
+    {
+      "file": "native/sql-13.log",
+      "capturedBytes": 6157,
+      "capturedSha256": "01d1812b59ebe8494ea9ae4d17cb0ad1c04f5791418b6149e01e19ec1cb69df3",
+      "readableSha256": "35ed2bc2e8c8e5fc90950a2fe94b58b7608638199cd80792b737e070fea026a5"
+    },
+    {
+      "file": "native/sql-14.log",
+      "capturedBytes": 4,
+      "capturedSha256": "bd88f8a2a059e2a7cf83f715e0d271246508b46fe6272182f74e06fdd87ec7b3",
+      "readableSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "native/sql-2.log",
+      "capturedBytes": 868,
+      "capturedSha256": "1e41c02ac9721e633c459f208587d8bf184d4ac665ab7fcced9ccd603ee6d15d",
+      "readableSha256": "c2adeab02be695a134b44597c1e695f2584607a9e646ebd33d4e7b0162bb1d4e"
+    },
+    {
+      "file": "native/sql-3.log",
+      "capturedBytes": 872,
+      "capturedSha256": "fb9ff4a982d6ae44d7c742bab94e129b6029d114b7438c5710a6ba3ce67436e8",
+      "readableSha256": "ae4ec8988ae60d2ccf6263f52b9066afbdd58123a6e8831deebc3910ac6292e8"
+    },
+    {
+      "file": "native/sql-4.log",
+      "capturedBytes": 880,
+      "capturedSha256": "d399015d7c1c5b946352b75643f27512d24c253da7951c260dcc8c91dfd36f55",
+      "readableSha256": "67e5668e1c4b2ee4ae19a473732783205ff1013c7d8ebf537f522f46ecb67c18"
+    },
+    {
+      "file": "native/sql-5.log",
+      "capturedBytes": 876,
+      "capturedSha256": "a078fd72e44c31bc9f335ce96878b6bcf9812b32125b63105ea351ef4e96e993",
+      "readableSha256": "f6281436a00e65003c5ee268ee0e0076761b2c4a876cecf936b98a6a4fdbb125"
+    },
+    {
+      "file": "native/sql-6.log",
+      "capturedBytes": 4,
+      "capturedSha256": "bd88f8a2a059e2a7cf83f715e0d271246508b46fe6272182f74e06fdd87ec7b3",
+      "readableSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "native/sql-7.log",
+      "capturedBytes": 872,
+      "capturedSha256": "fb9ff4a982d6ae44d7c742bab94e129b6029d114b7438c5710a6ba3ce67436e8",
+      "readableSha256": "ae4ec8988ae60d2ccf6263f52b9066afbdd58123a6e8831deebc3910ac6292e8"
+    },
+    {
+      "file": "native/sql-8.log",
+      "capturedBytes": 2104,
+      "capturedSha256": "e871777af4cd9b5bf18804445a0ed32b9f827d6595d2ce5e4acbda3abb1344f0",
+      "readableSha256": "23ca88ac99546a77917e7d174c155c8d622933a7b907a11e9c89b1e76eca5405"
+    },
+    {
+      "file": "native/sql-9.log",
+      "capturedBytes": 115,
+      "capturedSha256": "d02ec4e6b360a7b29af894028ee3c5b745b297123cb3863612d16954aaf49b6f",
+      "readableSha256": "37640038f3630d4153be0e3784d4ebd2ed7a4c8c03be6b5a8c7848a2d798cef2"
+    },
+    {
+      "file": "retained-failures/295/exunit-unit.log",
+      "capturedBytes": 41853,
+      "capturedSha256": "51744299b6ff1b7368ce516401d878a1bd3b0bd3d8dd71c05b2c20eeb33195f2",
+      "readableSha256": "fcb62ce2f9030e52bc9d56bb8176229c7010b587dea1af15ad4fb7c669ec1081"
+    },
+    {
+      "file": "retained-failures/295/host-1.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/295/sql-1.log",
+      "capturedBytes": 4,
+      "capturedSha256": "e25121d10d0bc0bce19d39cc63cfa89e186972b63c621fce4a146eb2b7153640",
+      "readableSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "retained-failures/295/sql-2.log",
+      "capturedBytes": 868,
+      "capturedSha256": "9f8db04c6888778202f9606e6024a2d7ba9db6f50da32a01efdc78ab589c74fd",
+      "readableSha256": "9854117b10bdbd567a92767e357d3250a63c617cf3c74b09fc32671f296b0b29"
+    },
+    {
+      "file": "retained-failures/295/sql-3.log",
+      "capturedBytes": 872,
+      "capturedSha256": "79026ad62af0e0b8b4ac65f931c3147dd1ef417ad7d025cc128d3d986b10b669",
+      "readableSha256": "9913548b3464f13e143d0cc40c58ead06df167b90cd3bcec53b4ef00a2dd18d7"
+    },
+    {
+      "file": "retained-failures/295/sql-4.log",
+      "capturedBytes": 880,
+      "capturedSha256": "9a73520adf1f7cbd45cbf91453b9efe4350ae86ab14ee3d5419f235de6459e3b",
+      "readableSha256": "16c71913d24d28451ab177aea86a685d3650cb94f1772e0b124b590c3a8735a1"
+    },
+    {
+      "file": "retained-failures/295/sql-5.log",
+      "capturedBytes": 876,
+      "capturedSha256": "275160f1c00ba7b5de5e0cb3a509cf5dfae952954eed32e8220b58ee2536c461",
+      "readableSha256": "93c8868c5ca521ca4204745a46ec8a60800b4f9d362374fa1c5fc8c8f1ce0c0f"
+    },
+    {
+      "file": "retained-failures/305/exunit-unit.log",
+      "capturedBytes": 33569,
+      "capturedSha256": "bda932b450dad9a59c79ed142c8ae5a064f33072ed0479af3506b610c41db3fc",
+      "readableSha256": "3aae1e52b59932d18344363a17789a08be247bc719078a420d50a9b7f06deb25"
+    },
+    {
+      "file": "retained-failures/305/host-1.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/305/sql-1.log",
+      "capturedBytes": 4,
+      "capturedSha256": "e25121d10d0bc0bce19d39cc63cfa89e186972b63c621fce4a146eb2b7153640",
+      "readableSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "retained-failures/305/sql-2.log",
+      "capturedBytes": 868,
+      "capturedSha256": "47b8c2b19114abf73cf5aa083354c5bc17d5953bd7260e5ba9aa4bd0bb27f1ff",
+      "readableSha256": "be81c3372803d6fd29968f7dcd7b5b3952fa03f8a79ebeeb421e6e325485e6f9"
+    },
+    {
+      "file": "retained-failures/305/sql-3.log",
+      "capturedBytes": 872,
+      "capturedSha256": "fdeee6fc5d1a96aa409ae3b0eeab28baf11090c471359e45f96ca4b32c8765b5",
+      "readableSha256": "c477cbdb03732db71e03f8efcc3fbd66f1098ecc6d26fc9e33d6aa18ffe7ca79"
+    },
+    {
+      "file": "retained-failures/305/sql-4.log",
+      "capturedBytes": 878,
+      "capturedSha256": "a4af2911b1f8644d11af46f0463d83f00031d2f73a4f4c3222f1e32fa5ec7a9f",
+      "readableSha256": "5c91130d2c87eb84908c6cd4023d4867dbca1bf65dfa02f090a0ba0ffd72e651"
+    },
+    {
+      "file": "retained-failures/305/sql-5.log",
+      "capturedBytes": 876,
+      "capturedSha256": "0beac1cff888fade1a0b69de3dfba7bd3aa35a417d063a9bf8db87ffd70f1131",
+      "readableSha256": "a7ec87fb2cf77151853ae359c747a2506d24b3129d86078ddc69cb270c0e5a09"
+    },
+    {
+      "file": "retained-failures/309/exunit-unit.log",
+      "capturedBytes": 5921,
+      "capturedSha256": "7cf1c8cca4898931a7e1b784f609a43a04b20324e8bbf1a0a976912e1eaf1173",
+      "readableSha256": "a64334c2da4ca970ff729c57e85a0cd79389669f1a9f710ee70dccf157ee124f"
+    },
+    {
+      "file": "retained-failures/309/host-1.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/309/sql-1.log",
+      "capturedBytes": 4,
+      "capturedSha256": "e25121d10d0bc0bce19d39cc63cfa89e186972b63c621fce4a146eb2b7153640",
+      "readableSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "retained-failures/309/sql-2.log",
+      "capturedBytes": 868,
+      "capturedSha256": "2e2cbad7202ce8ae27a3f94a0f6299fe716962955053de034dbffe72d6e85c2b",
+      "readableSha256": "50f0939af34b8e406aa234fc8f2b1e9ddfa8977866997bd41bddafa43cb94506"
+    },
+    {
+      "file": "retained-failures/309/sql-3.log",
+      "capturedBytes": 872,
+      "capturedSha256": "a0e52750fe7a0097dcd088dfa42e78b0093b79a7f4ecb5e7a3033acb96457e00",
+      "readableSha256": "8a89cee4df01e0ca7a3faa19387340b8b161f08d302894b54dc64b9d402dd5ec"
+    },
+    {
+      "file": "retained-failures/309/sql-4.log",
+      "capturedBytes": 880,
+      "capturedSha256": "c28d29499c4e84bb1b942fbbf7d773ddf365d2a5fa1efa2ebcf5d4b23ed18ece",
+      "readableSha256": "b99e1c28b45d06a168d725b5a58c8178a3c2d42d20abaeb76a5cc50978e848f7"
+    },
+    {
+      "file": "retained-failures/309/sql-5.log",
+      "capturedBytes": 876,
+      "capturedSha256": "54740a0be934eccf132af2a7f58fd52a485a039229dad049241c6403f3fc7eca",
+      "readableSha256": "275ed69219ffe481e2e51c9060fdc8d84b3511dbad496e212a965d45591e1b51"
+    },
+    {
+      "file": "retained-failures/311/exunit-commit.log",
+      "capturedBytes": 3990,
+      "capturedSha256": "967f7cd773402a6c4732c4b571ab4b2df68e740d62f9ef91814a4d606d7eb624",
+      "readableSha256": "0f20fdeb39cfd17b250c381e9971aee53c928e23376b9b50a47ccce8a1d32eaf"
+    },
+    {
+      "file": "retained-failures/311/exunit-effect-failure.log",
+      "capturedBytes": 3461,
+      "capturedSha256": "c970bb5dfde99744e3203182518af08a8a00251748c7bb22c47f46146354d6d1",
+      "readableSha256": "13210a29d8e2ce5f7f3409a97a7dc97e11f7e7e7feb8280b7ce02f9f8ccfd132"
+    },
+    {
+      "file": "retained-failures/311/exunit-fence-resume.log",
+      "capturedBytes": 3135,
+      "capturedSha256": "a19f9c602a3fbbe91f6d4ce5665c3c643ce03a4ab950deeb71fa6aedd1d082c2",
+      "readableSha256": "d7c630ca3914e1f86f4caff8eacc0df6b23eff6e7b54e733bea48aa3bbd7aaf3"
+    },
+    {
+      "file": "retained-failures/311/exunit-fence.log",
+      "capturedBytes": 3135,
+      "capturedSha256": "33a6ce704859e16af9b59bd4b9d6264366cf622bf93334ec3cf35ec5720dcac1",
+      "readableSha256": "8cd9a80d0935e6a57177425063381b6bfeee5065a7089a3c9118a558fce81681"
+    },
+    {
+      "file": "retained-failures/311/exunit-interrupt.log",
+      "capturedBytes": 3100,
+      "capturedSha256": "b9ef94c5d7e3831680cb8266fdb27ac96dd0d8999fd85bc31c95fd1828e27662",
+      "readableSha256": "b9ef94c5d7e3831680cb8266fdb27ac96dd0d8999fd85bc31c95fd1828e27662"
+    },
+    {
+      "file": "retained-failures/311/exunit-resume.log",
+      "capturedBytes": 3277,
+      "capturedSha256": "fccb5f3eee3285ea73e7d287bee4abea6a9e7419149087eae769db6b624e8bd3",
+      "readableSha256": "374620ec22c7f28b45b260547824eccc82d51030664cee160dd16d8209a0e95a"
+    },
+    {
+      "file": "retained-failures/311/exunit-unit.log",
+      "capturedBytes": 5253,
+      "capturedSha256": "3f63de7ea7ab5290bd23230a01b7b482878bb39719bbc8179c454a85726b7814",
+      "readableSha256": "e743a0c6dd7403e04726dfeaddff02937136aee307c4571e5331b77c30ccaca9"
+    },
+    {
+      "file": "retained-failures/311/exunit-writer.log",
+      "capturedBytes": 3135,
+      "capturedSha256": "396cdf7b4fab124cec33aedd16dbc69c58f4c54dc7761d241b6abd59574b319a",
+      "readableSha256": "a1b9c637ae6d797ad6543aed0bad2b8f4a14c1298c0b7464d0f13cbd96aba6e1"
+    },
+    {
+      "file": "retained-failures/311/host-1.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/311/host-2.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/311/host-3.log",
+      "capturedBytes": 184,
+      "capturedSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb",
+      "readableSha256": "38b536c09f3b3c03c469d3a493beee8a9737b20def6bd4461b29f902560e29eb"
+    },
+    {
+      "file": "retained-failures/311/pg-immediate-12.log",
+      "capturedBytes": 58,
+      "capturedSha256": "3589d2bd01f8295cc7c9ec3f5e07625fcd347ccb6f33f2d80edafe5f5217c1fb",
+      "readableSha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    {
+      "file": "retained-failures/311/pg-immediate-5.log",
+      "capturedBytes": 58,
+      "capturedSha256": "3589d2bd01f8295cc7c9ec3f5e07625fcd347ccb6f33f2d80edafe5f5217c1fb",
+      "readableSha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    {
+      "file": "retained-failures/311/sql-1.log",
+      "capturedBytes": 4,
+      "capturedSha256": "e25121d10d0bc0bce19d39cc63cfa89e186972b63c621fce4a146eb2b7153640",
+      "readableSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "retained-failures/311/sql-10.log",
+      "capturedBytes": 115,
+      "capturedSha256": "d02ec4e6b360a7b29af894028ee3c5b745b297123cb3863612d16954aaf49b6f",
+      "readableSha256": "37640038f3630d4153be0e3784d4ebd2ed7a4c8c03be6b5a8c7848a2d798cef2"
+    },
+    {
+      "file": "retained-failures/311/sql-11.log",
+      "capturedBytes": 248,
+      "capturedSha256": "cd36787928bc4183a0955daeaabe7869c490d9e659ee9e6ece71e3fd2af1b645",
+      "readableSha256": "da3257e810cb2819b31919779950c1c5a820273cfbc3efcb7f9ed0c6aab41bc0"
+    },
+    {
+      "file": "retained-failures/311/sql-12.log",
+      "capturedBytes": 6054,
+      "capturedSha256": "ada39516742d4590b4f4d1f4a756c9c16f5de971cfdaee6205d75b9cbf6812d2",
+      "readableSha256": "35d671d16e5834d85555af98a7efeb49dc4a05bf0e986e8e4cfcf0a89da78803"
+    },
+    {
+      "file": "retained-failures/311/sql-13.log",
+      "capturedBytes": 6054,
+      "capturedSha256": "ada39516742d4590b4f4d1f4a756c9c16f5de971cfdaee6205d75b9cbf6812d2",
+      "readableSha256": "35d671d16e5834d85555af98a7efeb49dc4a05bf0e986e8e4cfcf0a89da78803"
+    },
+    {
+      "file": "retained-failures/311/sql-14.log",
+      "capturedBytes": 4,
+      "capturedSha256": "bd88f8a2a059e2a7cf83f715e0d271246508b46fe6272182f74e06fdd87ec7b3",
+      "readableSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "retained-failures/311/sql-2.log",
+      "capturedBytes": 868,
+      "capturedSha256": "7707f7a595b0ea0280bf3d3a58a72c95365ce5d3988caff2fe8a4425542802e1",
+      "readableSha256": "96e379cfb88536e485c1f93f9af26b50e2fdc8b3e7e049f80f8f4e9d1a5fcd44"
+    },
+    {
+      "file": "retained-failures/311/sql-3.log",
+      "capturedBytes": 872,
+      "capturedSha256": "45de80c1a51700a83d27e60e0758d48193d08c3d7830936a956397eaac82c11f",
+      "readableSha256": "b78b68ce3667aec1ab00e0a8ed76fea3902f89c9b67b44f30625f6cb895dda01"
+    },
+    {
+      "file": "retained-failures/311/sql-4.log",
+      "capturedBytes": 878,
+      "capturedSha256": "19c278875d9de9540076ef5858f5502c5400eccaabb31cc04e4d1e791787aec9",
+      "readableSha256": "733e5372f76cd7f4385e113e1eb1c00af585f4937c83a37a80ccaef615102bad"
+    },
+    {
+      "file": "retained-failures/311/sql-5.log",
+      "capturedBytes": 876,
+      "capturedSha256": "193eed7c8c79f8a6f116711c3145780964ca41012e66f7140f432b9f5600ecb4",
+      "readableSha256": "a96324cba7807c128d48ad481f36664de93c8de131c50125f9656b8f19201157"
+    },
+    {
+      "file": "retained-failures/311/sql-6.log",
+      "capturedBytes": 4,
+      "capturedSha256": "bd88f8a2a059e2a7cf83f715e0d271246508b46fe6272182f74e06fdd87ec7b3",
+      "readableSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "retained-failures/311/sql-7.log",
+      "capturedBytes": 872,
+      "capturedSha256": "45de80c1a51700a83d27e60e0758d48193d08c3d7830936a956397eaac82c11f",
+      "readableSha256": "b78b68ce3667aec1ab00e0a8ed76fea3902f89c9b67b44f30625f6cb895dda01"
+    },
+    {
+      "file": "retained-failures/311/sql-8.log",
+      "capturedBytes": 2081,
+      "capturedSha256": "9937d8fa97b4f3979323ef0f1bc7eaffd515f5db29fac02eaa34fe49340614e9",
+      "readableSha256": "a0cfcea65f889ea698f26fabd7f9379df9f6501c87e6e58fb6f12040dbc012c2"
+    },
+    {
+      "file": "retained-failures/311/sql-9.log",
+      "capturedBytes": 115,
+      "capturedSha256": "d02ec4e6b360a7b29af894028ee3c5b745b297123cb3863612d16954aaf49b6f",
+      "readableSha256": "37640038f3630d4153be0e3784d4ebd2ed7a4c8c03be6b5a8c7848a2d798cef2"
+    },
+    {
+      "file": "gates/retained-ci-coupling-failure.txt",
+      "capturedBytes": 3615,
+      "capturedSha256": "420cc7c80778d20744ae5a15be51002f90454eac98f29599d127d124120990ff",
+      "readableSha256": "42a28dae0018557cf23bdcad553d78da1aecaf96e97c7ad67452a91ced71a50d"
+    }
+  ]
+}

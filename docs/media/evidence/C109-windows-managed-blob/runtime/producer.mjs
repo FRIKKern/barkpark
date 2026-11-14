@@ -1,0 +1,12 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {inventory} from '../scripts/runtime-postgres-bundle.mjs';
+const build=JSON.parse(fs.readFileSync('.git/C109-full-build303/result.json'));assert.equal(build.status,'passed');
+const pkg=JSON.parse(fs.readFileSync('docs/cycles/evidence/C098/pty-package-build-01/result.json')),original=path.join(pkg.out,'win-unpacked/resources/runtime');
+const expected=JSON.parse(fs.readFileSync('docs/cycles/evidence/C098/pty-package-build-01/runtime-inventory.json'));assert.deepEqual(inventory(original),expected);
+const root=path.resolve('runtime'),release=path.resolve(build.output);assert.ok(release.startsWith(root+path.sep));
+const pgOut=path.join(release,'postgres');assert.equal(fs.existsSync(pgOut),false);
+fs.cpSync(path.join(original,'postgres'),pgOut,{recursive:true,errorOnExist:true,force:false});assert.deepEqual(inventory(pgOut),inventory(path.join(original,'postgres')));
+const prior=JSON.parse(fs.readFileSync(path.join(original,'barkdown-release.json'))),erts=fs.readdirSync(release).find(n=>n.startsWith('erts-'));assert.ok(erts);
+const mark={version:1,upstream:build.source,matchesPin:false,platform:'win32',arch:'x64',erts,postgres:prior.postgres,toolchain:build.toolchain,purpose:'owned-full-backend-integration-proof',appAdopted:false,limits:['Reader assets and application package are not assembled','Complete distribution/prerequisite and clean-machine acceptance remain open']};
+fs.writeFileSync(path.join(release,'barkdown-release.json'),JSON.stringify(mark,null,2)+'\n',{flag:'wx'});
+const out='.git/C109-runtime304';fs.mkdirSync(out);fs.copyFileSync('.git/media-fence-runtime304.mjs',out+'/producer.mjs');
+const actual=inventory(release);fs.writeFileSync(out+'/inventory.json',JSON.stringify(actual,null,2)+'\n');fs.writeFileSync(out+'/result.json',JSON.stringify({status:'passed',source:build.source,output:release,original,originalExact:true,postgresExact:true,mark,files:actual.length},null,2)+'\n');

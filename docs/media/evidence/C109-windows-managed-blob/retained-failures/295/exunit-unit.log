@@ -1,0 +1,639 @@
+03:17:21.547 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"C:\\"}, []}}
+03:17:21.567 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"E:\\"}, []}}
+03:17:21.644 [warning] MAIL IS NOT DELIVERABLE — this node accepts transactional email and discards it.
+
+  adapter: Swoosh.Adapters.Local (local_mailbox)
+
+Magic-link sign-in, password reset, email verification and access-grant
+invitations will be ACCEPTED and never sent. The HTTP responses stay 200 by
+design (anti-enumeration), so nothing else will tell you this.
+
+Set SMTP_HOST (plus SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD as your relay
+requires) to enable delivery — see deploy/smtp.env.example. Ignore this if
+the box is not meant to send mail.
+
+03:17:21.646 [warning] [Operator] The instance-operator allowlist is UNSET (BARKPARK_OPERATOR_EMAILS and BARKPARK_OPERATOR_TOKEN_IDS are
+both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
+route groups to ANY admin-permissioned token, including one whose only membership is an
+admin seat in a single workspace:
+  1. POST|GET /v1/admin/self-update, POST /v1/admin/rollback, POST|GET /v1/admin/site-deploy
+  2. GET /v1/plugins
+  3. GET|PUT|DELETE /v1/plugins/settings/:plugin_name
+  4. GET /v1/secrets, GET /v1/secrets/:name, GET /v1/secrets/:name/audit,
+     PUT /v1/secrets/:name, DELETE /v1/secrets/:name
+  5. POST /v1/status/incidents, POST /v1/status/incidents/:id/resolve
+  6. POST /api/playground
+  7. POST /api/workspaces/:workspace_slug/import
+  8. GET /v1/instance/site-deploy, GET /v1/instance/metrics
+On a SINGLE-TENANT instance that is fine — the only admin is the operator. On a
+MULTI-TENANT one it hands your first customer-admin the instance: run-secrets in
+cleartext, the instance-wide plugin credentials record, and the release itself.
+Set BARKPARK_OPERATOR_EMAILS (comma-separated operator emails) and/or BARKPARK_OPERATOR_TOKEN_IDS
+(comma-separated api_token ids) to arm the allowlist; once either is non-empty the
+eight groups are allowlist-only and fail closed.
+
+03:17:21.812 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:22.155 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
+03:17:22.160 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
+03:17:22.162 [info] Plugins.Bootstrap: registered schema "session" (dataset="production", visibility="private") from plugin "bulldocs"
+03:17:22.165 [info] Plugins.Bootstrap: registered schema "paper_master" (dataset="production", visibility="private") from plugin "bulldocs"
+03:17:22.169 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
+03:17:22.172 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
+03:17:24.825 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:24.826 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:24.826 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:24.826 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:27.842 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:27.843 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:27.843 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:27.843 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:27.897 [warning] studio chat agent-state sweeper: sweep failed: could not checkout the connection owned by #PID<0.363.0> (Barkpark.StudioChat.AgentStateSweeper). When using the sandbox, connections are shared, so this may imply another process is using a connection. Reason: [Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 5559ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:
+
+  1. Ensuring your database is available and that you can connect to it
+  2. Tracking down slow queries and making sure they are running fast enough
+  3. Increasing the pool_size (although this increases resource consumption)
+  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval
+
+See DBConnection.start_link/2 for more information
+
+03:17:30.859 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:30.860 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:30.860 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:30.860 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:31.886 [warning] studio chat blocked-notification sweeper: sweep failed: could not checkout the connection owned by #PID<0.368.0> (Barkpark.StudioChat.BlockedSweeper). When using the sandbox, connections are shared, so this may imply another process is using a connection. Reason: [Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3970ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:
+
+  1. Ensuring your database is available and that you can connect to it
+  2. Tracking down slow queries and making sure they are running fast enough
+  3. Increasing the pool_size (although this increases resource consumption)
+  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval
+
+See DBConnection.start_link/2 for more information
+
+03:17:33.877 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:33.877 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:33.877 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:33.878 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:35.888 [warning] [Sharing] refresh skipped (store unavailable): %DBConnection.ConnectionError{message: "could not checkout the connection owned by #PID<0.286.0> (:application_master). When using the sandbox, connections are shared, so this may imply another process is using a connection. Reason: [Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3945ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n", severity: :error, reason: :queue_timeout}
+03:17:36.880 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:36.881 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:36.881 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:36.881 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:39.883 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:39.883 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:39.883 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:39.884 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+     warning: Barkpark.PubSubSingletons.drain!/0 is undefined (module Barkpark.PubSubSingletons is not available or is yet to be defined)
+     │
+ 104 │       Barkpark.PubSubSingletons.drain!()
+     │                                 ~
+     │
+     └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:104:33: Barkpark.DataCase.setup_sandbox/1
+
+     warning: Barkpark.TenancyFixtures.ensure_default_scope!/0 is undefined (module Barkpark.TenancyFixtures is not available or is yet to be defined)
+     │
+ 180 │     _ = Barkpark.TenancyFixtures.ensure_default_scope!()
+     │                                  ~
+     │
+     └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:180:34: Barkpark.DataCase.ensure_default_tenancy/0
+
+Running ExUnit with seed: 425652, max_cases: 40
+
+03:17:42.900 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:42.901 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:42.901 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:42.901 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  1) test a raised effect propagates and retains its pending root (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:134
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3434ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:17:45.915 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:45.916 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:45.916 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:45.916 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  2) test an ordinary server does not acquire managed admission or inspect pending operations (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:174
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3993ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:17:48.931 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:48.932 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:48.932 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:48.932 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  3) test missing enabled coordinator refuses before its callback (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:156
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3988ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:17:51.945 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:51.945 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:51.946 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:51.946 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:54.961 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:54.961 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:54.962 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:54.962 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  4) test database refusal before I/O releases the unused effect admission (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:142
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3994ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:17:57.963 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:57.963 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:57.963 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:17:57.964 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  5) test an error after I/O begins retains physical uncertainty (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:119
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3999ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:00.979 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:00.979 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:00.979 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:00.979 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  6) test unknown retained operations refuse mutation, and rollback restores availability (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:99
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3987ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:03.995 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:03.995 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:03.996 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:03.996 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:07.013 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:07.013 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:07.013 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:07.014 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  7) test prepared and logically deleted keys refuse byte, copy and delete effects before I/O (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:35
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3990ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:10.026 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:10.026 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:10.026 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:10.027 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  8) test unsupported aliases cannot bypass a pending key; unrelated ASCII writes remain usable (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:59
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3996ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:13.042 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:13.042 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:13.042 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:13.042 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+  9) test ordinary Unicode media writes remain supported without unresolved cleanup (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:82
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3999ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:16.044 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:16.044 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:16.044 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:16.045 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:19.061 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:19.062 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:19.062 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:19.062 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+ 10) test unverified receipts cannot be reported settled (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:127
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3988ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+03:18:22.076 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:22.077 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:22.077 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:18:22.077 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+
+
+ 11) test managed delete failure retains uncertainty; ordinary delete preserves its contract (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:88
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {%DBConnection.ConnectionError{
+             message: "[Elixir.Barkpark.Repo] connection not available and request was dropped from queue after 3992ms. This means requests are coming in and your connection pool cannot serve them fast enough. You can address this by:\n\n  1. Ensuring your database is available and that you can connect to it\n  2. Tracking down slow queries and making sure they are running fast enough\n  3. Increasing the pool_size (although this increases resource consumption)\n  4. Allowing requests to wait longer by increasing :queue_target and :queue_interval\n\nSee DBConnection.start_link/2 for more information\n",
+             severity: :error,
+             reason: :queue_timeout
+           },
+           [
+             {DBConnection.Ownership, :ownership_checkout, 2,
+              [
+                file: ~c"lib/db_connection/ownership.ex",
+                line: 108,
+                error_info: %{module: Exception}
+              ]},
+             {Ecto.Adapters.SQL.Sandbox, :checkout, 2,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 559]},
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 454]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+Finished in 43.4 seconds (0.00s async, 43.4s sync)
+
+Result: 0/11 passed
+Failed: 11 tests
+[os_mon] win32 supervisor port (win32sysinfo): Erlang has closed
