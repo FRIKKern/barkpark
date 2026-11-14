@@ -364,6 +364,26 @@ msgstr "Erstatt"
 msgid "Edited %{ago}"
 msgstr "Redigert %{ago}"
 
+#: lib/barkpark_web/studio_locale.ex:107
+#, elixir-autogen, elixir-format
+msgid "Drop or paste an image to replace it"
+msgstr "Slipp eller lim inn et bilde for å erstatte det"
+
+#: lib/barkpark_web/studio_locale.ex:107
+#, elixir-autogen, elixir-format
+msgid "Preview of uploaded image"
+msgstr "Forhåndsvisning av opplastet bilde"
+
+#: lib/barkpark_web/studio_locale.ex:107
+#, elixir-autogen, elixir-format
+msgid "Open image options menu"
+msgstr "Åpne bildeinnstillingsmeny"
+
+#: lib/barkpark_web/studio_locale.ex:107
+#, elixir-autogen, elixir-format
+msgid "Copy URL"
+msgstr "Kopier URL"
+
 #: lib/barkpark_web/studio_locale.ex:104
 #, elixir-autogen, elixir-format
 msgid "Drag or paste image here"
