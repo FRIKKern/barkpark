@@ -11,6 +11,10 @@ defmodule BarkparkWeb.Integration.ChatPatchHostGateTest do
   stdin is `tee`d to a file. A refusal is proven by ORDERING: the operator's
   later steer goes through the same Session, so once it is on the wire the
   refused one never will be.
+
+  The gate decides once, on the one row snapshot the request read: the two
+  window tests inject a write (or a runtime coming up) between that decision
+  and the apply, where a second read used to decide again.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -167,6 +171,72 @@ defmodule BarkparkWeb.Integration.ChatPatchHostGateTest do
     live = host_session!(ws, true)
     assert patch_session(seat, live, %{mode: "plan", draft: "leave echo"}).status == 200
     assert StudioChat.get_session(live, :global).draft == "leave echo"
+
+    # Effort never steers (no adapter applies it), so it is intent here as in
+    # Studio's set-effort: a live session takes it from the same principal.
+    assert patch_session(seat, live, %{effort_choice: "high"}).status == 200
+    assert StudioChat.get_session(live, :global).effort_choice == "high"
     assert steers(wire) == []
+  end
+
+  # The window between the PATCH's gate and its apply, injected without a
+  # sleep or a race: the request runs in this process, and its `draft` UPDATE
+  # (the first op applied) fires Ecto's query telemetry here, so `fun` runs
+  # exactly once, after the gate decided and before the mode op is applied.
+  defp between_gate_and_apply(fun) do
+    test_pid = self()
+    handler = "patch-gate-window-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, meta, _ ->
+        query = meta[:query] || ""
+
+        if self() == test_pid and not Process.get(handler, false) and
+             String.starts_with?(query, ~s(UPDATE "chat_sessions")) and
+             String.contains?(query, ~s("draft")) do
+          Process.put(handler, true)
+          fun.()
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    handler
+  end
+
+  test "an echo that passed the gate never steers back a change that landed after it",
+       %{default_ws: ws, op: op, seat: seat, wire: wire} do
+    sid = host_session!(ws, true)
+    # The operator's switch lands between the seat's gate and its apply.
+    fired = between_gate_and_apply(fn -> StudioChat.set_mode(sid, "acceptEdits") end)
+
+    assert patch_session(seat, sid, %{draft: "x", mode: "plan"}).status == 200
+    assert Process.get(fired), "the precondition: the window was entered"
+
+    assert patch_session(op, sid, %{model_choice: "sonnet"}).status == 200
+    assert await_steer(wire, {:model, "sonnet"})
+    refute {:mode, "plan"} in steers(wire), "the refused principal steered the live CLI"
+    # ...and its stale echo did not overwrite the operator's persisted choice.
+    assert StudioChat.get_session(sid, :global).mode == "acceptEdits"
+  end
+
+  test "a change the gate saw offline is never steered into a runtime that came up after it",
+       %{default_ws: ws, op: op, seat: seat, wire: wire} do
+    sid = host_session!(ws, false)
+
+    fired =
+      between_gate_and_apply(fn ->
+        {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+      end)
+
+    assert patch_session(seat, sid, %{draft: "x", mode: "acceptEdits"}).status == 200
+    assert Process.get(fired), "the precondition: the window was entered"
+
+    assert patch_session(op, sid, %{model_choice: "sonnet"}).status == 200
+    assert await_steer(wire, {:model, "sonnet"})
+    refute {:mode, "acceptEdits"} in steers(wire), "the refused principal steered the live CLI"
   end
 end
