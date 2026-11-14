@@ -460,14 +460,20 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
                ChatHostGate.authorize(Map.put(ctx.assigns, :store_session_id, row.id), :allow)
     end
 
-    test ":steer passes with no live session (intent only), refuses a live one", ctx do
+    # task-242dea9cceb7dd7e: the next spawn reads a saved mode, so an offline
+    # row is refused too; only a brand-new tab (no row, no pid) passes.
+    test ":steer refuses a host row live or offline, passes a tab with no row", ctx do
       row = row!(ctx.default_ws, %{execution_target: "managed"})
       assigns = Map.put(ctx.assigns, :store_session_id, row.id)
 
-      assert :ok = ChatHostGate.authorize(Map.put(assigns, :session, nil), :steer)
+      assert {:error, :host_execution_not_permitted} =
+               ChatHostGate.authorize(Map.put(assigns, :session, nil), :steer)
 
       assert {:error, :host_execution_not_permitted} =
                ChatHostGate.authorize(Map.put(assigns, :session, self()), :steer)
+
+      fresh = Map.merge(ctx.assigns, %{store_session_id: nil, session: nil})
+      assert :ok = ChatHostGate.authorize(fresh, :steer)
     end
 
     test ":steer passes a live registered_host session and the cloud profile", ctx do

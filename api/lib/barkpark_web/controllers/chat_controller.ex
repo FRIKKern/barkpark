@@ -277,21 +277,20 @@ defmodule BarkparkWeb.ChatController do
   # snapshot `fetch_scoped` read. A mode/model op equal to the snapshot is an
   # echo (the TUI's leave-PATCH) and is dropped: it neither writes nor steers,
   # so a stale echo can never undo a change that landed after this read. A real
-  # change on a session with a live runtime steers the running CLI, a host act
-  # like a turn, so it passes the `/messages` gate (a refusal writes nothing);
-  # apply then steers only the runtime this check saw — never one that came up
-  # after it. With no live runtime the change is persisted intent and passes,
-  # as the Studio tab's offline switch does.
+  # change is a host act like a turn, live or not: a live runtime is steered,
+  # and an offline one spawns from the saved row on the next `/messages`
+  # (task-242dea9cceb7dd7e). So it passes the `/messages` gate first (a refusal
+  # writes nothing); apply then steers only the runtime this check saw — never
+  # one that came up after it.
   @steered_patch_ops [:mode, :model_choice]
   defp patch_steer(conn, session, ops) do
     ops = Enum.reject(ops, fn {k, v} -> k in @steered_patch_ops and Map.get(session, k) == v end)
 
-    runtime =
-      if Enum.any?(ops, &(elem(&1, 0) in @steered_patch_ops)), do: live_runtime(session.id)
-
-    case runtime && HostExecutionGate.authorize_turn(conn.assigns[:api_token], session) do
-      {:error, _} = refused -> refused
-      _ -> {:ok, ops, runtime}
+    if Enum.any?(ops, &(elem(&1, 0) in @steered_patch_ops)) do
+      with :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
+           do: {:ok, ops, live_runtime(session.id)}
+    else
+      {:ok, ops, nil}
     end
   end
 

@@ -162,12 +162,10 @@ defmodule BarkparkWeb.Integration.ChatPatchHostGateTest do
     assert StudioChat.get_session(sid, :global).mode == "acceptEdits"
   end
 
-  test "CONTROL: persist-only PATCHes pass for the same principal (no runtime, an echo, a draft)",
+  # task-242dea9cceb7dd7e: an offline mode/model change is refused too (the next
+  # spawn reads it); chat_saved_mode_host_gate_test.exs pins that end to end.
+  test "CONTROL: an echo, a draft and effort pass for the same principal",
        %{default_ws: ws, seat: seat, wire: wire} do
-    offline = host_session!(ws, false)
-    assert patch_session(seat, offline, %{mode: "acceptEdits"}).status == 200
-    assert StudioChat.get_session(offline, :global).mode == "acceptEdits"
-
     live = host_session!(ws, true)
     assert patch_session(seat, live, %{mode: "plan", draft: "leave echo"}).status == 200
     assert StudioChat.get_session(live, :global).draft == "leave echo"
@@ -223,8 +221,11 @@ defmodule BarkparkWeb.Integration.ChatPatchHostGateTest do
     assert StudioChat.get_session(sid, :global).mode == "acceptEdits"
   end
 
+  # The operator passes the gate offline (a non-operator no longer does,
+  # task-242dea9cceb7dd7e): its change is saved, but never steered into a
+  # runtime the check did not see.
   test "a change the gate saw offline is never steered into a runtime that came up after it",
-       %{default_ws: ws, op: op, seat: seat, wire: wire} do
+       %{default_ws: ws, op: op, wire: wire} do
     sid = host_session!(ws, false)
 
     fired =
@@ -232,11 +233,11 @@ defmodule BarkparkWeb.Integration.ChatPatchHostGateTest do
         {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
       end)
 
-    assert patch_session(seat, sid, %{draft: "x", mode: "acceptEdits"}).status == 200
+    assert patch_session(op, sid, %{draft: "x", mode: "acceptEdits"}).status == 200
     assert Process.get(fired), "the precondition: the window was entered"
 
     assert patch_session(op, sid, %{model_choice: "sonnet"}).status == 200
     assert await_steer(wire, {:model, "sonnet"})
-    refute {:mode, "acceptEdits"} in steers(wire), "the refused principal steered the live CLI"
+    refute {:mode, "acceptEdits"} in steers(wire), "a runtime the gate never saw was steered"
   end
 end
