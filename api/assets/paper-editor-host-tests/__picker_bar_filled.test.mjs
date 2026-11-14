@@ -114,8 +114,10 @@ await check("each item does its job", async () => {
   assert.deepEqual(clicked, [["http://localhost/media/cover.png", true]], "Download: the image, absolute, as a download");
 
   const copied = [];
-  // The picker reads the global `navigator` (Node's own, read-only as a
-  // binding), so the stub goes on its `clipboard`.
+  // The picker reads the global `navigator`. Node 21+ has one (read-only as a
+  // binding), so the stub goes on its `clipboard`; Node 20 (CI) has none, so
+  // one is made first.
+  if (typeof globalThis.navigator === "undefined") Object.defineProperty(globalThis, "navigator", { configurable: true, value: {} });
   Object.defineProperty(globalThis.navigator, "clipboard", { configurable: true, value: { writeText: async (t) => copied.push(t) } });
   choose("Copy URL");
   assert.deepEqual(copied, ["http://localhost/media/cover.png"], "Copy URL: the absolute address");
