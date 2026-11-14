@@ -307,6 +307,21 @@ defmodule BarkparkWeb.StudioLocale do
     Jason.encode!(%{
       "Auto-saved" => gettext("Auto-saved"),
       "Block actions" => gettext("Block actions"),
+      # The find bar (bp-paper-find-bar.js, task-c1bf7f10239f73bf).
+      "%{index} of %{count}" =>
+        gettext("%{index} of %{count}", index: "%{index}", count: "%{count}"),
+      "Close" => gettext("Close"),
+      "Find" => gettext("Find"),
+      "Find and replace" => gettext("Find and replace"),
+      "Match case" => gettext("Match case"),
+      "Next match" => gettext("Next match"),
+      "No matches" => gettext("No matches"),
+      "Previous match" => gettext("Previous match"),
+      "Replace" => gettext("Replace"),
+      "Replace all" => gettext("Replace all"),
+      "Replace with" => gettext("Replace with"),
+      "Replaced %{count}" => gettext("Replaced %{count}", count: "%{count}"),
+      "Show replace" => gettext("Show replace"),
       "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement." =>
         gettext(
           "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
