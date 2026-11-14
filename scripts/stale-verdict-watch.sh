@@ -732,6 +732,10 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
 #      claim ABOUT the pull request rather than an admission that we could not
 #      look. An unreadable population must be distinguishable from an empty one
 #      AT THE POINT OF THE READ, not three functions later.
+# WHY the merge failed is the diagnostic. With stderr thrown away, an execve
+# E2BIG and a jq parse error both read "could not be merged" (task-d5ebbb1e3cce40ea).
+enrich_err() { head -c 300 "$WATCH_TMP/enrich.err" 2>/dev/null | tr '\n' ' '; }
+
 enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
   local repo="$1" rows="$2" nums cnt n out roll map mss st owner name cd cds
   nums="$(jq -r '[ .[] | select(.mergeable == "CONFLICTING") | .number ] | .[]' <<<"$rows" 2>/dev/null)" || {
@@ -773,8 +777,8 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
       cd="$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.committedDate // empty' 2>/dev/null)"
       [ -z "${cd:-}" ] || cds="$(jq -c --argjson n "$n" --arg c "$cd" '. + {($n|tostring): $c}' <<<"$cds" 2>/dev/null || printf '%s' "$cds")"
     fi
-    map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>/dev/null)" || {
-      red "  the rollup for #$n could not be added to the map"; return 2; }
+    map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>"$WATCH_TMP/enrich.err")" || {
+      red "  the rollup for #$n could not be added to the map: $(enrich_err)"; return 2; }
   done
 
   # EVERY conflicting row must come back carrying its rollup. A row that asked
@@ -785,8 +789,8 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
               then . + { statusCheckRollup: ($m[(.number|tostring)] // null),
                          mergeStateStatus: ($s[(.number|tostring)] // .mergeStateStatus),
                          headCommittedDate: ($c[(.number|tostring)] // .headCommittedDate) }
-              else . end ]' <<<"$rows" 2>/dev/null)" || {
-    red "  the rollups could not be merged into the population"; return 2; }
+              else . end ]' <<<"$rows" 2>"$WATCH_TMP/enrich.err")" || {
+    red "  the rollups could not be merged into the population: $(enrich_err)"; return 2; }
   printf '%s' "$out" | jq -e 'all(.[]; .statusCheckRollup != null)' >/dev/null 2>&1 || {
     red "  a CONFLICTING row came back without a rollup — refusing rather than treating it as empty"; return 2; }
   printf '%s' "$out"

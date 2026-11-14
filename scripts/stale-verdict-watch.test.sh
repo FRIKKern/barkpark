@@ -2124,6 +2124,38 @@ out="$(GITHUB_STEP_SUMMARY="$TMP/u-partial.md" run_watch "$TMP/u-partial.json" -
   && ok "(u5) a partial run exits 2 and its summary headline says rc=2 PARTIAL, not a bare green" \
   || bad "(u5) expected exit 2 and an rc=2 headline, got $rc: $(cat "$TMP/u-partial.md")"
 
+# ═══ (v) a rollup map over Linux's one-argument cap still reaches a verdict ══
+section "(v) a rollup map over 131072 bytes is merged, not UNREACHABLE"
+
+# THE DEFECT THIS OWNS (task-d5ebbb1e3cce40ea). enrich_conflicting handed the
+# whole rollup map to jq as ONE argv word. Linux caps one argv string at 131072
+# bytes (MAX_ARG_STRLEN), so with enough CONFLICTING rows execve failed E2BIG,
+# the error went to /dev/null, and every run ended UNREACHABLE naming no pull
+# request. macOS has no per-word cap, so this probe fails on the old script on
+# LINUX ONLY. Three rows of ~60 KB each: every single rollup is UNDER the cap
+# and the map of three is OVER it, so it is the merge that is on trial.
+v_pad="$(jq -c -n --arg t "$OLD" '[ range(0; 400) | {__typename:"CheckRun",
+  name: ("padding-check-run-with-a-long-name-" + (. | tostring)), status:"COMPLETED",
+  conclusion:"SUCCESS", completedAt:$t} ]')"
+v_req="$(jq -c --arg t "$OLD" '[ .protection.required_status_checks.checks[].context
+  | {__typename:"CheckRun", name: ., status:"COMPLETED", conclusion:"SUCCESS", completedAt:$t} ]' "$SPEC")"
+jq -c -n --slurpfile p <(printf '%s' "$v_pad") --slurpfile r <(printf '%s' "$v_req") \
+  '($r[0] + $p[0]) as $roll | {"9501": $roll, "9502": $roll, "9503": $roll}' > "$TMP/v-rollup.json"
+jq -c -n '[ 9501, 9502, 9503 | {number: ., mergeable:"CONFLICTING", mergeStateStatus:"DIRTY",
+  headRefOid:"0123456789abcdef0123456789abcdef01234567",
+  updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:[]} ]' > "$TMP/v-light.json"
+v_one="$(jq -c '."9501"' "$TMP/v-rollup.json" | wc -c | tr -d ' ')"
+v_all="$(wc -c < "$TMP/v-rollup.json" | tr -d ' ')"
+[ "$v_one" -lt 131072 ] && [ "$v_all" -gt 131072 ] \
+  && ok "(v) the fixture is on target: one rollup is $v_one bytes (under the cap), the map is $v_all (over it)" \
+  || bad "(v) the fixture missed: one rollup $v_one bytes, the map $v_all — it must straddle 131072"
+out="$(run_watch "$TMP/v-light.json" --rollup-fixture "$TMP/v-rollup.json")"; rc=$?
+[ "$rc" = "1" ] && ok "(v) three CONFLICTING rows with a $v_all-byte rollup map reach the verdict (exit 1)" \
+  || bad "(v) expected exit 1, got $rc: $(tail -3 <<<"$out")"
+grep -qE "NOVEL +3 — #9501, #9502, #9503" <<<"$out" \
+  && ok "(v) …and all three are named NOVEL" \
+  || bad "(v) the three rows are not named NOVEL: $(grep -E 'NOVEL|could not' <<<"$out" | head -2)"
+
 bash -n "$ROUTE" && ok "stale-verdict-watch-route.sh passes bash -n" || bad "stale-verdict-watch-route.sh has a syntax error"
 
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
