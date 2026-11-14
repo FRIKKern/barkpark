@@ -895,8 +895,11 @@ defmodule BarkparkWeb.ChatController do
         # authoritative — this clause ignores the tuple's sid, exactly like the
         # workflow clause above. Secret-safe by construction (D23): the payload
         # is a fixed set of ledger fields the Recorder built, never an inspect
-        # or a raw document.
-        chunk_or_stop(conn, sse_task_frame(transition))
+        # or a raw document. The frame is a task of the ledger dataset, so a
+        # token bound to another dataset is not sent it.
+        if ChatTaskSeam.ledger_in_binding?(conn.assigns[:api_token]),
+          do: chunk_or_stop(conn, sse_task_frame(transition)),
+          else: stream_loop(conn)
 
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
