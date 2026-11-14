@@ -20,6 +20,50 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
   alias Barkpark.StudioChat.Session
   alias Barkpark.Tenancy
 
+  @floor_key :chat_host_expired_turn_floor
+
+  # The shipped floor is a fixed instant at merge time; every lease these tests
+  # make is newer than a floor a day back, unless a test moves the floor.
+  setup do
+    previous = Application.fetch_env(:barkpark, @floor_key)
+    put_floor!(-86_400)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:barkpark, @floor_key, value)
+        :error -> Application.delete_env(:barkpark, @floor_key)
+      end
+    end)
+
+    :ok
+  end
+
+  test "a close on a lease that expired before the floor leaves lease, events and session as they were" do
+    %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch} = running_turn()
+    put_floor!(-600)
+    expire!(lease_id, -3600)
+    before = rows(session_id, lease_id)
+
+    assert {:error, :lease_expired} =
+             ChatHosts.accept_event(host, %{
+               lease_id: lease_id,
+               epoch: epoch,
+               cursor: 2,
+               idempotency_key: "close-1",
+               event: %{"kind" => "terminal", "terminal_state" => "failed"}
+             })
+
+    assert rows(session_id, lease_id) == before
+  end
+
+  test "the sweep ends a turn that expired 800 s ago, after the floor" do
+    %{session_id: session_id, lease_id: lease_id} = running_turn()
+    expire!(lease_id, -800)
+
+    assert 1 = ChatHosts.end_expired_turns(DateTime.utc_now())
+    assert StudioChat.get_session(session_id).status == "exited"
+  end
+
   test "a close refused as lease_expired ends the turn: the session leaves working" do
     %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch} = running_turn()
 
@@ -132,20 +176,16 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
     assert length(ChatHosts.replay_unprojected(session_id)) == 1
   end
 
-  test "the sweep leaves a lease that expired long ago, and its session, exactly as they were" do
-    # Rows already stuck before this code ran are not repaired by a deploy:
-    # the sweep looks back only over its last two ticks.
+  test "the sweep leaves a lease that expired before the floor, and its session, exactly as they were" do
+    # Rows already stuck before this code ran are not repaired by a deploy.
     %{session_id: session_id, lease_id: lease_id} = running_turn()
+    put_floor!(-600)
     expire!(lease_id, -3600)
-    lease_before = Repo.get!(ExecutionLease, lease_id)
-    session_before = Repo.get!(Session, session_id)
+    before = rows(session_id, lease_id)
 
     assert 0 = ChatHosts.end_expired_turns(DateTime.utc_now())
-    Barkpark.StudioChat.AgentStateSweeper.sweep()
 
-    assert Repo.get!(ExecutionLease, lease_id) == lease_before
-    assert Repo.get!(Session, session_id).status == session_before.status
-    assert length(ChatHosts.replay_unprojected(session_id)) == 1
+    assert rows(session_id, lease_id) == before
   end
 
   test "a live lease is never swept" do
@@ -200,6 +240,25 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
     {:ok, _} = StudioChat.update_status(session_id, "working")
 
     %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch}
+  end
+
+  defp put_floor!(seconds_from_now),
+    do:
+      Application.put_env(
+        :barkpark,
+        @floor_key,
+        DateTime.add(DateTime.utc_now(), seconds_from_now)
+      )
+
+  defp rows(session_id, lease_id) do
+    events =
+      from(e in Barkpark.ChatHosts.ExecutionEvent,
+        where: e.lease_id == ^lease_id,
+        order_by: e.cursor
+      )
+      |> Repo.all()
+
+    {Repo.get!(ExecutionLease, lease_id), events, Repo.get!(Session, session_id)}
   end
 
   defp expire!(lease_id, seconds_from_now) do
