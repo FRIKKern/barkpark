@@ -7,7 +7,8 @@
 //   * the box, its words (from data-strings) and its two buttons;
 //   * Upload opens the file dialog; Select opens the library, or the file
 //     dialog when no library is wired;
-//   * an image pasted on the box uploads; a text paste does not;
+//   * an image pasted on the box uploads; a text paste does not; a paste on a
+//     filled field does nothing;
 //   * the host says it is empty (data-bar-empty) and drops it with an image;
 //   * without chrome the picker draws the old empty card, as before.
 //
@@ -123,6 +124,22 @@ await check("an image pasted on the box uploads it; a text paste does not", () =
   assert.ok(ev.defaultPrevented);
   paste({ files: [{ name: "file.jpg", type: "image/jpeg" }], items: [] });
   assert.deepEqual(taken, ["shot.png", "file.jpg"]);
+  el.remove();
+});
+
+await check("a paste on a FILLED bar field sends no upload and keeps the image", () => {
+  const el = mount({ chrome: "bar", value: JSON.stringify({ url: "/media/cover.png", assetId: "a1" }) });
+  const taken = [];
+  el._takeFile = (f) => taken.push(f.name);
+  const btn = el.querySelector(".bp-mp-actions button");
+  assert.ok(btn, "the filled field has its action buttons");
+  btn.focus();
+  const ev = new window.Event("paste", { bubbles: true, cancelable: true });
+  ev.clipboardData = { files: [{ name: "shot.png", type: "image/png" }], items: [] };
+  btn.dispatchEvent(ev);
+  assert.deepEqual(taken, [], "no upload");
+  assert.ok(!ev.defaultPrevented, "the paste is not taken");
+  assert.equal(el.querySelector(".bp-mp-preview-img").getAttribute("src"), "/media/cover.png", "the image stays");
   el.remove();
 });
 
