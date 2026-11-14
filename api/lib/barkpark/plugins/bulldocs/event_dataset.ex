@@ -8,26 +8,43 @@ defmodule Barkpark.Plugins.Bulldocs.EventDataset do
   paper documents (published or draft) that carry the event's `paper_slug` in
   the event's own workspace and project.
 
-  `within/2` keeps an event only when every such paper is in the given
-  dataset. An event with no paper slug, with no paper left, or whose slug
-  exists in another dataset of the same workspace and project as well, has no
-  single dataset and is not kept: a bound token is held to its dataset, so an
-  event that cannot be placed there is not shown to it.
+  ## Placement
+
+    * every such paper is in ONE dataset: the event is in that dataset;
+    * no such paper (a goal-only event with no `paper_slug`, a paper that is
+      gone, or an event whose project differs from its paper's): the event is
+      in the paper default dataset, where an unplaced paper lives;
+    * the slug exists in TWO OR MORE datasets of the same workspace and
+      project: the event cannot be attributed to either, so it is in none.
+      Showing it to a bound token would leak one way or the other. Only
+      unbound callers see it.
+
+  `within/2` keeps the events placed in the given dataset.
   """
 
   import Ecto.Query
 
-  alias Barkpark.Content.{Document, DraftId}
+  alias Barkpark.Content.{Document, DraftId, Papers}
   alias Barkpark.Plugins.Bulldocs.Event
   alias Barkpark.Repo
 
-  @doc "The events of `events` that belong to `dataset` alone. One query."
+  @doc "The events of `events` placed in `dataset` (see the module doc). One query."
   @spec within([%Event{}], String.t()) :: [%Event{}]
   def within([], _dataset), do: []
 
   def within(events, dataset) when is_list(events) and is_binary(dataset) do
     papers = papers_for(events)
-    Enum.filter(events, &(datasets_of(&1, papers) == [dataset]))
+    Enum.filter(events, &(placement(&1, papers) == [dataset]))
+  end
+
+  # No paper: the paper default dataset. Two or more datasets (a twin slug):
+  # the list has more than one entry and equals no single dataset, so the event
+  # stays hidden from every bound token.
+  defp placement(event, papers) do
+    case datasets_of(event, papers) do
+      [] -> [Papers.paper_default_dataset()]
+      datasets -> datasets
+    end
   end
 
   defp papers_for(events) do

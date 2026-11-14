@@ -49,8 +49,10 @@ defmodule BarkparkWeb.BulldocsIntentsController do
   A token minted with an explicit dataset is held to it here too. An intent
   has no dataset of its own, it follows its paper (`EventDataset`): a
   dataset-bound token lists and marks only intents of papers in its dataset,
-  and a mark on any other intent is the same 404. Unbound tokens and the
-  shared secret are unchanged.
+  and a mark on any other intent is the same 404. An intent with no paper to
+  follow counts as the paper default dataset; one whose slug exists in two
+  datasets of its workspace and project is shown to no bound token. Unbound
+  tokens and the shared secret are unchanged.
   """
   use BarkparkWeb, :controller
 
