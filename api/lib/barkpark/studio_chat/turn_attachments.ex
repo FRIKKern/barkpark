@@ -16,29 +16,41 @@ defmodule Barkpark.StudioChat.TurnAttachments do
   reference's media type against the host's advertised
   `providers.<provider>.attachments` list.
 
-  A reference has exactly three keys: `id` (the sha256 hex of the decoded bytes,
-  which is the chat store's content address), `media_type` and `byte_size`. No
-  file name, store path, url or token.
+  An image reference has exactly three keys: `id` (the sha256 hex of the decoded
+  bytes, which is the chat store's content address), `media_type` and
+  `byte_size`. No file name, store path, url or token.
+
+  A file (`/papers/chat-host-file-attachments-plan`) arrives as a document
+  block, `{"type": "document", "source": {"type": "base64", "media_type",
+  "data"}, "title": name}`, with a `text/plain` or `application/pdf` type. Its
+  reference has the same three keys plus `name`, the block's title, which must
+  pass `AttachmentName.valid?/1`. The host writes the file under a path built
+  from the id, never from the name.
 
   The payload's `content` becomes the text alone: the text blocks joined by a
   newline, which is what the host already reduces a block list to. Content that
   is already a string passes through untouched and gains no `attachments` key.
 
-  It fails closed. A block that is neither a text block nor a base64 image of an
-  accepted type, or image data that is not base64, refuses the whole turn with
-  `{:error, :invalid_turn_content}`: nothing is leased and nothing is dropped
-  without a word.
+  It fails closed. A block that is not a text block, a base64 image of an image
+  type, or a base64 document of a file type with a valid name, or data that is
+  not base64, refuses the whole turn with `{:error, :invalid_turn_content}`:
+  nothing is leased and nothing is dropped without a word.
   """
 
-  alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.{AttachmentName, Attachments}
 
-  @type attachment_ref :: %{id: String.t(), media_type: String.t(), byte_size: non_neg_integer()}
+  @type attachment_ref :: %{
+          required(:id) => String.t(),
+          required(:media_type) => String.t(),
+          required(:byte_size) => non_neg_integer(),
+          optional(:name) => String.t()
+        }
 
   @doc """
   Rewrite a send_turn payload for a registered host. A block-list `content`
   becomes `%{content: text, attachments: [reference]}` (the `attachments` key is
-  present only when there is at least one image); a string `content` is
-  returned unchanged.
+  present only when there is at least one image or file); a string `content`
+  is returned unchanged.
   """
   @spec to_references(map()) :: {:ok, map()} | {:error, :invalid_turn_content}
   def to_references(%{content: blocks} = payload) when is_list(blocks) do
@@ -106,11 +118,22 @@ defmodule Barkpark.StudioChat.TurnAttachments do
     end
   end
 
+  defp split([%{"type" => "document", "source" => source} = block | rest], texts, refs) do
+    with true <- AttachmentName.valid?(block["title"]),
+         {:ok, ref} <- reference(source, Attachments.file_types()) do
+      split(rest, texts, [Map.put(ref, :name, block["title"]) | refs])
+    else
+      _ -> {:error, :invalid_turn_content}
+    end
+  end
+
   defp split([_unknown | _rest], _texts, _refs), do: {:error, :invalid_turn_content}
 
-  defp reference(%{"type" => "base64", "media_type" => media_type, "data" => data})
+  defp reference(source), do: reference(source, Attachments.media_types())
+
+  defp reference(%{"type" => "base64", "media_type" => media_type, "data" => data}, accepted)
        when is_binary(media_type) and is_binary(data) do
-    with true <- media_type in Attachments.media_types(),
+    with true <- media_type in accepted,
          {:ok, bytes} <- Base.decode64(data) do
       {:ok,
        %{
@@ -123,5 +146,5 @@ defmodule Barkpark.StudioChat.TurnAttachments do
     end
   end
 
-  defp reference(_source), do: :error
+  defp reference(_source, _accepted), do: :error
 end

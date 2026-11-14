@@ -114,8 +114,26 @@ defmodule Barkpark.ChatHosts.RegisteredHostReadinessTest do
       assert heartbeat_valid_with?([])
     end
 
-    test "a value outside the four image types is refused" do
-      refute heartbeat_valid_with?(["application/pdf"])
+    # Paper chat-host-file-attachments-plan (T3): a host that can write a file
+    # into its working folder lists the chat store's two file types too.
+    test "a provider's attachments list may name text/plain and application/pdf" do
+      %{host: host} = enroll_ready_host()
+      types = ~w(image/png image/jpeg image/gif image/webp text/plain application/pdf)
+
+      caps = put_in(full_readiness_capabilities(), ["providers", "claude", "attachments"], types)
+
+      assert {:ok, _} = ChatHosts.heartbeat(host, %{capabilities: caps})
+
+      assert Repo.get!(RegisteredHost, host.id).capabilities["providers"]["claude"]["attachments"] ==
+               types
+
+      assert heartbeat_valid_with?(["text/plain"])
+      assert heartbeat_valid_with?(["application/pdf", "image/png"])
+    end
+
+    test "a value outside the store's accepted types is refused" do
+      refute heartbeat_valid_with?(["application/zip"])
+      refute heartbeat_valid_with?(["text/html"])
       refute heartbeat_valid_with?(["image/png", "image/svg+xml"])
       refute heartbeat_valid_with?(["sk-ant-secret"])
       refute heartbeat_valid_with?([1])
