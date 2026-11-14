@@ -360,12 +360,12 @@ defmodule BarkparkWeb.TasksController do
       # deleted from each card, so no count, no ordering and no other field can
       # drift between the default view and the board's.
       :board ->
-        counts = Params.batch_edge_counts(docs)
+        counts = CountScope.edge_counts(docs, conn)
         child_counts = Params.batch_child_counts(docs, CountScope.of(conn))
         Enum.map(docs, &Params.render_board_with_counts(&1, counts, child_counts))
 
       :full ->
-        counts = Params.batch_edge_counts(docs)
+        counts = CountScope.edge_counts(docs, conn)
         # task-3e0eda896a247776: the SAME batched grouped query the brief card
         # runs — the full card used to omit `child_count` entirely, so the
         # DEFAULT view of the ledger answered "no children" for every epic root.
@@ -439,7 +439,7 @@ defmodule BarkparkWeb.TasksController do
           # `?view=` stays LENIENT (an undeclared value is still `:full`); only
           # the index fail-closes the value, see `Params.parse_index_view/1`.
           full_or_board when full_or_board in [:full, :board] ->
-            counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
+            counts = CountScope.edge_counts(sealed_in_progress ++ sealed_ready, conn)
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
             render =
@@ -989,7 +989,7 @@ defmodule BarkparkWeb.TasksController do
       {:ok, doc} ->
         # w7-08c: count edges on the single-doc path too. batch_edge_counts/1
         # accepts a 1-element list and runs the same two grouped queries.
-        counts = Params.batch_edge_counts([doc])
+        counts = CountScope.edge_counts([doc], conn)
 
         # C2 (task carries its rail): the task's direct child tasks — the rows
         # whose `content.parent_id` points at this doc, in chronological
@@ -2440,8 +2440,8 @@ defmodule BarkparkWeb.TasksController do
   defp edges_for_kind(conn, doc_id, kind_opt) do
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
-        deps = Tasks.dependencies(task.id, kind: kind_opt)
-        dependents = Tasks.dependents(task.id, kind: kind_opt)
+        deps = CountScope.held(Tasks.dependencies(task.id, kind: kind_opt), conn)
+        dependents = CountScope.held(Tasks.dependents(task.id, kind: kind_opt), conn)
 
         # Field-visibility seal (fail-closed): the deps/next graph is rendered
         # off content-redacted docs under the request's caller.
