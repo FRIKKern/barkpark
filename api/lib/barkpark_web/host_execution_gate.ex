@@ -11,9 +11,10 @@ defmodule BarkparkWeb.HostExecutionGate do
 
   An INSTANCE PRINCIPAL is: when the platform operator allowlist
   (`BARKPARK_OPERATOR_EMAILS` / `BARKPARK_OPERATOR_TOKEN_IDS`) is armed, only a
-  principal it names; when it is unset (single-tenant), an instance-admin
-  token, an owner/admin of the Default workspace, or a chat token bound to the
-  Default workspace (only a Default admin can mint one).
+  principal it names; when it is unset (single-tenant), an `admin` token of the
+  Default workspace or of no workspace, an owner/admin of the Default workspace,
+  or a chat token bound to the Default workspace (only a Default admin can mint
+  one). An `admin` token of any other workspace is not one.
   """
 
   alias Barkpark.Accounts.User
@@ -52,9 +53,17 @@ defmodule BarkparkWeb.HostExecutionGate do
 
   def authorize_turn(_principal, _session), do: :ok
 
-  # The admin bit is the flat instance tier (RequireAdmin) and needs no DB read.
+  # The admin bit is the instance tier only on a token of the Default workspace
+  # or of no workspace (the legacy operator; no DB read for that one). An admin
+  # token of any other workspace is that tenant's admin (task-4c44ce414f7d4a72).
   defp default_owner?(%ApiToken{} = token) do
-    Auth.has_permission?(token, "admin") or default_seat?(token, default_workspace_id())
+    admin? = Auth.has_permission?(token, "admin")
+
+    (admin? and is_nil(token.workspace_id)) or
+      case default_workspace_id() do
+        nil -> false
+        default -> (admin? and token.workspace_id == default) or default_seat?(token, default)
+      end
   end
 
   defp default_owner?(%User{} = user) do
