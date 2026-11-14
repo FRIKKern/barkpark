@@ -4,6 +4,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   `.doc-footer`, `styles.css` `.doc-footer`, `.publish`): what happened last
   on the left, then a Publish button and the "…" on the right.
 
+  - The left is a button named by its words, with TanStack's class names
+    (`.save-state`, `.save-state-text`). It opens nothing yet and is disabled.
   - The left says "Edited 5m ago" while there are edits not yet published,
     "Last published 2h ago" when there are none, and the save's own words
     when a save went wrong ("Save failed", "Updated by another user"). A
@@ -38,7 +40,12 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   @doc "The left's words and the Publish button."
   def bar(assigns) do
     ~H"""
-    <span class="dk-footer-status" data-desk-footer-status>{@status}</span>
+    <%!-- The TanStack Studio's names (`DocumentPane.tsx` `.save-state-btn`,
+          `.save-state`, `.save-state-text`): a button named by its words. It
+          opens nothing yet, so it is disabled and out of the tab order. --%>
+    <button type="button" class="dk-footer-status save-state-btn" data-desk-footer-status disabled>
+      <span class="save-state"><span class="save-state-text">{@status}</span></span>
+    </button>
     <button
       type="button"
       id={"#{@id}-publish"}
