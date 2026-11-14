@@ -6,7 +6,7 @@
 // Mounts the TRACKED static asset api/priv/static/assets/bp-media-picker.js in
 // jsdom with chrome="bar" and an image set, and checks the frame, the menu (its
 // items, toggle, aria-expanded, focus back on Escape), each item's action, the
-// host flag, the broken-image fallback, and that without chrome nothing moved.
+// host flag, where a paste lands, the broken-image fallback, and that without chrome nothing moved.
 //
 // Run: node ../paper-editor-host-tests/__picker_bar_filled.test.mjs
 import assert from "node:assert/strict";
@@ -124,6 +124,25 @@ await check("each item does its job", async () => {
   assert.ok(el.querySelector(".bp-mp-bar"), "Remove: back to the empty bar");
   assert.ok(el.hasAttribute("data-bar-empty") && !el.hasAttribute("data-bar-filled"));
   assert.equal(document.activeElement, el.querySelector(".bp-mp-bar"), "focus lands on the bar");
+  el.remove();
+});
+
+await check("a paste replaces the image only on the frame, never on the … button", () => {
+  const el = mount({ chrome: "bar", value: VALUE });
+  const taken = [];
+  el._takeFile = (f) => taken.push(f.name);
+  const paste = (target) => {
+    const ev = new window.Event("paste", { bubbles: true, cancelable: true });
+    ev.clipboardData = { files: [{ name: "shot.png", type: "image/png" }], items: [] };
+    target.dispatchEvent(ev);
+    return ev;
+  };
+  const onOpts = paste(el.querySelector(".bp-mp-options"));
+  assert.deepEqual(taken, [], "a paste on the … does nothing");
+  assert.ok(!onOpts.defaultPrevented);
+  const onFrame = paste(el.querySelector(".bp-mp-frame"));
+  assert.deepEqual(taken, ["shot.png"], "a paste on the frame replaces the image");
+  assert.ok(onFrame.defaultPrevented);
   el.remove();
 });
 

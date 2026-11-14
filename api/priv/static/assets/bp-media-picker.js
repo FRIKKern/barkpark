@@ -696,11 +696,14 @@ class BpMediaPicker extends HTMLElement {
         if (f) this._takeFile(f);
       });
       // The bar's "or paste": an image pasted while focus is in the EMPTY bar
-      // uploads, as a drop does. A filled field says nothing about paste, so a
-      // paste there does nothing, as in the old Studio. Text pastes (the alt
-      // input) pass through.
+      // uploads, as a drop does. A set image takes a paste only on its frame,
+      // whose name says so ("Drop or paste an image to replace it"); anywhere
+      // else in a filled field (the "…", its menu) a paste does nothing, as in
+      // the old Studio. Text pastes (the alt input) pass through.
       this.addEventListener("paste", (e) => {
-        if (!this._isBar() || this._busy || !this.hasAttribute("data-bar-empty")) return;
+        if (!this._isBar() || this._busy) return;
+        const onFrame = this.hasAttribute("data-bar-filled") && e.target && e.target.classList && e.target.classList.contains("bp-mp-frame");
+        if (!this.hasAttribute("data-bar-empty") && !onFrame) return;
         const f = bpMediaPickerPastedImage(e.clipboardData);
         if (!f) return;
         e.preventDefault();
