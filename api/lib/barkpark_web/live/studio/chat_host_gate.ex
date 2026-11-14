@@ -22,13 +22,15 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   """
 
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Runtime
   alias BarkparkWeb.HostExecutionGate
 
   @doc """
   `:ok`, or `{:error, :host_execution_not_permitted}` when the tab's principal
   may not take `act` on its session. `act` is `:turn`, `:steer` (a mode or model
-  change, steered live or saved to the row; only a brand-new tab with no row and
-  no pid passes, since it writes nothing a spawn reads) or a permission decision
+  change, steered live or saved to the row; a brand-new tab with no row and no
+  pid passes: it holds the choice in its assigns, and the row that would carry
+  it is created only past `create_session/3`) or a permission decision
   (`:allow | {:allow, input} | {:deny, message}`).
 
   The session is the stored row when there is one (its provider, target and
@@ -41,6 +43,37 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
     if act == :steer and is_nil(assigns[:session]) and is_nil(assigns[:store_session_id]),
       do: :ok,
       else: HostExecutionGate.authorize_turn(principal(assigns), subject(assigns))
+  end
+
+  @doc """
+  Create the row a brand-new tab's first send needs, in `scope`, only when the
+  spawn that follows may run (task-7321bf17168e60ff). The row takes the tab's
+  mode, and every later spawn on it starts from that mode, whoever takes the
+  turn: a principal the spawn would refuse must leave no row for the
+  operator's next turn to spawn from.
+  """
+  @spec create_session(map(), Ecto.UUID.t(), {:workspace, binary()} | :global) ::
+          {:ok, StudioChat.Session.t()} | {:error, term()}
+  def create_session(assigns, id, scope) do
+    owner =
+      case scope do
+        {:workspace, ws_id} -> ws_id
+        :global -> nil
+      end
+
+    with :ok <- authorize_spawn(assigns, %{owner_workspace_id: owner}) do
+      StudioChat.create_session(
+        %{
+          id: id,
+          provider: assigns.provider,
+          execution_target: assigns.execution_target,
+          execution_host_id: assigns.execution_host_id,
+          cwd: Runtime.cwd(assigns.provider),
+          mode: assigns.mode
+        },
+        scope
+      )
+    end
   end
 
   @doc """
