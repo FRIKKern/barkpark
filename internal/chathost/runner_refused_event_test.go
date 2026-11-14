@@ -26,6 +26,12 @@ type leaseServer struct {
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
+	// refuseKind: answer every event of this kind with that status.
+	refuseKind map[string]int
+	// onEvent, when set, sees the kind of every event POST, taken or not.
+	onEvent func(kind string)
+	// command: the command JSON to hand out; empty means a bare send_turn.
+	command string
 }
 
 func (s *leaseServer) handler(t *testing.T) http.Handler {
@@ -37,16 +43,20 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		case "/v1/chat-host/heartbeat":
 			_, _ = w.Write([]byte(`{"host":{"id":"host-1"}}`))
 		case "/v1/chat-host/commands":
+			command := s.command
+			if command == "" {
+				command = `{"provider":"claude","operation":"send_turn","session_id":"session-1"}`
+			}
 			if s.completed && s.staleListings == 0 {
 				_, _ = w.Write([]byte(`{"commands":[]}`))
 				return
 			}
 			if s.completed {
 				s.staleListings--
-				fmt.Fprintf(w, `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":%d,"command":{"provider":"claude","operation":"send_turn","session_id":"session-1"}}]}`, s.lastCursor-1)
+				fmt.Fprintf(w, `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":%d,"command":%s}]}`, s.lastCursor-1, command)
 				return
 			}
-			fmt.Fprintf(w, `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":%d,"command":{"provider":"claude","operation":"send_turn","session_id":"session-1"}}]}`, s.lastCursor)
+			fmt.Fprintf(w, `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":%d,"command":%s}]}`, s.lastCursor, command)
 		case "/v1/chat-host/events":
 			var payload struct {
 				Cursor uint64         `json:"cursor"`
@@ -57,8 +67,12 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 				return
 			}
 			s.posts++
-			status := 0
-			if s.refuse != nil {
+			postedKind, _ := payload.Event["kind"].(string)
+			if s.onEvent != nil {
+				s.onEvent(postedKind)
+			}
+			status := s.refuseKind[postedKind]
+			if status == 0 && s.refuse != nil {
 				status = s.refuse(payload.Cursor)
 			}
 			switch {
