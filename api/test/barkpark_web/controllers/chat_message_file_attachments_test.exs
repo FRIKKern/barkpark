@@ -111,17 +111,10 @@ defmodule BarkparkWeb.ChatMessageFileAttachmentsTest do
   defp restore(key, nil), do: Application.delete_env(:barkpark, key)
   defp restore(key, value), do: Application.put_env(:barkpark, key, value)
 
-  # The Go binary's attachments fixture with the two file types added to
-  # claude's list: the shape a host advertises once it writes files (T6).
+  # The Go binary's attachments fixture, which lists the two file types in
+  # claude's list since T6: the shape a host advertises once it writes files.
   defp enroll_files_host!(ws, name) do
-    caps =
-      @attachments_fixture
-      |> File.read!()
-      |> Jason.decode!()
-      |> update_in(
-        ["providers", "claude", "attachments"],
-        &(&1 ++ ~w(text/plain application/pdf))
-      )
+    caps = @attachments_fixture |> File.read!() |> Jason.decode!()
 
     {:ok, issued} =
       ChatHosts.issue_enrollment(ws.id, %{name: name, approved_roots: [System.tmp_dir!()]})
@@ -412,13 +405,24 @@ defmodule BarkparkWeb.ChatMessageFileAttachmentsTest do
   end
 
   test "a host that lists only images is refused a named file by name" do
-    # The Go binary's fixture as it ships today: images only.
+    # The Go binary's fixture with its file types taken out: what a host
+    # released before T6 advertises, images only.
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "msg-img-#{suffix}", name: "Img #{suffix}"})
     raw = "msg-img-member-#{suffix}"
     {:ok, _} = Auth.create_token(raw, "msg-img", @dataset, ["read", "write", "admin"], ws.id)
 
-    caps = @attachments_fixture |> File.read!() |> Jason.decode!()
+    caps =
+      @attachments_fixture
+      |> File.read!()
+      |> Jason.decode!()
+      |> update_in(
+        ["providers", "claude", "attachments"],
+        &Enum.filter(&1, fn type -> String.starts_with?(type, "image/") end)
+      )
+
+    assert caps["providers"]["claude"]["attachments"] ==
+             ~w(image/png image/jpeg image/gif image/webp)
 
     {:ok, issued} =
       ChatHosts.issue_enrollment(ws.id, %{
