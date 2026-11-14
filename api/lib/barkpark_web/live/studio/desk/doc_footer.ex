@@ -47,7 +47,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       phx-click={JS.push("publish") |> JS.focus(to: ~s([id="#{@menu_button}"]))}
       data-desk-publish
     >
-      <BarkparkWeb.Icons.icon name="send" size={21} />
+      <BarkparkWeb.Icons.desk_icon name="publish" size={21} />
       {(@publish && @publish.label) || gettext("Publish")}
     </button>
     """

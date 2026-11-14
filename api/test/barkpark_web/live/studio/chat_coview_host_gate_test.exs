@@ -7,7 +7,9 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
   allowlist armed a non-operator Default admin could approve, plan-approve,
   answer a question, or send a turn into an instance-host session — the acts
   `POST /v1/chat/sessions/:id/approval` (allow) and `/messages` refuse with 403
-  `host_execution_not_permitted` for the same principal.
+  `host_execution_not_permitted` for the same principal. task-14e61a60450c4678:
+  the same co-viewer could also steer the live permission mode or model, and
+  arming bypass wrote `bypassPermissions` to the session row.
 
   The wire is a `tee` of the runtime's stdin. Each refusal is proven by
   ORDERING, not by a sleep: the refused act and a later act that must pass go
@@ -271,6 +273,116 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
     end
   end
 
+  # task-14e61a60450c4678: every mode/model steer frame on the wire, in order.
+  defp steers(wire) do
+    wire
+    |> wire_text()
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn line ->
+      case Jason.decode(line) do
+        {:ok,
+         %{"type" => "control_request", "request" => %{"subtype" => "set_permission_mode"} = r}} ->
+          [{:mode, r["mode"]}]
+
+        {:ok, %{"type" => "control_request", "request" => %{"subtype" => "set_model"} = r}} ->
+          [{:model, r["model"]}]
+
+        _ ->
+          []
+      end
+    end)
+  end
+
+  # The ordering marker: a steer that must pass goes through the same Session
+  # after the refused ones would have. Once it is on the wire, they never will be.
+  defp operator_steers_model!(op_view, wire, model) do
+    render_change(element(op_view, "form[phx-change=set-model]"), %{"model" => model})
+    assert await_wire(wire, fn _ -> {:model, model} in steers(wire) end)
+  end
+
+  describe "allowlist armed: a non-operator co-viewer may not steer the live host session" do
+    setup %{conn: conn, default_ws: default_ws, wire: wire} do
+      {op_raw, op_token} = default_admin_token!(default_ws)
+      arm_allowlist!(op_token)
+      {op_view, sid} = start_live_session!(conn, op_raw, wire)
+
+      coviewer = mount_user(conn, default_admin_user!(default_ws), "/studio/chat/#{sid}")
+      assert is_pid(lv_assigns(coviewer)[:session]), "the co-view precondition: a live pid"
+
+      %{op_view: op_view, sid: sid, coviewer: coviewer, mode: lv_assigns(coviewer)[:mode]}
+    end
+
+    test "the permission mode (selector event and /autopilot) sends no steer", ctx do
+      assert ctx.mode not in ["acceptEdits", "auto"], "the precondition: a real switch"
+      html = render_hook(ctx.coviewer, "set-mode", %{"mode" => "acceptEdits"})
+
+      render_submit(element(ctx.coviewer, "form[phx-submit=send]"), %{"message" => "/autopilot"})
+      operator_steers_model!(ctx.op_view, ctx.wire, "sonnet")
+
+      assert Enum.filter(steers(ctx.wire), &match?({:mode, _}, &1)) == []
+      assert html =~ refusal()
+      assert lv_assigns(ctx.coviewer)[:mode] == ctx.mode
+      assert StudioChat.get_session(ctx.sid, :global).mode == ctx.mode
+    end
+
+    test "the model (picker and /model) sends no steer and persists nothing", ctx do
+      row_before = StudioChat.get_session(ctx.sid, :global).model_choice
+      tab_before = lv_assigns(ctx.coviewer)[:model_choice]
+
+      html =
+        render_change(element(ctx.coviewer, "form[phx-change=set-model]"), %{"model" => "opus"})
+
+      render_submit(element(ctx.coviewer, "form[phx-submit=send]"), %{"message" => "/model haiku"})
+
+      # The tab's acts are synchronous: a row write would already have landed.
+      assert StudioChat.get_session(ctx.sid, :global).model_choice == row_before
+      assert lv_assigns(ctx.coviewer)[:model_choice] == tab_before
+      assert html =~ refusal()
+
+      operator_steers_model!(ctx.op_view, ctx.wire, "sonnet")
+      refute {:model, "opus"} in steers(ctx.wire)
+      refute {:model, "haiku"} in steers(ctx.wire)
+    end
+
+    test "arming bypass writes nothing to the session row", ctx do
+      render_hook(ctx.coviewer, "set-mode", %{"mode" => "bypassPermissions"})
+      render_hook(ctx.coviewer, "bypass-confirm", %{"confirm" => "bypass"})
+      html = render_hook(ctx.coviewer, "arm-bypass", %{})
+
+      assert StudioChat.get_session(ctx.sid, :global).mode == ctx.mode
+      assert html =~ refusal()
+      assigns = lv_assigns(ctx.coviewer)
+      assert {assigns[:mode], assigns[:bypass_live_armed]} == {ctx.mode, false}
+    end
+  end
+
+  describe "CONTROLS: legit tabs keep steering the live session" do
+    test "a second operator tab (allowlist armed) steers mode and model", %{conn: conn} = ctx do
+      {op_raw, op_token} = default_admin_token!(ctx.default_ws)
+      arm_allowlist!(op_token)
+      {_op_view, sid} = start_live_session!(conn, op_raw, ctx.wire)
+
+      tab2 = mount_token(conn, op_raw, "/studio/chat/#{sid}")
+      html = render_hook(tab2, "set-mode", %{"mode" => "acceptEdits"})
+      operator_steers_model!(tab2, ctx.wire, "opus")
+
+      assert {:mode, "acceptEdits"} in steers(ctx.wire)
+      refute html =~ refusal()
+    end
+
+    test "with no operator allowlist, a Default admin co-viewer steers mode and model",
+         %{conn: conn} = ctx do
+      {op_raw, _} = default_admin_token!(ctx.default_ws)
+      {_op_view, sid} = start_live_session!(conn, op_raw, ctx.wire)
+
+      coviewer = mount_user(conn, default_admin_user!(ctx.default_ws), "/studio/chat/#{sid}")
+      render_hook(coviewer, "set-mode", %{"mode" => "acceptEdits"})
+      operator_steers_model!(coviewer, ctx.wire, "haiku")
+
+      assert {:mode, "acceptEdits"} in steers(ctx.wire)
+    end
+  end
+
   describe "CONTROLS: legit co-viewers keep resolving asks" do
     test "a second operator tab (allowlist armed) approves", %{conn: conn} = ctx do
       {op_raw, op_token} = default_admin_token!(ctx.default_ws)
@@ -346,6 +458,48 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
 
       assert :ok =
                ChatHostGate.authorize(Map.put(ctx.assigns, :store_session_id, row.id), :allow)
+    end
+
+    # task-242dea9cceb7dd7e: the next spawn reads a saved mode, so an offline
+    # row is refused too; only a brand-new tab (no row, no pid) passes.
+    test ":steer refuses a host row live or offline, passes a tab with no row", ctx do
+      row = row!(ctx.default_ws, %{execution_target: "managed"})
+      assigns = Map.put(ctx.assigns, :store_session_id, row.id)
+
+      assert {:error, :host_execution_not_permitted} =
+               ChatHostGate.authorize(Map.put(assigns, :session, nil), :steer)
+
+      assert {:error, :host_execution_not_permitted} =
+               ChatHostGate.authorize(Map.put(assigns, :session, self()), :steer)
+
+      fresh = Map.merge(ctx.assigns, %{store_session_id: nil, session: nil})
+      assert :ok = ChatHostGate.authorize(fresh, :steer)
+    end
+
+    test ":steer passes a live registered_host session and the cloud profile", ctx do
+      {:ok, issued} =
+        ChatHosts.issue_enrollment(ctx.default_ws.id, %{
+          name: "steer-host-#{System.unique_integer([:positive])}",
+          approved_roots: [System.tmp_dir!()],
+          capabilities: @host_caps
+        })
+
+      {:ok, %{credential: credential}} =
+        ChatHosts.enroll(issued.enrollment_token, %{capabilities: @host_caps})
+
+      {:ok, host} = ChatHosts.authenticate(credential)
+
+      reg =
+        row!(ctx.default_ws, %{execution_target: "registered_host", execution_host_id: host.id})
+
+      live = Map.put(ctx.assigns, :session, self())
+      assert :ok = ChatHostGate.authorize(Map.put(live, :store_session_id, reg.id), :steer)
+
+      {:ok, _} =
+        Tenancy.set_workspace_chat_settings(ctx.default_ws.id, %{"execution_profile" => "cloud"})
+
+      managed = row!(ctx.default_ws, %{execution_target: "managed"})
+      assert :ok = ChatHostGate.authorize(Map.put(live, :store_session_id, managed.id), :steer)
     end
 
     test "passes a managed session under the cloud profile", ctx do

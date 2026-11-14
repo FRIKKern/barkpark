@@ -113,6 +113,73 @@ defmodule BarkparkWeb.MediaDatasetBindingTest do
     end
   end
 
+  # `PUT /api/workspaces/:slug/media/blob/*path` is the restore primitive beside
+  # workspace import. It names no dataset and claims a blob key by workspace
+  # only, so a dataset-bound admin token overwrote another dataset's bytes
+  # (task-1b2116e5be0712d7). Import already refuses a bound token; so does this.
+  describe "blob push (PUT /api/workspaces/:slug/media/blob/*path)" do
+    setup do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      {:ok, other} = create_media_file_in!(ws, proj, %{}, @other)
+      on_exit(fn -> File.rm(Media.file_path(other.path)) end)
+
+      admin = fn opts ->
+        raw = "mdsb-blob-#{System.unique_integer([:positive])}"
+        perms = ["read", "write", "admin"]
+        {:ok, _} = Auth.create_token(raw, "mdsb-blob", @own, perms, ws.id, opts)
+        raw
+      end
+
+      push = fn raw, bytes ->
+        as(raw)
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/workspaces/#{ws.slug}/media/blob/#{other.path}", bytes)
+      end
+
+      %{other: other, admin: admin, push: push}
+    end
+
+    test "a dataset-bound admin token is refused, and the bytes stay", ctx do
+      assert ctx.push.(ctx.admin.([]), "BYTES-FROM-UNBOUND").status == 200
+      assert_dataset_refusal(ctx.push.(ctx.admin.(dataset_bound: true), "BYTES-FROM-BOUND"))
+      assert File.read!(Media.file_path(ctx.other.path)) == "BYTES-FROM-UNBOUND"
+    end
+  end
+
+  # `DELETE /media/:id` names no dataset and did not confine the row, so a
+  # bound token deleted another dataset's file (task-e50f48666c109098).
+  describe "delete by id (flat /media)" do
+    setup %{bound: bound, unbound: unbound} do
+      %{
+        own: uploaded!(upload(bound)),
+        other: uploaded!(upload(unbound, %{"dataset" => @other}))
+      }
+    end
+
+    test "a bound token cannot delete another dataset's file; its own it can",
+         %{bound: bound, own: own, other: other} do
+      missing = as(bound) |> delete("/media/#{Ecto.UUID.generate()}")
+      refused = as(bound) |> delete("/media/#{other.id}")
+
+      assert refused.status == 404
+      assert Repo.get(MediaFile, other.id)
+      # Another dataset's file answers exactly as a missing one.
+      assert strip_request_id(refused.resp_body) == strip_request_id(missing.resp_body)
+
+      assert (as(bound) |> delete("/media/#{own.id}")).status == 200
+      refute Repo.get(MediaFile, own.id)
+    end
+
+    test "an unbound token still deletes another dataset's file (control)",
+         %{unbound: unbound, other: other} do
+      assert (as(unbound) |> delete("/media/#{other.id}")).status == 200
+      refute Repo.get(MediaFile, other.id)
+    end
+
+    defp strip_request_id(body), do: Regex.replace(~r/"request_id":"[^"]*"/, body, "")
+  end
+
   describe "reads by id (scoped /w/:ws/p/:proj/media)" do
     test "meta: own dataset 200, another dataset 404" do
       ws = create_workspace!()

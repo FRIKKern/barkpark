@@ -101,6 +101,17 @@ defmodule BarkparkWeb.StudioLocale do
       "upload" => gettext("Upload file"),
       "browse" => gettext("Browse library"),
       "upload_button" => gettext("Upload"),
+      # The desk's image bar (chrome="bar"); "Select" here is the action, not
+      # the field type the bare msgid names.
+      "drag_paste" => gettext("Drag or paste image here"),
+      "select" => pgettext("image action", "Select"),
+      "bar_label" => gettext("Drop, paste or upload an image"),
+      "replace_label" => gettext("Drop or paste an image to replace it"),
+      "preview_alt" => gettext("Preview of uploaded image"),
+      "options_menu" => gettext("Open image options menu"),
+      "download" => gettext("Download"),
+      "copy_url" => gettext("Copy URL"),
+      "remove_short" => gettext("Remove"),
       "alt" => gettext("Alt text"),
       "alt_placeholder" => gettext("Describe the image for people who cannot see it"),
       "remove" => gettext("Remove image"),

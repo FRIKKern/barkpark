@@ -718,22 +718,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Switching permission mode steers the LIVE session via a `set_permission_mode`
-  # control frame (key `mode`, charter D12) — the model's context is preserved,
-  # no respawn. With no live subprocess (the common case now that spawn is lazy)
-  # it is a silent selector update; the next spawn carries the mode via
-  # build_args.
-  #
-  # Persistence is ACK-driven for a live session (charter D23): the store's mode
-  # is the last value the CLI actually confirmed, never the optimistic guess.
-  # We record the minted request_id in `pending_mode` (with the mode to revert to
-  # if it fails) so ONLY the ack matching the LATEST outstanding switch may commit
-  # or revert — a stale ack from a superseded rapid switch is ignored, never a
-  # mis-revert. With no live session there is no ack to wait on, so we persist
-  # immediately and the next lazy `--resume` spawn carries the mode.
+  # control frame (key `mode`, charter D12; context kept, no respawn) once the tab
+  # passes ChatHostGate's :steer check; the ACK-driven persistence (D23) is
+  # change_mode/2's. Offline it persists at once; the next spawn carries it.
   # Picking bypassPermissions in the footer NEVER steers on the select alone
-  # (charter D48 fail-closed law): it opens the loud type-to-confirm arm panel.
-  # The mode is unchanged until the ceremony completes — a plain select can't
-  # arm dangerous bypass.
+  # (charter D48 fail-closed law): it opens the loud type-to-confirm arm panel;
+  # the mode is unchanged until the ceremony completes.
   def handle_event("set-mode", %{"mode" => "bypassPermissions"}, socket) do
     {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)}
   end
@@ -803,14 +793,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Arm bypass — the ONLY road that persists mode == bypassPermissions. Guarded
-  # server-side on the exact typed word (never trust the client's button-enabled
-  # state). Persists the mode (so the next spawn's build_args, gated on the
-  # PERSISTED row, emits --allow-dangerously-skip-permissions) and posts an
-  # honest line: bypass takes effect on the NEXT spawn, never the running turn —
-  # the live process was started without the arming flag, so we send NO
+  # server-side on the exact typed word (a mismatch keeps the panel open) and on
+  # ChatHostGate's :turn check (a refusal writes nothing). Persists the mode (the
+  # next spawn's build_args, gated on the PERSISTED row, emits
+  # --allow-dangerously-skip-permissions) and says it takes effect on the NEXT
+  # spawn: the live process was started without the arming flag, so we send NO
   # set_permission_mode steer for it (unlike the other five modes).
   def handle_event("arm-bypass", _params, socket) do
-    if String.trim(socket.assigns[:bypass_confirm] || "") == "bypass" do
+    with "bypass" <- String.trim(socket.assigns[:bypass_confirm] || ""),
+         nil <- host_refused(socket, :turn) do
       if sid = socket.assigns[:store_session_id],
         do: StudioChat.set_mode(sid, "bypassPermissions")
 
@@ -837,8 +828,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       {:noreply, socket}
     else
-      # Word mismatch — never arm; keep the panel open for another try.
-      {:noreply, socket}
+      %Phoenix.LiveView.Socket{} = refused -> {:noreply, assign(refused, arming_bypass: false)}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -1204,12 +1195,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
       mode == socket.assigns.mode ->
         socket
 
+      refused = host_refused(socket, :steer) ->
+        refused
+
       session = socket.assigns.session ->
-        # Optimistic: move the selector now for instant feedback, but DON'T
-        # persist yet — the persisted mode is the last ACKED value (D23). Remember
-        # the request_id (latest-outstanding correlation) and the revert target:
-        # the last known-good mode, which a chain of unconfirmed rapid switches
-        # must preserve rather than fold into an intermediate optimistic value.
+        # Optimistic: move the selector now, but DON'T persist yet — the persisted
+        # mode is the last ACKED value (D23). Remember the request_id (latest-
+        # outstanding correlation) and the revert target: the last known-good
+        # mode, never an intermediate optimistic value of a rapid-switch chain.
         {:ok, request_id} = Runtime.steer(socket.assigns.provider, session, %{mode: mode})
         revert_to = revert_target(socket)
 
@@ -1226,16 +1219,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Switch the brain — shared by the header picker and the /model slash builtin.
   # `choice` is an already-normalized alias or nil (= CLI default).
   defp change_model(socket, choice) do
-    label = if choice, do: model_label(choice), else: "the CLI default"
+    with nil <- host_refused(socket, :steer) do
+      label = if choice, do: model_label(choice), else: "the CLI default"
+      if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
 
-    if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
+      if session = socket.assigns[:session],
+        do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
 
-    if session = socket.assigns[:session],
-      do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
+      socket
+      |> assign(model_choice: choice || "default")
+      |> append_message(:system, "Model → #{label}.")
+    end
+  end
 
-    socket
-    |> assign(model_choice: choice || "default")
-    |> append_message(:system, "Model → #{label}.")
+  # nil, or the tab with the refusal line when ChatHostGate refuses `act`.
+  defp host_refused(socket, act) do
+    if ChatHostGate.authorize(socket.assigns, act) != :ok,
+      do: append_message(socket, :system, spawn_error_text(:host_execution_not_permitted))
   end
 
   # Pick the reasoning-effort tier (charter D48) — shared by the footer selector.
@@ -4793,7 +4793,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
-        # The refusal above rides the same road for the same reason.
+        # The refusals (no workspace above, no host turn) ride the same road.
         case create_session_row(socket, id, scope) do
           {:ok, _} ->
             socket
@@ -4807,6 +4807,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
               :system,
               "⚠ Couldn't start a new chat — this login isn't authorized in any workspace, and every chat session has to belong to one. Your message was kept; ask an admin for workspace access."
             )
+            |> assign(session: nil, status: :offline)
+
+          {:error, :host_execution_not_permitted} ->
+            socket
+            |> append_message(:system, spawn_error_text(:host_execution_not_permitted))
             |> assign(session: nil, status: :offline)
 
           {:error, reason} ->
@@ -4830,19 +4835,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the ruling above `ensure_session/1`).
   defp create_session_row(_socket, _id, :unauthorized), do: {:error, :unauthorized_workspace}
 
-  defp create_session_row(socket, id, scope) do
-    StudioChat.create_session(
-      %{
-        id: id,
-        provider: socket.assigns.provider,
-        execution_target: socket.assigns.execution_target,
-        execution_host_id: socket.assigns.execution_host_id,
-        cwd: Runtime.cwd(socket.assigns.provider),
-        mode: socket.assigns.mode
-      },
-      scope
-    )
-  end
+  # A principal the spawn would refuse creates no row (ChatHostGate).
+  defp create_session_row(socket, id, scope),
+    do: ChatHostGate.create_session(socket.assigns, id, scope)
 
   # Bring the runtime up for `store_id` (fresh: `--session-id`; reopen:
   # `--resume`) — via the RECORDER, never a tab-owned process (wave 4, charter
@@ -5715,7 +5710,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp epic_goal_in_tenancy(socket, s, owners) do
     if epic_fold_permitted?(socket, Map.get(owners, s.id)) do
-      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s.provider, s.id)
+      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s, socket.assigns[:api_token])
     end
   end
 
@@ -6506,7 +6501,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       TaskLedgerScope.resolve(ledger_workspace_id(socket))
 
     if connected?(socket) and is_binary(workspace_id) and
-         ChatTaskSeam.available?(socket.assigns.task_reader) do
+         ChatTaskSeam.available?(socket.assigns.task_reader) and
+         ChatTaskSeam.in_binding?(dataset, socket.assigns[:api_token]) do
       Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
@@ -6658,6 +6654,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         MapSet.to_list(ids),
         Keyword.get(hand_task_scope(socket), :workspace_id)
       )
+      |> ChatTaskSeam.only_bound(socket.assigns[:api_token])
       |> Map.new(fn d -> {d.doc_id, hand_epic_row(socket, d.doc_id, d.title, d.content)} end)
 
     assign(socket, hand_epic: %{ids: ids, rows: rows})

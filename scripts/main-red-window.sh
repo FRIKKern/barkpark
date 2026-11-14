@@ -83,7 +83,15 @@ do_record() {
   local ledger="${1:-$LEDGER_DEFAULT}" repo="${2:-}" out rc now line verdict
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "poll $now — running the predicate..."
-  out=$(bash "$_dir/main-red-predicate.sh" ${repo:+"$repo"} 2>&1); rc=$?
+  out=$(bash "${MRW_PREDICATE:-$_dir/main-red-predicate.sh}" ${repo:+"$repo"} 2>&1); rc=$?
+  # ONE READ PER RUN (task-0f8b982c7d014258). A predicate read is ~240 API
+  # requests (measured 2026-11-14) and main-red-owner.sh used to make a second
+  # one seconds later. When the caller names a file, this reading is left there
+  # VERBATIM with its exit code, and the ownership step may reuse it.
+  if [ -n "${MRW_PREDICATE_OUT:-}" ]; then
+    { printf '%s\n' "$out" > "$MRW_PREDICATE_OUT" && printf '%s\n' "$rc" > "$MRW_PREDICATE_OUT.rc"; } 2>/dev/null \
+      || rm -f "$MRW_PREDICATE_OUT" "$MRW_PREDICATE_OUT.rc" 2>/dev/null
+  fi
   line=$(printf '%s\n' "$out" | grep -m1 '^2H PREDICATE:' || true)
   if [ -z "$line" ]; then
     # THE INSTRUMENT DID NOT SPEAK. Record that, loudly, as a non-pass. An
@@ -238,6 +246,9 @@ do_verdict() {
 # PAIR — the same ledger shape with one property moved — because an arm that
 # only ever sees one answer cannot tell a working rule from a hard-wired one.
 _selftest() {
+  # The arms own their inputs: never write a synthetic reading into a file the
+  # caller's environment names (task-0f8b982c7d014258).
+  unset MRW_PREDICATE_OUT MRW_PREDICATE
   local d pass=0 fails=0 out rc
   _ok(){ printf 'PASS %-38s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
   _no(){ printf 'FAIL %-38s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
@@ -375,6 +386,19 @@ _selftest() {
     case "$out" in *"TERMINAL:"*) :;; *) silent=$((silent+1));; esac
   done
   [ "$silent" = 0 ] && _ok "every exit prints TERMINAL" "16/16 paths" || _no "every exit prints TERMINAL" "$silent path(s) exited silently"
+
+  # THE SHARED READING (task-0f8b982c7d014258). --record leaves the predicate's
+  # output and exit code in the file the caller names, verbatim; and writes
+  # nothing when no file is named.
+  printf '#!/usr/bin/env bash\necho "RED ON MAIN (1):"\necho "2H PREDICATE: FALSE -- synthetic"\nexit 1\n' > "$d/pred"
+  MRW_PREDICATE="$d/pred" MRW_PREDICATE_OUT="$d/shared.out" bash "$_self" --record "$d/rec.jsonl" acme/widget >/dev/null 2>&1
+  if grep -q '^2H PREDICATE: FALSE -- synthetic$' "$d/shared.out" 2>/dev/null && [ "$(cat "$d/shared.out.rc" 2>/dev/null)" = 1 ]; then
+    _ok "record shares its reading" "output and exit 1 left for the owner step"
+  else _no "record shares its reading" "no verbatim reading in the named file"; fi
+  MRW_PREDICATE="$d/pred" bash "$_self" --record "$d/rec2.jsonl" acme/widget >/dev/null 2>&1
+  [ "$(ls "$d" | grep -c 'shared')" = 2 ] && [ -s "$d/rec2.jsonl" ] \
+    && _ok "record without a named file shares nothing" "ledger row only" \
+    || _no "record without a named file shares nothing" "an unnamed share appeared, or no row"
 
   rm -rf "$d"
   local total=$((pass+fails))

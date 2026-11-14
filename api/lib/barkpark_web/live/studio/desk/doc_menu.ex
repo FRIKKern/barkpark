@@ -38,7 +38,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
           optional(:values) => map(),
           optional(:href) => String.t(),
           optional(:target) => String.t() | nil,
-          optional(:rel) => String.t() | nil
+          optional(:rel) => String.t() | nil,
+          optional(:patch) => boolean()
         }
 
   @doc "The open document's menu items, in the Studio's order; none without a document."
@@ -50,6 +51,15 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   end
 
   def items(_assigns), do: []
+
+  @doc "The items with the document's reference links added, before Delete."
+  @spec with_refs([item()], [item()]) :: [item()]
+  def with_refs(items, []), do: items
+
+  def with_refs(items, refs) do
+    {before, delete} = Enum.split_while(items, &(&1.name != "delete-doc"))
+    before ++ refs ++ delete
+  end
 
   # As the toolbar's `doc_action_button/1`: a link opens its address, a
   # dialog (`schema_action`, admin-tier in `Caps`) is offered to an admin
@@ -172,7 +182,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
         style={"position-anchor: #{@anchor}; inset: auto; #{@at}; right: anchor(right); #{@margin}"}
       >
         <%= for {item, at} <- Enum.with_index(@items) do %>
-          <Menu.separator :if={at > 0 and item.name == "delete-doc"} />
+          <Menu.separator :if={at > 0 and separated?(item, Enum.at(@items, at - 1))} />
           <Menu.item
             :if={item[:href]}
             href={item.href}
@@ -182,6 +192,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
             tabindex="-1"
             icon={icon(item.name)}
             data-desk-doc-action={item.name}
+            data-phx-link={item[:patch] && "patch"}
+            data-phx-link-state={item[:patch] && "push"}
           >{item.label}</Menu.item>
           <Menu.item
             :if={!item[:href]}
@@ -201,6 +213,12 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
     """
   end
 
+  # A line before Delete, and before the first reference link.
+  defp separated?(%{name: "delete-doc"}, _prev), do: true
+  defp separated?(%{name: "open-reference"}, %{name: "open-reference"}), do: false
+  defp separated?(%{name: "open-reference"}, _prev), do: true
+  defp separated?(_item, _prev), do: false
+
   # Each action's glyph, as the TanStack Studio's menus draw them (Sanity's
   # names; Barkpark's own glyph wins where it has one, `desk_icon/1`).
   defp icon("publish"), do: "publish"
@@ -216,6 +234,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp icon("close-secondary"), do: "close"
   defp icon("view-graph"), do: "share"
   defp icon("editor-set-mode"), do: "sparkles"
+  defp icon("open-reference"), do: "link"
   defp icon(_name), do: nil
 
   # Each value as its phx-value attribute. The keys are this module's own

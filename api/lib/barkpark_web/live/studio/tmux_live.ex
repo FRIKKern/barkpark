@@ -68,9 +68,12 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   # mount gate ran once; a token revoked, expired or stripped of admin, or an
   # account removed from the Default workspace, kept a live host shell until the
   # socket reconnected. Each event now re-reads the principal from the database
-  # and re-asks the mount's own rule; a principal that no longer passes is sent
-  # back to /studio (the LiveView exits, and `terminate/2` kills the tmux
-  # client).
+  # and re-asks the mount's own rule — BOTH halves of it: the `:admin`
+  # live_session gate (a token holds `admin` and its admin seat) and the
+  # instance-principal check below it. Asking only the second let a Default
+  # token stripped of `admin` keep typing on its home seat
+  # (task-7160addac27a6434). A principal that no longer passes is sent back to
+  # /studio (the LiveView exits, and `terminate/2` kills the tmux client).
   def handle_event(event, params, socket) do
     if host_principal_now?(socket) do
       handle_console_event(event, params, socket)
@@ -83,9 +86,18 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   end
 
   defp host_principal_now?(socket) do
-    TmuxConsole.enabled?() and
-      BarkparkWeb.HostExecutionGate.instance_principal?(fresh_principal(socket.assigns))
+    principal = fresh_principal(socket.assigns)
+
+    TmuxConsole.enabled?() and admin_gate_now?(principal) and
+      BarkparkWeb.HostExecutionGate.instance_principal?(principal)
   end
+
+  # The token arm of the `:admin` on_mount gate. An account (no token) is held
+  # by `instance_principal?/1` alone, as before.
+  defp admin_gate_now?(%Barkpark.Auth.ApiToken{} = token),
+    do: BarkparkWeb.LiveAuth.admin_token?(token)
+
+  defp admin_gate_now?(_principal), do: true
 
   # The mount-time struct, re-read: a token through the same WHERE clause
   # `Auth.verify_token/1` applies (api kind, not revoked, not expired); a user

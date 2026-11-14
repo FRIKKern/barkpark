@@ -16,6 +16,12 @@ defmodule Barkpark.StudioChat.TitlesTest do
     def run(_binary, _args), do: Application.get_env(:barkpark, :test_title_cli, {:error, :unset})
   end
 
+  defmodule HostAllowed do
+    # These sessions are made-up ids with no row; the host rule itself is
+    # pinned by titles_host_gate_test.exs.
+    def session_may_host_exec?(_session_id), do: true
+  end
+
   defmodule SlowCli do
     # Outlives the (test-shortened) timeout, exercising the brutal-kill path.
     def run(_binary, _args) do
@@ -49,6 +55,7 @@ defmodule Barkpark.StudioChat.TitlesTest do
             :studio_chat_title_http_adapter,
             :studio_chat_title_cli,
             :studio_chat_store,
+            :studio_chat_title_host_rule,
             :studio_chat_title_timeout_ms,
             :anthropic_api_key,
             :test_title_api,
@@ -236,6 +243,7 @@ defmodule Barkpark.StudioChat.TitlesTest do
       Application.put_env(:barkpark, :studio_chat_title_cli, FakeCli)
       Application.put_env(:barkpark, :test_title_cli, {:ok, ~s({"title":"Generated title"})})
       Application.put_env(:barkpark, :studio_chat_store, FakeStore)
+      Application.put_env(:barkpark, :studio_chat_title_host_rule, HostAllowed)
 
       Phoenix.PubSub.subscribe(
         Barkpark.PubSub,

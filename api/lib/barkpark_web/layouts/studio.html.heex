@@ -165,14 +165,15 @@
         carries live host stats (Barkpark.HostVitals.Sampler): an embedded
         sticky LiveView in a live context, a static snapshot on dead views
         (controller-rendered admin pages have no @socket). Host vitals are
-        INSTANCE-ADMIN only (owner ruling #30 Q5, 2026-10-03): the same
-        instance_admin? flag as the self-update bar and the same audience as
-        /v1/instance/metrics. Anyone else gets no vitals markup and no child
-        LiveView at all. --%>
+        INSTANCE-OPERATOR only (owner ruling #30 Q5, 2026-10-03): the same
+        audience as /v1/instance/metrics and the ops consoles, i.e. the
+        host_vitals? chrome flag (an instance admin who is also the operator;
+        a tenant's admin token is not). Anyone else gets no vitals markup
+        and no child LiveView at all. --%>
   <BarkparkWeb.StudioComponents.Nav.studio_footer>
     <:vitals>
       <%= cond do %>
-        <% assigns[:instance_admin?] != true -> %>
+        <% assigns[:host_vitals?] != true -> %>
         <% assigns[:socket] -> %>
           <%= live_render(@socket, BarkparkWeb.ServerVitalsLive, id: "server-vitals", sticky: true) %>
         <% true -> %>

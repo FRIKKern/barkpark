@@ -3,8 +3,7 @@
 
 Owner of the fourth authorization tier that `docs/auth.md` §Hierarchy names and
 delegates here. Landed by PR #14990 (`BarkparkWeb.Plugs.RequirePlatformOperator`,
-pipeline `:require_platform_operator`); this text is that PR's own contract
-statement, kept verbatim so the code and the doc were written by the same hand.
+pipeline `:require_platform_operator`).
 
 **Tier 0 — instance operator (`RequirePlatformOperator`).** Above the three
 tiers above sits a config-backed allowlist for the seven INSTANCE-GLOBAL
@@ -27,8 +26,13 @@ twin) are DELIBERATELY not gated by it — they re-bind through
 admin out of their own workspace. `RequireAdmin` is unchanged and still
 answers only "is this bearer an admin SOMEWHERE".
 
+**Host reach** (Studio terminal, host chat turns, global `/v1/chat`) asks
+`HostExecutionGate` with the same lists. Unset: an `admin` token homed in
+Default or no workspace, or a Default admin seat (host turns: or a Default
+`chat` token); no other (#26234).
+
 **Operator runbook.** On the instance host set `BARKPARK_OPERATOR_EMAILS` and/or
 `BARKPARK_OPERATOR_TOKEN_IDS` in the service env, then restart. Until then the
-node keeps legacy behaviour and logs the boot warning — there is no flag day.
+node keeps legacy behaviour and logs the boot warning.
 The router's `:instance_global` tripwire test enumerates the seven groups and
 reds if one leaves the pipeline.
