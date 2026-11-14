@@ -464,22 +464,18 @@ defmodule Barkpark.ChatHosts do
   # running to project the close. Only a `working` row moves: an `active` or
   # `exited` session has no open turn to close, so its status stays and the
   # close is marked projected instead of sent, because the recorder would mark
-  # any session it gets an error for `exited`. A newer turn on a live lease
-  # keeps its status; the close still goes to the recorder, which holds this
-  # lease's turn open until it does.
+  # any session it gets an error for `exited`. When another live lease holds
+  # the session, its status stays and the close is not sent either: a
+  # Runtime.Event carries no lease id, so the recorder would end whatever turn
+  # it has open (the newer lease's) and mark the session `exited`. The live
+  # lease's own close ends the recorder's turn (task-d8685be32b21e31b).
   defp settle_ended_turn(execution_event, lease) do
     Transport.complete(lease.id)
 
-    cond do
-      not is_nil(live_report_fence(lease.session_id)) ->
-        project_event(execution_event, lease)
-
-      match?({1, _}, exit_if_working(lease.session_id)) ->
-        project_event(execution_event, lease)
-
-      true ->
-        mark_projected(execution_event.id)
-    end
+    if is_nil(live_report_fence(lease.session_id)) and
+         match?({1, _}, exit_if_working(lease.session_id)),
+       do: project_event(execution_event, lease),
+       else: mark_projected(execution_event.id)
   end
 
   defp exit_if_working(session_id) do
