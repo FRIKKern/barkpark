@@ -33,17 +33,24 @@ import (
 const exitSchemaDiff = exitGeneric
 
 func printSchemaPullHelp(out *writer) {
-	out.outf("usage: bp schema pull <dir> [--prune] [-o table|json|yaml]")
+	out.outf("usage: bp schema pull <dir> [--prune] [--dry-run] [-o table|json|yaml]")
 	out.outf("")
 	out.outf("Writes every schema of the dataset to <dir>, one file per schema, named")
 	out.outf("<name>.json. Keys are sorted and the server's schemaHash is left out, so")
 	out.outf("the files are stable in git. The folder is created when it is missing.")
 	out.outf("")
-	out.outf("A file in <dir> whose schema is no longer on the server is kept and named.")
+	out.outf("A schema file in <dir> whose schema is no longer on the server is kept and")
+	out.outf("named. Only a regular <name>.json that defines the schema <name> counts as")
+	out.outf("a schema file; pull never names or removes any other file.")
 	out.outf("A schema whose name contains /, \\, .. or a leading dot is skipped and named.")
 	out.outf("")
+	out.outf("The server lists each member of an array field's `of` with its type, to and")
+	out.outf("name only. A pulled file has no more than that, and a push of the file")
+	out.outf("replaces what the server stored for those members.")
+	out.outf("")
 	out.outf("flags:")
-	out.outf("  --prune    also remove the <name>.json files whose schema is not on the server")
+	out.outf("  --prune      also remove the schema files whose schema is not on the server")
+	out.outf("  --dry-run    say what would be written and removed, and write nothing")
 	out.outf("")
 	out.outf("example:")
 	out.outf("  bp schema pull ./schemas")
@@ -57,8 +64,11 @@ func printSchemaDiffHelp(out *writer) {
 	out.outf("fields added, removed and changed, and the other keys that differ),")
 	out.outf("removed (on the server only) and the count of unchanged schemas.")
 	out.outf("")
-	out.outf("Keys the server sets itself (id, schemaHash, timestamps) are ignored, and an")
-	out.outf("empty value equals a missing key. Nothing is written.")
+	out.outf("Only the keys the server stores are compared. A top-level key the file")
+	out.outf("leaves out counts as its default (visibility public, kind document, an")
+	out.outf("empty list or object), and the keys the server adds to a field (required?,")
+	out.outf("the of list of an array, the to list of a reference) are worked out the same")
+	out.outf("way for both sides. Every other value must match exactly. Nothing is written.")
 	out.outf("")
 	out.outf("exit codes: 0 when there is no difference, 1 when there is one, 5 when a")
 	out.outf("file in <dir> is not a schema definition. Use it as a CI check.")
@@ -72,9 +82,11 @@ func printSchemaPushHelp(out *writer) {
 	out.outf("")
 	out.outf("Prints the same plan as `bp schema diff`, then applies the added and the")
 	out.outf("changed schemas. Each <name>.json must define the schema <name>. A file")
-	out.outf("that does not parse stops the push before anything is written.")
+	out.outf("that does not parse stops the push before anything is written. A key that")
+	out.outf("a file leaves out is reset to its default on the server.")
 	out.outf("")
 	out.outf("Schemas that are on the server only are left alone unless you pass --prune.")
+	out.outf("Until they are pruned or pulled, `bp schema diff` keeps exiting 1 for them.")
 	out.outf("The server refuses to delete a schema that still has documents.")
 	out.outf("")
 	out.outf("flags:")
@@ -175,15 +187,14 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if err != nil {
 		return useError(out, "request_failed", fmt.Sprintf("schema pull: reading the schemas of %s: %v", exportScope(ctx), err), exitGeneric)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
-	}
+	// Decode every schema before the first write, so a schema that does not
+	// parse leaves the folder as it was.
+	files := map[string][]byte{}
 	written, skipped := []string{}, []string{}
-	onServer := map[string]bool{}
 	for _, raw := range server {
 		obj, err := decodeSchemaJSON(raw)
 		if err != nil {
-			return useError(out, "failed", fmt.Sprintf("schema pull: the server sent a schema that did not parse: %v", err), exitGeneric)
+			return useError(out, "failed", fmt.Sprintf("schema pull: the server sent a schema that did not parse: %v. Nothing was written.", err), exitGeneric)
 		}
 		name, _ := obj["name"].(string)
 		if !schemaFileNameOK(name) {
@@ -191,55 +202,84 @@ func runSchemaPull(out *writer, g globals, ctx manifest.Context, tail []string) 
 			continue
 		}
 		body, err := prettySchemaJSON(obj)
-		if err == nil {
-			path := filepath.Join(dir, name+".json")
-			if err = os.WriteFile(path+exportPartialSuffix, body, 0o644); err == nil {
-				err = os.Rename(path+exportPartialSuffix, path)
-			}
-		}
 		if err != nil {
-			return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
+			return useError(out, "failed", fmt.Sprintf("schema pull: %v. Nothing was written.", err), exitGeneric)
 		}
-		onServer[name] = true
+		files[name] = body
 		written = append(written, name)
 	}
 	sort.Strings(written)
 	sort.Strings(skipped)
 
-	// Files whose schema the server no longer has: named, and removed only
-	// with --prune. Only <name>.json files directly in the folder count.
-	stale, pruned := []string{}, []string{}
-	entries, _ := os.ReadDir(dir)
+	// A stale file is a regular <name>.json that defines schema <name> and has
+	// no schema on the server. Any other file in the folder (package.json, a
+	// symlink, a file that is not a schema) is never named or removed.
+	stale := []string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return useError(out, "failed", fmt.Sprintf("schema pull: %v. Nothing was written.", err), exitGeneric)
+	}
 	for _, e := range entries {
 		stem := strings.TrimSuffix(e.Name(), ".json")
-		if e.IsDir() || stem == e.Name() || strings.HasPrefix(stem, ".") || onServer[stem] {
+		if !e.Type().IsRegular() || stem == e.Name() || files[stem] != nil {
 			continue
 		}
-		if !prune {
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if obj, err := decodeSchemaJSON(raw); err == nil && obj["name"] == stem && schemaFileNameOK(stem) {
 			stale = append(stale, stem)
-			continue
 		}
-		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
-			return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
-		}
-		pruned = append(pruned, stem)
+	}
+	pruned := []string{}
+	if prune {
+		pruned, stale = stale, pruned
 	}
 
-	if out.emitStructured(map[string]any{"scope": exportScope(ctx), "dir": dir, "written": written, "pruned": pruned, "stale": stale, "skipped": skipped}) {
+	if !g.dryRun {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
+		}
+		for _, name := range written {
+			path := filepath.Join(dir, name+".json")
+			err := os.WriteFile(path+exportPartialSuffix, files[name], 0o644)
+			if err == nil {
+				err = os.Rename(path+exportPartialSuffix, path)
+			}
+			if err != nil {
+				return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
+			}
+		}
+		for _, name := range pruned {
+			if err := os.Remove(filepath.Join(dir, name+".json")); err != nil {
+				return useError(out, "failed", fmt.Sprintf("schema pull: %v", err), exitGeneric)
+			}
+		}
+	}
+
+	if out.emitStructured(map[string]any{"scope": exportScope(ctx), "dir": dir, "dry_run": g.dryRun, "written": written, "pruned": pruned, "stale": stale, "skipped": skipped}) {
 		return exitOK
 	}
-	out.outf("wrote %d schema(s) of %s to %s", len(written), exportScope(ctx), dir)
+	wrote, removed := "wrote", "removed"
+	if g.dryRun {
+		wrote, removed = "dry run: would write", "dry run: would remove"
+	}
+	out.outf("%s %d schema(s) of %s to %s", wrote, len(written), exportScope(ctx), dir)
 	for _, n := range written {
 		out.outf("  %s.json", n)
 	}
 	for _, n := range pruned {
-		out.outf("removed %s.json: %s has no schema %s", n, exportScope(ctx), n)
+		out.outf("%s %s.json: %s has no schema %s", removed, n, exportScope(ctx), n)
 	}
 	for _, n := range stale {
 		out.outf("kept %s.json: %s has no schema %s. Pass --prune to remove the file.", n, exportScope(ctx), n)
 	}
 	for _, n := range skipped {
 		out.outf("skipped schema %q: the name cannot be a file name", n)
+	}
+	if g.dryRun {
+		out.outf("dry run: nothing was written")
 	}
 	return exitOK
 }
@@ -332,7 +372,11 @@ func runSchemaPush(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if len(toApply) > 0 {
 		f := &schemaCopyFile{}
 		for _, n := range toApply {
-			f.Schemas = append(f.Schemas, local[n])
+			body, err := schemaPushBody(local[n])
+			if err != nil {
+				return useError(out, "failed", fmt.Sprintf("schema push: %s: %v. Nothing was written.", n, err), exitGeneric)
+			}
+			f.Schemas = append(f.Schemas, body)
 		}
 		if err := applySchemas(out, ctx, dataset, f); err != nil {
 			return useError(out, "request_failed", fmt.Sprintf("schema push: %v. No schema was deleted.", err), exitGeneric)

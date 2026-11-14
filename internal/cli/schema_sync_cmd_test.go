@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,18 +17,22 @@ import (
 )
 
 // syncFakeServer answers the three schema routes the way the real server
-// does: the list echoes each stored definition with the keys the server adds
-// itself (id, schemaHash and the defaults of keys the definition left out),
-// the upsert stores the body, and the delete answers a receipt that names the
-// schema. It counts the writes it gets.
+// does, as read from api/lib/barkpark/content/schema_definition.ex and
+// schema.ex. The upsert is a cast: a key the body leaves out keeps its stored
+// value, and a key the server does not store is dropped. The echo fills the
+// defaults (visibility "public", kind "document", empty lists and objects) and
+// adds required?, of and to to each field. It counts the writes it gets.
 type syncFakeServer struct {
 	srv *httptest.Server
 
 	mu      sync.Mutex
-	schemas map[string]map[string]any
+	schemas map[string]map[string]any // stored rows, cast spelling
 	posts   []string
 	deletes []string
 }
+
+var syncFakeCamel = map[string]string{"deskGroups": "desk_groups", "listPreview": "list_preview", "initialValues": "initial_values", "crossValidations": "cross_validations", "readerWrites": "reader_writes"}
+var syncFakeCast = []string{"name", "title", "icon", "visibility", "singleton", "kind", "fields", "actions", "groups", "fieldsets", "desk_groups", "desk", "list_preview", "initial_values", "cross_validations", "layout", "prefill", "reader_writes"}
 
 func newSyncFakeServer(t *testing.T) *syncFakeServer {
 	t.Helper()
@@ -41,6 +46,99 @@ func (s *syncFakeServer) ctx() manifest.Context {
 	return manifest.Context{Server: s.srv.URL, Workspace: "ws", Project: "proj", Dataset: "production"}
 }
 
+// cast stores a request body the way the changeset does.
+func (s *syncFakeServer) cast(in map[string]any) string {
+	for camel, snake := range syncFakeCamel {
+		if v, ok := in[camel]; ok {
+			delete(in, camel)
+			if _, has := in[snake]; !has {
+				in[snake] = v
+			}
+		}
+	}
+	name, _ := in["name"].(string)
+	row := s.schemas[name]
+	if row == nil {
+		row = map[string]any{}
+		s.schemas[name] = row
+	}
+	for _, k := range syncFakeCast {
+		if v, ok := in[k]; ok {
+			row[k] = v
+		}
+	}
+	return name
+}
+
+func syncFakeSpecs(list []any) []any {
+	out := []any{}
+	for _, v := range list {
+		spec := map[string]any{"type": "string"}
+		if m, ok := v.(map[string]any); ok {
+			spec = map[string]any{}
+			for _, k := range []string{"type", "to", "name"} {
+				if val, ok := m[k]; ok {
+					spec[k] = val
+				}
+			}
+		} else if str, ok := v.(string); ok {
+			spec["type"] = str
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+// echo serves a stored row the way serialize_schema_for_sdk does.
+func syncFakeEcho(row map[string]any) map[string]any {
+	or := func(k string, d any) any {
+		if v := row[k]; v != nil {
+			return v
+		}
+		return d
+	}
+	fields := []any{}
+	list, _ := row["fields"].([]any)
+	for _, f := range list {
+		m, _ := f.(map[string]any)
+		o := map[string]any{}
+		for k, v := range m {
+			o[k] = v
+		}
+		rules, _ := m["validation"].(map[string]any)
+		o["required?"] = rules["required"] == true
+		switch m["type"] {
+		case "array":
+			if of, ok := m["of"].([]any); ok {
+				o["of"] = syncFakeSpecs(of)
+			} else {
+				o["of"] = []any{map[string]any{"type": "string"}}
+			}
+		case "reference":
+			if ref, ok := m["refType"].(string); ok {
+				o["to"] = []any{map[string]any{"type": ref}}
+			} else {
+				o["to"] = []any{}
+			}
+		}
+		fields = append(fields, o)
+	}
+	out := map[string]any{
+		"id": row["name"], "name": row["name"], "title": row["title"], "icon": row["icon"],
+		"schemaHash": "hash-of-" + fmt.Sprint(row["name"]),
+		"visibility": or("visibility", "public"), "singleton": or("singleton", false), "kind": or("kind", "document"),
+		"fields": fields, "actions": or("actions", []any{}), "groups": or("groups", []any{}),
+		"fieldsets": or("fieldsets", []any{}), "deskGroups": or("desk_groups", []any{}),
+		"desk": or("desk", map[string]any{}), "crossValidations": or("cross_validations", []any{}),
+		"listPreview": or("list_preview", map[string]any{}), "initialValues": or("initial_values", map[string]any{}),
+		"layout": or("layout", []any{}), "prefill": or("prefill", map[string]any{}),
+	}
+	if rw, ok := row["reader_writes"].(map[string]any); ok {
+		out["readerWrites"] = rw
+	}
+	return out
+}
+
 func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	const route = "/w/ws/p/proj/v1/schemas/production"
 	s.mu.Lock()
@@ -48,15 +146,8 @@ func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == route:
 		list := []map[string]any{}
-		for name, def := range s.schemas {
-			out := map[string]any{
-				"id": name, "schemaHash": "hash-of-" + name, "updatedAt": "2026-11-14T10:00:00Z",
-				"kind": "document", "singleton": false, "icon": nil, "actions": []any{}, "desk": map[string]any{},
-			}
-			for k, v := range def {
-				out[k] = v
-			}
-			list = append(list, out)
+		for _, row := range s.schemas {
+			list = append(list, syncFakeEcho(row))
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"schemas": list, "_schemaVersion": 1})
 	case r.Method == http.MethodPost && r.URL.Path == route:
@@ -66,11 +157,10 @@ func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		name, _ := def["name"].(string)
-		s.schemas[name] = def
+		name := s.cast(def)
 		s.posts = append(s.posts, name)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(def)
+		_ = json.NewEncoder(w).Encode(syncFakeEcho(s.schemas[name]))
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, route+"/"):
 		name := strings.TrimPrefix(r.URL.Path, route+"/")
 		delete(s.schemas, name)
@@ -79,6 +169,21 @@ func (s *syncFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// seed stores definitions as if they had been posted, without counting them.
+func (s *syncFakeServer) seed(defs ...map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, def := range defs {
+		s.cast(def)
+	}
+}
+
+func (s *syncFakeServer) stored(name, key string) any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.schemas[name][key]
 }
 
 func (s *syncFakeServer) writes() (posts, deletes []string) {
@@ -119,9 +224,9 @@ func runSync(run func(*writer, globals, manifest.Context, []string) int, s *sync
 // difference, and a schema whose name could leave the folder is skipped.
 func TestSchemaPullDiffPushRoundTrip(t *testing.T) {
 	s := newSyncFakeServer(t)
-	s.schemas["post"] = syncSchema("post", "title", "body")
-	s.schemas["author"] = syncSchema("author", "name")
-	s.schemas["../evil"] = syncSchema("../evil", "x")
+	s.seed(syncSchema("post", "title", "body"))
+	s.seed(syncSchema("author", "name"))
+	s.seed(syncSchema("../evil", "x"))
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "schemas")
 
@@ -173,9 +278,9 @@ func TestSchemaPullDiffPushRoundTrip(t *testing.T) {
 // with the field-level summary, and the exit code says there is a difference.
 func TestSchemaDiffPlansAddedChangedRemoved(t *testing.T) {
 	s := newSyncFakeServer(t)
-	s.schemas["post"] = syncSchema("post", "title", "body", "legacy")
-	s.schemas["author"] = syncSchema("author", "name")
-	s.schemas["tag"] = syncSchema("tag", "label")
+	s.seed(syncSchema("post", "title", "body", "legacy"))
+	s.seed(syncSchema("author", "name"))
+	s.seed(syncSchema("tag", "label"))
 	dir := t.TempDir()
 	post := syncSchema("post", "title", "body", "subtitle")
 	post["title"] = "Article"
@@ -224,8 +329,8 @@ func TestSchemaPushAppliesAndPrunesOnlyWhenAsked(t *testing.T) {
 	t.Cleanup(func() { destroyStdinIsTTY = oldTTY })
 
 	s := newSyncFakeServer(t)
-	s.schemas["post"] = syncSchema("post", "title")
-	s.schemas["tag"] = syncSchema("tag", "label")
+	s.seed(syncSchema("post", "title"))
+	s.seed(syncSchema("tag", "label"))
 	dir := t.TempDir()
 	writeSyncFile(t, dir, "post", syncSchema("post", "title", "subtitle"))
 	writeSyncFile(t, dir, "page", syncSchema("page", "slug"))
@@ -278,5 +383,119 @@ func TestSchemaPushAppliesAndPrunesOnlyWhenAsked(t *testing.T) {
 	}
 	if code, stdout, _ := runSync(runSchemaDiff, s, globals{}, dir); code != exitOK {
 		t.Fatalf("diff after prune exit = %d, want 0; stdout=%s", code, stdout)
+	}
+}
+
+// AFTER A PUSH, DIFF IS CLEAN FOR EVERY FILE SHAPE, against a server that
+// casts and echoes like the real one: a pulled file with keys removed (the
+// server must really clear them), a short hand-written file, and the
+// `bp make schema` skeleton. A falsy value below the top level is a change.
+func TestSchemaPushReachesDiffZeroForEveryFileShape(t *testing.T) {
+	s := newSyncFakeServer(t)
+	post := syncSchema("post", "title")
+	post["icon"], post["singleton"], post["groups"] = "star", true, []any{map[string]any{"name": "seo"}}
+	s.seed(post)
+	dir := t.TempDir()
+	step := func(what string, run func(*writer, globals, manifest.Context, []string) int, want int) {
+		t.Helper()
+		if code, stdout, stderr := runSync(run, s, globals{}, dir); code != want {
+			t.Fatalf("%s exit = %d, want %d; stdout=%s stderr=%s", what, code, want, stdout, stderr)
+		}
+	}
+	step("pull", runSchemaPull, exitOK)
+	step("diff after pull", runSchemaDiff, exitOK)
+
+	// Remove three keys from the pulled file.
+	path := filepath.Join(dir, "post.json")
+	raw, _ := os.ReadFile(path)
+	var pulled map[string]any
+	if err := json.Unmarshal(raw, &pulled); err != nil {
+		t.Fatal(err)
+	}
+	delete(pulled, "icon")
+	delete(pulled, "singleton")
+	delete(pulled, "groups")
+	writeSyncFile(t, dir, "post", pulled)
+	step("diff after removing keys", runSchemaDiff, exitSchemaDiff)
+	step("push after removing keys", runSchemaPush, exitOK)
+	if icon, single, groups := s.stored("post", "icon"), s.stored("post", "singleton"), s.stored("post", "groups"); icon != nil || single != false || len(groups.([]any)) != 0 {
+		t.Fatalf("the server kept the removed keys: icon=%v singleton=%v groups=%v", icon, single, groups)
+	}
+	step("diff after the keys were cleared", runSchemaDiff, exitOK)
+
+	// A short hand-written file and the skeleton `bp make schema` prints.
+	writeSyncFile(t, dir, "page", map[string]any{"name": "page", "title": "Page", "fields": []any{
+		map[string]any{"name": "slug", "type": "string", "validation": map[string]any{"required": true}},
+		map[string]any{"name": "tags", "type": "array"},
+		map[string]any{"name": "author", "type": "reference", "refType": "author"},
+	}})
+	skeleton, err := schemaSkeleton("product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "product.json"), []byte(skeleton), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	step("push of hand-written files", runSchemaPush, exitOK)
+	step("diff after hand-written files", runSchemaDiff, exitOK)
+
+	// A false inside initialValues is data, not a default.
+	var page map[string]any
+	raw, _ = os.ReadFile(filepath.Join(dir, "page.json"))
+	_ = json.Unmarshal(raw, &page)
+	page["initialValues"] = map[string]any{"featured": false}
+	writeSyncFile(t, dir, "page", page)
+	code, stdout, _ := runSync(runSchemaDiff, s, globals{}, dir)
+	if code != exitSchemaDiff || !strings.Contains(stdout, "~ page  changed (keys: initialValues)") {
+		t.Fatalf("diff after initialValues exit = %d; stdout=%s", code, stdout)
+	}
+	step("push of initialValues", runSchemaPush, exitOK)
+	step("diff after initialValues", runSchemaDiff, exitOK)
+	page["fields"].([]any)[0].(map[string]any)["default"] = false
+	writeSyncFile(t, dir, "page", page)
+	step("diff after a false field default", runSchemaDiff, exitSchemaDiff)
+}
+
+// pull --dry-run writes nothing. pull --prune removes a stale schema file and
+// nothing else: not package.json, not a JSON file that is not a schema, not a
+// symlink.
+func TestSchemaPullDryRunAndPruneTouchOnlySchemaFiles(t *testing.T) {
+	s := newSyncFakeServer(t)
+	s.seed(syncSchema("post", "title"))
+	fresh := filepath.Join(t.TempDir(), "new")
+	code, stdout, _ := runSync(runSchemaPull, s, globals{dryRun: true}, fresh)
+	if code != exitOK || !strings.Contains(stdout, "dry run: would write 1 schema(s)") {
+		t.Fatalf("dry-run pull exit = %d; stdout=%s", code, stdout)
+	}
+	if _, err := os.Stat(fresh); err == nil {
+		t.Fatal("pull --dry-run created the folder")
+	}
+
+	dir := t.TempDir()
+	writeSyncFile(t, dir, "old", syncSchema("old", "x"))
+	writeSyncFile(t, dir, "package", map[string]any{"name": "my-app", "version": "1.0.0"})
+	writeSyncFile(t, dir, "tsconfig", map[string]any{"compilerOptions": map[string]any{}})
+	outside := filepath.Join(t.TempDir(), "link.json")
+	writeSyncFile(t, filepath.Dir(outside), "link", syncSchema("link", "x"))
+	if err := os.Symlink(outside, filepath.Join(dir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, _ := runSync(runSchemaPull, s, globals{dryRun: true}, dir, "--prune"); code != exitOK || !strings.Contains(stdout, "dry run: would remove old.json") {
+		t.Fatalf("dry-run prune exit = %d; stdout=%s", code, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.json")); err != nil {
+		t.Fatal("pull --prune --dry-run removed old.json")
+	}
+	code, stdout, stderr := runSync(runSchemaPull, s, globals{}, dir, "--prune")
+	if code != exitOK || !strings.Contains(stdout, "removed old.json") {
+		t.Fatalf("prune exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.json")); err == nil {
+		t.Error("pull --prune kept the stale schema file old.json")
+	}
+	for _, keep := range []string{"post.json", "package.json", "tsconfig.json", "link.json"} {
+		if _, err := os.Lstat(filepath.Join(dir, keep)); err != nil {
+			t.Errorf("pull --prune removed %s", keep)
+		}
 	}
 }
