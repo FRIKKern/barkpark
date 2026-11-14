@@ -12,10 +12,10 @@ defmodule Barkpark.ChatHosts do
   @credential_ttl 30 * 24 * 60 * 60
   @lease_ttl 60
   @expired_turn_grace 90
-  # The server ends an expired turn only when its lease expired at or after
-  # this instant (UTC), set past the merge of task-1e98bcc0f1c64067 (#26199).
-  # A lease that expired before it, including every row stuck before this
-  # code shipped, is left exactly as it is. Tests move it through the
+  # The server ends an expired turn only when its lease was CREATED
+  # (`inserted_at`) at or after this instant (UTC), set past the merge of
+  # task-1e98bcc0f1c64067 (#26199). A lease created before it, including every
+  # row stuck before this code shipped, is left exactly as it is. Tests move it through the
   # `:chat_host_expired_turn_floor` app env; never edit it to reach old rows.
   @expired_turn_floor ~U[2026-11-14 12:00:00Z]
   @online_window 90
@@ -304,7 +304,7 @@ defmodule Barkpark.ChatHosts do
         # close again (internal/chathost/runner.go), so the server ends the
         # turn here or nothing ever will (task-1e98bcc0f1c64067).
         {:error, :lease_expired} ->
-          if status_for(event) == "completed" and expired_since_floor?(lease),
+          if status_for(event) == "completed" and created_since_floor?(lease),
             do: end_expired_turn(lease, :lease_expired),
             else: Repo.rollback(:lease_expired)
 
@@ -337,9 +337,11 @@ defmodule Barkpark.ChatHosts do
   turns it ended.
 
   It never touches older rows: the lease's session must be `working`, and the
-  lease must have expired at or after `floor` (the fixed instant this code
-  shipped, `@expired_turn_floor`). A lease that expired before the floor is
-  left exactly as it is, however long the server was down since.
+  lease must have been created (`inserted_at`, which nothing updates) at or
+  after `floor`, the fixed instant this code shipped (`@expired_turn_floor`).
+  A lease created before the floor is left exactly as it is, even when a
+  heartbeat carried its `expires_at` past the floor. One created after it is
+  ended however long the server was down.
   """
   def end_expired_turns(now \\ DateTime.utc_now(), floor \\ expired_turn_floor()) do
     cutoff = DateTime.add(now, -@expired_turn_grace)
@@ -349,7 +351,7 @@ defmodule Barkpark.ChatHosts do
       on: s.id == l.session_id,
       where: s.status == "working",
       where: l.status in ["leased", "running"],
-      where: is_nil(l.revoked_at) and l.expires_at < ^cutoff and l.expires_at >= ^floor,
+      where: is_nil(l.revoked_at) and l.expires_at < ^cutoff and l.inserted_at >= ^floor,
       select: l.id
     )
     |> Repo.all()
@@ -360,7 +362,7 @@ defmodule Barkpark.ChatHosts do
     Repo.transaction(fn ->
       ExecutionLease
       |> where([l], l.id == ^lease_id and is_nil(l.revoked_at))
-      |> where([l], l.expires_at < ^cutoff and l.expires_at >= ^floor)
+      |> where([l], l.expires_at < ^cutoff and l.inserted_at >= ^floor)
       |> lock("FOR UPDATE")
       |> Repo.one()
       |> case do
@@ -407,8 +409,11 @@ defmodule Barkpark.ChatHosts do
 
   defp end_expired_turn(_lease, _reason), do: Repo.rollback(:lease_expired)
 
-  defp expired_since_floor?(%ExecutionLease{expires_at: expires_at}),
-    do: DateTime.compare(expires_at, expired_turn_floor()) != :lt
+  # On when the lease was CREATED: a heartbeat renews `expires_at` on every
+  # live lease, so a lease from before deploy can carry its expiry past the
+  # floor, while `inserted_at` never moves.
+  defp created_since_floor?(%ExecutionLease{inserted_at: inserted_at}),
+    do: DateTime.compare(inserted_at, expired_turn_floor()) != :lt
 
   defp expired_turn_floor,
     do: Application.get_env(:barkpark, :chat_host_expired_turn_floor, @expired_turn_floor)

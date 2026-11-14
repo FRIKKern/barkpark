@@ -40,9 +40,35 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
 
   test "a close on a lease that expired before the floor leaves lease, events and session as they were" do
     %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch} = running_turn()
+    created!(lease_id, -7200)
     put_floor!(-600)
     expire!(lease_id, -3600)
     before = rows(session_id, lease_id)
+
+    assert {:error, :lease_expired} =
+             ChatHosts.accept_event(host, %{
+               lease_id: lease_id,
+               epoch: epoch,
+               cursor: 2,
+               idempotency_key: "close-1",
+               event: %{"kind" => "terminal", "terminal_state" => "failed"}
+             })
+
+    assert rows(session_id, lease_id) == before
+  end
+
+  test "a lease created before the floor and renewed past it by a heartbeat is left as it was" do
+    # A heartbeat moves expires_at on every live lease, so a lease that existed
+    # before deploy can carry an expiry past the floor. The floor is on when
+    # the lease was created, which nothing ever moves.
+    %{host: host, session_id: session_id, lease_id: lease_id, epoch: epoch} = running_turn()
+    created!(lease_id, -3600)
+    put_floor!(-600)
+    assert {:ok, _} = ChatHosts.heartbeat(host, %{})
+    expire!(lease_id, -200)
+    before = rows(session_id, lease_id)
+
+    assert 0 = ChatHosts.end_expired_turns(DateTime.utc_now())
 
     assert {:error, :lease_expired} =
              ChatHosts.accept_event(host, %{
@@ -179,6 +205,7 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
   test "the sweep leaves a lease that expired before the floor, and its session, exactly as they were" do
     # Rows already stuck before this code ran are not repaired by a deploy.
     %{session_id: session_id, lease_id: lease_id} = running_turn()
+    created!(lease_id, -7200)
     put_floor!(-600)
     expire!(lease_id, -3600)
     before = rows(session_id, lease_id)
@@ -259,6 +286,12 @@ defmodule Barkpark.ChatHosts.ExpiredLeaseTurnTest do
       |> Repo.all()
 
     {Repo.get!(ExecutionLease, lease_id), events, Repo.get!(Session, session_id)}
+  end
+
+  defp created!(lease_id, seconds_from_now) do
+    {1, _} =
+      from(l in ExecutionLease, where: l.id == ^lease_id)
+      |> Repo.update_all(set: [inserted_at: DateTime.add(DateTime.utc_now(), seconds_from_now)])
   end
 
   defp expire!(lease_id, seconds_from_now) do
