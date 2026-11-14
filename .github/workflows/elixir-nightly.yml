@@ -206,6 +206,13 @@ jobs:
           fi
           xmllint --version 2>&1
         working-directory: ${{ github.workspace }}
+      # The :requires_node tests call `tsc` (Barkpark.Plugins.TypesTest). The
+      # runner image ships Node and no TypeScript compiler, and the test fails
+      # loud on a missing one, so the run installs it (task-9d24d800bd19c548).
+      - name: TypeScript compiler for the :requires_node tests
+        run: |
+          npm install --global typescript@5.9.3
+          tsc --version
       - name: Compile (dev, --warnings-as-errors)
         run: mix compile --warnings-as-errors
       - name: DB setup
