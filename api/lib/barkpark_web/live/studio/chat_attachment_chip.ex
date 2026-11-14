@@ -61,8 +61,10 @@ defmodule BarkparkWeb.Studio.ChatAttachmentChip do
       class="text-xs"
       style="display: flex; flex-direction: column; gap: 2px; max-width: 220px; border: 1px solid var(--border-muted); border-radius: 10px; padding: 10px 14px;"
     >
+      <%!-- <bdi> isolates the name's direction, so a right-to-left name
+            cannot reorder the size beside it. --%>
       <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={@file.name}>
-        {@file.name || gettext("File")}
+        <bdi>{@file.name || gettext("File")}</bdi>
       </span>
       <span :if={@file.byte_size} class="text-dim">{size_label(@file.byte_size)}</span>
     </div>
@@ -71,12 +73,22 @@ defmodule BarkparkWeb.Studio.ChatAttachmentChip do
 
   @doc """
   A byte count as people read it: `512 B`, `12.3 KB`, `2.9 MB`, in powers of
-  1000 like the store's 3 MB cap.
+  1000 like the store's 3 MB cap. A count that would round to `1000.0 KB`
+  (999,950 bytes and up) is shown in MB. The decimal mark follows the gettext
+  locale: a point in English, a comma in Norwegian.
   """
   @spec size_label(non_neg_integer()) :: String.t()
   def size_label(n) when n < 1000, do: "#{n} B"
-  def size_label(n) when n < 1_000_000, do: "#{one_decimal(n / 1000)} KB"
+  def size_label(n) when n < 999_950, do: "#{one_decimal(n / 1000)} KB"
   def size_label(n), do: "#{one_decimal(n / 1_000_000)} MB"
 
-  defp one_decimal(x), do: :erlang.float_to_binary(x, decimals: 1)
+  # en and nb_NO are the two shipped locales; every non-English one in that
+  # set writes a decimal comma.
+  defp one_decimal(x) do
+    text = :erlang.float_to_binary(x, decimals: 1)
+
+    if String.starts_with?(Gettext.get_locale(BarkparkWeb.Gettext), "en"),
+      do: text,
+      else: String.replace(text, ".", ",")
+  end
 end

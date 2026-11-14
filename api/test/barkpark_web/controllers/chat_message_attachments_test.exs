@@ -342,7 +342,11 @@ defmodule BarkparkWeb.ChatMessageAttachmentsTest do
             "",
             42,
             nil,
-            %{"id" => id}
+            # `{"id", "name"}` is a valid entry (chat-host-file-attachments-plan);
+            # an object with any other key, or a malformed id inside it, is not.
+            %{"id" => id, "url" => "/x"},
+            %{"id" => String.upcase(id), "name" => "a.png"},
+            %{"name" => "a.png"}
           ] do
         conn = send_message(admin, sid, %{content: "x", attachments: [bad]})
 

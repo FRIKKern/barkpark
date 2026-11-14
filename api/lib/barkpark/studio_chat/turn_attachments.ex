@@ -74,7 +74,10 @@ defmodule Barkpark.StudioChat.TurnAttachments do
           :ok | {:error, {:host_cannot_receive_attachments, String.t()}}
   def admit(host, provider, %{operation: :send_turn, payload: %{attachments: [_ | _] = refs}}) do
     provider = to_string(provider)
-    accepted = accepted_types(host, provider)
+    # The codex adapter has no file path: a file is never leased to codex, even
+    # when a host lists file types under its codex entry.
+    codex_refused = if provider == "codex", do: Attachments.file_types(), else: []
+    accepted = accepted_types(host, provider) -- codex_refused
 
     if Enum.all?(refs, &(&1.media_type in accepted)),
       do: :ok,
