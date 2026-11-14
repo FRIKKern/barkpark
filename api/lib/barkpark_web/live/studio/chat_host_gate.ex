@@ -8,8 +8,12 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   A co-viewer never spawns, so the gate has to sit on the ACTS that drive the
   runtime, not on how the pid was obtained: every turn and every allow, the
   same checks `POST /v1/chat/sessions/:id/messages` and `/approval` make, and
-  every live steer of the session's permission mode or model
-  (task-14e61a60450c4678).
+  every change of the session's permission mode or model
+  (task-14e61a60450c4678), live or saved: the next spawn starts from the row's
+  mode and model, so writing them while the runtime is offline is a host act
+  too (task-242dea9cceb7dd7e). The check keys on the session, never on whether
+  this tab holds a pid: a tab that opened offline never learns the pid of a
+  runtime that came up elsewhere.
 
   A deny always passes (the HTTP door lets a deny through too): it stops a host
   turn, it never lets one act. A steer to a stricter mode does NOT pass: a deny
@@ -22,9 +26,9 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
 
   @doc """
   `:ok`, or `{:error, :host_execution_not_permitted}` when the tab's principal
-  may not take `act` on its session. `act` is `:turn`, `:steer` (a live mode or
-  model switch; with no live session there is nothing to steer and the tab only
-  persists intent, so it passes) or a permission decision
+  may not take `act` on its session. `act` is `:turn`, `:steer` (a mode or model
+  change, steered live or saved to the row; only a brand-new tab with no row and
+  no pid passes, since it writes nothing a spawn reads) or a permission decision
   (`:allow | {:allow, input} | {:deny, message}`).
 
   The session is the stored row when there is one (its provider, target and
@@ -32,10 +36,12 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   """
   @spec authorize(map(), term()) :: :ok | {:error, :host_execution_not_permitted}
   def authorize(_assigns, {:deny, _message}), do: :ok
-  def authorize(%{session: nil}, :steer), do: :ok
 
-  def authorize(assigns, _act),
-    do: HostExecutionGate.authorize_turn(principal(assigns), subject(assigns))
+  def authorize(assigns, act) do
+    if act == :steer and is_nil(assigns[:session]) and is_nil(assigns[:store_session_id]),
+      do: :ok,
+      else: HostExecutionGate.authorize_turn(principal(assigns), subject(assigns))
+  end
 
   @doc """
   The spawn-time check: `store_session` is the row the spawn is for (or nil
