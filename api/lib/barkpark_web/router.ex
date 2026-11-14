@@ -2263,7 +2263,6 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/", StudioLive)
       live("/media", MediaLive)
-      # Search insights and synonyms. Admins only: SearchLive asks at mount.
       live("/search", SearchLive)
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
