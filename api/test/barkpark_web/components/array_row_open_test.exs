@@ -130,6 +130,30 @@ defmodule BarkparkWeb.Components.ArrayRowOpenTest do
     end
   end
 
+  # #26148 review: the browser keeps `open` on the element LiveView matches by
+  # id. An index id left it at the position: move the open S1 down and S2
+  # opened; remove S1 and S2 opened. A keyed row's id is its key's.
+  test "a keyed row keeps its id across a move and a remove, so its open state goes with it" do
+    ids = fn value ->
+      render_component(&ArrayField.array_field/1, %{field: sections(), value: value})
+      |> rows()
+      |> Enum.map(&elem(&1, 0))
+    end
+
+    k1 = %{"_key" => "k1", "_type" => "sec", "heading" => "One"}
+    k2 = %{"_key" => "k2", "_type" => "sec", "heading" => "Two"}
+    k3 = %{"_key" => "k3", "_type" => "sec", "heading" => "Three"}
+
+    [a, b, c] = ids.([k1, k2, k3])
+    assert ids.([k2, k1, k3]) == [b, a, c], "a move takes the row's id with it"
+    assert ids.([k2, k3]) == [b, c], "a remove leaves the others' ids as they were"
+    assert length(Enum.uniq([a, b, c])) == 3
+
+    # Two rows sharing a key (pasted data) keep index ids: no id twice.
+    shared = ids.([k1, %{k2 | "_key" => "k1"}])
+    assert length(Enum.uniq(shared)) == 2
+  end
+
   test "a typed array's rows (several member types) leave it to the browser too" do
     field = %Field{
       name: "blocks",
