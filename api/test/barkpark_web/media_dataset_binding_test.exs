@@ -113,6 +113,40 @@ defmodule BarkparkWeb.MediaDatasetBindingTest do
     end
   end
 
+  # `PUT /api/workspaces/:slug/media/blob/*path` is the restore primitive beside
+  # workspace import. It names no dataset and claims a blob key by workspace
+  # only, so a dataset-bound admin token overwrote another dataset's bytes
+  # (task-1b2116e5be0712d7). Import already refuses a bound token; so does this.
+  describe "blob push (PUT /api/workspaces/:slug/media/blob/*path)" do
+    setup do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      {:ok, other} = create_media_file_in!(ws, proj, %{}, @other)
+      on_exit(fn -> File.rm(Media.file_path(other.path)) end)
+
+      admin = fn opts ->
+        raw = "mdsb-blob-#{System.unique_integer([:positive])}"
+        perms = ["read", "write", "admin"]
+        {:ok, _} = Auth.create_token(raw, "mdsb-blob", @own, perms, ws.id, opts)
+        raw
+      end
+
+      push = fn raw, bytes ->
+        as(raw)
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/workspaces/#{ws.slug}/media/blob/#{other.path}", bytes)
+      end
+
+      %{other: other, admin: admin, push: push}
+    end
+
+    test "a dataset-bound admin token is refused, and the bytes stay", ctx do
+      assert ctx.push.(ctx.admin.([]), "BYTES-FROM-UNBOUND").status == 200
+      assert_dataset_refusal(ctx.push.(ctx.admin.(dataset_bound: true), "BYTES-FROM-BOUND"))
+      assert File.read!(Media.file_path(ctx.other.path)) == "BYTES-FROM-UNBOUND"
+    end
+  end
+
   describe "reads by id (scoped /w/:ws/p/:proj/media)" do
     test "meta: own dataset 200, another dataset 404" do
       ws = create_workspace!()
