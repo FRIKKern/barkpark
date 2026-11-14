@@ -128,6 +128,46 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
            ]
   end
 
+  # task-f1df9985c3ff5edb. The pinned schema (0.144.1) has no request that
+  # changes a live thread's approval policy or model in place: turn/steer
+  # carries only `input`, and the overrides ride turn/start. A mode or model
+  # steer used to go out as a turn/steer with `"input":[]`, which the
+  # app-server accepts as a content-free steer while the change is lost and
+  # the caller is told :ok. It is answered unsupported, like claude's effort.
+  test "a mode or model steer on a live session is answered unsupported and sends nothing" do
+    {binary, args, log} = fake_app_server()
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: binary,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               cwd: "/tmp",
+               timeout_ms: :infinity
+             })
+
+    assert :ok = Codex.send_turn(runtime, "hello")
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :turn_started}}
+
+    for command <- [%{mode: "auto"}, %{model: "gpt-5"}, %{content: ""}, %{input: []}] do
+      assert {:error, {:unsupported_steer, ^command}} = Codex.steer(runtime, command)
+    end
+
+    # CONTROL: the same live session still steers when there is input to send.
+    assert :ok = Codex.steer(runtime, %{content: "focus"})
+    assert :ok = Codex.close(runtime)
+
+    steers =
+      log
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["method"] == "turn/steer"))
+
+    assert [%{"params" => %{"input" => [%{"type" => "text", "text" => "focus"}]}}] = steers
+  end
+
   test "resume uses the opaque provider thread id" do
     {binary, args, log} = fake_app_server()
 
