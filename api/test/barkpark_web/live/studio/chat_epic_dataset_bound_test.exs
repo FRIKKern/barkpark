@@ -87,7 +87,7 @@ defmodule BarkparkWeb.Studio.ChatEpicDatasetBoundTest do
   # The same session over the token API: the show body and its list row.
   defp session_json(ws, scope, epic_dataset, epic_title, token_opts) do
     m = seed(ws, scope, epic_dataset, epic_title, token_opts)
-    get = &(build_conn() |> put_req_header("authorization", "Bearer " <> m.raw) |> get(&1))
+    get = &(scoped_conn() |> put_req_header("authorization", "Bearer " <> m.raw) |> get(&1))
 
     show = get.("/v1/chat/sessions/#{m.sid}")
     index = get.("/v1/chat/sessions")
