@@ -103,6 +103,9 @@ USAGE
 # delivery tool that silently reports "no reds" when it could not read is the
 # original defect wearing this file's name.
 _mro_selftest() {
+  # The arms own their inputs: a shared reading named by the caller's
+  # environment must never steer them (task-0f8b982c7d014258).
+  unset MRO_PREDICATE_OUT MRO_REUSE_MAX_MIN
   local d fails=0 pass=0 out rc
   _ok(){ printf 'PASS %-30s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
   _no(){ printf 'FAIL %-30s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
@@ -233,6 +236,49 @@ GSTUB
   if grep -q "issue comment" "$log"; then _no "unchanged set stays silent" "commented on an UNCHANGED red set — 48 pages a day"
   else _ok "unchanged set stays silent" "body refreshed, no comment"; fi
 
+  # ── THE SHARED READING (task-0f8b982c7d014258) ────────────────────────────
+  # The stub predicate leaves a mark when it runs, so each arm can assert
+  # whether a SECOND read happened. One reuse arm, three refusals.
+  cat > "$d/pred-marked" <<'PMARK'
+#!/usr/bin/env bash
+: > "$MRO_P_MARK"
+echo "RED ON MAIN (0):"; echo "  (none)"; echo
+echo "NO SUCCESS/FAILURE VERDICT ON MAIN — CANNOT READ, NOT GREEN (0):"; echo "  (none)"; echo
+echo "2H PREDICATE: TRUE -- fresh read"
+exit 0
+PMARK
+  _shared(){ # label want-fresh-read(0|1) needle  — the share file is prepared by the caller
+    local lbl="$1" wantfresh="$2" need="$3" fresh=0
+    rm -f "$d/mark"; : > "$d/ghlog"
+    out=$(PATH="$d/bin:$PATH" MRO_PREDICATE="$d/pred-marked" MRO_P_MARK="$d/mark" MRO_G_LOG="$d/ghlog" \
+          MRO_PREDICATE_OUT="$d/share" bash "$_MRO_SELF" acme/widget 2>&1)
+    [ -f "$d/mark" ] && fresh=1
+    if [ "$fresh" != "$wantfresh" ]; then _no "$lbl" "fresh read=$fresh (want $wantfresh)"; return; fi
+    case "$out" in *"$need"*) _ok "$lbl" "fresh read=$fresh";; *) _no "$lbl" "output lacks [$need]";; esac
+  }
+  _share_red(){ printf 'RED ON MAIN (1):\n  failure abc123 x SHARED.yml\n\nNO SUCCESS/FAILURE VERDICT ON MAIN — CANNOT READ, NOT GREEN (0):\n  (none)\n\n2H PREDICATE: FALSE -- 1 workflow(s) red\n' > "$d/share"; echo 1 > "$d/share.rc"; }
+  # REUSE: a reading that spoke is acted on — the red it carries gets its owner
+  # and the predicate is NOT run again.
+  _share_red; _shared "a shared reading is reused" 0 "OPENED issue"
+  # …and it is the SHARED red that was owned, not the fresh stub's green.
+  case "$out" in *"SHARED.yml"*) _ok "the reused reading is the one acted on" "SHARED.yml owned";; *) _no "the reused reading is the one acted on" "the shared red was not delivered";; esac
+  # REFUSAL 1: a blind reading is never inherited.
+  printf '2H PREDICATE: CANNOT READ -- feed unreadable\n' > "$d/share"; echo 4 > "$d/share.rc"
+  _shared "a blind shared reading is re-read" 1 "fresh read"
+  # …each half of that test on its own: exit 4 beside a TRUE line (the
+  # predicate's "too few workflows" path), and exit 1 beside a blind line.
+  printf '2H PREDICATE: TRUE -- nothing red\n' > "$d/share"; echo 4 > "$d/share.rc"
+  _shared "exit 4 with a TRUE line is re-read" 1 "fresh read"
+  printf '2H PREDICATE: CANNOT READ -- feed unreadable\n' > "$d/share"; echo 1 > "$d/share.rc"
+  _shared "exit 1 with a blind line is re-read" 1 "fresh read"
+  # REFUSAL 2: a stale file is not this run's reading.
+  _share_red; touch -t 202001010000 "$d/share"
+  _shared "a stale shared reading is re-read" 1 "fresh read"
+  # REFUSAL 3: no exit code, no reuse.
+  _share_red; rm -f "$d/share.rc"
+  _shared "a reading without its exit code is re-read" 1 "fresh read"
+  rm -f "$d/share" "$d/share.rc"
+
   rm -rf "$d"
   local total=$((pass+fails))
   if [ "$total" -lt 12 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
@@ -256,8 +302,31 @@ REPO="${1:-${GITHUB_REPOSITORY:-FRIKKern/barkpark}}"
 [ -x "$PREDICATE" ] || [ -f "$PREDICATE" ] || {
   echo "CANNOT READ: no predicate at $PREDICATE — refusing to report on main's health"; exit 4; }
 
-OUT=$(bash "$PREDICATE" "$REPO" 2>&1); PRC=$?
-echo "$OUT"
+# ── ONE PREDICATE READ PER RUN (task-0f8b982c7d014258) ───────────────────────
+# A predicate read is ~240 API requests (measured 2026-11-14: 4 per push
+# workflow). The window step of the same job has just made one; a second here
+# doubled the spend and helped exhaust the Actions token's hourly budget on
+# 2026-11-13. So a reading the window step left in $MRO_PREDICATE_OUT is reused
+# — but ONLY a reading that SPOKE: exit 0 or 1 with a TRUE/FALSE verdict line,
+# and written within the last $MRO_REUSE_MAX_MIN minutes. A blind reading
+# (CANNOT READ), a stale file, a missing exit code: all fall through to a fresh
+# read, so this step never inherits a silence it could have read past.
+_mro_shared_reading() { # prints nothing; rc 0 = OUT/PRC were set from the file
+  local f="${MRO_PREDICATE_OUT:-}" rc
+  [ -n "$f" ] && [ -s "$f" ] && [ -s "$f.rc" ] || return 1
+  [ -n "$(find "$f" -mmin "-${MRO_REUSE_MAX_MIN:-10}" 2>/dev/null)" ] || return 1
+  rc=$(head -1 "$f.rc" 2>/dev/null)
+  case "$rc" in 0|1) : ;; *) return 1 ;; esac
+  grep -qE '^2H PREDICATE: (TRUE|FALSE)' "$f" || return 1
+  OUT=$(cat "$f"); PRC=$rc
+}
+if _mro_shared_reading; then
+  echo "$OUT"
+  echo "predicate: REUSED the reading this run's window step took (exit $PRC) — no second read"
+else
+  OUT=$(bash "$PREDICATE" "$REPO" 2>&1); PRC=$?
+  echo "$OUT"
+fi
 echo
 echo "── main-red-owner: predicate exit=$PRC ──"
 

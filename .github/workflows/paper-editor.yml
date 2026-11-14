@@ -224,6 +224,7 @@ jobs:
           node ../paper-editor-host-tests/__press_answer_watchdog.test.mjs
           node ../paper-editor-host-tests/__picker_asset_ref.test.mjs
           node ../paper-editor-host-tests/__picker_chrome.test.mjs
+          node ../paper-editor-host-tests/__picker_bar.test.mjs
           node ../paper-editor-host-tests/__picker_focal.test.mjs
           node ../paper-editor-host-tests/__picker_metadata.test.mjs
           node ../paper-editor-host-tests/__picker_reference_preview.test.mjs

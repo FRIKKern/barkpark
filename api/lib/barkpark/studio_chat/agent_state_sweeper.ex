@@ -20,6 +20,9 @@ defmodule Barkpark.StudioChat.AgentStateSweeper do
   read `working` for ≤150s — bounded, and the view-side stall badge covers the
   window.
 
+  Each tick first ends the turns of registered hosts that went silent
+  (`ChatHosts.end_expired_turns/1`): their session status leaves `working`.
+
   A sweep failure (a DB hiccup) logs and waits for the next tick — convergence
   machinery must never crash-loop the chat supervision tree.
   """
@@ -67,9 +70,25 @@ defmodule Barkpark.StudioChat.AgentStateSweeper do
   """
   @spec sweep(DateTime.t()) :: non_neg_integer()
   def sweep(now \\ DateTime.utc_now()) do
+    end_expired_host_turns(now)
     cutoff = DateTime.add(now, -@stale_after_s, :second)
     {count, _} = StudioChat.sweep_stale_agent_states(cutoff, now)
     count
+  end
+
+  # A registered host that went silent for good never closes its turn, so the
+  # session would stay `working` (task-1e98bcc0f1c64067). Ending those turns
+  # first also drops their live fence, so the agent-state sweep below can
+  # converge the same rows. Its own rescue: it never costs that sweep a tick.
+  defp end_expired_host_turns(now) do
+    Barkpark.ChatHosts.end_expired_turns(now)
+  rescue
+    error ->
+      Logger.warning(
+        "studio chat agent-state sweeper: expired host turns not ended: #{Exception.message(error)}"
+      )
+
+      0
   end
 
   defp safe_sweep do

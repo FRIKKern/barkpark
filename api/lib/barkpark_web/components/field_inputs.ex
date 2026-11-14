@@ -465,6 +465,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         id={@id_prefix == "" && @n}
+        chrome={@id_prefix == "" && "bar"}
         value={@v}
         dataset={@dataset}
         scope-prefix={@scope_prefix}

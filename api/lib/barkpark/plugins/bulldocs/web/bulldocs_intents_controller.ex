@@ -43,10 +43,21 @@ defmodule BarkparkWeb.BulldocsIntentsController do
       it) and the un-bound global-admin token. Failing OPEN here is safe only
       because `RequireIngestToken` already rejected every unauthenticated
       caller; this seam narrows an authorized caller, it is not the auth gate.
+
+  ## Dataset binding (task-ad7114cdcb1200b9)
+
+  A token minted with an explicit dataset is held to it here too. An intent
+  has no dataset of its own, it follows its paper (`EventDataset`): a
+  dataset-bound token lists and marks only intents of papers in its dataset,
+  and a mark on any other intent is the same 404. An intent with no paper to
+  follow counts as the paper default dataset; one whose slug exists in two
+  datasets of its workspace and project is shown to no bound token. Unbound
+  tokens and the shared secret are unchanged.
   """
   use BarkparkWeb, :controller
 
-  alias Barkpark.Plugins.Bulldocs.Events
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Plugins.Bulldocs.{EventDataset, Events}
 
   @doc """
   Return the pending actionable intents, oldest first, as a JSON list — scoped
@@ -57,6 +68,7 @@ defmodule BarkparkWeb.BulldocsIntentsController do
       conn
       |> caller_scope()
       |> Events.list_pending_intents()
+      |> within_bound_dataset(conn)
       |> Enum.map(&intent_json/1)
 
     conn
@@ -116,15 +128,30 @@ defmodule BarkparkWeb.BulldocsIntentsController do
   # read the row first and refuse unless it belongs to the caller's workspace.
   # A globally-scoped caller (`[]`) sees every row, exactly as before.
   defp visible_to_caller?(conn, id) do
-    case Keyword.get(caller_scope(conn), :workspace_id) do
-      nil ->
-        true
+    workspace_id = Keyword.get(caller_scope(conn), :workspace_id)
 
-      workspace_id ->
-        case Events.get_event(id) do
-          nil -> false
-          event -> event.workspace_id == workspace_id
-        end
+    if is_nil(workspace_id) and is_nil(bound_dataset(conn)) do
+      true
+    else
+      case Events.get_event(id) do
+        nil ->
+          false
+
+        event ->
+          (is_nil(workspace_id) or event.workspace_id == workspace_id) and
+            within_bound_dataset([event], conn) != []
+      end
+    end
+  end
+
+  # The dataset a dataset-bound token is held to, else nil. `RequireIngestToken`
+  # assigns `:api_token` for a token caller; the shared secret assigns none.
+  defp bound_dataset(conn), do: ApiToken.bound_dataset(conn.assigns[:api_token])
+
+  defp within_bound_dataset(events, conn) do
+    case bound_dataset(conn) do
+      nil -> events
+      dataset -> EventDataset.within(events, dataset)
     end
   end
 

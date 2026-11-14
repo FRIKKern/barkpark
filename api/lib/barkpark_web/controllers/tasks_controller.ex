@@ -116,7 +116,7 @@ defmodule BarkparkWeb.TasksController do
   # therefore in `docs/openapi.json`. NARROWER than the document reads on
   # purpose: `raw` is not offered on this surface.
   @graph_perspectives ["published", "drafts"]
-  alias BarkparkWeb.TasksController.Params
+  alias BarkparkWeb.TasksController.{CountScope, Params}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -338,17 +338,17 @@ defmodule BarkparkWeb.TasksController do
         Enum.map(docs, &Params.render_ids/1)
 
       :brief ->
-        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        child_counts = Params.batch_child_counts(docs, CountScope.of(conn))
         # task-52f4f3aff99c64d5: the LIVE half of the same edge — one extra
         # indexed grouped query per page, and the only thing that separates an
         # epic root still delegating to open children from a leaf a builder can
         # be sent at. See Params.batch_live_child_counts/2.
-        live_child_counts = Params.batch_live_child_counts(docs, scope_opts(conn))
+        live_child_counts = Params.batch_live_child_counts(docs, CountScope.of(conn))
         # task-e8d0fe00383f8499: the INBOUND half. The parent edge above is
         # structurally blind to a seal row whose children hang off a DIFFERENT
         # root — child_count 0, an ordinary-looking leaf. See
         # Params.batch_live_parents/2 and Dispatchability.classify_upstream/3.
-        live_parents = Params.batch_live_parents(docs, scope_opts(conn))
+        live_parents = Params.batch_live_parents(docs, CountScope.of(conn))
 
         Enum.map(
           docs,
@@ -361,7 +361,7 @@ defmodule BarkparkWeb.TasksController do
       # drift between the default view and the board's.
       :board ->
         counts = Params.batch_edge_counts(docs)
-        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        child_counts = Params.batch_child_counts(docs, CountScope.of(conn))
         Enum.map(docs, &Params.render_board_with_counts(&1, counts, child_counts))
 
       :full ->
@@ -369,7 +369,7 @@ defmodule BarkparkWeb.TasksController do
         # task-3e0eda896a247776: the SAME batched grouped query the brief card
         # runs — the full card used to omit `child_count` entirely, so the
         # DEFAULT view of the ledger answered "no children" for every epic root.
-        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        child_counts = Params.batch_child_counts(docs, CountScope.of(conn))
         Enum.map(docs, &Params.render_doc_with_counts(&1, counts, child_counts))
     end
   end
