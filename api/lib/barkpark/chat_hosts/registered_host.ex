@@ -177,15 +177,18 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   defp safe_task_hands?(value) when is_boolean(value), do: true
   defp safe_task_hands?(_), do: false
 
-  # The image types this provider on the host can take as image blocks (Paper
-  # chat-host-attachments-plan). `TurnAttachments.admit/3` reads it before a
-  # send_turn that carries attachment references is leased; absent means none.
-  # Every value is one of the chat store's own media types and none repeats, so
-  # the list is at most four fixed strings and cannot carry a secret.
+  # The attachment types this provider on the host can take: images as image
+  # blocks (Paper chat-host-attachments-plan) and the two file types written to
+  # its working folder (chat-host-file-attachments-plan). `TurnAttachments.admit/3`
+  # reads it before a send_turn that carries attachment references is leased;
+  # absent means none. Every value is one of the chat store's own types and none
+  # repeats, so the list is at most six fixed strings and cannot carry a secret.
+  @attachment_types Attachments.media_types() ++ Attachments.file_types()
+
   defp safe_attachments?(nil), do: true
 
   defp safe_attachments?(types) when is_list(types),
-    do: Enum.all?(types, &(&1 in Attachments.media_types())) and Enum.uniq(types) == types
+    do: Enum.all?(types, &(&1 in @attachment_types)) and Enum.uniq(types) == types
 
   defp safe_attachments?(_), do: false
 end
