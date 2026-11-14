@@ -90,27 +90,26 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	}
 	if provider == "codex" {
 		if len(refs) > 0 {
-			return fmt.Errorf("codex on a registered host takes text only: this turn carries %d image(s), so it was refused and codex was not started", len(refs))
+			return fmt.Errorf("codex on a registered host takes text only: this turn carries %d attachment(s), so it was refused and codex was not started", len(refs))
 		}
 		return h.runCodex(ctx, resolved, content, remote, emit)
 	}
 	switch provider {
 	case "claude":
-		// The host does not advertise the file types yet, so the server leases
-		// it no file; one that arrives anyway is refused by name, not sent to
-		// claude as a picture.
-		for _, ref := range refs {
-			if isFileMediaType(ref.MediaType) {
-				return fmt.Errorf("this host does not hand files to claude yet: this turn carries a %s file, so it was refused and claude was not started", ref.MediaType)
-			}
-		}
+		// Pictures ride the turn as image blocks. Files are written under the
+		// session folder first and named in the turn (turn_files.go).
 		var images []Attachment
+		var files []TurnFile
 		if len(refs) > 0 {
-			if images, err = h.fetchTurnImages(ctx, remote, refs); err != nil {
+			fetched, err := h.fetchTurnAttachments(ctx, remote, refs)
+			if err != nil {
+				return err
+			}
+			if images, files, err = h.saveTurnFiles(resolved, sessionID, refs, fetched); err != nil {
 				return err
 			}
 		}
-		return h.runClaude(ctx, resolved, content, images, remote, emit)
+		return h.runClaude(ctx, resolved, content, files, images, remote, emit)
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)
 	}
@@ -157,7 +156,7 @@ func (h *LocalHandler) handleControl(ctx context.Context, sessionID, operation s
 	return emit(map[string]any{"kind": "control_completed", "operation": operation})
 }
 
-func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, images []Attachment, remote RemoteCommand, emit func(map[string]any) error) error {
+func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files []TurnFile, images []Attachment, remote RemoteCommand, emit func(map[string]any) error) error {
 	providerSessionID, _ := remote.Command["provider_session_id"].(string)
 	sessionID, _ := remote.Command["session_id"].(string)
 	payload, _ := remote.Command["payload"].(map[string]any)
@@ -226,7 +225,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, image
 	emit, endStatus := h.startStatusLabel(ctx, content, emit)
 	defer endStatus()
 
-	if err := session.write(claudeUserFrame(content, images)); err != nil {
+	if err := session.write(claudeUserFrame(content, files, images)); err != nil {
 		return err
 	}
 

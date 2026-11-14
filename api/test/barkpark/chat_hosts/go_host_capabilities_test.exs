@@ -79,9 +79,10 @@ defmodule Barkpark.ChatHosts.GoHostCapabilitiesTest do
              %{"protocol" => "bidirectional-v2"}
   end
 
-  # The shape the Go host emits once it fetches images (Paper
-  # chat-host-attachments-plan, T6): today's map with
-  # `providers.claude.attachments` added, and codex unchanged. The server must
+  # The shape the Go host emits once it fetches pictures and files (Papers
+  # chat-host-attachments-plan T6 and chat-host-file-attachments-plan T6):
+  # today's map with `providers.claude.attachments` (four picture types, then
+  # text/plain and application/pdf) added, and codex unchanged. The server must
   # admit it before any binary sends it, or that host's heartbeats are refused
   # and it goes offline. When T6 ships, this literal becomes the main fixture.
   describe "the Go binary's attachments shape (T6)" do
@@ -94,9 +95,11 @@ defmodule Barkpark.ChatHosts.GoHostCapabilitiesTest do
 
     test "it is today's fixture plus providers.claude.attachments and nothing else" do
       caps = attachments_capabilities()
-      {images, claude} = Map.pop(caps["providers"]["claude"], "attachments")
+      {types, claude} = Map.pop(caps["providers"]["claude"], "attachments")
 
-      assert images == ~w(image/png image/jpeg image/gif image/webp)
+      assert types ==
+               ~w(image/png image/jpeg image/gif image/webp text/plain application/pdf)
+
       assert put_in(caps, ["providers", "claude"], claude) == go_capabilities()
     end
 

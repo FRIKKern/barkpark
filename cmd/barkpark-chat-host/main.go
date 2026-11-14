@@ -62,8 +62,9 @@ func main() {
 	}
 }
 
-// newRunner wires the host: the handler fetches a turn's images through the
-// same client, and so the same Host credential, that leased the command.
+// newRunner wires the host: the handler fetches a turn's pictures and files
+// through the same client, and so the same Host credential, that leased the
+// command.
 func newRunner(state chathost.State) *chathost.Runner {
 	client := &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential, AllowInsecureLoopback: state.AllowInsecureLoopback}
 	handler := chathost.NewLocalHandler(state.Host.ApprovedRoots)
@@ -85,8 +86,9 @@ func capabilities() map[string]any {
 			"task_hands": taskHandsReady,
 		}
 		if name == "claude" {
-			// Only claude takes image blocks; codex on a host is text-only.
-			metadata["attachments"] = chathost.ClaudeImageTypes()
+			// Only claude takes pictures and files; codex on a host is
+			// text-only.
+			metadata["attachments"] = chathost.ClaudeAttachmentTypes()
 		}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {

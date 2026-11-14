@@ -399,15 +399,22 @@ func TestCodexSendTurnWithAttachmentsIsRefused(t *testing.T) {
 	}
 }
 
-// What the host advertises is what the fetch accepts.
-func TestClaudeImageTypesAreTheFetchableOnes(t *testing.T) {
-	types := ClaudeImageTypes()
-	if len(types) != 4 {
-		t.Fatalf("%d types, want the four image types", len(types))
+// What the host advertises is what the fetch accepts: the four pictures, then
+// the two file types.
+func TestClaudeAttachmentTypesAreTheFetchableOnes(t *testing.T) {
+	types := ClaudeAttachmentTypes()
+	want := []string{"image/png", "image/jpeg", "image/gif", "image/webp", "text/plain", "application/pdf"}
+	if strings.Join(types, ",") != strings.Join(want, ",") {
+		t.Fatalf("advertised %v, want %v", types, want)
 	}
 	for _, mediaType := range types {
 		if !acceptedMediaType(mediaType) {
 			t.Errorf("%s is advertised but the fetch refuses it", mediaType)
+		}
+	}
+	for _, mediaType := range ClaudeImageTypes() {
+		if !isImageMediaType(mediaType) {
+			t.Errorf("%s is handed to claude as an image block but is not a picture type", mediaType)
 		}
 	}
 }
