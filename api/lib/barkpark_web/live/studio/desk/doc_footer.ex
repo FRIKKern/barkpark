@@ -16,6 +16,15 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     beside it, as TanStack's does. Found by its id as an attribute: a pane
     id (`desk-pane-2-doc:post;x`) is no CSS id selector.
 
+  - In the published perspective (`?perspective=published`,
+    `Panes.perspective/1`) the button is Unpublish, red, as TanStack's
+    `PublishedFooter`. It sends the Studio's own `unpublish` event, which
+    opens the desk's dialog (`UnpublishDialog`): nothing is unpublished
+    until that dialog is confirmed. It is greyed out, and says "Not
+    published", when no published version exists. Over a draft it stays
+    offered, as TanStack's: an unpublish keeps an existing draft as it is
+    (`Content.Lifecycle.unpublish_document`, draft wins).
+
   The words are drawn when the pane renders, so "5m ago" moves on with the
   next change, not with the clock.
   """
@@ -37,15 +46,43 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
 
   attr :menu_button, :string, required: true, doc: "the id of the \"…\" button beside it"
 
-  @doc "The left's words and the Publish button."
+  attr :perspective, :atom,
+    default: :drafts,
+    values: [:drafts, :published],
+    doc: "`:published` draws Unpublish in Publish's place"
+
+  attr :published?, :boolean,
+    default: false,
+    doc: "whether a published version exists; Unpublish is greyed out without one"
+
+  @doc "The left's words and the Publish button, or Unpublish in the published perspective."
+  def bar(%{perspective: :published} = assigns) do
+    ~H"""
+    <.words status={@status} />
+    <%!-- TanStack's `button.publish.danger`, named "Unpublish". The dialog it
+          opens gives the focus back to it on Cancel (`ModalFocus`). --%>
+    <style>
+      .dk .dk-publish.danger:not(:disabled) { background: var(--dk-menu-danger-hover); color: var(--dk-bg); }
+      .dk .dk-publish.danger:not(:disabled):hover { background: var(--dk-menu-danger); }
+    </style>
+    <button
+      type="button"
+      id={"#{@id}-unpublish"}
+      class="dk-publish publish danger"
+      disabled={!@published?}
+      title={!@published? && gettext("Not published")}
+      phx-click="unpublish"
+      data-desk-unpublish
+    >
+      <BarkparkWeb.Icons.desk_icon name="unpublish" size={21} />
+      {gettext("Unpublish")}
+    </button>
+    """
+  end
+
   def bar(assigns) do
     ~H"""
-    <%!-- The TanStack Studio's names (`DocumentPane.tsx` `.save-state-btn`,
-          `.save-state`, `.save-state-text`): a button named by its words. It
-          opens nothing yet, so it is disabled and out of the tab order. --%>
-    <button type="button" class="dk-footer-status save-state-btn" data-desk-footer-status disabled>
-      <span class="save-state"><span class="save-state-text">{@status}</span></span>
-    </button>
+    <.words status={@status} />
     <button
       type="button"
       id={"#{@id}-publish"}
@@ -56,6 +93,19 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     >
       <BarkparkWeb.Icons.desk_icon name="publish" size={21} />
       {(@publish && @publish.label) || gettext("Publish")}
+    </button>
+    """
+  end
+
+  attr :status, :string, required: true
+
+  defp words(assigns) do
+    ~H"""
+    <%!-- The TanStack Studio's names (`DocumentPane.tsx` `.save-state-btn`,
+          `.save-state`, `.save-state-text`): a button named by its words. It
+          opens nothing yet, so it is disabled and out of the tab order. --%>
+    <button type="button" class="dk-footer-status save-state-btn" data-desk-footer-status disabled>
+      <span class="save-state"><span class="save-state-text">{@status}</span></span>
     </button>
     """
   end

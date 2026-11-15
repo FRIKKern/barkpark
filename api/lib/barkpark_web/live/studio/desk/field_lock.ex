@@ -10,9 +10,12 @@ defmodule BarkparkWeb.Studio.Desk.FieldLock do
   HOW A LOCKED FIELD POSTS. On purpose, two ways:
 
     * A text field (#{inspect(~w(string text url email slug number))}) keeps its
-      input and gets the `readonly` attribute. A `readonly` input still posts,
-      and it posts the value the form drew, so the save writes the stored
-      value back unchanged. The text stays focusable and selectable.
+      input and gets the `readonly` attribute. A `readonly` input still posts
+      the value the form drew. The save drops a posted value that equals what
+      the form drew for the row this tab last saved or loaded, and keeps what
+      the store holds; a posted value that differs from it is written
+      (`Barkpark.Content.Forms.edited_keys/4`). The text stays focusable and
+      selectable.
     * Any other type is drawn display-only with no input at all
       (`FieldInputs`' read-only clause). Nothing is posted and the save keeps
       the stored value. A checkbox or a select ignores `readonly`, and
