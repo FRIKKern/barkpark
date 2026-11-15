@@ -251,10 +251,10 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 		}
 		extra = map[string]any{"draft": isDraft}
 	default:
-		// Both sides are read with perspective=raw: each id exactly as given,
-		// and a refusal for a credential that may only read published
-		// documents. The default perspective answers such a credential 404 on
-		// every drafts. id, which reads as "no draft" when there is one.
+		// The draft is read with perspective=raw: a credential that may only
+		// read published documents is refused there. The default perspective
+		// answers such a credential 404 on every drafts. id, which reads as
+		// "no draft" when there is one.
 		draft, _, hasDraft, code := docDiffDoc(out, ctx, a.typ, "drafts."+a.id, "raw")
 		if code != exitOK {
 			return code
@@ -273,9 +273,18 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 				return useError(out, "not_found", fmt.Sprintf("doc diff: there is no %s document %s.", a.typ, a.id), exitNotFound)
 			}
 		}
-		pub, _, hasPub, code := docDiffDoc(out, ctx, a.typ, a.id, "raw")
+		// The published side is read by its exact id with NO perspective. A
+		// raw read of a plain id falls back to the draft when there is no
+		// published row (QueryController tries the id, then its drafts. twin),
+		// and the draft would then be compared with itself: a document that
+		// was never published read as "the same", exit 0. An answer that says
+		// it is a draft is not a published row, whatever door sent it.
+		pub, pubIsDraft, hasPub, code := docDiffDoc(out, ctx, a.typ, a.id, "")
 		if code != exitOK {
 			return code
+		}
+		if pubIsDraft {
+			pub, hasPub = nil, false
 		}
 		switch {
 		case !hasDraft && !hasPub:

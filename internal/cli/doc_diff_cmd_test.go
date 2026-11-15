@@ -72,6 +72,15 @@ func newDocFakeServer(t *testing.T, gets map[string]string) *docFakeServer {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		// Like the real server, a perspective=raw read of a plain id that
+		// has no published row answers the draft.
+		if _, ok := s.gets[path]; !ok && r.URL.Query().Get("perspective") == "raw" && !strings.Contains(path, "/drafts.") {
+			if i := strings.LastIndex(path, "/"); i >= 0 {
+				if _, ok := s.gets[path[:i+1]+"drafts."+path[i+1:]]; ok {
+					path = path[:i+1] + "drafts." + path[i+1:]
+				}
+			}
+		}
 		if body, ok := s.gets[path]; ok && r.Method == http.MethodGet {
 			_, _ = w.Write([]byte(body))
 			return
@@ -185,6 +194,15 @@ func TestDocDiffExitCodes(t *testing.T) {
 	code, stdout, _ := runDocVerb(runDocDiff, s.ctx(), globals{}, "post", "p1")
 	if code != exitDocDiff || !strings.Contains(stdout, "0 changed, 4 added, 0 removed") {
 		t.Errorf("never published: exit = %d, stdout=%s", code, stdout)
+	}
+	code, stdout, _ = runDocVerb(runDocDiff, s.ctx(), globals{output: "json"}, "post", "p1")
+	if code != exitDocDiff || !strings.Contains(stdout, `"published":false`) || !strings.Contains(stdout, `"differences":true`) {
+		t.Errorf("never published, json: exit = %d, stdout=%s", code, stdout)
+	}
+	// Even a server that answers the draft for the plain id is not believed.
+	s = newDocFakeServer(t, map[string]string{docDiffDraftPath: docDiffDraft, docDiffPubPath: docDiffDraft})
+	if code, stdout, _ := runDocVerb(runDocDiff, s.ctx(), globals{}, "post", "p1"); code != exitDocDiff || !strings.Contains(stdout, "0 changed, 4 added, 0 removed") {
+		t.Errorf("a draft answered for the published id: exit = %d, stdout=%s", code, stdout)
 	}
 
 	s = newDocFakeServer(t, nil)
