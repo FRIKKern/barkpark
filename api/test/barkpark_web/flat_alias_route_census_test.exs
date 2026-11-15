@@ -848,6 +848,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # V1.MediaController.usage
+    {"GET", "/v1/media/:dataset/:id/usage"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the file read and every document read " <>
+         "(Media.Usage), so the rows are the pipeline-derived :current_workspace's — " <>
+         "which DeriveWorkspaceFromToken fills from the token before AssignDefaultScope."},
     # V1.MediaCollectionsController.index
     {"GET", "/v1/media/:dataset/collections"} =>
       {:workspace_derived,

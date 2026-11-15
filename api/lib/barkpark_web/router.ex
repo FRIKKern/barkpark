@@ -3637,6 +3637,7 @@ defmodule BarkparkWeb.Router do
     get("/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
     get("/:dataset/collections/:id", V1.MediaCollectionsController, :show)
     get("/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/:dataset/:id/usage", V1.MediaController, :usage)
     get("/:dataset", V1.MediaController, :index)
     get("/:dataset/:id", V1.MediaController, :show)
   end
@@ -4257,6 +4258,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/media/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
     get("/v1/media/:dataset/collections/:id", V1.MediaCollectionsController, :show)
     get("/v1/media/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/v1/media/:dataset/:id/usage", V1.MediaController, :usage)
     get("/v1/media/:dataset", V1.MediaController, :index)
     get("/v1/media/:dataset/:id", V1.MediaController, :show)
   end

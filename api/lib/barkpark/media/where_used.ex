@@ -106,6 +106,10 @@ defmodule Barkpark.Media.WhereUsed do
   # a sample, and the envelope says which is which.
   @sample_limit 20
 
+  # `textual_rows/2` stops here: a logo on more pages than this is listed from
+  # its first 1000 referring rows, by doc_id.
+  @rows_limit 1000
+
   @doc """
   The delivery path a document would carry for this blob: `/media/files/<path>`.
 
@@ -362,23 +366,12 @@ defmodule Barkpark.Media.WhereUsed do
   # delete answered 200 over live `_ref`s.
   defp structural_referrers(%MediaFile{} = file) do
     scope = MediaFile.scope_opts(file)
-    asset_doc = Barkpark.Media.asset_doc_for_file(file, file.dataset, scope)
-    patterns = sanity_ref_patterns(file)
 
-    case {asset_doc, patterns} do
-      {nil, []} ->
+    case structural_target(file) do
+      nil ->
         %{count: 0, sample: []}
 
-      _ ->
-        # The upload mints the companion as a DRAFT (`drafts.asset-…`) while a
-        # field holds the bare `asset-…`; `list_reference_holders/3` matches the
-        # published id, so normalise here. A blob with no companion (a bare
-        # import) still has its Sanity ids to match.
-        target =
-          if asset_doc,
-            do: Barkpark.Content.published_id(asset_doc.doc_id),
-            else: "asset-" <> to_string(file.id)
-
+      {target, patterns} ->
         ctx = %Barkpark.Content.CallerContext{
           principal_type: :api_token,
           is_admin: true,
@@ -399,6 +392,30 @@ defmodule Barkpark.Media.WhereUsed do
           end)
 
         %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
+    end
+  end
+
+  @doc """
+  What a schema image/file field holds when it shows this blob:
+  `{asset_doc_id, sanity_ref_patterns}`, or `nil` when there is nothing to
+  match (no companion asset document and no Sanity id).
+
+  The upload mints the companion as a DRAFT (`drafts.asset-…`) while a field
+  holds the bare `asset-…`; `list_reference_holders/3` matches the published
+  id, so the id is normalised here. A blob with no companion (a bare import)
+  still has its Sanity ids to match. The companion is found under the blob's
+  OWN tenancy scope (task-fe13ea62be4a69e6).
+  """
+  def structural_target(%MediaFile{id: nil}), do: nil
+
+  def structural_target(%MediaFile{} = file) do
+    asset_doc =
+      Barkpark.Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
+
+    case {asset_doc, sanity_ref_patterns(file)} do
+      {nil, []} -> nil
+      {nil, patterns} -> {"asset-" <> to_string(file.id), patterns}
+      {doc, patterns} -> {Barkpark.Content.published_id(doc.doc_id), patterns}
     end
   end
 
@@ -448,6 +465,20 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   defp scan(url, workspace_id, narrow \\ & &1) do
+    query =
+      url
+      |> scan_query(workspace_id, narrow)
+      |> select([d], %{doc_id: d.doc_id, type: d.type, dataset: d.dataset, title: d.title})
+
+    count = Repo.aggregate(query, :count)
+    sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
+
+    %{count: count, sample: sample}
+  end
+
+  # The textual scan's rows, before any select: `scan/3` counts and samples
+  # them, `textual_rows/2` hands their ids to `Media.Usage`.
+  defp scan_query(url, workspace_id, narrow) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
     # stored `path`), never caller text, but it is still bound as a PARAMETER so
@@ -455,33 +486,44 @@ defmodule Barkpark.Media.WhereUsed do
     # both wildcards and the query declares its own ESCAPE character.
     pattern = "%" <> like_escape(url) <> "%"
 
-    query =
-      from(d in Document,
-        where: d.status in ["published", "draft"],
-        # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
-        # document. Every upload's `Assets.create_draft/1` stamps
-        # `content.fileInfo.url` with this blob's OWN delivery path, and a
-        # mediaAsset row is ALWAYS a draft (never published) — so widening
-        # this scan to drafts made every blob with a companion asset doc
-        # match ITSELF, one false "referrer" that is really just the blob
-        # describing its own metadata, never a reader- or editor-visible use.
-        where: d.type != "mediaAsset",
-        where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern),
-        select: %{
-          doc_id: d.doc_id,
-          type: d.type,
-          dataset: d.dataset,
-          title: d.title
-        }
-      )
-      |> scope_to_owner_tenant(workspace_id)
-      |> narrow.()
-
-    count = Repo.aggregate(query, :count)
-    sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
-
-    %{count: count, sample: sample}
+    from(d in Document,
+      where: d.status in ["published", "draft"],
+      # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
+      # document. Every upload's `Assets.create_draft/1` stamps
+      # `content.fileInfo.url` with this blob's OWN delivery path, and a
+      # mediaAsset row is ALWAYS a draft (never published) — so widening
+      # this scan to drafts made every blob with a companion asset doc
+      # match ITSELF, one false "referrer" that is really just the blob
+      # describing its own metadata, never a reader- or editor-visible use.
+      where: d.type != "mediaAsset",
+      where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern)
+    )
+    |> scope_to_owner_tenant(workspace_id)
+    |> narrow.()
   end
+
+  @doc """
+  The textual scan's matching rows in ONE dataset string, as
+  `%{id: documents.id, doc_id:}`, at most #{@rows_limit}.
+
+  NOT a caller-scoped read. The scan is fenced to the blob's own workspace
+  (plus the shared NULL-workspace layer) and to the `dataset` string only;
+  `Media.Usage` reads every row it returns again through the caller's own read
+  path and keeps only the ones that path returns. Never render these rows to a
+  caller directly.
+  """
+  def textual_rows(%MediaFile{path: path} = file, dataset)
+      when is_binary(path) and is_binary(dataset) do
+    file
+    |> delivery_path()
+    |> scan_query(Map.get(file, :workspace_id), &where(&1, [d], d.dataset == ^dataset))
+    |> select([d], %{id: d.id, doc_id: d.doc_id})
+    |> order_by([d], asc: d.doc_id)
+    |> limit(@rows_limit)
+    |> Repo.all()
+  end
+
+  def textual_rows(%MediaFile{}, _dataset), do: []
 
   # LIKE metacharacters in the blob path would otherwise make the pattern match
   # MORE than the literal path — an over-broad match here means a refusal that

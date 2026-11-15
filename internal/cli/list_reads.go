@@ -64,6 +64,7 @@ var listReadCommands = map[string]bool{
 	"graph.show":              true, // tasks_controller.ex  -> nodes
 	"graph.tasks":             true, // tasks_controller.ex  -> tasks
 	"media.search-synonyms":   true, // v1/media_controller.ex -> result (bare array)
+	"media.usage":             true, // v1/media_controller.ex -> result.documents
 	"paper.access":            true, // paper_access_controller.ex -> access
 	"paper.masters":           true, // paper_masters_controller.ex -> masters
 	"plugin.ls":               true, // plugins_controller.ex  -> plugins
