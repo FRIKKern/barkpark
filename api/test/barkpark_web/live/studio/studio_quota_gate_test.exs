@@ -68,7 +68,7 @@ defmodule BarkparkWeb.Studio.StudioQuotaGateTest do
   defp count(schema), do: Repo.aggregate(schema, :count)
 
   defp fire(view, "save") do
-    render_change(view, "autosave", %{"doc" => %{"title" => "After"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "After"}})
     render_click(view, "save")
   end
 

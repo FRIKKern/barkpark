@@ -151,7 +151,7 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
            "the wire shape changed; this test's premise (a flat dotted key) no longer holds: " <>
              inspect(wire)
 
-    render_submit(view, "save", wire)
+    BarkparkWeb.EditorPost.submit(view, wire)
 
     # Draft-first: the editor's save writes the draft, exactly as it does for
     # every other type. Either row proves the round trip persisted.

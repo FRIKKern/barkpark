@@ -684,7 +684,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
 
       # Autosave doc A → the header reports "Saved".
       html_a =
-        render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-edited"}})
+        BarkparkWeb.EditorPost.hook(view, "autosave", %{
+          "doc" => %{"title" => "Post One", "body" => "aaa-edited"}
+        })
 
       assert html_a =~ ~s(class="save-status" role="status" aria-live="polite">Saved)
 
@@ -736,7 +738,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       assert html =~ ~s(id="editor-form")
 
       html_saved =
-        render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-x"}})
+        BarkparkWeb.EditorPost.hook(view, "autosave", %{
+          "doc" => %{"title" => "Post One", "body" => "aaa-x"}
+        })
 
       assert html_saved =~ ~s(<span class="save-status" role="status" aria-live="polite">Saved)
     end

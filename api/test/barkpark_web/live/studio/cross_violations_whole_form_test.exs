@@ -77,7 +77,7 @@ defmodule BarkparkWeb.Studio.CrossViolationsWholeFormTest do
 
     # The Brief group is the one on screen: its inputs are all the form posts.
     html =
-      render_change(view, "autosave", %{"doc" => %{"title" => "Memo edited", "summary" => ""}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Memo edited", "summary" => ""}})
 
     refute html =~ "A finished memo should have a summary",
            "an open memo was warned for lacking a summary after a title edit"

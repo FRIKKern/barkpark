@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
            "the editor did not open the asset; this test would be vacuous"
 
     render_click(view, "select-group", %{"group" => "metadata"})
-    render_submit(view, "save", alt_text_wire("SKREVET AV EN NEKTET SKRIBENT"))
+    BarkparkWeb.EditorPost.submit(view, alt_text_wire("SKREVET AV EN NEKTET SKRIBENT"))
 
     content = read_back(slug)
     wrote? = is_map(content) and is_map(content["altText"])
@@ -194,7 +194,7 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{slug}"))
 
     render_click(view, "select-group", %{"group" => "metadata"})
-    render_submit(view, "save", alt_text_wire("Et fyrtårn i tåke"))
+    BarkparkWeb.EditorPost.submit(view, alt_text_wire("Et fyrtårn i tåke"))
 
     content = read_back(slug)
     stored? = is_map(content) and get_in(content, ["altText", "nob"]) == "Et fyrtårn i tåke"
@@ -220,7 +220,7 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{slug}"))
 
     render_click(view, "select-group", %{"group" => "metadata"})
-    render_submit(view, "save", alt_text_wire("Holderen skriver"))
+    BarkparkWeb.EditorPost.submit(view, alt_text_wire("Holderen skriver"))
 
     content = read_back(slug)
     stored? = is_map(content) and get_in(content, ["altText", "nob"]) == "Holderen skriver"
@@ -265,7 +265,7 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
     refute html =~ "studio-unresolved-document-notice",
            "the editor did not open the note; this test would be vacuous"
 
-    render_submit(view, "save", %{"doc" => %{"title" => "RENAMED BY A NON-HOLDER"}})
+    BarkparkWeb.EditorPost.submit(view, %{"doc" => %{"title" => "RENAMED BY A NON-HOLDER"}})
 
     doc =
       case Content.get_document("drafts.#{slug}", "s9AuthNote", @dataset) do

@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
     assert length(before) == 3
 
     # The first keystroke births drafts.n1; the editor now holds the draft.
-    render_change(view, "autosave", %{"doc" => %{"title" => "Note n1 edited"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Note n1 edited"}})
     {:ok, draft} = Content.get_document("drafts.n1", "note", @dataset)
     assert draft.title == "Note n1 edited"
 
@@ -129,7 +129,7 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
       |> Enum.sort()
     end
 
-    render_change(tab_b, "autosave", %{
+    BarkparkWeb.EditorPost.change(tab_b, %{
       "doc" => %{"title" => "Note n1", "body" => "<p>tab B body</p>", "author" => "grace"}
     })
 

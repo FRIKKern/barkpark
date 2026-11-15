@@ -311,7 +311,7 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       conn = init_test_session(conn, %{"api_token" => raw})
       {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
 
-      render_change(view, "autosave", %{"doc" => %{"title" => "Edited"}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Edited"}})
 
       assert {:ok, draft} = Content.get_document("drafts." <> id, @type_name, @dataset)
       assert draft.title == "Edited"

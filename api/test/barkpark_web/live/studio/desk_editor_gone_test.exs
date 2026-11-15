@@ -82,8 +82,11 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
     delete_elsewhere(ctx)
     assert eventually(fn -> has_element?(ctx.view, "[data-desk-edit-gone]") end)
 
-    render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Typed after delete"}})
-    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Saved after delete"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{
+      "doc" => %{"title" => "Typed after delete"}
+    })
+
+    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Saved after delete"}})
     render(ctx.view)
 
     assert stored(ctx) == nil, "the deleted document was written back: #{inspect(stored(ctx))}"
@@ -92,7 +95,8 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
   # Control: the same event on a document that is still there writes, so the
   # test above is not green because the event never reached the editor.
   test "control: the same autosave on a document still there writes it", ctx do
-    render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Typed while here"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{"doc" => %{"title" => "Typed while here"}})
+
     assert eventually(fn -> stored(ctx) && stored(ctx).title == "Typed while here" end)
   end
 

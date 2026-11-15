@@ -109,15 +109,15 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     draft_elsewhere(ctx, "Here elsewhere")
     assert eventually(fn -> title_shown(ctx.view, "Here elsewhere") end)
     # A types in the old form, then the discard lands before the browser has the new one.
-    render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Here elsewhere!"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{"doc" => %{"title" => "Here elsewhere!"}})
     discard_elsewhere(ctx)
     assert eventually(fn -> has_element?(ctx.view, @note) end)
 
-    render_hook(ctx.view, "autosave", %{
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{
       "doc" => %{"title" => "Here elsewhere!!", "excerpt" => "Draft words"}
     })
 
-    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here elsewhere!!!"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Here elsewhere!!!"}})
     render(ctx.view)
 
     assert stored(ctx) == {"Here", false}
@@ -161,7 +161,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
 
     assert has_element?(ctx.view, @note, "was not saved")
     # The browser has the new form: its saves write again.
-    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
     assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
   end
 
@@ -192,7 +192,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
 
     assert title_shown(ctx.view, "Here")
 
-    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
     assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
     refute has_element?(ctx.view, @note), "the save clears the line's sentence"
     assert has_element?(ctx.view, "#{lost} blockquote", "Here elsewhere <typed>")
@@ -207,7 +207,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     render_hook(ctx.view, "desk-discard-seen", %{"lost" => true})
     assert has_element?(ctx.view, @note, "was not saved")
     refute has_element?(ctx.view, "details[data-desk-lost]")
-    render_hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Here, again"}})
     assert eventually(fn -> stored(ctx) == {"Here, again", true} end)
     refute has_element?(ctx.view, @note)
   end
@@ -236,7 +236,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     assert eventually(fn -> has_element?(again, @form) end)
     refute has_element?(again, @note)
 
-    render_hook(again, "autosave", %{"doc" => %{"title" => "Here, after the reconnect"}})
+    BarkparkWeb.EditorPost.hook(again, "autosave", %{
+      "doc" => %{"title" => "Here, after the reconnect"}
+    })
+
     assert eventually(fn -> stored(ctx) == {"Here, after the reconnect", true} end)
   end
 
@@ -247,7 +250,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     assert eventually(fn -> has_element?(ctx.view, @note) end)
 
     render_hook(ctx.view, "desk-discard-seen", %{})
-    render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Here, typed after"}})
+
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{
+      "doc" => %{"title" => "Here, typed after"}
+    })
 
     assert eventually(fn -> stored(ctx) == {"Here, typed after", true} end)
   end
@@ -266,7 +272,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDiscardedTest do
     assert eventually(fn -> title_shown(ctx.view, "Here, new") end)
     refute has_element?(ctx.view, @note)
 
-    render_hook(ctx.view, "autosave", %{"doc" => %{"title" => "Here, newer"}})
+    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{"doc" => %{"title" => "Here, newer"}})
     assert eventually(fn -> stored(ctx) == {"Here, newer", true} end)
   end
 end

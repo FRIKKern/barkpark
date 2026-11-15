@@ -189,7 +189,7 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
       assert Map.has_key?(form, "cover")
       assert Map.has_key?(form, "featuredPublications")
 
-      render_change(view, "autosave", %{"doc" => wire(form)})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => wire(form)})
 
       assert draft_row(doc_id) == :no_draft,
              "an autosave identical to the published document created a draft row"
@@ -203,8 +203,8 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
       view = open!(doc_id)
       form = editor_form(view)
 
-      render_change(view, "autosave", %{"doc" => wire(form)})
-      render_change(view, "autosave", %{"doc" => wire(form)})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => wire(form)})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => wire(form)})
 
       assert draft_row(doc_id) == :no_draft
     end
@@ -257,12 +257,12 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
 
       unchanged =
         ExUnit.CaptureLog.capture_log(fn ->
-          render_change(view, "autosave", %{"doc" => wire(form)})
+          BarkparkWeb.EditorPost.change(view, %{"doc" => wire(form)})
         end)
 
       changed =
         ExUnit.CaptureLog.capture_log(fn ->
-          render_change(view, "autosave", %{
+          BarkparkWeb.EditorPost.change(view, %{
             "doc" => wire(Map.put(form, "body", "endret"))
           })
         end)
@@ -295,7 +295,7 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
       view = open!(doc_id)
       form = editor_form(view)
 
-      render_change(view, "autosave", %{
+      BarkparkWeb.EditorPost.change(view, %{
         "doc" => wire(Map.put(form, "body", "Velkommen til forsiden — REDIGERT"))
       })
 
@@ -319,7 +319,7 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
       view = open!(doc_id)
       form = editor_form(view)
 
-      render_change(view, "autosave", %{"doc" => wire(Map.put(form, "title", "Forsiden 2"))})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => wire(Map.put(form, "title", "Forsiden 2"))})
 
       doc = draft_row(doc_id)
       refute doc == :no_draft

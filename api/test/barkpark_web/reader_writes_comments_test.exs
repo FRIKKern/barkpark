@@ -313,10 +313,10 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
       assert json_response(add_comment(v1, id, "original"), 200)
       view = studio(v2, @comment, id)
 
-      render_change(view, "autosave", %{"doc" => %{"message" => "rewritten"}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"message" => "rewritten"}})
       assert {:error, :not_found} = draft(id)
 
-      render_change(view, "autosave", %{"doc" => %{"state" => "resolved"}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"state" => "resolved"}})
       assert {:ok, d} = draft(id)
       assert d.content["state"] == "resolved"
       assert d.content["message"] == "original"
@@ -331,7 +331,7 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
       assert json_response(add_comment(v1, id, "mine"), 200)
       view = studio(v1, @comment, id)
 
-      render_change(view, "autosave", %{"doc" => %{"message" => "edited"}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"message" => "edited"}})
       assert {:ok, d} = draft(id)
       assert d.content["message"] == "edited"
     end
@@ -345,7 +345,7 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
              )
 
       view = studio(v1, "post", post_id)
-      render_change(view, "autosave", %{"doc" => %{"title" => "y"}})
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "y"}})
       assert {:ok, d} = Content.get_document("drafts." <> post_id, "post", @dataset)
       assert d.title == "x"
     end

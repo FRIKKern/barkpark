@@ -334,7 +334,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       # proves the write tier, not unclassified-event fallout.
       assert Caps.classify("autosave") == :write
 
-      render_hook(view, "autosave", %{
+      BarkparkWeb.EditorPost.hook(view, "autosave", %{
         "doc" => %{"title" => "Seam Post", "body" => "ESCALATED-VIA-EVENT"}
       })
 

@@ -271,3 +271,70 @@
     attributeFilter: ["data-row-finding"]
   });
 })();
+
+// task-8908b6e031268f77: an edit not yet posted leaves before the pane does.
+// The editor form's inputs post after a delay (phx-debounce), and the server
+// writes a post only into the document it was built for (`PostIdentity`). A
+// post that left after the pane asked for another document is refused, so
+// the edit would be lost. LiveView posts a waiting input at once when it
+// blurs. A hidden input (date-time, colour, reference) never blurs, and
+// neither does a text input when the pane changes with the focus still in
+// it (browser Back, a row opened by a script). So each input of the form
+// that changed is remembered for as long as its delay, and gets that `blur`
+// when the page is about to leave the document: a LiveView navigation, or a
+// press outside the form (a row or a button that asks the server to open
+// another document).
+(function () {
+  "use strict";
+
+  // input -> the timer that forgets it once its own delay has posted it.
+  var waiting = new Map();
+
+  function field(el) {
+    var form = el && el.form;
+    return form && form.id === "editor-form" && el.hasAttribute("phx-debounce") ? el : null;
+  }
+
+  function delay(el) {
+    var ms = parseInt(el.getAttribute("phx-debounce"), 10);
+    return (isNaN(ms) ? 300 : ms) + 200;
+  }
+
+  function note(e) {
+    var el = field(e.target);
+    if (!el) return;
+    clearTimeout(waiting.get(el));
+    waiting.set(
+      el,
+      setTimeout(function () {
+        waiting.delete(el);
+      }, delay(el))
+    );
+  }
+
+  function flush() {
+    var inputs = Array.from(waiting.keys());
+    waiting.forEach(function (timer) {
+      clearTimeout(timer);
+    });
+    waiting.clear();
+    inputs.forEach(function (el) {
+      if (el.isConnected) el.dispatchEvent(new Event("blur"));
+    });
+  }
+
+  function press(e) {
+    if (!waiting.size) return;
+    var form = document.getElementById("editor-form");
+    if (!form || !e.target || !form.contains(e.target)) flush();
+  }
+
+  document.addEventListener("input", note, true);
+  document.addEventListener("change", note, true);
+  // On window, in the capture phase: before LiveView's own click listener
+  // pushes the event or the patch, and before any other listener redraws.
+  window.addEventListener("click", press, true);
+  window.addEventListener("phx:page-loading-start", flush);
+  window.addEventListener("phx:navigate", flush);
+  window.BarkparkFormLeave = flush;
+})();

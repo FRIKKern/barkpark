@@ -116,7 +116,7 @@ defmodule BarkparkWeb.Studio.StudioTabTitleTest do
     {:ok, view, _} = live(conn, scoped_studio("/d/production/studio/tab_rename_note/tr-1"))
     assert page_title(view) == "Vinterreise · Barkpark"
 
-    render_change(view, "autosave", %{"doc" => %{"title" => "Sommerreise"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Sommerreise"}})
     assert page_title(view) =~ ~r/^Sommerreise/
   end
 

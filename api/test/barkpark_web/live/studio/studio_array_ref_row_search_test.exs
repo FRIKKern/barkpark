@@ -77,7 +77,7 @@ defmodule BarkparkWeb.Studio.StudioArrayRefRowSearchTest do
     # The browser posts the row's hidden input, which holds "", with every
     # autosave, here one from the title.
     html =
-      render_change(view, "autosave", %{
+      BarkparkWeb.EditorPost.change(view, %{
         "_target" => ["doc", "title"],
         "doc" => %{"title" => "Lesekveld i biblioteket", "relatedBooks" => %{"0" => ""}}
       })
@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioArrayRefRowSearchTest do
     add_row(view)
 
     html =
-      render_change(view, "autosave", %{
+      BarkparkWeb.EditorPost.change(view, %{
         "_target" => ["doc", "relatedBooks", "0"],
         "doc" => %{"title" => "Lesekveld", "relatedBooks" => %{"0" => "book-a"}}
       })
@@ -98,7 +98,7 @@ defmodule BarkparkWeb.Studio.StudioArrayRefRowSearchTest do
     [[picked]] = row_ids(html)
 
     html =
-      render_change(view, "autosave", %{
+      BarkparkWeb.EditorPost.change(view, %{
         "_target" => ["doc", "relatedBooks", "0"],
         "doc" => %{"title" => "Lesekveld", "relatedBooks" => %{"0" => "book-b"}}
       })

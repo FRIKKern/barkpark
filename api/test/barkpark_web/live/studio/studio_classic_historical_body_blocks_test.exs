@@ -146,7 +146,7 @@ defmodule BarkparkWeb.Studio.StudioClassicHistoricalBodyBlocksTest do
     refute has_element?(view, ~s(#bp-rt-hidden-body[value*="stale fixture derivative"]))
 
     saved_html =
-      render_hook(view, "autosave", %{
+      BarkparkWeb.EditorPost.hook(view, "autosave", %{
         "doc" => %{
           "title" => "Historical Card saved in Classic",
           "body" => "<p>raw scalar must not replace blocks</p>",

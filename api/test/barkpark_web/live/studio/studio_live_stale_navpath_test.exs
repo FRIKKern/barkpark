@@ -169,7 +169,7 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       # would upsert_draft(doc_a, ...) under Project B's scope — writing the old
       # doc_id into the WRONG project and get_or_create a duplicate "production"
       # dataset under B. Post-fix editor_doc is nil so do_autosave no-ops.
-      render_click(view, "save", %{"doc" => %{"title" => "Edited After Switch"}})
+      BarkparkWeb.EditorPost.click(view, %{"doc" => %{"title" => "Edited After Switch"}})
 
       a_after = doc_count(default_ws.id, project_a.id)
       b_after = doc_count(default_ws.id, project_b.id)

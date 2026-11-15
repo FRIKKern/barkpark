@@ -52,7 +52,7 @@ defmodule BarkparkWeb.Studio.DeskSaveStateTest do
   test "the edit pane carries the save token: none yet, then the save's", %{view: view} do
     assert has_element?(view, ~s(#{@pane}[data-desk-save=""]))
 
-    render_hook(view, "autosave", %{"doc" => %{"title" => "Here, typed"}})
+    BarkparkWeb.EditorPost.hook(view, "autosave", %{"doc" => %{"title" => "Here, typed"}})
     assert eventually(fn -> has_element?(view, ~s(#{@pane}[data-desk-save="Saved"])) end)
   end
 end
