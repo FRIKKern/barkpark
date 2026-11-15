@@ -1740,6 +1740,31 @@ msgstr ""
 msgid "Are you sure you want to delete"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:34
+#, elixir-autogen, elixir-format
+msgid "Delete document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:35
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to delete this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Used in"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:46
+#, elixir-autogen, elixir-format
+msgid "You may not be able to delete “%{title}” because the following documents refer to it:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:53
+#, elixir-autogen, elixir-format
+msgid "If you delete this document, documents that refer to it will no longer be able to access it."
+msgstr ""
+
 #: lib/barkpark_web/components/studio_components/modals.ex:875
 #, elixir-autogen, elixir-format
 msgid "Aug"
@@ -1865,6 +1890,18 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:940
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and delete"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:74
+#, elixir-autogen, elixir-format
+msgid "1 document refers to “%{title}”"
+msgid_plural "%{count} documents refer to “%{title}”"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:171
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab (%{type})"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:740

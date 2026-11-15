@@ -122,6 +122,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
       "serves the schema itself; a miss is a 404, not a render",
+    "barkpark_web/live/studio/desk/doc_dialog.ex:kind" =>
+      "reads only the type's title, for the \"Post / author\" line under a referring " <>
+        "document in the desk's delete and unpublish dialogs; a miss prints the type " <>
+        "name; no document field is read or rendered with it",
     "barkpark_web/controllers/document_ops_controller.ex:apply_op" =>
       "presence check before a block-op write; a miss is a 404, the schema is never rendered",
     "barkpark_web/controllers/document_ops_controller.ex:apply_field_ops" =>
