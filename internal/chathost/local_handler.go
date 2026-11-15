@@ -94,11 +94,21 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	if cwd == "" || (content == "" && len(refs) == 0) {
 		return fmt.Errorf("command requires cwd and content")
 	}
+	// A bot folder (bot_folder.go) is checked before anything is fetched,
+	// written or started. No key: the turn runs in cwd, as before.
+	folder, named, err := parseBotFolder(payload)
+	if err != nil {
+		return fmt.Errorf("refused the bot folder of this turn, so %s was not started: %w", provider, err)
+	}
 	resolved, err := ResolveApprovedPath(h.ApprovedRoots, cwd)
 	if err != nil {
 		return err
 	}
 	if provider == "codex" {
+		if named {
+			return fmt.Errorf("refused the bot folder of this turn, so codex was not started: %w",
+				refuseBotFolder("codex on a registered host has no bot folders"))
+		}
 		if len(refs) > 0 {
 			return fmt.Errorf("codex on a registered host takes text only: this turn carries %d attachment(s), so it was refused and codex was not started", len(refs))
 		}
@@ -106,6 +116,13 @@ func (h *LocalHandler) Handle(ctx context.Context, remote RemoteCommand, emit fu
 	}
 	switch provider {
 	case "claude":
+		// The bot folder is the turn's cwd: its files land under its own
+		// .barkpark/attachments, and the sweep stays inside it.
+		if named {
+			if resolved, err = BotFolderPath(h.ApprovedRoots, resolved, folder); err != nil {
+				return fmt.Errorf("refused the bot folder of this turn, so claude was not started: %w", err)
+			}
+		}
 		// Pictures ride the turn as image blocks. Files are written under the
 		// session folder first and named in the turn (turn_files.go).
 		h.touchTurnFiles(resolved, sessionID)

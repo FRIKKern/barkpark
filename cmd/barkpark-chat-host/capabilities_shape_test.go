@@ -17,10 +17,12 @@ import (
 // fixture does not have. Change the fixture, the server check in
 // api/lib/barkpark/chat_hosts/registered_host.ex and this binary together.
 //
-// The fixture is the shape with providers.claude.attachments, which the server
-// admits from the release that knows the key (task-066530e5560942ff). A host
-// that sends it to an older server has its heartbeats refused.
-const serverFixture = "../../api/test/support/fixtures/chat_host_go_capabilities_attachments.json"
+// The fixture is the shape with providers.claude.attachments (admitted from
+// task-066530e5560942ff) and providers.claude.bot_folders, which the server
+// admits from the release that knows the key (task-ed93b8c0ab2b44b8). A host
+// that sends it to an older server has its heartbeats refused, so this binary
+// ships only after that server release is live.
+const serverFixture = "../../api/test/support/fixtures/chat_host_go_capabilities_bot_folders.json"
 
 func TestCapabilitiesShapeMatchesServerFixture(t *testing.T) {
 	raw, err := os.ReadFile(serverFixture)
@@ -63,6 +65,11 @@ func TestCapabilitiesShapeMatchesServerFixture(t *testing.T) {
 		if !reflect.DeepEqual(got["attachments"], want["attachments"]) {
 			t.Errorf("%s attachments = %#v, server fixture has %#v", name, got["attachments"], want["attachments"])
 		}
+		// bot_folders is true for claude and absent for codex: the server
+		// refuses it under codex.
+		if !reflect.DeepEqual(got["bot_folders"], want["bot_folders"]) {
+			t.Errorf("%s bot_folders = %#v, server fixture has %#v", name, got["bot_folders"], want["bot_folders"])
+		}
 	}
 	// The fixture has nothing the binary never sends: the same providers, and
 	// for each the same keys once "version" (sent only when the CLI is
@@ -93,6 +100,20 @@ func TestOnlyClaudeAdvertisesAttachments(t *testing.T) {
 	codex, _ := providers["codex"].(map[string]any)
 	if _, present := codex["attachments"]; present || codex == nil {
 		t.Errorf("codex = %#v; want a provider with no attachments key", codex)
+	}
+}
+
+// Needs no fixture: claude says its turns run in a session's bot folder, codex
+// has no such key, so the server never leases codex a bot folder turn.
+func TestOnlyClaudeAdvertisesBotFolders(t *testing.T) {
+	providers, _ := capabilities()["providers"].(map[string]any)
+	claude, _ := providers["claude"].(map[string]any)
+	if claude["bot_folders"] != true {
+		t.Errorf("claude bot_folders = %#v, want true", claude["bot_folders"])
+	}
+	codex, _ := providers["codex"].(map[string]any)
+	if _, present := codex["bot_folders"]; present || codex == nil {
+		t.Errorf("codex = %#v; want a provider with no bot_folders key", codex)
 	}
 }
 
