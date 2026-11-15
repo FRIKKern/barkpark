@@ -3307,7 +3307,7 @@
               }
             }
           },
-          "description": "Request body fields: provider, execution_target, execution_host_id, mode, model, effort.",
+          "description": "Request body fields: provider, execution_target, execution_host_id, bot_folder, mode, model, effort.",
           "required": true
         },
         "responses": {
