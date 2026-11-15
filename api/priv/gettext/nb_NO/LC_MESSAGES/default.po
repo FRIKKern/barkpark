@@ -13888,3 +13888,8 @@ msgstr "Erstattet %{count}"
 #, elixir-autogen, elixir-format
 msgid "Show replace"
 msgstr "Vis erstatt"
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgid "Field actions"
+msgstr "Felthandlinger"
