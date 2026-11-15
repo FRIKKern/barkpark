@@ -304,15 +304,19 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # to "" right after the hook filled it, and the event dates read empty. The
   # stored value also rides on the wrapper as `data-value`, so a new value from
   # the server changes the wrapper and the hook's `updated` shows it.
+  #
+  # The field's id is on the picker, the control the editor sees: on the
+  # hidden input the label's `for` pointed at nothing a click or a reader
+  # could reach.
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
     <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
-      <input type="hidden" id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
+      <input type="hidden" name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
       <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
-        <input type="datetime-local" class="form-input" aria-required={aria_required(@field)} aria-label={@field["title"] || @n} />
+        <input type="datetime-local" id={@id_prefix && @id_prefix <> @n} class="form-input" aria-required={aria_required(@field)} aria-label={@field["title"] || @n} />
       </span>
     </div>
     """
