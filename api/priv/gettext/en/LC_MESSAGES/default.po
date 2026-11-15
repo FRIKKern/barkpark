@@ -14099,6 +14099,21 @@ msgstr ""
 msgid "Your session has ended. Sign in again."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy field"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Paste field"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Empty value, nothing to copy"
+msgstr ""
+
 #: lib/barkpark_web/live/studio/sheet_grid/charts.ex:365
 #, elixir-autogen, elixir-format
 msgid "%{count} row left out: it holds a cell that is not a number."

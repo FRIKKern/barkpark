@@ -277,7 +277,9 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
     grid = view |> element(~s(#{set("grid")} > .fieldset)) |> render()
     assert grid =~ ~s(class="fieldset fieldset-columns")
     assert grid =~ ~s(style="--bp-columns:2")
-    refute grid =~ "display"
+    # The grid's own tag: a field inside it draws icons with a display of their own.
+    [own] = Regex.run(~r/^<div[^>]*>/, grid)
+    refute own =~ "display"
 
     assert has_element?(view, ~s(#{set("grid")} > legend > button[aria-expanded="false"]))
     assert has_element?(view, ~s(#{set("grid")} [name="doc[gx]"][value="Left"]))

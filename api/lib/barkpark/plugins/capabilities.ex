@@ -4756,6 +4756,7 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "Registered host UUID; required only when execution_target is registered_host."
           ),
+          flag("bot_folder", "string", "Create-only bot folder name (registered_host, claude)."),
           flag("mode", "string", "Provider-scoped permission mode (allowlisted)."),
           flag("model", "string", "Provider-scoped model choice (allowlisted)."),
           flag("effort", "string", "Provider-scoped effort choice (allowlisted).")

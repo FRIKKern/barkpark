@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
@@ -325,6 +326,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
+  # A field's "Field actions" menu (`FieldActions`).
+  def handle_event("desk-field-" <> _ = event, params, socket),
+    do: FieldActions.handle_event(event, params, socket)
+
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
   # The lit hit's index from the form: one of the hits, else the first.
@@ -470,6 +475,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-focus-mode={@desk_focus != nil}
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
+      data-desk-field-actions={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

@@ -2,9 +2,10 @@ defmodule BarkparkWeb.Studio.DeskFieldSlotsTest do
   @moduledoc """
   Every field of the desk's form holds the TanStack Studio's two places
   (`Fields.tsx`): `.field > .field-actions` with a button named "Field
-  actions", and `.field > .change-bar`. Neither does anything yet
-  (`Desk.FieldSlots`). An array of any kind has an element named by its
-  path inside its `.field`. The old Studio's form has none of it.
+  actions" (its menu: `desk_field_actions_test.exs`), and
+  `.field > .change-bar`, which does nothing yet (`Desk.FieldSlots`). An
+  array of any kind has an element named by its path inside its `.field`.
+  The old Studio's form has none of it.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -17,7 +18,7 @@ defmodule BarkparkWeb.Studio.DeskFieldSlotsTest do
 
   @dataset "production"
   @form "[data-pane-editing] #editor-form"
-  @button ~s(button[type="button"][aria-label="Field actions"][disabled])
+  @button ~s|button[type="button"][aria-label="Field actions"]:not([disabled])|
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -96,26 +97,6 @@ defmodule BarkparkWeb.Studio.DeskFieldSlotsTest do
       assert has_element?(view, ~s(#{field} > .field-actions > #{@button})), path
       assert has_element?(view, ~s(#{field} > span.change-bar[hidden])), path
     end
-  end
-
-  test "the button is named, opens nothing and is out of the tab order", c do
-    view = desk(c)
-    actions = ~s|#{@form} .field:has([id="title"]) > .field-actions|
-    html = view |> element(actions) |> render()
-
-    assert html =~ ~s(aria-label="Field actions")
-    assert html =~ ~r/<button[^>]*\sdisabled/
-    refute html =~ "phx-click"
-    refute html =~ "tabindex"
-    refute html =~ "aria-haspopup"
-
-    # Until the menu exists a screen reader does not meet the button: its
-    # holder is aria-hidden. Not `hidden`, which would undraw it for the specs.
-    assert html =~ ~r/^<div[^>]*\sclass="field-actions"[^>]*\saria-hidden="true"/
-    refute html =~ ~r/^<div[^>]*\shidden[\s=>]/
-
-    assert BarkparkWeb.Studio.Desk.Style.sheet(%{}) |> rendered_to_string() =~
-             ".dk .field > .field-actions { position: absolute; opacity: 0; pointer-events: none; }"
   end
 
   test "an array of any kind has an element named by its path; its fieldset keeps bp-array-", c do

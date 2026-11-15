@@ -323,6 +323,9 @@ defmodule Barkpark.StudioChat.Recorder do
         # self-hosted session (the build_args there ignore the key).
         cloud_sandbox_id: cloud_sandbox_id,
         cwd: Map.get(opts, :cwd),
+        # The row's bot folder (StudioChat.BotFolder), read here so no caller
+        # of `ensure/1` can forget it and run the bot in the shared root.
+        bot_folder: Barkpark.StudioChat.BotFolder.of_session(id),
         provider_session_id: Map.get(opts, :provider_session_id),
         runtime_ingress_token: runtime_ingress_token,
         developer_instructions: codex_developer_instructions(provider, id),

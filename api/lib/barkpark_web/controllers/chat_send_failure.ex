@@ -35,6 +35,11 @@ defmodule BarkparkWeb.ChatSendFailure do
   def classify({:provider_protocol_incompatible, _}), do: :unsupported
   def classify({:unsupported_runtime_operation, _}), do: :unsupported
   def classify({:missing_runtime_contract, _}), do: :unsupported
+  # The session names a bot folder and its host does not advertise
+  # `bot_folders` (StudioChat.BotFolder): an older host binary would run the
+  # turn in the shared root, so nothing was leased. Permanent until the host
+  # binary is updated.
+  def classify({:host_cannot_use_bot_folder, _}), do: :unsupported
 
   # The turn names attachments and the session's registered host does not list
   # their type (Paper chat-host-attachments-plan). Permanent for this host until
