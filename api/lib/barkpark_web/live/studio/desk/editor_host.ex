@@ -55,9 +55,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
      socket
      |> assign(active: nil, editing: nil, pending: nil, desk_incoming: nil)
      # The open Incoming references panel reads again when someone saves.
-     |> attach_hook(:desk_incoming_refs, :handle_info, &IncomingRefs.on_info/2)
+     |> attach_hook(:desk_incoming_refs, :handle_info, &on_info/2)
      |> put_away()}
   end
+
+  # The hook's function is this module's own, so the page's hooks can be read
+  # from where they are attached; the panel decides what a message means.
+  defp on_info(message, socket), do: IncomingRefs.on_info(message, socket)
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
   def target(panes, dataset) do
