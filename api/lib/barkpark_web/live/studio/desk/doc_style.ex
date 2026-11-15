@@ -49,7 +49,8 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       fill 6 px in from the top right.
     * A field's "…" (`Desk.FieldActions`) is TanStack's `.field-actions`
       rule: 25 px, at the field's top right, 25 px in,
-      drawn under the pointer or the focus and while its menu is open;
+      its three dots drawn here (Sanity's ellipsis at 21 px: 2.5 px dots,
+      5 px apart), shown under the pointer or the focus and while its menu is open;
       always drawn where nothing hovers, 44 px on a touch phone. Its menu
       opens to its right, above it where the pane leaves no room.
     * `.dk-field-toast` is the one rule outside the edit pane: the words
@@ -159,12 +160,12 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .bp-mp-bar button { min-height: 44px; } .dk .dk-edit .bp-mp-options { width: 44px; height: 44px; } }
       .dk .dk-edit .field { position: relative; }
       .dk .dk-edit .field > .field-actions { position: absolute; top: 0; right: 25px; z-index: 2; opacity: 0; }
-      .dk .dk-edit .field:is(:hover, :focus-within):not(:has(.field:is(:hover, :focus-within))) > .field-actions, .dk .dk-edit .field > .field-actions:focus-within, .dk .dk-edit .field > .field-actions:has(:popover-open) { opacity: 1; }
+      .dk .dk-edit .field:is(:hover, :focus-within):not(:has(.field:is(:hover, :focus-within))) > .field-actions, .dk .dk-edit .field > .field-actions:focus-within, .dk .dk-edit .field > .field-actions:has(> [aria-expanded="true"]) { opacity: 1; }
       .dk .dk-edit .field-actions > .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
-      .dk .dk-edit .field-actions > .icon-btn svg { width: 21px; height: 21px; }
+      .dk .dk-edit .field-actions > .icon-btn::before { content: ""; width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor; box-shadow: -5px 0 currentColor, 5px 0 currentColor; }
       .dk .dk-edit .field-actions > .icon-btn:hover { background: var(--dk-icon-btn-hover); }
       .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
-      .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-area: right center; position-try-fallbacks: top; }
+      .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-anchor: --dk-field-actions; position-area: right center; position-try-fallbacks: top; }
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       .dk-field-toast { box-sizing: border-box; inset: auto 16px 56px auto; margin: 0; max-width: min(420px, calc(100vw - 32px)); padding: 10px 14px; border: 0; border-radius: 6px; background: var(--surface-raised); color: var(--text); box-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); font-size: 13px; line-height: 19px; }

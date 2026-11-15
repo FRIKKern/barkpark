@@ -14302,3 +14302,8 @@ msgstr "Viser de første %{shown} tallkolonnene av %{total}."
 #, elixir-autogen, elixir-format
 msgid "This chart's cells cannot be read. Edit it to pick new ones."
 msgstr "Cellene til dette diagrammet kan ikke leses. Rediger det for å velge nye."
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "This field cannot be edited, so nothing was pasted"
+msgstr "Dette feltet kan ikke redigeres, så ingenting ble limt inn"

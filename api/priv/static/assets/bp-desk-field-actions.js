@@ -116,10 +116,22 @@
     });
   }
 
+  // The form has one menu for all its fields. The field it was opened for is
+  // on the menu (`data-desk-field`, written by bp-desk.js); it is put on the
+  // item as the item is pressed, for LiveView to send. False when the menu
+  // names no field: nothing to act on.
+  function named(item) {
+    var menu = item.closest("[data-desk-field]");
+    var field = menu ? menu.getAttribute("data-desk-field") : "";
+    if (!field) return false;
+    item.setAttribute("phx-value-field", field);
+    return true;
+  }
+
   // In the click: a write whose three types wait for the server's answer.
   function startCopy(item) {
     if (pending) pending.reject(new Error("superseded"));
-    var answer = { field: item.getAttribute("data-desk-field-copy"), failed: failedWords(item) };
+    var answer = { field: item.getAttribute("phx-value-field"), failed: failedWords(item) };
     var data = new Promise(function (resolve, reject) {
       answer.resolve = resolve;
       answer.reject = reject;
@@ -272,9 +284,134 @@
     function (event) {
       if (passing || !event.target || !event.target.closest) return;
       var copy = event.target.closest("[data-desk-field-copy]");
-      if (copy && !copy.disabled) return startCopy(copy);
+      if (copy && !copy.disabled) return named(copy) && startCopy(copy);
       var paste = event.target.closest("[data-desk-field-paste]");
-      if (paste && !paste.disabled) startPaste(paste, event);
+      if (paste && !paste.disabled && named(paste)) startPaste(paste, event);
+    },
+    true
+  );
+
+  // ── The open menu follows its field ─────────────────────────────────────
+  //
+  // The form has one menu, opened for one field. While it is open a save can
+  // patch the form: a rule may lock that field (Paste goes off), or hide it,
+  // or its fieldset may fold. A menu left open for a field that is no longer
+  // drawn has nothing to be placed by. So while the menu is open the form is
+  // watched: Paste follows the field's button, and when the button is gone
+  // or not drawn the menu is closed and the focus is put on the control of
+  // the nearest field that is still there, else on the pane's selected view
+  // tab (`landing`). Never left on the page's body.
+  var watch = null;
+
+  function drawn(el) {
+    if (!el || !el.isConnected) return false;
+    if (typeof el.checkVisibility === "function") return el.checkVisibility();
+    return !el.closest("[hidden]");
+  }
+
+  function openerOf(menu) {
+    return buttonOf(menu, menu.getAttribute("data-desk-field"));
+  }
+
+  // The "…" of the field of that name. Fields are found by name each time: a
+  // patch that takes a field out reuses its element for the one after it.
+  function buttonOf(menu, field) {
+    var buttons = window.document.querySelectorAll(".field-actions > button[data-desk-field]");
+    for (var i = 0; i < buttons.length; i++) {
+      if (buttons[i].getAttribute("data-desk-field") === field && buttons[i].getAttribute("popovertarget") === menu.id) return buttons[i];
+    }
+    return null;
+  }
+
+  // The field's first control a person can use; a "…" button is not one.
+  function control(field) {
+    if (!drawn(field)) return null;
+    var all = field.querySelectorAll("input, textarea, select, button, [tabindex], [contenteditable='true']");
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.type !== "hidden" && !el.disabled && el.tabIndex >= 0 && !el.closest(".field-actions") && drawn(el)) return el;
+    }
+    return null;
+  }
+
+  function stopWatch() {
+    if (watch) watch.observer.disconnect();
+    watch = null;
+  }
+
+  function follow() {
+    if (!watch) return;
+    var menu = watch.menu;
+    var opener = openerOf(menu);
+    if (drawn(opener)) {
+      var paste = menu.querySelector("[data-desk-field-paste]");
+      var off = opener.hasAttribute("data-desk-paste-off");
+      if (paste && paste.disabled !== off) paste.disabled = off;
+      return;
+    }
+    var to = landing(menu, watch);
+    stopWatch();
+    try {
+      menu.hidePopover();
+    } catch (_error) {
+      /* already closed */
+    }
+    if (to) to.focus();
+  }
+
+  // Where the focus goes when the menu's field is gone: the control of the
+  // nearest field still there (after it, else before it), else the pane's
+  // selected view tab, else the pane's first control. Each is focusable as
+  // the server draws it. Nothing is made focusable here: the next patch
+  // takes a `tabindex` the server did not draw away again, and the focus
+  // would fall to the page's body with it.
+  function landing(menu, watching) {
+    var names = watching.after.concat(watching.before);
+    for (var i = 0; i < names.length; i++) {
+      var button = buttonOf(menu, names[i]);
+      var found = button && control(button.closest(".field"));
+      if (found) return found;
+    }
+    var pane = watching.scope.closest("[data-pane-editing]") || watching.scope;
+    var tab = pane.querySelector('[role="tab"][aria-selected="true"]');
+    if (tab && tab.tabIndex >= 0 && drawn(tab)) return tab;
+    return control(pane);
+  }
+
+  function startWatch(menu) {
+    stopWatch();
+    var opener = openerOf(menu);
+    var scope = opener && (opener.closest("form") || opener.closest("[data-pane-index]"));
+    if (!scope || typeof window.MutationObserver !== "function") return;
+    // The fields after this one, by name, in the form's order.
+    var buttons = Array.prototype.slice.call(scope.querySelectorAll(".field-actions > button[data-desk-field]"));
+    var name = function (button) {
+      return button.getAttribute("data-desk-field");
+    };
+    var at = buttons.indexOf(opener);
+    var after = buttons.slice(at + 1).map(name);
+    // The fields before it, nearest first.
+    var before = buttons.slice(0, at).map(name).reverse();
+    var queued = false;
+    var observer = new window.MutationObserver(function () {
+      if (queued) return;
+      queued = true;
+      Promise.resolve().then(function () {
+        queued = false;
+        follow();
+      });
+    });
+    observer.observe(scope, { childList: true, subtree: true, attributes: true });
+    watch = { menu: menu, observer: observer, after: after, before: before, scope: scope };
+  }
+
+  window.document.addEventListener(
+    "toggle",
+    function (event) {
+      var menu = event.target;
+      if (!menu || !menu.matches || !menu.matches('[role="menu"][data-desk-field]')) return;
+      if (event.newState === "open") startWatch(menu);
+      else if (watch && watch.menu === menu) stopWatch();
     },
     true
   );

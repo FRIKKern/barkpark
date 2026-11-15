@@ -89,44 +89,63 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
 
   defp eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
 
+  @menu ~s([data-pane-editing] #editor-form #field-actions-menu)
+
+  # The form's one menu; the browser names the field as the item is pressed.
   defp copy(view, name) do
     view
-    |> element(~s(#{@form} [id="field-actions-#{name}"] button[data-desk-field-copy="#{name}"]))
-    |> render_click()
+    |> element(~s(#{@menu} button[data-desk-field-copy]))
+    |> render_click(%{"field" => name})
   end
 
-  test "each field's button opens a menu with Copy field and Paste field", c do
+  test "each field's button opens the form's one menu, with Copy field and Paste field", c do
     view = desk(c)
 
     for name <- ~w(title excerpt count empty blank tags cta) do
-      actions = ~s|#{@form} .field:has([id^="#{name}"]) > .field-actions|
-      button = ~s(#{actions} > button.icon-btn[type="button"][aria-label="Field actions"])
-      menu = ~s(#{actions} > [popover][role="menu"][id="field-actions-#{name}"])
+      button =
+        ~s|#{@form} .field:has([id^="#{name}"]) > .field-actions > button.icon-btn[type="button"][aria-label="Field actions"]|
 
       assert has_element?(
                view,
-               ~s|#{button}[popovertarget="field-actions-#{name}"][aria-haspopup="menu"][aria-expanded="false"]:not([disabled])|
+               ~s|#{button}[id="field-actions-#{name}-button"][popovertarget="field-actions-menu"][aria-haspopup="menu"][aria-expanded="false"][data-desk-field="#{name}"]:not([disabled]):not([data-desk-paste-off])|
              ),
              name
-
-      assert has_element?(view, ~s(#{button}[id="field-actions-#{name}-button"])), name
-      # bp-desk.js gives a `dk-doc-menu-list` popover its keys and aria-expanded.
-      assert has_element?(view, ~s(#{menu}.dk-doc-menu-list.dk-menu[aria-label="Field actions"])),
-             name
-
-      items =
-        for [_, attrs, words] <-
-              Regex.scan(
-                ~r/<button([^>]*\srole="menuitem"[^>]*)>([^<]*)</,
-                view |> element(menu) |> render()
-              ) do
-          {String.trim(words), attrs =~ ~r/\sdisabled[\s=>]|\sdisabled$/}
-        end
-
-      assert items == [{"Copy field", false}, {"Paste field", false}], name
     end
 
-    refute render(view) =~ ~s(class="field-actions" data-desk-field-actions aria-hidden)
+    # One menu, not one per field. bp-desk.js gives a `dk-doc-menu-list`
+    # popover its keys.
+    html = view |> element(@form) |> render()
+    assert length(Regex.scan(~r/\srole="menu"/, html)) == 1
+
+    assert has_element?(
+             view,
+             ~s(#{@menu}[popover][role="menu"].dk-doc-menu-list.dk-menu[aria-label="Field actions"])
+           )
+
+    items =
+      for [_, attrs, words] <-
+            Regex.scan(
+              ~r/<button([^>]*\srole="menuitem"[^>]*)>([^<]*)</,
+              view |> element(@menu) |> render()
+            ) do
+        {String.trim(words), attrs =~ ~r/\sdisabled[\s=>]|\sdisabled$/}
+      end
+
+    assert items == [{"Copy field", false}, {"Paste field", false}]
+  end
+
+  # 40 fields drew 40 menus: about 2.7 KB a field. A field now carries its
+  # button only.
+  test "a field carries its button, not a menu: under 500 bytes of field actions each", c do
+    view = desk(c)
+
+    for name <- ~w(title excerpt tags cta) do
+      actions =
+        view |> element(~s|#{@form} .field:has([id^="#{name}"]) > .field-actions|) |> render()
+
+      assert byte_size(actions) < 500, "#{name}: #{byte_size(actions)} bytes"
+      refute actions =~ "menuitem"
+    end
   end
 
   test "Copy field answers with the stored value in the TanStack clipboard format", c do
@@ -210,7 +229,7 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
 
   test "a field the form hides (visibleWhen) is not answered for, whatever the page sent", c do
     view = desk(c)
-    refute has_element?(view, ~s(#{@form} [id="field-actions-hidden"]))
+    refute has_element?(view, ~s(#{@form} [id="field-actions-hidden-button"]))
 
     render_hook(view, "desk-field-copy", %{"field" => "hidden"})
     refute_push_event(view, "desk:field-copied", _, 50)
@@ -223,6 +242,22 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
     assert [_, mounted] = Regex.run(~r/phx-mounted="([^"]+)"/, button)
     assert mounted =~ "ignore_attrs"
     assert mounted =~ "aria-expanded"
+  end
+
+  # When a rule hides the field under its open menu and no field is left to
+  # take the focus, bp-desk-field-actions.js puts it on the pane's selected
+  # view tab. That works only while the SERVER draws the tab focusable: a
+  # tabindex the script added would go with the next patch.
+  test "the edit pane's selected view tab is focusable as the server draws it", c do
+    view = desk(c)
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] .view-tabs [role="tab"][aria-selected="true"][tabindex="0"])
+           )
+
+    refute view |> element("[data-pane-editing] #editor-form") |> render() =~
+             ~r/^<form[^>]*\stabindex=/
   end
 
   test "a field the schema does not have, or no open document, is answered with nothing", c do
@@ -248,7 +283,7 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
              ".dk .dk-edit .field > .field-actions { position: absolute; top: 0; right: 25px; z-index: 2; opacity: 0; }"
 
     assert doc =~
-             ".dk .dk-edit .field:is(:hover, :focus-within):not(:has(.field:is(:hover, :focus-within))) > .field-actions, .dk .dk-edit .field > .field-actions:focus-within, .dk .dk-edit .field > .field-actions:has(:popover-open) { opacity: 1; }"
+             ".dk .dk-edit .field:is(:hover, :focus-within):not(:has(.field:is(:hover, :focus-within))) > .field-actions, .dk .dk-edit .field > .field-actions:focus-within, .dk .dk-edit .field > .field-actions:has(> [aria-expanded=\"true\"]) { opacity: 1; }"
 
     assert doc =~ "@media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }"
     assert doc =~ ".dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; }"

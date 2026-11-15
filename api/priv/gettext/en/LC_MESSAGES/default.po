@@ -14300,3 +14300,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This chart's cells cannot be read. Edit it to pick new ones."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "This field cannot be edited, so nothing was pasted"
+msgstr ""

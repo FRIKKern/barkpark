@@ -720,6 +720,25 @@
       };
       fieldScript();
       hook._onFieldAction = function (e) {
+        // A field's "…" opens the form's one menu: the menu is told which
+        // field, placed by that button, and Paste is off where the field takes none.
+        var opener = e.target.closest ? e.target.closest(".field-actions > button[data-desk-field]") : null;
+        var shared = opener && root.ownerDocument.getElementById(opener.getAttribute("popovertarget"));
+        if (shared) {
+          // Open for another field: closed first, so this click opens it for
+          // this one (a second press of the same button closes it, as before).
+          if (hook._fieldOpener && hook._fieldOpener !== opener && shared.matches(":popover-open")) {
+            hook._fieldOpener.setAttribute("aria-expanded", "false");
+            shared.hidePopover();
+          }
+          if (hook._fieldOpener) hook._fieldOpener.style.removeProperty("anchor-name");
+          hook._fieldOpener = opener;
+          opener.style.setProperty("anchor-name", "--dk-field-actions");
+          shared.setAttribute("data-desk-field", opener.getAttribute("data-desk-field"));
+          var pasteItem = shared.querySelector("[data-desk-field-paste]");
+          if (pasteItem) pasteItem.disabled = opener.hasAttribute("data-desk-paste-off");
+          return;
+        }
         var item = e.target.closest ? e.target.closest("[data-desk-field-copy], [data-desk-field-paste]") : null;
         if (!item || item.disabled || window.BarkparkDeskFieldActions) return;
         e.stopPropagation();
@@ -1178,7 +1197,7 @@
         var menu = e.target;
         if (!menu.matches || !menu.matches(MENU)) return;
         var open = e.newState === "open";
-        var button = root.ownerDocument.getElementById(menu.id + "-button");
+        var button = root.ownerDocument.getElementById(menu.id + "-button") || (menu.hasAttribute("data-desk-field") ? hook._fieldOpener : null);
         if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
         var first = menu.querySelector(MENU_ITEM);
         if (open && first) first.focus();
