@@ -73,9 +73,15 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     conn =
       post(bearer(conn, raw), "/w/#{ws.slug}/v1/chat-hosts/enrollments", %{"name" => "third"})
 
-    assert %{"error" => %{"code" => "host_limit_reached", "details" => %{"limit" => 2}}} =
-             json_response(conn, 409)
+    assert %{
+             "error" => %{
+               "code" => "host_limit_reached",
+               "details" => %{"limit" => 2},
+               "message" => message
+             }
+           } = json_response(conn, 409)
 
+    assert message =~ "revoke one to enroll another"
     assert rows(ws) == before
   end
 
@@ -151,6 +157,36 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     {:ok, _} = ChatHosts.revoke(ws.id, id)
 
     assert {:ok, _} = ChatHosts.enroll(issue!(ws, "new"))
+  end
+
+  test "an expired credential holds no slot and cannot come back past the cap" do
+    limit(1)
+    ws = create_workspace!()
+    {:ok, %{host: %{id: old_id}, credential: old_credential}} = enrol_result(ws, "old")
+    {:ok, old} = ChatHosts.authenticate(old_credential)
+
+    # The old host's 30-day credential runs out; nobody revokes it.
+    past = DateTime.add(DateTime.utc_now(), -1)
+
+    {1, _} =
+      Repo.update_all(from(h in RegisteredHost, where: h.id == ^old_id),
+        set: [credential_expires_at: past]
+      )
+
+    # It cannot write, so its slot is free.
+    assert {:ok, %{credential: new_credential}} = ChatHosts.enroll(issue!(ws, "new"))
+
+    # It cannot come back: authenticate refuses it, and a rotation that was
+    # authenticated just before the expiry is refused after it, so the
+    # workspace never holds two live hosts under a cap of one.
+    assert {:error, :invalid_credential} = ChatHosts.authenticate(old_credential)
+    assert {:error, :invalid_credential} = ChatHosts.rotate_credential(old)
+    assert DateTime.compare(Repo.get!(RegisteredHost, old_id).credential_expires_at, past) == :eq
+
+    # A host that rotates before its expiry keeps its slot.
+    {:ok, new} = ChatHosts.authenticate(new_credential)
+    assert {:ok, _} = ChatHosts.rotate_credential(new)
+    assert {:error, {:host_limit_reached, 1}} = ChatHosts.issue_enrollment(ws.id, %{name: "x"})
   end
 
   test "two enrolments at once: the second waits for the first and is refused" do
@@ -230,7 +266,7 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
       })
       |> render_submit()
 
-    assert html =~ "reached its limit of 1 enrolled chat hosts"
+    assert html =~ "reached its limit of 1 enrolled chat hosts. Revoke one to enroll another."
     refute html =~ "One-time enrollment token"
     assert [%{name: "laptop"}] = live_hosts(ws)
   end

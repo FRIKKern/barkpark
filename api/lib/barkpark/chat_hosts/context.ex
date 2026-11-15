@@ -19,7 +19,7 @@ defmodule Barkpark.ChatHosts do
   # `:chat_host_expired_turn_floor` app env; never edit it to reach old rows.
   @expired_turn_floor ~U[2026-11-14 12:00:00Z]
   @online_window 90
-  # Live hosts (enrolled, not revoked) one workspace may hold. Each has its own
+  # Live hosts (see live_count/1) one workspace may hold. Each has its own
   # :host_write_per_minute bucket, so this bounds a workspace's host writes.
   # People run one or two machines each; 10 leaves room for a small team.
   # Set with `config :barkpark, :chat_host_live_limit` (task-4abf105be723796a).
@@ -94,10 +94,16 @@ defmodule Barkpark.ChatHosts do
     if live_count(workspace_id) >= limit, do: Repo.rollback({:host_limit_reached, limit})
   end
 
+  # Live means it can still write: enrolled, not revoked, credential unexpired.
+  # An expired credential never comes back (authenticate/1 and
+  # rotate_credential/1 both refuse it), so freeing its slot is final.
   defp live_count(workspace_id) do
+    now = DateTime.utc_now()
+
     RegisteredHost
     |> where([h], h.workspace_id == ^workspace_id)
     |> where([h], not is_nil(h.enrolled_at) and is_nil(h.revoked_at))
+    |> where([h], h.credential_expires_at > ^now)
     |> Repo.aggregate(:count)
   end
 
@@ -156,6 +162,11 @@ defmodule Barkpark.ChatHosts do
 
       cond do
         is_nil(current) or not is_nil(current.revoked_at) ->
+          Repo.rollback(:invalid_credential)
+
+        # Authenticated just before the expiry, rotating just after: refused,
+        # so an expired host, which holds no live slot, cannot come back.
+        DateTime.compare(current.credential_expires_at, now) != :gt ->
           Repo.rollback(:invalid_credential)
 
         current.credential_hash != host.credential_hash or

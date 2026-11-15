@@ -35,10 +35,10 @@ A 429's `details.budget` names the spent bucket (`class`, `per_minute`,
 ## Tuning
 
 The knobs live in `config :barkpark, :rate_limits`: `read_per_minute`,
-`write_per_minute` (env `BARKPARK_RATE_LIMIT_READ`/`_WRITE`), and config-only
+`write_per_minute` (env `BARKPARK_RATE_LIMIT_READ`/`_WRITE`); config-only
 `session_write_per_minute`, `host_write_per_minute`.
-`config :barkpark, :chat_host_live_limit` (10) caps live chat hosts per
-workspace: at most 10 x 2400 host writes a minute. One token (say a site build)
+`config :barkpark, :chat_host_live_limit` (10) stops new chat hosts at that many
+live per workspace; hosts over a lowered cap stay. A token (a site build)
 gets its own budget with
 `tokens: %{"<api_token id>" => %{read: N}}` or
 `BARKPARK_RATE_LIMIT_TOKENS="<id>:read=3000:write=120"`; it wins over class
