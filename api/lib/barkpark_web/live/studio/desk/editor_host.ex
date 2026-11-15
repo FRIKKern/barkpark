@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.ShareMenu
   alias BarkparkWeb.Studio.Desk.Tree
+  alias BarkparkWeb.Studio.Desk.UnpublishDialog
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -677,10 +678,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <div :if={!@edit_failed and gone?(assigns)} class="dk-note" role="main" data-desk-edit-gone>
           <p>{gettext("This document has been deleted.")}</p>
         </div>
-        <%!-- The Studio's own delete modal is kept out of the desk: the
-              desk draws its dialog below, from the same assigns. --%>
+        <%!-- The Studio's own delete and unpublish modals are kept out of the
+              desk: the desk draws its dialogs below, from the same assigns. --%>
         <%= if !@edit_failed and !gone?(assigns) do %>
-          {Components.studio_live_shell(assign(assigns, :show_delete, false))}
+          {Components.studio_live_shell(
+            assign(assigns, show_delete: false, show_unpublish_guard: false)
+          )}
         <% end %>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Hidden until an
@@ -706,6 +709,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             id={"#{@view.id}-delete-dialog"}
             title={@page_title}
             published?={DocStatus.state(assigns).published?}
+            rows={DocDialog.rows(assigns[:desk_used_in])}
+            base={@base}
+          />
+          <UnpublishDialog.dialog
+            :if={assigns[:show_unpublish_guard] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+            id={"#{@view.id}-unpublish-dialog"}
+            title={@page_title}
             rows={DocDialog.rows(assigns[:desk_used_in])}
             base={@base}
           />
