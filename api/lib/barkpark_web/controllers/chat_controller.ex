@@ -123,7 +123,8 @@ defmodule BarkparkWeb.ChatController do
 
   @doc """
   Create a session. Body `{provider?, execution_target?, execution_host_id?,
-  mode?, model?, effort?}`; the public id is server-minted and cwd is ALWAYS the
+  bot_folder?, mode?, model?, effort?}`; `bot_folder` is a create-only name on
+  a registered-host claude session (`StudioChat.BotFolder`). The public id is server-minted and cwd is ALWAYS the
   selected provider adapter's managed cwd (D22). No runtime is spawned here — the
   subprocess comes up on the first send (`Recorder.ensure/1`).
 
@@ -150,6 +151,7 @@ defmodule BarkparkWeb.ChatController do
                provider: attrs.provider,
                execution_target: attrs.execution_target,
                execution_host_id: attrs.execution_host_id,
+               bot_folder: attrs.bot_folder,
                cwd: provider_cwd(attrs.provider),
                mode: attrs.mode
              },
@@ -184,8 +186,15 @@ defmodule BarkparkWeb.ChatController do
 
   # The defaults are what a PATCH echo is: nothing a spawn would not start from
   # anyway. Any other first mode or model is checked against the row the create
-  # would make (its provider, target and owner).
-  defp authorize_create_choices(_conn, %{mode: mode, default_mode: mode, model: nil}), do: :ok
+  # would make (its provider, target and owner). A bot folder decides where the
+  # turn runs, so it is a choice too and takes the same check.
+  defp authorize_create_choices(_conn, %{
+         mode: mode,
+         default_mode: mode,
+         model: nil,
+         bot_folder: nil
+       }),
+       do: :ok
 
   defp authorize_create_choices(conn, attrs) do
     owner =
@@ -1323,7 +1332,7 @@ defmodule BarkparkWeb.ChatController do
   # validation (fail BEFORE any store/runtime call — obligations D + E)
   # ─────────────────────────────────────────────────────────────────────────
 
-  @create_keys ~w(provider execution_target execution_host_id mode model effort)
+  @create_keys ~w(provider execution_target execution_host_id bot_folder mode model effort)
   defp validate_create(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, @create_keys),
@@ -1333,6 +1342,7 @@ defmodule BarkparkWeb.ChatController do
            opt_enum(params, "execution_target", StudioChat.Session.execution_targets(), "managed"),
          {:ok, host_id} <- opt_uuid(params, "execution_host_id"),
          :ok <- validate_execution_identity(target, host_id),
+         {:ok, bot_folder} <- opt_bot_folder(params, provider, target),
          capabilities = Runtime.capabilities(provider),
          {:ok, mode} <-
            opt_capability(params, "mode", capabilities.modes -- ["bypassPermissions"]),
@@ -1348,6 +1358,7 @@ defmodule BarkparkWeb.ChatController do
          provider: provider,
          execution_target: target,
          execution_host_id: host_id,
+         bot_folder: bot_folder,
          mode: mode || default_mode,
          default_mode: default_mode,
          model: model,
@@ -1392,6 +1403,26 @@ defmodule BarkparkWeb.ChatController do
 
   defp validate_execution_identity("registered_host", nil),
     do: {:error, "execution_host_id is required for registered_host execution"}
+
+  # The bot folder (`StudioChat.BotFolder`): a name on a registered-host claude
+  # session, never a path. `nil` and an absent key are the same: no folder.
+  defp opt_bot_folder(params, provider, target) do
+    case Map.get(params, "bot_folder") do
+      nil ->
+        {:ok, nil}
+
+      _ when target != "registered_host" ->
+        {:error, "bot_folder is only for registered_host execution"}
+
+      _ when provider != "claude" ->
+        {:error, "bot_folder is only for the claude provider"}
+
+      folder ->
+        if StudioChat.BotFolder.valid?(folder),
+          do: {:ok, folder},
+          else: {:error, "bot_folder must match #{StudioChat.BotFolder.pattern_source()}"}
+    end
+  end
 
   defp opt_capability(params, key, allowed) do
     case Map.get(params, key) do
@@ -1624,6 +1655,7 @@ defmodule BarkparkWeb.ChatController do
       provider: s.provider,
       execution_target: s.execution_target,
       execution_host_id: s.execution_host_id,
+      bot_folder: s.bot_folder,
       provider_session_id: s.provider_session_id,
       title: s.title,
       title_source: s.title_source,
