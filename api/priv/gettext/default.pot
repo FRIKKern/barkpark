@@ -13846,3 +13846,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Show replace"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgid "Field actions"
+msgstr ""

@@ -66,8 +66,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # instead of the parent LiveView.
   attr :target, :any, default: nil
   # This array's bare field path (`links`), in the desk only: its rows list
-  # then carries `id="links"`, the element Sanity's Studio names by the
-  # path. nil adds no id.
+  # (for an array of options, the box of checkboxes) then carries
+  # `id="links"`, the element Sanity's Studio names by the path. nil adds no id.
   attr :id_base, :string, default: nil
 
   # Several named member types (`field.of_types`, Sanity's page-builder
@@ -196,6 +196,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       assigns
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:id_base, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
       |> Map.put(:path, path)
@@ -210,7 +211,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       <legend class="bp-field-title"><%= @title %></legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
       <input type="hidden" name={@path <> "[]"} value="" />
-      <div class={"bp-select-list-options" <> if(@grid, do: " bp-select-list-grid", else: "")}>
+      <div id={@id_base} class={"bp-select-list-options" <> if(@grid, do: " bp-select-list-grid", else: "")}>
         <label :for={o <- @options} class="bp-select-list-option">
           <input type="checkbox" name={@path <> "[]"} value={o.value} checked={o.checked}
                  phx-change={@on_change} disabled={@readonly} />
