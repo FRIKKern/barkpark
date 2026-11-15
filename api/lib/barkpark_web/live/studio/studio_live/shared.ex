@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, RefusedSave}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -653,7 +653,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           # params: a grouped editor posts only the visible group, so a rule
           # over a field on another group read it as absent (a new open task
           # was warned "A finished task should record an outcome summary").
-          form = Map.merge(socket.assigns[:editor_form] || %{}, params)
+          form = PostedEdits.into_form(socket, params, raw_params)
 
           assign(socket,
             panes: panes,
