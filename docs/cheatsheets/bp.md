@@ -1,18 +1,16 @@
 <!-- doc-tier: human | canonical-for: bp-cheatsheet | budget: 600tok -->
 # bp — cheatsheet
 
-```
-bp [globals] <noun> <verb> [args] [flags]
-```
+`bp [globals] <noun> <verb> [args] [flags]`
 
 | Command | Effect | Example |
 |---|---|---|
 | `bp setup` | wizard (TTY) / scripted | `bp setup --target connect --server URL --token $TOK` |
 | `bp servers` / `bp use <name>` | list / switch | `bp use prod` |
-| `bp whoami` / `bp capabilities` | server + auth tier / whole API, one call | `bp whoami` |
-| `bp doc ls <type>`/`get`/`diff <type> <id>` | list / one doc / draft vs published, exits 1 | `bp doc diff post p1` |
+| `bp whoami`/`bp capabilities` | server + auth tier / whole API, one call | `bp whoami` |
+| `bp doc ls <type>`/`get`/`diff <type> <id>` | list / one doc / draft vs published, exits 1 on a difference | `bp doc diff post p1` |
 | `bp doc query <type>` | filtered read | `bp doc query post --filter 'status=draft'` |
-| `bp doc create <type>`/`patch`/`duplicate <type> <id>` | create / edit / copy to a new draft | `bp doc patch post p1 --set title=New` |
+| `bp doc create <type>`/`patch`/`duplicate <type> <id>` | create / edit / copy as a draft | `bp doc patch post p1 --set title=New` |
 | `bp doc mutate` | atomic batch; also `publish`/`unpublish`/`delete` | `bp doc publish post p1` |
 | `bp make schema <type>` | v2 skeleton | `bp make schema product --out product.json` |
 | `bp schema get/apply` | read / upsert schema | `bp schema apply --file product.json` |
@@ -33,6 +31,4 @@ Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml
 
 Body flags (after verb, write commands only): `--set k=v` / `--set k:=json` (typed) · `-f/--file -` stdin.
 
-Exit codes: `docs/cli/error-exit-table.md`.
-
-Canon: [HANDBOOK](../cli/HANDBOOK.md).
+Exit codes: `docs/cli/error-exit-table.md`. Canon: [HANDBOOK](../cli/HANDBOOK.md).

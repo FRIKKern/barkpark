@@ -567,14 +567,6 @@ func (c *Client) Create(typeName, title string) (string, error) {
 	return results[0].ID, nil
 }
 
-// duplicateSkipKeys are the legacy-envelope top-level keys that are document
-// METADATA, not content — they must not be copied into a duplicate's create
-// payload. ("status" is server-assigned: a create is always a fresh draft,
-// exactly like Studio's clone_document forcing status "draft".)
-var duplicateSkipKeys = map[string]bool{
-	"id": true, "status": true, "updatedAt": true, "createdAt": true, "values": true,
-}
-
 // Duplicate clones a document into a fresh draft with a server-assigned id,
 // matching Studio's duplicate-doc action (Content.clone_document): the title
 // gets a " (copy)" suffix and every content field is copied VERBATIM as raw

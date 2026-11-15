@@ -73,6 +73,54 @@ func TestDocDuplicateSendsACreateAndPrintsTheNewID(t *testing.T) {
 	}
 }
 
+// No field of the source is left out, whatever its name. Until this test the
+// copy dropped content, values, createdAt and updatedAt without a word. Names
+// the flat create cannot carry (status, id, a content object) make the copy
+// send every field inside a content map instead.
+func TestDocDuplicateCopiesEveryField(t *testing.T) {
+	flat := `{"result":{"_id":"p1","_type":"post","_rev":"r","title":"T","values":{"a":1},"createdAt":"user-created","updatedAt":"user-updated","content":"a field named content","body_html":"<p>x</p>"}}`
+	s := newDocFakeServer(t, map[string]string{docDiffPubPath: flat})
+	if code, _, stderr := runDocVerb(runDocDuplicate, s.ctx(), globals{}, "post", "p1"); code != exitOK {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr)
+	}
+	create := docDupCreate(t, s.posts[0])
+	for _, k := range []string{"values", "createdAt", "updatedAt", "content", "body_html"} {
+		if _, ok := create[k]; !ok {
+			t.Errorf("the copy lost the field %q: %v", k, create)
+		}
+	}
+	if create["content"] != "a field named content" || create["createdAt"] != "user-created" {
+		t.Errorf("create = %v", create)
+	}
+
+	nested := `{"result":{"_id":"p1","_type":"post","_rev":"r","title":"T","status":"sold","id":"sku-1","content":{"nb":"brodtekst"},"slug":"t"}}`
+	s = newDocFakeServer(t, map[string]string{docDiffPubPath: nested})
+	if code, _, stderr := runDocVerb(runDocDuplicate, s.ctx(), globals{}, "post", "p1"); code != exitOK {
+		t.Fatalf("nested: exit = %d, stderr=%s", code, stderr)
+	}
+	create = docDupCreate(t, s.posts[0])
+	inner, _ := create["content"].(map[string]any)
+	if inner["status"] != "sold" || inner["id"] != "sku-1" || inner["slug"] != "t" || inner["content"] == nil {
+		t.Errorf("nested create content = %v", create["content"])
+	}
+	if len(create) != 3 || create["title"] != "T (copy)" || create["_type"] != "post" {
+		t.Errorf("nested create has keys beside _type, title and content: %v", create)
+	}
+}
+
+// --id may not name a document that exists, published or draft: the copy
+// would become that document's draft.
+func TestDocDuplicateRefusesATakenID(t *testing.T) {
+	s := newDocFakeServer(t, map[string]string{
+		docDiffPubPath:                       docDupSource,
+		"/v1/data/doc/production/post/taken": `{"result":{"_id":"taken","_type":"post","_draft":false,"title":"Live"}}`,
+	})
+	code, stdout, stderr := runDocVerb(runDocDuplicate, s.ctx(), globals{}, "post", "p1", "--id", "taken")
+	if code != exitConflict || s.postCount() != 0 || stdout != "" || !strings.Contains(stderr, "already a post document taken") {
+		t.Errorf("exit = %d, writes = %d, stdout=%q, stderr=%s", code, s.postCount(), stdout, stderr)
+	}
+}
+
 // What Studio's Duplicate refuses, this refuses, before any write: a type
 // that says authorCreatable false, a singleton, and a document that is not
 // there.

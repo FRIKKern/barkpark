@@ -43,13 +43,19 @@ func printDocDiffHelp(out *writer) {
 	out.outf("A draft that was never published shows every field as added.")
 	out.outf("The id, revision and timestamps the server sets are not compared.")
 	out.outf("")
+	out.outf("The credential must be able to read drafts. A token that may only read")
+	out.outf("published documents (public-read, the default of `bp token create`) is")
+	out.outf("refused with exit 3; it is never told there is no draft. A field the")
+	out.outf("credential may not read is not compared.")
+	out.outf("")
 	out.outf("flags:")
 	out.outf("  --rev <revision>   compare that revision to the current document (the draft")
 	out.outf("                     when there is one, otherwise the published version)")
 	out.outf("  --from <revision>  compare two revisions of the document; needs --to")
 	out.outf("  --to <revision>")
 	out.outf("  -o json            path, kind (added, removed, changed, moved), before and")
-	out.outf("                     after for every difference")
+	out.outf("                     after for every difference; draft and published say")
+	out.outf("                     which rows exist, or null when the mode did not look")
 	out.outf("")
 	out.outf("Revision ids come from `bp doc history <type> <id>`.")
 	out.outf("")
@@ -218,6 +224,7 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 	}
 
 	var before, after docDiffSide
+	var extra map[string]any
 	var code int
 	switch {
 	case a.from != "":
@@ -242,12 +249,17 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 		if isDraft {
 			after.label = "draft"
 		}
+		extra = map[string]any{"draft": isDraft}
 	default:
-		draft, _, hasDraft, code := docDiffDoc(out, ctx, a.typ, "drafts."+a.id, "")
+		// Both sides are read with perspective=raw: each id exactly as given,
+		// and a refusal for a credential that may only read published
+		// documents. The default perspective answers such a credential 404 on
+		// every drafts. id, which reads as "no draft" when there is one.
+		draft, _, hasDraft, code := docDiffDoc(out, ctx, a.typ, "drafts."+a.id, "raw")
 		if code != exitOK {
 			return code
 		}
-		pub, _, hasPub, code := docDiffDoc(out, ctx, a.typ, a.id, "")
+		pub, _, hasPub, code := docDiffDoc(out, ctx, a.typ, a.id, "raw")
 		if code != exitOK {
 			return code
 		}
@@ -255,7 +267,7 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 		case !hasDraft && !hasPub:
 			return useError(out, "not_found", fmt.Sprintf("doc diff: there is no %s document %s.", a.typ, a.id), exitNotFound)
 		case !hasDraft:
-			if !out.emitStructured(docDiffPayload(a, "published", "draft", nil, map[string]any{"draft": false})) {
+			if !out.emitStructured(docDiffPayload(a, "published", "draft", nil, map[string]any{"draft": false, "published": true})) {
 				out.outf("no draft; nothing to publish")
 			}
 			return exitOK
@@ -272,14 +284,18 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 		}
 		return renderDocDiff(out, a, before.label, after.label, changes, map[string]any{"draft": true, "published": hasPub}, note)
 	}
-	return renderDocDiff(out, a, before.label, after.label, docdiff.Diff(before.fields, after.fields), nil, "")
+	return renderDocDiff(out, a, before.label, after.label, docdiff.Diff(before.fields, after.fields), extra, "")
 }
 
 func docDiffPayload(a docDiffArgs, before, after string, changes []docdiff.Change, extra map[string]any) map[string]any {
 	if changes == nil {
 		changes = []docdiff.Change{}
 	}
+	// draft and published say whether the document has each row. They are
+	// null when the mode did not look: a comparison of revisions reads neither.
 	payload := map[string]any{
+		"draft":       nil,
+		"published":   nil,
 		"type":        a.typ,
 		"id":          a.id,
 		"before":      before,

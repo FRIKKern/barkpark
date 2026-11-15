@@ -11,7 +11,7 @@ Builtins (scoped `/w/<ws>/p/<proj>/v1/…` URLs, not BuildURL): `bp make schema 
 - Credentials → docs/auth.md: `bp token create --permissions …,admin`; no admin locally: `bp instance admin-token <id> --install`; attach a box to Cloud: `bp barkparks adopt` → deploy/README.md.
 - Support desk: `bp ticket` (inbox·show·answer·close) + `bp ticket-key` (mint·ls·rotate·pause·unpause·revoke) → docs/contracts/plugin-http-api.md.
 - `docs/cli/**` is PATH FROZEN (cli.go refs it): {error-exit-table,m0-decisions,HANDBOOK}.md, manifest.schema.json + fixtures/*.json.
-- Go gate, LOCAL: `CGO_ENABLED=0 go build ./... && go vet ./internal/{cli,manifest}/... && go test ./internal/{cli,manifest}/...`; CI runs `./...` on Linux.
+- Go gate, LOCAL: `set -- ./internal/cli/... ./internal/manifest/...; CGO_ENABLED=0 go build ./... && go vet "$@" && go test "$@"`; CI runs `./...` on Linux.
 
 ## Code anchors
 - internal/cli/cli.go — func Execute

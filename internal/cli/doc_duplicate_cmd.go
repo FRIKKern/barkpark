@@ -31,13 +31,16 @@ func printDocDuplicateHelp(out *writer) {
 	out.outf("copy. The draft of the document is copied when there is one, otherwise the")
 	out.outf("published version. The copy is always a draft; publish it with")
 	out.outf("`bp doc publish`. The title of the copy is the source title with \" (copy)\".")
+	out.outf("Every field is copied as it is, a slug and references included. A field the")
+	out.outf("credential may not read is not in the copy.")
 	out.outf("")
 	out.outf("Like Duplicate in Studio, it refuses a singleton type and a type whose")
 	out.outf("schema says authorCreatable: false. A paper cannot be copied here; use Studio.")
 	out.outf("")
 	out.outf("flags:")
 	out.outf("  --id <new id>    the id of the copy (default: the server assigns one);")
-	out.outf("                   an id that is already taken is refused")
+	out.outf("                   an id that a draft or a published document already")
+	out.outf("                   has is refused")
 	out.outf("  --title <title>  the title of the copy")
 	out.outf("  --dry-run        print the create that would be sent, and write nothing")
 	out.outf("  --yes            skip the production confirmation")
@@ -173,8 +176,19 @@ func runDocDuplicate(out *writer, g globals, ctx manifest.Context, tail []string
 	if err := json.Unmarshal(docBody, &src); err != nil {
 		return useError(out, "failed", fmt.Sprintf("doc duplicate: the document did not parse: %v. Nothing was written.", err), exitGeneric)
 	}
+	// 3. --id may not name a document that exists. The server refuses a
+	// taken draft id by itself. A published document with no draft it would
+	// accept, and the copy would then sit as that document's draft, one
+	// publish away from replacing it; so that case is refused here.
 	newID := a.newID
 	if newID != "" {
+		_, taken, code := docDuplicateGet(out, ctx, "/v1/data/doc/"+url.PathEscape(dataset)+"/"+url.PathEscape(a.typ)+"/"+url.PathEscape(newID)+"?perspective=drafts", true)
+		if code != exitOK {
+			return code
+		}
+		if taken {
+			return useError(out, "conflict", fmt.Sprintf("doc duplicate: there is already a %s document %s. Pick another --id. Nothing was written.", a.typ, newID), exitConflict)
+		}
 		newID = "drafts." + newID
 	}
 	create, err := apiclient.DuplicateCreate(a.typ, src, apiclient.DuplicateOptions{ID: newID, Title: a.title})

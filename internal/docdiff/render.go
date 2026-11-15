@@ -12,7 +12,7 @@ const (
 	// maxLineRows caps the rows of one multi-line text diff.
 	maxLineRows = 40
 	// maxLineCells caps the line-by-line comparison table. Two texts over it
-	// are printed as all old lines, then all new lines.
+	// are not printed line by line; a note gives their sizes.
 	maxLineCells = 4_000_000
 )
 
@@ -114,13 +114,20 @@ func LineRows(oldV, newV string) []Row {
 	b, a := strings.Split(oldV, "\n"), strings.Split(newV, "\n")
 	var rows []Row
 	same := 0
+	// The lines both sides start and end with are the same by definition.
+	// Setting them aside first keeps a long text with a small change well
+	// under the table cap below.
+	for len(b) > 0 && len(a) > 0 && b[0] == a[0] {
+		b, a, same = b[1:], a[1:], same+1
+	}
+	for len(b) > 0 && len(a) > 0 && b[len(b)-1] == a[len(a)-1] {
+		b, a, same = b[:len(b)-1], a[:len(a)-1], same+1
+	}
 	if len(b)*len(a) > maxLineCells {
-		for _, ln := range b {
-			rows = append(rows, Row{'-', "    " + clip(ln, 0)})
-		}
-		for _, ln := range a {
-			rows = append(rows, Row{'+', "    " + clip(ln, 0)})
-		}
+		// Too much differs to compare line by line. Printing every old line
+		// as removed would mark lines that did not change, so say how much
+		// there is and point at the full values.
+		rows = append(rows, Row{' ', fmt.Sprintf("    too long to show line by line: %d line(s) before and %d after differ in the middle; -o json has both texts", len(b), len(a))})
 	} else {
 		// lcs[i][j] is the length of the longest common run of lines of
 		// b[i:] and a[j:].

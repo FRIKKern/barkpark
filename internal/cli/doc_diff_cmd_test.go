@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,10 @@ type docFakeServer struct {
 	gets   map[string]string
 	posts  []string
 	answer string // the mutate response body
+	// publicRead makes the fake answer like the real server answers a
+	// credential that may only read published documents: 404 on every
+	// drafts. id, and a refusal on a perspective=raw read.
+	publicRead bool
 }
 
 func newDocFakeServer(t *testing.T, gets map[string]string) *docFakeServer {
@@ -39,6 +44,15 @@ func newDocFakeServer(t *testing.T, gets map[string]string) *docFakeServer {
 			b, _ := io.ReadAll(r.Body)
 			s.posts = append(s.posts, string(b))
 			_, _ = w.Write([]byte(s.answer))
+			return
+		}
+		if s.publicRead && r.URL.Query().Get("perspective") == "raw" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"public-read tokens may only read published public documents"}}`))
+			return
+		}
+		if s.publicRead && strings.Contains(path, "/drafts.") {
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		if body, ok := s.gets[path]; ok && r.Method == http.MethodGet {
@@ -165,6 +179,21 @@ func TestDocDiffExitCodes(t *testing.T) {
 	}
 }
 
+// A credential that cannot read drafts gets 404 on drafts.p1 although the
+// draft is there. That must never read as "no draft; nothing to publish",
+// exit 0: a CI job would pass while the draft differs. It is refused, with a
+// code that is neither 0 nor the "differs" code.
+func TestDocDiffRefusesACredentialThatCannotSeeDrafts(t *testing.T) {
+	s := newDocFakeServer(t, map[string]string{docDiffPubPath: docDiffPublished, docDiffDraftPath: docDiffDraft})
+	s.publicRead = true
+	for _, g := range []globals{{}, {output: "json"}} {
+		code, stdout, stderr := runDocVerb(runDocDiff, s.ctx(), g, "post", "p1")
+		if code != exitAuth || strings.Contains(stdout+stderr, "nothing to publish") || strings.Contains(stdout, `"differences":false`) {
+			t.Errorf("output %q: exit = %d, want %d and no claim that there is no draft; stdout=%s stderr=%s", g.output, code, exitAuth, stdout, stderr)
+		}
+	}
+}
+
 // --rev compares a revision to the current document, and a revision of
 // another document is refused.
 func TestDocDiffRevision(t *testing.T) {
@@ -182,6 +211,42 @@ func TestDocDiffRevision(t *testing.T) {
 	}
 	if code, stdout, _ := runDocVerb(runDocDiff, s.ctx(), globals{}, "post", "p1", "--from", "r", "--to", "r"); code != exitOK {
 		t.Errorf("--from r --to r: exit = %d, stdout=%s", code, stdout)
+	}
+
+	// -o json has the same keys in every mode.
+	want := []string{"after", "before", "changes", "differences", "draft", "id", "published", "summary", "type"}
+	noDraft := newDocFakeServer(t, map[string]string{docDiffPubPath: docDiffPublished})
+	both := newDocFakeServer(t, map[string]string{docDiffPubPath: docDiffPublished, docDiffDraftPath: docDiffDraft})
+	for name, run := range map[string]func() string{
+		"--rev": func() string {
+			_, o, _ := runDocVerb(runDocDiff, s.ctx(), globals{output: "json"}, "post", "p1", "--rev", "r")
+			return o
+		},
+		"--from --to": func() string {
+			_, o, _ := runDocVerb(runDocDiff, s.ctx(), globals{output: "json"}, "post", "p1", "--from", "r", "--to", "r")
+			return o
+		},
+		"no draft": func() string {
+			_, o, _ := runDocVerb(runDocDiff, noDraft.ctx(), globals{output: "json"}, "post", "p1")
+			return o
+		},
+		"draft": func() string {
+			_, o, _ := runDocVerb(runDocDiff, both.ctx(), globals{output: "json"}, "post", "p1")
+			return o
+		},
+	} {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(run()), &got); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		keys := make([]string, 0, len(got))
+		for k := range got {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if !reflect.DeepEqual(keys, want) {
+			t.Errorf("%s: keys = %v, want %v", name, keys, want)
+		}
 	}
 }
 

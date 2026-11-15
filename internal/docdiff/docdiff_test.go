@@ -84,6 +84,31 @@ func TestSummaryAndRender(t *testing.T) {
 	}
 }
 
+// A long text with one changed line shows that line, not its unchanged
+// neighbours. A text where too much differs to compare says so and marks no
+// line as removed.
+func TestLineRowsLongTexts(t *testing.T) {
+	lines := make([]string, 30000)
+	for i := range lines {
+		lines[i] = "line " + strings.Repeat("x", i%7)
+	}
+	oldV := strings.Join(lines, "\n")
+	lines[15000] = "changed"
+	rows := LineRows(oldV, strings.Join(lines, "\n"))
+	if len(rows) != 3 || rows[0].Sign != '-' || rows[1].Format() != "+     changed" || !strings.Contains(rows[2].Text, "29999 line(s) the same") {
+		t.Errorf("one changed line in 30000: rows = %+v", rows)
+	}
+
+	a, b := make([]string, 3000), make([]string, 3000)
+	for i := range a {
+		a[i], b[i] = "a"+strings.Repeat("x", i), "b"+strings.Repeat("x", i)
+	}
+	rows = LineRows(strings.Join(a, "\n"), strings.Join(b, "\n"))
+	if len(rows) != 1 || rows[0].Sign != ' ' || !strings.Contains(rows[0].Text, "too long to show line by line: 3000 line(s) before and 3000 after") {
+		t.Errorf("over the cap: rows = %+v", rows)
+	}
+}
+
 func TestFieldRowsPrintsEveryLineAndEmpty(t *testing.T) {
 	rows := FieldRows("a\nb", "")
 	if len(rows) != 3 || rows[0].Format() != "- a" || rows[1].Format() != "- b" || rows[2].Format() != "+ (empty)" {
