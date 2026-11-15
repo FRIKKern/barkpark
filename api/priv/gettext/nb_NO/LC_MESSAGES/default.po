@@ -13945,3 +13945,18 @@ msgstr "Vis erstatt"
 #, elixir-autogen, elixir-format
 msgid "Field actions"
 msgstr "Felthandlinger"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy field"
+msgstr "Kopier felt"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Paste field"
+msgstr "Lim inn felt"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Empty value, nothing to copy"
+msgstr "Tom verdi, ingenting å kopiere"

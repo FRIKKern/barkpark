@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
@@ -324,6 +325,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
         {:noreply, assign(socket, :desk_inspect, false)}
     end
   end
+
+  # A field's "Field actions" menu (`FieldActions`).
+  def handle_event("desk-field-" <> _ = event, params, socket),
+    do: FieldActions.handle_event(event, params, socket)
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
