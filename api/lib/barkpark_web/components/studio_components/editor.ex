@@ -22,6 +22,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Components.Fields.Visibility
   alias BarkparkWeb.Studio.Desk.FieldGroups
+  alias BarkparkWeb.Studio.Desk.Fieldsets
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
 
   @doc """
@@ -980,8 +981,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <input type="text" id={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"} name="doc[title]" value={@editor_form["title"]} class="form-input" aria-required={(get_title_validation(@editor_schema) || %{})["required"] == true && "true"} phx-debounce="300" />
               </.editor_field>
               <%= if @editor_schema do %>
-                <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
-                        Visibility.visible?(field, @editor_form) do %>
+                <%!-- In the desk, fields that name a schema fieldset are drawn
+                      inside it (`Desk.Fieldsets`); elsewhere every entry is a
+                      lone field. --%>
+                <%= for entry <- shown_entries(@editor_schema, @nav_group, @editor_form, @parent_assigns) do %>
+                  <Fieldsets.entry :let={field} entry={entry} scope={@editor_doc.doc_id}>
                   <.studio_field_renderer
                     field={BarkparkWeb.Studio.Desk.FieldLock.resolve(field, @editor_form, desk?(@parent_assigns))}
                     editor_form={@editor_form}
@@ -994,6 +998,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     document_rev={@editor_doc.rev}
                     form_gen={@editor_form_gen}
                   />
+                  </Fieldsets.entry>
                 <% end %>
               <% end %>
               <div class="editor-actions">
@@ -1512,6 +1517,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     do: drawable_icon(icon) || "circle"
 
   defp tab_icon(_), do: "circle"
+
+  # The fields the form draws, in order: on the chosen tab and not hidden by
+  # `visibleWhen`, gathered into the schema's fieldsets in the desk.
+  defp shown_entries(schema, nav_group, form, parent_assigns) do
+    schema.fields
+    |> Enum.reject(&(&1["name"] == "title"))
+    |> visible_fields(nav_group)
+    |> Enum.filter(&Visibility.visible?(&1, form))
+    |> Fieldsets.entries(Fieldsets.of(schema, desk?(parent_assigns)))
+  end
 
   @doc """
   Filter top-level fields to those visible on the currently selected tab.
