@@ -21,6 +21,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Components.Fields.Visibility
+  alias BarkparkWeb.Studio.Desk.FieldGroups
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
 
   @doc """
@@ -732,6 +733,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       )
       |> assign(:show_diff_toggle, show_diff_toggle)
       |> assign(:show_diff, show_diff_toggle and assigns.diff_visible)
+      |> assign_tab_groups()
 
     ~H"""
     <%= if @editor_doc do %>
@@ -908,7 +910,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   tabindex={if tab_stop(@editor_schema, @nav_group, @parent_assigns) == "all-fields", do: "0", else: "-1"}
                   class={"bp-tab " <> if(is_nil(@nav_group), do: "is-active", else: "")}
                 ><span class="bp-tab-label"><%= gettext("All fields") %></span></button>
-                <%= for grp <- schema_groups(@editor_schema) do %>
+                <%= for grp <- @tab_groups do %>
                   <button
                     type="button"
                     id={"bp-group-tab-" <> grp["name"]}
@@ -1467,6 +1469,21 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     case Map.get(schema, :groups) || Map.get(schema, "groups") do
       list when is_list(list) -> list
       _ -> []
+    end
+  end
+
+  # The tabs to draw. The desk draws a group's tab only while one of its
+  # fields shows, and falls back to All fields when the chosen group's tab is
+  # gone (`Desk.FieldGroups`). The old Studio draws every declared group.
+  defp assign_tab_groups(%{editor_schema: schema, parent_assigns: parent} = assigns) do
+    if desk?(parent) do
+      form = assigns[:editor_form]
+
+      assigns
+      |> assign(:tab_groups, FieldGroups.shown(schema, form))
+      |> assign(:nav_group, FieldGroups.current(schema, assigns[:nav_group], form))
+    else
+      assign(assigns, :tab_groups, schema_groups(schema))
     end
   end
 

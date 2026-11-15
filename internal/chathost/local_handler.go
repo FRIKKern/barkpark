@@ -26,6 +26,9 @@ type LocalHandler struct {
 	// StatusLabel makes a claude turn's 2 to 4 word status label
 	// (status_label.go). Nil means no label.
 	StatusLabel StatusLabeler
+	// Status sends that label to the server, out of the turn's event sequence.
+	// Nil means no label: the side call is not run.
+	Status StatusPoster
 	// Log receives the line a skipped status label leaves. Nil means os.Stderr.
 	Log io.Writer
 
@@ -222,8 +225,9 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 		return err
 	}
 	defer h.unregister(sessionID, session)
-	// The label's side call runs alongside the turn; the turn never waits for it.
-	emit, endStatus := h.startStatusLabel(ctx, content, emit)
+	// The label's side call and its POST run alongside the turn; the turn never
+	// waits for either.
+	emit, endStatus := h.startStatusLabel(ctx, remote, content, emit)
 	defer endStatus()
 
 	if err := session.write(claudeUserFrame(content, files, images)); err != nil {
