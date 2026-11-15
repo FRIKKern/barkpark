@@ -39,6 +39,23 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   was pressed in under the same key; its handler asks `ours?/2` of the
   event before it builds anything.
 
+  ## Events that are not the form's post
+
+  A press that writes the open document without posting the form (a list's
+  Add, Remove and Move, Generate on a slug, a pick or a clear in the old
+  reference and image pickers, the picker's upload) is an event of its own,
+  and the server ran it against whatever document the socket held when it
+  arrived. It names its document under the same key: the page's script
+  (`bp-array-focus.js`) reads the form's attribute at the moment of the
+  press and puts it on the pressed control, so LiveView sends it with the
+  event. `pressed/3` runs the handler only for an event `ours?/2` holds
+  for. The pickers finish their write in a message the page sends itself;
+  `own/2` and `own?/2` keep that message to the document it was built in.
+
+  The name only narrows. What a socket may write is asked where it always
+  was (`Shared.do_autosave/3`); an event that names the open document gets
+  nothing it would not have had.
+
   ## Why two
 
   LiveView posts a waiting input the moment it blurs, and removing the
@@ -106,6 +123,32 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   end
 
   def ours?(_params, _socket), do: false
+
+  @doc """
+  Runs `fun` for an event pressed in the document the editor holds now,
+  with the name taken off its params. For any other event nothing happens.
+  """
+  def pressed(params, socket, fun) when is_function(fun, 2) do
+    if ours?(params, socket),
+      do: fun.(Map.drop(params, [@key, @end_key]), socket),
+      else: {:noreply, socket}
+  end
+
+  @doc """
+  A form the page sends itself to save (`{:autosave_form, form}`), kept to
+  the document the socket holds as it is built.
+  """
+  def own(form, socket), do: {:own, of(socket), form}
+
+  @doc """
+  The form of such a message when the socket still holds its document,
+  else `nil`. A bare form is one the server built for the open document.
+  """
+  def own?({:own, doc, form}, socket),
+    do: if(is_binary(doc) and doc === of(socket), do: form)
+
+  def own?(form, _socket) when is_map(form), do: form
+  def own?(_form, _socket), do: nil
 
   @doc """
   `params` without the two keys among the document's fields. A post that

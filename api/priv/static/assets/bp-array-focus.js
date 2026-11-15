@@ -370,3 +370,44 @@
   window.addEventListener("phx:navigate", leave);
   window.BarkparkFormLeave = flush;
 })();
+
+// task-8908b6e031268f77: a press that writes the open document names it.
+// A list's Add, Remove and Move, Generate on a slug, and the old pickers'
+// pick, clear and upload are events of their own, not posts of the editor
+// form. The server writes one only into the document it was pressed in
+// (`PostIdentity`), so the pressed control is given the form's own mark,
+// read at the press, and LiveView sends it with the event as a
+// `phx-value-`. A press with no editor form on the page gets no mark and
+// is not written.
+(function () {
+  "use strict";
+
+  var MARK = "phx-value-_bp_doc";
+  var WRITES = ["array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image"];
+
+  // Whether a binding (an event name, or LiveView's JSON commands) sends one.
+  function writes(binding) {
+    if (!binding) return false;
+    for (var i = 0; i < WRITES.length; i++) {
+      if (binding === WRITES[i] || binding.indexOf('"event":"' + WRITES[i] + '"') !== -1) return true;
+    }
+    return false;
+  }
+
+  function name(attr) {
+    return function (e) {
+      var from = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+      var el = from && from.closest ? from.closest("[" + attr + "]") : null;
+      if (!el || !writes(el.getAttribute(attr))) return;
+      var form = document.getElementById("editor-form");
+      var doc = form ? form.getAttribute(MARK) : null;
+      if (doc) el.setAttribute(MARK, doc);
+      else el.removeAttribute(MARK);
+    };
+  }
+
+  // On window, in the capture phase: before LiveView's own listener reads
+  // the control's values and pushes the event.
+  window.addEventListener("click", name("phx-click"), true);
+  window.addEventListener("submit", name("phx-submit"), true);
+})();

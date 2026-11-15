@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.Access
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   def open_image_picker(%{"field" => field_name}, socket) do
     files =
@@ -58,14 +59,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
   def select_media(%{"url" => url, "field" => field_name}, socket) do
     form = Map.put(socket.assigns.editor_form, field_name, url)
     socket = assign(socket, editor_form: form, image_picker_field: nil, media_files: [])
-    send(self(), {:autosave_form, form})
+    send(self(), {:autosave_form, PostIdentity.own(form, socket)})
     {:noreply, socket}
   end
 
   def clear_image(%{"field" => field_name}, socket) do
     form = Map.put(socket.assigns.editor_form, field_name, "")
     socket = assign(socket, editor_form: form)
-    send(self(), {:autosave_form, form})
+    send(self(), {:autosave_form, PostIdentity.own(form, socket)})
     {:noreply, socket}
   end
 
@@ -92,7 +93,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
       [url | _] ->
         form = Map.put(socket.assigns.editor_form, field_name, url)
         socket = assign(socket, editor_form: form, image_picker_field: nil, media_files: [])
-        send(self(), {:autosave_form, form})
+        send(self(), {:autosave_form, PostIdentity.own(form, socket)})
         {:noreply, socket}
 
       _ ->

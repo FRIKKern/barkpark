@@ -155,9 +155,10 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/p1"))
       assert html =~ ~s(phx-click="slug-generate")
 
-      view
-      |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
+      )
 
       # The derived slug lands in the form AND the saved draft.
       assert render(view) =~ Barkpark.Tenancy.slugify("Hello world")

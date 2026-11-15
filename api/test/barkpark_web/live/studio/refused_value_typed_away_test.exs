@@ -128,9 +128,10 @@ defmodule BarkparkWeb.Studio.RefusedValueTypedAwayTest do
   end
 
   defp add_tag_row({view, sel}) do
-    view
-    |> element(~s(#{sel} [phx-value-action="add_row"][phx-value-field="tags"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{sel} [phx-value-action="add_row"][phx-value-field="tags"]))
+    )
   end
 
   # What the server draws for the field now: a patch puts it in the input

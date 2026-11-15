@@ -169,11 +169,13 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
   test "the stored object can be removed", c do
     view = studio(c, c.junk)
 
-    view
-    |> element(
-      ~s(#editor-form [data-field-name="tags"] li[data-row-index="0"] button[phx-value-action="remove_row"])
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(
+        view,
+        ~s(#editor-form [data-field-name="tags"] li[data-row-index="0"] button[phx-value-action="remove_row"])
+      )
     )
-    |> render_click()
 
     assert stored(c, c.junk) == {"Here", ["b"]}
   end
