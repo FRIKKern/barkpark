@@ -27,7 +27,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   whatever the page sent. A field locked by its rule is shown, read-only,
   and copies.
 
-  PASTE. The browser reads the clipboard and the item sends
+  PASTE. A browser that will not let the page read the clipboard says so
+  and nothing is sent. Otherwise the browser reads the clipboard and the item sends
   `desk-field-paste` with the field's name and the clipboard item's JSON.
   `Handlers.FieldPaste` reads the item against the field's schema; the
   clipboard is not trusted. What fits is saved as a typed edit of that field
@@ -122,6 +123,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
           data-desk-field-paste={@name}
           data-desk-nothing={gettext("Nothing to paste")}
           data-desk-invalid={gettext("Invalid clipboard item")}
+          data-desk-denied={gettext("The browser did not let this page read the clipboard")}
         >{gettext("Paste field")}</Menu.item>
       </div>
     </div>

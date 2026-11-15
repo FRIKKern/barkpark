@@ -19,9 +19,11 @@
 // schema and saves it as a typed edit, or answers `desk:field-toast` with
 // the words that refuse it. Nothing is written to the form here.
 //
-// A browser that refuses to let a page read the clipboard pastes the last
-// field copied in this browser (kept in localStorage), as the TanStack
-// Studio does.
+// A browser that will not let the page read the clipboard (permission
+// denied, or no `clipboard.read` at all) is told so, and nothing is sent.
+// The TanStack Studio pastes the last field copied in that browser instead
+// (clipboard.ts `readKept`); that writes a value the person may have copied
+// over since and cannot see, so it is not done here.
 //
 // The words are shown in a toast on the page's body (`.dk-field-toast`,
 // `Desk.DocStyle`): a status, or an alert when something was refused. A
@@ -41,8 +43,6 @@
   var ANSWER_MS = 5000;
   var TOAST_MS = 5000;
 
-  // The last field copied here, for a browser that cannot read the clipboard.
-  var KEPT = "barkpark.desk.field-clip";
   // More than the server takes (`FieldPaste`): not sent at all.
   var MAX_CLIP = 262144;
 
@@ -172,7 +172,6 @@
       return;
     }
     answer.resolve(detail);
-    keep(detail.json);
     // An earlier refusal ("Empty value…") is not this copy's.
     hideToast();
     // The write begun in the click, else (it was refused, or never begun) one now.
@@ -184,22 +183,6 @@
       .catch(function () {
         if (answer.failed) toast("critical", answer.failed);
       });
-  }
-
-  function keep(json) {
-    try {
-      window.localStorage.setItem(KEPT, json);
-    } catch (_error) {
-      /* private mode: the system clipboard still has it */
-    }
-  }
-
-  function kept() {
-    try {
-      return window.localStorage.getItem(KEPT);
-    } catch (_error) {
-      return null;
-    }
   }
 
   // The text when it is a Sanity clipboard item, else null.
@@ -242,39 +225,29 @@
     });
   }
 
-  // What the system clipboard holds now, as a Sanity item's JSON, or null.
+  // What the system clipboard holds now, as a Sanity item's JSON, or null
+  // for anything else. Rejects when the page may not read the clipboard.
   function readClip() {
     var clipboard = window.navigator.clipboard;
-    if (!clipboard || !clipboard.read) return Promise.resolve(kept());
-    return clipboard.read().then(
-      function (items) {
-        var list = Array.prototype.slice.call(items || []);
-        var next = function (at) {
-          if (at >= list.length) return null;
-          return itemJson(list[at]).then(function (json) {
-            return json || next(at + 1);
-          });
-        };
-        return next(0);
-      },
-      function (error) {
-        // Refused outright: this browser's own copy. An empty or unreadable
-        // clipboard is nothing to paste.
-        var refused = !(window.DOMException && error instanceof window.DOMException) || error.name === "NotAllowedError";
-        return refused ? kept() : null;
-      }
-    );
+    if (!clipboard || !clipboard.read) return Promise.reject(new Error("no clipboard to read"));
+    return clipboard.read().then(function (items) {
+      var list = Array.prototype.slice.call(items || []);
+      var next = function (at) {
+        if (at >= list.length) return null;
+        return itemJson(list[at]).then(function (json) {
+          return json || next(at + 1);
+        });
+      };
+      return next(0);
+    });
   }
 
   // The click is held back, the clipboard read, and the click handed on with
   // the item on it. The menu closes by itself: the click's default is kept.
   function startPaste(item, event) {
     event.stopPropagation();
-    readClip()
-      .catch(function () {
-        return null;
-      })
-      .then(function (json) {
+    readClip().then(
+      function (json) {
         if (!json) return toast("default", item.getAttribute("data-desk-nothing") || "");
         if (json.length > MAX_CLIP) return toast("critical", item.getAttribute("data-desk-invalid") || "");
         if (!item.isConnected) return;
@@ -287,7 +260,11 @@
           passing = false;
           item.removeAttribute("phx-value-clip");
         }
-      });
+      },
+      function () {
+        toast("critical", item.getAttribute("data-desk-denied") || "");
+      }
+    );
   }
 
   window.document.addEventListener(

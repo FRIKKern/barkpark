@@ -14150,3 +14150,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "A field of type \"%{type}\" cannot be pasted into"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "The browser did not let this page read the clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "The number is too large to paste"
+msgstr ""

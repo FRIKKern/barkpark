@@ -76,6 +76,23 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
                 }
               ]
             }),
+            f.("box", "composite", %{
+              "fields" => [
+                %{"name" => "kind", "type" => "select", "options" => ["url", "internal"]},
+                %{"name" => "label", "type" => "string"}
+              ]
+            }),
+            f.("boxes", "arrayOf", %{
+              "of" => [
+                %{
+                  "type" => "composite",
+                  "fields" => [
+                    %{"name" => "kind", "type" => "select", "options" => ["url", "internal"]},
+                    %{"name" => "label", "type" => "string"}
+                  ]
+                }
+              ]
+            }),
             f.("body", "richText", %{}),
             f.("fixed", "string", %{
               "readOnly" => %{"field" => "choice", "operator" => "eq", "value" => "b"}
@@ -380,6 +397,57 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
       refused(c, view, "choice", clip("string", "3"), ~s(Value "3" is not allowed in "a,b,c"))
     end
 
+    # Review of #26467: a select took any string once it sat inside an object.
+    test "a select takes only its options at every depth: field, subfield, list row", c do
+      view = desk(c)
+      why = ~s(Value "evil" is not allowed in "url,internal")
+      box = "object:kind=string,label=string"
+
+      refused(
+        c,
+        view,
+        "choice",
+        clip("string", "evil"),
+        ~s(Value "evil" is not allowed in "a,b,c")
+      )
+
+      refused(c, view, "box", clip(box, %{"kind" => "evil", "label" => "L"}), why)
+
+      refused(
+        c,
+        view,
+        "boxes",
+        clip("array:" <> box, [%{"kind" => "url"}, %{"kind" => "evil"}]),
+        why
+      )
+
+      refused(c, view, "box", clip(box, %{"kind" => 7}), @incompatible)
+
+      assert changes(c, view, "box", clip(box, %{"kind" => "internal", "label" => "L"})) ==
+               %{"box" => {nil, %{"kind" => "internal", "label" => "L"}}}
+
+      assert %{"boxes" => {nil, [%{"kind" => "url", "_key" => _}]}} =
+               changes(c, view, "boxes", clip("array:" <> box, [%{"kind" => "url"}]))
+    end
+
+    test "a number no field should hold: 10^400, and a float past the range", c do
+      view = desk(c)
+      why = "The number is too large to paste"
+
+      refused(c, view, "count", clip("number", Integer.pow(10, 400)), why)
+      refused(c, view, "count", clip("number", -Integer.pow(10, 400)), why)
+      refused(c, view, "title", clip("number", Integer.pow(10, 400)), why)
+      refused(c, view, "count", clip("number", 9_007_199_254_740_992), why)
+
+      assert changes(c, view, "count", clip("number", 9_007_199_254_740_991)) ==
+               %{"count" => {7, 9_007_199_254_740_991}}
+
+      # JSON has no infinity; a literal past a float's range is not a number at all.
+      raw = String.replace(clip("number", 12_345), "12345", "1e999")
+      assert changes(c, view, "count", raw) == %{}
+      assert_push_event(view, @toast, %{title: _})
+    end
+
     test "a reference of another type, to no document, or to a document of another type", c do
       view = desk(c)
       sig = "reference:#{c.author_type}"
@@ -496,6 +564,21 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
             clip("string", nil)
           ] do
         assert changes(c, view, "title", clip) == %{}
+        assert_push_event(view, @toast, %{tone: "default", title: "Nothing to paste"})
+      end
+    end
+
+    # Review of #26467: these wrote nothing and said nothing.
+    test "an object with no subfield to write: an empty one, or one holding only nulls", c do
+      view = desk(c)
+      sig = "object:label=string,url=string"
+
+      for value <- [
+            %{},
+            %{"url" => nil, "label" => nil},
+            %{"_type" => "x", "_key" => "k", "url" => nil}
+          ] do
+        assert changes(c, view, "cta", clip(sig, value)) == %{}
         assert_push_event(view, @toast, %{tone: "default", title: "Nothing to paste"})
       end
     end

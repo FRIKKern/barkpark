@@ -14155,3 +14155,13 @@ msgstr "Verdi av typen \"%{type}\" er ikke tillatt i dette listefeltet"
 #, elixir-autogen, elixir-format
 msgid "A field of type \"%{type}\" cannot be pasted into"
 msgstr "Det går ikke å lime inn i et felt av typen \"%{type}\""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "The browser did not let this page read the clipboard"
+msgstr "Nettleseren lot ikke denne siden lese utklippstavlen"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "The number is too large to paste"
+msgstr "Tallet er for stort til å limes inn"

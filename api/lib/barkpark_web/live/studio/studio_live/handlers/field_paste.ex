@@ -9,8 +9,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   used for one thing, the words of a refusal. What is written is decided by
   the target field's schema alone (`fit/4`):
 
-    * a text, number or boolean must be one;
-    * a select takes only a value on its list;
+    * a text, number or boolean must be one; a whole number is at most
+      2^53 - 1 either way, the largest every reader of the stored JSON holds
+      exactly (typing has no such bound; that is the typed path's to fix);
+    * a select takes only a value on its list, at every depth: the field
+      itself, a subfield of an object, a row of a list of objects;
     * a reference must name a document of the field's type that exists
       (`ref?`, the caller's scoped read);
     * an object keeps only the subfields its schema declares, each read the
@@ -42,12 +45,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   @max_rows 500
   @max_depth 8
 
-  @text_types ~w(string text url email select)
+  @text_types ~w(string text url email)
+  # The largest whole number a double holds exactly (JavaScript's
+  # MAX_SAFE_INTEGER): past it the site and the Studio read another number.
+  @max_integer 9_007_199_254_740_991
   @row_types ~w(string text url email number boolean composite)
 
   @typedoc """
   `{:save, params}`: the `autosave` params that write the paste.
-  `:nothing`: the clipboard holds no copied field.
+  `:nothing`: the clipboard holds no copied field, or one with nothing in
+  it to write (an object with no subfield set).
   `{:invalid, why}`: it holds one this field does not take; `why` says so.
   """
   @type plan :: {:save, map()} | :nothing | {:invalid, String.t() | nil}
@@ -63,6 +70,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
     case read(clip) do
       {:ok, item} ->
         case transfer(item, field, current, ref?) do
+          # An object that sets no subfield would save as a change of nothing.
+          {:ok, value} when value == %{} -> :nothing
           {:ok, value} -> {:save, %{"doc" => %{name => value}, "_target" => ["doc", name]}}
           {:error, why} -> {:invalid, why}
         end
@@ -120,23 +129,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
 
     # A number goes into text as its digits, and a number or a text into a
     # list of texts as one more row.
+    numeric? = sig in ~w(number integer float) and is_number(value)
+    # A copied number is one a field can hold, whatever it is pasted into.
+    held = if numeric? and not in_range?(value), do: too_large(), else: :ok
+
     {sig, value} =
-      if sig in ~w(number integer float) and is_number(value) and
-           target in ["string", "array:string"],
-         do: {"string", number_text(value)},
-         else: {sig, value}
+      if numeric? and in_range?(value) and target in ["string", "array:string"],
+        do: {"string", number_text(value)},
+        else: {sig, value}
 
     {sig, value, append} =
       if sig == "string" and target == "array:string",
         do: {target, [value], true},
         else: {sig, value, append}
 
-    with :ok <- same(sig, value, target),
-         {:ok, clean} <- fit(field, value, ref?, 0),
-         :ok <- on_list(field, clean) do
+    with :ok <- held,
+         :ok <- same(sig, value, target),
+         {:ok, clean} <- fit(field, value, ref?, 0) do
       {:ok, placed(clean, current, append)}
     end
   end
+
+  defp in_range?(n) when is_integer(n), do: abs(n) <= @max_integer
+  defp in_range?(n) when is_float(n), do: true
 
   defp same(sig, _value, sig), do: :ok
   defp same(sig, value, target), do: {:error, mismatch(sig, value, target)}
@@ -151,22 +166,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
       do: n |> trunc() |> Integer.to_string(),
       else: :erlang.float_to_binary(n, [:short])
   end
-
-  # A select takes only its options.
-  defp on_list(%{"type" => "select"} = field, value) do
-    allowed = option_values(field["options"])
-
-    if value in allowed,
-      do: :ok,
-      else:
-        {:error,
-         gettext("Value \"%{value}\" is not allowed in \"%{list}\"",
-           value: value,
-           list: Enum.map_join(allowed, ",", &to_string/1)
-         )}
-  end
-
-  defp on_list(_field, _value), do: :ok
 
   defp option_values(%{"list" => list}), do: option_values(list)
 
@@ -189,8 +188,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   defp fit(%{"type" => type}, value, _ref?, _depth) when type in @text_types,
     do: if(is_binary(value), do: {:ok, value}, else: incompatible())
 
-  defp fit(%{"type" => "number"}, value, _ref?, _depth),
-    do: if(is_number(value), do: {:ok, value}, else: incompatible())
+  # A select takes only its options, wherever it sits.
+  defp fit(%{"type" => "select"} = field, value, _ref?, _depth) when is_binary(value) do
+    allowed = option_values(field["options"])
+
+    if value in allowed,
+      do: {:ok, value},
+      else:
+        {:error,
+         gettext("Value \"%{value}\" is not allowed in \"%{list}\"",
+           value: value,
+           list: Enum.map_join(allowed, ",", &to_string/1)
+         )}
+  end
+
+  defp fit(%{"type" => "select"}, _value, _ref?, _depth), do: incompatible()
+
+  defp fit(%{"type" => "number"}, value, _ref?, _depth) do
+    cond do
+      not is_number(value) -> incompatible()
+      in_range?(value) -> {:ok, value}
+      true -> too_large()
+    end
+  end
 
   defp fit(%{"type" => "boolean"}, value, _ref?, _depth),
     do: if(is_boolean(value), do: {:ok, value}, else: incompatible())
@@ -287,6 +307,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
 
   defp incompatible,
     do: {:error, gettext("Source and target schema types are not compatible")}
+
+  defp too_large, do: {:error, gettext("The number is too large to paste")}
 
   defp unsupported(%{"type" => type}),
     do: {:error, gettext("A field of type \"%{type}\" cannot be pasted into", type: type)}

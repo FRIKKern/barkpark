@@ -13,7 +13,7 @@
 // the item's JSON rides on the menu item as `phx-value-clip` for exactly one
 // click, which LiveView sends. Anything else on the clipboard is "Nothing to
 // paste" and no click goes on. A browser that will not let the page read
-// the clipboard pastes the last field copied in it. The server's refusal
+// the clipboard is told so, and nothing is sent. The server's refusal
 // (`desk:field-toast`) is shown as an alert.
 //
 // THE SCRIPT ITSELF is loaded by bp-desk.js when the desk mounts. A click on
@@ -112,7 +112,7 @@ document.body.innerHTML =
   `</div></div></div>` +
   `<div class="field"><div class="field-actions"><div id="field-actions-title" popover role="menu">` +
   `<button role="menuitem" phx-click="desk-field-paste" phx-value-field="title" data-desk-field-paste="title" ` +
-  `data-desk-nothing="Nothing to paste" data-desk-invalid="Invalid clipboard item">Paste field</button>` +
+  `data-desk-nothing="Nothing to paste" data-desk-invalid="Invalid clipboard item" data-desk-denied="The browser did not let this page read the clipboard">Paste field</button>` +
   `</div></div></div>`;
 
 const item = document.querySelector("[data-desk-field-copy]");
@@ -243,21 +243,26 @@ assert.deepEqual(await paste(), []);
 assert.equal(toast().textContent, "Invalid clipboard item");
 assert.equal(toast().getAttribute("role"), "alert");
 
-// 8e. A browser that refuses the read pastes the last field copied in it;
-//     an unreadable clipboard is nothing to paste.
+// 8e. A browser that will not let the page read the clipboard: Paste says
+//     so and sends nothing. It does not paste what was copied here earlier:
+//     something else may have been copied since (review of #26467).
 window.localStorage.clear();
-const refusal = new window.DOMException("denied", "NotAllowedError");
-reads = refusal;
-assert.deepEqual(await paste(), [], "nothing kept yet");
-assert.equal(toast().textContent, "Nothing to paste");
 refuse = () => false;
 press();
 answer({ ...copy, json: ITEM });
 await tick(80);
-reads = refusal;
-assert.deepEqual((await paste()).map((x) => x.clip), [ITEM], "a copy is kept for a browser that cannot read the clipboard");
-reads = new window.DOMException("no data", "DataError");
+assert.equal(window.localStorage.length, 0, "no copy is kept in the browser");
+for (const error of [new window.DOMException("denied", "NotAllowedError"), new window.DOMException("no data", "DataError"), new Error("broken")]) {
+  reads = error;
+  assert.deepEqual(await paste(), [], error.name);
+  assert.equal(toast().textContent, "The browser did not let this page read the clipboard", error.name);
+  assert.equal(toast().getAttribute("role"), "alert");
+}
+// No clipboard to read at all (an old browser, a page not on https): the same.
+Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { write: clipboardApi.write, writeText: clipboardApi.writeText } });
 assert.deepEqual(await paste(), []);
+assert.equal(toast().textContent, "The browser did not let this page read the clipboard");
+Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: clipboardApi });
 
 // 8f. The disabled Paste item reads nothing and sends nothing.
 reads = [{ [SANITY]: ITEM }];
