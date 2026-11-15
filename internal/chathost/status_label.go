@@ -49,9 +49,8 @@ type StatusPoster interface {
 }
 
 // How long one label POST may take. Past it the label is dropped: by then the
-// turn's text is usually out and a late label is not shown. A var so a test can
-// shorten it.
-var statusPostTimeout = 2 * time.Second
+// turn's text is usually out and a late label is not shown.
+const statusPostTimeout = 2 * time.Second
 
 const (
 	// The prompt the side call gets as its system prompt; the person's text is
@@ -80,6 +79,9 @@ const (
 type ClaudeStatusLabeler struct {
 	Model   string
 	Timeout time.Duration
+	// WaitDelay bounds Wait for the side call's child (defaultProviderWaitDelay
+	// when zero).
+	WaitDelay time.Duration
 }
 
 // StatusLabelerFromEnv reads the side call's settings. It returns nil (no
@@ -148,7 +150,7 @@ func (l *ClaudeStatusLabeler) StatusLabel(ctx context.Context, request string) (
 	cmd.Stdout = out
 	// Stderr goes to the null device. WaitDelay bounds Wait when a grandchild
 	// still holds stdout after claude exited or was killed (#26164).
-	cmd.WaitDelay = providerWaitDelay
+	cmd.WaitDelay = providerWaitDelay(l.WaitDelay)
 	// Run waits for the child on every path, so it is never left a zombie.
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

@@ -533,13 +533,10 @@ func TestClaudeStatusLabelerRunsAToolFreeSideCall(t *testing.T) {
 // for: kill(pid, 0) answers ESRCH only once the child is reaped (a zombie still
 // answers).
 func TestClaudeStatusLabelerTimesOutAndReapsItsChild(t *testing.T) {
-	previous := providerWaitDelay
-	providerWaitDelay = 200 * time.Millisecond
-	t.Cleanup(func() { providerWaitDelay = previous })
 	record := filepath.Join(t.TempDir(), "pid")
 	installStatusHelper(t, map[string]string{"BARKPARK_STATUS_HELPER": "hang", "BARKPARK_STATUS_HELPER_RECORD": record})
 	// Long enough for the helper to start and write its pid on a loaded machine.
-	labeler := &ClaudeStatusLabeler{Timeout: 2 * time.Second}
+	labeler := &ClaudeStatusLabeler{Timeout: 2 * time.Second, WaitDelay: 200 * time.Millisecond}
 
 	started := time.Now()
 	if _, err := labeler.StatusLabel(context.Background(), "say hi"); err == nil {

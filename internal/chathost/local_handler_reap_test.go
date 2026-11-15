@@ -39,10 +39,6 @@ func TestRunCodexWaitsForTheChildAfterAnEmitError(t *testing.T) {
 // before the fix Handle returned it, so the Runner published an error terminal
 // after a good reply (review of #26164).
 func TestRunCodexCompletedTurnIgnoresAStderrHeldPastWaitDelay(t *testing.T) {
-	previous := providerWaitDelay
-	providerWaitDelay = 200 * time.Millisecond
-	t.Cleanup(func() { providerWaitDelay = previous })
-
 	dir := t.TempDir()
 	binary, err := os.Executable()
 	if err != nil {
@@ -55,6 +51,7 @@ func TestRunCodexCompletedTurnIgnoresAStderrHeldPastWaitDelay(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	handler := NewLocalHandler([]string{t.TempDir()})
+	handler.WaitDelay = 200 * time.Millisecond
 	var kinds []any
 	err = handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
 		"provider": "codex", "operation": "send_turn", "session_id": "session-stderr-held",
