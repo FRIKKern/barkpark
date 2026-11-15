@@ -25,8 +25,11 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
 
   At most #{@cap} rows are drawn; past that a line says how many there are.
 
-  Opening it puts the focus on its close button. Escape from inside it, or
-  the close button, closes it and gives the focus back to the "…" button.
+  Opening it puts the focus on its close button. Escape on that button or
+  on a row, or a press of the button, closes it and gives the focus back to
+  the "…" button. The key is bound on those elements themselves: LiveView
+  runs a `phx-keydown` only for the element the key was pressed on, and
+  Escape while typing in the form must leave the panel open.
 
   `EditorHost` owns the `desk_incoming` assign: `nil` while the panel is
   closed, else `%{groups: groups, total: n}`.
@@ -164,8 +167,6 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
       data-inspect={@inspect}
       aria-label={@open && gettext("Incoming references")}
       hidden={!@open}
-      phx-keydown={@open && @close}
-      phx-key={@open && "escape"}
     >
       <%= if @open do %>
         <.sheet />
@@ -176,6 +177,8 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
             class="dk-inspector-close icon-btn"
             aria-label={gettext("Close incoming references")}
             phx-click={@close}
+            phx-keydown={@close}
+            phx-key="escape"
             phx-mounted={JS.focus()}
             data-desk-inspector-close
           >
@@ -195,6 +198,8 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
               <.link
                 patch={row_path(row, @chain, @index, @base)}
                 class="preview dk-incoming-row"
+                phx-keydown={@close}
+                phx-key="escape"
                 data-desk-incoming-row={row.from_doc_id}
               >
                 <span class="media" aria-hidden="true">

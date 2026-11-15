@@ -228,17 +228,30 @@ defmodule BarkparkWeb.Studio.DeskIncomingRefsTest do
     # `phx-mounted`: the button takes the focus when the panel is drawn.
     assert close =~ ~r/phx-mounted="[^"]*focus/
 
-    panel = view |> element(@panel) |> render() |> String.split(">", parts: 2) |> hd()
-    assert panel =~ ~s(phx-key="escape")
-    # Escape patches the param out, then focuses the "…" button.
-    assert panel =~ ~r/phx-keydown="[^"]*patch[^"]*focus[^"]*-editor-actions-button/
+    # Escape patches the param out, then focuses the "…" button. LiveView runs
+    # a `phx-keydown` only on the element the key was pressed on, so the
+    # binding is on each focusable element of the panel, not on the panel.
+    assert close =~ ~s(phx-key="escape")
+    assert close =~ ~r/phx-keydown="[^"]*patch[^"]*focus[^"]*-editor-actions-button/
+    holder = view |> element(@panel) |> render() |> String.split(">", parts: 2) |> hd()
+    refute holder =~ "phx-keydown"
 
-    view |> element(@panel) |> render_keydown(%{"key" => "Escape"})
+    view
+    |> element(~s(#{@panel} button[data-desk-inspector-close]))
+    |> render_keydown(%{"key" => "Escape"})
+
     assert_patch(view, "#{c.base}/#{c.author};#{c.ada}")
     refute has_element?(view, @panel)
-    # Closed, the holder listens for no key.
-    refute view |> element("[data-pane-editing] aside[data-desk-inspector]") |> render() =~
-             "phx-keydown"
+  end
+
+  test "Escape on a row closes the panel too", c do
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
+    link = row("inc-post-1-#{c.n}")
+    assert view |> element(link) |> render() =~ ~s(phx-key="escape")
+
+    view |> element(link) |> render_keydown(%{"key" => "Escape"})
+    assert_patch(view, "#{c.base}/#{c.author};#{c.ada}")
+    refute has_element?(view, @panel)
   end
 
   test "a re-read while the database is out keeps the list and the page", c do
