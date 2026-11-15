@@ -719,6 +719,16 @@
         return script;
       };
       fieldScript();
+      // The Validation panel's jump to a field (bp-desk-validation.js), the
+      // desk's alone too: loaded once, from the address the page gives.
+      var jumpSrc = root.getAttribute("data-desk-validation");
+      if (jumpSrc && !window.BarkparkDeskValidation && !document.querySelector("script[data-desk-validation]")) {
+        var jump = document.createElement("script");
+        jump.src = jumpSrc;
+        jump.async = true;
+        jump.setAttribute("data-desk-validation", "");
+        document.head.appendChild(jump);
+      }
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.

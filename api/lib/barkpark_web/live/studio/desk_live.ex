@@ -476,6 +476,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
       data-desk-field-actions={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")}
+      data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
