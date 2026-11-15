@@ -176,7 +176,9 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 		PollInterval:      time.Millisecond,
 		HeartbeatInterval: 20 * time.Millisecond,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// Run's context outlives the test's own waits, so only the Runner's cancel
+	// on revocation can end the work in time; at 1 s its deadline did that too.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
 	go func() { result <- runner.Run(ctx) }()
@@ -191,6 +193,9 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 	}
 	select {
 	case <-handler.canceled:
+		if ctx.Err() != nil {
+			t.Fatalf("the work ended with Run's own context (%v), not with the revocation", ctx.Err())
+		}
 	case <-time.After(time.Second):
 		t.Fatal("provider process context was not cancelled")
 	}
