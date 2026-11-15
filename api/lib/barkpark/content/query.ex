@@ -4242,24 +4242,9 @@ defmodule Barkpark.Content.Query do
   def get_documents_by_ids([], _dataset, _opts), do: %{}
 
   def get_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
     Document
     |> where([d], d.doc_id in ^doc_ids)
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    # Row/ownership ACL (Phase 4). This batch read is TYPELESS (a page of search
-    # hits may span many types), so it can't gate on `owner_scoped?/3` per type.
-    # `scope_to_owner/2` is applied UNCONDITIONALLY here — which is byte-identical
-    # for non-owner_scoped types because their rows carry a NULL `owner_id`
-    # (owner_id is stamped ONLY on owner_scoped writes), and a NULL owner always
-    # satisfies the `owner_id == uid OR IS NULL` / `IS NULL` clauses. The net
-    # effect: an owner_scoped hit owned by another user is dropped from a
-    # non-owner's hydration, closing the leak through the search-expand path.
-    |> scope_to_owner(Keyword.get(opts, :caller_context))
-    |> maybe_scope_to_grants(opts)
-    |> restrict_to_visible_types(dataset, opts)
+    |> scope_as_id_read(dataset, opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
   end
@@ -4280,18 +4265,29 @@ defmodule Barkpark.Content.Query do
   def count_documents_by_ids([], _dataset, _opts), do: 0
 
   def count_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-
     Document
     |> where([d], d.doc_id in ^doc_ids)
+    |> scope_as_id_read(dataset, opts)
+    |> exclude(:order_by)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  The read scope of `get_documents_by_ids/3` on any `Document` query: dataset,
+  workspace and project, owner-scoped rows, grants, private schemas. A caller
+  that must cap a candidate set applies it BEFORE the limit, so rows the caller
+  cannot read never take a slot (`Media.WhereUsed.textual_rows/3`).
+  """
+  def scope_as_id_read(query, dataset, opts) do
+    query
     |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
+    # Row/ownership ACL (Phase 4). This read is TYPELESS, so `scope_to_owner/2`
+    # applies UNCONDITIONALLY: rows of non-owner_scoped types carry a NULL
+    # `owner_id`, which always passes, so only another user's owner_scoped row drops.
     |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> maybe_scope_to_grants(opts)
     |> restrict_to_visible_types(dataset, opts)
-    |> exclude(:order_by)
-    |> Repo.aggregate(:count)
   end
 
   # SCHEMA-VISIBILITY CLAMP — the second half of the tenancy stack above, and

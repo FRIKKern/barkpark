@@ -477,7 +477,7 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   # The textual scan's rows, before any select: `scan/3` counts and samples
-  # them, `textual_rows/2` hands their ids to `Media.Usage`.
+  # them, `textual_rows/3` hands the caller's own to `Media.Usage`.
   defp scan_query(url, workspace_id, narrow) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
@@ -502,28 +502,40 @@ defmodule Barkpark.Media.WhereUsed do
     |> narrow.()
   end
 
-  @doc """
-  The textual scan's matching rows in ONE dataset string, as
-  `%{id: documents.id, doc_id:}`, at most #{@rows_limit}.
+  @doc "The most textual candidates `textual_rows/3` returns."
+  def rows_limit, do: @rows_limit
 
-  NOT a caller-scoped read. The scan is fenced to the blob's own workspace
-  (plus the shared NULL-workspace layer) and to the `dataset` string only;
-  `Media.Usage` reads every row it returns again through the caller's own read
-  path and keeps only the ones that path returns. Never render these rows to a
-  caller directly.
+  @doc """
+  The textual scan's documents in `dataset` that the caller behind `opts` may
+  read, at most #{@rows_limit}: `{documents, truncated}`.
+
+  The caller's read scope (`Content.Query.scope_as_id_read/3`: dataset,
+  workspace and project, owner-scoped rows, grants, private schemas) is part of
+  the SQL, before the limit, on top of the blob's own workspace fence. A row
+  the caller cannot read never takes a slot, so neither the list nor
+  `truncated` changes with it. `truncated` is true only when the caller's own
+  matches pass the cap. The delete guard's `scan/3` is not this query: it
+  still counts every referrer.
   """
-  def textual_rows(%MediaFile{path: path} = file, dataset)
+  def textual_rows(%MediaFile{path: path} = file, dataset, opts)
       when is_binary(path) and is_binary(dataset) do
-    file
-    |> delivery_path()
-    |> scan_query(Map.get(file, :workspace_id), &where(&1, [d], d.dataset == ^dataset))
-    |> select([d], %{id: d.id, doc_id: d.doc_id})
-    |> order_by([d], asc: d.doc_id)
-    |> limit(@rows_limit)
-    |> Repo.all()
+    scoped =
+      &(&1
+        |> where([d], d.dataset == ^dataset)
+        |> Barkpark.Content.Query.scope_as_id_read(dataset, opts))
+
+    rows =
+      file
+      |> delivery_path()
+      |> scan_query(Map.get(file, :workspace_id), scoped)
+      |> order_by([d], asc: d.doc_id)
+      |> limit(@rows_limit + 1)
+      |> Repo.all()
+
+    {Enum.take(rows, @rows_limit), length(rows) > @rows_limit}
   end
 
-  def textual_rows(%MediaFile{}, _dataset), do: []
+  def textual_rows(%MediaFile{}, _dataset, _opts), do: {[], false}
 
   # LIKE metacharacters in the blob path would otherwise make the pattern match
   # MORE than the literal path — an over-broad match here means a refusal that

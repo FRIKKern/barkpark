@@ -103,7 +103,7 @@ defmodule BarkparkWeb.V1MediaUsageTest do
     assert admin(scoped_conn())
            |> get("/v1/media/#{@ds}/#{unused.id}/usage")
            |> json_response(200) ==
-             %{"result" => %{"documents" => [], "total" => 0}}
+             %{"result" => %{"documents" => [], "total" => 0, "truncated" => false}}
   end
 
   test "a use inside a private field is listed for an admin and hidden from an editor" do
@@ -165,6 +165,55 @@ defmodule BarkparkWeb.V1MediaUsageTest do
     resp = scoped_conn() |> get("/v1/media/#{@ds}/#{file.id}/usage")
     assert resp.status == 401
     refute resp.resp_body =~ "Own page"
+  end
+
+  test "a hidden document never takes a candidate slot: total and truncated ignore it" do
+    file = media_file!()
+    sibling_project = create_project!(file.workspace_id)
+    cap = Barkpark.Media.WhereUsed.rows_limit()
+    now = DateTime.utc_now()
+    body = %{"blocks" => [%{"type" => "image", "src" => "/media/files/#{file.path}"}]}
+
+    row = fn doc_id, project_id ->
+      %{
+        id: Ecto.UUID.generate(),
+        doc_id: doc_id,
+        type: "paper",
+        dataset: @ds,
+        title: doc_id,
+        status: "published",
+        workspace_id: file.workspace_id,
+        project_id: project_id,
+        rev: "rev-" <> doc_id,
+        content: body,
+        inserted_at: now,
+        updated_at: now
+      }
+    end
+
+    # The caller's own uses fill the cap exactly; the last one sorts after
+    # the hidden document, so a hidden row taking a slot would push it out.
+    own =
+      for n <- 1..(cap - 1),
+          do: row.("a-fill-#{String.pad_leading("#{n}", 4, "0")}", file.project_id)
+
+    Repo.insert_all(Document, own ++ [row.("z-last", file.project_id)])
+
+    usage = fn ->
+      admin(scoped_conn()) |> get("/v1/media/#{@ds}/#{file.id}/usage") |> json_response(200)
+    end
+
+    without = usage.()
+
+    assert %{"total" => ^cap, "truncated" => false} = without["result"]
+
+    Repo.insert_all(Document, [row.("m-hidden", sibling_project.id)])
+
+    assert usage.() == without
+
+    Repo.insert_all(Document, [row.("b-one-more", file.project_id)])
+
+    assert %{"total" => ^cap, "truncated" => true} = usage.()["result"]
   end
 
   # ── fixtures ──────────────────────────────────────────────────────────────

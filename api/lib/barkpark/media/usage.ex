@@ -19,12 +19,11 @@ defmodule Barkpark.Media.Usage do
   documents the caller could read anyway, so neither half answers from the
   guard's own reads.
 
-    * Textual: `WhereUsed.textual_rows/2` gives candidate rows in the asked
-      dataset string. Each is read again through
-      `Content.Query.get_documents_by_ids/3` with the caller's scope — the
-      read stack every id hydration uses: dataset, workspace and project,
-      owner-scoped types, grants, private schemas — and kept only when that
-      read returns the very same row (`documents.id`). The kept document is
+    * Textual: `WhereUsed.textual_rows/3` runs the scan with the caller's
+      read scope in the SQL, before its cap — the stack every id hydration
+      uses (`Content.Query.scope_as_id_read/3`: dataset, workspace and
+      project, owner-scoped types, grants, private schemas) — so a document
+      the caller cannot read never takes a candidate slot. Each document is
       then rendered through `Envelope.render/3` as the caller, and must still
       hold the delivery path: a path inside a field this caller may not read
       does not count.
@@ -33,8 +32,12 @@ defmodule Barkpark.Media.Usage do
       type and field-visibility fences apply as they do to backlinks.
 
   A caller held to the published perspective (`published_only: true`) sees no
-  draft rows. Nothing here counts what was dropped: `total` is the number of
-  documents the caller is shown or could page to, never the guard's count.
+  draft rows. `total` counts the documents the caller may see, never the
+  guard's count. `truncated` is true when the caller's own textual matches pass
+  the scan's cap, so `total` is then a floor. One gap stays: a readable
+  document whose only use sits in a field the caller may not read still takes a
+  cap slot before the field check drops it; it can only make `truncated` true
+  early, and names nothing.
 
   The caller must already hold the file (the route reads it through
   `Media.get_file/2` with the same scope first); this module does not check it.
@@ -62,7 +65,7 @@ defmodule Barkpark.Media.Usage do
 
   @doc """
   The documents in `dataset` that use `file`, as the caller behind `opts` may
-  read them: `%{documents: [row], total: n}`.
+  read them: `%{documents: [row], total: n, truncated: boolean}`.
 
   `opts` are the caller's read opts (`ScopeHelpers.scope_opts/1`:
   `workspace_id`, `project_id`, `caller_context`, `grant_scoped`) plus
@@ -71,13 +74,16 @@ defmodule Barkpark.Media.Usage do
   """
   @spec list(MediaFile.t(), String.t(), keyword()) :: %{
           documents: [row()],
-          total: non_neg_integer()
+          total: non_neg_integer(),
+          truncated: boolean()
         }
   def list(%MediaFile{} = file, dataset, opts) when is_binary(dataset) do
     {published_only, read_opts} = Keyword.pop(opts, :published_only, false)
 
+    {textual, truncated} = textual(file, dataset, read_opts)
+
     rows =
-      (textual(file, dataset, read_opts) ++ structural(file, dataset, read_opts))
+      (textual ++ structural(file, dataset, read_opts))
       |> Enum.reject(&(published_only and Content.draft?(&1.doc_id)))
       |> Enum.uniq_by(& &1.doc_id)
 
@@ -87,28 +93,20 @@ defmodule Barkpark.Media.Usage do
       |> Enum.map(fn {id, versions} -> one_row(id, versions) end)
       |> Enum.sort_by(&{String.downcase(&1.title || ""), &1.id})
 
-    %{documents: Enum.take(documents, @shown), total: length(documents)}
+    %{documents: Enum.take(documents, @shown), total: length(documents), truncated: truncated}
   end
 
   defp textual(file, dataset, opts) do
-    case WhereUsed.textual_rows(file, dataset) do
-      [] ->
-        []
+    {docs, truncated} = WhereUsed.textual_rows(file, dataset, opts)
+    url = WhereUsed.delivery_path(file)
+    ctx = Keyword.get(opts, :caller_context)
 
-      candidates ->
-        pks = MapSet.new(candidates, & &1.id)
-        url = WhereUsed.delivery_path(file)
-        ctx = Keyword.get(opts, :caller_context)
+    rows =
+      docs
+      |> Enum.filter(&holds_url?(&1, url, dataset, opts, ctx))
+      |> Enum.map(&%{doc_id: &1.doc_id, type: &1.type, title: &1.title})
 
-        candidates
-        |> Enum.map(& &1.doc_id)
-        |> Enum.uniq()
-        |> Query.get_documents_by_ids(dataset, opts)
-        |> Map.values()
-        |> Enum.filter(&MapSet.member?(pks, &1.id))
-        |> Enum.filter(&holds_url?(&1, url, dataset, opts, ctx))
-        |> Enum.map(&%{doc_id: &1.doc_id, type: &1.type, title: &1.title})
-    end
+    {rows, truncated}
   end
 
   # The document as the caller would receive it still holds the path. An
