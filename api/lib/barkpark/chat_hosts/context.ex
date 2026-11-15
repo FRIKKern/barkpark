@@ -7,6 +7,7 @@ defmodule Barkpark.ChatHosts do
 
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
   alias Barkpark.Repo
+  alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
   @enrollment_ttl 10 * 60
   @credential_ttl 30 * 24 * 60 * 60
@@ -324,6 +325,17 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  @doc """
+  The commands `host` is handed on its poll: every live lease it holds.
+
+  Each command is checked again against the host's capabilities as stored now
+  (task-fb73a4f2ed75231f): the dispatch path's `TurnAttachments.admit/3` and
+  `BotFolder.admit/3` ran when the lease was made, and a heartbeat since then
+  may have dropped what the turn needs (an older host binary would run a bot
+  in the shared root, or drop a file). Such a lease is never handed out. The
+  server ends its turn with the dispatch path's refusal as the reason, so the
+  session leaves `working`, and the command leaves the queue.
+  """
   def next_commands(%RegisteredHost{} = host) do
     host.id
     |> Transport.commands()
@@ -331,20 +343,65 @@ defmodule Barkpark.ChatHosts do
       case Repo.get(ExecutionLease, lease_id) do
         %ExecutionLease{revoked_at: nil, status: status} = lease
         when status not in ["completed", "cancelled"] ->
-          [
-            %{
-              lease_id: lease.id,
-              epoch: lease.epoch,
-              last_cursor: lease.last_cursor,
-              command: command_to_map(command)
-            }
-          ]
+          case servable(host, lease, command) do
+            :ok ->
+              [
+                %{
+                  lease_id: lease.id,
+                  epoch: lease.epoch,
+                  last_cursor: lease.last_cursor,
+                  command: command_to_map(command)
+                }
+              ]
+
+            {:error, refusal} ->
+              end_unservable_turn(lease.id, refusal)
+              []
+          end
 
         _ ->
           []
       end
     end)
   end
+
+  # The same checks, in the same order, as `Runtime.dispatch/4` for a
+  # registered host.
+  defp servable(host, lease, command) do
+    with :ok <- TurnAttachments.admit(host, lease.provider, command) do
+      BotFolder.admit(host, lease.provider, command)
+    end
+  end
+
+  defp end_unservable_turn(lease_id, {reason, _provider} = refusal) do
+    Repo.transaction(fn ->
+      ExecutionLease
+      |> where([l], l.id == ^lease_id and is_nil(l.revoked_at))
+      |> lock("FOR UPDATE")
+      |> Repo.one()
+      |> case do
+        nil ->
+          Repo.rollback(refusal)
+
+        lease ->
+          lease
+          |> end_turn(reason, "server:#{reason}", unservable_message(reason))
+          |> ended_or_rollback(refusal)
+      end
+    end)
+    |> case do
+      {:ok, {:ended, execution_event, lease}} -> settle_ended_turn(execution_event, lease)
+      _ -> Transport.complete(lease_id)
+    end
+  end
+
+  defp unservable_message(:host_cannot_use_bot_folder),
+    do:
+      "The chat host no longer runs a bot in its own folder, so this turn was not sent. Update barkpark-chat-host."
+
+  defp unservable_message(:host_cannot_receive_attachments),
+    do:
+      "The chat host no longer receives this turn's attachments, so it was not sent. Update barkpark-chat-host, or send the words alone."
 
   def accept_event(%RegisteredHost{} = host, attrs) when is_map(attrs) do
     lease_id = value(attrs, :lease_id)
@@ -551,7 +608,24 @@ defmodule Barkpark.ChatHosts do
   # path as a host's close: the lease is `completed` (no heartbeat renews it,
   # no poll lists it again) and the recorder ends the turn on projection or
   # on its replay. A lease that already closed ends nothing.
-  defp end_expired_turn(%ExecutionLease{status: status} = lease, reason)
+  defp end_expired_turn(lease, reason) do
+    lease
+    |> end_turn(
+      reason,
+      "server:lease_expired",
+      "The chat host's lease expired before this turn closed."
+    )
+    |> ended_or_rollback(:lease_expired)
+  end
+
+  defp ended_or_rollback({:ended, _execution_event, _lease} = ended, _reason), do: ended
+  defp ended_or_rollback(:not_ended, reason), do: Repo.rollback(reason)
+
+  # The server's own close of a `leased`/`running` lease, written at the next
+  # cursor inside the caller's transaction, under its row lock. `:not_ended`
+  # (a lease already closed, or a write that failed) asks the caller to roll
+  # back.
+  defp end_turn(%ExecutionLease{status: status} = lease, reason, key, message)
        when status in ["leased", "running"] do
     cursor = lease.last_cursor + 1
 
@@ -560,20 +634,18 @@ defmodule Barkpark.ChatHosts do
       "terminal_state" => "failed",
       "origin" => "server",
       "reason" => Atom.to_string(reason),
-      "error" => %{"message" => "The chat host's lease expired before this turn closed."}
+      "error" => %{"message" => message}
     }
 
-    with {:ok, execution_event} <-
-           persist_event(lease, cursor, "server:lease_expired", event),
+    with {:ok, execution_event} <- persist_event(lease, cursor, key, event),
          :ok <- persist_cursor(lease, cursor, event) do
       {:ended, execution_event, lease}
     else
-      :duplicate -> Repo.rollback(:lease_expired)
-      {:error, _} -> Repo.rollback(:lease_expired)
+      _ -> :not_ended
     end
   end
 
-  defp end_expired_turn(_lease, _reason), do: Repo.rollback(:lease_expired)
+  defp end_turn(_lease, _reason, _key, _message), do: :not_ended
 
   # On when the lease was CREATED: a heartbeat renews `expires_at` on every
   # live lease, so a lease from before deploy can carry its expiry past the
