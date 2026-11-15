@@ -659,8 +659,25 @@ class BpReferencePicker extends HTMLElement {
         });
       }
     }
-    this._lastSearchMatches = Array.from(byCanonical.values());
+    this._lastSearchMatches = this._rank(Array.from(byCanonical.values()), query);
     return this._lastSearchMatches;
+  }
+
+  // The desk's order for a typed search, as TanStack's (lib/ref-rank.ts) and
+  // Sanity's: the hits whose title has a word starting with each query word
+  // first, then by title with numbers in order ("post 2" before "post 10").
+  // Elsewhere the server's order stands.
+  _rank(hits, query) {
+    const terms = this._box ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
+    if (!terms.length) return hits;
+    const score = (hit) => {
+      const words = hit.title.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+      return terms.filter((q) => words.some((w) => w.startsWith(q))).length;
+    };
+    return hits
+      .map((hit) => ({ hit, score: score(hit) }))
+      .sort((a, b) => b.score - a.score || a.hit.title.localeCompare(b.hit.title, undefined, { numeric: true }))
+      .map((x) => x.hit);
   }
 
   _filterParams() {
