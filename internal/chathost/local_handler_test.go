@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -392,10 +393,20 @@ func TestProviderHelperProcess(t *testing.T) {
 			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "codex-thread", "turn": map[string]any{"id": "codex-turn", "status": "completed"}}})
 			if os.Getenv("BARKPARK_HELPER_STDERR_CHILD") != "" {
 				// A grandchild (an MCP server, say) that outlives codex and
-				// keeps the inherited stderr open. It exits on its own.
-				child := exec.Command("sleep", "5")
+				// keeps the inherited stderr open. It exits on its own after
+				// BARKPARK_HELPER_STDERR_SECONDS (default 5); its pid goes to
+				// BARKPARK_HELPER_STDERR_PID when set, so a test can end it.
+				seconds := os.Getenv("BARKPARK_HELPER_STDERR_SECONDS")
+				if seconds == "" {
+					seconds = "5"
+				}
+				child := exec.Command("sleep", seconds)
 				child.Stderr = os.Stderr
-				_ = child.Start()
+				if child.Start() == nil {
+					if record := os.Getenv("BARKPARK_HELPER_STDERR_PID"); record != "" {
+						_ = os.WriteFile(record, []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+					}
+				}
 			}
 			os.Exit(0)
 		default:
