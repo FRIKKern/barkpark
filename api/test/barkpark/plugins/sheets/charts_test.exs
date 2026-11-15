@@ -149,6 +149,20 @@ defmodule Barkpark.Plugins.Sheets.ChartsTest do
     assert [_] = Charts.list_errors("charts", 0)
   end
 
+  test "a duplicated tab keeps its charts; exports and the snapshot ignore them" do
+    state = run(state(), set("A1:C4"))
+    copied = run(state, %{"op" => "duplicate_tab", "tab" => 0})
+    assert [%{"charts" => [chart]}, %{"charts" => [chart]}] = copied.content["tabs"]
+
+    removed = run(copied, %{"op" => "delete_tab", "tab" => 1})
+    assert [%{"charts" => [^chart]}] = removed.content["tabs"]
+
+    assert {:ok, xlsx} = Barkpark.Plugins.Sheets.XlsxExport.to_binary(state.content)
+    assert is_binary(xlsx)
+    assert Barkpark.Plugins.Sheets.Csv.export(state.content) =~ "Sales"
+    assert %{"rows" => [_ | _]} = Barkpark.Plugins.Sheets.Core.snapshot_for(state.content, 0)
+  end
+
   test "data skips cells that are not numbers and says when nothing is" do
     chart = %{"range" => "A1:C4", "headers" => true, "labels" => true}
 

@@ -139,6 +139,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     bars = chart_html(view)
     assert bars =~ "<rect"
     refute bars =~ "<polyline"
+    # The y-axis is pinned to round ticks (0..120 for a top value of 99);
+    # the last end-anchored label is the final x label.
+    assert Regex.scan(~r/bp-chart__tick"[^>]*text-anchor="end">([^<]*)</, bars)
+           |> Enum.map(&List.last/1) == ["120", "80", "40", "0", "Feb"]
 
     # A range of text only says so instead of drawing an empty chart.
     view |> element(~s([data-test-id="sheet-chart-btn"])) |> render_click()

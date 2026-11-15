@@ -42,11 +42,34 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
     DataViz.chart_html(%{
       "kind" => if(Map.get(chart, "type") == "bar", do: "bars", else: "line"),
       "series" => Enum.map(data.series, &%{"label" => &1.label, "points" => &1.points}),
-      "axes" => %{"xLabels" => data.labels}
+      "axes" => Map.merge(%{"xLabels" => data.labels}, axis_pins(chart, data))
     })
   end
 
   defp svg(_chart, _data), do: nil
+
+  # Pin the y-axis so its four ticks land on round numbers: the renderer draws
+  # them at even thirds of the span, which gives 126.7 for a 40..300 range.
+  # Bars keep a zero baseline. A flat series is left to the renderer.
+  defp axis_pins(chart, data) do
+    points = Enum.flat_map(data.series, & &1.points)
+    {lo, hi} = Enum.min_max(points)
+    lo = if Map.get(chart, "type") == "bar", do: min(lo, 0), else: lo
+    hi = if Map.get(chart, "type") == "bar", do: max(hi, 0), else: hi
+
+    with true <- hi > lo,
+         mag = :math.pow(10, Float.floor(:math.log10((hi - lo) / 3))),
+         {min, max} <-
+           Enum.find_value([1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 15], fn m ->
+             step = m * mag
+             base = Float.floor(lo / step) * step
+             if base + 3 * step >= hi, do: {base, base + 3 * step}
+           end) do
+      %{"min" => min, "max" => max}
+    else
+      _ -> %{}
+    end
+  end
 
   # ── events ───────────────────────────────────────────────────────────────
 
@@ -237,7 +260,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
         .sheet-charts {
           flex: none; max-height: 46vh; overflow: auto; padding: 10px 12px;
           border-top: 1px solid var(--border); background: var(--bg);
-          display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 600px), 1fr));
+          display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 540px), 1fr));
           --sheet-chart-s0: #2563eb; --sheet-chart-s1: #c2410c; --sheet-chart-s2: #047857; --sheet-chart-s3: #a21caf;
         }
         html[data-theme="dark"] .sheet-charts { --sheet-chart-s0: #7aa7ff; --sheet-chart-s1: #fb923c; --sheet-chart-s2: #34d399; --sheet-chart-s3: #e879f9; }
@@ -247,12 +270,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
         .sheet-reader:has(.sheet-charts) { max-height: none; }
         .sheet-reader:has(.sheet-charts) .sheet-grid-wrap { max-height: 70vh; }
         .sheet-reader .sheet-charts { max-height: none; }
-        .sheet-chart { margin: 0; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        .sheet-chart { margin: 0; min-width: 0; max-width: 720px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         .sheet-chart-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
         .sheet-chart-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sheet-chart-note { margin: 6px 0 0; font-size: 12px; color: var(--fg-dim, var(--fg)); }
         .sheet-chart .bp-chart__scroll { overflow-x: auto; }
-        .sheet-chart .bp-chart svg { display: block; width: 100%; min-width: 520px; height: auto; }
+        .sheet-chart .bp-chart svg { display: block; width: 100%; min-width: 500px; height: auto; }
         .sheet-chart .bp-chart__grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .sheet-chart .bp-chart__axis { stroke: var(--fg-dim, var(--fg)); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .sheet-chart .bp-chart__tick { fill: var(--fg-dim, var(--fg)); font-size: 12px; }
