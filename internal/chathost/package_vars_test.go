@@ -2,9 +2,11 @@ package chathost
 
 import (
 	"go/ast"
+	"go/build"
+	"go/importer"
 	"go/parser"
 	"go/token"
-	"os"
+	"go/types"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,99 +19,111 @@ import (
 // that only when the leftover goroutine happens to read at the wrong moment;
 // this check sees the write every time. A test shortens a setting on its own
 // Runner, LocalHandler or ClaudeStatusLabeler instead.
+//
+// The package is type-checked, so a name resolves as the compiler resolves it
+// (a local that shadows a global is not the global). A test write is any of:
+// an assignment or ++/-- whose target is rooted at a package-level var (x,
+// x.f, x[i], *x); &x; a method with a pointer receiver called on x or reached
+// through it (x.Store(...), x.f.Reset()); copy, clear or delete into x. It does
+// not follow x passed to a function that writes through it.
 func TestNoTestWritesAPackageLevelVariable(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+	all, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
-	parsed := map[string]*ast.File{}
-	globals := map[string]bool{}
-	specs := map[*ast.ValueSpec]bool{}
-	for _, name := range files {
+	var names []string
+	var files []*ast.File
+	for _, name := range all {
+		// The files this build compiles: turn_files_unix.go or _other.go.
+		if match, err := build.Default.MatchFile(".", name); err != nil || !match {
+			continue
+		}
+		names = append(names, name)
 		file, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		parsed[name] = file
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.VAR {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				value := spec.(*ast.ValueSpec)
-				specs[value] = true
-				for _, ident := range value.Names {
-					if ident.Name != "_" { // var _ Iface = … is a compile-time check, not a variable
-						globals[ident.Name] = true
-					}
-				}
-			}
-		}
+		files = append(files, file)
 	}
-
+	info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	config := types.Config{Importer: importer.Default()}
+	pkg, err := config.Check("chathost", fset, files, info)
+	if err != nil {
+		t.Fatalf("type-checking the package for the scan: %v", err)
+	}
 	// A scan that saw no package-level vars would pass on any tree.
-	if _, err := os.Stat("runner.go"); err != nil || !globals["ErrRevoked"] || !globals["turnFilesFolder"] {
-		t.Fatalf("the scan did not see this package's sources (%d files, %d vars): %v", len(parsed), len(globals), err)
+	for _, want := range []string{"ErrRevoked", "turnFilesFolder"} {
+		if _, ok := pkg.Scope().Lookup(want).(*types.Var); !ok {
+			t.Fatalf("the scan did not see %s: it is not reading this package's sources (%d files)", want, len(files))
+		}
 	}
 
-	// isGlobal: ident names a package-level var, not a local that shadows one.
-	// Per-file resolution leaves a name declared in another file unresolved.
-	isGlobal := func(ident *ast.Ident) bool {
-		if !globals[ident.Name] {
-			return false
-		}
-		if ident.Obj == nil {
-			return true
-		}
-		spec, ok := ident.Obj.Decl.(*ast.ValueSpec)
-		return ok && specs[spec]
-	}
-	var writes []string
-	written := func(expr ast.Expr) {
-		// The root of x, x.f, x[i], *x, (x).
+	// global: the package-level var expr is rooted at, if any.
+	global := func(expr ast.Expr) *types.Var {
 		for {
 			switch e := expr.(type) {
 			case *ast.SelectorExpr:
 				expr = e.X
-				continue
 			case *ast.IndexExpr:
 				expr = e.X
-				continue
 			case *ast.StarExpr:
 				expr = e.X
-				continue
 			case *ast.ParenExpr:
 				expr = e.X
-				continue
 			case *ast.Ident:
-				if isGlobal(e) {
-					writes = append(writes, fset.Position(e.Pos()).String()+": "+e.Name)
+				v, ok := info.Uses[e].(*types.Var)
+				if ok && v.Parent() == pkg.Scope() {
+					return v
 				}
+				return nil
+			default:
+				return nil
 			}
-			return
 		}
 	}
-	for name, file := range parsed {
-		if !strings.HasSuffix(name, "_test.go") {
+	var writes []string
+	flag := func(at ast.Node, how string, expr ast.Expr) {
+		if v := global(expr); v != nil {
+			writes = append(writes, fset.Position(at.Pos()).String()+": "+how+" "+v.Name())
+		}
+	}
+	for i, file := range files {
+		if !strings.HasSuffix(names[i], "_test.go") {
 			continue
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			switch n := node.(type) {
 			case *ast.AssignStmt:
-				if n.Tok == token.DEFINE {
-					return true
-				}
-				for _, lhs := range n.Lhs {
-					written(lhs)
+				if n.Tok != token.DEFINE {
+					for _, lhs := range n.Lhs {
+						flag(lhs, "assigns", lhs)
+					}
 				}
 			case *ast.IncDecStmt:
-				written(n.X)
+				flag(n, "increments", n.X)
 			case *ast.UnaryExpr:
-				// &global hands the variable to code that may write it.
 				if n.Op == token.AND {
-					written(n.X)
+					flag(n, "takes the address of", n.X)
+				}
+			case *ast.SelectorExpr:
+				selection := info.Selections[n]
+				if selection == nil || selection.Kind() == types.FieldVal {
+					break
+				}
+				if signature, ok := selection.Obj().Type().(*types.Signature); ok && signature.Recv() != nil {
+					if _, pointer := signature.Recv().Type().(*types.Pointer); pointer {
+						flag(n, "calls pointer method "+n.Sel.Name+" on", n.X)
+					}
+				}
+			case *ast.CallExpr:
+				if ident, ok := n.Fun.(*ast.Ident); ok && len(n.Args) > 0 {
+					if builtin, ok := info.Uses[ident].(*types.Builtin); ok {
+						switch builtin.Name() {
+						case "copy", "clear", "delete":
+							flag(n, builtin.Name()+" into", n.Args[0])
+						}
+					}
 				}
 			}
 			return true
