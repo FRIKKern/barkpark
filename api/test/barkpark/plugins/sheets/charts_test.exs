@@ -159,7 +159,7 @@ defmodule Barkpark.Plugins.Sheets.ChartsTest do
 
     assert {:ok, xlsx} = Barkpark.Plugins.Sheets.XlsxExport.to_binary(state.content)
     assert is_binary(xlsx)
-    assert Barkpark.Plugins.Sheets.Csv.export(state.content) =~ "Sales"
+    assert {:ok, "Month,Sales,Cost" <> _} = Barkpark.Plugins.Sheets.Csv.export(state.content)
     assert %{"rows" => [_ | _]} = Barkpark.Plugins.Sheets.Core.snapshot_for(state.content, 0)
   end
 

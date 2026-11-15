@@ -151,6 +151,8 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     |> element(~s([data-test-id="sheet-chart-form"]))
     |> render_submit(%{"chart_id" => "", "range" => "A1:A3", "type" => "line", "title" => ""})
 
+    BarkparkWeb.LiveSettle.settle!(view, label: "text-only chart")
+
     assert view |> element(~s([data-test-id="sheet-chart-empty"])) |> render() =~
              "No numbers in A1:A3"
 
@@ -179,7 +181,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     refute render(reader) =~ "forged"
   end
 
-  defp chart_html(view), do: view |> element(~s([data-chart-id="ch-1"])) |> render()
+  # The host forwards each session delta to the grid with send_update, which
+  # lands one message after the delta: wait for the mailbox before reading.
+  defp chart_html(view) do
+    BarkparkWeb.LiveSettle.settle!(view, label: "chart redraw")
+    view |> element(~s([data-chart-id="ch-1"])) |> render()
+  end
 
   defp polylines(html), do: Regex.scan(~r/<polyline[^>]*>/, html)
 
