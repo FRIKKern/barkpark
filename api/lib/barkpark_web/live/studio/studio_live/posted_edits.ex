@@ -2,80 +2,129 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   @moduledoc """
   What the form buffer takes from a post (task-a4ded0be5c8ec3cb).
 
-  After a save settles, the buffer holds for every field either what this
-  page just posted for it or a newer value from another editor. It never
-  holds an older value of this page's own that the person has typed away.
+  ## The model
 
-  The browser posts every drawn input on each change. The save reads a posted
-  value as an edit only when it differs from what the form drew for
-  `editor_doc`, the row this tab last saved or loaded
-  (`Barkpark.Content.Forms.edited_keys/4`); for every other field it keeps
-  what the store holds.
+  For each field: the store holds S, the form buffer B (what the server
+  draws), the page last posted D, and R is the newest value another editor
+  saved.
 
-  ## A post that was written (`into_form/3`)
+  After a post settles, **B is D for every field the post carried, unless B
+  is an R the page has not posted back yet**. So with one editor the buffer
+  always takes the whole post, whether the post was written or changed
+  nothing. Nothing is derived from which fields are unsaved, held or edited.
 
-  The buffer takes:
+  ## The exception: a value from another editor
 
-  1. Every field the save read as an edit.
-  2. The field the post is a change of (`RefusedSave.target/2`): the page
-     shows what the person typed there.
-  3. Every field whose buffer value is this page's own and not saved: a
-     field a save did not land for (`editor_unsaved_keys`) and a field the
-     store refused (`RefusedSave.keys/1`). The post carries what the page
-     shows for it now. Left alone, a refused value the person typed back to
-     the stored one stayed in the buffer, was drawn again on the next patch,
-     and was saved by the next change (#26396 review).
+  The browser posts every drawn input on each change. A post that left the
+  browser before another editor's save reached the page carries that
+  editor's fields at their old values. The store keeps R for them: it reads
+  a posted value as an edit only when it differs from what the form drew for
+  `editor_doc`, the row this tab last saved or loaded. The buffer took the
+  whole post, so the page drew the old values again, and the next change
+  anywhere posted them as edits, over the other editor's save.
 
-  Any other field keeps the buffer's value. That is the same value when
-  nobody else saved. When another editor saved, it is that editor's: a post
-  that left the browser before the save reached the page carries the old
-  value, and taking it put the old value back on the page, where the next
-  change anywhere posted it as an edit over the other editor's save.
+  `remote/3` remembers each field a remote save changed in the buffer, with
+  the value it put there. Such a field is *waiting* while the buffer still
+  holds exactly that value and `editor_doc` is still the row from before the
+  remote save. A waiting field's posted value is not taken when the save
+  does not read it as an edit (`Barkpark.Content.Forms.edited_keys/4`, the
+  code the write runs): it is what the page showed before R.
 
-  ## A post that changed nothing (`unchanged/2`)
+  A field stops waiting when the buffer gets any other value for it (the
+  person's own typing, a refused value, a pick), and all of them do when a
+  save of this tab lands, because `editor_doc` is then the saved row.
 
-  Nothing is written and the buffer takes only (3). It does not take (2): a
-  post that changed nothing can be an old one, and the buffer may hold
-  another editor's newer value for that field.
+  The field a post is a change of (`RefusedSave.target/2`) is the person's
+  own typing. A written post puts it in the buffer even while it waits, as
+  before this module. A post that changed nothing leaves the buffer's R and
+  the field stops waiting, so the next written post takes it, as before.
   """
 
-  import Phoenix.Component, only: [assign: 2]
+  import Phoenix.Component, only: [assign: 2, assign: 3]
 
   alias Barkpark.Content.Forms
-  alias BarkparkWeb.Studio.StudioLive.RefusedSave
 
   @doc """
-  The form buffer after `params` landed. `socket` is the socket from before
-  the save, `params` the post in storage shape and `raw_params` the post as
-  the browser sent it, both as `Forms.upsert_draft/6` was given them.
+  A remote save changed the buffer from `old_form` to `new_form`: each field
+  that changed waits. `socket` still holds the `editor_doc` from before.
+  """
+  def remote(socket, old_form, new_form) when is_map(old_form) and is_map(new_form) do
+    changed =
+      for {key, value} <- new_form, Map.get(old_form, key) != value, into: %{}, do: {key, value}
+
+    if changed == %{} do
+      socket
+    else
+      assign(
+        socket,
+        :editor_remote_waiting,
+        {base(socket), Map.merge(waiting_values(socket), changed)}
+      )
+    end
+  end
+
+  def remote(socket, _old_form, _new_form), do: socket
+
+  @doc """
+  The form buffer after `params` was written. `socket` is the socket from
+  before the save, `params` the post in storage shape and `raw_params` the
+  post as the browser sent it, both as `Forms.upsert_draft/6` was given them.
   """
   def into_form(socket, params, raw_params) do
-    schema = socket.assigns[:editor_schema]
-    posted = Forms.with_posted_rich_text(params, raw_params, schema)
-
-    edited =
-      Forms.edited_keys(socket.assigns[:editor_doc], socket.assigns[:editor_type], schema, posted)
-
-    target = List.wrap(socket.assigns[:editor_post_target])
-    take(socket, params, edited ++ target ++ own_unsaved(socket))
+    waiting = waiting(socket, socket.assigns[:editor_form] || %{}) -- target(socket)
+    merge(socket, params, old_values(socket, params, raw_params, waiting))
   end
 
   @doc """
   `socket` after a post that changed nothing against `editor_doc`: "Saved",
-  and the buffer takes the posted value of each field it held unsaved.
+  and the buffer takes the post. A waiting field keeps the buffer's value;
+  the one the post is a change of stops waiting.
   """
   def unchanged(socket, params) do
+    form = socket.assigns[:editor_form] || %{}
+    values = Map.drop(waiting_values(socket), target(socket))
+
     assign(socket,
       save_status: "Saved",
-      editor_form: take(socket, params, own_unsaved(socket))
+      editor_form: merge(socket, params, waiting(socket, form)),
+      editor_remote_waiting: {base(socket), values}
     )
   end
 
-  defp take(socket, params, keys),
-    do: Map.merge(socket.assigns[:editor_form] || %{}, Map.take(params, keys))
+  defp merge(socket, params, kept),
+    do: Map.merge(socket.assigns[:editor_form] || %{}, Map.drop(params, kept))
 
-  defp own_unsaved(socket) do
-    unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
-    MapSet.to_list(unsaved) ++ RefusedSave.keys(socket)
+  # The waiting fields whose posted value the save does not read as an edit.
+  defp old_values(_socket, _params, _raw_params, []), do: []
+
+  defp old_values(socket, params, raw_params, waiting) do
+    schema = socket.assigns[:editor_schema]
+    posted = params |> Forms.with_posted_rich_text(raw_params, schema) |> Map.take(waiting)
+
+    waiting --
+      Forms.edited_keys(socket.assigns[:editor_doc], socket.assigns[:editor_type], schema, posted)
   end
+
+  defp waiting(socket, form),
+    do: for({key, value} <- waiting_values(socket), Map.get(form, key) === value, do: key)
+
+  # Remembered against one `editor_doc`; void for any other.
+  defp waiting_values(socket) do
+    case socket.assigns[:editor_remote_waiting] do
+      {base, values} -> if base == base(socket), do: values, else: %{}
+      _ -> %{}
+    end
+  end
+
+  defp base(socket) do
+    case socket.assigns[:editor_doc] do
+      %{doc_id: id} = doc ->
+        {socket.assigns[:editor_type], id, Map.get(doc, :rev), Map.get(doc, :updated_at)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp target(socket), do: List.wrap(socket.assigns[:editor_post_target])
 end
