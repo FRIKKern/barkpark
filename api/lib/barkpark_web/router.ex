@@ -2978,6 +2978,7 @@ defmodule BarkparkWeb.Router do
     post("/rotate", ChatHostController, :rotate)
     get("/commands", ChatHostController, :commands)
     post("/events", ChatHostController, :event)
+    post("/leases/:lease_id/status", ChatHostController, :status)
     get("/leases/:lease_id/attachments/:attachment_id", ChatHostAttachmentController, :show)
   end
 

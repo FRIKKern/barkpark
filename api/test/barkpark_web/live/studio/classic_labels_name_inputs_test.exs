@@ -50,7 +50,6 @@ defmodule BarkparkWeb.Studio.ClassicLabelsNameInputsTest do
           {"Title", "title"},
           {"Slug", "slug"},
           {"Status", "status"},
-          {"When", "when"},
           {"Excerpt", "excerpt"},
           {"Pinned", "pinned"}
         ] do
@@ -62,6 +61,21 @@ defmodule BarkparkWeb.Studio.ClassicLabelsNameInputsTest do
                ~r{<(?:input|select|textarea)[^>]*id="#{Regex.escape(for_id)}"[^>]*name="doc\[#{name}\]"},
              "the #{label} label points at #{for_id}, which is not the doc[#{name}] control"
     end
+  end
+
+  # A date-time's named control is a hidden input; its label points at the
+  # picker beside it, the control a click or a reader can reach.
+  test "a date-time field's label points at its picker", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/note/n1"))
+
+    assert has_element?(view, ~s(label.editor-field-label[for="doc-field-n1-when"]), "When")
+
+    assert has_element?(
+             view,
+             ~s(.bp-datetime-field input[type="datetime-local"][id="doc-field-n1-when"])
+           )
+
+    assert has_element?(view, ~s(.bp-datetime-field input[type="hidden"][name="doc[when]"]))
   end
 
   test "a web-component field's label points at nothing rather than at a missing id", %{

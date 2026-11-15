@@ -10,9 +10,11 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
   so a link read from it showed the old name. The link now reads the
   `list_preview` field, as the desk's rows do.
 
-  (b) The pane that edits shows its links in a strip, read again only when
-  its reference ids change. A change to a document of a type its references
-  can point at now reads the strip again too.
+  (b) The pane that edits reads its targets again only when its reference
+  ids change, or when a document of a type its references can point at
+  changes. A single reference's card is drawn in the browser, so the targets
+  are pushed to it (`desk:ref-targets`); the "…" menu no longer holds a
+  hidden link for it.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -128,13 +130,9 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
   @read_only ~s([data-pane-index="2"])
   @edit "[data-pane-editing]"
 
-  # The pane's one link shows `name`, and no longer `old`. The edit pane's
-  # links are in its "…" menu ("Open reference: <title>").
+  # The pane's one link shows `name`, and no longer `old`.
   defp shows?(view, pane, name, old \\ nil) do
-    link =
-      if pane == @edit,
-        do: ~s( .pane-header a[data-desk-doc-action="open-reference"]),
-        else: " a[data-desk-ref]"
+    link = " a[data-desk-ref]"
 
     has_element?(view, pane <> link, name) and
       (old == nil or not has_element?(view, pane <> link, old))
@@ -156,18 +154,32 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
 
   test "(b) the edit pane's strip follows a rename of a referenced document", c do
     {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.post};#{c.one}")
-    assert poll(view, fn -> shows?(view, @edit, "Ada Lovelace") end)
+    ada = c.ada
+
+    assert_push_event(
+      view,
+      "desk:ref-targets",
+      %{refs: [%{path: "author", id: ^ada, title: "Ada Lovelace"}]},
+      5_000
+    )
 
     rename_elsewhere(c, "Ada Byron")
     send(view.pid, {:document_changed, %{type: c.author, doc_id: c.ada}})
 
-    assert poll(view, fn -> shows?(view, @edit, "Ada Byron", "Ada Lovelace") end),
-           "the edit pane: " <> strip(view, @edit)
+    assert_push_event(
+      view,
+      "desk:ref-targets",
+      %{refs: [%{path: "author", id: ^ada, title: "Ada Byron"}]},
+      5_000
+    )
+
+    # The card is that link: the menu holds no hidden twin of it.
+    refute has_element?(view, @edit <> ~s( a[data-desk-doc-action="open-reference"]))
   end
 
   test "control: a change of a type the editor cannot reference does not read its strip", c do
     {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.post};#{c.one}")
-    assert poll(view, fn -> shows?(view, @edit, "Ada Lovelace") end)
+    assert_push_event(view, "desk:ref-targets", %{refs: [%{title: "Ada Lovelace"}]}, 5_000)
 
     # Renamed in the store behind the app's back, then announced as another
     # type's change: a strip that read again would show the new name.
@@ -182,7 +194,6 @@ defmodule BarkparkWeb.Studio.DeskRefTitlesTest do
     Process.sleep(600)
     render_async(view, 5_000)
 
-    assert shows?(view, @edit, "Ada Lovelace", "Ada Quiet"),
-           "the edit pane: " <> strip(view, @edit)
+    refute_push_event(view, "desk:ref-targets", _targets, 100)
   end
 end
