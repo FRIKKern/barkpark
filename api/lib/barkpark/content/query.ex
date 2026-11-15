@@ -21,7 +21,7 @@ defmodule Barkpark.Content.Query do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, DraftId, Schema}
+  alias Barkpark.Content.{Document, DraftId, Query.DraftShadow, Schema}
 
   import Barkpark.Content.Scope,
     only: [
@@ -62,8 +62,8 @@ defmodule Barkpark.Content.Query do
                         in `text`, for a caller that knows which text names
                         the keys it reads but not the keys a document holds
 
-  The `:drafts` perspective merges draft/published pairs at SQL level via
-  `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
+  `:drafts` merges draft/published pairs in SQL (`DISTINCT ON`) before `limit`
+  and `offset`, and judges a filter on the draft when there is one (`DraftShadow`).
 
   Tenancy scoping (Wave 1 hard boundary):
     - `:workspace_id` — scope reads to a single workspace (nil = unscoped /
@@ -1507,7 +1507,7 @@ defmodule Barkpark.Content.Query do
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
     |> maybe_only_doc_ids(Keyword.get(opts, :only_doc_ids))
-    |> apply_filter_map(filter_map, type, dataset, opts)
+    |> DraftShadow.filter(filter_map, opts, &apply_filter_map(&1, &2, type, dataset, opts))
   end
 
   # A preview token that names documents (owner ruling #17) lists only those,
