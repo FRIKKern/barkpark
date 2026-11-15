@@ -4276,7 +4276,7 @@ defmodule Barkpark.Content.Query do
   The read scope of `get_documents_by_ids/3` on any `Document` query: dataset,
   workspace and project, owner-scoped rows, grants, private schemas. A caller
   that must cap a candidate set applies it BEFORE the limit, so rows the caller
-  cannot read never take a slot (`Media.WhereUsed.textual_rows/3`).
+  cannot read never take a slot (`Media.WhereUsed.textual_rows/4`).
   """
   def scope_as_id_read(query, dataset, opts) do
     {workspace_id, project_id} = {opts[:workspace_id], opts[:project_id]}

@@ -19,25 +19,25 @@ defmodule Barkpark.Media.Usage do
   documents the caller could read anyway, so neither half answers from the
   guard's own reads.
 
-    * Textual: `WhereUsed.textual_rows/3` runs the scan with the caller's
-      read scope in the SQL, before its cap — the stack every id hydration
-      uses (`Content.Query.scope_as_id_read/3`: dataset, workspace and
-      project, owner-scoped types, grants, private schemas) — so a document
-      the caller cannot read never takes a candidate slot. Each document is
-      then rendered through `Envelope.render/3` as the caller, and must still
-      hold the delivery path: a path inside a field this caller may not read
-      does not count.
+    * Textual: `WhereUsed.textual_rows/4` runs the scan with the caller's
+      read scope in the SQL — the stack every id hydration uses
+      (`Content.Query.scope_as_id_read/3`: dataset, workspace and project,
+      owner-scoped types, grants, private schemas) — so a document the
+      caller cannot read is never fetched. Each fetched document is then
+      rendered through `Envelope.render/3` as the caller, and must still hold
+      the delivery path: a path inside a field this caller may not read does
+      not count. The scan pages until more than the cap have passed that
+      check, so a dropped document never takes a cap slot either.
     * Structural: `Content.Query.list_reference_holders/3` (the backlinks
       read) runs with the caller's own context and scope, so its row, grant,
       type and field-visibility fences apply as they do to backlinks.
 
   A caller held to the published perspective (`published_only: true`) sees no
   draft rows. `total` counts the documents the caller may see, never the
-  guard's count. `truncated` is true when the caller's own textual matches pass
-  the scan's cap, so `total` is then a floor. One gap stays: a readable
-  document whose only use sits in a field the caller may not read still takes a
-  cap slot before the field check drops it; it can only make `truncated` true
-  early, and names nothing.
+  guard's count. `truncated` is true when more than the cap of textual uses
+  pass both checks, so `total` is then a floor. Neither `total`, `truncated`
+  nor the list depends on a document or field the caller may not read. Time
+  can: each extra page the field check forces is one more scan.
 
   The caller must already hold the file (the route reads it through
   `Media.get_file/2` with the same scope first); this module does not check it.
@@ -97,33 +97,36 @@ defmodule Barkpark.Media.Usage do
   end
 
   defp textual(file, dataset, opts) do
-    {docs, truncated} = WhereUsed.textual_rows(file, dataset, opts)
     url = WhereUsed.delivery_path(file)
     ctx = Keyword.get(opts, :caller_context)
-
-    rows =
-      docs
-      |> Enum.filter(&holds_url?(&1, url, dataset, opts, ctx))
-      |> Enum.map(&%{doc_id: &1.doc_id, type: &1.type, title: &1.title})
-
-    {rows, truncated}
+    keep = &holding_url(&1, url, dataset, opts, ctx)
+    {docs, truncated} = WhereUsed.textual_rows(file, dataset, opts, keep)
+    {Enum.map(docs, &%{doc_id: &1.doc_id, type: &1.type, title: &1.title}), truncated}
   end
 
-  # The document as the caller would receive it still holds the path. An
-  # admin sees every field, so its render can only equal the stored content.
-  defp holds_url?(_doc, _url, _dataset, _opts, %{is_admin: true}), do: true
+  # The documents of one page that, as the caller would receive them, still
+  # hold the path. An admin sees every field, so its render can only equal the
+  # stored content. One schema read per type per page.
+  defp holding_url(page, _url, _dataset, _opts, %{is_admin: true}), do: page
 
-  defp holds_url?(doc, url, dataset, opts, ctx) do
-    schema =
-      case Schema.get_schema_for_redaction(doc.type, dataset, opts) do
-        {:ok, schema} -> schema
-        :error -> nil
-      end
+  defp holding_url(page, url, dataset, opts, ctx) do
+    schemas =
+      page
+      |> Enum.map(& &1.type)
+      |> Enum.uniq()
+      |> Map.new(fn type ->
+        case Schema.get_schema_for_redaction(type, dataset, opts) do
+          {:ok, schema} -> {type, schema}
+          :error -> {type, nil}
+        end
+      end)
 
-    doc
-    |> Envelope.render(schema, ctx)
-    |> Jason.encode!()
-    |> String.contains?(url)
+    Enum.filter(page, fn doc ->
+      doc
+      |> Envelope.render(schemas[doc.type], ctx)
+      |> Jason.encode!()
+      |> String.contains?(url)
+    end)
   end
 
   defp structural(file, dataset, opts) do

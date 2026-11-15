@@ -216,6 +216,47 @@ defmodule BarkparkWeb.V1MediaUsageTest do
     assert %{"total" => ^cap, "truncated" => true} = usage.()["result"]
   end
 
+  test "a use only inside a private field never takes a cap slot either" do
+    file = media_file!()
+    scope = [workspace_id: file.workspace_id, project_id: file.project_id]
+    cap = Barkpark.Media.WhereUsed.rows_limit()
+    url = "/media/files/#{file.path}"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "usage_memo",
+          "title" => "Usage memo",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "secret", "type" => "string", "private" => true}
+          ]
+        },
+        @ds,
+        scope
+      )
+
+    # The editor's own visible uses fill the cap exactly, the last sorting
+    # after the memo; the memo is readable but holds the path only in `secret`.
+    own =
+      for n <- 1..(cap - 1),
+          do: raw_row(file, "a-fill-#{String.pad_leading("#{n}", 4, "0")}", "paper", image(url))
+
+    Repo.insert_all(Document, own ++ [raw_row(file, "z-last", "paper", image(url))])
+
+    usage = fn ->
+      editor(scoped_conn()) |> get("/v1/media/#{@ds}/#{file.id}/usage") |> json_response(200)
+    end
+
+    without = usage.()
+    assert %{"total" => ^cap, "truncated" => false} = without["result"]
+
+    Repo.insert_all(Document, [raw_row(file, "m-memo", "usage_memo", %{"secret" => url})])
+
+    assert usage.() == without
+  end
+
   # ── fixtures ──────────────────────────────────────────────────────────────
 
   defp both(row, draft, published),
@@ -237,6 +278,27 @@ defmodule BarkparkWeb.V1MediaUsageTest do
 
     on_exit(fn -> File.rm(Path.join(Media.upload_dir(), created["path"])) end)
     Repo.get!(MediaFile, created["id"])
+  end
+
+  defp image(url), do: %{"blocks" => [%{"type" => "image", "src" => url}]}
+
+  defp raw_row(file, doc_id, type, content) do
+    now = DateTime.utc_now()
+
+    %{
+      id: Ecto.UUID.generate(),
+      doc_id: doc_id,
+      type: type,
+      dataset: @ds,
+      title: doc_id,
+      status: "published",
+      workspace_id: file.workspace_id,
+      project_id: file.project_id,
+      rev: "rev-" <> doc_id,
+      content: content,
+      inserted_at: now,
+      updated_at: now
+    }
   end
 
   defp paper!(file, title, workspace_id, project_id, opts \\ []) do

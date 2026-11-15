@@ -477,7 +477,7 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   # The textual scan's rows, before any select: `scan/3` counts and samples
-  # them, `textual_rows/3` hands the caller's own to `Media.Usage`.
+  # them, `textual_rows/4` hands the caller's own to `Media.Usage`.
   defp scan_query(url, workspace_id, narrow) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
@@ -502,40 +502,60 @@ defmodule Barkpark.Media.WhereUsed do
     |> narrow.()
   end
 
-  @doc "The most textual candidates `textual_rows/3` returns."
+  @doc "The most textual uses `textual_rows/4` returns."
   def rows_limit, do: @rows_limit
 
   @doc """
   The textual scan's documents in `dataset` that the caller behind `opts` may
-  read, at most #{@rows_limit}: `{documents, truncated}`.
+  read and that `keep` accepts, at most #{@rows_limit}: `{documents, truncated}`.
 
   The caller's read scope (`Content.Query.scope_as_id_read/3`: dataset,
   workspace and project, owner-scoped rows, grants, private schemas) is part of
-  the SQL, before the limit, on top of the blob's own workspace fence. A row
-  the caller cannot read never takes a slot, so neither the list nor
-  `truncated` changes with it. `truncated` is true only when the caller's own
-  matches pass the cap. The delete guard's `scan/3` is not this query: it
-  still counts every referrer.
+  the SQL, on top of the blob's own workspace fence, so a row the caller cannot
+  read is never fetched. `keep` takes one page of documents and returns the
+  ones to count (`Media.Usage` drops a use that sits only in a field the caller
+  may not read). The scan reads pages of #{@rows_limit + 1} in `doc_id` order
+  and stops once more than #{@rows_limit} rows have passed `keep`, or the
+  matches run out. No other bound: a page bound would make `truncated` depend
+  on how many rows `keep` dropped. So the cap and `truncated` count only kept
+  rows. The delete guard's `scan/3` is not this query: it still counts every
+  referrer.
   """
-  def textual_rows(%MediaFile{path: path} = file, dataset, opts)
+  def textual_rows(%MediaFile{path: path} = file, dataset, opts, keep \\ & &1)
       when is_binary(path) and is_binary(dataset) do
     scoped =
       &(&1
         |> where([d], d.dataset == ^dataset)
         |> Barkpark.Content.Query.scope_as_id_read(dataset, opts))
 
-    rows =
+    query =
       file
       |> delivery_path()
       |> scan_query(Map.get(file, :workspace_id), scoped)
-      |> order_by([d], asc: d.doc_id)
+      |> order_by([d], asc: d.doc_id, asc: d.id)
       |> limit(@rows_limit + 1)
-      |> Repo.all()
 
+    rows = kept_pages(query, nil, keep, [])
     {Enum.take(rows, @rows_limit), length(rows) > @rows_limit}
   end
 
-  def textual_rows(%MediaFile{}, _dataset, _opts), do: {[], false}
+  def textual_rows(%MediaFile{}, _dataset, _opts, _keep), do: {[], false}
+
+  # Keyset pages on (doc_id, id): `id` breaks a tie should two rows in scope
+  # share a doc_id, so no row is skipped or read twice.
+  defp kept_pages(query, last, keep, kept) do
+    page = query |> after_row(last) |> Repo.all()
+    kept = kept ++ keep.(page)
+
+    if length(kept) > @rows_limit or length(page) <= @rows_limit,
+      do: kept,
+      else: kept_pages(query, List.last(page), keep, kept)
+  end
+
+  defp after_row(query, nil), do: query
+
+  defp after_row(query, %{doc_id: doc_id, id: id}),
+    do: where(query, [d], d.doc_id > ^doc_id or (d.doc_id == ^doc_id and d.id > ^id))
 
   # LIKE metacharacters in the blob path would otherwise make the pattern match
   # MORE than the literal path — an over-broad match here means a refusal that
