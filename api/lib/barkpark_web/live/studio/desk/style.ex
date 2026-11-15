@@ -281,6 +281,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit > .pane-layout { flex: 1 1 auto; min-height: 0; }
       .dk fieldset.editor-field { border: 0; margin-inline: 0; padding: 0; min-width: 0; }
       .dk fieldset.editor-field > legend { padding: 0; }
+      /* A field's Field actions button (`Desk.FieldActions`) is drawn by `Desk.DocStyle`, with the rest of the edit pane. */
       .dk-search-dialog { box-sizing: border-box; inset: 0; width: min(800px, calc(100vw - 32px)); max-width: none; height: fit-content; max-height: min(735px, calc(88vh - 20px)); margin: 12vh auto auto; padding: 0; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-toast-shadow); overflow: hidden; font-size: 13px; line-height: 19px; }
       .dk-search-dialog[open] { display: flex; flex-direction: column; }
       .dk-search { display: flex; flex-direction: column; min-height: 0; }
