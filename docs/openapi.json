@@ -138,6 +138,7 @@
                   "hollow_paper",
                   "host_cannot_receive_attachments",
                   "host_execution_not_permitted",
+                  "host_limit_reached",
                   "idempotency_key_in_use",
                   "import_body_read_failed",
                   "import_body_too_large",

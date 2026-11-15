@@ -25,6 +25,7 @@ defmodule BarkparkWeb.ChatHostController do
     if TenancyAuth.workspace_owner?(conn.assigns.api_token, workspace_id) do
       case ChatHosts.issue_enrollment(workspace_id, params) do
         {:ok, result} -> conn |> put_status(:created) |> json(result)
+        {:error, {:host_limit_reached, limit}} -> host_limit_reached(conn, limit)
         {:error, changeset} -> unprocessable(conn, changeset)
       end
     else
@@ -68,6 +69,10 @@ defmodule BarkparkWeb.ChatHostController do
         )
 
         unprocessable(conn, changeset)
+
+      # Like the 422 above, only a valid unexpired token reaches this.
+      {:error, {:host_limit_reached, limit}} ->
+        host_limit_reached(conn, limit)
 
       {:error, _reason} ->
         unauthorized_enrollment(conn)
@@ -166,6 +171,16 @@ defmodule BarkparkWeb.ChatHostController do
   defp not_found(conn) do
     conn
     |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: "host not found"})
+  end
+
+  defp host_limit_reached(conn, limit) do
+    conn
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "host_limit_reached",
+      message:
+        "this workspace has reached its limit of #{limit} enrolled chat hosts; revoke one to enrol another",
+      details: %{limit: limit}
+    })
   end
 
   defp conflict(conn, reason) do
