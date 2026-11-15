@@ -16,3 +16,8 @@ import "time"
 // build. CI therefore also runs this test without -race, against the 1 s bound
 // in limits_bound_test.go.
 const limitDocTime = 5 * time.Second
+
+// raceDetector reports whether the test binary runs under -race. The cost
+// check in limits_cost_test.go does not run here: the detector's uneven
+// slowdown changes every doc's cost relative to the calibration doc.
+const raceDetector = true

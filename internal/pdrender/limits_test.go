@@ -203,7 +203,8 @@ func TestLimitEdgesMatchTheElixirText(t *testing.T) {
 
 func TestLimitDocsRenderWithinTheirBound(t *testing.T) {
 	reg := DefaultRegistry(LightTheme())
-	for _, d := range loadLimitDocs(t) {
+	docs := loadLimitDocs(t)
+	for _, d := range docs {
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
@@ -228,6 +229,11 @@ func TestLimitDocsRenderWithinTheirBound(t *testing.T) {
 			t.Errorf("%s does not show %q", d.Name, nestedTooDeep)
 		}
 	}
+	// A subtest, so CI's `-run '^TestLimitDocsRenderWithinTheirBound$'` step
+	// (go-tests.yml, no race detector) runs it too.
+	t.Run("cost against a calibration render", func(t *testing.T) {
+		checkLimitDocCost(t, reg, docs)
+	})
 }
 
 func renderBlockText(t *testing.T, block string, width int) string {
