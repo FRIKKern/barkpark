@@ -376,7 +376,8 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
   test "the nb-NO classic editor's save status is Norwegian", %{conn: conn, ws: ws, proj: proj} do
     {:ok, view, _html} = live(conn, editor(ws, proj))
 
-    html = render_hook(view, "autosave", %{"doc" => %{"title" => "Over My Dead Body"}})
+    html =
+      BarkparkWeb.EditorPost.hook(view, "autosave", %{"doc" => %{"title" => "Over My Dead Body"}})
 
     assert html =~ ~s(class="save-status" role="status" aria-live="polite">Lagret<)
     refute html =~ ~s(aria-live="polite">Saved<)

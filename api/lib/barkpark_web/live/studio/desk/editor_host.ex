@@ -46,6 +46,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
   alias BarkparkWeb.Studio.StudioLive.DocActions
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Fields
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Scope
   alias BarkparkWeb.Studio.StudioLive.Paths
   alias Phoenix.LiveView.JS
 
@@ -281,6 +283,27 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
       true ->
         event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+    end
+  end
+
+  @doc """
+  A change the desk built itself for the open document (Paste field), with
+  the guards a typed change gets above. It is no browser post and names no
+  document (`Fields.autosave_built/2`).
+  """
+  def write_built(params, socket) do
+    cond do
+      gone?(socket.assigns) ->
+        {:noreply, socket}
+
+      Discarded.drop?(socket.assigns) ->
+        {:noreply, Discarded.drop(socket)}
+
+      true ->
+        params
+        |> Fields.autosave_built(written(socket, "autosave"))
+        |> Scope.settle_group()
+        |> ours()
     end
   end
 

@@ -86,7 +86,10 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
     assert hidden_value(html, "bp-ref-hidden-author") == "ada"
     assert hidden_value(html, "bp-mp-hidden-cover") =~ "one.png"
 
-    html = render_patch(view, scoped_studio("/d/#{@dataset}/studio/note/n2"))
+    # The patch that opens another document draws no form; the next render
+    # draws the second note's (`DocSwap`, task-8908b6e031268f77).
+    render_patch(view, scoped_studio("/d/#{@dataset}/studio/note/n2"))
+    html = render(view)
 
     assert hidden_value(html, "bp-rt-hidden-body") =~ "second body"
     assert hidden_value(html, "bp-ref-hidden-author") == "grace"
@@ -107,7 +110,7 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
     assert length(before) == 3
 
     # The first keystroke births drafts.n1; the editor now holds the draft.
-    render_change(view, "autosave", %{"doc" => %{"title" => "Note n1 edited"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Note n1 edited"}})
     {:ok, draft} = Content.get_document("drafts.n1", "note", @dataset)
     assert draft.title == "Note n1 edited"
 
@@ -129,7 +132,7 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
       |> Enum.sort()
     end
 
-    render_change(tab_b, "autosave", %{
+    BarkparkWeb.EditorPost.change(tab_b, %{
       "doc" => %{"title" => "Note n1", "body" => "<p>tab B body</p>", "author" => "grace"}
     })
 

@@ -37,7 +37,7 @@ defmodule BarkparkWeb.Studio.NumberFieldPublishTest do
 
   test "a non-numeric value in a number field blocks publish, inline on the field", %{conn: conn} do
     {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/notice/n1"))
-    render_change(view, "autosave", %{"doc" => %{"title" => "N", "count" => "abc"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "N", "count" => "abc"}})
 
     html = render_click(view, "publish")
 
@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.NumberFieldPublishTest do
 
   test "a numeric value publishes as a number", %{conn: conn} do
     {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/notice/n1"))
-    render_change(view, "autosave", %{"doc" => %{"title" => "N", "count" => "7.5"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "N", "count" => "7.5"}})
 
     html = render_click(view, "publish")
 

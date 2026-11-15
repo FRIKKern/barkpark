@@ -137,13 +137,12 @@ defmodule BarkparkWeb.Studio.StudioCriteriaTextEditTest do
 
     # A real edit fires phx-change first (that is what carries `_target`), then
     # the submit. Reproduce both.
-    render_change(
+    BarkparkWeb.EditorPost.change(
       view,
-      "autosave",
       Map.put(wire, "_target", ["doc[acceptance_criteria][0].criterion"])
     )
 
-    render_submit(view, "save", wire)
+    BarkparkWeb.EditorPost.submit(view, wire)
 
     stored = reread!(slug) |> Map.get(:content) |> Map.get("acceptance_criteria")
 
@@ -188,7 +187,7 @@ defmodule BarkparkWeb.Studio.StudioCriteriaTextEditTest do
           "doc[acceptance_criteria][1].met=false&doc[acceptance_criteria][1].evidence="
       )
 
-    html = render_submit(view, "save", wire)
+    html = BarkparkWeb.EditorPost.submit(view, wire)
 
     # The row's headline is "reports Saved and persists nothing". The honest
     # pairing is the one asserted here: the editor's own report and the stored

@@ -684,12 +684,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
 
       # Autosave doc A → the header reports "Saved".
       html_a =
-        render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-edited"}})
+        BarkparkWeb.EditorPost.hook(view, "autosave", %{
+          "doc" => %{"title" => "Post One", "body" => "aaa-edited"}
+        })
 
       assert html_a =~ ~s(class="save-status" role="status" aria-live="polite">Saved)
 
       # Navigate the editor to doc B (same LiveView, push_patch — no remount).
-      html_b = render_patch(view, scoped_studio("/d/#{@dataset}/studio/page/about"))
+      # Two patches (DocSwap): the first draws no form, the next draws B's.
+      render_patch(view, scoped_studio("/d/#{@dataset}/studio/page/about"))
+      html_b = render(view)
+      assert html_b =~ ~s(id="editor-form")
 
       # Doc B must NOT inherit doc A's "Saved" — the status resets to blank.
       refute html_b =~ ~s(class="save-status" role="status" aria-live="polite">Saved)
@@ -736,7 +741,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       assert html =~ ~s(id="editor-form")
 
       html_saved =
-        render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-x"}})
+        BarkparkWeb.EditorPost.hook(view, "autosave", %{
+          "doc" => %{"title" => "Post One", "body" => "aaa-x"}
+        })
 
       assert html_saved =~ ~s(<span class="save-status" role="status" aria-live="polite">Saved)
     end

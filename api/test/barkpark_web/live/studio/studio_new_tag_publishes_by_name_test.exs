@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Studio.StudioNewTagPublishesByNameTest do
     pub_id = Content.published_id(draft.doc_id)
 
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/tag/#{pub_id}"))
-    render_change(view, "autosave", %{"doc" => %{"title" => title}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => title}})
     {view, pub_id}
   end
 

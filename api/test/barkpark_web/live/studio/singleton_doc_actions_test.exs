@@ -93,7 +93,7 @@ defmodule BarkparkWeb.Studio.SingletonDocActionsTest do
   test "a singleton's draft still offers Publish and Discard draft", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sitePrefs/sitePrefs"))
 
-    render_change(view, "autosave", %{
+    BarkparkWeb.EditorPost.change(view, %{
       "_target" => ["doc", "tagline"],
       "doc" => %{"tagline" => "changed"}
     })

@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptRows
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -241,7 +242,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   defp new_document_attrs(type), do: %{"content" => Shared.seed_new_doc_content(type)}
 
+  # A post built for another document than the editor holds is not written
+  # (`PostIdentity`).
   def save(params, socket) when is_map(params) do
+    if PostIdentity.ours?(params, socket), do: save_open(params, socket), else: {:noreply, socket}
+  end
+
+  def save(_params, socket), do: {:noreply, socket}
+
+  defp save_open(params, socket) do
+    params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
     case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
@@ -249,8 +259,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       _ -> {:noreply, socket}
     end
   end
-
-  def save(_params, socket), do: {:noreply, socket}
 
   defp do_save(params, socket) do
     socket = Shared.do_autosave(socket, params, :save)
@@ -384,6 +392,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def autosave(%{"_target" => ["undefined"]}, socket), do: {:noreply, socket}
 
   def autosave(params, socket) when is_map(params) do
+    if PostIdentity.ours?(params, socket),
+      do: autosave_open(params, socket),
+      else: {:noreply, socket}
+  end
+
+  def autosave(_params, socket) do
+    {:noreply, socket}
+  end
+
+  @doc """
+  A change the server built itself for the document the socket holds (the
+  desk's Paste field): not a browser post, so it carries no name and none is
+  asked (`PostIdentity`). Never call it with params that came from the page.
+  """
+  def autosave_built(params, socket) when is_map(params), do: autosave_open(params, socket)
+
+  defp autosave_open(params, socket) do
+    params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
     case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
@@ -404,10 +430,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       _ ->
         {:noreply, socket}
     end
-  end
-
-  def autosave(_params, socket) do
-    {:noreply, socket}
   end
 
   # ── The dot-path fold (S9 crit 3, task-6d80c6cc7d97b1d1) ────────────────────

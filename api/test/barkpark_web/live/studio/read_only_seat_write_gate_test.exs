@@ -100,12 +100,12 @@ defmodule BarkparkWeb.Studio.ReadOnlySeatWriteGateTest do
 
   # "save" after an edit: the edit itself is the write a reader cannot make.
   defp fire(view, "save") do
-    render_change(view, "autosave", %{"doc" => %{"title" => "After"}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "After"}})
     render_click(view, "save")
   end
 
   defp fire(view, "autosave"),
-    do: render_change(view, "autosave", %{"doc" => %{"title" => "After"}})
+    do: BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "After"}})
 
   defp fire(view, event), do: render_click(view, event)
 

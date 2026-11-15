@@ -946,8 +946,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%!-- The group tabs' panel is this wrapper, not the form: ARIA
                   does not allow role="tabpanel" on a <form> (axe
                   aria-allowed-role). --%>
+            <%!-- Left out of the patch that opens another document, so no
+                  input of the last one is kept (`DocSwap`). --%>
             <div
-              :if={@nav_view == nil}
+              :if={@nav_view == nil and not BarkparkWeb.Studio.StudioLive.DocSwap.swapping?(@parent_assigns)}
               id="editor-tabpanel"
               role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
               aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop(@editor_schema, @nav_group, @parent_assigns)}
@@ -957,6 +959,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
+              phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page
                     showed (bp-array-focus.js; `RemoteValues`). --%>
@@ -1018,6 +1021,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   data-test-id="validation-warnings"
                 ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
+              <%!-- Last child on purpose: the end mark of `PostIdentity`. --%>
+              <input type="hidden" name={BarkparkWeb.Studio.StudioLive.PostIdentity.end_key()} value={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)} />
             </form>
             </div>
           <% end %>

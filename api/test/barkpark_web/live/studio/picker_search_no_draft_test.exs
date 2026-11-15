@@ -130,7 +130,7 @@ defmodule BarkparkWeb.Studio.PickerSearchNoDraftTest do
 
     # One post per keystroke of "Åpent hus", as the browser sends them.
     for _ <- String.graphemes("Åpent hus") do
-      render_change(view, "autosave", %{"_target" => ["undefined"], "doc" => browser_form()})
+      BarkparkWeb.EditorPost.change(view, %{"_target" => ["undefined"], "doc" => browser_form()})
     end
 
     assert draft_row(doc_id) == :no_draft,
@@ -142,7 +142,7 @@ defmodule BarkparkWeb.Studio.PickerSearchNoDraftTest do
     seed_published!(doc_id)
     view = open!(doc_id)
 
-    render_change(view, "autosave", %{"_target" => ["doc", "price"], "doc" => browser_form()})
+    BarkparkWeb.EditorPost.change(view, %{"_target" => ["doc", "price"], "doc" => browser_form()})
 
     assert draft_row(doc_id) == :no_draft
   end
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.Studio.PickerSearchNoDraftTest do
     view = open!(doc_id)
 
     form = browser_form(%{"location" => "Litteraturhuset"}) |> Map.delete("_unused_location")
-    render_change(view, "autosave", %{"_target" => ["doc", "location"], "doc" => form})
+    BarkparkWeb.EditorPost.change(view, %{"_target" => ["doc", "location"], "doc" => form})
 
     doc = draft_row(doc_id)
     refute doc == :no_draft
@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.PickerSearchNoDraftTest do
     view = open!(doc_id)
 
     form = browser_form(%{"parentEvent" => "parent-event-2"}) |> Map.delete("_unused_parentEvent")
-    render_change(view, "autosave", %{"_target" => ["doc", "parentEvent"], "doc" => form})
+    BarkparkWeb.EditorPost.change(view, %{"_target" => ["doc", "parentEvent"], "doc" => form})
 
     doc = draft_row(doc_id)
     refute doc == :no_draft

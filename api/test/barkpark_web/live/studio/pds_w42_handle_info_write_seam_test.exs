@@ -88,6 +88,9 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # push_patch(replace: true) that drops a desk search hit's `?focus=doc`
     # from the URL: a navigation, no store call (task-4e10550394f87112)
     {"{:drop_focus_query, to}", :no_write},
+    # DocSwap.done/1 — the form of the document just opened is drawn again:
+    # one assign and a client push, no store call (task-8908b6e031268f77)
+    {":editor_swap_done", :no_write},
     {"(_other, socket)", :no_write}
   ]
 
@@ -244,7 +247,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 18,
+      assert length(heads) == 19,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 
@@ -334,7 +337,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       # proves the write tier, not unclassified-event fallout.
       assert Caps.classify("autosave") == :write
 
-      render_hook(view, "autosave", %{
+      BarkparkWeb.EditorPost.hook(view, "autosave", %{
         "doc" => %{"title" => "Seam Post", "body" => "ESCALATED-VIA-EVENT"}
       })
 

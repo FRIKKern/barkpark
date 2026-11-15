@@ -190,8 +190,13 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
     })
   end
 
+  # As the page sends it: the menu item carries the name of the document the
+  # form it was pressed in was drawn for (task-8908b6e031268f77).
   defp paste(view, name, clip),
-    do: render_hook(view, "desk-field-paste", %{"field" => name, "clip" => clip})
+    do: render_hook(view, "desk-field-paste", pressed(view, %{"field" => name, "clip" => clip}))
+
+  defp pressed(view, params),
+    do: Map.merge(Map.take(BarkparkWeb.EditorPost.marks(view), ["_bp_doc"]), params)
 
   # The stored document the editor writes: its draft once there is one.
   defp stored(c) do
@@ -634,11 +639,59 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
             %{"field" => "nope", "clip" => clip("string", "x")},
             %{"field" => 1, "clip" => 2}
           ] do
+        render_hook(view, "desk-field-paste", pressed(view, params))
+      end
+
+      assert snapshot(c) == before
+      refute_push_event(view, @toast, _, 50)
+    end
+  end
+
+  describe "a paste names the document it was pressed in (task-8908b6e031268f77)" do
+    test "a paste event that names no document, or another one, writes nothing", c do
+      view = desk(c)
+      before = snapshot(c)
+      mine = BarkparkWeb.EditorPost.marks(view)["_bp_doc"]
+
+      for extra <- [
+            %{},
+            %{"_bp_doc" => "nope"},
+            %{"_bp_doc" => String.replace(mine, c.id, c.id <> "-other")}
+          ] do
+        params = Map.merge(%{"field" => "title", "clip" => clip("string", "Pasted")}, extra)
         render_hook(view, "desk-field-paste", params)
       end
 
       assert snapshot(c) == before
       refute_push_event(view, @toast, _, 50)
+
+      # The same event with the open document's name is written.
+      paste(view, "title", clip("string", "Pasted"))
+      assert stored(c).title == "Pasted"
+    end
+
+    test "pressed in one document, arriving after the pane opened another: not written", c do
+      {:ok, _} =
+        Content.create_document(
+          c.type,
+          %{"doc_id" => c.id <> "-b", "title" => "Other"},
+          @dataset
+        )
+
+      view = desk(c)
+      pressed_in_a = pressed(view, %{"field" => "title", "clip" => clip("string", "Pasted")})
+
+      render_patch(view, c.desk <> "-b")
+      render_async(view, 5_000)
+      assert eventually(fn -> has_element?(view, "#bp-seen-" <> c.id <> "-b") end)
+
+      render_hook(view, "desk-field-paste", pressed_in_a)
+
+      {other, _draft?, _published?} =
+        Content.fetch_doc_with_draft(c.type, c.id <> "-b", @dataset)
+
+      assert other.title == "Other"
+      assert stored(c).title != "Pasted"
     end
   end
 

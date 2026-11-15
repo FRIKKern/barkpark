@@ -124,7 +124,7 @@ defmodule BarkparkWeb.Studio.LocalizedClearTest do
 
     # 1. The author types alt text and saves it. This half already works
     #    (#16066) and is the fixture the clear needs.
-    render_submit(view, "save", wire(@filled))
+    BarkparkWeb.EditorPost.submit(view, wire(@filled))
 
     set = stored_alt_text(slug)
     set? = is_map(set) and Map.get(set, "nob") == "Et fyrtårn i tåke"
@@ -138,12 +138,12 @@ defmodule BarkparkWeb.Studio.LocalizedClearTest do
     #    input that fired it in `_target` — for a dotted field name that is the
     #    verbatim params key (`Plug.Conn.Query.decode/1` leaves a name that does
     #    not end in `]` whole, and `decode_merge_target/1` wraps it in a list).
-    render_change(view, "autosave", Map.put(wire(@cleared), "_target", ["doc[altText].nob"]))
-    render_change(view, "autosave", Map.put(wire(@cleared), "_target", ["doc[altText].eng"]))
+    BarkparkWeb.EditorPost.change(view, Map.put(wire(@cleared), "_target", ["doc[altText].nob"]))
+    BarkparkWeb.EditorPost.change(view, Map.put(wire(@cleared), "_target", ["doc[altText].eng"]))
 
     # 3. …and hits Save. A `phx-submit` carries NO `_target`, which is exactly
     #    why the touched set has to outlive the change events above.
-    render_submit(view, "save", wire(@cleared))
+    BarkparkWeb.EditorPost.submit(view, wire(@cleared))
 
     cleared = stored_alt_text(slug)
     nob = if is_map(cleared), do: Map.get(cleared, "nob"), else: nil
@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.LocalizedClearTest do
   } do
     view = open_metadata_panel!(slug)
 
-    render_submit(view, "save", wire(@filled))
+    BarkparkWeb.EditorPost.submit(view, wire(@filled))
 
     # The author edits an UNRELATED field. The renderer still posts the empty
     # `doc[altText]` inputs alongside it — that is the composite shape — but
@@ -172,13 +172,12 @@ defmodule BarkparkWeb.Studio.LocalizedClearTest do
     untouched_empties =
       "doc[title]=Cover+photo&doc[altText].nob=&doc[altText].eng=&doc[credit].nob="
 
-    render_change(
+    BarkparkWeb.EditorPost.change(
       view,
-      "autosave",
       Map.put(wire(untouched_empties), "_target", ["doc", "title"])
     )
 
-    render_submit(view, "save", wire(untouched_empties))
+    BarkparkWeb.EditorPost.submit(view, wire(untouched_empties))
 
     survived = stored_alt_text(slug)
     survived? = is_map(survived) and Map.get(survived, "nob") == "Et fyrtårn i tåke"

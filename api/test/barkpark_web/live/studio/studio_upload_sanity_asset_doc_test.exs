@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
     raw = token!(ws, ["read", "write"])
     view = open!(raw, doc_id)
 
-    render_change(view, "autosave", %{
+    BarkparkWeb.EditorPost.change(view, %{
       "doc" => %{"title" => "Lærelyst", "heroImage" => picked(file)}
     })
 
@@ -141,7 +141,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
     # Saving again writes no second document and leaves the first unchanged.
     rev = asset.rev
 
-    render_change(view, "autosave", %{
+    BarkparkWeb.EditorPost.change(view, %{
       "doc" => %{"title" => "Lærelyst igjen", "heroImage" => picked(file)}
     })
 
@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
     before = asset_doc(sanity_id, scope)
 
     view = open!(token!(ws, ["read", "write"]), doc_id)
-    render_change(view, "autosave", %{"doc" => %{"heroImage" => picked(file)}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"heroImage" => picked(file)}})
 
     {:ok, draft} = Content.get_document(DraftId.draft_id(doc_id), "article", @dataset, scope)
     assert draft.content["heroImage"]["asset"]["_ref"] == sanity_id
@@ -230,7 +230,8 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
 
     raw = token!(ws, ["read", "write"])
     view = open!(raw, doc_id)
-    render_change(view, "autosave", %{"doc" => %{"title" => "Bytte", "heroImage" => replaced}})
+
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Bytte", "heroImage" => replaced}})
 
     {:ok, draft} = Content.get_document(DraftId.draft_id(doc_id), "article", @dataset, scope)
 
@@ -264,7 +265,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
     want = "image-#{file.sha1}-3x2-png"
 
     view = open!(token!(ws, ["read"]), doc_id)
-    render_change(view, "autosave", %{"doc" => %{"heroImage" => picked(file)}})
+    BarkparkWeb.EditorPost.change(view, %{"doc" => %{"heroImage" => picked(file)}})
 
     assert asset_doc(want, scope) == nil
 

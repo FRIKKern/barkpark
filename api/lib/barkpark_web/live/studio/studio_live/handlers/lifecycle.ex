@@ -20,6 +20,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # callback, deriving current_path from `uri` for every studio-layout
   # surface), so `uri` is unused in this body now.
   def finish_handle_params(socket, dataset, path, desk, _uri, params) do
+    shown = BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket)
+
     socket =
       socket
       |> Shared.ensure_list_subscription(dataset)
@@ -48,6 +50,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
       )
+      |> BarkparkWeb.Studio.StudioLive.DocSwap.start(shown)
 
     # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display
     # group (`/studio/content-types/<type>/<id>` on a declared desk) opened its

@@ -217,6 +217,26 @@ assert.deepEqual(await paste(), [{ event: "desk-field-paste", field: "title", cl
 assert.equal(pasteItem.hasAttribute("phx-value-clip"), false, "the item is on the button for that click only");
 assert.equal(toast().textContent, "", "no toast: the server answers");
 
+// 8a2. The paste names the document of the form it was pressed in, as the
+//      form named it at the press: the pane may have moved on by the time
+//      the clipboard is read (task-8908b6e031268f77).
+{
+  const form = document.createElement("form");
+  form.id = "editor-form";
+  form.setAttribute("phx-value-_bp_doc", '["production","post","a"]');
+  document.body.appendChild(form);
+  const named = [];
+  const listen = (e) => { const el = e.target.closest("[phx-click]"); if (el) named.push(el.getAttribute("phx-value-_bp_doc")); };
+  window.addEventListener("click", listen);
+  press(pasteItem);
+  form.setAttribute("phx-value-_bp_doc", '["production","post","b"]');
+  await tick(80);
+  window.removeEventListener("click", listen);
+  assert.deepEqual(named, ['["production","post","a"]'], "the document at the press, not the one the pane shows now");
+  assert.equal(pasteItem.hasAttribute("phx-value-_bp_doc"), false, "on the button for that click only");
+  form.remove();
+}
+
 // 8b. No custom type (another browser): the item in text/html, base64, UTF-8.
 const UTF = JSON.stringify({ type: "sanityClipboardItem", value: "Blåbær", barkpark: { kind: "field", field: { name: "x", sig: "string", value: "Blåbær" } } });
 reads = [{ "text/html": `<div data-sanity-clipboard-base64="${b64(UTF)}"><p>Blåbær</p></div>`, "text/plain": "Blåbær" }];

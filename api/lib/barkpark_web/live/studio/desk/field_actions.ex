@@ -62,6 +62,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   alias BarkparkWeb.Studio.Desk.FieldLock
   alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias Phoenix.LiveView.JS
 
@@ -174,8 +175,19 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
     end
   end
 
-  def handle_event("desk-field-paste", %{"field" => name, "clip" => clip}, socket)
+  # The paste names the document of the form its menu was pressed in
+  # (`PostIdentity`): the clipboard is read first, and the pane may have
+  # opened another document by the time the event is here.
+  def handle_event("desk-field-paste", %{"field" => name, "clip" => clip} = params, socket)
       when is_binary(name) and is_binary(clip) do
+    if PostIdentity.ours?(params, socket),
+      do: paste(name, clip, socket),
+      else: {:noreply, socket}
+  end
+
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp paste(name, clip, socket) do
     case target(socket.assigns, name) do
       # The page offered a paste the form no longer allows (a rule locked or
       # hid the field since): said, not dropped in silence. A name the
@@ -195,8 +207,9 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
 
         case FieldPaste.plan(field, current, clip, &ref?(socket, &1, &2)) do
           {:save, params} ->
-            # The typed edit's own way in, with the desk's guards (`EditorHost`).
-            {:noreply, saved} = EditorHost.handle_event("autosave", params, socket)
+            # The typed edit's own way in, with the desk's guards. The params
+            # are built here for the open document: no browser post.
+            {:noreply, saved} = EditorHost.write_built(params, socket)
             {:noreply, remount(saved, field)}
 
           :nothing ->
@@ -213,8 +226,6 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
         end
     end
   end
-
-  def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   # What the browser is told for a copy of field `name`: its three clipboard
   # types, or `empty`, the words that refuse it. nil when no document is open
