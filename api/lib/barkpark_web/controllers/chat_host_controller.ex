@@ -126,6 +126,20 @@ defmodule BarkparkWeb.ChatHostController do
     end
   end
 
+  # POST /v1/chat-host/leases/:lease_id/status (task-768e7dc4449cc7b9): a
+  # turn's status label, out of the cursor sequence. 202 says the fence passed;
+  # `streamed` says whether the session stream got it. It is false when the turn
+  # is not open, already has text or already streamed a label, or when the
+  # session has no Recorder or it did not answer in time. Every fence miss is one
+  # 409; a label that is not text is the same 422 the event path answers.
+  def status(conn, %{"lease_id" => lease_id} = params) do
+    case ChatHosts.accept_status(conn.assigns.chat_host, lease_id, params) do
+      {:ok, outcome} -> conn |> put_status(:accepted) |> json(%{streamed: outcome == :streamed})
+      {:error, :stale_fence} -> conflict(conn, :stale_fence)
+      {:error, reason} -> unprocessable(conn, reason)
+    end
+  end
+
   # POST /v1/chat/sessions/:id/state (herd-s6, charter D78h–D80h): the fenced
   # reporter's authoritative herd-state write. Vocabulary is the persisted
   # four-state — anything else is 422 BEFORE the store is touched. `epoch` must

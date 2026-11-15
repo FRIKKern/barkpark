@@ -57,6 +57,19 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 				return
 			}
 			fmt.Fprintf(w, `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":%d,"command":%s}]}`, s.lastCursor, command)
+		case "/v1/chat-host/leases/lease-1/status":
+			// A label is out of the cursor sequence: it moves no cursor and is
+			// never one of the kinds taken.
+			if s.onEvent != nil {
+				s.onEvent("status")
+			}
+			if status := s.refuseKind["status"]; status != 0 {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"code":"refused"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"streamed":true}`))
 		case "/v1/chat-host/events":
 			var payload struct {
 				Cursor uint64         `json:"cursor"`
@@ -145,6 +158,10 @@ func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Co
 		Handler:      handler,
 		PollInterval: time.Millisecond,
 		Log:          &syncBuffer{},
+	}
+	// As main.go wires it: the handler posts labels through the Runner's client.
+	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {
+		local.Status = runner.Client
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	result := make(chan error, 1)

@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   require Logger
 
+  alias BarkparkWeb.Studio.Desk.DeleteDialog
   alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocDialog
   alias BarkparkWeb.Studio.Desk.DocMenu
@@ -147,7 +148,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             %{type: ref_type} = ref when is_binary(ref_type) <- targets,
             do: Map.put(ref, :path, field)
 
-      assign(socket, active_refs: refs, desk_ref_ids: ids)
+      # The reference cards in the form are drawn in the browser
+      # (`bp-reference-picker.js`): they follow these same targets.
+      socket
+      |> assign(active_refs: refs, desk_ref_ids: ids)
+      |> Phoenix.LiveView.push_event("desk:ref-targets", %{
+        refs: Enum.map(refs, &Map.take(&1, [:path, :id, :title, :type]))
+      })
     else
       _ -> socket
     end
@@ -156,9 +163,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp strip(socket), do: socket
 
   # The references as menu items, "Open reference: <title>", each a patch to
-  # the next pane, as the strip's links were.
-  defp ref_items(%{active_refs: refs, chain: chain, view: view, base: base}) do
-    for ref <- refs do
+  # the next pane, as the strip's links were. Not a single reference field's:
+  # its card in the form is that link (TanStack's RefInput), and a hidden
+  # twin here would answer for it first. An array's rows are not links yet.
+  defp ref_items(%{active_refs: refs, chain: chain, view: view, base: base} = assigns) do
+    carded = for {name, :one} <- Refs.fields(assigns[:editor_schema] || %{}), do: name
+
+    for ref <- refs, ref.path not in carded do
       %{
         label: gettext("Open reference: %{title}", title: ref.title),
         name: "open-reference",
@@ -629,10 +640,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <div :if={!@edit_failed and gone?(assigns)} class="dk-note" role="main" data-desk-edit-gone>
           <p>{gettext("This document has been deleted.")}</p>
         </div>
-        <%!-- The Studio's own unpublish modal is kept out of the desk: the
-              desk draws its dialog below, from the same assigns. --%>
+        <%!-- The Studio's own delete and unpublish modals are kept out of the
+              desk: the desk draws its dialogs below, from the same assigns. --%>
         <%= if !@edit_failed and !gone?(assigns) do %>
-          {Components.studio_live_shell(assign(assigns, :show_unpublish_guard, false))}
+          {Components.studio_live_shell(
+            assign(assigns, show_delete: false, show_unpublish_guard: false)
+          )}
         <% end %>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Nothing fills it yet,
@@ -650,6 +663,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               (`DocDialog`): the Studio's handlers open and close them. The
               holder is always here, as the notes' is. --%>
         <div id={"#{@view.id}-dialogs"}>
+          <DeleteDialog.dialog
+            :if={assigns[:show_delete] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+            id={"#{@view.id}-delete-dialog"}
+            title={@page_title}
+            published?={DocStatus.state(assigns).published?}
+            rows={DocDialog.rows(assigns[:desk_used_in])}
+            base={@base}
+          />
           <UnpublishDialog.dialog
             :if={assigns[:show_unpublish_guard] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
             id={"#{@view.id}-unpublish-dialog"}

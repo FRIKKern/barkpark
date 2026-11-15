@@ -49,7 +49,13 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
           "visibility" => "public",
           "fields" => [
             %{"name" => "title", "title" => "Title", "type" => "string"},
-            %{"name" => "author", "title" => "Author", "type" => "reference", "to" => [author]}
+            %{"name" => "author", "title" => "Author", "type" => "reference", "to" => [author]},
+            %{
+              "name" => "authors",
+              "title" => "Authors",
+              "type" => "arrayOf",
+              "of" => [%{"type" => "reference", "to" => [%{"type" => author}]}]
+            }
           ]
         },
         @dataset
@@ -67,7 +73,10 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
         %{
           "doc_id" => one,
           "title" => "Post One",
-          "content" => %{"author" => %{"_ref" => ada, "_type" => "reference"}}
+          "content" => %{
+            "author" => %{"_ref" => ada, "_type" => "reference"},
+            "authors" => [%{"_ref" => ada, "_type" => "reference"}]
+          }
         },
         @dataset
       )
@@ -100,12 +109,13 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
 
   # ── (a) ───────────────────────────────────────────────────────────────────
 
-  test "(a) no row of reference links; the reference is in the menu, before Delete", c do
+  test "(a) no row of reference links; an array's reference is in the menu, before Delete; a single one is its card",
+       c do
     view = open(c)
     refute has_element?(view, "#{@pane} nav.dk-edit-refs")
     refute has_element?(view, "#{@pane} > nav")
 
-    to = "#{c.base}/#{c.post};#{c.one};#{c.ada},type=#{c.author},parentRefPath=author"
+    to = "#{c.base}/#{c.post};#{c.one};#{c.ada},type=#{c.author},parentRefPath=authors"
     menu = ~s(#{@pane} > .pane-header [role="menu"][id$="-actions"])
 
     assert has_element?(
@@ -120,6 +130,17 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
 
     at = Enum.find_index(names, &(&1 == "open-reference"))
     assert at != nil
+
+    # The single reference field's card (drawn in the browser) is its link:
+    # the menu holds no hidden anchor for it, and the card is sent its target.
+    refute has_element?(view, ~s(#{@pane} a[href$="parentRefPath=author"]))
+    ada = c.ada
+
+    assert_push_event(view, "desk:ref-targets", %{refs: targets}, 1_000)
+
+    assert %{path: "author", id: ^ada, title: "Ada Lovelace"} =
+             Enum.find(targets, &(&1.path == "author"))
+
     assert Enum.find_index(names, &(&1 == "delete-doc")) == at + 1
 
     # The footer's menu is the document's actions only.

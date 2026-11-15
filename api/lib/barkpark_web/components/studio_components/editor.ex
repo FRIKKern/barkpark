@@ -21,6 +21,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Components.Fields.Visibility
+  alias BarkparkWeb.Studio.Desk.FieldGroups
+  alias BarkparkWeb.Studio.Desk.Fieldsets
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
 
   @doc """
@@ -593,6 +595,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   # Whether a `readOnly` field renders display-only here: a non-admin viewer,
   # the same rule FieldInputs and the server's mutate door apply (#21536).
+  # A field locked by its condition is display-only for an admin too.
+  defp read_only_display?(%{"readOnly" => true, "lockedByRule" => true}, _parent_assigns),
+    do: true
+
   defp read_only_display?(%{"readOnly" => true}, parent_assigns),
     do: not BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(parent_assigns, :caps))
 
@@ -732,6 +738,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       )
       |> assign(:show_diff_toggle, show_diff_toggle)
       |> assign(:show_diff, show_diff_toggle and assigns.diff_visible)
+      |> assign_tab_groups()
 
     ~H"""
     <%= if @editor_doc do %>
@@ -908,7 +915,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   tabindex={if tab_stop(@editor_schema, @nav_group, @parent_assigns) == "all-fields", do: "0", else: "-1"}
                   class={"bp-tab " <> if(is_nil(@nav_group), do: "is-active", else: "")}
                 ><span class="bp-tab-label"><%= gettext("All fields") %></span></button>
-                <%= for grp <- schema_groups(@editor_schema) do %>
+                <%= for grp <- @tab_groups do %>
                   <button
                     type="button"
                     id={"bp-group-tab-" <> grp["name"]}
@@ -974,10 +981,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <input type="text" id={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"} name="doc[title]" value={@editor_form["title"]} class="form-input" aria-required={(get_title_validation(@editor_schema) || %{})["required"] == true && "true"} phx-debounce="300" />
               </.editor_field>
               <%= if @editor_schema do %>
-                <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
-                        Visibility.visible?(field, @editor_form) do %>
+                <%!-- In the desk, fields that name a schema fieldset are drawn
+                      inside it (`Desk.Fieldsets`); elsewhere every entry is a
+                      lone field. --%>
+                <%= for entry <- shown_entries(@editor_schema, @nav_group, @editor_form, @parent_assigns) do %>
+                  <Fieldsets.entry :let={field} entry={entry} scope={@editor_doc.doc_id}>
                   <.studio_field_renderer
-                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
+                    field={BarkparkWeb.Studio.Desk.FieldLock.resolve(field, @editor_form, desk?(@parent_assigns))}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
@@ -988,6 +998,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     document_rev={@editor_doc.rev}
                     form_gen={@editor_form_gen}
                   />
+                  </Fieldsets.entry>
                 <% end %>
               <% end %>
               <div class="editor-actions">
@@ -1470,6 +1481,21 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
+  # The tabs to draw. The desk draws a group's tab only while one of its
+  # fields shows, and falls back to All fields when the chosen group's tab is
+  # gone (`Desk.FieldGroups`). The old Studio draws every declared group.
+  defp assign_tab_groups(%{editor_schema: schema, parent_assigns: parent} = assigns) do
+    if desk?(parent) do
+      form = assigns[:editor_form]
+
+      assigns
+      |> assign(:tab_groups, FieldGroups.shown(schema, form))
+      |> assign(:nav_group, FieldGroups.current(schema, assigns[:nav_group], form))
+    else
+      assign(assigns, :tab_groups, schema_groups(schema))
+    end
+  end
+
   # The group tab that is the bar's one Tab stop: the selected group, else the
   # first, so the bar is never unreachable from the keyboard. On the desk,
   # no group selected is All fields (its tab's id ends "all-fields").
@@ -1492,6 +1518,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp tab_icon(_), do: "circle"
 
+  # The fields the form draws, in order: on the chosen tab and not hidden by
+  # `visibleWhen`, gathered into the schema's fieldsets in the desk.
+  defp shown_entries(schema, nav_group, form, parent_assigns) do
+    schema.fields
+    |> Enum.reject(&(&1["name"] == "title"))
+    |> visible_fields(nav_group)
+    |> Enum.filter(&Visibility.visible?(&1, form))
+    |> Fieldsets.entries(Fieldsets.of(schema, desk?(parent_assigns)))
+  end
+
   @doc """
   Filter top-level fields to those visible on the currently selected tab.
 
@@ -1506,7 +1542,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   def visible_fields(fields, nil), do: fields
 
   def visible_fields(fields, group_name) when is_binary(group_name) do
-    Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
+    Enum.filter(fields, &FieldGroups.in_group?(&1, group_name))
   end
 
   # A top-level field's own findings out of a `Validation.check_tree/3` half:
