@@ -1242,6 +1242,7 @@ defmodule PDS.Census do
     {:post, "/v1/auth/webauthn/step-up/challenge", "BarkparkWeb.WebauthnController", :step_up_challenge, :status_only_receipt},
     {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll, :status_only_receipt},
     {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat, :status_only_receipt},
+    {:post, "/v1/chat-host/leases/:lease_id/status", "BarkparkWeb.ChatHostController", :status, :status_only_receipt},
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
     {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
     # THE ASKUSERQUESTION ANSWER SUBMIT (ct-bl-question-updatedinput). Same class,

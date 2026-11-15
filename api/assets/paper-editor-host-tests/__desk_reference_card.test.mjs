@@ -102,7 +102,20 @@ try {
     "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "a split group stays whole");
   assert.equal(at("post;post-07|,view=preview", 2),
     "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "from either side of it");
+  assert.equal(at("post;post-07%7C,view=preview", 3),
+    "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "a split's bar is printed as the server prints it");
+  // The panes changed under the card (Split pane right is a patch; the card is
+  // not drawn again): the href is read again as the link is reached.
+  dom.reconfigure({ url: "http://localhost" + BASE + "post;post-07%7C," });
+  card.closest("[data-pane-index]").setAttribute("data-pane-index", "3");
+  assert.equal(link.getAttribute("href"), BASE + "post;post-07;author-berg,type=author,parentRefPath=author", "stale until reached");
+  for (const reach of ["pointerdown", "focus", "click"]) {
+    link.setAttribute("href", "/stale");
+    link.dispatchEvent(new window.Event(reach, { bubbles: reach !== "focus", cancelable: true }));
+    assert.equal(link.getAttribute("href"), BASE + "post;post-07|,;author-berg,type=author,parentRefPath=author", reach + " reads the panes again");
+  }
   assert.equal(at("post;post-07", 2), "post;post-07;author-berg,type=author,parentRefPath=author");
+  link.dispatchEvent(new window.Event("focus"));
   assert.equal(actions.getAttribute("aria-haspopup"), "menu");
   assert.equal(
     [...card.querySelectorAll("button")].filter((b) => /Change|Remove/.test(b.textContent)).length,
@@ -173,6 +186,49 @@ try {
   b2.click();
   document.body.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
   assert.equal(other.querySelector('[role="menu"]').hidden, true, "a click outside closes it");
+
+  // ── The desk's targets (EditorHost pushes desk:ref-targets) ───────────────
+  // With no event the card is right by its own read (above: "Ola Berg").
+  const targets = (refs) => window.dispatchEvent(new window.CustomEvent("phx:desk:ref-targets", { detail: { refs } }));
+  const live = mount("desk").picker;
+  await tick();
+  const liveTitle = () => live.querySelector(".ref-box .t").textContent;
+  assert.equal(liveTitle(), "Ola Berg", "no event: the mount's own read");
+  targets([{ path: "author", id: "author-berg", title: "Ola Berg X", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "a rename elsewhere shows on the card");
+  assert.equal(live.querySelector("a.ref-preview").textContent, "Ola Berg XAuthor", "and names its link");
+  targets([{ path: "author", id: "author-other", title: "Someone else", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "a target this field does not hold is ignored");
+  targets([{ path: "reviewer", id: "author-berg", title: "Wrong field", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "as is another field's");
+  // The value changed meanwhile (a pick): a late answer for the old id is dropped.
+  live.querySelector('button[aria-label="Reference actions"]').click();
+  live.querySelectorAll('[role="menuitem"]')[1].click();
+  const s2 = live.querySelector(".bp-ref-search-input");
+  s2.value = "in";
+  s2.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await tick(500);
+  live.querySelector('[role="option"]').click();
+  targets([{ path: "author", id: "author-berg", title: "Late", type: "author" }]);
+  assert.equal(liveTitle(), "Ingrid Ness", "a late answer for the replaced value is ignored");
+  // The mount's own read, answering after the desk did, does not paint over it.
+  let answer;
+  globalThis.fetch = window.fetch = (url, options = {}) =>
+    String(url).includes("/v1/data/doc/") ? new Promise((r) => (answer = r)) : fetchMock(url, options);
+  const slow = mount("desk").picker;
+  await tick();
+  targets([{ path: "author", id: "author-berg", title: "Ola Berg, renamed", type: "author" }]);
+  answer({ ok: true, json: async () => ({ result: { _id: "author-berg", _type: "author", title: "Ola Berg" } }) });
+  await tick();
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Ola Berg, renamed", "an older read does not replace the desk's title");
+  globalThis.fetch = window.fetch = fetchMock;
+  // Taken out of the page it stops listening; put back, it listens again.
+  slow.remove();
+  targets([{ path: "author", id: "author-berg", title: "While away", type: "author" }]);
+  document.getElementById("desk").appendChild(slow);
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Ola Berg, renamed");
+  targets([{ path: "author", id: "author-berg", title: "Back", type: "author" }]);
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Back", "re-attached: it follows again");
 
   // ── Control: outside the desk, the pill with Change and Remove ────────────
   const studio = mount("studio").picker;
