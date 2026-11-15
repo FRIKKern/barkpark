@@ -181,6 +181,58 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     refute render(reader) =~ "forged"
   end
 
+  test "a stored charts value the gate would refuse breaks neither the reader, the grid nor the save",
+       %{conn: conn} do
+    import Ecto.Query
+    slug = "charts-junk-#{System.unique_integer([:positive, :monotonic])}"
+    tab = %{"name" => "Data", "cells" => %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}}
+
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => slug, "content" => %{"tabs" => [tab]}},
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document(slug, "sheet", @dataset)
+
+    junk = [
+      %{"id" => %{"x" => 1}, "range" => "A1:A2", "type" => "line"},
+      %{"id" => "ok", "range" => %{}, "type" => "line"},
+      "nope",
+      %{"id" => "kept", "range" => "A1:A2", "type" => "bar", "title" => "Kept"}
+    ]
+
+    # Written straight to the rows: no product write gets past the save gate.
+    for doc <-
+          Barkpark.Repo.all(
+            from(d in Barkpark.Content.Document,
+              where: d.doc_id in ^[slug, "drafts." <> slug] and d.type == "sheet"
+            )
+          ) do
+      content = Map.put(doc.content, "tabs", [Map.put(tab, "charts", junk)])
+
+      Barkpark.Repo.update_all(from(x in Barkpark.Content.Document, where: x.id == ^doc.id),
+        set: [content: content]
+      )
+    end
+
+    {:ok, _reader, reader_html} = live(conn, "/sheets/#{slug}")
+    assert reader_html =~ "Kept"
+    assert length(Regex.scan(~r/data-test-id="sheet-chart"/, reader_html)) == 1
+
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{slug}"))
+    assert html =~ "Kept"
+
+    # An edit still saves: the session dropped the junk when it loaded the sheet.
+    grid = with_target(view, "#sheet-grid-#{slug}")
+    render_hook(grid, "cell-click", %{"ref" => "A2", "shift" => false})
+    render_hook(grid, "edit-commit", %{"value" => "7", "move" => "down"})
+    assert :ok = Session.flush(slug, @dataset)
+    {:ok, content} = Session.peek(slug, @dataset)
+    assert [%{"id" => "kept"}] = hd(content["tabs"])["charts"]
+  end
+
   # The host forwards each session delta to the grid with send_update, which
   # lands one message after the delta: wait for the mailbox before reading.
   defp chart_html(view) do

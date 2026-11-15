@@ -136,6 +136,7 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   Because sort only permutes rows, undo is loss-free and tab-identity-stable.
   """
 
+  alias Barkpark.Plugins.Sheets.Charts
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Engine
 
@@ -852,8 +853,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   # A chart's `"range"` moves with the rows and columns it reads — the same
   # arithmetic as a conditional-format range. A chart whose whole range is
   # deleted goes with it (the session's undo brings it back; see `Charts`).
-  defp rewrite_charts(%{"charts" => charts} = tab, axis, change) when is_list(charts),
-    do: Map.put(tab, "charts", Enum.flat_map(charts, &rewrite_cond_format(&1, axis, change)))
+  # `Charts.list/1` trims a range an insert grew past the chart cell cap.
+  defp rewrite_charts(%{"charts" => _} = tab, axis, change) do
+    moved = Enum.flat_map(Charts.list(tab), &rewrite_cond_format(&1, axis, change))
+    Map.put(tab, "charts", Charts.list(%{"charts" => moved}))
+  end
 
   defp rewrite_charts(tab, _axis, _change), do: tab
 

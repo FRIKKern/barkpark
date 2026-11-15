@@ -149,6 +149,107 @@ defmodule Barkpark.Plugins.Sheets.ChartsTest do
     assert [_] = Charts.list_errors("charts", 0)
   end
 
+  defp tall_state(rows) do
+    cells = for r <- 1..rows, c <- ["A", "B"], into: %{}, do: {"#{c}#{r}", n(r)}
+    st = state()
+    content = %{"tabs" => [%{"name" => "Sheet 1", "cells" => cells}]}
+    %{st | content: content, nonempty: Ops.count_nonempty(content)}
+  end
+
+  defp tab_cells(state), do: state.content |> Map.fetch!("tabs") |> hd() |> Map.fetch!("cells")
+
+  test "undo of a row delete brings the rows back when the chart sits at the cell cap" do
+    state = run(tall_state(1001), set("A1:B1000"))
+
+    # An insert inside would grow the range to 2,006 cells: its end is trimmed.
+    grown = run(state, %{"op" => "insert_rows", "tab" => 0, "at" => 5, "count" => 3})
+    assert [%{"range" => "A1:B1000"} = chart] = charts(grown)
+    assert Charts.list_errors(charts(grown), 0) == []
+
+    deleted = run(grown, %{"op" => "delete_rows", "tab" => 0, "at" => 10, "count" => 1})
+    assert [%{"range" => "A1:B999"}] = charts(deleted)
+    refute tab_cells(deleted) == tab_cells(grown)
+
+    undone = history(deleted, "undo")
+    assert tab_cells(undone) == tab_cells(grown)
+    assert charts(undone) == [chart]
+    assert charts(history(undone, "redo")) == charts(deleted)
+
+    # The insert undoes exactly too, and the chart can still be changed.
+    back = undone |> history("undo")
+    assert tab_cells(back) == tab_cells(state)
+    assert charts(back) == charts(state)
+
+    assert [%{"title" => "t"}] =
+             charts(run(grown, set("A1:B1000", %{"id" => "ch-1", "title" => "t"})))
+
+    gone = run(grown, %{"op" => "delete_chart", "tab" => 0, "id" => "ch-1"})
+    assert charts(history(gone, "undo")) == [chart]
+  end
+
+  test "undo of a row delete brings the rows back when the tab is full of charts again" do
+    state = run(tall_state(30), set("A20:B22"))
+    full = Enum.reduce(1..19, state, fn _, st -> run(st, set("A1:B2")) end)
+    assert length(charts(full)) == 20
+
+    deleted = run(full, %{"op" => "delete_rows", "tab" => 0, "at" => 20, "count" => 3})
+    assert length(charts(deleted)) == 19
+    {:ok, refilled, _} = Ops.apply_one(Map.put(set("A1:B3"), "user", "someone-else"), deleted)
+
+    # The rows come back; the chart has no room, so it is the part left out.
+    undone = history(refilled, "undo")
+    assert tab_cells(undone) == tab_cells(full)
+    assert length(charts(undone)) == 20
+    refute Enum.any?(charts(undone), &(&1["id"] == "ch-1"))
+  end
+
+  test "a generated id is never handed out twice on a tab" do
+    state = run(state(), set("A1:B2", %{"title" => "mine"}))
+    deleted = run(state, %{"op" => "delete_chart", "tab" => 0, "id" => "ch-1"})
+
+    {:ok, other, _} =
+      Ops.apply_one(Map.put(set("A1:C4", %{"title" => "theirs"}), "user", "u2"), deleted)
+
+    assert [%{"id" => "ch-2", "title" => "theirs"}] = charts(other)
+
+    # My undo puts my chart back beside theirs, not over it.
+    assert [%{"id" => "ch-1", "title" => "mine"}, %{"id" => "ch-2", "title" => "theirs"}] =
+             charts(history(other, "undo"))
+  end
+
+  test "reading stored charts is total: junk is dropped, never raised on" do
+    good = %{"id" => "a", "range" => "A1:B2", "type" => "line"}
+
+    for junk <- [
+          "charts",
+          %{"a" => 1},
+          5,
+          [1, "x", nil, [], %{}],
+          [%{"id" => %{}}],
+          [%{"id" => "a", "range" => %{}, "type" => "line"}],
+          [%{"id" => "a", "range" => "A1:B2", "type" => %{}}],
+          [%{"id" => [1], "range" => "A1", "type" => "bar", "title" => %{}}]
+        ] do
+      tab = %{"cells" => cells(), "charts" => junk}
+      assert Charts.list(tab) == []
+      assert BarkparkWeb.Studio.SheetGrid.Charts.views(tab) == []
+      assert %{"tabs" => [%{"charts" => []}]} = Charts.clean_content(%{"tabs" => [tab]})
+    end
+
+    # Good entries survive beside junk; a repeated id and the 21st are dropped;
+    # a range over the cell cap is trimmed, and the gate refuses it untrimmed.
+    many = for i <- 1..30, do: Map.put(good, "id", "c#{i}")
+    assert length(Charts.list(%{"charts" => [%{"id" => %{}}, good, good | many]})) == 20
+    big = Map.put(good, "range", "A1:Z5000")
+    assert [%{"range" => "A1:Z76"}] = Charts.list(%{"charts" => [big]})
+    assert [error] = Charts.list_errors([big], 0)
+    assert error =~ "at most 2000"
+
+    assert Charts.clean_content(%{"tabs" => [%{"name" => "t"}]}) == %{
+             "tabs" => [%{"name" => "t"}]
+           }
+  end
+
   test "a duplicated tab keeps its charts; exports and the snapshot ignore them" do
     state = run(state(), set("A1:C4"))
     copied = run(state, %{"op" => "duplicate_tab", "tab" => 0})

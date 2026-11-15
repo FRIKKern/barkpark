@@ -9,8 +9,8 @@ defmodule Barkpark.Plugins.Sheets.Charts do
       %{"id" => "ch-1", "range" => "A1:C6", "type" => "line" | "bar",
         "title" => "Sales", "headers" => true, "labels" => true}
 
-  `"headers"` — the first row of the range names the series. `"labels"` — the
-  first column labels the points. Both default to `true`.
+  `"headers"`: the first row names the series. `"labels"`: the first column
+  labels the points. Both default to `true`.
 
   ## Ops (`apply_op/3`, called from `Session.Ops.apply_one/2`)
 
@@ -20,15 +20,29 @@ defmodule Barkpark.Plugins.Sheets.Charts do
     * `%{"op" => "delete_chart", "tab" => i, "id" => id}`.
 
   Each returns a `{:structural, op}` inverse, so undo/redo ride the session's
-  existing machinery. A row/column delete that shrinks or removes a chart gets
-  its inverse wrapped by `wrap_delete_inverse/4`, so undo brings the chart back.
+  existing machinery. A new chart's id comes from `"chart_seq"`, a counter kept
+  on the tab, so an id is never handed out twice — an undo cannot land on a
+  chart another editor added later.
 
-  ## Strict at the gate, lenient at read
+  ## One rule for the two caps
 
-  `list_errors/2` is the before_save gate (shape, known type, id, range inside
-  the grid, at most `chart_cap/0` per tab). `apply_op/3` adds the range-size
-  bound (`area_cap/0` cells). `data/2` never raises: it clips an oversized range
-  and returns `state: :bad_range` for one it cannot read.
+  A stored chart reads at most `area_cap/0` cells and a tab holds at most
+  `chart_cap/0` charts. The op refuses more, the save gate (`list_errors/2`)
+  refuses more, and a row/column insert that would grow a chart past the cell
+  cap trims the range at its end (`list/1`, called by `Structure`).
+
+  ## Undo of a row/column edit never fails on a chart
+
+  `wrap_shift_inverse/4` pairs the edit's own inverse with a `{:charts, tab,
+  items}` entry that puts the changed charts back. That entry is applied by
+  `put_back/2`, which cannot fail: a chart that no longer fits under the chart
+  cap is left out, and the rows and columns come back either way.
+
+  ## The read side is total
+
+  Every reader goes through `list/1`, which keeps only well-formed charts.
+  `clean_content/1` does the same to a document when a session loads it, so a
+  stored value the gate would refuse cannot block later saves.
   """
 
   alias Barkpark.Plugins.Sheets.Core
@@ -52,14 +66,54 @@ defmodule Barkpark.Plugins.Sheets.Charts do
   @id_re ~r/^[A-Za-z0-9_-]{1,64}\z/
   @known_keys ~w(id range type title headers labels)
 
-  def types, do: @types
   def chart_cap, do: @chart_cap
   def area_cap, do: @area_cap
 
-  @doc "The tab's charts as a list of maps — total; junk entries are dropped."
+  @doc """
+  The tab's charts in stored form — total. An entry that is not a well-formed
+  chart is dropped, an oversized range is trimmed to `area_cap/0`, a repeated
+  id keeps its first chart, and at most `chart_cap/0` are returned.
+  """
   @spec list(term()) :: [map()]
-  def list(%{"charts" => charts}) when is_list(charts), do: Enum.filter(charts, &is_map/1)
+  def list(%{"charts" => charts}) when is_list(charts) do
+    charts
+    |> Enum.flat_map(fn chart ->
+      case shape(chart) do
+        {:ok, chart, corners} -> [Map.put(chart, "range", format_range(trim(corners)))]
+        {:error, _} -> []
+      end
+    end)
+    |> Enum.uniq_by(& &1["id"])
+    |> Enum.take(@chart_cap)
+  end
+
   def list(_tab), do: []
+
+  @doc """
+  A sheet document's content with every tab's `"charts"` put through `list/1`.
+  A tab with no `"charts"` key is left exactly as it is.
+  """
+  @spec clean_content(term()) :: term()
+  def clean_content(%{"tabs" => tabs} = content) when is_list(tabs) do
+    Map.put(content, "tabs", Enum.map(tabs, &clean_tab/1))
+  end
+
+  def clean_content(content), do: content
+
+  defp clean_tab(%{"charts" => _} = tab), do: Map.put(tab, "charts", list(tab))
+  defp clean_tab(tab), do: tab
+
+  # Trim a range to the cell cap: whole rows off the end, and for a range wider
+  # than the cap itself, one row of the first `area_cap` columns.
+  defp trim({c1, r1, c2, r2} = corners) do
+    width = c2 - c1 + 1
+
+    cond do
+      width * (r2 - r1 + 1) <= @area_cap -> corners
+      width > @area_cap -> {c1, r1, c1 + @area_cap - 1, r1}
+      true -> {c1, r1, c2, r1 + div(@area_cap, width) - 1}
+    end
+  end
 
   # ── validation ───────────────────────────────────────────────────────────
 
@@ -81,7 +135,7 @@ defmodule Barkpark.Plugins.Sheets.Charts do
         end
       end)
 
-    ids = for %{"id" => id} <- charts, do: id
+    ids = for %{"id" => id} <- charts, is_binary(id), do: id
     dup = if ids == Enum.uniq(ids), do: [], else: ["tab #{idx}: charts: duplicate id"]
     cap ++ each ++ dup
   end
@@ -90,7 +144,15 @@ defmodule Barkpark.Plugins.Sheets.Charts do
 
   @doc "A chart in its stored form, or why it may not be stored."
   @spec normalize(term()) :: {:ok, map()} | {:error, String.t()}
-  def normalize(%{} = chart) do
+  def normalize(chart) do
+    with {:ok, chart, corners} <- shape(chart),
+         :ok <- in_area(corners) do
+      {:ok, chart}
+    end
+  end
+
+  # Everything but the cell cap, which `list/1` trims instead of refusing.
+  defp shape(%{} = chart) do
     with :ok <- known_keys(chart),
          {:ok, id} <- valid_id(Map.get(chart, "id")),
          {:ok, corners} <- parse_range(Map.get(chart, "range")),
@@ -107,11 +169,11 @@ defmodule Barkpark.Plugins.Sheets.Charts do
          "title" => title,
          "headers" => headers,
          "labels" => labels
-       }}
+       }, corners}
     end
   end
 
-  def normalize(_chart), do: {:error, "must be a map"}
+  defp shape(_chart), do: {:error, "must be a map"}
 
   defp known_keys(chart) do
     case Map.keys(chart) -- @known_keys do
@@ -195,16 +257,17 @@ defmodule Barkpark.Plugins.Sheets.Charts do
   def apply_op(%{"op" => "set_chart", "chart" => %{} = chart} = op, tab, tab_idx) do
     charts = list(tab)
 
-    chart =
-      if Map.get(chart, "id") in [nil, ""],
-        do: Map.put(chart, "id", next_id(charts)),
-        else: chart
+    {chart, tab} =
+      if Map.get(chart, "id") in [nil, ""] do
+        n = next_seq(tab, charts)
+        {Map.put(chart, "id", "ch-#{n}"), Map.put(tab, "chart_seq", n)}
+      else
+        {chart, tab}
+      end
 
     prior_at = Enum.find_index(charts, &(Map.get(&1, "id") == chart["id"]))
 
     with {:ok, chart} <- normalize(chart),
-         {:ok, corners} <- parse_range(chart["range"]),
-         :ok <- in_area(corners),
          {:ok, at} <- valid_at(Map.get(op, "at")),
          :ok <- under_cap(charts, prior_at) do
       rest = if prior_at, do: List.delete_at(charts, prior_at), else: charts
@@ -253,34 +316,79 @@ defmodule Barkpark.Plugins.Sheets.Charts do
 
   defp under_cap(_charts, _prior_at), do: :ok
 
-  defp next_id(charts) do
-    taken = MapSet.new(charts, &Map.get(&1, "id"))
+  # The next number for a generated id: past the tab's counter, and past any
+  # caller-chosen `ch-N` already there. The counter only grows, so a deleted
+  # chart's id is not handed out again.
+  defp next_seq(tab, charts) do
+    seq =
+      case Map.get(tab, "chart_seq") do
+        n when is_integer(n) and n >= 0 -> n
+        _ -> 0
+      end
 
-    1
+    taken = MapSet.new(charts, & &1["id"])
+
+    (seq + 1)
     |> Stream.iterate(&(&1 + 1))
-    |> Enum.find_value(fn n ->
-      id = "ch-#{n}"
-      if MapSet.member?(taken, id), do: nil, else: id
-    end)
+    |> Enum.find(&(not MapSet.member?(taken, "ch-#{&1}")))
   end
 
   @doc """
-  A row/column delete rewrote the tab from `old_tab` to `new_tab`. When that
-  shrank or removed charts, wrap the delete's inverse in a group that also puts
-  those charts back, so undo is lossless. Unchanged charts leave it as it was.
+  Pair a row/column edit's own inverse with a `{:charts, tab, items}` entry
+  holding the tab's charts as they were before the edit (`put_back/2`), so undo
+  returns each chart exactly — also one the edit trimmed, shrank or removed. A
+  tab with no charts gets the inverse back as it is.
   """
-  @spec wrap_delete_inverse(term(), map(), map(), non_neg_integer()) :: term()
-  def wrap_delete_inverse(inverse, old_tab, new_tab, tab_idx) do
-    after_by_id = Map.new(list(new_tab), &{Map.get(&1, "id"), &1})
+  @spec wrap_shift_inverse(term(), map(), non_neg_integer()) :: term()
+  def wrap_shift_inverse(inverse, old_tab, tab_idx) do
+    items = for {chart, i} <- Enum.with_index(list(old_tab)), do: {chart["id"], chart, i}
 
-    restores =
-      for {chart, i} <- Enum.with_index(list(old_tab)),
-          Map.get(after_by_id, Map.get(chart, "id")) != chart,
-          do: {:structural, set_op(tab_idx, chart, i)}
+    # A group is undone back to front: the edit's own inverse runs first and
+    # puts the rows or columns back, then the charts.
+    if items == [], do: inverse, else: {:group, [{:charts, tab_idx, items}, inverse]}
+  end
 
-    # A group is undone back to front, so the delete's own inverse goes last
-    # (it runs first and puts the rows back), then the charts in list order.
-    if restores == [], do: inverse, else: {:group, Enum.reverse(restores) ++ [inverse]}
+  @doc """
+  Put charts back on a tab, for undo and redo. `items` is `[{id, chart | nil,
+  at}]`: a chart replaces the one with that id (or is inserted) at index `at`;
+  `nil` removes the id. Never fails: a chart that would take the tab past
+  `chart_cap/0` is left out. Returns `{new_tab, counter_items}`, the items
+  that undo this call.
+  """
+  @spec put_back(map(), list()) :: {map(), list()}
+  def put_back(tab, items) when is_map(tab) and is_list(items) do
+    before = list(tab)
+
+    counter =
+      for {id, _chart, _at} <- items do
+        at = Enum.find_index(before, &(&1["id"] == id))
+        {id, at && Enum.at(before, at), at || 0}
+      end
+
+    ids = MapSet.new(items, fn {id, _chart, _at} -> id end)
+    here = MapSet.new(before, & &1["id"])
+    kept = Enum.reject(before, &MapSet.member?(ids, &1["id"]))
+
+    # A chart still on the tab always goes back; one that is gone goes back
+    # only while there is room under the cap.
+    {present, absent} =
+      items
+      |> Enum.filter(fn {_id, chart, _at} -> is_map(chart) end)
+      |> Enum.sort_by(fn {_id, _chart, at} -> at end)
+      |> Enum.split_with(fn {id, _chart, _at} -> MapSet.member?(here, id) end)
+
+    room = max(@chart_cap - length(kept) - length(present), 0)
+
+    # Lowest index first, so each chart lands where it was.
+    charts =
+      (present ++ Enum.take(absent, room))
+      |> Enum.sort_by(fn {_id, _chart, at} -> at end)
+      |> Enum.reduce(kept, fn {_id, chart, at}, acc ->
+        List.insert_at(acc, min(at, length(acc)), chart)
+      end)
+
+    {Map.put(tab, "charts", list(%{"charts" => charts})),
+     Enum.sort_by(counter, fn {_id, _chart, at} -> at end)}
   end
 
   # ── data ─────────────────────────────────────────────────────────────────
@@ -374,17 +482,12 @@ defmodule Barkpark.Plugins.Sheets.Charts do
 
   # A formula cell's computed value counts; an error value or text never does.
   defp number_at(cells, c, r) do
-    case cell_at(cells, c, r) do
-      %{"v" => v} = cell when is_number(v) ->
-        mag = abs(v)
-
-        if Map.get(cell, "t") != "e" and
-             (v == 0 or (mag >= @min_magnitude and mag <= @max_magnitude)),
-           do: v,
-           else: nil
-
-      _ ->
-        nil
+    with %{"v" => v} = cell when is_number(v) <- cell_at(cells, c, r),
+         true <- Map.get(cell, "t") != "e",
+         true <- v == 0 or (abs(v) >= @min_magnitude and abs(v) <= @max_magnitude) do
+      v
+    else
+      _ -> nil
     end
   end
 

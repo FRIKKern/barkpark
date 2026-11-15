@@ -152,11 +152,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       # (own tab and every other tab holding a cross-tab ref), which is what
       # makes the undo lossless. See `shift_inverse/6`.
       inverse = shift_inverse(op, tab_idx, old_tab, state, axis, change)
-      # A delete that shrinks or removes a chart: undo puts the chart back too.
-      inverse =
-        if kind == :delete,
-          do: Charts.wrap_delete_inverse(inverse, old_tab, new_tab, tab_idx),
-          else: inverse
+      # On a tab with charts, undo also puts each chart back as it was.
+      inverse = Charts.wrap_shift_inverse(inverse, old_tab, tab_idx)
 
       state =
         apply_structural(state, tab_idx, new_tab, true, %{
@@ -840,6 +837,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # tab move/delete with a pending sort undo). The rect/perm are row-space and
   # do not shift under a tab permutation.
   defp remap_entry({:permute, tab, rect, perm}, fun), do: {:permute, fun.(tab), rect, perm}
+  defp remap_entry({:charts, tab, items}, fun), do: {:charts, fun.(tab), items}
   # A group's absolute tab indices live inside its member entries — a tab
   # move/delete permutes each one (the #843 all-inverse-shapes remap contract;
   # a missing clause would crash undo after a reorder with a pending group).
@@ -936,6 +934,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   defp apply_entry({:structural, op_map}, state), do: apply_one(op_map, state)
+
+  # Charts put back beside a row/column undo. `Charts.put_back/2` cannot fail,
+  # so this member never stops the group that restores the rows.
+  defp apply_entry({:charts, tab, items}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      {new_tab, counter} = Charts.put_back(Sheets.get_tab(state.content, tab_idx), items)
+      structure = %{op: "set_chart", at: nil, count: nil, tab: tab_idx}
+
+      {:ok, apply_structural(state, tab_idx, new_tab, false, structure),
+       {:charts, tab_idx, counter}}
+    end
+  end
 
   # Per-gesture compound undo (QL-D4): a `{:group, entries}` holds one batch's
   # same-user inverses in APPLICATION order (op1..opN). Fold them in REVERSE

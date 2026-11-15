@@ -132,10 +132,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
       (0-based) places or moves it in the tab's list. Refused as
       `invalid_chart`: a range outside the sheet or over 2,000 cells, an
       unknown type or key, a 21st chart on a tab; `chart_not_found` for a
-      delete of an unknown id. No recompute. A row/column insert or delete
-      moves the range like a conditional-format range; deleting every row or
-      column of the range removes the chart, and undo of that delete puts it
-      back.
+      delete of an unknown id. No recompute. A generated id (`ch-N`) is never
+      reused on a tab. A row/column insert or delete moves the range like a
+      conditional-format range (an insert that would grow it past 2,000 cells
+      trims its end); deleting every row or column of the range removes the
+      chart. Undo of a row/column edit puts the charts back with a
+      `{:charts, tab, items}` entry that cannot fail.
     * `%{"op" => "sort_range", "tab" => i, "range" => "A2:D50",
       "keys" => [%{"col" => 0, "dir" => "asc"}, …]}` — sorts the range's rows
       in place (SF-A): a PURE row permutation that moves every cell map
@@ -722,7 +724,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
     case load_doc(pubid, dataset, scope_ws, scope_proj) do
       {:ok, doc} ->
-        content = doc.content || %{}
+        # Charts the save gate would refuse are dropped here, so a stored
+        # junk value cannot halt every later flush.
+        content = Barkpark.Plugins.Sheets.Charts.clean_content(doc.content || %{})
 
         {:ok,
          schedule_idle(%{
