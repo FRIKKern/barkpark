@@ -226,6 +226,16 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
     refute desk =~ ".field > .field-actions"
   end
 
+  test "the desk names the browser script by its content hash; the root layout does not link it",
+       c do
+    {:ok, _view, html} = live(c.conn, c.desk)
+    path = BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")
+
+    assert path =~ ~r|^/assets/v/[\w-]{16}/bp-desk-field-actions\.js$|
+    assert html =~ ~s(data-desk-field-actions="#{path}")
+    refute html =~ ~r/<script[^>]*bp-desk-field-actions/
+  end
+
   test "the menu is drawn for a named field only" do
     assigns = %{}
 

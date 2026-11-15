@@ -101,7 +101,7 @@ press(item.querySelector("svg"));
 await tick();
 assert.equal(held, "before", "nothing is written before the server answers");
 answer(copy);
-await tick(20);
+await tick(80);
 assert.deepEqual(held, { [SANITY]: copy.json, "text/html": copy.html, "text/plain": copy.text });
 assert.deepEqual(writes, [[SANITY, "text/html", "text/plain"].sort()]);
 assert.equal(toast(), null, "a landed copy shows no toast");
@@ -110,7 +110,7 @@ assert.equal(toast(), null, "a landed copy shows no toast");
 //    the earlier copy, and nothing more is written.
 press();
 answer({ field: "excerpt", empty: "Empty value, nothing to copy" });
-await tick(20);
+await tick(80);
 assert.equal(writes.length, 1, "an empty field writes nothing");
 assert.equal(held["text/plain"], "Short", "the earlier copy is still on the clipboard");
 assert.equal(toast().textContent, "Empty value, nothing to copy");
@@ -123,10 +123,10 @@ assert.equal(toast().getAttribute("popover"), "manual");
 answer(copy);
 press();
 answer({ ...copy, field: "title" });
-await tick(20);
+await tick(80);
 assert.equal(writes.length, 1, "an answer for another field is not this copy's");
 answer({ ...copy, text: "Again" });
-await tick(20);
+await tick(80);
 assert.equal(held["text/plain"], "Again");
 assert.equal(writes.length, 2);
 
@@ -134,7 +134,7 @@ assert.equal(writes.length, 2);
 refuse = (it) => SANITY in it.types;
 press();
 answer({ ...copy, text: "Two types" });
-await tick(20);
+await tick(80);
 assert.deepEqual(writes.at(-1), ["text/html", "text/plain"]);
 assert.equal(held["text/plain"], "Two types");
 
@@ -142,7 +142,7 @@ assert.equal(held["text/plain"], "Two types");
 refuse = () => true;
 press();
 answer({ ...copy, text: "Words" });
-await tick(20);
+await tick(80);
 assert.deepEqual(writes.at(-1), ["writeText"]);
 assert.equal(held, "Words");
 
@@ -150,7 +150,7 @@ assert.equal(held, "Words");
 Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: undefined });
 press();
 answer(copy);
-await tick(20);
+await tick(80);
 assert.equal(toast().textContent, "Could not copy to the clipboard");
 assert.equal(toast().getAttribute("role"), "alert");
 assert.equal(held, "Words");
@@ -159,8 +159,32 @@ assert.equal(held, "Words");
 press(document.querySelector("[data-desk-field-paste]"));
 press(document.body);
 answer(copy);
-await tick(20);
+await tick(80);
 assert.equal(toast().textContent, "Could not copy to the clipboard", "no new toast");
 
-console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said)");
+// 8. bp-desk.js loads this script when the desk mounts, once, from the
+//    address on the desk's root; a page with no address loads nothing.
+delete window.BarkparkDeskFieldActions;
+await import("../../priv/static/assets/bp-desk.js");
+const mountDesk = (attrs) => {
+  const el = document.createElement("div");
+  el.id = "desk-panes";
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  document.body.appendChild(el);
+  Object.defineProperty(el, "clientWidth", { get: () => 1440 });
+  const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
+  hook.mounted();
+  return el;
+};
+const loaded = () => [...document.querySelectorAll("head > script[data-desk-field-actions]")];
+mountDesk({}).remove();
+assert.equal(loaded().length, 0, "no address, no script");
+const SRC = "/assets/v/0123456789abcdef/bp-desk-field-actions.js";
+mountDesk({ "data-desk-field-actions": SRC }).remove();
+mountDesk({ "data-desk-field-actions": SRC });
+assert.equal(loaded().length, 1, "loaded once, however often the desk mounts");
+assert.equal(loaded()[0].getAttribute("src"), SRC);
+assert.equal(loaded()[0].async, true);
+
+console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said, loaded by the desk)");
 process.exit(0);

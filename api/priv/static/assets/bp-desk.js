@@ -698,6 +698,17 @@
       hook._ahead = null;
       hook._warmed = {};
 
+      // A field's Copy and Paste (bp-desk-field-actions.js) are the desk's
+      // alone: loaded here, once, from the address the page gives.
+      var fieldActions = root.getAttribute("data-desk-field-actions");
+      if (fieldActions && !window.BarkparkDeskFieldActions && !root.ownerDocument.querySelector("script[data-desk-field-actions]")) {
+        var script = root.ownerDocument.createElement("script");
+        script.src = fieldActions;
+        script.async = true;
+        script.setAttribute("data-desk-field-actions", "");
+        root.ownerDocument.head.appendChild(script);
+      }
+
       hook._settle = function (landed) {
         var ahead = hook._ahead;
         hook._ahead = null;

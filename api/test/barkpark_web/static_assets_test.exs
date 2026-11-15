@@ -26,8 +26,7 @@ defmodule BarkparkWeb.StaticAssetsTest do
     bp-graph.js bp-tmux-terminal.js bp-paper-mermaid.js bp-chat-composer.js
     bp-chat-turn-clock.js bp-chat-palette.js bp-paper-editor-hooks.js
     bp-paper-find-bar.js
-    bp-array-focus.js bp-tab-keys.js bp-desk.js bp-desk-field-actions.js
-    bp-datetime-field.js
+    bp-array-focus.js bp-tab-keys.js bp-desk.js bp-datetime-field.js
   )
 
   defp file_hash(name), do: StaticAssets.digest(File.read!(StaticAssets.file(name)))

@@ -13,7 +13,10 @@
 // The words are shown in a toast on the page's body (`.dk-field-toast`,
 // `Desk.DocStyle`): a status, or an alert when something was refused.
 //
-// A document-level listener, no phx-hook, as bp-array-focus.js.
+// A document-level listener, no phx-hook, as bp-array-focus.js. Only the
+// desk needs it, so bp-desk.js loads it when the desk mounts (the address is
+// on the desk's root, `data-desk-field-actions`); the root layout has no
+// script tag for it.
 (function () {
   "use strict";
 

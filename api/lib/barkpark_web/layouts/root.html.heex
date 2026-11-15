@@ -5570,8 +5570,6 @@
         draws the pane's frame before the server answers. Registered as
         Hooks.Desk below. Bottom of <body> (Golden Rule #4). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-desk.js")}></script>
-  <%!-- A desk field's Copy and Paste (Desk.FieldActions): the clipboard is the browser's. A document-level listener, no hook; `async`. --%>
-  <script src={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")} async></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
         delegates to `window.BarkparkDatetimeFieldHook` and waits until this
