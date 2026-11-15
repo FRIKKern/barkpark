@@ -24,7 +24,7 @@ import (
 // after turn_started was taken and before the first text. It is cosmetic, so
 // it never blocks, delays, fails or reorders the turn: the turn does not wait
 // for the side call or for the POST, the POST has no cursor, so the turn's
-// events never queue behind it, it is tried once under statusPostTimeout, and
+// events never queue behind it, it is tried once under the POST timeout, and
 // any failure (an old server's 404, a 5xx, a 429, a timeout) drops it. A label
 // that is ready only after the first text or after the turn ended is never
 // sent; the server also drops one that reaches it after the turn's first text.
@@ -50,7 +50,8 @@ type StatusPoster interface {
 
 // How long one label POST may take. Past it the label is dropped: by then the
 // turn's text is usually out and a late label is not shown.
-const statusPostTimeout = 2 * time.Second
+// LocalHandler.StatusPostTimeout sets it per handler.
+const defaultStatusPostTimeout = 2 * time.Second
 
 const (
 	// The prompt the side call gets as its system prompt; the person's text is
@@ -262,8 +263,12 @@ func (h *LocalHandler) startStatusLabel(ctx context.Context, remote RemoteComman
 	}
 	labelCtx, cancel := context.WithCancel(ctx)
 	poster := h.Status
+	postTimeout := h.StatusPostTimeout
+	if postTimeout <= 0 {
+		postTimeout = defaultStatusPostTimeout
+	}
 	status := &turnStatus{emit: emit, post: func(label string) {
-		postCtx, done := context.WithTimeout(labelCtx, statusPostTimeout)
+		postCtx, done := context.WithTimeout(labelCtx, postTimeout)
 		defer done()
 		if err := poster.PostStatus(postCtx, remote, label); err != nil && labelCtx.Err() == nil {
 			h.logf("status label not taken: %v", err)

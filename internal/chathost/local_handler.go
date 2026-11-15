@@ -35,6 +35,9 @@ type LocalHandler struct {
 	// zero). Each handler holds its own, so a test that shortens it does not race
 	// a turn another test left running.
 	WaitDelay time.Duration
+	// StatusPostTimeout bounds the one label POST (defaultStatusPostTimeout
+	// when zero).
+	StatusPostTimeout time.Duration
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession

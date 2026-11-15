@@ -295,7 +295,61 @@ defmodule BarkparkWeb.StudioLocale do
       "Video" => gettext("Video"),
       "video" => gettext("video"),
       "Video preview" => gettext("Video preview"),
-      "Visibility" => gettext("Visibility")
+      "Visibility" => gettext("Visibility"),
+      # The bulk bar, delete steps and drop zone (bp-asset-explorer-bulk.js).
+      "%{count} files deleted" => gettext("%{count} files deleted", count: "%{count}"),
+      "%{count} files were not deleted" =>
+        gettext("%{count} files were not deleted", count: "%{count}"),
+      "%{count} selected" => gettext("%{count} selected", count: "%{count}"),
+      "%{failed} of %{count} could not be added" =>
+        gettext("%{failed} of %{count} could not be added",
+          count: "%{count}",
+          failed: "%{failed}"
+        ),
+      "%{failed} of %{count} could not be removed" =>
+        gettext("%{failed} of %{count} could not be removed",
+          count: "%{count}",
+          failed: "%{failed}"
+        ),
+      "1 file deleted" => gettext("1 file deleted"),
+      "1 file was not deleted" => gettext("1 file was not deleted"),
+      "Add to folder" => gettext("Add to folder"),
+      "Add to folder…" => gettext("Add to folder…"),
+      "Added %{count} to %{name}" =>
+        gettext("Added %{count} to %{name}", count: "%{count}", name: "%{name}"),
+      "Clear selection" => gettext("Clear selection"),
+      "Close" => gettext("Close"),
+      "Could not be deleted" => gettext("Could not be deleted"),
+      "Delete" => gettext("Delete"),
+      "Delete %{count} files that documents use?" =>
+        gettext("Delete %{count} files that documents use?", count: "%{count}"),
+      "Delete %{count} files?" => gettext("Delete %{count} files?", count: "%{count}"),
+      "Delete 1 file that documents use?" => gettext("Delete 1 file that documents use?"),
+      "Delete 1 file?" => gettext("Delete 1 file?"),
+      "Delete anyway" => gettext("Delete anyway"),
+      "Delete failed (%{status})" => gettext("Delete failed (%{status})", status: "%{status}"),
+      "Deleting… %{done} of %{total}" =>
+        gettext("Deleting… %{done} of %{total}", done: "%{done}", total: "%{total}"),
+      "Documents that use these files will show a broken file. This cannot be undone." =>
+        gettext("Documents that use these files will show a broken file. This cannot be undone."),
+      "Drop files to upload" => gettext("Drop files to upload"),
+      "Remove from folder" => gettext("Remove from folder"),
+      "Removed %{count} from %{name}" =>
+        gettext("Removed %{count} from %{name}", count: "%{count}", name: "%{name}"),
+      "Select %{name}" => gettext("Select %{name}", name: "%{name}"),
+      "Selected files" => gettext("Selected files"),
+      "The delete request failed. The list shows what is left." =>
+        gettext("The delete request failed. The list shows what is left."),
+      "This cannot be undone. Files that documents use are kept." =>
+        gettext("This cannot be undone. Files that documents use are kept."),
+      "Used by %{count} documents" => gettext("Used by %{count} documents", count: "%{count}"),
+      "Used by 1 document" => gettext("Used by 1 document"),
+      "Working… %{done} of %{total}" =>
+        gettext("Working… %{done} of %{total}", done: "%{done}", total: "%{total}"),
+      "You do not have permission to change these files." =>
+        gettext("You do not have permission to change these files."),
+      "Your session has ended. Sign in again." =>
+        gettext("Your session has ended. Sign in again.")
     })
   end
 
