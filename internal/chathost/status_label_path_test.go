@@ -32,18 +32,22 @@ func (f statusPostFunc) PostStatus(ctx context.Context, command RemoteCommand, l
 
 // labelPathServer is the leaseServer with a status endpoint in front of it. A
 // status label, on either path, creates gate (so the helper turn writes its
-// text while the label is in flight) and is answered per mode: "hang" holds the
-// answer for 3 s, "503" answers 503 at once.
+// text while the label is in flight) and is answered per mode: "hang" never
+// answers until the host gives up on it (or labelBackstop passes), "503"
+// answers 503 at once. textWhileHeld: the first text arrived while a hanging
+// label POST was still open.
 type labelPathServer struct {
 	lease *leaseServer
 	gate  string
 	mode  string
 
-	mu          sync.Mutex
-	statusPosts int
-	statusBody  map[string]any
-	statusPath  string
-	textAt      time.Time
+	mu            sync.Mutex
+	statusPosts   int
+	statusBody    map[string]any
+	statusPath    string
+	held          bool
+	textSeen      bool
+	textWhileHeld bool
 }
 
 func (s *labelPathServer) handler(t *testing.T) http.Handler {
@@ -66,8 +70,9 @@ func (s *labelPathServer) handler(t *testing.T) http.Handler {
 				label = true
 			case "text_delta":
 				s.mu.Lock()
-				if s.textAt.IsZero() {
-					s.textAt = time.Now()
+				if !s.textSeen {
+					s.textSeen = true
+					s.textWhileHeld = s.held
 				}
 				s.mu.Unlock()
 			}
@@ -80,6 +85,7 @@ func (s *labelPathServer) handler(t *testing.T) http.Handler {
 		s.statusPosts++
 		s.statusBody = body
 		s.statusPath = r.URL.Path
+		s.held = s.mode == "hang"
 		s.mu.Unlock()
 		_ = os.WriteFile(s.gate, nil, 0o600)
 		w.Header().Set("Content-Type", "application/json")
@@ -89,8 +95,13 @@ func (s *labelPathServer) handler(t *testing.T) http.Handler {
 			return
 		}
 		select {
-		case <-time.After(3 * time.Second):
+		case <-time.After(labelBackstop):
 		case <-r.Context().Done():
+		}
+		s.mu.Lock()
+		s.held = false
+		s.mu.Unlock()
+		if r.Context().Err() != nil {
 			return
 		}
 		if r.URL.Path == "/v1/chat-host/events" {
@@ -106,13 +117,8 @@ func (s *labelPathServer) handler(t *testing.T) http.Handler {
 func TestStatusLabelPostThatHangsOrFailsDoesNotHoldTheFirstText(t *testing.T) {
 	for _, mode := range []string{"hang", "503"} {
 		t.Run(mode, func(t *testing.T) {
-			dir := t.TempDir()
-			gate := filepath.Join(dir, "gate")
-			stamps := filepath.Join(dir, "times.json")
-			installStatusHelper(t, map[string]string{
-				"BARKPARK_STATUS_HELPER": "turn", "BARKPARK_STATUS_HELPER_GATE": gate,
-				"BARKPARK_STATUS_HELPER_TIMES": stamps,
-			})
+			gate := filepath.Join(t.TempDir(), "gate")
+			installStatusHelper(t, map[string]string{"BARKPARK_STATUS_HELPER": "turn", "BARKPARK_STATUS_HELPER_GATE": gate})
 			root := t.TempDir()
 			command, _ := json.Marshal(map[string]any{
 				"provider": "claude", "operation": "send_turn", "session_id": "session-1",
@@ -126,47 +132,37 @@ func TestStatusLabelPostThatHangsOrFailsDoesNotHoldTheFirstText(t *testing.T) {
 			handler := NewLocalHandler([]string{root})
 			handler.StatusLabel = StatusLabelFunc(func(context.Context, string) (string, error) { return tidesLabel, nil })
 			handler.Status = client
+			// Longer than the server holds a hanging POST: the host must not end
+			// it on its own clock first, or a text that comes later than the
+			// default on a loaded machine would look held.
+			handler.StatusPostTimeout = 2 * labelBackstop
 			log := &syncBuffer{}
 			handler.Log = log
 			runner := Runner{Client: client, Handler: handler, PollInterval: time.Millisecond, Log: &syncBuffer{}}
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*labelBackstop)
 			defer cancel()
 			result := make(chan error, 1)
 			go func() { result <- runner.Run(ctx) }()
 
-			started := time.Now()
 			for {
 				if done, _ := server.lease.snapshot(); done {
 					break
 				}
 				if ctx.Err() != nil {
 					_, kinds := server.lease.snapshot()
-					t.Fatalf("the turn never completed; events taken: %v", kinds)
+					t.Fatalf("the turn never completed behind a label POST that is %s; events taken: %v", mode, kinds)
 				}
 				time.Sleep(time.Millisecond)
 			}
-			took := time.Since(started)
 			_, kinds := server.lease.snapshot()
-
-			raw, err := os.ReadFile(stamps)
-			if err != nil {
-				t.Fatalf("the helper turn wrote no times: %v", err)
-			}
-			var nanos map[string]int64
-			if err := json.Unmarshal(raw, &nanos); err != nil {
-				t.Fatal(err)
-			}
 			server.mu.Lock()
-			textAt := server.textAt
+			textSeen, textWhileHeld := server.textSeen, server.textWhileHeld
 			server.mu.Unlock()
-			if textAt.IsZero() {
-				t.Fatalf("no text reached the server in %v behind a label POST that is %s; events taken: %v", took, mode, kinds)
+			if !textSeen {
+				t.Fatalf("no text reached the server behind a label POST that is %s; events taken: %v", mode, kinds)
 			}
-			if lag := textAt.Sub(time.Unix(0, nanos["text"])); lag > 100*time.Millisecond {
-				t.Fatalf("the first text reached the server %v after the provider wrote it, behind a label POST that is %s; want within 100ms", lag, mode)
-			}
-			if took > 2500*time.Millisecond {
-				t.Fatalf("the turn took %v behind a label POST that is %s", took, mode)
+			if mode == "hang" && !textWhileHeld {
+				t.Fatalf("the first text reached the server only after the hanging label POST ended: the POST held it")
 			}
 			if want := []string{"session_started", "turn_started", "text_delta", "turn_completed"}; fmt.Sprint(kinds) != fmt.Sprint(want) {
 				t.Fatalf("events taken %v; want %v: the label is not a turn event", kinds, want)

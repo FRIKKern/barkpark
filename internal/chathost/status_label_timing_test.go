@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -17,6 +18,14 @@ import (
 // Live, with the label on, the first text came about 2 s later on a loaded Mac.
 // These tests pin that the side call never holds the turn's text and that it
 // runs below the turn's CPU priority.
+//
+// They are order-based (task-8ec73df27873e821): a label call or POST the test
+// holds open, and an assertion on what was published while it was held, not a
+// lag in milliseconds. On a machine loaded to about 42 the turn alone took over
+// 8 s, so every time budget failed there. labelBackstop is the one wall clock:
+// it frees what the test holds, so a host that waits for the label still ends
+// and the test can say what it waited for.
+const labelBackstop = 20 * time.Second
 
 // niceOf reads a process's niceness the same way on macOS and Linux.
 func niceOf(pid int) int {
@@ -31,76 +40,73 @@ func niceOf(pid int) int {
 	return n
 }
 
-// runTimedTurn runs one claude send_turn against the helper turn with extra
-// helper env, and returns when each event reached emit and the helper's own
-// UnixNano stamp of when it wrote its "text" line.
-func runTimedTurn(t *testing.T, labeler StatusLabeler, env map[string]string) (map[string]time.Time, map[string]time.Time) {
-	t.Helper()
-	stamps := filepath.Join(t.TempDir(), "times.json")
-	env["BARKPARK_STATUS_HELPER"] = "turn"
-	env["BARKPARK_STATUS_HELPER_TIMES"] = stamps
-	installStatusHelper(t, env)
-	handler := NewLocalHandler([]string{t.TempDir()})
-	handler.StatusLabel = labeler
-	handler.Log = &syncBuffer{}
-	var mu sync.Mutex
-	seen := map[string]time.Time{}
-	err := handler.Handle(context.Background(), RemoteCommand{Command: map[string]any{
-		"provider": "claude", "operation": "send_turn", "session_id": "session-timed",
-		"payload": map[string]any{"cwd": handler.ApprovedRoots[0], "content": "say hi", "mode": "plan"},
-	}}, func(event map[string]any) error {
-		mu.Lock()
-		defer mu.Unlock()
-		if kind := event["kind"].(string); seen[kind].IsZero() {
-			seen[kind] = time.Now()
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Handle() = %v", err)
-	}
-	raw, err := os.ReadFile(stamps)
-	if err != nil {
-		t.Fatalf("the helper turn wrote no times: %v", err)
-	}
-	var nanos map[string]int64
-	if err := json.Unmarshal(raw, &nanos); err != nil {
-		t.Fatal(err)
-	}
-	helper := map[string]time.Time{}
-	for name, n := range nanos {
-		helper[name] = time.Unix(0, n)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	return seen, helper
+// heldLabel is a label call that answers only once freed: by the test, or by
+// labelBackstop. The turn's end cancels it.
+type heldLabel struct {
+	entered   atomic.Bool
+	released  atomic.Bool
+	release   chan struct{}
+	once      sync.Once
+	cancelled chan struct{}
+	cancel    sync.Once
 }
 
-// With a label call that takes 3 s, the first text is published as soon as the
-// provider writes it, not after the label: the side call is never under the
-// lock the turn's events pass through.
+func newHeldLabel(t *testing.T) *heldLabel {
+	label := &heldLabel{release: make(chan struct{}), cancelled: make(chan struct{})}
+	backstop := time.AfterFunc(labelBackstop, label.free)
+	t.Cleanup(func() {
+		backstop.Stop()
+		label.free()
+	})
+	return label
+}
+
+// free answers the call. released is set first, so an event that sees it unset
+// was published while the call was still held.
+func (l *heldLabel) free() {
+	l.once.Do(func() {
+		l.released.Store(true)
+		close(l.release)
+	})
+}
+
+func (l *heldLabel) StatusLabel(ctx context.Context, _ string) (string, error) {
+	l.entered.Store(true)
+	select {
+	case <-l.release:
+		return tidesLabel, nil
+	case <-ctx.Done():
+		l.cancel.Do(func() { close(l.cancelled) })
+		return "", ctx.Err()
+	}
+}
+
+// The first text is published while the label call is still running: the side
+// call is never under the lock the turn's events pass through, and the turn
+// never waits for it. The turn ends with the call still held, so no label goes
+// out.
 func TestClaudeTurnTextIsNotHeldByASlowLabelCall(t *testing.T) {
-	labeler := StatusLabelFunc(func(ctx context.Context, _ string) (string, error) {
-		select {
-		case <-time.After(3 * time.Second):
-			return tidesLabel, nil
-		case <-ctx.Done():
-			return "", ctx.Err()
+	label := newHeldLabel(t)
+	var textSeen, textWhileHeld bool
+	events, _ := runLabelledTurnHooked(t, label, "", &syncBuffer{}, func(event map[string]any) {
+		if event["kind"] == "text_delta" && !textSeen {
+			textSeen = true
+			textWhileHeld = !label.released.Load()
 		}
 	})
-	started := time.Now()
-	seen, helper := runTimedTurn(t, labeler, map[string]string{})
-	if seen["text_delta"].IsZero() {
-		t.Fatal("no text was published")
+	if !label.entered.Load() {
+		t.Fatal("the label call was never made, so this proves nothing")
 	}
-	if lag := seen["text_delta"].Sub(helper["text"]); lag > 100*time.Millisecond {
-		t.Fatalf("the first text reached the server side %v after the provider wrote it; want within 100ms", lag)
+	if !textSeen {
+		t.Fatalf("no text was published; events %v", kindsOf(events))
 	}
-	if took := time.Since(started); took > 2500*time.Millisecond {
-		t.Fatalf("the turn took %v; a 3 s label call held it", took)
+	if !textWhileHeld {
+		t.Fatalf("the first text was published only after the label call was freed (by the %v backstop): the side call held it", labelBackstop)
 	}
-	if !seen["status"].IsZero() {
-		t.Fatal("a label that came after the turn ended was published")
+	for _, event := range events {
+		if event["kind"] == "status" {
+			t.Fatal("a label that came after the turn ended was published")
+		}
 	}
 }
 
@@ -115,7 +121,8 @@ func TestClaudeStatusLabelerRunsBelowTheTurnsPriority(t *testing.T) {
 		"BARKPARK_STATUS_HELPER": "label", "BARKPARK_STATUS_HELPER_RECORD": record,
 		"BARKPARK_STATUS_HELPER_SAY": tidesLabel,
 	})
-	if _, err := (&ClaudeStatusLabeler{Timeout: 5 * time.Second}).StatusLabel(context.Background(), "say hi"); err != nil {
+	// The timeout is a backstop: the helper answers as soon as it runs.
+	if _, err := (&ClaudeStatusLabeler{Timeout: labelBackstop}).StatusLabel(context.Background(), "say hi"); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(record)

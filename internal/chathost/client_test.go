@@ -132,16 +132,29 @@ func (h *blockingHandler) Handle(ctx context.Context, _ RemoteCommand, _ func(ma
 	return ctx.Err()
 }
 
+// The credential is revoked while the provider works. The server revokes only
+// once the work has started: Run makes its tickers before the startup
+// heartbeat, so a startup heartbeat that took longer than HeartbeatInterval left
+// both ticks ready, and select could take the heartbeat first. A 401 then ended
+// Run before any poll listed the command (seen under load: heartbeat1@21ms
+// heartbeat2@24ms, no poll). The startup heartbeat here always takes longer
+// than HeartbeatInterval, so every run has both ticks ready.
 func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 	var heartbeats atomic.Int32
 	var commandSent atomic.Bool
+	handler := &blockingHandler{started: make(chan struct{}), canceled: make(chan struct{})}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/chat-host/heartbeat":
-			if heartbeats.Add(1) > 1 {
+			if heartbeats.Add(1) == 1 {
+				time.Sleep(30 * time.Millisecond)
+			}
+			select {
+			case <-handler.started:
 				w.WriteHeader(http.StatusUnauthorized)
 				return
+			default:
 			}
 			_, _ = w.Write([]byte(`{"host":{"id":"host-1"}}`))
 		case "/v1/chat-host/commands":
@@ -157,14 +170,15 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 	}))
 	defer server.Close()
 
-	handler := &blockingHandler{started: make(chan struct{}), canceled: make(chan struct{})}
 	runner := Runner{
 		Client:            &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client(), AllowInsecureLoopback: true},
 		Handler:           handler,
 		PollInterval:      time.Millisecond,
 		HeartbeatInterval: 20 * time.Millisecond,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// Run's context outlives the test's own waits, so only the Runner's cancel
+	// on revocation can end the work in time; at 1 s its deadline did that too.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
 	go func() { result <- runner.Run(ctx) }()
@@ -179,6 +193,9 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 	}
 	select {
 	case <-handler.canceled:
+		if ctx.Err() != nil {
+			t.Fatalf("the work ended with Run's own context (%v), not with the revocation", ctx.Err())
+		}
 	case <-time.After(time.Second):
 		t.Fatal("provider process context was not cancelled")
 	}

@@ -15,7 +15,8 @@ defmodule BarkparkWeb.StudioLocaleComponentKeysTest do
     media: "bp-media-picker.js",
     # The asset browser speaks with the words its opener (the media picker) hands it.
     media: "bp-asset-browser.js",
-    asset_explorer: "bp-asset-explorer.js"
+    asset_explorer: "bp-asset-explorer.js",
+    asset_explorer: "bp-asset-explorer-bulk.js"
   ]
 
   for {kind, file} <- @components do
