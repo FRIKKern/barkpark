@@ -14100,3 +14100,18 @@ msgstr "Du har ikke tilgang til å endre disse filene."
 #, elixir-autogen, elixir-format
 msgid "Your session has ended. Sign in again."
 msgstr "Økten er utløpt. Logg inn på nytt."
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy field"
+msgstr "Kopier felt"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Paste field"
+msgstr "Lim inn felt"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Empty value, nothing to copy"
+msgstr "Tom verdi, ingenting å kopiere"

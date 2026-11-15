@@ -47,6 +47,15 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       Set, it is TanStack's frame (`.image-preview`, :1899-1907): 270 px
       on the soft fill, the image contained, a 25 px "…" on the glass
       fill 6 px in from the top right.
+    * A field's "…" (`Desk.FieldActions`) is TanStack's `.field-actions`
+      (styles.css :1431-1449): 25 px, at the field's top right, 25 px in,
+      drawn under the pointer or the focus and while its menu is open;
+      always drawn where nothing hovers, 44 px on a touch phone. Its menu
+      opens to its right, above it where the pane leaves no room.
+    * `.dk-field-toast` is the one rule outside the edit pane: the words
+      `bp-desk-field-actions.js` shows for a copy or a paste, bottom right
+      as TanStack's toasts, over the pane's footer. It is on the page's body, so no patch of the
+      form takes it down.
   """
 
   use Phoenix.Component
@@ -147,6 +156,21 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .bp-mp-options { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: var(--dk-glass); box-shadow: inset 0 0 0 1px var(--dk-line); color: var(--dk-icon-muted); cursor: pointer; }
       .dk .dk-edit .bp-mp-options svg { width: 21px; height: 21px; }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .bp-mp-bar button { min-height: 44px; } .dk .dk-edit .bp-mp-options { width: 44px; height: 44px; } }
+      .dk .dk-edit .field { position: relative; }
+      .dk .dk-edit .field > .field-actions { position: absolute; top: 0; right: 25px; z-index: 2; opacity: 0; }
+      .dk .dk-edit .field:is(:hover, :focus-within):not(:has(.field:is(:hover, :focus-within))) > .field-actions, .dk .dk-edit .field > .field-actions:focus-within, .dk .dk-edit .field > .field-actions:has(:popover-open) { opacity: 1; }
+      .dk .dk-edit .field-actions > .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
+      .dk .dk-edit .field-actions > .icon-btn svg { width: 21px; height: 21px; }
+      .dk .dk-edit .field-actions > .icon-btn:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
+      .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-area: right center; position-try-fallbacks: top; }
+      @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
+      @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
+      .dk-field-toast { box-sizing: border-box; inset: auto 16px 56px auto; margin: 0; max-width: min(420px, calc(100vw - 32px)); padding: 10px 14px; border: 0; border-radius: 6px; background: var(--dk-field-toast-bg, #fff); color: var(--dk-field-toast-fg, #252837); box-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); font-size: 13px; line-height: 19px; }
+      .dk-field-toast strong { display: block; font-weight: 600; }
+      .dk-field-toast[data-tone="critical"] { box-shadow: inset 3px 0 0 #d63a2c, 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
+      .dk-field-toast[data-tone="caution"] { box-shadow: inset 3px 0 0 #b98900, 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
+      html[data-theme="dark"] .dk-field-toast { --dk-field-toast-bg: #13141b; --dk-field-toast-fg: #e4e5e9; }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.Fieldsets.css()) %>
     </style>
     """

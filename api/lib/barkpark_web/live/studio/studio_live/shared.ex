@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, RefusedSave}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -653,7 +653,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           # params: a grouped editor posts only the visible group, so a rule
           # over a field on another group read it as absent (a new open task
           # was warned "A finished task should record an outcome summary").
-          form = Map.merge(socket.assigns[:editor_form] || %{}, params)
+          form = PostedEdits.into_form(socket, params, raw_params)
 
           assign(socket,
             panes: panes,
@@ -682,7 +682,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # the one `Fields.do_save/2` reads to clear the dirty flag on an explicit
       # save of an untouched form. A socket with no doc/type still falls through
       # untouched, exactly as before.
-      if doc && type, do: assign(socket, save_status: "Saved"), else: socket
+      if doc && type, do: PostedEdits.unchanged(socket, params), else: socket
     end
   end
 
@@ -908,8 +908,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   # A sheet's cells live in its session, which persists on a debounce, and
   # Unpublish is offered only while no draft row exists. Flushing first (as
-  # Publish does) would create that draft, and `unpublish_document` then
-  # overwrites an existing draft with the published content, losing the cells.
+  # Publish does) would create that draft. `unpublish_document` once overwrote
+  # an existing draft with the published content; it now keeps it (draft wins).
   # So read the live cells, unpublish, and put them on the new draft when they
   # differ; the session's next persist writes the same draft
   # (task-3b3209373291e9fd).

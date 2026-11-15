@@ -172,8 +172,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # no `aria-required` of its own. A text input that has one is read
   # "required" twice; that is the price of no field going silent.
   attr :mark_hidden, :boolean, default: false
-  # The desk's Field actions button and change bar place (`Desk.FieldSlots`).
-  attr :slots, :boolean, default: false
+  # The desk's Field actions menu and change bar place (`Desk.FieldSlots`):
+  # the schema field they are for. Nothing is drawn without it.
+  attr :slots, :any, default: false
   slot :inner_block, required: true
 
   def editor_field(assigns) do
@@ -188,7 +189,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label><% end %>
-      <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={@slots} />
+      <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={@slots} field={@slots} />
       <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
@@ -452,7 +453,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
       <div class={"editor-field field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
-        <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={desk?(@parent_assigns)} />
+        <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={desk?(@parent_assigns)} field={@field} />
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
@@ -498,7 +499,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         description={field_description(@field)}
         fieldset={type == "image" and desk?(@parent_assigns)}
         mark_hidden={desk?(@parent_assigns)}
-        slots={desk?(@parent_assigns)}
+        slots={desk?(@parent_assigns) && @field}
       >
         <%= if body_in_blocks? do %>
           <div class="bp-classic-body-blocks" data-test-id="classic-body-in-blocks" role="note">
@@ -973,7 +974,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 label={title_label(@editor_schema)}
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 mark_hidden={desk?(@parent_assigns)}
-                slots={desk?(@parent_assigns)}
+                slots={desk?(@parent_assigns) && %{"name" => "title", "type" => "string"}}
                 errors={Map.get(@validation_errors, "title", [])}
                 warnings={Map.get(@validation_warnings, "title", [])}
                 for={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"}

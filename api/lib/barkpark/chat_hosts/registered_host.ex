@@ -119,6 +119,11 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     Enum.all?(Map.keys(map), &(&1 in @capability_keys)) and
       safe_chat_runtime?(Map.get(map, "chat_runtime")) and
       Enum.all?(providers, fn
+        # Only claude works in a bot folder (StudioChat.BotFolder): a codex
+        # entry claiming it is a host bug, refused rather than stored.
+        {"codex", %{"bot_folders" => _}} ->
+          false
+
         {provider, metadata} when provider in ["claude", "codex"] ->
           safe_provider_metadata?(metadata)
 
@@ -147,7 +152,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   # secret: `operations` is a bounded list of short command-name strings and
   # `task_hands` is a boolean, so admitting them keeps the "only non-secret
   # readiness metadata" invariant while making a genuine host reachable.
-  @provider_metadata_keys ~w(installed auth_ready version operations task_hands attachments)
+  @provider_metadata_keys ~w(installed auth_ready version operations task_hands attachments bot_folders)
 
   defp safe_provider_metadata?(%{"installed" => installed, "auth_ready" => auth_ready} = map)
        when is_boolean(installed) and is_boolean(auth_ready) do
@@ -155,7 +160,8 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       safe_version?(Map.get(map, "version")) and
       safe_operations?(Map.get(map, "operations")) and
       safe_task_hands?(Map.get(map, "task_hands")) and
-      safe_attachments?(Map.get(map, "attachments"))
+      safe_attachments?(Map.get(map, "attachments")) and
+      safe_bot_folders?(Map.get(map, "bot_folders"))
   end
 
   defp safe_provider_metadata?(_), do: false
@@ -191,4 +197,10 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     do: Enum.all?(types, &(&1 in @attachment_types)) and Enum.uniq(types) == types
 
   defp safe_attachments?(_), do: false
+
+  # The host makes and uses a bot folder under its root when a turn names one
+  # (task-ed93b8c0ab2b44b8). `BotFolder.admit/3` leases such a turn only to a
+  # host that says `true`; absent means it cannot. A boolean carries no secret.
+  defp safe_bot_folders?(nil), do: true
+  defp safe_bot_folders?(value), do: is_boolean(value)
 end

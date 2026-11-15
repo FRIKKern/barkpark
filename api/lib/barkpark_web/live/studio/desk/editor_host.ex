@@ -45,6 +45,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.UnpublishDialog
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
+  alias BarkparkWeb.Studio.StudioLive.DocActions
   alias BarkparkWeb.Studio.StudioLive.Paths
   alias Phoenix.LiveView.JS
 
@@ -461,6 +462,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       else: PaneComponent.left_out(pane)
   end
 
+  # The footer follows the page's perspective (`Panes.perspective/1`):
+  # Unpublish in Publish's place at `?perspective=published`. A singleton is
+  # never unpublished (the Studio withholds the action), so its footer stays
+  # as it is. The form is the draft's in either perspective.
+  defp footer_perspective(assigns) do
+    if "unpublish" in DocActions.withheld_action_names(assigns[:editor_schema]),
+      do: :drafts,
+      else: Panes.perspective(assigns[:desk_uri])
+  end
+
   # `inspect=on` is the Inspect dialog, drawn over the form, not an inspector.
   defp inspector(pane), do: if(pane[:inspect] == "on", do: nil, else: pane[:inspect])
 
@@ -541,7 +552,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               else:
                 assigns
                 |> DocMenu.items()
-                |> DocMenu.with_incoming(IncomingRefs.menu_item(@chain, @view.index, @base))
+                |> DocMenu.with_incoming(
+                  IncomingRefs.menu_item(
+                    @chain,
+                    @view.index,
+                    @base,
+                    Panes.perspective(assigns[:desk_uri])
+                  )
+                )
                 |> DocMenu.with_refs(ref_items(assigns))
           }
         />
@@ -699,6 +717,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           index={@view.index}
           base={@base}
           menu_button={"#{@view.id}-actions-button"}
+          perspective={Panes.perspective(assigns[:desk_uri])}
         />
         <%!-- The desk's own dialogs for the Studio's document actions
               (`DocDialog`): the Studio's handlers open and close them. The
@@ -718,6 +737,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             title={@page_title}
             rows={DocDialog.rows(assigns[:desk_used_in])}
             base={@base}
+            return_to={"#{@view.id}-actions-button"}
           />
         </div>
       </div>
@@ -732,6 +752,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           status={BarkparkWeb.Studio.Desk.DocFooter.status(assigns)}
           publish={Enum.find(items, &(&1.event == "publish"))}
           menu_button={"#{@view.id}-footer-actions-button"}
+          perspective={footer_perspective(assigns)}
+          published?={DocStatus.state(assigns).published?}
         />
         <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
       </div>

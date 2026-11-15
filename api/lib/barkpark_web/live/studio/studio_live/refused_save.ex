@@ -72,6 +72,8 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     socket =
       assign(socket,
         editor_save_target: nil,
+        # The field this write is a change of, for `PostedEdits`.
+        editor_post_target: keys,
         editor_save_error: nil,
         editor_save_error_fields: nil
       )

@@ -14095,3 +14095,18 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Your session has ended. Sign in again."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy field"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Paste field"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Empty value, nothing to copy"
+msgstr ""

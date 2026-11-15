@@ -90,6 +90,12 @@ func capabilities() map[string]any {
 			// Only claude takes pictures and files; codex on a host is
 			// text-only.
 			metadata["attachments"] = chathost.ClaudeAttachmentTypes()
+			// Claude turns run in the session's bot folder when it names one
+			// (internal/chathost/bot_folder.go). The server leases a turn
+			// with a bot folder only to a host that says so: an older host
+			// ignores the key and would run that bot in another bot's
+			// folder. A server older than the key refuses this heartbeat.
+			metadata["bot_folders"] = true
 		}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {

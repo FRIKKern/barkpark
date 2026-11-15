@@ -23,11 +23,16 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.DocDialog
+  alias Phoenix.LiveView.JS
 
   attr :id, :string, required: true
   attr :title, :string, required: true, doc: "the open document's title"
   attr :rows, :list, required: true, doc: "`DocDialog.rows/1`: who refers to it"
   attr :base, :string, required: true
+
+  attr :return_to, :string,
+    default: nil,
+    doc: "the id of the pane's \"Show document actions\" button"
 
   @doc "The dialog, open."
   def dialog(assigns) do
@@ -73,7 +78,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
           :if={@used > 0}
           type="button"
           class="dk-dialog-btn btn"
-          phx-click="confirm-unpublish"
+          phx-click={confirm(@return_to)}
           phx-value-disconnect="true"
           data-desk-confirm="disconnect-unpublish"
         >
@@ -82,7 +87,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
         <button
           type="button"
           class="dk-dialog-btn btn danger"
-          phx-click="confirm-unpublish"
+          phx-click={confirm(@return_to)}
           data-desk-confirm="unpublish"
         >
           {if @used > 0, do: gettext("Unpublish anyway"), else: gettext("Unpublish now")}
@@ -91,6 +96,15 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
     </DocDialog.frame>
     """
   end
+
+  # The Studio's `confirm-unpublish`, and the focus to the pane's document
+  # actions, as the TanStack Studio's (`PublishedFooter`): the footer's
+  # Unpublish, when it opened the dialog, is greyed out once the document is
+  # unpublished, and a greyed-out button cannot take the focus back.
+  defp confirm(nil), do: "confirm-unpublish"
+
+  defp confirm(return_to),
+    do: JS.push("confirm-unpublish") |> JS.focus(to: ~s([id="#{return_to}"]))
 
   attr :title, :string, required: true
 
