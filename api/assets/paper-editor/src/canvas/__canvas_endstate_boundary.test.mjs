@@ -66,6 +66,7 @@ const DEFINITIONS = [
   {"key":"instance:method:replaceAll","owner":"index.js","exportSymbol":null,"static":false,"kind":"method","name":"replaceAll","async":false,"runtimeLength":1,"header":"replaceAll(text) ","bodySha256":"25b1d3c8ca5fffa19702580a9012207284aa55c97b3ace0ef39b0275142a058f","wrapper":null,"wrapperSha256":null},
   {"key":"instance:method:hasPendingChanges","owner":"index.js","exportSymbol":null,"static":false,"kind":"method","name":"hasPendingChanges","async":false,"runtimeLength":0,"header":"hasPendingChanges() ","bodySha256":"858a896f341fae2142eb18dfda2585ef7c04a43e43639dbb2993796960625dab","wrapper":null,"wrapperSha256":null},
   {"key":"instance:method:recoverySnapshot","owner":"index.js","exportSymbol":null,"static":false,"kind":"method","name":"recoverySnapshot","async":false,"runtimeLength":0,"header":"recoverySnapshot() ","bodySha256":"096e6d87294b8ebb0bc9cf6a155c53b95b4af9a182bffd85202216decefb2846","wrapper":null,"wrapperSha256":null},
+  {"key":"instance:method:toMarkdown","owner":"index.js","exportSymbol":null,"static":false,"kind":"method","name":"toMarkdown","async":false,"runtimeLength":1,"header":"toMarkdown(options) ","bodySha256":"ccb0f60f401de74220de1c3b53ff9cbb64a0697c85ec64c8c0ee7f0bb534cf1a","wrapper":null,"wrapperSha256":null},
   {"key":"instance:method:resolveConflictWithServerBlocks","owner":"index.js","exportSymbol":null,"static":false,"kind":"method","name":"resolveConflictWithServerBlocks","async":false,"runtimeLength":1,"header":"resolveConflictWithServerBlocks(blocks) ","bodySha256":"634124da83cd5e3446f39dcd06a979551a65e1790be8c77f465612b893b27867","wrapper":null,"wrapperSha256":null},
   {"key":"instance:method:_scheduleEmit","owner":"canvas-ops.js","exportSymbol":"_scheduleEmit","static":false,"kind":"method","name":"_scheduleEmit","async":false,"runtimeLength":0,"header":"_scheduleEmit() ","bodySha256":"993083bff8f884e5ef465bbcc60e19646ee7d68a79083c40c780ccd78de2483f","wrapper":"  _scheduleEmit() { return opsMethods._scheduleEmit.call(this, ...arguments); }","wrapperSha256":"c1c83c03a187de84c1b20ca629983d0cc5ec6cfa50da03f3cb3332fa56d38821"},
   {"key":"instance:method:_armComposeEndEmit","owner":"canvas-ops.js","exportSymbol":"_armComposeEndEmit","static":false,"kind":"method","name":"_armComposeEndEmit","async":false,"runtimeLength":0,"header":"_armComposeEndEmit() ","bodySha256":"078a1e48aceb8cd61a5a2913a7d3a9d3108d4087c33f2a609cbf8a56c6dcfff1","wrapper":"  _armComposeEndEmit() { return opsMethods._armComposeEndEmit.call(this, ...arguments); }","wrapperSha256":"5f497de7855b940e685e77d8673a97193fe61c9ec78379ac94912a3d8ec12f4f"},
@@ -377,6 +378,7 @@ const IMPORTS = [
   {"consumer":"index.js","source":"./canvas-ops.js","kind":"namespace","imported":"*","local":"opsMethods"},
   {"consumer":"index.js","source":"./canvas-server.js","kind":"namespace","imported":"*","local":"serverMethods"},
   {"consumer":"index.js","source":"./figure-context.js","kind":"named","imported":"isFigureSingletonCanvas","local":"isFigureSingletonCanvas"},
+  {"consumer":"index.js","source":"./markdown-export.js","kind":"named","imported":"canvasToMarkdown","local":"canvasToMarkdown"},
   {"consumer":"index.js","source":"./source-mode.js","kind":"named","imported":"sourceModeActive","local":"sourceModeActive"},
   {"consumer":"index.js","source":"./source-mode.js","kind":"named","imported":"sourceModeCommit","local":"sourceModeCommit"},
   {"consumer":"index.js","source":"./source-mode.js","kind":"named","imported":"sourceModeEnter","local":"sourceModeEnter"},
@@ -520,8 +522,8 @@ const FILES = {
     "8b227c2d356c8f7fe1c22080206248cb863c92957db288d19cdc0740764f7689"
   ],
   "index.js": [
-    718,
-    "3309eac3e085b22843486de8d98cbb2b0e1162394de864762a822090032055b7"
+    723,
+    "8a54408a54246c0281b654bdf94925f266143e9ef146b2942680474935364e5c"
   ]
 };
 const COMMENTS = {"count":1171,"multisetSha256":"45d7399273427002f3e736807183441cf5b051e84d9787ef59f6c957ff4ff448"};
@@ -564,10 +566,10 @@ const COMMENT_OWNERS = {
   }
 };
 
-assert.equal(DEFINITIONS.length, 202, "all class definitions are specified");
+assert.equal(DEFINITIONS.length, 203, "all class definitions are specified");
 assert.equal(DEFINITIONS.filter((row) => row.exportSymbol).length, 77, "all newly moved definitions are specified");
-assert.equal(DEFINITIONS.filter((row) => row.bodySha256).length, 199, "every non-field body is hash-locked");
-assert.equal(IMPORTS.length, 169, "complete lexical import closure is specified");
+assert.equal(DEFINITIONS.filter((row) => row.bodySha256).length, 200, "every non-field body is hash-locked");
+assert.equal(IMPORTS.length, 170, "complete lexical import closure is specified");
 assert.equal(EXPORTS.length, 85, "complete leaf export surface is specified");
 assert.deepEqual(COMMENTS, { count: 1171, multisetSha256: "45d7399273427002f3e736807183441cf5b051e84d9787ef59f6c957ff4ff448" });
 
@@ -673,7 +675,7 @@ const parseImports = (owner, text) => {
 const importKey = (row) => [row.consumer, row.source, row.kind, row.imported, row.local].join("\0");
 const actualImports = [...texts].flatMap(([name, text]) => parseImports(name, text)).sort((a, b) => importKey(a).localeCompare(importKey(b)));
 const expectedImports = [...IMPORTS].sort((a, b) => importKey(a).localeCompare(importKey(b)));
-assert.deepEqual(actualImports, expectedImports, "all 169 exact imports/reexports and aliases match");
+assert.deepEqual(actualImports, expectedImports, "all 170 exact imports/reexports and aliases match");
 
 const internalNames = new Set(Object.keys(FILES));
 const actualEdges = actualImports.flatMap((row) => {
@@ -771,4 +773,4 @@ const memberNames = [...new Set(sourceMembers([elementClassBody(texts.get("index
 assert.equal(memberNames.length, 206, "final canvas source-member census");
 assert.equal(sha(memberNames.join("\n") + "\n"), "805f20b09124db41e8cc38c3920042ee6247548ca827b353a23989794996b764");
 dom.window.close();
-console.log("canvas endstate boundary: 202 definitions, 169 imports, 85 exports, 1171 comments and 12 source leaves passed");
+console.log("canvas endstate boundary: 203 definitions, 170 imports, 85 exports, 1171 comments and 12 source leaves passed");

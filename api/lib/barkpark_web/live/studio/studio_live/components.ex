@@ -273,9 +273,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           >
             <.icon name="external-link" size={14} /> {gettext("Open standalone")}
           </a>
-          <%!-- ITEM share (P7): a direct Google-Docs-style link to THIS paper,
-                not the whole papers section. Admin-only; the handler re-checks
-                admin server-side. --%>
+          <BarkparkWeb.Studio.StudioLive.Components.PaperExport.export_button :if={@slug && @show_editor} slug={@slug} title={@title} blocks={@edit_blocks} retained={@paper_canvas_retained} scope_prefix={@scope_prefix} draft={@paper_draft?} has_published={@paper_has_published} />
+          <%!-- ITEM share (P7): a direct Google-Docs-style link to THIS paper, not the
+                whole papers section. Admin-only; the handler re-checks admin server-side. --%>
           <button
             :if={@shares_admin?}
             type="button"

@@ -4,7 +4,7 @@
 // a side-effect `import "@portable-doc/editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
 // attributes, events, globals, public classes and theme tokens. EMBED-CONTRACT.md
-// (v1.22.0) is the normative spec for both elements; these types follow
+// (v1.23.0) is the normative spec for both elements; these types follow
 // src/index.js and src/canvas/index.js. src/__contract_truth.test.mjs fails when
 // this file, EMBED-CONTRACT.md's surface index and the element classes disagree.
 
@@ -571,6 +571,16 @@ export interface ServerEchoMeta {
   mode?: string | null;
   requestId?: string | null;
 }
+/** 1.23.0. What `toMarkdown()` takes. */
+export interface MarkdownExportOptions {
+  /** Convert these blocks instead of the canvas's own run. */
+  blocks?: PortableDocBlock[];
+  /** Relative image and link addresses are resolved against it. Default: `document.baseURI`. */
+  baseUrl?: string;
+  /** The placeholder line's words, `%{block}` being the block's name. Default: `"%{block}: not included in Markdown export"`. */
+  placeholder?: string;
+}
+
 export type RecoverySnapshot =
   | { mode: "rich"; blocks: PortableDocBlock[] }
   | { mode: "rich"; raw_editor_document?: unknown; serialization_error: string }
@@ -634,6 +644,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   applyServerBlocksIfIdle(blocks: PortableDocBlock[]): boolean;
   resolveConflictWithServerBlocks(blocks: PortableDocBlock[]): void;
   recoverySnapshot(): RecoverySnapshot;
+  /** 1.23.0. Markdown for export: the run as it is on screen (unsaved typing included), or `blocks` when given (no mount needed). One way: what Markdown cannot say becomes text or a one-line placeholder. */
+  toMarkdown(options?: MarkdownExportOptions): string;
   focusBlock(id: string): boolean;
   /** 1.12.0: select the top-level image or object block card `id`, as a click on it does. */
   selectBlock(id: string): boolean;

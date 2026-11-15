@@ -14307,3 +14307,59 @@ msgstr "Cellene til dette diagrammet kan ikke leses. Rediger det for å velge ny
 #, elixir-autogen, elixir-format
 msgid "This field cannot be edited, so nothing was pasted"
 msgstr "Dette feltet kan ikke redigeres, så ingenting ble limt inn"
+
+#: lib/barkpark_web/studio_locale.ex:366
+#, elixir-autogen, elixir-format
+msgid "%{block}: not included in Markdown export"
+msgstr "%{block}: ikke med i Markdown-eksporten"
+
+#: lib/barkpark_web/studio_locale.ex:368
+#, elixir-autogen, elixir-format
+msgid "Copy as Markdown"
+msgstr "Kopier som Markdown"
+
+#: lib/barkpark_web/studio_locale.ex:369
+#, elixir-autogen, elixir-format
+msgid "Download Markdown"
+msgstr "Last ned Markdown"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_export.ex:80
+#: lib/barkpark_web/studio_locale.ex:370
+#, elixir-autogen, elixir-format
+msgid "Export"
+msgstr "Eksporter"
+
+#: lib/barkpark_web/studio_locale.ex:372
+#, elixir-autogen, elixir-format
+msgid "Markdown is text first. A block it cannot hold becomes a one-line note."
+msgstr "Markdown er tekst først. En blokk det ikke har plass til, blir en merknad på én linje."
+
+#: lib/barkpark_web/studio_locale.ex:373
+#, elixir-autogen, elixir-format
+msgid "Print / Save as PDF"
+msgstr "Skriv ut / lagre som PDF"
+
+#: lib/barkpark_web/studio_locale.ex:375
+#, elixir-autogen, elixir-format
+msgid "Print opens the published page in a new tab."
+msgstr "Utskrift åpner den publiserte siden i en ny fane."
+
+#: lib/barkpark_web/studio_locale.ex:377
+#, elixir-autogen, elixir-format
+msgid "Print uses the published version. Changes in this draft are not in it."
+msgstr "Utskrift bruker den publiserte versjonen. Endringene i dette utkastet er ikke med."
+
+#: lib/barkpark_web/studio_locale.ex:378
+#, elixir-autogen, elixir-format
+msgid "Publish this paper to print it."
+msgstr "Publiser artikkelen for å skrive den ut."
+
+#: lib/barkpark_web/studio_locale.ex:380
+#, elixir-autogen, elixir-format
+msgid "The browser did not allow the copy. Download the file instead."
+msgstr "Nettleseren tillot ikke kopieringen. Last ned filen i stedet."
+
+#: lib/barkpark_web/studio_locale.ex:382
+#, elixir-autogen, elixir-format
+msgid "The paper is still loading. Try again in a moment."
+msgstr "Artikkelen lastes fortsatt. Prøv igjen om litt."
