@@ -88,10 +88,14 @@ defmodule Barkpark.ChatHosts do
   # the token unused until it expires. Hosts already enrolled are never
   # touched, so a workspace over the cap keeps them all.
   defp claim_live_slot(workspace_id) do
-    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["chat_host_live:" <> workspace_id])
+    lock_live_slots(workspace_id)
     limit = live_limit()
 
     if live_count(workspace_id) >= limit, do: Repo.rollback({:host_limit_reached, limit})
+  end
+
+  defp lock_live_slots(workspace_id) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["chat_host_live:" <> workspace_id])
   end
 
   # Live means it can still write: enrolled, not revoked, credential unexpired.
@@ -151,7 +155,6 @@ defmodule Barkpark.ChatHosts do
 
   def rotate_credential(%RegisteredHost{} = host) do
     credential = Security.mint_secret()
-    now = DateTime.utc_now()
 
     Repo.transaction(fn ->
       current =
@@ -159,6 +162,15 @@ defmodule Barkpark.ChatHosts do
         |> where([h], h.id == ^host.id)
         |> lock("FOR UPDATE")
         |> Repo.one()
+
+      # The same order as enrol: this host's own row, then the workspace key,
+      # and the clock read only after both. Holding the key, nothing waits on
+      # a row, so no cycle forms, and a rotation stuck behind a row lock never
+      # stalls the workspace's enrolments. The key orders this expiry check
+      # against claim_live_slot/1's count: an enrolment that saw this host
+      # expired is committed before `now` is read here.
+      if current, do: lock_live_slots(current.workspace_id)
+      now = DateTime.utc_now()
 
       cond do
         is_nil(current) or not is_nil(current.revoked_at) ->
