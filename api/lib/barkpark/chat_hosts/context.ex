@@ -19,10 +19,16 @@ defmodule Barkpark.ChatHosts do
   # `:chat_host_expired_turn_floor` app env; never edit it to reach old rows.
   @expired_turn_floor ~U[2026-11-14 12:00:00Z]
   @online_window 90
+  # Live hosts (enrolled, not revoked) one workspace may hold. Each has its own
+  # :host_write_per_minute bucket, so this bounds a workspace's host writes.
+  # People run one or two machines each; 10 leaves room for a small team.
+  # Set with `config :barkpark, :chat_host_live_limit` (task-4abf105be723796a).
+  @default_live_limit 10
 
   def issue_enrollment(workspace_id, attrs) when is_binary(workspace_id) and is_map(attrs) do
     secret = Security.mint_secret()
     now = DateTime.utc_now()
+    limit = live_limit()
 
     params = %{
       workspace_id: workspace_id,
@@ -34,9 +40,15 @@ defmodule Barkpark.ChatHosts do
       capabilities: value(attrs, :capabilities, %{})
     }
 
-    case %RegisteredHost{} |> RegisteredHost.enrollment_changeset(params) |> Repo.insert() do
-      {:ok, host} -> {:ok, %{host: public_host(host), enrollment_token: secret}}
-      error -> error
+    # An early answer for the owner. `enroll/2` checks again under the lock,
+    # because tokens issued while there was room could all complete.
+    if live_count(workspace_id) >= limit do
+      {:error, {:host_limit_reached, limit}}
+    else
+      case %RegisteredHost{} |> RegisteredHost.enrollment_changeset(params) |> Repo.insert() do
+        {:ok, host} -> {:ok, %{host: public_host(host), enrollment_token: secret}}
+        error -> error
+      end
     end
   end
 
@@ -61,12 +73,38 @@ defmodule Barkpark.ChatHosts do
           Repo.rollback(:expired_enrollment)
 
         true ->
+          claim_live_slot(host.workspace_id)
           complete_enrollment(host, attrs, now)
       end
     end)
     |> case do
       {:ok, result} -> {:ok, result}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Two enrolments in one workspace queue on this lock until the first
+  # commits, so the second counts the first. A refusal rolls back and leaves
+  # the token unused until it expires. Hosts already enrolled are never
+  # touched, so a workspace over the cap keeps them all.
+  defp claim_live_slot(workspace_id) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["chat_host_live:" <> workspace_id])
+    limit = live_limit()
+
+    if live_count(workspace_id) >= limit, do: Repo.rollback({:host_limit_reached, limit})
+  end
+
+  defp live_count(workspace_id) do
+    RegisteredHost
+    |> where([h], h.workspace_id == ^workspace_id)
+    |> where([h], not is_nil(h.enrolled_at) and is_nil(h.revoked_at))
+    |> Repo.aggregate(:count)
+  end
+
+  defp live_limit do
+    case Application.get_env(:barkpark, :chat_host_live_limit, @default_live_limit) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @default_live_limit
     end
   end
 

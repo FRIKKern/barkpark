@@ -143,6 +143,9 @@ defmodule Barkpark.Content.Errors do
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
                          "invalid_enrollment",
+                         # chat_host_controller.ex host_limit_reached/2: the
+                         # workspace holds its cap of live chat hosts (409).
+                         "host_limit_reached",
                          # Owner ruling #7 — member_controller.ex rotate_token:
                          # a user-owned token is rotated only by its owner (403).
                          "owner_only",
