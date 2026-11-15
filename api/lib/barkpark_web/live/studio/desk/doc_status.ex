@@ -59,7 +59,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         </span>
       </span>
       <span
-        class="dk-chip"
+        class="dk-chip chip"
         data-tone={@published? && "positive"}
         data-off={!@published?}
         title={!@published? && gettext("Unpublished")}
@@ -69,7 +69,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         <span class="sr-only">{if @published?, do: gettext("Published"), else: gettext("Not published")}</span>
       </span>
       <span
-        class="dk-chip"
+        class="dk-chip chip"
         data-selected
         data-active={@draft?}
         title={@draft? && gettext("Edited")}
