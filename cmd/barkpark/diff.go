@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/docdiff"
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -116,17 +117,13 @@ func (m *model) buildDiffLines(pub *Doc) []string {
 			continue
 		}
 		lines = append(lines, editorLabelStyle.Render(strings.ToUpper(field.Title)))
-		for _, ln := range strings.Split(oldV, "\n") {
-			if ln == "" && oldV == "" {
-				ln = "(empty)"
+		// The rows come from internal/docdiff, which `bp doc diff` also uses.
+		for _, row := range docdiff.FieldRows(oldV, newV) {
+			style := diffAddStyle
+			if row.Sign == '-' {
+				style = diffDelStyle
 			}
-			lines = append(lines, diffDelStyle.Render("- "+ln))
-		}
-		for _, ln := range strings.Split(newV, "\n") {
-			if ln == "" && newV == "" {
-				ln = "(empty)"
-			}
-			lines = append(lines, diffAddStyle.Render("+ "+ln))
+			lines = append(lines, style.Render(row.Format()))
 		}
 		lines = append(lines, "")
 	}

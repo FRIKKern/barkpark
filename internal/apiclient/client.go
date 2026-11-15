@@ -590,23 +590,9 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("duplicate: source document %s not found", id)
 	}
-	if hasPersistedBlocks(doc.Blocks) {
-		return "", fmt.Errorf("papers cannot be duplicated here — use Studio")
-	}
-
-	title := doc.Title
-	if title == "" {
-		title = "Untitled"
-	}
-	create := map[string]interface{}{
-		"_type": typeName,
-		"title": title + " (copy)",
-	}
-	for k, raw := range doc.Extra {
-		if envelopeMetaKeys[k] || duplicateSkipKeys[k] {
-			continue
-		}
-		create[k] = raw
+	create, err := DuplicateCreate(typeName, doc, DuplicateOptions{})
+	if err != nil {
+		return "", err
 	}
 
 	results, err := c.MutateResults([]map[string]interface{}{{"create": create}})
