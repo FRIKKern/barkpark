@@ -38,5 +38,56 @@
     if (next.getAttribute("aria-selected") !== "true") next.click();
   });
 
-  window.BarkparkTabKeys = { target: target };
+  // A desk document opened by its URL has the focus on its field groups, as
+  // the TanStack Studio's and Sanity's (keyboard.spec.ts J19): the first tab,
+  // All fields, whichever group is selected. Only a focus nobody holds (the
+  // page's) is taken. A key, a press, or a focus placed elsewhere ends it, and
+  // so do OPEN_FOCUS_MS. Until then a patch that re-draws the bar and drops
+  // the focus to the page gets it placed again. A row followed inside the
+  // desk keeps the focus on the row (bp-desk.js); that is not a page load.
+  var OPEN_FOCUS_MS = 5000;
+  var OPEN_TAB = '[data-pane-editing] .bp-tab-bar[role="tablist"] [role="tab"]:not([disabled])';
+
+  function openFocus(doc, win) {
+    var observer = null;
+    var timer = null;
+
+    function free() {
+      var a = doc.activeElement;
+      return !a || a === doc.body || a === doc.documentElement;
+    }
+    function place() {
+      var tab = doc.querySelector(OPEN_TAB);
+      if (tab && free()) tab.focus({ preventScroll: true });
+    }
+    function stop() {
+      if (observer) observer.disconnect();
+      if (timer) win.clearTimeout(timer);
+      doc.removeEventListener("keydown", stop, true);
+      doc.removeEventListener("pointerdown", stop, true);
+      doc.removeEventListener("focusin", elsewhere, true);
+    }
+    function elsewhere(e) {
+      if (!e.target || !e.target.matches || !e.target.matches(OPEN_TAB)) stop();
+    }
+
+    doc.addEventListener("keydown", stop, true);
+    doc.addEventListener("pointerdown", stop, true);
+    doc.addEventListener("focusin", elsewhere, true);
+    if (win.MutationObserver) {
+      observer = new win.MutationObserver(place);
+      observer.observe(doc.documentElement, { childList: true, subtree: true });
+    }
+    timer = win.setTimeout(stop, OPEN_FOCUS_MS);
+    place();
+    return stop;
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { openFocus(document, window); }, { once: true });
+  } else {
+    openFocus(document, window);
+  }
+
+  window.BarkparkTabKeys = { target: target, openFocus: openFocus };
 })();

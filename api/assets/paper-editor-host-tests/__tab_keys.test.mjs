@@ -103,6 +103,81 @@ check("an object field's group strip (.bp-obj-tabs) moves and selects too", () =
   assert.equal(picked, "b");
 });
 
+// A desk document opened by its URL: the focus goes to the first group tab
+// (keyboard.spec.ts J19, task-e7e5aa7938cd5581).
+const deskBar =
+  `<div data-pane-editing><div class="bp-tab-bar" role="tablist">` +
+  `<button type="button" role="tab" id="all" aria-selected="false" tabindex="-1">All fields</button>` +
+  `<button type="button" role="tab" id="content" aria-selected="true" tabindex="0">Content</button>` +
+  `</div></div>`;
+const tick = () => new Promise((r) => setTimeout(r, 0));
+async function acheck(name, fn) {
+  let stop = null;
+  try {
+    stop = await fn((s) => (stop = s));
+    console.log(`PASS  ${name}`);
+  } catch (e) {
+    failures += 1;
+    console.log(`FAIL  ${name}`);
+    console.log(`      ${e.message}`);
+  }
+  if (typeof stop === "function") stop();
+}
+const open = () => window.BarkparkTabKeys.openFocus(document, window);
+const blur = () => document.activeElement && document.activeElement.blur && document.activeElement.blur();
+
+await acheck("open: the first tab takes the page's focus, whichever is selected", async () => {
+  document.body.innerHTML = deskBar;
+  blur();
+  const stop = open();
+  assert.equal(document.activeElement.id, "all");
+  return stop;
+});
+
+await acheck("open: a bar drawn later takes it; a re-drawn bar takes it again", async () => {
+  document.body.innerHTML = "";
+  blur();
+  const stop = open();
+  assert.equal(document.activeElement, document.body);
+  document.body.innerHTML = deskBar;
+  await tick();
+  assert.equal(document.activeElement.id, "all");
+  document.body.innerHTML = deskBar;
+  await tick();
+  assert.equal(document.activeElement.id, "all");
+  return stop;
+});
+
+await acheck("open: a focus someone holds is left alone", async () => {
+  document.body.innerHTML = `<input id="search" />`;
+  document.getElementById("search").focus();
+  const stop = open();
+  document.body.insertAdjacentHTML("beforeend", deskBar);
+  await tick();
+  assert.equal(document.activeElement.id, "search");
+  return stop;
+});
+
+await acheck("open: a key ends it", async () => {
+  document.body.innerHTML = "";
+  blur();
+  const stop = open();
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  document.body.innerHTML = deskBar;
+  await tick();
+  assert.equal(document.activeElement, document.body);
+  return stop;
+});
+
+await acheck("open: the old Studio's bar (no edit pane round it) is left alone", async () => {
+  document.body.innerHTML = `<div class="bp-tab-bar" role="tablist"><button type="button" role="tab" id="old">Content</button></div>`;
+  blur();
+  const stop = open();
+  await tick();
+  assert.equal(document.activeElement, document.body);
+  return stop;
+});
+
 dom.window.close();
 if (failures) {
   console.log(`${failures} failure(s)`);
