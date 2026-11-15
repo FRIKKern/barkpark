@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
     [
       %{"name" => "title", "title" => "Title", "type" => "string"},
       %{"name" => "slug", "title" => "Slug", "type" => "slug"},
-      %{"name" => "tags", "title" => "Tags", "type" => "array", "of" => %{"type" => "string"}},
+      %{"name" => "tags", "title" => "Tags", "type" => "arrayOf", "of" => %{"type" => "string"}},
       %{"name" => "author", "title" => "Author", "type" => "reference", "refType" => person},
       %{"name" => "cover", "title" => "Cover", "type" => "image"}
     ]
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
   defp presses(c) do
     [
       {"array_op add", "array_op", %{"action" => "add_row", "field" => "tags", "path" => ""},
-       &Map.put(&1, "tags", &1["tags"] ++ [""])},
+       &Map.put(&1, "tags", &1["tags"] ++ [nil])},
       {"array_op remove", "array_op",
        %{"action" => "remove_row", "field" => "tags", "path" => "", "index" => "0"},
        &Map.put(&1, "tags", tl(&1["tags"]))},
@@ -234,10 +234,10 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
 
       EditorPost.press_on(
         view,
-        element(view, ~s(#{sel} button[phx-click="array_op"][phx-value-action="add_row"]))
+        element(view, ~s(#{sel} [phx-value-action="add_row"][phx-value-field="tags"]))
       )
 
-      assert stored(c, c.a)["tags"] == ["one 1", "two 1", ""]
+      assert stored(c, c.a)["tags"] == ["one 1", "two 1", nil]
     end
 
     test "#{surface}: a pick the page sent itself to save is not saved once B is open", c do
