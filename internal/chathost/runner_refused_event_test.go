@@ -29,6 +29,9 @@ type leaseServer struct {
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
+	// closeDeadline: the TerminalTimeout startRunner gives this test's Runner
+	// (zero: the default).
+	closeDeadline time.Duration
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -173,10 +176,11 @@ func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Co
 	t.Helper()
 	ts := httptest.NewServer(server.handler(t))
 	runner := Runner{
-		Client:       &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
-		Handler:      handler,
-		PollInterval: time.Millisecond,
-		Log:          &syncBuffer{},
+		Client:          &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
+		Handler:         handler,
+		PollInterval:    time.Millisecond,
+		Log:             &syncBuffer{},
+		TerminalTimeout: server.closeDeadline,
 	}
 	// As main.go wires it: the handler posts labels through the Runner's client.
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {
@@ -290,10 +294,8 @@ func TestRunnerDoesNotRestartALeaseItJustFinished(t *testing.T) {
 // was refused too, is listed again with last_cursor 0. This process started
 // it, so it is closed, never handed to the provider a second time.
 func TestRunnerNeverRunsALeaseTwiceEvenWhenNoEventWasTaken(t *testing.T) {
-	defer func(old time.Duration) { terminalPublishTimeout = old }(terminalPublishTimeout)
-	terminalPublishTimeout = 20 * time.Millisecond
 	opened := time.Now()
-	server := &leaseServer{refuse: func(uint64) int {
+	server := &leaseServer{closeDeadline: 20 * time.Millisecond, refuse: func(uint64) int {
 		if time.Since(opened) < 150*time.Millisecond {
 			return http.StatusServiceUnavailable
 		}

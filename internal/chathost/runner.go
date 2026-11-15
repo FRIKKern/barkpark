@@ -24,6 +24,10 @@ type Runner struct {
 	// Log receives one line when a call starts failing and one when it works
 	// again. Nil means os.Stderr.
 	Log io.Writer
+	// TerminalTimeout bounds the terminal publish after a run has ended. Zero
+	// means defaultTerminalTimeout. Each Runner holds its own, so a test that
+	// shortens it does not race a lease goroutine another test left running.
+	TerminalTimeout time.Duration
 
 	mu     sync.Mutex
 	active map[string]activeCommand
@@ -227,7 +231,7 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		// started this. A refusal retrying can heal leaves it to the next poll.
 		terminal := func(state string, err error) {
 			cancel()
-			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), terminalPublishTimeout)
+			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), r.terminalTimeout())
 			defer publishCancel()
 			perr := publish(publishCtx, map[string]any{
 				"kind":           "terminal",
@@ -296,9 +300,16 @@ func (r *Runner) forgetUnlisted(listed []RemoteCommand) {
 // A refused event is retried for this long before the turn gives up.
 const maxPublishOutage = 2 * time.Minute
 
-// Bound on the terminal publish after the run has ended. A var so a test can
-// end it sooner.
-var terminalPublishTimeout = 30 * time.Second
+// Bound on the terminal publish after the run has ended, unless the Runner
+// sets TerminalTimeout.
+const defaultTerminalTimeout = 30 * time.Second
+
+func (r *Runner) terminalTimeout() time.Duration {
+	if r.TerminalTimeout > 0 {
+		return r.TerminalTimeout
+	}
+	return defaultTerminalTimeout
+}
 
 // publish sends one event at cursor and retries an answer that retrying can
 // heal (network, timeout, 5xx, 408, 429) with the same cursor and key, so the

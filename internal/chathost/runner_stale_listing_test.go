@@ -105,11 +105,8 @@ func (s *staleListingServer) handler() http.Handler {
 }
 
 func TestRunnerDoesNotCloseALeaseAgainFromAPollSentBeforeItsRunEnded(t *testing.T) {
-	defer func(old time.Duration) { terminalPublishTimeout = old }(terminalPublishTimeout)
-	terminalPublishTimeout = 100 * time.Millisecond
-
 	handler := &failingHandler{}
-	runner := &Runner{Handler: handler, PollInterval: time.Millisecond, Log: &syncBuffer{}}
+	runner := &Runner{Handler: handler, PollInterval: time.Millisecond, Log: &syncBuffer{}, TerminalTimeout: 100 * time.Millisecond}
 	server := &staleListingServer{runner: runner, pollHeld: make(chan struct{}), gaveUp: make(chan struct{})}
 	ts := httptest.NewServer(server.handler())
 	defer ts.Close()
