@@ -682,7 +682,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # the one `Fields.do_save/2` reads to clear the dirty flag on an explicit
       # save of an untouched form. A socket with no doc/type still falls through
       # untouched, exactly as before.
-      if doc && type, do: assign(socket, save_status: "Saved"), else: socket
+      if doc && type, do: PostedEdits.unchanged(socket, params), else: socket
     end
   end
 
