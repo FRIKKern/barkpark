@@ -56,6 +56,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.Desk.FieldLock
+
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
@@ -110,16 +112,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # caller that does not say (`schema_admin` absent) keeps today's input too.
   # Declared before the structured-value clause so a readOnly composite (a
   # map, like mediaAsset `fileInfo`) is display-only too (task-08b6c963d72ce983).
-  def input(%{field: %{"readOnly" => true, "name" => name}, schema_admin: false} = assigns) do
-    form = assigns[:editor_form] || %{}
-    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+  #
+  # A field locked by a CONDITION in the desk (`Desk.FieldLock`) takes the
+  # same display for every viewer, an admin too, unless it is a text field:
+  # that one keeps its input, `readonly`, in the clauses below.
+  def input(%{field: %{"readOnly" => true, "name" => _}, schema_admin: false} = assigns),
+    do: schema_readonly(assigns)
 
-    ~H"""
-    <div data-readonly-field={@n} data-schema-readonly>
-      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
-    </div>
-    """
-  end
+  def input(%{field: %{"readOnly" => true, "lockedByRule" => true, "name" => _}} = assigns),
+    do: schema_readonly(assigns)
 
   # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
   # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
@@ -261,7 +262,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
     ~H"""
-    <textarea id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" aria-required={aria_required(@field)} rows={@rows} phx-debounce="500"><%= @v %></textarea>
+    <textarea id={@id_prefix && @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" aria-required={aria_required(@field)} rows={@rows} readonly={FieldLock.locked?(@field)} phx-debounce="500"><%= @v %></textarea>
     """
   end
 
@@ -495,8 +496,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
-      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" aria-required={aria_required(@field)} />
-      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" aria-required={aria_required(@field)} readonly={FieldLock.locked?(@field)} />
+      <button type="button" class="btn btn-sm" disabled={FieldLock.locked?(@field)} phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
     </div>
     """
   end
@@ -559,9 +560,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
     ~H"""
     <%= if @numeric do %>
-      <input id={@id_prefix && @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" aria-required={aria_required(@field)} phx-debounce="500" />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" inputmode="numeric" pattern="-?[0-9]+(\.[0-9]+)?" name={"doc[#{@n}]"} value={@v} class="form-input bp-input-numeric" aria-required={aria_required(@field)} readonly={FieldLock.locked?(@field)} phx-debounce="500" />
     <% else %>
-      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" aria-required={aria_required(@field)} />
+      <input id={@id_prefix && @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" aria-required={aria_required(@field)} readonly={FieldLock.locked?(@field)} />
     <% end %>
     """
   end
@@ -621,6 +622,17 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # unedited.
   defp scalar_text(v) when is_number(v) or is_boolean(v), do: to_string(v)
   defp scalar_text(v), do: v
+
+  defp schema_readonly(%{field: %{"name" => name}} = assigns) do
+    form = assigns[:editor_form] || %{}
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-schema-readonly>
+      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
+    </div>
+    """
+  end
 
   defp readonly_json(nil), do: "—"
   defp readonly_json(""), do: "—"

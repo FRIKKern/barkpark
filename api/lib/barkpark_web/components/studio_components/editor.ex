@@ -593,6 +593,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   # Whether a `readOnly` field renders display-only here: a non-admin viewer,
   # the same rule FieldInputs and the server's mutate door apply (#21536).
+  # A field locked by its condition is display-only for an admin too.
+  defp read_only_display?(%{"readOnly" => true, "lockedByRule" => true}, _parent_assigns),
+    do: true
+
   defp read_only_display?(%{"readOnly" => true}, parent_assigns),
     do: not BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(parent_assigns, :caps))
 
@@ -977,7 +981,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
                         Visibility.visible?(field, @editor_form) do %>
                   <.studio_field_renderer
-                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
+                    field={BarkparkWeb.Studio.Desk.FieldLock.resolve(field, @editor_form, desk?(@parent_assigns))}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
