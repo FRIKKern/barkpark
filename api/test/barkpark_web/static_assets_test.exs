@@ -25,6 +25,7 @@ defmodule BarkparkWeb.StaticAssetsTest do
     bp-modal-focus.js bp-sheet-formula.js bp-sheet-pointing.js bp-sheet-grid.js
     bp-graph.js bp-tmux-terminal.js bp-paper-mermaid.js bp-chat-composer.js
     bp-chat-turn-clock.js bp-chat-palette.js bp-paper-editor-hooks.js
+    bp-paper-find-bar.js
     bp-array-focus.js bp-tab-keys.js bp-desk.js bp-datetime-field.js
   )
 

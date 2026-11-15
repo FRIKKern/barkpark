@@ -16,12 +16,10 @@ this card owns the budget numbers and WHO gets which one.
 | `:host` | `Authorization: Host <cred>` → `ChatHosts.authenticate/1`, read only where the mount passes `principal: :chat_host` | `:host_write_per_minute` (2400; one event per text_delta) | `:read_per_minute` (300) |
 | `:anonymous` | no resolvable credential at all | `client_ip/1`-keyed, `:write_per_minute` (60) | `:read_per_minute` (300) |
 
-A Bearer wins over a session cookie on the same request, same precedence
-`OptionalSessionToken` documents — a caller carrying both is billed as
-`:verified`, never `:session`. A per-dataset override
+A Bearer wins over a session cookie (`OptionalSessionToken`'s precedence): a
+caller carrying both is billed `:verified`. A per-dataset override
 (`config :barkpark, :rate_limits, datasets: %{"ds" => %{write: N}}`) wins over
-every class default, `:session` included: an operator clamping one dataset's
-abuse ceiling means it regardless of who is asking.
+every class default, `:session` included: a clamp on one dataset binds everyone.
 
 ## Why `:session` and `:owned` are wider (task-2c31de0cf6597d32)
 
@@ -36,10 +34,12 @@ A 429's `details.budget` names the spent bucket (`class`, `per_minute`,
 
 ## Tuning
 
-The knobs live in `config :barkpark, :rate_limits`
-(`BARKPARK_RATE_LIMIT_*` in `runtime.exs`): `read_per_minute`,
-`write_per_minute`, `session_write_per_minute`, `host_write_per_minute`. One
-token (say a site build prerendering in parallel) gets its own budget with
+The knobs live in `config :barkpark, :rate_limits`: `read_per_minute`,
+`write_per_minute` (env `BARKPARK_RATE_LIMIT_READ`/`_WRITE`), and config-only
+`session_write_per_minute`, `host_write_per_minute`.
+`config :barkpark, :chat_host_live_limit` (10) caps live chat hosts per
+workspace: at most 10 x 2400 host writes a minute. One token (say a site build)
+gets its own budget with
 `tokens: %{"<api_token id>" => %{read: N}}` or
 `BARKPARK_RATE_LIMIT_TOKENS="<id>:read=3000:write=120"`; it wins over class
 and dataset budgets. Capacity and refill scale together, so the full-refill
@@ -52,4 +52,4 @@ credential plug in a metered pipeline missing from its `@accounted` map. A new
 Bearer kind needs a resolver in `@principal_resolvers`, a new cookie kind a
 branch in `RateLimit.session_principal_id/1`, a new scheme a mount option like
 `principal: :chat_host`. Otherwise it is metered as anonymous (the SCIM
-incident, see that test's moduledoc).
+incident, in that test's moduledoc).
