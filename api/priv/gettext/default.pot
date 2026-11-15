@@ -14358,3 +14358,18 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The paper is still loading. Try again in a moment."
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:302
+#, elixir-autogen, elixir-format
+msgid "Checking where this file is used…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:304
+#, elixir-autogen, elixir-format
+msgid "Could not check where this file is used"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:301
+#, elixir-autogen, elixir-format
+msgid "Not used anywhere"
+msgstr ""

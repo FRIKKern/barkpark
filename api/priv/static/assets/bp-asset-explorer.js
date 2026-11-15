@@ -1680,6 +1680,8 @@
 
       await this._fetchAssetDetail(doc);
       this._loadRelations(doc);
+      // "Used in": bp-asset-explorer-usage.js, loaded first.
+      if (window.BpAssetExplorerUsage) window.BpAssetExplorerUsage.load(this, doc);
     }
 
     _inspectorPreview(doc, kind, previewUrl) {

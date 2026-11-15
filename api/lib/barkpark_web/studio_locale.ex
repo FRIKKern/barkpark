@@ -296,6 +296,16 @@ defmodule BarkparkWeb.StudioLocale do
       "video" => gettext("video"),
       "Video preview" => gettext("Video preview"),
       "Visibility" => gettext("Visibility"),
+      # The inspector's "Used in" list (bp-asset-explorer-usage.js).
+      "Used in" => gettext("Used in"),
+      "Not used anywhere" => gettext("Not used anywhere"),
+      "Checking where this file is used…" => gettext("Checking where this file is used…"),
+      "Could not check where this file is used" =>
+        gettext("Could not check where this file is used"),
+      "Showing the first %{shown} of %{total}." =>
+        gettext("Showing the first %{shown} of %{total}.", shown: "%{shown}", total: "%{total}"),
+      "Published" => gettext("Published"),
+      "Draft" => gettext("Draft"),
       # The bulk bar, delete steps and drop zone (bp-asset-explorer-bulk.js).
       "%{count} files deleted" => gettext("%{count} files deleted", count: "%{count}"),
       "%{count} files were not deleted" =>

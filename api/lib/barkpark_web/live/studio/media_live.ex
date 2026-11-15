@@ -124,6 +124,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
           scope-prefix={@scope_prefix}
           data-token={assigns[:api_token_raw] || ""}
           data-open-path={@asset_edit_path}
+          data-studio-path={Paths.studio_path(@scope_prefix, [], @dataset)}
           data-strings={BarkparkWeb.StudioLocale.component_strings(:asset_explorer)}
         />
       </div>
