@@ -379,6 +379,23 @@ msgstr "Utkast: upubliserte endringer"
 msgid "Draft: no changes"
 msgstr "Utkast: ingen endringer"
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:53
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:128
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:134
+#, elixir-autogen, elixir-format
+msgid "Incoming references"
+msgstr "Innkommende referanser"
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:138
+#, elixir-autogen, elixir-format
+msgid "Close incoming references"
+msgstr "Lukk innkommende referanser"
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:148
+#, elixir-autogen, elixir-format
+msgid "No incoming references found."
+msgstr "Fant ingen innkommende referanser."
+
 #: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Drop or paste an image to replace it"
@@ -13411,6 +13428,11 @@ msgstr "Søk i listen"
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{count}."
 msgstr "Viser de første %{count}."
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:189
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{shown} of %{total}."
+msgstr "Viser de første %{shown} av %{total}."
 
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format

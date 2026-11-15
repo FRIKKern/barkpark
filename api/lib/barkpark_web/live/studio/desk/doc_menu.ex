@@ -1,7 +1,8 @@
 defmodule BarkparkWeb.Studio.Desk.DocMenu do
   @moduledoc """
   The edit pane's "…" menu, Sanity's document actions: Publish or Unpublish,
-  History, Discard draft (Sanity's "Discard changes": a draft over a
+  History, Incoming references (the header's menu; it opens the inspector,
+  `IncomingRefs`), Discard draft (Sanity's "Discard changes": a draft over a
   published document), Duplicate and Delete, as the Studio offers them for
   the open document (`DocActions.resolved_doc_actions/1`, so a singleton has
   no Unpublish, Duplicate or Delete, and a plugin's resolver applies). Discard
@@ -34,7 +35,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   @type item :: %{
           required(:label) => String.t(),
           required(:name) => String.t(),
-          required(:event) => String.t() | nil,
+          required(:event) => String.t() | Phoenix.LiveView.JS.t() | nil,
           optional(:values) => map(),
           optional(:href) => String.t(),
           optional(:target) => String.t() | nil,
@@ -51,6 +52,24 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   end
 
   def items(_assigns), do: []
+
+  @doc """
+  The items with "Incoming references" added: after History, as the TanStack
+  Studio's header menu has it, else before Delete. The header's menu only.
+  """
+  @spec with_incoming([item()], item()) :: [item()]
+  def with_incoming([], _incoming), do: []
+
+  def with_incoming(items, incoming) do
+    case Enum.split_while(items, &(&1.name != "show-history")) do
+      {before, [history | rest]} ->
+        before ++ [history, incoming | rest]
+
+      {all, []} ->
+        {before, delete} = Enum.split_while(all, &(&1.name != "delete-doc"))
+        before ++ [incoming | delete]
+    end
+  end
 
   @doc "The items with the document's reference links added, before Delete."
   @spec with_refs([item()], [item()]) :: [item()]
@@ -235,6 +254,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp icon("view-graph"), do: "share"
   defp icon("editor-set-mode"), do: "sparkles"
   defp icon("open-reference"), do: "link"
+  defp icon("incoming-references"), do: "sync"
   defp icon(_name), do: nil
 
   # Each value as its phx-value attribute. The keys are this module's own
