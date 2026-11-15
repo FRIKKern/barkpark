@@ -44,9 +44,9 @@ func printDocDiffHelp(out *writer) {
 	out.outf("The id, revision and timestamps the server sets are not compared.")
 	out.outf("")
 	out.outf("The credential must be able to read drafts. A token that may only read")
-	out.outf("published documents (public-read, the default of `bp token create`) is")
-	out.outf("refused with exit 3; it is never told there is no draft. A field the")
-	out.outf("credential may not read is not compared.")
+	out.outf("published documents (public-read, the default of `bp token create`), or")
+	out.outf("no token at all, is refused with exit 3; it is never told there is no")
+	out.outf("draft. A field the credential may not read is not compared.")
 	out.outf("")
 	out.outf("flags:")
 	out.outf("  --rev <revision>   compare that revision to the current document (the draft")
@@ -258,6 +258,20 @@ func runDocDiff(out *writer, g globals, ctx manifest.Context, tail []string) int
 		draft, _, hasDraft, code := docDiffDoc(out, ctx, a.typ, "drafts."+a.id, "raw")
 		if code != exitOK {
 			return code
+		}
+		if !hasDraft {
+			// A 404 on the draft is only "no draft" from a credential that
+			// could have seen one. A caller with no token is pinned to
+			// published too, and the raw read above does not refuse it. The
+			// history read refuses both (401 without a token, 403 for
+			// public-read), so it is asked before anything is concluded.
+			_, ok, code := docDiffGet(out, ctx, "/v1/data/history/"+url.PathEscape(docDiffDataset(ctx))+"/"+url.PathEscape(a.typ)+"/"+url.PathEscape(a.id)+"?limit=1")
+			if code != exitOK {
+				return code
+			}
+			if !ok {
+				return useError(out, "not_found", fmt.Sprintf("doc diff: there is no %s document %s.", a.typ, a.id), exitNotFound)
+			}
 		}
 		pub, _, hasPub, code := docDiffDoc(out, ctx, a.typ, a.id, "raw")
 		if code != exitOK {

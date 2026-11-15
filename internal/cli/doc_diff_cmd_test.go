@@ -30,6 +30,10 @@ type docFakeServer struct {
 	// credential that may only read published documents: 404 on every
 	// drafts. id, and a refusal on a perspective=raw read.
 	publicRead bool
+	// noToken makes it answer like the real server answers a caller with no
+	// token: 404 on every drafts. id, the published row on any other read,
+	// and 401 on the history read.
+	noToken bool
 }
 
 func newDocFakeServer(t *testing.T, gets map[string]string) *docFakeServer {
@@ -51,7 +55,20 @@ func newDocFakeServer(t *testing.T, gets map[string]string) *docFakeServer {
 			_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"public-read tokens may only read published public documents"}}`))
 			return
 		}
-		if s.publicRead && strings.Contains(path, "/drafts.") {
+		if strings.HasPrefix(path, "/v1/data/history/") {
+			switch {
+			case s.publicRead:
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"read seat needed"}}`))
+			case s.noToken:
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"code":"unauthorized","message":"missing token"}}`))
+			default:
+				_, _ = w.Write([]byte(`{"revisions":[],"count":0}`))
+			}
+			return
+		}
+		if (s.publicRead || s.noToken) && strings.Contains(path, "/drafts.") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -185,11 +202,13 @@ func TestDocDiffExitCodes(t *testing.T) {
 // code that is neither 0 nor the "differs" code.
 func TestDocDiffRefusesACredentialThatCannotSeeDrafts(t *testing.T) {
 	s := newDocFakeServer(t, map[string]string{docDiffPubPath: docDiffPublished, docDiffDraftPath: docDiffDraft})
-	s.publicRead = true
-	for _, g := range []globals{{}, {output: "json"}} {
-		code, stdout, stderr := runDocVerb(runDocDiff, s.ctx(), g, "post", "p1")
-		if code != exitAuth || strings.Contains(stdout+stderr, "nothing to publish") || strings.Contains(stdout, `"differences":false`) {
-			t.Errorf("output %q: exit = %d, want %d and no claim that there is no draft; stdout=%s stderr=%s", g.output, code, exitAuth, stdout, stderr)
+	for _, kind := range []string{"public-read", "no token"} {
+		s.publicRead, s.noToken = kind == "public-read", kind == "no token"
+		for _, g := range []globals{{}, {output: "json"}} {
+			code, stdout, stderr := runDocVerb(runDocDiff, s.ctx(), g, "post", "p1")
+			if code != exitAuth || strings.Contains(stdout+stderr, "nothing to publish") || strings.Contains(stdout, `"differences":false`) {
+				t.Errorf("%s, output %q: exit = %d, want %d and no claim that there is no draft; stdout=%s stderr=%s", kind, g.output, code, exitAuth, stdout, stderr)
+			}
 		}
 	}
 }
