@@ -352,6 +352,10 @@ var codeExit = map[string]int{
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
 	"host_execution_not_permitted": exitAuth,
 
+	// 409, chat_host_controller.ex host_limit_reached/2: the workspace holds its
+	// cap of live chat hosts. A conflict, not a retry: revoke one first.
+	"host_limit_reached": exitConflict,
+
 	// 422, ChatSendFailure: the turn names attachments and the session's
 	// registered host does not advertise their type. Permanent until the host
 	// binary is updated, so a validation exit, never a retry.

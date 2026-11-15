@@ -47,6 +47,14 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
       {:error, :forbidden} ->
         {:noreply, deny(socket)}
 
+      {:error, {:host_limit_reached, limit}} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "This workspace has reached its limit of #{limit} enrolled chat hosts. Revoke one to enrol another."
+         )}
+
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Could not create enrollment")}
     end

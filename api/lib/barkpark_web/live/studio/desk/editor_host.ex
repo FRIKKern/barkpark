@@ -412,6 +412,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp desk_pane(_params, _chain), do: nil
 
+  # `inspect=on` is the Inspect dialog, drawn over the form, not an inspector.
+  defp inspector(pane), do: if(pane[:inspect] == "on", do: nil, else: pane[:inspect])
+
   @doc """
   The pane that edits: a header row with the close link, the document's
   references, and the Studio's editor. Takes the page's own assigns, because the Studio's shell
@@ -426,6 +429,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       class="pane-column dk-pane pane doc dk-doc dk-edit"
       data-pane-index={@view.index}
       data-pane-kind="doc"
+      data-testid="document-pane"
+      data-pane={"doc:#{@view.pane.id}"}
       data-pane-editing
       data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
@@ -623,13 +628,25 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <%= if !@edit_failed and !gone?(assigns) do %>
           {Components.studio_live_shell(assigns)}
         <% end %>
+        <%!-- The inspector's holder (TanStack's `aside` beside the form:
+              validation, history, incoming references). Nothing fills it yet,
+              so it is hidden; `data-inspect` is the pane's `inspect` from the
+              URL, which says which inspector a later one draws here. --%>
+        <aside
+          id={"#{@view.id}-inspector"}
+          class="dk-inspector"
+          data-desk-inspector
+          data-inspect={inspector(@view.pane)}
+          hidden
+        >
+        </aside>
       </div>
       <%!-- Sanity's pane footer: what happened last, Publish, and the same
             actions behind its own "…" ("Open document actions"),
             `Desk.DocFooter`. It is the pane's last child, so its coming and
             going moves nothing. --%>
       <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
-      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer">
+      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}
           status={BarkparkWeb.Studio.Desk.DocFooter.status(assigns)}

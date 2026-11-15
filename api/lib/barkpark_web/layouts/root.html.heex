@@ -5553,11 +5553,11 @@
         globals exist before the Hooks registration + LiveSocket connect below
         — and here at the BOTTOM of <body>, never in <head> (Golden Rule 4). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-chat-palette.js")}></script>
-  <%!-- The paper block editor's LiveView hooks. Non-defer for the same reason
-        as the bp-* globals above: `window.BarkparkPaperEditorHooks` must exist
-        before the inline script below folds it into Hooks and connects the
-        LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
+  <%!-- The paper block editor's LiveView hooks. Non-defer like the bp-* globals above: `window.BarkparkPaperEditorHooks` must exist before the
+        inline script below folds it into Hooks and connects the LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). The find bar after it
+        (task-c1bf7f10239f73bf) is a document-level key listener with no hook, so `async` (a `defer` would hold DOMContentLoaded and the socket). --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-paper-editor-hooks.js")}></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-paper-find-bar.js")} async></script>
   <%!-- Array fields keep keyboard focus on the row a button acted on
         (task-278c7992ed05a30b): a document-level listener, no phx-hook
         (array fields stay a pure round-trip, Decision 13). Bottom of

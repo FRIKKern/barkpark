@@ -259,6 +259,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     if data.failed, do: socket, else: assign(socket, :sharers, [])
   end
 
+  # The TanStack Studio's names for a pane: "types", or "doc:<id>".
+  defp pane_name(%{kind: :types}), do: "types"
+  defp pane_name(%{kind: :doc, id: id}), do: "doc:#{id}"
+  defp pane_name(_pane), do: false
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -267,7 +272,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       class={["pane-column", "dk-pane", "pane", to_string(@pane.kind), @pane.kind == :doc && "dk-doc"]}
       data-pane-index={@index}
       data-pane-kind={@pane.kind}
-      data-pane={@pane.kind == :types && "types"}
+      data-testid={@pane.kind == :doc && "document-pane"}
+      data-pane={pane_name(@pane)}
       aria-label={title(assigns)}
       aria-busy={@data.loading && "true"}
       data-desk-focused={@focus[:on] == true}
