@@ -241,35 +241,28 @@ defmodule Barkpark.Content.DiffMatchPatch do
 
   # Sanity's patch text gives `start1`/`start2` as UTF-8 byte offsets into the
   # text it was made from (@sanity/diff-match-patch's
-  # `adjustIndiciesToUcs2`): each becomes a UTF-16 offset into `text`. An
-  # offset past the end is the end; one inside a character fails the patch.
+  # `adjustIndiciesToUcs2`): each becomes a UTF-16 offset into `text`. The
+  # text may have changed since, so the offset is a hint for where to look,
+  # not a place: one past the end is the end, and one inside a character is
+  # the end of that character (as the library walks with
+  # `allowExceedingIndices`). The hunk's context then places it.
   defp to_unit_offsets(patches, text) do
-    Enum.reduce_while(patches, {:ok, []}, fn p, {:ok, acc} ->
-      with {:ok, s1} <- unit_offset(text, p.start1),
-           {:ok, s2} <- unit_offset(text, p.start2) do
-        {:cont, {:ok, [%{p | start1: s1, start2: s2} | acc]}}
-      else
-        :error -> {:halt, :error}
-      end
-    end)
-    |> case do
-      {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      :error -> :error
-    end
+    {:ok,
+     Enum.map(patches, fn p ->
+       %{p | start1: unit_offset(text, p.start1), start2: unit_offset(text, p.start2)}
+     end)}
   end
 
   defp unit_offset(text, target), do: unit_offset(text, target, 0, 0)
 
-  defp unit_offset(_text, target, bytes, units) when bytes == target, do: {:ok, units}
-  defp unit_offset(_text, target, bytes, _units) when bytes > target, do: :error
-  defp unit_offset(<<>>, _target, _bytes, units), do: {:ok, units}
+  defp unit_offset(_text, target, bytes, units) when bytes >= target, do: units
 
   defp unit_offset(<<cp::utf8, rest::binary>>, target, bytes, units) do
     size = byte_size(<<cp::utf8>>)
     unit_offset(rest, target, bytes + size, units + if(cp > 0xFFFF, do: 2, else: 1))
   end
 
-  defp unit_offset(_text, _target, _bytes, _units), do: :error
+  defp unit_offset(_text, _target, _bytes, units), do: units
 
   # ── patch_apply ────────────────────────────────────────────────────────────
 
