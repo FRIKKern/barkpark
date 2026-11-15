@@ -98,6 +98,7 @@ defmodule Barkpark.Media.WhereUsed do
   require Logger
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Query
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
@@ -494,13 +495,49 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   @doc """
-  The 409 envelope a delete refuses with, naming the referrers.
+  The 409 envelope a delete refuses with, naming the referrers the caller
+  behind `opts` may read (`visible_census/2`).
 
   Rendered by the controllers directly (not through `FallbackController`) so the
   referrer census can ride in `details` — the envelope reuses the already-public
   `conflict` code, so no client's error branching changes.
   """
-  def refusal_envelope(%MediaFile{} = file, %{count: count, sample: sample}) do
+  def refusal_envelope(%MediaFile{} = file, %{count: _, sample: _} = census, opts)
+      when is_list(opts) do
+    %{count: count, sample: sample} = visible_census(census, opts)
+    envelope(file, count, sample)
+  end
+
+  @doc """
+  `census` as the caller behind `opts` may see it (task-29ef6d1ab344a01b).
+
+  The census is the delete GATE's answer: it counts every document that uses
+  the blob, in every project and for every owner, because a delete must refuse
+  on any of them. The refusal hands `sample` back to the caller, so it keeps
+  only the documents that caller can read by id
+  (`Content.Query.get_documents_by_ids/3` with their read `opts`: dataset,
+  workspace and project, owner-scoped types, grants, private schemas). A
+  document they cannot read is never named, by title or by id. `count` stays
+  the gate's count: the refusal itself already says the file is in use.
+  """
+  @spec visible_census(%{count: non_neg_integer(), sample: [map()]}, keyword()) ::
+          %{count: non_neg_integer(), sample: [map()]}
+  def visible_census(%{sample: sample} = census, opts) when is_list(opts) do
+    readable =
+      sample
+      |> Enum.filter(&is_binary(&1.dataset))
+      |> Enum.group_by(& &1.dataset, & &1.doc_id)
+      |> Enum.flat_map(fn {dataset, ids} ->
+        ids
+        |> Query.get_documents_by_ids(dataset, opts)
+        |> Enum.map(fn {id, _} -> {dataset, id} end)
+      end)
+      |> MapSet.new()
+
+    %{census | sample: Enum.filter(sample, &MapSet.member?(readable, {&1.dataset, &1.doc_id}))}
+  end
+
+  defp envelope(file, count, sample) do
     %{
       code: "conflict",
       message:
