@@ -265,6 +265,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     bp-media-picker.js
     bp-desk.js
     bp-paper-find-bar.js
+    bp-paper-export.js
   )
 
   # A file that portals through its anchor's own document (`doc` is

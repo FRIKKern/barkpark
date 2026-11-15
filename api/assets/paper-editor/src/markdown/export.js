@@ -42,6 +42,9 @@ export function blocksToExportMarkdown(blocks, options = {}) {
   return chunks(blocks, ctx).join("\n\n");
 }
 
+// The blocks a container holds, under `children` or `blocks` as the reader reads them.
+const inside = (node, ctx) => chunks(Array.isArray(node.children) ? node.children : node.blocks, ctx);
+
 function chunks(blocks, ctx) {
   return (Array.isArray(blocks) ? blocks : []).map((block) => blockMd(block, ctx)).filter((md) => md !== "");
 }
@@ -158,11 +161,14 @@ function blockMd(block, ctx) {
       const tone = TONES[str(block.tone).toLowerCase()] || humanize(block.tone || "note");
       const title = oneLine(block.title);
       const head = title ? "**" + tone + ":** " + escapeInlineText(title) : "**" + tone + "**";
-      return quote(joined([head, inline(block.content, ctx), ...chunks(block.blocks, ctx)]));
+      return quote(joined([head, inline(block.content, ctx), ...inside(block, ctx)]));
     }
     case "note": return quote(noteLine(block, ctx));
     case "notes": return quote(joined((Array.isArray(block.items) ? block.items : []).map((item) => noteLine(item, ctx)))) || placeholder(block, ctx);
-    case "code": return fenced(block.value, /^[^\s`]+$/.test(str(block.lang || block.language)) ? str(block.lang || block.language) : "");
+    case "code": {
+      const source = ["value", "code", "content", "text"].map((key) => (Array.isArray(block[key]) ? plainText(block[key]) : str(block[key]))).find((text) => text.trim() !== "");
+      return source === undefined ? "" : fenced(source, /^[^\s`]+$/.test(str(block.lang || block.language)) ? str(block.lang || block.language) : "");
+    }
     case "diff": return joined([block.file ? "`" + oneLine(block.file) + "`" : "", fenced(block.diff, "diff")]);
     case "filetree": return joined([fenced(block.text, ""), italic(block.legend)]);
     case "code-tabs": return joined((Array.isArray(block.tabs) ? block.tabs : []).flatMap((tab) => [bold(tab && tab.label), fenced(tab && tab.value, oneLine(tab && (tab.language || tab.lang)).replace(/[\s`]/g, ""))]));
@@ -174,7 +180,7 @@ function blockMd(block, ctx) {
       if (!src) return placeholder(block, ctx);
       return joined(["![" + oneLine(block.alt).replace(/[\[\]]/g, "") + "](" + src + ")", italic(block.caption)]);
     }
-    case "figure": return joined([blockMd(block.child, ctx), ...chunks(block.blocks, ctx), italic(block.caption)]) || placeholder(block, ctx);
+    case "figure": return joined([blockMd(block.child, ctx), ...inside(block, ctx), italic(block.caption)]) || placeholder(block, ctx);
     case "table": return tableMd(block, ctx) || placeholder(block, ctx);
     case "sheet": {
       const snap = isMap(block.snapshot) ? block.snapshot : {};
@@ -184,14 +190,14 @@ function blockMd(block, ctx) {
       const steps = (Array.isArray(block.steps) ? block.steps : []).filter(isMap);
       return steps.map((step, i) => {
         const marker = i + 1 + ". ";
-        return marker + indent(joined([bold(step.title), ...chunks(step.blocks, ctx)]), " ".repeat(marker.length)).trimStart();
+        return marker + indent(joined([bold(step.title), ...inside(step, ctx)]), " ".repeat(marker.length)).trimStart();
       }).join("\n\n") || placeholder(block, ctx);
     }
-    case "tabs": return joined((Array.isArray(block.tabs) ? block.tabs : []).filter(isMap).flatMap((tab) => [bold(tab.label), ...chunks(tab.blocks, ctx)])) || placeholder(block, ctx);
+    case "tabs": return joined((Array.isArray(block.tabs) ? block.tabs : []).filter(isMap).flatMap((tab) => [bold(tab.label), ...inside(tab, ctx)])) || placeholder(block, ctx);
     case "columns": return joined((Array.isArray(block.columns) ? block.columns : []).flatMap((column) => chunks(isMap(column) ? column.blocks : column, ctx))) || placeholder(block, ctx);
-    case "expandable": return joined([bold(block.summary), ...chunks(block.blocks, ctx)]) || placeholder(block, ctx);
-    case "terminal": return joined([bold(block.title), ...chunks(block.children, ctx), italic(block.footer)]) || placeholder(block, ctx);
-    case "section": return joined([bold(block.title), ...chunks(block.blocks, ctx)]) || placeholder(block, ctx);
+    case "expandable": return joined([bold(block.summary), ...inside(block, ctx)]) || placeholder(block, ctx);
+    case "terminal": return joined([bold(block.title), ...inside(block, ctx), italic(block.footer)]) || placeholder(block, ctx);
+    case "section": return joined([bold(block.title), ...inside(block, ctx)]) || placeholder(block, ctx);
     case "card": {
       const slots = isMap(block.slots) ? block.slots : {};
       const title = (Array.isArray(slots.title) ? slots.title : []).map((b) => bold(b && (b.text ?? plainText(b.content))));
@@ -313,8 +319,8 @@ function words(node, out, depth) {
 // A block Markdown has no form for: its child blocks when it holds some, else
 // a line naming it, followed by its words.
 function fallback(block, ctx) {
-  const nested = [block.blocks, block.children].filter((list) => Array.isArray(list) && list.some((b) => isMap(b) && typeof b.type === "string"));
-  if (nested.length) return joined(nested.flatMap((list) => chunks(list, ctx))) || placeholder(block, ctx);
+  const nested = [block.children, block.blocks].find((list) => Array.isArray(list) && list.some((b) => isMap(b) && typeof b.type === "string"));
+  if (nested) return joined(chunks(nested, ctx)) || placeholder(block, ctx);
   const out = [];
   words(block, out, 0);
   return [placeholder(block, ctx), ...out.map((line) => "> " + escapeInlineText(line))].join("\n");

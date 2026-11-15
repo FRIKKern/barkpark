@@ -31,7 +31,11 @@ const opened = [];
 const blobs = new Map();
 window.URL.createObjectURL = (blob) => { const url = `blob:paper-${blobs.size}`; blobs.set(url, blob); return url; };
 window.URL.revokeObjectURL = () => {};
-window.HTMLAnchorElement.prototype.click = function () { if (this.download) files.push({ name: this.download, blob: blobs.get(this.getAttribute("href")) }); };
+// A download link's click is a real click on the page, outside the menu.
+window.HTMLAnchorElement.prototype.click = function () {
+  if (this.download) files.push({ name: this.download, blob: blobs.get(this.getAttribute("href")) });
+  this.dispatchEvent(new window.Event("click", { bubbles: true }));
+};
 Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: (text) => { copies.push(text); return Promise.resolve(); } } });
 window.open = (href, target) => { opened.push([href, target]); return null; };
 const read = (blob) => new Promise((resolve) => { const reader = new window.FileReader(); reader.onload = () => resolve(reader.result); reader.readAsText(blob); });

@@ -14305,3 +14305,59 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This field cannot be edited, so nothing was pasted"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:366
+#, elixir-autogen, elixir-format
+msgid "%{block}: not included in Markdown export"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:368
+#, elixir-autogen, elixir-format
+msgid "Copy as Markdown"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:369
+#, elixir-autogen, elixir-format
+msgid "Download Markdown"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_export.ex:80
+#: lib/barkpark_web/studio_locale.ex:370
+#, elixir-autogen, elixir-format
+msgid "Export"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:372
+#, elixir-autogen, elixir-format
+msgid "Markdown is text first. A block it cannot hold becomes a one-line note."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:373
+#, elixir-autogen, elixir-format
+msgid "Print / Save as PDF"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:375
+#, elixir-autogen, elixir-format
+msgid "Print opens the published page in a new tab."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:377
+#, elixir-autogen, elixir-format
+msgid "Print uses the published version. Changes in this draft are not in it."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:378
+#, elixir-autogen, elixir-format
+msgid "Publish this paper to print it."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:380
+#, elixir-autogen, elixir-format
+msgid "The browser did not allow the copy. Download the file instead."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:382
+#, elixir-autogen, elixir-format
+msgid "The paper is still loading. Try again in a moment."
+msgstr ""

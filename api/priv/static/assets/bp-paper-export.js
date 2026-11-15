@@ -288,8 +288,9 @@
     var text = markdown(source, menu.strings);
     if (text === null) return fail();
     if (action === "download") {
-      download(source, text);
+      // Closed first: the link's own click below is a click outside the menu.
       close(true);
+      download(source, text);
     } else if (action === "copy") {
       var held = menu;
       copy(text).then(function () {
