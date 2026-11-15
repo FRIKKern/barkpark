@@ -154,6 +154,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
     {:noreply, assign(socket, nav_group: name)}
   end
 
+  # After a save in the desk: a chosen group whose tab is no longer drawn
+  # (its fields all hidden now) is forgotten, so the form stays on All fields
+  # when one of them shows again (`Desk.FieldGroups.settle/1`).
+  def settle_group({:noreply, socket}),
+    do: {:noreply, BarkparkWeb.Studio.Desk.FieldGroups.settle(socket)}
+
+  def settle_group(other), do: other
+
   def select_desk(%{"desk" => name}, socket) do
     desk = if name == "" or name == socket.assigns[:nav_desk], do: nil, else: name
 

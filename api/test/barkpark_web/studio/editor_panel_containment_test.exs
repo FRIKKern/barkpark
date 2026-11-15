@@ -248,7 +248,12 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # (`@supports not`). EditorHost draws it as the first child of the edit
     # pane's `.dk-edit-body`, a SIBLING of the Studio shell that holds the
     # `.editor-panel`, never under it, so no panel containing block reaches it.
-    "live/studio/desk/style.ex" => 2
+    "live/studio/desk/style.ex" => 2,
+    # The desk's delete and unpublish dialogs (`DocDialog.frame/1`): the dim
+    # layer and the card, fixed over the whole window. EditorHost draws them
+    # in the edit pane's `.dk-edit-body`, a SIBLING of the Studio shell that
+    # holds the `.editor-panel`, never under it, as the Inspect layer above.
+    "live/studio/desk/doc_dialog.ex" => 2
   }
 
   # Shipped studio JS that emits `position: fixed` from script. Each MUST portal
@@ -309,7 +314,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # synthetic source rather than this class: a control that reads a real file
     # dies with the file's next cleanup, and a dead control is a green with no
     # subject.
-    "bp-modal-overlay" => :css_rule
+    "bp-modal-overlay" => :css_rule,
+    # desk/doc_dialog.ex frame/1: the dim layer behind the desk's delete and
+    # unpublish dialogs. Its position is on the element itself, because its
+    # stylesheet is drawn with the dialog, not in root.html.heex.
+    "dk-dialog-backdrop" => :inline_style
   }
 
   # What counts as "backdrop-shaped": a class token whose name says it exists to
