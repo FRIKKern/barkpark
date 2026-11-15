@@ -379,6 +379,23 @@ msgstr ""
 msgid "Draft: no changes"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:53
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:128
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:134
+#, elixir-autogen, elixir-format
+msgid "Incoming references"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:138
+#, elixir-autogen, elixir-format
+msgid "Close incoming references"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:148
+#, elixir-autogen, elixir-format
+msgid "No incoming references found."
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Drop or paste an image to replace it"
