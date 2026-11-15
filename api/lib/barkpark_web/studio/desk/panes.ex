@@ -186,6 +186,38 @@ defmodule BarkparkWeb.Studio.Desk.Panes do
     to_path(update_doc(panes, index, change), base)
   end
 
+  @doc """
+  The page's perspective, from its URL's query (`?perspective=published`), as
+  the TanStack Studio reads it (`lib/perspective.ts`): `:published` for exactly
+  that value, `:drafts` for anything else or none. It is the page's, not a
+  pane's, so the paths this module prints do not carry it
+  (`keep_perspective/2` adds it).
+  """
+  @spec perspective(String.t() | nil) :: :drafts | :published
+  def perspective(uri) when is_binary(uri) do
+    with {:ok, %URI{query: query}} when is_binary(query) <- URI.new(uri),
+         %{"perspective" => "published"} <- URI.decode_query(query) do
+      :published
+    else
+      _ -> :drafts
+    end
+  rescue
+    # A query with bytes `URI.decode_query/1` refuses names no perspective.
+    ArgumentError -> :drafts
+  end
+
+  def perspective(_uri), do: :drafts
+
+  @doc """
+  `path` with the page's perspective kept: for a patch that stays on the same
+  document pane (its inspector opens or closes), as the TanStack Studio's
+  perspective stays (`withPerspective`). Links to other documents do not
+  take it.
+  """
+  @spec keep_perspective(String.t(), :drafts | :published) :: String.t()
+  def keep_perspective(path, :published), do: path <> "?perspective=published"
+  def keep_perspective(path, _drafts), do: path
+
   @doc "A stable key for a pane, for keyed rendering."
   @spec pane_key(pane()) :: String.t()
   def pane_key(%{kind: :types}), do: "types"
