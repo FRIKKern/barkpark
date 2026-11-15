@@ -3,6 +3,7 @@ package pdrender
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -41,6 +42,29 @@ import (
 // slowdown in more than half of the checked docs at once, and a render that
 // waits rather than computes. The wall-clock bound still covers those when
 // they are large.
+//
+// When this check fails, or CI prints a "limit-doc cost drift" warning, on
+// your PR:
+//   - If the named doc got slower and you did not mean it to, look at the
+//     renderer for that doc's block type. That is what the check is for.
+//   - If you made the doc more expensive on purpose, re-measure (below).
+//   - If you made OTHER docs faster, the check can still fail. The machine
+//     factor is the median over the docs with a base, so when more than half
+//     of them get faster (four of the seven at 3x faster, say), the factor
+//     drops and the docs you did not touch read as up to 3x slower. Re-measure.
+//   - A warning (above limitDocCostDrift, still passing) means a doc has
+//     moved far enough that noise on a slow runner may push it over the slack
+//     on someone else's PR. Re-measure in the PR that moved it.
+//
+// To re-measure, on an otherwise idle machine, run
+//
+//	go test ./internal/pdrender -run '^TestLimitDocsRenderWithinTheirBound$' -count=20 -v
+//
+// and take each doc's median "ratio" over the 20 runs. Write those medians
+// into limitDocCostBase. A doc whose median is under limitDocCostFloor gets 0,
+// and a doc at 0 whose median is now over the floor gets its median. Say in
+// the PR which bases moved and why, and check that CI's printed normalised
+// values for the new bases sit near 1.00.
 
 // limitDocCostBase is each limit doc's render CPU time divided by the
 // calibration doc's, measured on main (Apple M-series, 20 runs, median). Zero
@@ -57,9 +81,7 @@ import (
 // about 1.2 and 0.95 there. The cost of that: on the Mac they now fail only
 // past about 4.6x (nested columns) and 6x (nested strong) their usual cost.
 //
-// To re-measure after a change that legitimately makes a doc more expensive,
-// run `go test ./internal/pdrender -run '^TestLimitDocsRenderWithinTheirBound$'
-// -count=20 -v` and take the median of the "ratio" column per doc.
+// To re-measure, see "When this check fails" at the top of this file.
 var limitDocCostBase = map[string]float64{
 	"toc":            0,
 	"sheet":          0,
@@ -88,6 +110,10 @@ const (
 	// under 1.07. A renderer made 5x slower moved its doc to 2.3 to 5.4,
 	// depending on how much of the doc's render that renderer is.
 	limitDocCostSlack = 2.5
+	// limitDocCostDrift is where a passing doc starts to print a warning. In
+	// PR #26427's two CI runs every doc read 1.2 or less under these bases
+	// and floor, so a doc above 1.6 has moved.
+	limitDocCostDrift = 1.6
 	limitDocCostFloor = 0.5
 	limitDocCostPairs = 7
 )
@@ -133,6 +159,7 @@ func renderCPU(t *testing.T, reg *Registry, doc []byte) (time.Duration, string) 
 	return after - before, out
 }
 
+// median of a non-empty slice; callers check the length first.
 func median(v []float64) float64 {
 	s := slices.Clone(v)
 	slices.Sort(s)
@@ -188,6 +215,9 @@ func checkLimitDocCost(t *testing.T, reg *Registry, docs []limitDoc) {
 			normal = append(normal, ratio[d.Name]/base)
 		}
 	}
+	if len(normal) == 0 {
+		t.Fatal("no limit doc with a base in limitDocCostBase was measured, so there is no machine factor to normalise by; give the docs their bases as the comment at the top of this file says")
+	}
 	factor := median(normal)
 	t.Logf("machine factor %.2f (about 1.00 on the machine that measured the bases)", factor)
 	for _, d := range docs {
@@ -197,8 +227,17 @@ func checkLimitDocCost(t *testing.T, reg *Registry, docs []limitDoc) {
 		}
 		cost := ratio[d.Name] / base / factor
 		t.Logf("%-16s ratio %7.3f  %-5s %7.3f  normalised %5.2f", d.Name, ratio[d.Name], held, base, cost)
-		if cost > limitDocCostSlack {
+		switch {
+		case cost > limitDocCostSlack:
 			t.Errorf("%s costs %.2f times its %s against the calibration render, over %.1f: a slowdown in its renderer, or a change that made it legitimately more expensive (then re-measure limitDocCostBase)", d.Name, cost, held, limitDocCostSlack)
+		case cost > limitDocCostDrift:
+			msg := fmt.Sprintf("limit-doc cost drift: %s reads %.2f of its %s (warns above %.1f, fails above %.1f); re-measure limitDocCostBase in internal/pdrender/limits_cost_test.go", d.Name, cost, held, limitDocCostDrift, limitDocCostSlack)
+			t.Log(msg)
+			if os.Getenv("GITHUB_ACTIONS") == "true" {
+				// A workflow command must start its own line on stdout;
+				// t.Log prefixes the file and line, so print it directly.
+				fmt.Printf("::warning::%s\n", msg)
+			}
 		}
 	}
 }
