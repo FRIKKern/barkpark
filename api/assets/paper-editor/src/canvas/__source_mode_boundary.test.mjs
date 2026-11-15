@@ -229,6 +229,7 @@ const expected = {
     "sourceMode|accessor|01|get sourceMode:0|-",
     "state|value|011|function|state|0",
     "tagSource|accessor|01|get tagSource:0|set tagSource:1",
+    "toMarkdown|value|011|function|toMarkdown|1",
     "toggleList|value|011|function|toggleList|1",
     "toggleMark|value|011|function|toggleMark|2",
     "toggleSourceMode|value|011|function|toggleSourceMode|0",
@@ -238,7 +239,7 @@ const expected = {
   ],
   "static": [
     "BUILD_SHA|value|111|object|null",
-    "CONTRACT_VERSION|value|111|string|\"1.22.0\"",
+    "CONTRACT_VERSION|value|111|string|\"1.23.0\"",
     "EDITOR_VERSION|value|111|string|\"0.1.0-alpha.2\"",
     "_imageFiles|value|011|function|_imageFiles|1",
     "length|value|010|number|0",
@@ -283,7 +284,7 @@ assert.deepEqual(definitions[0], {
 const element = document.createElement("bp-paper-canvas");
 assert.equal(element.constructor, BpPaperCanvas);
 assert.equal(element.localName, "bp-paper-canvas");
-assert.equal(BpPaperCanvas.CONTRACT_VERSION, "1.22.0");
+assert.equal(BpPaperCanvas.CONTRACT_VERSION, "1.23.0");
 assert.equal(BpPaperCanvas.EDITOR_VERSION, "0.1.0-alpha.2");
 assert.equal(BpPaperCanvas.BUILD_SHA, null, "unbuilt source keeps BUILD_SHA null");
 

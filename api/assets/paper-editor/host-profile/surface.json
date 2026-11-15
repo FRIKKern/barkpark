@@ -1,7 +1,7 @@
 {
-  "contract": "1.22.0",
+  "contract": "1.23.0",
   "editor": "0.1.0-alpha.2",
-  "build": "e964413171d4",
+  "build": "06ff877ef3c8",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -130,6 +130,7 @@
         "sourceMode",
         "state",
         "tagSource",
+        "toMarkdown",
         "toggleList",
         "toggleMark",
         "toggleSourceMode",

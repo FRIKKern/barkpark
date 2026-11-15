@@ -361,6 +361,25 @@ defmodule BarkparkWeb.StudioLocale do
     Jason.encode!(%{
       "Auto-saved" => gettext("Auto-saved"),
       "Block actions" => gettext("Block actions"),
+      # The export menu (bp-paper-export.js, task-a5ba0a62b64635ac).
+      "%{block}: not included in Markdown export" =>
+        gettext("%{block}: not included in Markdown export", block: "%{block}"),
+      "Copied" => gettext("Copied"),
+      "Copy as Markdown" => gettext("Copy as Markdown"),
+      "Download Markdown" => gettext("Download Markdown"),
+      "Export" => gettext("Export"),
+      "Markdown is text first. A block it cannot hold becomes a one-line note." =>
+        gettext("Markdown is text first. A block it cannot hold becomes a one-line note."),
+      "Print / Save as PDF" => gettext("Print / Save as PDF"),
+      "Print opens the published page in a new tab." =>
+        gettext("Print opens the published page in a new tab."),
+      "Print uses the published version. Changes in this draft are not in it." =>
+        gettext("Print uses the published version. Changes in this draft are not in it."),
+      "Publish this paper to print it." => gettext("Publish this paper to print it."),
+      "The browser did not allow the copy. Download the file instead." =>
+        gettext("The browser did not allow the copy. Download the file instead."),
+      "The paper is still loading. Try again in a moment." =>
+        gettext("The paper is still loading. Try again in a moment."),
       # The find bar (bp-paper-find-bar.js, task-c1bf7f10239f73bf).
       "%{index} of %{count}" =>
         gettext("%{index} of %{count}", index: "%{index}", count: "%{count}"),
