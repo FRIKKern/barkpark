@@ -58,7 +58,7 @@ defmodule BarkparkWeb.QueryDraftsFilterShadowTest do
 
     put.(b, alan)
 
-    %{a: a, b: b, c: c, ada: ada, alan: alan}
+    %{a: a, b: b, c: c, ada: ada, alan: alan, scope: scope}
   end
 
   # The query string as a client sends it: `filter[author][in]=…`.
@@ -107,6 +107,44 @@ defmodule BarkparkWeb.QueryDraftsFilterShadowTest do
 
     # With another filter, b's draft is asked too, and it is not ada.
     assert ids(list(editor, Map.put(by_id, "filter[author]", ctx.ada))) == [ctx.a]
+  end
+
+  test "a filter on the row status still names the stored row", ctx do
+    editor = as_editor(ctx.conn)
+
+    # The Go TUI's status lists send `filter=status=<option>` under drafts.
+    tui = list(editor, %{"perspective" => "drafts", "filter" => "status=published"})
+    assert ids(tui) == [ctx.a, ctx.b, ctx.c]
+
+    # With a content filter, b's draft is asked that part, and it is not ada.
+    both = %{
+      "perspective" => "drafts",
+      "filter[status]" => "published",
+      "filter[author]" => ctx.ada
+    }
+
+    assert ids(list(editor, both)) == [ctx.a, ctx.c]
+  end
+
+  test "an $or branch on a row field reads like the same filter at the top", ctx do
+    read = fn filter_map ->
+      "post"
+      |> Content.list_documents(
+        @dataset,
+        [perspective: :drafts, filter_map: filter_map] ++ ctx.scope
+      )
+      |> Enum.map(& &1.doc_id)
+      |> Enum.sort()
+    end
+
+    assert read.(%{"$or" => [%{"_id" => %{"in" => [ctx.a, ctx.b]}}]}) == [ctx.a, ctx.b]
+    assert read.(%{"$or" => [%{"_id" => ctx.b}, %{"author" => "nobody"}]}) == [ctx.b]
+
+    # No row field in any branch: judged on the draft.
+    assert read.(%{"$or" => [%{"author" => ctx.ada}, %{"author" => "nobody"}]}) == [ctx.a, ctx.c]
+
+    assert read.(%{"status" => "published", "author" => %{"in" => [ctx.ada, ctx.alan]}}) ==
+             [ctx.a, ctx.b, ctx.c]
   end
 
   test "total and pages count the shadowed row out", ctx do
