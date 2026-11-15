@@ -24,9 +24,8 @@ const tidesLabel = "Explaining ocean tides"
 // PATH by installStatusHelper. BARKPARK_STATUS_HELPER picks what it plays:
 //
 //	turn   a stream-json claude turn: init, message_start, then (once the gate
-//	       file exists, or after 5 s) one text delta and a success result.
-//	       BARKPARK_STATUS_HELPER_TIMES names a file that gets the UnixNano
-//	       time the text line was written
+//	       file exists, or after labelBackstop) one text delta and a success
+//	       result
 //	label  the label side call: records its args, stdin, cwd, niceness and
 //	       whether a Barkpark token reached it, then prints
 //	       BARKPARK_STATUS_HELPER_SAY
@@ -44,24 +43,15 @@ func TestStatusLabelHelperProcess(t *testing.T) {
 		_ = decoder.Decode(&input)
 		encoder := json.NewEncoder(os.Stdout)
 		write := func(value map[string]any) { _ = encoder.Encode(value) }
-		times := map[string]int64{}
-		stamp := func(name string) {
-			if path := os.Getenv("BARKPARK_STATUS_HELPER_TIMES"); path != "" {
-				times[name] = time.Now().UnixNano()
-				encoded, _ := json.Marshal(times)
-				_ = os.WriteFile(path, encoded, 0o600)
-			}
-		}
 		write(map[string]any{"type": "system", "subtype": "init", "session_id": "claude-thread"})
 		write(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start"}})
 		if gate := os.Getenv("BARKPARK_STATUS_HELPER_GATE"); gate != "" {
-			for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			for deadline := time.Now().Add(labelBackstop); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 				if _, err := os.Stat(gate); err == nil {
 					break
 				}
 			}
 		}
-		stamp("text")
 		write(map[string]any{"type": "stream_event", "event": map[string]any{
 			"type": "content_block_delta", "index": 0.0,
 			"delta": map[string]any{"type": "text_delta", "text": "Tides come from the moon."},
@@ -117,6 +107,13 @@ func runLabelledTurn(t *testing.T, labeler StatusLabeler, gate string) ([]map[st
 // runLabelledTurnLogged is runLabelledTurn with the handler's log in log.
 func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log *syncBuffer) ([]map[string]any, time.Duration) {
 	t.Helper()
+	return runLabelledTurnHooked(t, labeler, gate, log, nil)
+}
+
+// runLabelledTurnHooked is runLabelledTurnLogged with onEvent called for each
+// of the turn's events as it is published, on the turn's goroutine.
+func runLabelledTurnHooked(t *testing.T, labeler StatusLabeler, gate string, log *syncBuffer, onEvent func(map[string]any)) ([]map[string]any, time.Duration) {
+	t.Helper()
 	env := map[string]string{"BARKPARK_STATUS_HELPER": "turn"}
 	if gate != "" {
 		env["BARKPARK_STATUS_HELPER_GATE"] = gate
@@ -141,6 +138,9 @@ func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log
 		"provider": "claude", "operation": "send_turn", "session_id": "session-label",
 		"payload": map[string]any{"cwd": handler.ApprovedRoots[0], "content": "how do ocean tides work?", "mode": "plan"},
 	}}, func(event map[string]any) error {
+		if onEvent != nil {
+			onEvent(event)
+		}
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -198,26 +198,30 @@ func TestClaudeTurnGivesTheLabelCallThePersonsText(t *testing.T) {
 	}
 }
 
-// A label call that never answers does not hold the turn: the turn ends on its
-// own time, publishes no status, and the call's context is cancelled with it.
+// A label call that never answers does not hold the turn: the turn ends while
+// the call is still held, publishes no status, and the call's context is
+// cancelled with it.
 func TestClaudeTurnDoesNotWaitForASlowLabel(t *testing.T) {
-	cancelled := make(chan struct{})
-	labeler := StatusLabelFunc(func(ctx context.Context, _ string) (string, error) {
-		<-ctx.Done()
-		close(cancelled)
-		return "", ctx.Err()
+	label := newHeldLabel(t)
+	endedWhileHeld := false
+	events, _ := runLabelledTurnHooked(t, label, "", &syncBuffer{}, func(event map[string]any) {
+		if event["kind"] == "turn_completed" {
+			endedWhileHeld = !label.released.Load()
+		}
 	})
-	events, elapsed := runLabelledTurn(t, labeler, "")
 
 	if want := []string{"session_started", "turn_started", "text_delta", "turn_completed"}; fmt.Sprint(kindsOf(events)) != fmt.Sprint(want) {
 		t.Fatalf("events %v; want %v", kindsOf(events), want)
 	}
-	if elapsed > 4*time.Second {
-		t.Fatalf("the turn took %v; a slow label call held it", elapsed)
+	if !label.entered.Load() {
+		t.Fatal("the label call was never made, so this proves nothing")
+	}
+	if !endedWhileHeld {
+		t.Fatalf("the turn ended only after the label call was freed (by the %v backstop): it waited for the call", labelBackstop)
 	}
 	select {
-	case <-cancelled:
-	case <-time.After(2 * time.Second):
+	case <-label.cancelled:
+	case <-time.After(labelBackstop):
 		t.Fatal("the label call's context was not cancelled when the turn ended")
 	}
 }
@@ -245,7 +249,7 @@ func TestClaudeTurnWithAFailingLabelIsUnchanged(t *testing.T) {
 // without the person's text. One the turn's end cancelled leaves none.
 func TestClaudeTurnLogsASkippedLabelWithoutThePersonsText(t *testing.T) {
 	waitFor := func(log *syncBuffer, want string) string {
-		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		for deadline := time.Now().Add(labelBackstop); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 			if strings.Contains(log.String(), want) {
 				break
 			}
@@ -353,15 +357,11 @@ func TestTurnStatusPublishesTheLabelOnlyBetweenTurnStartedAndText(t *testing.T) 
 				},
 				post: func(label string) { posted <- label },
 			}
-			// The label is posted on its own goroutine: after each step, take
-			// what it posted.
-			take := func(wait time.Duration) {
-				select {
-				case <-posted:
-					kinds = append(kinds, "status")
-				case <-time.After(wait):
-				}
-			}
+			// The label is posted on its own goroutine, which may run late on a
+			// loaded machine; the decision to send it is made in the step
+			// itself. So after each step, read that decision, and only then
+			// wait for the POST it started.
+			sent := false
 			for _, s := range c.steps {
 				if s.event != nil {
 					if err := status.forward(s.event); err != nil {
@@ -370,11 +370,28 @@ func TestTurnStatusPublishesTheLabelOnlyBetweenTurnStartedAndText(t *testing.T) 
 				} else {
 					status.offer(s.offer)
 				}
-				take(20 * time.Millisecond)
+				status.mu.Lock()
+				decided := status.sent
+				status.mu.Unlock()
+				if decided && !sent {
+					sent = true
+					kinds = append(kinds, "status")
+				}
 			}
-			take(50 * time.Millisecond)
 			if fmt.Sprint(kinds) != fmt.Sprint(c.want) {
 				t.Fatalf("emitted %v; want %v", kinds, c.want)
+			}
+			if sent {
+				select {
+				case <-posted:
+				case <-time.After(labelBackstop):
+					t.Fatal("the label was marked sent but never posted")
+				}
+			}
+			select {
+			case label := <-posted:
+				t.Fatalf("a second label %q was posted", label)
+			default:
 			}
 		})
 	}
@@ -426,13 +443,13 @@ func TestTurnStatusForwardHoldsNoLockAcrossEmit(t *testing.T) {
 	}()
 	select {
 	case <-offered:
-	case <-time.After(time.Second):
+	case <-time.After(labelBackstop):
 		t.Fatal("offer waited for an event being published")
 	}
 	close(release)
 	select {
 	case <-posted:
-	case <-time.After(time.Second):
+	case <-time.After(labelBackstop):
 		t.Fatal("the label was not posted")
 	}
 }
@@ -488,7 +505,8 @@ func TestClaudeStatusLabelerRunsAToolFreeSideCall(t *testing.T) {
 		"BARKPARK_STATUS_HELPER_SAY": "\"Explaining ocean tides.\"\n",
 	})
 	t.Setenv("BARKPARK_API_TOKEN", "bpcs_must-not-leak")
-	labeler := &ClaudeStatusLabeler{Model: "sonnet", Timeout: 5 * time.Second}
+	// The timeout is a backstop: the helper answers as soon as it runs.
+	labeler := &ClaudeStatusLabeler{Model: "sonnet", Timeout: labelBackstop}
 	label, err := labeler.StatusLabel(context.Background(), "-p how do ocean tides work?")
 	if err != nil {
 		t.Fatal(err)
@@ -529,25 +547,37 @@ func TestClaudeStatusLabelerRunsAToolFreeSideCall(t *testing.T) {
 	}
 }
 
-// A side call that never answers ends at its timeout, and its child is waited
-// for: kill(pid, 0) answers ESRCH only once the child is reaped (a zombie still
-// answers).
-func TestClaudeStatusLabelerTimesOutAndReapsItsChild(t *testing.T) {
+// A side call that never answers is ended (by the turn, or by its own
+// timeout: both are its context ending), and its child is waited for:
+// kill(pid, 0) answers ESRCH only once the child is reaped (a zombie still
+// answers). The call is ended once the helper is running, not on a clock that
+// can run out before a loaded machine starts it. The timeout message itself is
+// TestClaudeStatusLabelerSaysItTimedOut's.
+func TestClaudeStatusLabelerReapsItsChildWhenTheCallEnds(t *testing.T) {
 	record := filepath.Join(t.TempDir(), "pid")
 	installStatusHelper(t, map[string]string{"BARKPARK_STATUS_HELPER": "hang", "BARKPARK_STATUS_HELPER_RECORD": record})
-	// Long enough for the helper to start and write its pid on a loaded machine.
-	labeler := &ClaudeStatusLabeler{Timeout: 2 * time.Second, WaitDelay: 200 * time.Millisecond}
+	labeler := &ClaudeStatusLabeler{Timeout: labelBackstop, WaitDelay: 200 * time.Millisecond}
 
-	started := time.Now()
-	if _, err := labeler.StatusLabel(context.Background(), "say hi"); err == nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		defer cancel()
+		for deadline := time.Now().Add(labelBackstop); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if raw, err := os.ReadFile(record); err == nil && len(raw) > 0 {
+				return
+			}
+		}
+	}()
+	_, err := labeler.StatusLabel(ctx, "say hi")
+	if err == nil {
 		t.Fatal("a side call that never answered returned a label")
 	}
-	if elapsed := time.Since(started); elapsed > 6*time.Second {
-		t.Fatalf("the side call took %v; want it to end at its timeout", elapsed)
+	raw, readErr := os.ReadFile(record)
+	if readErr != nil {
+		t.Fatalf("the helper never started in %v: %v", labelBackstop, readErr)
 	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatalf("the helper never started: %v", err)
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v; want the call ended by its context once the helper ran, not by the %v backstop", err, labelBackstop)
 	}
 	pid, _ := strconv.Atoi(string(raw))
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {

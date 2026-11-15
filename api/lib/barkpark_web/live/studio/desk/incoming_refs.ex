@@ -97,21 +97,32 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
 
   def on_info(_message, socket), do: {:cont, socket}
 
-  # One row per referring document, grouped by type in the order the types
-  # first appear, each group under its schema's title.
-  @spec read(String.t(), String.t(), map()) :: %{groups: [group()], total: non_neg_integer()}
-  defp read(id, dataset, assigns) do
+  @doc """
+  Every document that refers to `id`, one row each: `Content.Graph.backlinks/2`
+  under the page's own scope and caller. A referrer that exists only as a
+  draft is in it; a draft and its published version are one row; the
+  document itself is not. The desk's delete and unpublish dialogs list the
+  same rows (`DocDialog`).
+  """
+  @spec referrers(String.t(), String.t(), map()) :: [map()]
+  def referrers(id, dataset, assigns) do
     # The page's scope, always set before a document is edited: without it
     # the read would not be fenced, so its absence raises.
     scope = Map.fetch!(assigns, :scope)
     here = Content.published_id(id)
 
-    all =
-      here
-      |> Content.Graph.backlinks([dataset: dataset] ++ scope)
-      |> Enum.reject(&(Content.published_id(&1.from_doc_id) == here))
-      |> Enum.uniq_by(&Content.published_id(&1.from_doc_id))
+    here
+    |> Content.Graph.backlinks([dataset: dataset] ++ scope)
+    |> Enum.reject(&(Content.published_id(&1.from_doc_id) == here))
+    |> Enum.uniq_by(&Content.published_id(&1.from_doc_id))
+  end
 
+  # One row per referring document, grouped by type in the order the types
+  # first appear, each group under its schema's title.
+  @spec read(String.t(), String.t(), map()) :: %{groups: [group()], total: non_neg_integer()}
+  defp read(id, dataset, assigns) do
+    scope = Map.fetch!(assigns, :scope)
+    all = referrers(id, dataset, assigns)
     rows = Enum.take(all, @cap)
 
     groups =

@@ -6,15 +6,21 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
 
   The Studio's handlers still open, close and confirm these dialogs
   (`Handlers.Delete`, `Handlers.Doc`): they set `show_delete` or
-  `show_unpublish_guard` and the referrers they found
-  (`Content.Graph.reverse_referencers/2`). The desk draws its own dialog
-  from those assigns and keeps the old Studio's modal out of its page
-  (`EditorHost.pane/2`), so nothing here reads the graph or writes.
+  `show_unpublish_guard`. The desk draws its own dialog from those assigns
+  and keeps the old Studio's modal out of its page (`EditorHost.pane/2`).
+  Nothing here writes.
 
-  `follow/1` turns the handler's referrers into the list's rows once, when a
-  dialog opens: one row per referring document and field, each with its
-  type's title ("Post / author"). `EditorHost` calls it after every Studio
-  event and owns the `desk_used_in` assign: `nil` while no dialog is open.
+  `follow/1` reads who refers to the open document once, when a dialog
+  opens: the rows of the Incoming references panel
+  (`IncomingRefs.referrers/3`, `Content.Graph.backlinks/2` under the page's
+  scope and caller), so the dialog and the panel name the same documents.
+  One row per referring document, with its type's title and the field that
+  refers ("Post / author"); a referrer that exists only as a draft is
+  listed. The handler's own list (`Content.Graph.reverse_referencers/2`,
+  the edge index, which has no row for such a draft) is not drawn; what a
+  confirm disconnects is the handler's business, read again when it runs.
+  `EditorHost` calls `follow/1` after every Studio event and owns the
+  `desk_used_in` assign: `nil` while no dialog is open.
 
   The frame is a `role="dialog"` with the shared `ModalFocus` hook: the focus
   starts on Cancel (`data-modal-focus`), Tab stays inside, Escape closes it
@@ -26,6 +32,7 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.DocTitle
 
@@ -35,7 +42,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
   @doc """
   Keeps `desk_used_in` in step with the Studio's dialogs: the rows while the
   delete dialog or the unpublish dialog is open, `nil` otherwise. The rows
-  are built again only when the handler's referrers changed.
+  are read when a dialog opens, and again only when the handler's own
+  referrers changed under an open one.
   """
   def follow(socket) do
     assigns = socket.assigns
@@ -57,8 +65,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
       {source, %{source: source}} ->
         socket
 
-      {{_kind, refs} = source, _stale} ->
-        assign(socket, :desk_used_in, %{source: source, rows: rows(refs, assigns)})
+      {source, _stale} ->
+        assign(socket, :desk_used_in, %{source: source, rows: read(assigns)})
     end
   end
 
@@ -66,8 +74,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
   def rows(%{rows: rows}), do: rows
   def rows(_closed), do: []
 
-  @doc "How many documents refer: a document that refers from two fields is one."
-  def count(rows), do: rows |> Enum.uniq_by(& &1.id) |> length()
+  @doc "How many documents refer: one row each."
+  def count(rows), do: length(rows)
 
   @doc "The warning's words: how many documents refer to the one titled `title`."
   def refers(count, title) do
@@ -79,36 +87,35 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
     )
   end
 
-  # The delete handler's referrers carry `doc_id` and `field`, the unpublish
-  # handler's `from_doc_id` and `via_field`. A draft and its published version
-  # are one document.
-  defp rows(refs, assigns) do
-    dataset = assigns[:dataset]
-    scope = assigns[:scope] || []
+  # The open document's referrers, as the dialog's rows. Read when a dialog
+  # opens: the handler has just read the edge index for the same document,
+  # so the database is there.
+  defp read(%{editor_doc: %{doc_id: doc_id}, dataset: dataset} = assigns)
+       when is_binary(dataset) do
+    scope = Map.fetch!(assigns, :scope)
 
     rows =
-      for ref <- refs do
+      for ref <- IncomingRefs.referrers(doc_id, dataset, assigns) do
         %{
-          id: Content.published_id(ref[:doc_id] || ref[:from_doc_id]),
+          id: Content.published_id(ref.from_doc_id),
           type: ref.type,
           title: ref[:title],
-          field: ref[:field] || ref[:via_field]
+          field: ref[:via_field]
         }
       end
-      |> Enum.uniq_by(&{&1.id, &1.field})
 
     kinds = Map.new(Enum.uniq_by(rows, & &1.type), &{&1.type, kind(&1.type, dataset, scope)})
     Enum.map(rows, &Map.put(&1, :kind, kinds[&1.type]))
   end
 
-  defp kind(type, dataset, scope) when is_binary(dataset) do
+  defp read(_assigns), do: []
+
+  defp kind(type, dataset, scope) do
     case Content.get_schema(type, dataset, scope) do
       {:ok, %{title: title}} when is_binary(title) and title != "" -> title
       _ -> type
     end
   end
-
-  defp kind(type, _dataset, _scope), do: type
 
   attr :id, :string, required: true
   attr :title, :string, required: true
@@ -152,14 +159,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
     default: false,
     doc: "say the type and the field that refers under each title"
 
-  @doc """
-  The documents that refer to the open one, each a link that opens it in a
-  new tab. Without `field`, one row per document.
-  """
+  @doc "The documents that refer to the open one, each a link that opens it in a new tab."
   def used_in(assigns) do
-    rows = if assigns.field, do: assigns.rows, else: Enum.uniq_by(assigns.rows, & &1.id)
-    assigns = assign(assigns, :rows, rows)
-
     ~H"""
     <ul class={["used-in dk-used-in", !@field && "compact"]}>
       <li :for={row <- @rows}>
@@ -175,7 +176,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
           </span>
           <span class="text">
             <span class="t">{DocTitle.shown(row.title) || gettext("Untitled")}</span>
-            <span :if={@field} class="s">{row.kind} / {row.field}</span>
+            <span :if={@field and row.field not in [nil, ""]} class="s">{row.kind} / {row.field}</span>
+            <span :if={@field and row.field in [nil, ""]} class="s">{row.kind}</span>
           </span>
         </a>
       </li>

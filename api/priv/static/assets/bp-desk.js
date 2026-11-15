@@ -1479,6 +1479,55 @@
       };
       window.addEventListener("phx:bp:focus-new-doc", hook._focusNewDoc);
 
+      // AFTER A DELETE. The deleted document's pane goes, and the focus went
+      // with it to <body>. The Studio says which document went
+      // (`bp:focus-after-delete`, `Handlers.Delete`); the page's listener for
+      // it (root.html.heex) looks for the Studio's rows, and the desk has
+      // none of those. Here the focus goes to the row next to the deleted
+      // one in the last pane, else that pane's first row or control. Only
+      // while the focus is lost, for 1.5 s (the list may be drawn again),
+      // and never after the user's first key or press.
+      hook._focusAfterDelete = function (e) {
+        var gone = String((e.detail && e.detail.id) || "");
+        if (!gone) return;
+        var doc = root.ownerDocument;
+        var stop = Date.now() + 1500;
+        var interrupted = false;
+        var interrupt = function () {
+          interrupted = true;
+        };
+        var done = function () {
+          doc.removeEventListener("keydown", interrupt, true);
+          doc.removeEventListener("pointerdown", interrupt, true);
+        };
+        var isGone = function (row) {
+          var id = decodeURIComponent(row.getAttribute("href") || "").split(/[;|]/).pop().split(",")[0];
+          return id === gone || id === "drafts." + gone;
+        };
+        doc.addEventListener("keydown", interrupt, true);
+        doc.addEventListener("pointerdown", interrupt, true);
+        var attempt = function () {
+          if (interrupted || !root.isConnected) return done();
+          var active = doc.activeElement;
+          var lost = !active || active === doc.body || !active.isConnected;
+          var editing = root.querySelector("[data-pane-editing]");
+          var pane = editing ? null : Array.prototype.slice.call(root.querySelectorAll("[data-pane-index]:not([data-desk-leaving])")).pop();
+          if (lost && pane) {
+            var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
+            var at = rows.findIndex(isGone);
+            var kept = rows.filter(function (row) {
+              return !isGone(row);
+            });
+            var to = (at >= 0 ? rows[at + 1] || rows[at - 1] : kept[0]) || pane.querySelector(TABBABLE);
+            if (to) to.focus();
+          }
+          if (Date.now() < stop) window.setTimeout(attempt, 100);
+          else done();
+        };
+        attempt();
+      };
+      window.addEventListener("phx:bp:focus-after-delete", hook._focusAfterDelete);
+
       // "Share document": an item with `data-desk-copy` puts its text on the
       // clipboard (a path gets the page's origin in front) and the menu's
       // toast says so, or says the copy failed. The browser's clipboard, or
@@ -1792,6 +1841,7 @@
       window.removeEventListener("popstate", this._tipUrl);
       window.removeEventListener("phx:page-loading-stop", this._tipUrl);
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
+      window.removeEventListener("phx:bp:focus-after-delete", this._focusAfterDelete);
       root.removeEventListener("click", this._onCopy);
       root.removeEventListener("keydown", this._onInspectKey);
       root.removeEventListener("keydown", this._onDocKey);

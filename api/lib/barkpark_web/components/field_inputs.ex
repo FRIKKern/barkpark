@@ -309,12 +309,18 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # The field's id is on the picker, the control the editor sees: on the
   # hidden input the label's `for` pointed at nothing a click or a reader
   # could reach.
+  #
+  # `data-doc` names the open document (its published id, which a first
+  # draft does not change). The hook keeps an edit the form has not posted yet
+  # through a patch only while this and `data-value` stay the same
+  # (task-2be7cd2bd845c2da).
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+    doc = Barkpark.Content.DraftId.published_id(to_string(assigns.doc_key))
+    assigns = assign(assigns, n: name, v: val, doc: doc)
 
     ~H"""
-    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
+    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v} data-doc={@doc}>
       <input type="hidden" name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
       <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
         <input type="datetime-local" id={@id_prefix && @id_prefix <> @n} class="form-input" aria-required={aria_required(@field)} aria-label={@field["title"] || @n} />
