@@ -93,6 +93,17 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
                 }
               ]
             }),
+            f.("level", "select", %{"options" => [1, 2, 3]}),
+            f.("outer", "composite", %{
+              "fields" => [
+                %{
+                  "name" => "inner",
+                  "type" => "composite",
+                  "fields" => [%{"name" => "url", "type" => "string"}]
+                },
+                %{"name" => "note", "type" => "string"}
+              ]
+            }),
             f.("body", "richText", %{}),
             f.("fixed", "string", %{
               "readOnly" => %{"field" => "choice", "operator" => "eq", "value" => "b"}
@@ -362,7 +373,11 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
 
     test "a copy made by Copy field in one document pastes into another's", c do
       view = desk(c)
-      view |> element(~s(#{@form} button[data-desk-field-copy="excerpt"])) |> render_click()
+
+      view
+      |> element(~s(#{@form} #field-actions-menu button[data-desk-field-copy]))
+      |> render_click(%{"field" => "excerpt"})
+
       assert_push_event(view, "desk:field-copied", %{json: json})
 
       assert changes(c, view, "title", json) == %{"title" => {"Target", "Old excerpt"}}
@@ -428,6 +443,13 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
 
       assert %{"boxes" => {nil, [%{"kind" => "url", "_key" => _}]}} =
                changes(c, view, "boxes", clip("array:" <> box, [%{"kind" => "url"}]))
+    end
+
+    # Re-review of #26467: the form offers "2"; the paste refused it.
+    test "a select whose options are numbers takes the values the form offers", c do
+      view = desk(c)
+      assert changes(c, view, "level", clip("string", "2")) == %{"level" => {nil, "2"}}
+      refused(c, view, "level", clip("string", "9"), ~s(Value "9" is not allowed in "1,2,3"))
     end
 
     test "a number no field should hold: 10^400, and a float past the range", c do
@@ -583,6 +605,24 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
       end
     end
 
+    # Re-review of #26467: wrote nothing and said nothing.
+    test "an object whose only content is an empty object inside it", c do
+      view = desk(c)
+      sig = "object:inner=object:url=string,note=string"
+
+      for value <- [
+            %{"inner" => %{}},
+            %{"inner" => %{"url" => nil}},
+            %{"inner" => %{"_key" => "k"}}
+          ] do
+        assert changes(c, view, "outer", clip(sig, value)) == %{}
+        assert_push_event(view, @toast, %{tone: "default", title: "Nothing to paste"})
+      end
+
+      assert changes(c, view, "outer", clip(sig, %{"inner" => %{}, "note" => "N"})) ==
+               %{"outer" => {nil, %{"note" => "N"}}}
+    end
+
     test "an event sent by hand with no field, no item or an unknown field does nothing", c do
       view = desk(c)
       before = snapshot(c)
@@ -612,14 +652,12 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
          c do
       view = desk(c)
 
-      assert has_element?(
-               view,
-               ~s(#{@form} button[data-desk-field-paste="fixed"][disabled][aria-disabled="true"])
-             )
+      # The button says so; bp-desk.js turns the one menu's Paste off for it.
+      assert has_element?(view, ~s(#{@form} button[data-desk-field="fixed"][data-desk-paste-off]))
 
       assert has_element?(
                view,
-               ~s|#{@form} button[data-desk-field-paste="title"]:not([disabled]):not([aria-disabled])|
+               ~s|#{@form} button[data-desk-field="title"]:not([data-desk-paste-off])|
              )
 
       assert changes(c, view, "fixed", clip("string", "forced")) == %{}

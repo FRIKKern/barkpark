@@ -106,12 +106,12 @@ await import("../../priv/static/assets/bp-desk-field-actions.js");
 document.body.innerHTML =
   `<div class="field"><div class="field-actions">` +
   `<button id="field-actions-excerpt-button" popovertarget="field-actions-excerpt"></button>` +
-  `<div id="field-actions-excerpt" popover role="menu" data-desk-copy-failed="Could not copy to the clipboard">` +
-  `<button role="menuitem" data-desk-field-copy="excerpt">Copy field<span><svg></svg></span></button>` +
-  `<button role="menuitem" data-desk-field-paste="excerpt" disabled>Paste field</button>` +
+  `<div id="field-actions-excerpt" popover role="menu" data-desk-field="excerpt" data-desk-copy-failed="Could not copy to the clipboard">` +
+  `<button role="menuitem" data-desk-field-copy>Copy field<span><svg></svg></span></button>` +
+  `<button role="menuitem" data-desk-field-paste disabled>Paste field</button>` +
   `</div></div></div>` +
-  `<div class="field"><div class="field-actions"><div id="field-actions-title" popover role="menu">` +
-  `<button role="menuitem" phx-click="desk-field-paste" phx-value-field="title" data-desk-field-paste="title" ` +
+  `<div class="field"><div class="field-actions"><div id="field-actions-title" popover role="menu" data-desk-field="title">` +
+  `<button role="menuitem" phx-click="desk-field-paste" data-desk-field-paste ` +
   `data-desk-nothing="Nothing to paste" data-desk-invalid="Invalid clipboard item" data-desk-denied="The browser did not let this page read the clipboard">Paste field</button>` +
   `</div></div></div>`;
 
@@ -199,7 +199,7 @@ window.addEventListener("click", (e) => {
   const el = e.target.closest("[phx-click]");
   if (el) sent.push({ event: el.getAttribute("phx-click"), field: el.getAttribute("phx-value-field"), clip: el.getAttribute("phx-value-clip") });
 });
-const pasteItem = document.querySelector('[data-desk-field-paste="title"]');
+const pasteItem = document.querySelector("#field-actions-title [data-desk-field-paste]");
 const ITEM = JSON.stringify({ type: "sanityClipboardItem", value: "Short", barkpark: { kind: "field", field: { name: "excerpt", sig: "string", value: "Short" } } });
 const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
 const paste = async () => {
@@ -267,7 +267,7 @@ Object.defineProperty(window.navigator, "clipboard", { configurable: true, value
 // 8f. The disabled Paste item reads nothing and sends nothing.
 reads = [{ [SANITY]: ITEM }];
 sent.length = 0;
-press(document.querySelector('[data-desk-field-paste="excerpt"]'));
+press(document.querySelector("#field-actions-excerpt [data-desk-field-paste]"));
 await tick(80);
 assert.deepEqual(sent, []);
 
@@ -292,10 +292,12 @@ const mountDesk = (attrs) => {
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
   el.innerHTML =
     `<section data-pane-index="1"><div class="dk-toast" popover="manual"></div>` +
-    `<div class="field"><div class="field-actions"><div popover role="menu" data-desk-unavailable="Copy and paste did not load. Reload the page.">` +
-    `<button role="menuitem" phx-click="desk-field-copy" phx-value-field="late" data-desk-field-copy="late">Copy field</button>` +
-    `<button role="menuitem" phx-click="desk-field-paste" phx-value-field="late" data-desk-field-paste="late">Paste field</button>` +
-    `</div></div></div></section>`;
+    `<div class="field"><div class="field-actions"><button id="b-late" popovertarget="m" data-desk-field="late" aria-expanded="false"></button></div></div>` +
+    `<div class="field"><div class="field-actions"><button id="b-fixed" popovertarget="m" data-desk-field="fixed" data-desk-paste-off aria-expanded="false"></button></div></div>` +
+    `<div id="m" class="dk-doc-menu-list" popover role="menu" data-desk-unavailable="Copy and paste did not load. Reload the page.">` +
+    `<button role="menuitem" phx-click="desk-field-copy" data-desk-field-copy>Copy field</button>` +
+    `<button role="menuitem" phx-click="desk-field-paste" data-desk-field-paste>Paste field</button>` +
+    `</div></section>`;
   document.body.appendChild(el);
   Object.defineProperty(el, "clientWidth", { get: () => 1440 });
   const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
@@ -313,7 +315,44 @@ assert.equal(loaded()[0].async, true);
 
 // 10. A click made before the script has arrived waits for it and is then
 //     made again: it does not vanish, and it is not sent half-handled.
-const late = (what) => deskRoot.querySelector(`[data-desk-field-${what}="late"]`);
+const late = (what) => deskRoot.querySelector(`[data-desk-field-${what}]`);
+// One menu for the form: the "…" that opens it names its field on it, is the
+// menu's anchor, and turns Paste off for a field that takes none.
+const sharedMenu = deskRoot.querySelector("#m");
+const opener = (id) => deskRoot.querySelector("#" + id);
+const toggle = (state) => {
+  if (state === "open") sharedMenu.setAttribute("data-open", "");
+  else sharedMenu.removeAttribute("data-open");
+  const e = new window.Event("toggle");
+  e.newState = state;
+  sharedMenu.dispatchEvent(e);
+};
+press(opener("b-fixed"));
+toggle("open");
+assert.equal(sharedMenu.getAttribute("data-desk-field"), "fixed");
+assert.equal(opener("b-fixed").style.getPropertyValue("anchor-name"), "--dk-field-actions");
+assert.equal(opener("b-fixed").getAttribute("aria-expanded"), "true");
+assert.equal(late("paste").disabled, true, "Paste is off for a field that takes none");
+// Another field's button while it is open: closed for the first, then this click opens it for the second.
+let hidden = 0;
+sharedMenu.hidePopover = () => {
+  hidden += 1;
+  sharedMenu.removeAttribute("data-open");
+};
+press(opener("b-late"));
+assert.equal(hidden, 1, "closed for the field it was open for");
+assert.equal(opener("b-fixed").getAttribute("aria-expanded"), "false");
+assert.equal(opener("b-fixed").style.getPropertyValue("anchor-name"), "", "one anchor at a time");
+toggle("open");
+assert.equal(sharedMenu.getAttribute("data-desk-field"), "late");
+assert.equal(opener("b-late").style.getPropertyValue("anchor-name"), "--dk-field-actions");
+assert.equal(opener("b-late").getAttribute("aria-expanded"), "true");
+assert.equal(late("paste").disabled, false);
+// The same button again: the browser's own toggle closes it; nothing is hidden by hand.
+press(opener("b-late"));
+assert.equal(hidden, 1);
+toggle("closed");
+assert.equal(opener("b-late").getAttribute("aria-expanded"), "false");
 const paneToast = () => deskRoot.querySelector(".dk-toast");
 sent.length = 0;
 press(late("copy"));
@@ -348,5 +387,5 @@ press(late("copy"));
 assert.equal(sent.length, 1);
 answer({ field: "late", empty: "Empty value, nothing to copy" });
 
-console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said, paste reads and hands on, loaded by the desk, a click waits for the script)");
+console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said, paste reads and hands on, loaded by the desk, one menu for the form, a click waits for the script)");
 process.exit(0);

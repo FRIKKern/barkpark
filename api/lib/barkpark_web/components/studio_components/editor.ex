@@ -961,6 +961,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <%!-- Per field, the number of the last remote value this page
                     showed (bp-array-focus.js; `RemoteValues`). --%>
               <input type="hidden" name="_bp_seen" id={"bp-seen-" <> Barkpark.Content.published_id(@editor_doc.doc_id)} value="{}" phx-update="ignore" />
+              <%!-- The desk's one Field actions menu, opened by each field's button. --%>
+              <BarkparkWeb.Studio.Desk.FieldActions.shared_menu :if={desk?(@parent_assigns)} />
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`

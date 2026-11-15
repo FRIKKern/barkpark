@@ -116,10 +116,22 @@
     });
   }
 
+  // The form has one menu for all its fields. The field it was opened for is
+  // on the menu (`data-desk-field`, written by bp-desk.js); it is put on the
+  // item as the item is pressed, for LiveView to send. False when the menu
+  // names no field: nothing to act on.
+  function named(item) {
+    var menu = item.closest("[data-desk-field]");
+    var field = menu ? menu.getAttribute("data-desk-field") : "";
+    if (!field) return false;
+    item.setAttribute("phx-value-field", field);
+    return true;
+  }
+
   // In the click: a write whose three types wait for the server's answer.
   function startCopy(item) {
     if (pending) pending.reject(new Error("superseded"));
-    var answer = { field: item.getAttribute("data-desk-field-copy"), failed: failedWords(item) };
+    var answer = { field: item.getAttribute("phx-value-field"), failed: failedWords(item) };
     var data = new Promise(function (resolve, reject) {
       answer.resolve = resolve;
       answer.reject = reject;
@@ -272,9 +284,9 @@
     function (event) {
       if (passing || !event.target || !event.target.closest) return;
       var copy = event.target.closest("[data-desk-field-copy]");
-      if (copy && !copy.disabled) return startCopy(copy);
+      if (copy && !copy.disabled) return named(copy) && startCopy(copy);
       var paste = event.target.closest("[data-desk-field-paste]");
-      if (paste && !paste.disabled) startPaste(paste, event);
+      if (paste && !paste.disabled && named(paste)) startPaste(paste, event);
     },
     true
   );

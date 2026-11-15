@@ -11,6 +11,11 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   arrow keys (its menu rule matches `dk-doc-menu-list`). `aria-expanded` is
   the browser's: a patch of the form while a menu is open leaves it alone.
 
+  ONE MENU FOR THE FORM. Each field draws its button only; the menu is drawn
+  once (`shared_menu/1`), so a form of 40 fields carries 40 buttons and one
+  menu, not 40 menus. The button's three dots are drawn by the sheet
+  (`Desk.DocStyle`), not by an svg in every field.
+
   COPY. The item sends `desk-field-copy` with the field's name. The answer
   is the event `desk:field-copied`: the field's stored value as the three
   clipboard types (`FieldClip`), or the words that say the field is empty.
@@ -54,11 +59,15 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldClip
   alias BarkparkWeb.Studio.Desk.FieldLock
-  alias BarkparkWeb.Studio.Desk.Glyph
   alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias Phoenix.LiveView.JS
+
+  # The form's one menu, and what the browser owns on each button: whether its
+  # menu is open, and the anchor the open menu is placed by.
+  @menu_id "field-actions-menu"
+  @keep JS.ignore_attributes(["aria-expanded", "style"])
 
   @copied "desk:field-copied"
   @toast "desk:field-toast"
@@ -70,69 +79,80 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   attr :name, :string, required: true, doc: "the field's name in the schema"
   attr :paste, :boolean, default: true, doc: "whether this editor may paste into the field"
 
-  @doc "The \"…\" button and its menu, for the field `name`."
+  @doc """
+  A field's "…" button. It opens the form's one menu (`shared_menu/1`) and
+  names its field for it (`data-desk-field`).
+  """
   def menu(assigns) do
-    assigns = assign(assigns, id: "field-actions-" <> assigns.name, anchor: anchor(assigns.name))
+    assigns = assign(assigns, menu_id: @menu_id, keep: @keep)
 
     ~H"""
     <div class="field-actions" data-desk-field-actions>
       <button
         type="button"
-        id={"#{@id}-button"}
+        id={"field-actions-#{@name}-button"}
         class="icon-btn"
-        popovertarget={@id}
+        popovertarget={@menu_id}
         aria-haspopup="menu"
         aria-expanded="false"
-        phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+        phx-mounted={@keep}
         aria-label={gettext("Field actions")}
         data-tip={gettext("Field actions")}
-        style={"anchor-name: #{@anchor}"}
-      >
-        <Glyph.glyph name="ellipsis-horizontal" />
-      </button>
-      <div
-        id={@id}
-        popover
-        role="menu"
-        aria-label={gettext("Field actions")}
-        class="dk-field-menu dk-doc-menu-list dk-menu"
-        style={"position-anchor: #{@anchor}"}
-        data-desk-copy-failed={gettext("Could not copy to the clipboard")}
-        data-desk-unavailable={gettext("Copy and paste did not load. Reload the page.")}
-      >
-        <Menu.item
-          role="menuitem"
-          tabindex="-1"
-          icon="copy"
-          popovertarget={@id}
-          popovertargetaction="hide"
-          phx-click="desk-field-copy"
-          phx-value-field={@name}
-          data-desk-field-copy={@name}
-        >{gettext("Copy field")}</Menu.item>
-        <Menu.item
-          role="menuitem"
-          tabindex="-1"
-          icon="clipboard"
-          disabled={!@paste}
-          aria-disabled={!@paste && "true"}
-          popovertarget={@id}
-          popovertargetaction="hide"
-          phx-click="desk-field-paste"
-          phx-value-field={@name}
-          data-desk-field-paste={@name}
-          data-desk-nothing={gettext("Nothing to paste")}
-          data-desk-invalid={gettext("Invalid clipboard item")}
-          data-desk-denied={gettext("The browser did not let this page read the clipboard")}
-        >{gettext("Paste field")}</Menu.item>
-      </div>
+        data-desk-field={@name}
+        data-desk-paste-off={!@paste}
+      ></button>
     </div>
     """
   end
 
-  # A CSS anchor name is an identifier and a field's name need not be one.
-  defp anchor(name),
-    do: "--dk-field-" <> (:md5 |> :crypto.hash(name) |> Base.encode16(case: :lower))
+  @doc """
+  The form's one Field actions menu, opened by every field's button. Which
+  field it acts on is the browser's to say: `bp-desk.js` writes the opening
+  button's field on it (`data-desk-field`), anchors it to that button and
+  turns Paste off for a field that takes none; `bp-desk-field-actions.js`
+  puts that field on the item as it is pressed. A patch leaves all of that
+  alone. The server trusts none of it: each event names a field and is
+  checked as before.
+  """
+  def shared_menu(assigns) do
+    assigns = assign(assigns, :id, @menu_id)
+
+    ~H"""
+    <div
+      id={@id}
+      popover
+      role="menu"
+      aria-label={gettext("Field actions")}
+      class="dk-field-menu dk-doc-menu-list dk-menu"
+      phx-mounted={JS.ignore_attributes(["data-desk-field"])}
+      data-desk-copy-failed={gettext("Could not copy to the clipboard")}
+      data-desk-unavailable={gettext("Copy and paste did not load. Reload the page.")}
+    >
+      <Menu.item
+        role="menuitem"
+        tabindex="-1"
+        icon="copy"
+        popovertarget={@id}
+        popovertargetaction="hide"
+        phx-click="desk-field-copy"
+        data-desk-field-copy
+      >{gettext("Copy field")}</Menu.item>
+      <Menu.item
+        role="menuitem"
+        tabindex="-1"
+        icon="clipboard"
+        popovertarget={@id}
+        popovertargetaction="hide"
+        phx-click="desk-field-paste"
+        phx-mounted={JS.ignore_attributes(["disabled", "aria-disabled"])}
+        data-desk-field-paste
+        data-desk-nothing={gettext("Nothing to paste")}
+        data-desk-invalid={gettext("Invalid clipboard item")}
+        data-desk-denied={gettext("The browser did not let this page read the clipboard")}
+      >{gettext("Paste field")}</Menu.item>
+    </div>
+    """
+  end
 
   @doc """
   Whether this editor may paste into `field` (as `FieldLock.resolve/3` left

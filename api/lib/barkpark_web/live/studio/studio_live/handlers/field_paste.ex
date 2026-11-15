@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content.DraftId
+  alias Barkpark.Content.SelectOptions
   alias Barkpark.Content.SlugValue
   alias BarkparkWeb.Studio.Desk.FieldClip
 
@@ -167,16 +168,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
       else: :erlang.float_to_binary(n, [:short])
   end
 
+  # A select's stored values, as the form offers them
+  # (`Content.SelectOptions`): a number option is its digits.
   defp option_values(%{"list" => list}), do: option_values(list)
-
-  defp option_values(options) when is_list(options) do
-    Enum.map(options, fn
-      %{"value" => value} -> value
-      value -> value
-    end)
-  end
-
-  defp option_values(_options), do: []
+  defp option_values(options), do: SelectOptions.values(options)
 
   # ── The value, read against the field's schema ──────────────────────────
   #
@@ -198,7 +193,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
         {:error,
          gettext("Value \"%{value}\" is not allowed in \"%{list}\"",
            value: value,
-           list: Enum.map_join(allowed, ",", &to_string/1)
+           list: Enum.join(allowed, ",")
          )}
   end
 
@@ -251,7 +246,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
     |> Enum.reduce_while({:ok, %{}}, fn {key, v}, {:ok, acc} ->
       with %{} = sub <- by_name[key],
            {:ok, clean} <- fit(sub, v, ref?, depth + 1) do
-        {:cont, {:ok, Map.put(acc, key, clean)}}
+        # An inner object that sets nothing is not written, as a null is not.
+        {:cont, {:ok, if(clean == %{}, do: acc, else: Map.put(acc, key, clean))}}
       else
         nil -> {:halt, incompatible()}
         error -> {:halt, error}
