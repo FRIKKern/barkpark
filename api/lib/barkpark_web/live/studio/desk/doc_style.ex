@@ -147,6 +147,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .bp-mp-options { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: var(--dk-glass); box-shadow: inset 0 0 0 1px var(--dk-line); color: var(--dk-icon-muted); cursor: pointer; }
       .dk .dk-edit .bp-mp-options svg { width: 21px; height: 21px; }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .bp-mp-bar button { min-height: 44px; } .dk .dk-edit .bp-mp-options { width: 44px; height: 44px; } }
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.Fieldsets.css()) %>
     </style>
     """
   end
