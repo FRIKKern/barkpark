@@ -43,6 +43,7 @@ import * as mountMethods from "./canvas-mount.js";
 import * as opsMethods from "./canvas-ops.js";
 import * as serverMethods from "./canvas-server.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
+import { canvasToMarkdown } from "./markdown-export.js";
 import {
   sourceModeActive, sourceModeCommit, sourceModeEnter, sourceModeExit, sourceModeSizeTextarea,
   sourceModeSyncText, sourceModeTeardown, sourceModeToggle,
@@ -226,7 +227,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   toMarkdown(options) {
-    return hostApiMethods.toMarkdown.call(this, options);
+    return canvasToMarkdown(this, options);
   }
 
   resolveConflictWithServerBlocks(blocks) {

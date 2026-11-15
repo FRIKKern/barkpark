@@ -1,4 +1,4 @@
-import { blocksToExportMarkdown, markdownToBlocks } from "../markdown.js";
+import { markdownToBlocks } from "../markdown.js";
 import { CANVAS_SLASH_ITEMS } from "./canvas-menu-catalog.js";
 import { insertSlashTypeAtSelection } from "./command-palette.js";
 import {
@@ -403,21 +403,6 @@ export function hasPendingChanges() {
         serialization_error: "The rich-text draft could not be projected to PortableDoc blocks.",
       };
     }
-  }
-
-  // 1.23.0: Markdown for a file the writer takes away (markdown/export.js), not
-  // the round-trip Markdown of source mode. With `blocks` it converts those and
-  // needs no mount; without, the run as it is on screen, unsaved typing included
-  // (recoverySnapshot's read), or the saved baseline before mount. Reads only.
-  export function toMarkdown(options = {}) {
-    const opts = options && typeof options === "object" ? options : {};
-    const baseUrl = typeof opts.baseUrl === "string" ? opts.baseUrl : (typeof document !== "undefined" && document.baseURI) || "";
-    let blocks = opts.blocks;
-    if (!Array.isArray(blocks)) {
-      const live = this._editor && !this._editor.isDestroyed ? this.recoverySnapshot() : null;
-      blocks = live && Array.isArray(live.blocks) ? live.blocks : this.blocks;
-    }
-    return blocksToExportMarkdown(blocks, { baseUrl, placeholder: opts.placeholder });
   }
 
   // Explicit conflict resolution seam. Normal echoes never erase newer local
