@@ -1527,7 +1527,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   def visible_fields(fields, nil), do: fields
 
   def visible_fields(fields, group_name) when is_binary(group_name) do
-    Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
+    Enum.filter(fields, &FieldGroups.in_group?(&1, group_name))
   end
 
   # A top-level field's own findings out of a `Validation.check_tree/3` half:

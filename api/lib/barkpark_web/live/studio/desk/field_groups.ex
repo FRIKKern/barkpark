@@ -35,11 +35,31 @@ defmodule BarkparkWeb.Studio.Desk.FieldGroups do
     if Enum.any?(shown(schema, form), &(&1["name"] == nav_group)), do: nav_group
   end
 
+  @doc """
+  The group to keep on the socket: `nav_group`, or `nil` once its tab is no
+  longer drawn. Without it the socket kept a group whose tab had gone, and the
+  form jumped back to that group the moment one of its fields showed again.
+  """
+  @spec settle(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def settle(%{assigns: %{desk_base: base, nav_group: group} = assigns} = socket)
+      when is_binary(base) and is_binary(group) do
+    if current(assigns[:editor_schema], group, assigns[:editor_form]) == nil,
+      do: Phoenix.Component.assign(socket, :nav_group, nil),
+      else: socket
+  end
+
+  def settle(socket), do: socket
+
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(%{"fields" => fields}) when is_list(fields), do: fields
   defp fields(_schema), do: []
 
-  defp in_group?(%{"group" => group}, name) when is_binary(group), do: group == name
-  defp in_group?(%{"group" => groups}, name) when is_list(groups), do: name in groups
-  defp in_group?(_field, _name), do: false
+  @doc """
+  Whether `field` sits in the group `name`. A field's `"group"` is one name or
+  a list of names, as Sanity's; a field with none is in no group.
+  """
+  @spec in_group?(map(), String.t()) :: boolean()
+  def in_group?(%{"group" => group}, name) when is_binary(group), do: group == name
+  def in_group?(%{"group" => groups}, name) when is_list(groups), do: name in groups
+  def in_group?(_field, _name), do: false
 end

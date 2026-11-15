@@ -66,9 +66,11 @@ defmodule BarkparkWeb.Studio.DeskGroupTabsShownTest do
       "group" => "meta",
       "fields" => [
         %{"name" => "metaTitle", "title" => "Meta title", "type" => "string"},
-        %{"name" => "noIndex", "title" => "No index", "type" => "boolean"}
+        %{"name" => "noIndex", "title" => "No index", "type" => "boolean"},
+        %{"name" => "reviewedAt", "title" => "Reviewed at", "type" => "datetime"}
       ]
     },
+    %{"name" => "both", "title" => "Both", "type" => "string", "group" => ["content", "meta"]},
     %{
       "name" => "promoLine",
       "title" => "Promo line",
@@ -88,7 +90,8 @@ defmodule BarkparkWeb.Studio.DeskGroupTabsShownTest do
     "rating" => 0,
     "featuredNote" => "In the newsletter.",
     "tags" => ["one", "two"],
-    "seo" => %{"metaTitle" => "Meta", "noIndex" => false},
+    "seo" => %{"metaTitle" => "Meta", "noIndex" => false, "reviewedAt" => "2026-09-20T10:00:00Z"},
+    "both" => "Twice",
     "promoLine" => "Half price",
     "legacy" => "Old"
   }
@@ -126,10 +129,10 @@ defmodule BarkparkWeb.Studio.DeskGroupTabsShownTest do
     {id, stored.content}
   end
 
-  defp open(c, path) do
+  defp open(c, path, form \\ @form) do
     {:ok, view, _html} = live(c.conn, path)
     render_async(view, 5_000)
-    assert eventually(fn -> has_element?(view, @form) end)
+    assert eventually(fn -> has_element?(view, form) end)
     view
   end
 
@@ -195,6 +198,49 @@ defmodule BarkparkWeb.Studio.DeskGroupTabsShownTest do
     assert has_element?(view, ~s(#{@pane} #bp-group-tab-all-fields[aria-selected="true"]))
     assert has_element?(view, ~s(#{@form} [name="doc[excerpt]"]))
     refute has_element?(view, ~s(#{@form} [name="doc[promoLine]"]))
+
+    # The gone group is forgotten: its field showing again does not pull the
+    # form back to it.
+    change(view, %{"featured" => "true"})
+    assert saved?(c, id, "featured", true)
+
+    assert has_element?(view, ~s(#{@pane} #bp-group-tab-promo[aria-selected="false"]))
+    assert has_element?(view, ~s(#{@pane} #bp-group-tab-all-fields[aria-selected="true"]))
+    assert has_element?(view, ~s(#{@form} [name="doc[excerpt]"]))
+  end
+
+  test "a field in two groups shows on both tabs, and on no other", c do
+    {id, _stored} = doc!(c, true)
+    view = desk(c, id)
+
+    assert has_element?(view, ~s(#{@pane} #bp-group-tab-content[aria-selected="true"]))
+    assert has_element?(view, ~s(#{@form} [name="doc[both]"][value="Twice"]))
+
+    pick(view, "meta")
+    assert has_element?(view, ~s(#{@form} [name="doc[both]"][value="Twice"]))
+
+    pick(view, "promo")
+    refute has_element?(view, ~s(#{@form} [name="doc[both]"]))
+
+    old = open(c, "#{c.scope}/#{c.type}/#{id}", "#editor-form")
+    assert has_element?(old, ~s(#bp-group-tab-content[aria-selected="true"]))
+    assert has_element?(old, ~s(#editor-form [name="doc[both]"]))
+    old |> element("#bp-group-tab-promo") |> render_click()
+    refute has_element?(old, ~s(#editor-form [name="doc[both]"]))
+  end
+
+  test "a date-time subfield's id is on its picker too", c do
+    {id, _stored} = doc!(c, false)
+    view = desk(c, id)
+    pick(view, "meta")
+
+    assert has_element?(view, ~s(#{@form} input[type="datetime-local"][id="seo.reviewedAt"]))
+    assert has_element?(view, ~s(#{@form} label[for="seo.reviewedAt"]))
+
+    assert has_element?(
+             view,
+             ~s|#{@form} input[type="hidden"][data-datetime-value][value="2026-09-20T10:00:00Z"]:not([id])|
+           )
   end
 
   test "FieldGroups: a list of groups, and no schema", _c do

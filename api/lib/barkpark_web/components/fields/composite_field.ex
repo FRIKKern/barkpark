@@ -586,7 +586,6 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={to_string(@value || "")}>
       <input
         type="hidden"
-        id={@input_id}
         name={@input_name}
         value={to_string(@value || "")}
         data-datetime-value
@@ -594,10 +593,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         disabled={@readonly}
       />
       <%!-- Ignored by LiveView patches, which reset a picker with no value
-            attribute (task-cf45242ef3477fba); see FieldInputs' datetime. --%>
+            attribute (task-cf45242ef3477fba); see FieldInputs' datetime. The
+            subfield's id is on the picker, the control its label reaches. --%>
       <span id={"#{@input_id}-dt-pick"} phx-update="ignore" class="bp-datetime-picker">
         <input
           type="datetime-local"
+          id={@input_id}
           class="bp-input"
           aria-label={title_for(@field)}
           disabled={@readonly}

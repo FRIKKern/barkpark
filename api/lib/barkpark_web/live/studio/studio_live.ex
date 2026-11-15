@@ -513,10 +513,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
-  def handle_event("save", params, socket), do: Fields.save(params, socket)
+
+  def handle_event("save", params, socket),
+    do: params |> Fields.save(socket) |> Scope.settle_group()
+
   def handle_event("reload-remote-doc", _params, socket), do: Fields.reload_remote_doc(socket)
   def handle_event("slug-generate", params, socket), do: Fields.slug_generate(params, socket)
-  def handle_event("autosave", params, socket), do: Fields.autosave(params, socket)
+
+  def handle_event("autosave", params, socket),
+    do: params |> Fields.autosave(socket) |> Scope.settle_group()
 
   def handle_event("toggle-content-preview", _params, socket),
     do: Fields.toggle_content_preview(socket)
