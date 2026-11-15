@@ -34,6 +34,12 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     host
     |> cast(attrs, @enrollment_fields)
     |> validate_required([:workspace_id, :name, :enrollment_hash, :enrollment_expires_at])
+    # `ChatHosts.issue_enrollment/2` takes the default for each of these only
+    # when the key is ABSENT, so an owner's JSON null arrives as nil. All
+    # three columns are NOT NULL: without this, a 500 (task-7f0bd4bfa363eb60).
+    |> validate_required([:approved_roots, :protocol_version, :capabilities],
+      message: "must not be null"
+    )
     |> validate_length(:name, min: 1, max: 120)
     |> validate_number(:protocol_version, greater_than: 0)
     |> validate_roots()

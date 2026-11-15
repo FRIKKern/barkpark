@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,12 +32,51 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// lineSignal is a syncBuffer that closes seen the first time a written line
+// contains want, so a test waits for a log line instead of a clock.
+type lineSignal struct {
+	syncBuffer
+	want string
+	seen chan struct{}
+	once sync.Once
+}
+
+func (b *lineSignal) Write(p []byte) (int, error) {
+	n, err := b.syncBuffer.Write(p)
+	if strings.Contains(string(p), b.want) {
+		b.once.Do(func() { close(b.seen) })
+	}
+	return n, err
+}
+
+// outageLines returns the "<name> failing" and "<name> reconnected" lines of
+// out, in order, as "failing" and "reconnected".
+func outageLines(out, name string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, name+" failing"):
+			lines = append(lines, "failing")
+		case strings.Contains(line, name+" reconnected"):
+			lines = append(lines, "reconnected")
+		}
+	}
+	return lines
+}
+
 const oneCommand = `{"commands":[{"lease_id":"lease-1","epoch":1,"last_cursor":0,"command":{"provider":"claude"}}]}`
 
 // The live failure: one "Client.Timeout exceeded while awaiting headers" on
 // GET /v1/chat-host/commands ended Run and the host program exited. Here the
 // first heartbeats answer 503 and the first polls time out; Run must outlast
 // both and start the command the server hands out once it answers again.
+//
+// The two outages end independently. On a loaded machine a heartbeat can
+// itself run past the 30 ms client timeout before the handler counts it, so
+// the host's heartbeat outage outlasts the server's three 503s and the poll
+// can recover first (task-769d38f45bb31cdd). The test waits for both
+// reconnect lines, and reads the log by order, not by count: such a timeout
+// can also open a second, real outage after a reconnect.
 func TestRunnerRetriesTransientHeartbeatAndPollFailures(t *testing.T) {
 	const failures = 3
 	var heartbeats, polls atomic.Int32
@@ -69,7 +109,7 @@ func TestRunnerRetriesTransientHeartbeatAndPollFailures(t *testing.T) {
 	httpClient := server.Client()
 	httpClient.Timeout = 30 * time.Millisecond
 	handler := &blockingHandler{started: make(chan struct{}), canceled: make(chan struct{})}
-	logs := &syncBuffer{}
+	logs := &lineSignal{want: "heartbeat reconnected", seen: make(chan struct{})}
 	runner := Runner{
 		Client:            &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: httpClient, AllowInsecureLoopback: true},
 		Handler:           handler,
@@ -92,15 +132,40 @@ func TestRunnerRetriesTransientHeartbeatAndPollFailures(t *testing.T) {
 	if got := polls.Load(); got <= failures {
 		t.Fatalf("polls=%d; the command started before the outage ended", got)
 	}
+	// The poll's reconnect line is written before Run returns; the
+	// heartbeat's may still be coming.
+	select {
+	case <-logs.seen:
+	case err := <-result:
+		t.Fatalf("Run ended on a transient failure: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("the heartbeat never reconnected:\n%s", logs.String())
+	}
 
 	cancel()
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatalf("runner error=%v want context.Canceled", err)
 	}
 	out := logs.String()
-	for _, want := range []string{"heartbeat failing", "heartbeat reconnected", "poll failing", "poll reconnected"} {
-		if got := strings.Count(out, want); got != 1 {
-			t.Errorf("log has %q %d times, want once per outage:\n%s", want, got, out)
+	// One line when an outage starts and one when it ends, never one per
+	// failed attempt: the lines alternate, starting with "failing".
+	for _, name := range []string{"heartbeat", "poll"} {
+		lines := outageLines(out, name)
+		if len(lines) < 2 {
+			t.Errorf("%s: outage lines %v, want failing then reconnected:\n%s", name, lines, out)
+			continue
+		}
+		for i, line := range lines {
+			if want := []string{"failing", "reconnected"}[i%2]; line != want {
+				t.Errorf("%s: outage lines %v, line %d is %q want %q (one line per outage, not per attempt):\n%s", name, lines, i, line, want, out)
+				break
+			}
+		}
+		// The first outage spans at least the server's scripted failures.
+		var attempts int
+		_, after, _ := strings.Cut(out, name+" reconnected after ")
+		if _, err := fmt.Sscanf(after, "%d failed attempts", &attempts); err != nil || attempts < failures {
+			t.Errorf("%s reconnected after %d attempts (%v), want at least %d:\n%s", name, attempts, err, failures, out)
 		}
 	}
 }

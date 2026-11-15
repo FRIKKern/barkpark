@@ -28,6 +28,9 @@ type Runner struct {
 	// means defaultTerminalTimeout. Each Runner holds its own, so a test that
 	// shortens it does not race a lease goroutine another test left running.
 	TerminalTimeout time.Duration
+	// now is the clock the retry backoff reads. Nil means time.Now. A test
+	// sets it on its own Runner to hold the clock still.
+	now func() time.Time
 
 	mu     sync.Mutex
 	active map[string]activeCommand
@@ -137,7 +140,7 @@ type outage struct {
 // attempt runs call unless it is still waiting out a backoff. It returns an
 // error only when Run must end.
 func (r *Runner) attempt(ctx context.Context, o *outage, call func() error) error {
-	if time.Now().Before(o.retryAt) {
+	if r.clock().Before(o.retryAt) {
 		return nil
 	}
 	err := call()
@@ -165,8 +168,15 @@ func (r *Runner) attempt(ctx context.Context, o *outage, call func() error) erro
 			wait = grown
 		}
 	}
-	o.retryAt = time.Now().Add(wait)
+	o.retryAt = r.clock().Add(wait)
 	return nil
+}
+
+func (r *Runner) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 func (r *Runner) logf(format string, args ...any) {
