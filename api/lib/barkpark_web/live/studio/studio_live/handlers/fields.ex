@@ -251,6 +251,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(_params, socket), do: {:noreply, socket}
 
   defp save_open(params, socket) do
+    params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
     case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
@@ -400,7 +401,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {:noreply, socket}
   end
 
+  @doc """
+  A change the server built itself for the document the socket holds (the
+  desk's Paste field): not a browser post, so it carries no name and none is
+  asked (`PostIdentity`). Never call it with params that came from the page.
+  """
+  def autosave_built(params, socket) when is_map(params), do: autosave_open(params, socket)
+
   defp autosave_open(params, socket) do
+    params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
     case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do

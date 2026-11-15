@@ -404,6 +404,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply, socket |> refresh_grant_access() |> enforce_admission()}
   end
 
+  def handle_info(:editor_swap_done, socket),
+    do: {:noreply, BarkparkWeb.Studio.StudioLive.DocSwap.done(socket)}
+
   def handle_info({:doc_updated, msg}, socket), do: Lifecycle.doc_updated(msg, socket)
   def handle_info({:paper_block, frame}, socket), do: Lifecycle.paper_block(frame, socket)
   def handle_info({:paper_updated, msg}, socket), do: Lifecycle.paper_updated(msg, socket)

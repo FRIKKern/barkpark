@@ -256,8 +256,14 @@
 
   // The click is held back, the clipboard read, and the click handed on with
   // the item on it. The menu closes by itself: the click's default is kept.
+  //
+  // The paste names the document of the form it was pressed in, read now:
+  // the pane may open another one while the clipboard is read, and the
+  // server refuses a paste pressed in another document (`PostIdentity`).
   function startPaste(item, event) {
     event.stopPropagation();
+    var form = window.document.getElementById("editor-form");
+    var doc = form ? form.getAttribute("phx-value-_bp_doc") : null;
     readClip().then(
       function (json) {
         if (!json) return toast("default", item.getAttribute("data-desk-nothing") || "");
@@ -265,12 +271,14 @@
         if (!item.isConnected) return;
         hideToast();
         item.setAttribute("phx-value-clip", json);
+        if (doc) item.setAttribute("phx-value-_bp_doc", doc);
         passing = true;
         try {
           item.click();
         } finally {
           passing = false;
           item.removeAttribute("phx-value-clip");
+          item.removeAttribute("phx-value-_bp_doc");
         }
       },
       function () {

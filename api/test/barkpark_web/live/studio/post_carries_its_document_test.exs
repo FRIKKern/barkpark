@@ -127,6 +127,36 @@ defmodule BarkparkWeb.Studio.PostCarriesItsDocumentTest do
 
   defp untouched(n), do: Map.put(content(n), "title", "Title #{n}")
 
+  # A focused input that is in both forms is kept by the patch, with the
+  # text typed in it: A's row text sat in B's form and B's next post stored
+  # it. The desk never had one patch hold both forms (it loads the document
+  # in a second step); the old Studio now leaves the form out of the patch
+  # that opens another document and draws it in the next.
+  test "studio: the patch that opens another document draws no form; the next one draws B's",
+       c do
+    {view, sel} = page = open(c, :studio, c.a)
+    {url, _sel} = c.studio
+
+    html = render_patch(view, url.(c.b))
+    refute html =~ ~s(id="editor-form")
+
+    await(view, sel, c.b)
+    assert identity(page) == PostIdentity.value(@dataset, c.type, c.b)
+    assert stored(c, c.b) == untouched(2)
+
+    # Focus that went with the old form is put on the document header (the
+    # page does it only while focus is on <body>), a target the server draws.
+    assert_push_event(view, "bp:focus-doc-header", %{})
+    assert render(view) =~ ~r/<div[^>]*class="pane-header editor-header"[^>]*tabindex="-1"/
+  end
+
+  test "studio: the same document opened again keeps its form in the patch", c do
+    {view, _sel} = open(c, :studio, c.a)
+    {url, _sel} = c.studio
+
+    assert render_patch(view, url.(c.a)) =~ ~s(id="editor-form")
+  end
+
   for surface <- [:desk, :studio] do
     @surface surface
 
@@ -202,6 +232,29 @@ defmodule BarkparkWeb.Studio.PostCarriesItsDocumentTest do
 
       assert String.replace(value, "&quot;", ~s(")) == identity(page)
       assert html =~ ~r/<input[^>]*\sname="_bp_doc_end"[^>]*>\s*<\/form>/
+    end
+
+    test "#{surface}: the marks sent as fields of the document are not kept as fields", c do
+      {view, sel} = page = open(c, @surface, c.a)
+
+      view
+      |> element(sel)
+      |> render_change(%{
+        "_target" => ["doc", "byline"],
+        "doc" => %{
+          "byline" => "typed",
+          "_bp_doc" => identity(page),
+          "_bp_doc_end" => identity(page)
+        }
+      })
+
+      assert stored(c, c.a) == Map.put(untouched(1), "byline", "typed")
+      state = :sys.get_state(view.pid).socket.assigns
+
+      for key <- [PostIdentity.key(), PostIdentity.end_key()] do
+        refute Map.has_key?(state.editor_form, key)
+        refute Map.has_key?(state.editor_doc.content, key)
+      end
     end
 
     test "#{surface}: a Save built from A that arrives after the pane opened B is not written",

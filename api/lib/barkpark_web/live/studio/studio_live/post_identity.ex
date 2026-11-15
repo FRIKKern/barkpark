@@ -29,6 +29,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   another value, or with no attribute value, is not written. That holds for
   a post sent by hand too.
 
+  ## A write the server builds
+
+  A browser post is the only thing `ours?/2` is for. Code in the page's own
+  process that builds the params itself, for the document the socket holds
+  (the desk's Paste field), has no form to have been stale: it calls
+  `Fields.autosave_built/2`, which takes no name and asks nothing. The EVENT
+  that started it came from the browser, though, and names the document it
+  was pressed in under the same key; its handler asks `ours?/2` of the
+  event before it builds anything.
+
   ## Why two
 
   LiveView posts a waiting input the moment it blurs, and removing the
@@ -96,4 +106,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   end
 
   def ours?(_params, _socket), do: false
+
+  @doc """
+  `params` without the two keys among the document's fields. A post that
+  carries them inside `doc` (sent by hand) would leave them in the form
+  buffer.
+  """
+  def no_marks(%{"doc" => %{} = doc} = params),
+    do: Map.put(params, "doc", Map.drop(doc, [@key, @end_key]))
+
+  def no_marks(params), do: params
 end

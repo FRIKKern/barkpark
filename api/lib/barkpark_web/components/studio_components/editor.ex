@@ -946,8 +946,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%!-- The group tabs' panel is this wrapper, not the form: ARIA
                   does not allow role="tabpanel" on a <form> (axe
                   aria-allowed-role). --%>
+            <%!-- Left out of the patch that opens another document, so no
+                  input of the last one is kept (`DocSwap`). --%>
             <div
-              :if={@nav_view == nil}
+              :if={@nav_view == nil and not BarkparkWeb.Studio.StudioLive.DocSwap.swapping?(@parent_assigns)}
               id="editor-tabpanel"
               role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
               aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop(@editor_schema, @nav_group, @parent_assigns)}

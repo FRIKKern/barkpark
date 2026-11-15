@@ -163,13 +163,15 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
       a_before = doc_count(default_ws.id, project_a.id)
       b_before = doc_count(default_ws.id, project_b.id)
 
+      # The save left the form while it was still on the page.
+      marks = BarkparkWeb.EditorPost.marks(view)
       render_change(view, "switch-project", %{"project" => project_b.slug})
 
       # Fire a save with edited params. With the stale editor_doc the pre-fix code
       # would upsert_draft(doc_a, ...) under Project B's scope — writing the old
       # doc_id into the WRONG project and get_or_create a duplicate "production"
       # dataset under B. Post-fix editor_doc is nil so do_autosave no-ops.
-      BarkparkWeb.EditorPost.click(view, %{"doc" => %{"title" => "Edited After Switch"}})
+      BarkparkWeb.EditorPost.click(view, %{"doc" => %{"title" => "Edited After Switch"}}, marks)
 
       a_after = doc_count(default_ws.id, project_a.id)
       b_after = doc_count(default_ws.id, project_b.id)

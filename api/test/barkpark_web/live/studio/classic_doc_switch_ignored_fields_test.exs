@@ -86,7 +86,10 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
     assert hidden_value(html, "bp-ref-hidden-author") == "ada"
     assert hidden_value(html, "bp-mp-hidden-cover") =~ "one.png"
 
-    html = render_patch(view, scoped_studio("/d/#{@dataset}/studio/note/n2"))
+    # The patch that opens another document draws no form; the next render
+    # draws the second note's (`DocSwap`, task-8908b6e031268f77).
+    render_patch(view, scoped_studio("/d/#{@dataset}/studio/note/n2"))
+    html = render(view)
 
     assert hidden_value(html, "bp-rt-hidden-body") =~ "second body"
     assert hidden_value(html, "bp-ref-hidden-author") == "grace"

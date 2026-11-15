@@ -79,14 +79,25 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
   end
 
   test "a save in flight after the delete does not write the document back", ctx do
+    # The post left the form while it was still on the page.
+    marks = BarkparkWeb.EditorPost.marks(ctx.view)
     delete_elsewhere(ctx)
     assert eventually(fn -> has_element?(ctx.view, "[data-desk-edit-gone]") end)
 
-    BarkparkWeb.EditorPost.hook(ctx.view, "autosave", %{
-      "doc" => %{"title" => "Typed after delete"}
-    })
+    BarkparkWeb.EditorPost.hook(
+      ctx.view,
+      "autosave",
+      %{"doc" => %{"title" => "Typed after delete"}},
+      marks
+    )
 
-    BarkparkWeb.EditorPost.hook(ctx.view, "save", %{"doc" => %{"title" => "Saved after delete"}})
+    BarkparkWeb.EditorPost.hook(
+      ctx.view,
+      "save",
+      %{"doc" => %{"title" => "Saved after delete"}},
+      marks
+    )
+
     render(ctx.view)
 
     assert stored(ctx) == nil, "the deleted document was written back: #{inspect(stored(ctx))}"
