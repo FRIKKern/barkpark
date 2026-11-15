@@ -54,6 +54,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       :last_seen_at
     ])
     |> validate_required([:enrolled_at, :credential_hash, :credential_expires_at])
+    |> validate_host_declared()
     |> validate_number(:credential_version, greater_than: 0)
     |> validate_roots()
     |> validate_capabilities()
@@ -63,9 +64,21 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   def heartbeat_changeset(host, attrs) do
     host
     |> cast(attrs, @heartbeat_fields)
+    |> validate_host_declared()
     |> validate_number(:protocol_version, greater_than: 0)
     |> validate_capabilities()
   end
+
+  # The host sends these two on enroll and heartbeat. The context keeps the
+  # stored value only when a key is ABSENT, so a key sent as JSON null casts
+  # to a nil change, which `validate_number/3` and `validate_change/3` both
+  # skip. Both columns are NOT NULL, so that nil used to reach Postgres and
+  # raise: a 500 instead of this 422 (task-2cd727c3405afd23).
+  defp validate_host_declared(changeset),
+    do:
+      validate_required(changeset, [:protocol_version, :capabilities],
+        message: "must not be null"
+      )
 
   def revoke_changeset(host, at), do: change(host, revoked_at: at)
 
