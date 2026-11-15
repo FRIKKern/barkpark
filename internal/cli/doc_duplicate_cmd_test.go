@@ -11,7 +11,7 @@ const docDupSchemaPath = "/v1/schemas/production/post"
 // docDupSource is what the document read sends for p1 with perspective=drafts.
 const docDupSource = `{"result":{"_id":"drafts.p1","_type":"post","_rev":"r2","_draft":true,"_publishedId":"p1",
 	"_createdAt":"2026-01-03T00:00:00Z","_updatedAt":"2026-01-04T00:00:00Z",
-	"title":"New","extra":"added","seo":{"title":"same"},
+	"title":"New","extra":"added","body":"line one\nline two","seo":{"title":"same"},
 	"links":[{"_key":"c","url":"three"},{"_key":"a","url":"one"},{"_key":"b","url":"two"}]}}`
 
 func docDupCreate(t *testing.T, body string) map[string]any {
@@ -42,7 +42,7 @@ func TestDocDuplicateSendsACreateAndPrintsTheNewID(t *testing.T) {
 		t.Fatalf("writes = %d, want 1", s.postCount())
 	}
 	create := docDupCreate(t, s.posts[0])
-	if create["title"] != "New (copy)" || create["_type"] != "post" || create["extra"] != "added" {
+	if create["title"] != "New (copy)" || create["_type"] != "post" || create["extra"] != "added" || create["body"] != "line one\nline two" {
 		t.Errorf("create = %v", create)
 	}
 	if rows, _ := create["links"].([]any); len(rows) != 3 {
@@ -54,7 +54,7 @@ func TestDocDuplicateSendsACreateAndPrintsTheNewID(t *testing.T) {
 		}
 	}
 
-	code, stdout, _ = runDocVerb(runDocDuplicate, s.ctx(), globals{output: "json"}, "post", "p1", "--id", "p2", "--title", "Second")
+	code, stdout, _ = runDocVerb(runDocDuplicate, s.ctx(), globals{output: "json", outputSet: true}, "post", "p1", "--id", "p2", "--title", "Second")
 	if code != exitOK || !strings.Contains(stdout, `"id":"drafts.post-9"`) {
 		t.Fatalf("--id/--title: exit = %d, stdout=%s", code, stdout)
 	}

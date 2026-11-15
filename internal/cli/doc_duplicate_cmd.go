@@ -133,6 +133,9 @@ func runDocDuplicate(out *writer, g globals, ctx manifest.Context, tail []string
 		printDocDuplicateHelp(out)
 		return exitOK
 	}
+	// Like the manifest's write verbs, a pipe gets the short receipt (the new
+	// id) unless -o asks for json or yaml.
+	out.resolveOutputForCommand(g, "minimal")
 	a, err := parseDocDuplicateArgs(tail)
 	if err != nil {
 		return usageErrf(out, func() { printDocDuplicateHelp(out) }, "doc duplicate: %v", err)
@@ -147,7 +150,7 @@ func runDocDuplicate(out *writer, g globals, ctx manifest.Context, tail []string
 	}
 	if found {
 		if why := docDuplicateWithheld(schemaBody); why != "" {
-			return useError(out, "forbidden", fmt.Sprintf("doc duplicate: a %s document cannot be duplicated: %s. Nothing was written.", a.typ, why), exitValidation)
+			return useError(out, "duplicate_withheld", fmt.Sprintf("doc duplicate: a %s document cannot be duplicated: %s. Nothing was written.", a.typ, why), exitValidation)
 		}
 	}
 

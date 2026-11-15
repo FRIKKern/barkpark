@@ -16,6 +16,13 @@ type DuplicateOptions struct {
 // (Client.Duplicate) and `bp doc duplicate` share: the title gets " (copy)"
 // unless opts.Title names one, every content field is copied as raw JSON, and
 // the document's own metadata is left out. The server makes a create a draft.
+//
+// `body` and `body_html` are content, so they are copied. They sit in
+// envelopeMetaKeys only because the field editor shows them elsewhere; until
+// 2026-11-15 the copy left them out and a post lost its body without a word.
+// `blocks` stays out (a stored tree is refused below, a synthesized one is a
+// view of the fields already copied), and so does `content`, which the create
+// route reads as the document's whole content map.
 // A paper is refused: its block tree cannot ride the generic mutate path, and
 // a copy without its blocks would lose them without saying so.
 func DuplicateCreate(typeName string, doc Doc, opts DuplicateOptions) (map[string]interface{}, error) {
@@ -39,7 +46,7 @@ func DuplicateCreate(typeName string, doc Doc, opts DuplicateOptions) (map[strin
 		create["_id"] = opts.ID
 	}
 	for k, raw := range doc.Extra {
-		if envelopeMetaKeys[k] || duplicateSkipKeys[k] {
+		if duplicateSkipKeys[k] || (envelopeMetaKeys[k] && k != "body" && k != "body_html") {
 			continue
 		}
 		create[k] = raw
