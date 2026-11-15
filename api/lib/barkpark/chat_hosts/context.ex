@@ -435,8 +435,10 @@ defmodule Barkpark.ChatHosts do
   rules as a `status` event. Nothing is written: no ExecutionEvent row, no
   cursor, no lease or session change, so it cannot reach the expired-lease
   close or the run-once rule. The Recorder streams it as the same runtime
-  `:status` event the cursor path does, but only while the turn is open and has
-  no text yet. Answers `{:ok, :streamed | :dropped}`.
+  `:status` event the cursor path does, once per turn, only while the turn is
+  open and has no text yet. Answers `{:ok, :streamed}`, or `{:ok, :dropped}`
+  when the turn is not open, already has text or already streamed a label, or
+  when the session has no Recorder or it did not answer within 2 s.
   """
   def accept_status(%RegisteredHost{} = host, lease_id, attrs) when is_map(attrs) do
     epoch = value(attrs, :epoch)

@@ -579,12 +579,14 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   # A host's out-of-sequence status label (ChatHosts.accept_status/3): streamed
-  # only while the turn is open and has no text, decided here so it is ordered
-  # against the turn's own projected events. Never stored, never touches state.
+  # once per turn, only while the turn is open and has no text, decided here so
+  # it is ordered against the turn's own projected events. Never stored; the
+  # one flag it sets is cleared when a new turn starts.
   def handle_call({:offer_status, %Event{kind: :status} = event}, _from, state) do
-    if Map.get(state, :runtime_turn_open?, false) and state.runtime_text == "" do
+    if Map.get(state, :runtime_turn_open?, false) and state.runtime_text == "" and
+         not Map.get(state, :runtime_status_sent?, false) do
       broadcast(state, {:studio_chat_runtime_event, event})
-      {:reply, :streamed, state}
+      {:reply, :streamed, Map.put(state, :runtime_status_sent?, true)}
     else
       {:reply, :dropped, state}
     end
@@ -1403,7 +1405,11 @@ defmodule Barkpark.StudioChat.Recorder do
           |> publish_activity(%{state: :working, line: "thinking…"})
         else
           %{state | runtime_text: ""}
-          |> Map.merge(%{runtime_turn_open?: true, runtime_break?: false})
+          |> Map.merge(%{
+            runtime_turn_open?: true,
+            runtime_break?: false,
+            runtime_status_sent?: false
+          })
           |> stable_start()
           |> clear_pending_asks()
           |> publish_activity(%{state: :working, line: "thinking…"})

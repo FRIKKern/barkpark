@@ -115,6 +115,47 @@ defmodule BarkparkWeb.ChatHostStatusControllerTest do
     assert event_rows(fence.lease_id) == 2
   end
 
+  test "one label per turn: later ones are not streamed, and the next turn gets its own",
+       %{host: host, credential: credential, sid: sid, fence: fence} = turn do
+    assert {:ok, :accepted} = post_event(turn, 1, %{"kind" => "turn_started"})
+
+    assert json_response(post_status(turn, %{"epoch" => fence.epoch, "label" => @label}), 202) ==
+             %{"streamed" => true}
+
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :status}}, 2_000
+
+    for _ <- 1..24 do
+      conn = post_status(turn, %{"epoch" => fence.epoch, "label" => "Mulling it over"})
+      assert json_response(conn, 202) == %{"streamed" => false}
+    end
+
+    # An older host's second turn_started for the same turn does not reopen it.
+    assert {:ok, :accepted} = post_event(turn, 2, %{"kind" => "turn_started"})
+    conn = post_status(turn, %{"epoch" => fence.epoch, "label" => "Mulling it over"})
+    assert json_response(conn, 202) == %{"streamed" => false}
+    refute_receive {:studio_chat_runtime_event, %Event{kind: :status}}, 200
+
+    assert {:ok, :accepted} =
+             post_event(turn, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    # The next turn, on its own lease, streams its own label.
+    command = %Command{
+      operation: :send_turn,
+      provider: "claude",
+      session_id: sid,
+      idempotency_key: "label-next-#{System.unique_integer([:positive])}",
+      payload: %{cwd: System.tmp_dir!(), content: "and the moon?"}
+    }
+
+    {:ok, next} = ChatHosts.lease_and_enqueue(host, command, [])
+    next_turn = %{turn | fence: next}
+    assert {:ok, :accepted} = post_event(next_turn, 1, %{"kind" => "turn_started"})
+
+    conn = post_status(credential, next.lease_id, %{"epoch" => next.epoch, "label" => @label})
+    assert json_response(conn, 202) == %{"streamed" => true}
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :status}}, 2_000
+  end
+
   test "a label before the turn started, or after it ended, is not streamed",
        %{fence: fence} = turn do
     conn = post_status(turn, %{"epoch" => fence.epoch, "label" => @label})
