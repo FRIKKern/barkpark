@@ -25,7 +25,8 @@ const tidesLabel = "Explaining ocean tides"
 //
 //	turn   a stream-json claude turn: init, message_start, then (once the gate
 //	       file exists, or after labelBackstop) one text delta and a success
-//	       result
+//	       result. With BARKPARK_STATUS_HELPER_TEXT_AT it first writes the wall
+//	       clock (Unix nanoseconds) to that file, just before the text.
 //	label  the label side call: records its args, stdin, cwd, niceness and
 //	       whether a Barkpark token reached it, then prints
 //	       BARKPARK_STATUS_HELPER_SAY
@@ -51,6 +52,9 @@ func TestStatusLabelHelperProcess(t *testing.T) {
 					break
 				}
 			}
+		}
+		if at := os.Getenv("BARKPARK_STATUS_HELPER_TEXT_AT"); at != "" {
+			_ = os.WriteFile(at, []byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0o600)
 		}
 		write(map[string]any{"type": "stream_event", "event": map[string]any{
 			"type": "content_block_delta", "index": 0.0,
@@ -114,7 +118,17 @@ func runLabelledTurnLogged(t *testing.T, labeler StatusLabeler, gate string, log
 // of the turn's events as it is published, on the turn's goroutine.
 func runLabelledTurnHooked(t *testing.T, labeler StatusLabeler, gate string, log *syncBuffer, onEvent func(map[string]any)) ([]map[string]any, time.Duration) {
 	t.Helper()
+	return runLabelledTurnEnv(t, labeler, nil, gate, log, onEvent)
+}
+
+// runLabelledTurnEnv is runLabelledTurnHooked with extra environment for the
+// helper turn (BARKPARK_STATUS_HELPER_TEXT_AT).
+func runLabelledTurnEnv(t *testing.T, labeler StatusLabeler, extra map[string]string, gate string, log *syncBuffer, onEvent func(map[string]any)) ([]map[string]any, time.Duration) {
+	t.Helper()
 	env := map[string]string{"BARKPARK_STATUS_HELPER": "turn"}
+	for key, value := range extra {
+		env[key] = value
+	}
 	if gate != "" {
 		env["BARKPARK_STATUS_HELPER_GATE"] = gate
 	}
