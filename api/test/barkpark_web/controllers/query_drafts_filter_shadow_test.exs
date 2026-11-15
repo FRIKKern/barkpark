@@ -61,9 +61,12 @@ defmodule BarkparkWeb.QueryDraftsFilterShadowTest do
     %{a: a, b: b, c: c, ada: ada, alan: alan}
   end
 
+  # The query string as a client sends it: `filter[author][in]=…`.
   defp list(conn, params) do
+    query = params |> Map.put("order", "_id:asc") |> URI.encode_query()
+
     conn
-    |> get("/v1/data/query/#{@dataset}/post", Map.put(params, "order", "_id:asc"))
+    |> get("/v1/data/query/#{@dataset}/post?" <> query)
     |> json_response(200)
     |> Map.fetch!("result")
   end
@@ -93,6 +96,17 @@ defmodule BarkparkWeb.QueryDraftsFilterShadowTest do
     # `neq` reads the draft too: b's draft is not ada, a and c are.
     assert ids(list(editor, %{"perspective" => "drafts", "filter[author][neq]" => ctx.ada})) ==
              ["drafts." <> ctx.b]
+  end
+
+  test "a filter on the id still names the stored row", ctx do
+    editor = as_editor(ctx.conn)
+    by_id = %{"perspective" => "drafts", "filter[_id][in]" => "#{ctx.a},#{ctx.b}"}
+
+    # Alone, as before: the JS client's getDocuments reads rows this way.
+    assert ids(list(editor, by_id)) == [ctx.a, ctx.b]
+
+    # With another filter, b's draft is asked too, and it is not ada.
+    assert ids(list(editor, Map.put(by_id, "filter[author]", ctx.ada))) == [ctx.a]
   end
 
   test "total and pages count the shadowed row out", ctx do

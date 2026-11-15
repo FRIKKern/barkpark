@@ -21,9 +21,20 @@ defmodule Barkpark.Content.Query.DraftShadow do
   they ran before. A draft row passes as is, since `drafts.drafts.<id>` is
   never stored, so the clause is a plain anti-join and the lookup uses the
   `(doc_id, type, dataset_id)` unique index.
+
+  ## Filters on the id
+
+  `_id` and `doc_id` name a stored row, `drafts.` prefix and all, so
+  `filter[_id][in]=a,b` asks for those rows and a draft cannot answer for
+  them. A filter on the id alone reads as before: the JS client's
+  `getDocuments` still gets the published row it named. With an id filter and
+  another filter together, the published row is a hit unless its draft fails
+  the other filter.
   """
 
   import Ecto.Query
+
+  @id_fields ~w(_id doc_id)
 
   @doc """
   `visible` narrowed by `apply_filter.(visible, filter_map)`, and, when
@@ -34,17 +45,31 @@ defmodule Barkpark.Content.Query.DraftShadow do
           Ecto.Query.t()
   def filter(visible, filter_map, opts, apply_filter) do
     filtered = apply_filter.(visible, filter_map)
+    {by_id, on_document} = Map.split(filter_map, @id_fields)
 
-    if Keyword.get(opts, :perspective) == :drafts and map_size(filter_map) > 0 do
-      twin =
-        from(t in visible,
-          where: t.doc_id == fragment("'drafts.' || ?", parent_as(:shadowed).doc_id),
-          select: 1
+    cond do
+      Keyword.get(opts, :perspective) != :drafts or map_size(on_document) == 0 ->
+        filtered
+
+      # The draft, when it matches, is in `filtered` too and wins the merge.
+      map_size(by_id) == 0 ->
+        from(d in filtered, as: :shadowed, where: not exists(twin(visible)))
+
+      true ->
+        matching = twin(apply_filter.(visible, on_document))
+
+        from(d in filtered,
+          as: :shadowed,
+          where: not exists(twin(visible)) or exists(matching)
         )
-
-      from(d in filtered, as: :shadowed, where: not exists(twin))
-    else
-      filtered
     end
+  end
+
+  # The draft of the outer row, among `rows`.
+  defp twin(rows) do
+    from(t in rows,
+      where: t.doc_id == fragment("'drafts.' || ?", parent_as(:shadowed).doc_id),
+      select: 1
+    )
   end
 end
