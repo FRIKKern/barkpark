@@ -34,6 +34,12 @@ type Runner struct {
 	// just before the end landed still lists it. An entry goes when a poll no
 	// longer lists its lease.
 	seen map[string]leaseMark
+	// ended: when this process's last run of a lease ended. A poll sent before
+	// that is no evidence the lease still needs a run: it may have been answered
+	// before the run's close landed, as when the close's POST timed out after
+	// the server took it (task-522b05a5c537bebd). Such a listing starts nothing;
+	// the next poll decides. An entry goes with the lease's mark.
+	ended map[string]time.Time
 }
 
 type leaseMark int
@@ -60,6 +66,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	r.active = make(map[string]activeCommand)
 	r.seen = make(map[string]leaseMark)
+	r.ended = make(map[string]time.Time)
 
 	poll := time.NewTicker(r.PollInterval)
 	heartbeat := time.NewTicker(r.HeartbeatInterval)
@@ -75,13 +82,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	polling := &outage{name: "poll"}
 	sendHeartbeat := func() error { return r.Client.Heartbeat(ctx, r.Capabilities) }
 	fetchCommands := func() error {
+		sentAt := time.Now()
 		commands, err := r.Client.Commands(ctx)
 		if err != nil {
 			return err
 		}
 		r.forgetUnlisted(commands)
 		for _, command := range commands {
-			r.start(ctx, command)
+			r.startListed(ctx, command, sentAt)
 		}
 		return nil
 	}
@@ -166,9 +174,19 @@ func (r *Runner) logf(format string, args ...any) {
 }
 
 func (r *Runner) start(parent context.Context, command RemoteCommand) {
+	r.startListed(parent, command, time.Now())
+}
+
+// startListed runs a listed lease. polledAt is when the poll that listed it
+// was sent.
+func (r *Runner) startListed(parent context.Context, command RemoteCommand, polledAt time.Time) {
 	r.mu.Lock()
 	mark := r.seen[command.LeaseID]
 	if _, exists := r.active[command.LeaseID]; exists || mark == leaseDone {
+		r.mu.Unlock()
+		return
+	}
+	if endedAt, ok := r.ended[command.LeaseID]; ok && !polledAt.After(endedAt) {
 		r.mu.Unlock()
 		return
 	}
@@ -184,6 +202,9 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 		defer func() {
 			r.mu.Lock()
 			delete(r.active, command.LeaseID)
+			if r.ended != nil {
+				r.ended[command.LeaseID] = time.Now()
+			}
 			r.mu.Unlock()
 			cancel()
 		}()
@@ -267,6 +288,7 @@ func (r *Runner) forgetUnlisted(listed []RemoteCommand) {
 		}
 		if !slices.ContainsFunc(listed, func(c RemoteCommand) bool { return c.LeaseID == leaseID }) {
 			delete(r.seen, leaseID)
+			delete(r.ended, leaseID)
 		}
 	}
 }

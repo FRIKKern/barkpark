@@ -14,15 +14,18 @@ import (
 
 // leaseServer plays the server's side of one lease: it hands the lease out on
 // every poll until it holds a completed event (ChatHosts.next_commands/1), takes
-// an event only at last_cursor+1, answers a repeat of a taken cursor as a
-// duplicate, and refuses a gap (ChatHosts.reconcile_event/4).
+// an event only at last_cursor+1, answers a repeat of a taken cursor with the
+// same key and event as a duplicate and any other as cursor_conflict, and
+// refuses a gap (ChatHosts.reconcile_event/4).
 type leaseServer struct {
 	mu         sync.Mutex
 	lastCursor uint64
-	completed  bool
-	kinds      []string
-	refuse     func(cursor uint64) int // non-zero: answer this attempt with that status
-	posts      int                     // event POSTs received
+	// taken: the key and event taken at each cursor.
+	taken     map[uint64]string
+	completed bool
+	kinds     []string
+	refuse    func(cursor uint64) int // non-zero: answer this attempt with that status
+	posts     int                     // event POSTs received
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
@@ -73,6 +76,7 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		case "/v1/chat-host/events":
 			var payload struct {
 				Cursor uint64         `json:"cursor"`
+				Key    string         `json:"idempotency_key"`
 				Event  map[string]any `json:"event"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -88,21 +92,36 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 			if status == 0 && s.refuse != nil {
 				status = s.refuse(payload.Cursor)
 			}
+			encoded, _ := json.Marshal(payload.Event)
+			signature := payload.Key + "|" + string(encoded)
+			prior, recorded := s.taken[payload.Cursor]
 			switch {
 			case status != 0:
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"error":{"code":"refused"}}`))
-			case payload.Cursor <= s.lastCursor && s.completed:
+			// The same cursor, key and event as one already taken: a duplicate,
+			// whether or not the lease completed since.
+			case payload.Cursor <= s.lastCursor && recorded && prior == signature:
+				_, _ = w.Write([]byte(`{"accepted":false,"duplicate":true}`))
+			case payload.Cursor <= s.lastCursor && (recorded || s.completed):
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"error":{"code":"unprocessable","message":":cursor_conflict"}}`))
-				s.kinds = append(s.kinds, "refused-after-completed")
+				if s.completed {
+					s.kinds = append(s.kinds, "refused-after-completed")
+				}
 			case payload.Cursor <= s.lastCursor:
+				// A cursor taken before this server kept history (lastCursor set
+				// by the test): taken as a duplicate, as before.
 				_, _ = w.Write([]byte(`{"accepted":false,"duplicate":true}`))
 			case payload.Cursor != s.lastCursor+1:
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"error":{"code":"unprocessable","message":":cursor_gap"}}`))
 			default:
 				s.lastCursor = payload.Cursor
+				if s.taken == nil {
+					s.taken = map[uint64]string{}
+				}
+				s.taken[payload.Cursor] = signature
 				kind, _ := payload.Event["kind"].(string)
 				s.kinds = append(s.kinds, kind)
 				if kind == "turn_completed" || kind == "terminal" {
