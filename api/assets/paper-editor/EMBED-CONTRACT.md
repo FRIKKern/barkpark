@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.22.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.23.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,14 +6,14 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.22.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.23.0"` (also exported as `CONTRACT_VERSION`).
 Build identity, the Surface index of every name below, a dated census of what each
 host uses, and the reach-ins hosts still make are at the end.
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert. 1.21.0 adds the `CONTRACT_VERSION`, `EDITOR_VERSION` and `BUILD_SHA` statics on both elements (Build identity), and declares what hosts already used: the editor's modes and members, the canvas's host attributes, rebase and resume-focus methods, paint holes, the DOM a host reads, and the pieces a host supplies. 1.22.0 adds `focusSelection()` on both elements, so hosts stop focusing `[contenteditable]` or `.ProseMirror` inside them, and each host's use is checked against its profile (Host profiles).
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 adds the `flushKeepsSource` property (a source-mode flush commits the Markdown and keeps source mode open; a server apply reaches a source textarea with no unsaved text) and the `sourceMode` getter; for every host, a block whose kind changes into one it cannot be turned into is sent as a remove and an insert. 1.21.0 adds the `CONTRACT_VERSION`, `EDITOR_VERSION` and `BUILD_SHA` statics on both elements (Build identity), and declares what hosts already used: the editor's modes and members, the canvas's host attributes, rebase and resume-focus methods, paint holes, the DOM a host reads, and the pieces a host supplies. 1.22.0 adds `focusSelection()` on both elements, so hosts stop focusing `[contenteditable]` or `.ProseMirror` inside them, and each host's use is checked against its profile (Host profiles). 1.23.0 adds the canvas's `toMarkdown()` (Markdown export).
 
 ## The element
 
@@ -383,6 +383,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `focusSelection()` | focus the editing surface where its selection already is, as focusing `.ProseMirror` did (1.22.0) | `true` when it has focus; `false` unmounted |
 | `captureResumeFocus()` | before the host makes the page inert or moves the canvas (a reconnect, a halt): remember that the author is typing here. Arms only in rich, editable mode with focus inside and a `.bp-paper-editor[data-paper-doc-key]` root; focus moving elsewhere cancels it | `true` when armed |
 | `restoreResumeFocus()` | after: put the caret back, only if armed, the same editor, root and document key, nothing inert, and focus on `<body>` | `true` when restored |
+| `toMarkdown({ blocks, baseUrl, placeholder }?)` | Markdown for export (1.23.0, below). Reads only: no op, no flush, in read-only mode too | a string |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
 | `sourceMode` (getter) | whether the Markdown source textarea owns input (1.20.0) | boolean |
 
@@ -391,6 +392,36 @@ ProseMirror's blur leaves the DOM change unread for 20 ms. `flushPendingChanges`
 `hasPendingChanges` and `applyServerBlocks` read it first (1.15.0), so a flush
 saves it and a server apply cannot overwrite it. Hosts no longer reach into
 `view.domObserver`.
+
+### Markdown export (1.23.0)
+
+`toMarkdown()` returns the run as Markdown a person reads: the document on screen,
+unsaved typing included (in source mode, the textarea's text as blocks), or the
+saved `blocks` before mount. It is one way. Source mode's Markdown parses back to
+the same blocks and carries what Markdown cannot say as an HTML comment; this one
+does not parse back and writes no comment.
+
+| Option | Effect |
+|---|---|
+| `blocks` | convert these blocks instead of the run. Needs no mount, so a host can convert the blocks it keeps outside any canvas on an element it only created |
+| `baseUrl` | relative image and link addresses become absolute against it. Default `document.baseURI` |
+| `placeholder` | the placeholder line's words, `%{block}` being the block's name (its type as words, in English). Default `%{block}: not included in Markdown export` |
+
+```
+heading, paragraph, list, checklist, quote, code, table,
+divider, image, link, diagram (mermaid fence), equation ($$)   ─► Markdown's own form (GFM)
+callout, note                                                  ─► a quote with a bold label
+steps                                                          ─► a numbered list, each step's blocks under it
+tabs, columns, section, expandable, figure, card, terminal     ─► a bold label, then their blocks in order
+sheet                                                          ─► its snapshot as a table
+field blocks                                                   ─► **Label:** value
+any other block                                                ─► > [Chart: not included in Markdown export]
+                                                                  then one quoted line per text it holds
+```
+
+Blocks are separated by one blank line. A mark Markdown lacks (underline, highlight,
+sub, sup) keeps its text; a document link keeps its words; an empty paragraph is
+left out. No block is dropped without a line.
 
 ### Save echoes
 
@@ -693,7 +724,7 @@ Both element classes carry three statics:
 
 | Static | Value |
 |---|---|
-| `CONTRACT_VERSION` | this document's version, `"1.22.0"`. `<bp-paper-editor>` had it before 1.21.0 |
+| `CONTRACT_VERSION` | this document's version, `"1.23.0"`. `<bp-paper-editor>` had it before 1.21.0 |
 | `EDITOR_VERSION` | since 1.21.0: the npm package version, `package.json`'s `version` (today `"0.1.0-alpha.2"`). It is not bumped per contract release |
 | `BUILD_SHA` | since 1.21.0: 12 hex of the sha-256 over esbuild's version and every input file of the bundle. The same source builds the same bytes and sha; a change to a test leaves it alone. Build options are not hashed: `npm run build` and `npm run build:dev` give the same sha and different bytes. `null` where `src/contract.js` runs unbuilt (plain Node, `dist/contract.js`) |
 
@@ -771,7 +802,7 @@ element classes).
 | Kind | On | Names |
 |---|---|---|
 | static | both | `BUILD_SHA`, `CONTRACT_VERSION`, `EDITOR_VERSION` |
-| member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `focusSelection`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
+| member | canvas | `acknowledgedSaves`, `acknowledgeOps`, `applyServerBlocks`, `applyServerBlocksIfIdle`, `blocks`, `can`, `captureResumeFocus`, `commentRanges`, `commentsInSelection`, `discardInflightOps`, `editBlockObject`, `findClear`, `findNext`, `findPrev`, `findSet`, `findState`, `flushKeepsSource`, `flushPendingChanges`, `focusBlock`, `focusFirstBodyBlock`, `focusSelection`, `hasPendingChanges`, `identifyOpsRequest`, `insertBlock`, `insertInline`, `linkPreviewSource`, `liveRemote`, `localEditsRebaseSafe`, `mediaPicker`, `mediaUploader`, `rebaseSafe`, `recoverySnapshot`, `redo`, `refreshWikilinks`, `replaceAll`, `replaceCurrent`, `resendPendingOps`, `resolveConflictWithServerBlocks`, `restoreResumeFocus`, `run`, `selectBlock`, `setBlockStyle`, `setCommentRanges`, `setRemoteSelections`, `sourceMode`, `state`, `tagSource`, `toMarkdown`, `toggleList`, `toggleMark`, `toggleSourceMode`, `undo`, `wikilinkResolve`, `wikilinkSource` |
 | tag | canvas | `bp-paper-canvas` |
 | tag | editor | `bp-paper-editor` |
 | tag | picker | `bp-media-picker`, `bp-reference-picker` |

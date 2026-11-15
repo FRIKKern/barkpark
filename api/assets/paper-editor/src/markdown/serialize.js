@@ -331,7 +331,7 @@ function serializeDiagram(block) {
 // pickFence(value) → a backtick fence at least 3 long AND longer than the longest
 // backtick run inside the value, so a value containing ``` survives unambiguously
 // (the fence-length bump the prompt calls out). Pure string scan.
-function pickFence(value) {
+export function pickFence(value) {
   let longest = 0;
   let cur = 0;
   for (let i = 0; i < value.length; i++) {
@@ -488,7 +488,7 @@ function wikilinkChildrenMatchLabel(node) {
 // nearest enclosing *-family emphasis (strong/em), or null when the nearest
 // enclosing emphasis is a strike / there is none — it drives the same-family
 // delimiter ALTERNATION below.
-function inlineToMarkdown(inline, parentEmphChar) {
+export function inlineToMarkdown(inline, parentEmphChar) {
   return (inline || []).map((n) => inlineNodeToMarkdown(n, parentEmphChar)).join("");
 }
 
@@ -581,7 +581,7 @@ function inlineCode(value) {
 // tokenizer's backslash handling. We escape the minimal set our serializer +
 // tokenizer recognize: \ * _ ~ ` [ ] # | < (plus a leading run handled by
 // escapeBlockLeader at the line level).
-function escapeInlineText(text) {
+export function escapeInlineText(text) {
   let out = "";
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];

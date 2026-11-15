@@ -225,6 +225,10 @@ class BpPaperCanvas extends HTMLElement {
     return hostApiMethods.recoverySnapshot.call(this);
   }
 
+  toMarkdown(options) {
+    return hostApiMethods.toMarkdown.call(this, options);
+  }
+
   resolveConflictWithServerBlocks(blocks) {
     return hostApiMethods.resolveConflictWithServerBlocks.call(this, blocks);
   }
