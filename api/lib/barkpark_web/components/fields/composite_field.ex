@@ -106,8 +106,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           />
         </details>
       <% true -> %>
-        <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} data-collapsible={@folds} data-open={@folds && to_string(@open)}>
-          <legend class="bp-field-title"><%= if @folds do %><Fieldsets.toggle open={@open} title={@title} /><% else %><%= @title %><% end %></legend>
+        <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} id={@fold_id} data-collapsible={@folds}>
+          <legend class="bp-field-title"><%= if @folds do %><Fieldsets.toggle id={@fold_id <> "-toggle"} open={@open} title={@title} /><% else %><%= @title %><% end %></legend>
           <p :if={@description} class="bp-field-description"><%= @description %></p>
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
@@ -127,12 +127,16 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   defp put_fold(%{id_base: base, field: field} = assigns) when is_binary(base) do
     options = Fieldsets.options(field)
 
+    folds = Fieldsets.folds?(options)
+
     assigns
-    |> Map.put(:folds, Fieldsets.folds?(options))
+    |> Map.put(:folds, folds)
     |> Map.put(:open, Fieldsets.open?(options))
+    |> Map.put(:fold_id, if(folds, do: Fieldsets.fold_id("bp-fold", base)))
   end
 
-  defp put_fold(assigns), do: assigns |> Map.put(:folds, false) |> Map.put(:open, true)
+  defp put_fold(assigns),
+    do: assigns |> Map.put(:folds, false) |> Map.put(:open, true) |> Map.put(:fold_id, nil)
 
   # The subfields, optionally under Sanity-style OBJECT GROUPS (Gyldendal
   # parity E1.5). A composite declaring `"groups": [{"name","title","default"?}]`

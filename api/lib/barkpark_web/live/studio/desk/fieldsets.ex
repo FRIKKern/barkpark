@@ -9,14 +9,22 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
   `options.collapsed` folds: its title is a button.
 
   FOLDING NEVER TOUCHES WHAT IS SAVED. A folded fieldset keeps every input in
-  the page; the desk's sheet only stops drawing them
-  (`fieldset[data-open="false"] > :not(legend)`). The form posts the same
+  the page; the desk's sheet only stops drawing them. The form posts the same
   fields folded or open, so a save cannot drop or blank a value because its
   fieldset was shut.
 
-  Open or shut is the browser's own state: the button flips `data-open` on
-  its fieldset with a LiveView JS command, which LiveView keeps across its
+  ONE STATE, ONE PLACE. Open or shut is the title button's `aria-expanded`
+  and nothing else; the sheet reads it
+  (`fieldset:has(> legend > .object-toggle[aria-expanded="false"])`). The
+  button flips it with a LiveView JS command, which LiveView keeps across its
   patches. No event reaches the server.
+
+  IDS. LiveView keeps that state on the element, and matches elements across
+  a patch by id. So the fieldset and its button each carry an id of their own
+  (`fold_id/2`): without one, a fieldset that stopped being drawn handed its
+  state to whichever fieldset took its place. The desk has one live editor
+  form in a page, so the document id and the fieldset's name, or an object's
+  field path, name one element.
   """
 
   use Phoenix.Component
@@ -91,6 +99,8 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
   fieldset is a `<fieldset>` around its fields' markup.
   """
   attr :entry, :any, required: true
+  # The open document's id: part of a fieldset's id.
+  attr :scope, :string, default: "doc"
   slot :inner_block, required: true
 
   def entry(%{entry: {:field, field}} = assigns) do
@@ -105,6 +115,11 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
     assigns =
       assign(assigns,
         name: set["name"],
+        id:
+          fold_id(
+            "bp-set",
+            "#{Barkpark.Content.DraftId.published_id(assigns.scope)}-#{set["name"]}"
+          ),
         title: set["title"] || set["name"],
         fields: fields,
         folds: folds?(options),
@@ -114,16 +129,16 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
 
     ~H"""
     <fieldset
+      id={@id}
       class="field object-field fieldset-group"
       data-fieldset={@name}
       data-collapsible={@folds}
-      data-open={@folds && to_string(@open)}
     >
       <legend>
-        <.toggle :if={@folds} open={@open} title={@title} />
+        <.toggle :if={@folds} id={@id <> "-toggle"} open={@open} title={@title} />
         <span :if={not @folds}>{@title}</span>
       </legend>
-      <div class="fieldset" style={@columns}>
+      <div class={["fieldset", @columns && "fieldset-columns"]} style={@columns}>
         <%= for field <- @fields do %>
           {render_slot(@inner_block, field)}
         <% end %>
@@ -133,9 +148,10 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
   end
 
   @doc """
-  The title of a folding fieldset as a button. It flips `data-open` on the
-  nearest `<fieldset>` and its own `aria-expanded`.
+  The title of a folding fieldset as a button. It flips its own
+  `aria-expanded`, the one place the state lives.
   """
+  attr :id, :string, required: true
   attr :open, :boolean, required: true
   attr :title, :string, required: true
 
@@ -143,12 +159,10 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
     ~H"""
     <button
       type="button"
+      id={@id}
       class="object-toggle"
       aria-expanded={to_string(@open)}
-      phx-click={
-        JS.toggle_attribute({"data-open", "true", "false"}, to: {:closest, "fieldset"})
-        |> JS.toggle_attribute({"aria-expanded", "true", "false"})
-      }
+      phx-click={JS.toggle_attribute({"aria-expanded", "true", "false"})}
     >
       <span class="toggle-arrow" aria-hidden="true">
         <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 25 25">
@@ -165,8 +179,18 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
     """
   end
 
+  @doc """
+  The id of a folding element: `prefix` and `key` (a fieldset's document and
+  name, an object's field path), with anything an id should not hold made `_`.
+  """
+  @spec fold_id(String.t(), String.t()) :: String.t()
+  def fold_id(prefix, key),
+    do: prefix <> "-" <> String.replace(to_string(key), ~r/[^A-Za-z0-9_.-]/, "_")
+
+  # The column count rides as a custom property; the grid itself is the
+  # sheet's, so the sheet's rule for a shut fieldset can win over it.
   defp columns(%{"columns" => n}) when is_integer(n) and n > 1 and n <= 12,
-    do: "display:grid;grid-template-columns:repeat(#{n}, minmax(0, 1fr));column-gap:20px;"
+    do: "--bp-columns:#{n}"
 
   defp columns(_options), do: nil
 
@@ -174,21 +198,21 @@ defmodule BarkparkWeb.Studio.Desk.Fieldsets do
   @spec css() :: String.t()
   def css do
     """
-    .dk .dk-edit fieldset[data-open="false"] > :not(legend) { display: none; }
     .dk .dk-edit fieldset.fieldset-group { min-width: 0; margin: 0 0 59px; padding: 0; border: 0; }
     .dk .dk-edit fieldset.fieldset-group > legend { display: flex; align-items: center; margin: 0 0 11px; padding: 0; font-size: 13px; line-height: 19px; font-weight: 500; color: var(--dk-fg); }
     .dk .dk-edit fieldset.fieldset-group > .fieldset { border-left: 1px solid var(--dk-border); padding-left: 12px; }
     .dk .dk-edit fieldset.fieldset-group > .fieldset > .editor-field { margin-bottom: 32px; }
     .dk .dk-edit fieldset.fieldset-group > .fieldset > .editor-field:last-child { margin-bottom: 0; }
-    .dk .dk-edit fieldset.fieldset-group > .fieldset[style*=grid] { row-gap: 32px; }
-    .dk .dk-edit fieldset.fieldset-group > .fieldset[style*=grid] > .editor-field { margin-bottom: 0; }
+    .dk .dk-edit .fieldset-columns { display: grid; grid-template-columns: repeat(var(--bp-columns), minmax(0, 1fr)); column-gap: 20px; row-gap: 32px; }
+    .dk .dk-edit fieldset.fieldset-group > .fieldset-columns > .editor-field { margin-bottom: 0; }
     .dk .dk-edit .object-toggle { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px 2px 0; border: 0; border-radius: 3px; background: none; font: inherit; color: inherit; cursor: pointer; }
     .dk .dk-edit .object-toggle svg { width: 21px; height: 21px; margin: -2px -6px; }
     .dk .dk-edit .object-toggle:focus-visible { outline: 2px solid var(--dk-focus-ring); }
     .dk .dk-edit .toggle-arrow { display: inline-grid; place-items: center; width: 9px; color: var(--dk-muted); transition: transform 100ms; }
-    .dk .dk-edit fieldset[data-open="true"] > legend .toggle-arrow { transform: rotate(90deg); }
+    .dk .dk-edit .object-toggle[aria-expanded="true"] .toggle-arrow { transform: rotate(90deg); }
     .dk .dk-edit fieldset[data-collapsible] > legend { display: flex; align-items: center; min-height: 25px; }
-    .dk .dk-edit fieldset[data-open="false"] > legend { margin-bottom: 0; }
+    .dk .dk-edit fieldset[data-collapsible]:has(> legend > .object-toggle[aria-expanded="false"]) > legend { margin-bottom: 0; }
+    .dk .dk-edit fieldset[data-collapsible]:has(> legend > .object-toggle[aria-expanded="false"]) > :not(legend) { display: none; }
     """
   end
 end

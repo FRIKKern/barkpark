@@ -981,7 +981,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                       inside it (`Desk.Fieldsets`); elsewhere every entry is a
                       lone field. --%>
                 <%= for entry <- shown_entries(@editor_schema, @nav_group, @editor_form, @parent_assigns) do %>
-                  <Fieldsets.entry :let={field} entry={entry}>
+                  <Fieldsets.entry :let={field} entry={entry} scope={@editor_doc.doc_id}>
                   <.studio_field_renderer
                     field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
                     editor_form={@editor_form}

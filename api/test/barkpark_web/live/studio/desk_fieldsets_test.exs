@@ -36,7 +36,8 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
       "title" => "Where",
       "options" => %{"collapsible" => true, "collapsed" => false}
     },
-    %{"name" => "quiet", "title" => "Quiet"}
+    %{"name" => "quiet", "title" => "Quiet"},
+    %{"name" => "grid", "title" => "Grid", "options" => %{"columns" => 2, "collapsed" => true}}
   ]
 
   @agreed %{"field" => "agree", "operator" => "eq", "value" => true}
@@ -58,6 +59,8 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
       "visibleWhen" => @agreed
     },
     %{"name" => "stray", "title" => "Stray", "type" => "string", "fieldset" => "undeclared"},
+    %{"name" => "gx", "title" => "Gx", "type" => "string", "fieldset" => "grid"},
+    %{"name" => "gy", "title" => "Gy", "type" => "string", "fieldset" => "grid"},
     %{
       "name" => "seo",
       "title" => "SEO",
@@ -86,6 +89,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
     "city" => "Oslo",
     "hush" => "Kept while hidden",
     "stray" => "Alone",
+    "gx" => "Left",
     "seo" => %{"metaTitle" => "Meta", "noIndex" => false},
     "cta" => %{"label" => "Go"}
   }
@@ -148,7 +152,12 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
     view = desk(c)
 
     assert has_element?(view, ~s|#{set("size")}:not([data-collapsible]) > legend|, "Size")
-    assert has_element?(view, ~s(#{set("size")} > .fieldset[style*="repeat(2,"] [id="width"]))
+
+    assert has_element?(
+             view,
+             ~s(#{set("size")} > .fieldset.fieldset-columns[style="--bp-columns:2"] [id="width"])
+           )
+
     assert has_element?(view, ~s(#{set("size")} > .fieldset [id="height"]))
     refute has_element?(view, ~s(#{set("size")} > legend button))
 
@@ -162,7 +171,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
   test "a collapsed fieldset starts shut, a collapsible one open; both keep their inputs", c do
     view = desk(c)
 
-    more = set("more") <> ~s([data-collapsible][data-open="false"])
+    more = set("more") <> "[data-collapsible]"
 
     assert has_element?(
              view,
@@ -175,7 +184,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
              "#{name} left the form"
     end
 
-    where = set("where") <> ~s([data-collapsible][data-open="true"])
+    where = set("where") <> "[data-collapsible]"
 
     assert has_element?(
              view,
@@ -187,7 +196,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
 
     toggle = view |> element(~s(#{more} button.object-toggle)) |> render()
     assert toggle =~ "toggle_attr"
-    assert toggle =~ "data-open"
+    assert toggle =~ "aria-expanded"
     refute toggle =~ "push"
   end
 
@@ -207,7 +216,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
     view = desk(c)
 
     seo = ~s(#{@form} fieldset.bp-field-composite[data-field-name="seo"])
-    assert has_element?(view, ~s(#{seo}[data-collapsible][data-open="false"]))
+    assert has_element?(view, ~s(#{seo}[data-collapsible]))
 
     assert has_element?(
              view,
@@ -221,16 +230,72 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
 
     assert has_element?(
              view,
-             ~s|#{cta}:not([data-collapsible]):not([data-open]) > legend|,
+             ~s|#{cta}:not([data-collapsible]):not([id]) > legend|,
              "Call to action"
            )
 
     refute has_element?(view, ~s(#{cta} button.object-toggle))
   end
 
-  test "the desk sheet stops drawing a shut fieldset's fields, and nothing else" do
+  # Review of #26390, B1: with no id LiveView re-applied a shut fieldset's
+  # state to whichever fieldset took its place in the page.
+  test "a fieldset and its button have ids of their own; the state is one attribute", c do
+    view = desk(c)
+    html = view |> element(@form) |> render()
+
+    for {name, id} <- [
+          {"size", "bp-set-#{c.id}-size"},
+          {"more", "bp-set-#{c.id}-more"},
+          {"where", "bp-set-#{c.id}-where"},
+          {"grid", "bp-set-#{c.id}-grid"}
+        ] do
+      assert has_element?(view, ~s(#{set(name)}[id="#{id}"])), "#{name} has no id"
+    end
+
+    assert has_element?(
+             view,
+             ~s(#{set("more")} > legend > button[id="bp-set-#{c.id}-more-toggle"])
+           )
+
+    assert has_element?(
+             view,
+             ~s(#{@form} fieldset[id="bp-fold-seo"] > legend > button[id="bp-fold-seo-toggle"])
+           )
+
+    ids = for [_, id] <- Regex.scan(~r/\sid="([^"]+)"/, html), do: id
+    assert ids -- Enum.uniq(ids) == []
+
+    # Open or shut is the button's aria-expanded and nothing else.
+    refute html =~ "data-open"
+    refute Fieldsets.css() =~ "data-open"
+  end
+
+  # Review of #26390, B2: an inline display:grid beat the sheet's display:none.
+  test "columns are the sheet's grid, not an inline one, so a columned fieldset folds", c do
+    view = desk(c)
+
+    grid = view |> element(~s(#{set("grid")} > .fieldset)) |> render()
+    assert grid =~ ~s(class="fieldset fieldset-columns")
+    assert grid =~ ~s(style="--bp-columns:2")
+    refute grid =~ "display"
+
+    assert has_element?(view, ~s(#{set("grid")} > legend > button[aria-expanded="false"]))
+    assert has_element?(view, ~s(#{set("grid")} [name="doc[gx]"][value="Left"]))
+
+    css = Fieldsets.css()
+    assert css =~ "fieldset-columns { display: grid;"
+    refute css =~ "!important"
+  end
+
+  test "the desk sheet stops drawing a shut fieldset's fields, after every other rule" do
     css = rendered_to_string(BarkparkWeb.Studio.Desk.DocStyle.sheet(%{}))
-    assert css =~ ~s|.dk .dk-edit fieldset[data-open="false"] > :not(legend) { display: none; }|
+
+    shut =
+      ~s|.dk .dk-edit fieldset[data-collapsible]:has(> legend > .object-toggle[aria-expanded="false"]) > :not(legend) { display: none; }|
+
+    assert css =~ shut
+    [_before, after_shut] = String.split(Fieldsets.css(), shut)
+    refute after_shut =~ "display:"
     refute Fieldsets.css() =~ "hidden"
   end
 
@@ -242,7 +307,7 @@ defmodule BarkparkWeb.Studio.DeskFieldsetsTest do
     refute has_element?(view, "#editor-form .object-toggle")
     refute has_element?(view, "#editor-form [data-collapsible]")
 
-    for name <- ~w(width note height limit agree body city stray) do
+    for name <- ~w(width note height limit agree body city stray gx gy) do
       assert has_element?(view, ~s(#editor-form [name="doc[#{name}]"])), "no input for #{name}"
     end
   end
