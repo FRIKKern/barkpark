@@ -1,0 +1,243 @@
+package pdrender
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"runtime"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+// The wall-clock bound in limits_bound_test.go catches a render that blows up
+// by an order of magnitude, but the slowest limit doc takes about 40 ms on a
+// CI runner, so a doc could get 20 times slower and still pass one second.
+// This check catches a smaller slowdown. It times each limit doc's render
+// against a fixed calibration doc's render on the same machine, in the same
+// process, and compares that ratio with the doc's base measured on main.
+// Decoding is not timed: for some limit docs it costs more than the render and
+// would dilute a renderer's slowdown.
+//
+// Three choices keep it from failing on a slow or loaded machine:
+//   - It reads process CPU time, not the wall clock, so other processes
+//     competing for the CPU do not count.
+//   - Each doc render is paired with a calibration render right before it, and
+//     the check takes the median of limitDocCostPairs pair ratios.
+//   - It divides every doc's ratio by the median over the docs with a base. That
+//     median is the machine factor: how much more or less the calibration doc
+//     costs on this CPU than on the machine that measured the bases. A
+//     slowdown in one renderer moves one or two docs, not the median.
+//
+// While measuring, GOMAXPROCS is 1 and the garbage collector is off, so the
+// CPU time is the renderer's own work and does not depend on the core count.
+// The alloc bound covers allocation.
+//
+// What it does not catch: a slowdown in decoding, a slowdown in code the
+// calibration doc also runs (inline text and marks, headings, lists), a
+// slowdown in more than half of the checked docs at once, and a render that
+// waits rather than computes. The wall-clock bound still covers those when
+// they are large.
+//
+// When this check fails, or CI prints a "limit-doc cost drift" warning, on
+// your PR:
+//   - If the named doc got slower and you did not mean it to, look at the
+//     renderer for that doc's block type. That is what the check is for.
+//   - If you made the doc more expensive on purpose, re-measure (below).
+//   - If you made OTHER docs faster, the check can still fail. The machine
+//     factor is the median over the docs with a base, so when more than half
+//     of them get faster (four of the seven at 3x faster, say), the factor
+//     drops and the docs you did not touch read as up to 3x slower. Re-measure.
+//   - A warning (above limitDocCostDrift, still passing) means a doc has
+//     moved far enough that noise on a slow runner may push it over the slack
+//     on someone else's PR. Re-measure in the PR that moved it.
+//
+// To re-measure, on an otherwise idle machine, run
+//
+//	go test ./internal/pdrender -run '^TestLimitDocsRenderWithinTheirBound$' -count=20 -v
+//
+// and take each doc's median "ratio" over the 20 runs. Write those medians
+// into limitDocCostBase. A doc whose median is under limitDocCostFloor gets 0,
+// and a doc at 0 whose median is now over the floor gets its median. Say in
+// the PR which bases moved and why, and check that CI's printed normalised
+// values for the new bases sit near 1.00.
+
+// limitDocCostBase is each limit doc's render CPU time divided by the
+// calibration doc's, measured on main (Apple M-series, 20 runs, median). Zero
+// marks a doc whose render costs under limitDocCostFloor of the calibration
+// render. Such a doc is too short to hold to its own base, so it is held to
+// the floor instead. That still catches a blowup (a quadratic polyline scan
+// takes the route doc from 0.005 to over 100), not a 5x slowdown.
+//
+// The floor is 0.5 because of the two deep-nesting docs, "nested columns"
+// (0.31 here) and "nested strong" (0.23). On a hosted x86 CI runner they cost
+// about twice as much against the calibration doc as on the Mac (1.95 and
+// 2.07 normalised in PR #26427's run, while every other doc read 0.82 to
+// 1.02), which left too little room under the slack. On the floor they read
+// about 1.2 and 0.95 there. The cost of that: on the Mac they now fail only
+// past about 4.6x (nested columns) and 6x (nested strong) their usual cost.
+//
+// To re-measure, see "When this check fails" at the top of this file.
+var limitDocCostBase = map[string]float64{
+	"toc":            0,
+	"sheet":          0,
+	"table":          9.606,
+	"heatmap":        1.673,
+	"route":          0,
+	"record table":   0,
+	"tool diff":      3.119,
+	"multi edit":     3.933,
+	"nested columns": 0,
+	"nested section": 2.970,
+	"big number":     0,
+	"nested strong":  0,
+	"many merges":    2.229,
+	"many spans":     2.151,
+	"many marks":     0,
+	"flat line":      0,
+	"flat line high": 0,
+}
+
+const (
+	// limitDocCostSlack is how far a doc's normalised cost may rise above its
+	// base. On the measuring Mac the normalised cost of the docs with a base
+	// stayed within 0.73 to 1.83 over 50 runs, 20 of them with eight extra
+	// busy processes (load average up to 30); the docs on the floor stayed
+	// under 1.07. A renderer made 5x slower moved its doc to 2.3 to 5.4,
+	// depending on how much of the doc's render that renderer is.
+	limitDocCostSlack = 2.5
+	// limitDocCostDrift is where a passing doc starts to print a warning. In
+	// PR #26427's two CI runs every doc read 1.2 or less under these bases
+	// and floor, so a doc above 1.6 has moved.
+	limitDocCostDrift = 1.6
+	limitDocCostFloor = 0.5
+	limitDocCostPairs = 7
+)
+
+// calibrationDoc is a fixed page of headings, wrapped paragraphs with marks,
+// and short lists: block types the limit docs do not stress. It renders in
+// about 4 ms on the measuring Mac.
+func calibrationDoc() []byte {
+	var blocks []any
+	for i := range 60 {
+		blocks = append(blocks,
+			map[string]any{"type": "heading", "level": 2, "text": fmt.Sprintf("Section %d", i)},
+			map[string]any{"type": "paragraph", "content": []any{
+				map[string]any{"type": "text", "value": "The reader wraps this sentence at the screen width and keeps "},
+				map[string]any{"type": "text", "value": "bold words", "marks": []any{"strong"}},
+				map[string]any{"type": "text", "value": " and "},
+				map[string]any{"type": "text", "value": "italic words", "marks": []any{"em"}},
+				map[string]any{"type": "text", "value": " inside one paragraph that runs long enough to wrap twice or more at one hundred columns."},
+			}},
+			map[string]any{"type": "list", "items": []any{"first item of the list", "second item, a little longer than the first", "third"}},
+		)
+	}
+	body, err := json.Marshal(map[string]any{"blocks": blocks})
+	if err != nil {
+		panic(err)
+	}
+	return body
+}
+
+// renderCPU decodes doc, then renders it once and returns the CPU time the
+// render took. Decoding stays outside the measurement: for some limit docs it
+// costs more than the render, and it would dilute a renderer's slowdown.
+func renderCPU(t *testing.T, reg *Registry, doc []byte) (time.Duration, string) {
+	t.Helper()
+	blocks, err := Decode(doc)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	runtime.GC()
+	before, _ := processCPUTime()
+	out := reg.RenderDoc(blocks, RenderCtx{Width: 100, Theme: LightTheme()})
+	after, _ := processCPUTime()
+	return after - before, out
+}
+
+// median of a non-empty slice; callers check the length first.
+func median(v []float64) float64 {
+	s := slices.Clone(v)
+	slices.Sort(s)
+	if n := len(s); n%2 == 1 {
+		return s[n/2]
+	}
+	return (s[len(s)/2-1] + s[len(s)/2]) / 2
+}
+
+func checkLimitDocCost(t *testing.T, reg *Registry, docs []limitDoc) {
+	if raceDetector {
+		t.Skip("the race detector changes each doc's cost relative to the calibration doc; the wall-clock bound applies")
+	}
+	if _, ok := processCPUTime(); !ok {
+		t.Skip("no process CPU time on this OS; the wall-clock bound applies")
+	}
+	seen := map[string]bool{}
+	for _, d := range docs {
+		seen[d.Name] = true
+		if _, ok := limitDocCostBase[d.Name]; !ok {
+			t.Errorf("limit doc %q has no entry in limitDocCostBase; measure it as that comment says", d.Name)
+		}
+	}
+	for name := range limitDocCostBase {
+		if !seen[name] {
+			t.Errorf("limitDocCostBase names %q, which is not in limit-docs.json; remove it", name)
+		}
+	}
+
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+
+	cal := calibrationDoc()
+	if _, out := renderCPU(t, reg, cal); !strings.Contains(ansi.Strip(out), "Section 59") {
+		t.Fatalf("the calibration doc did not render its last heading:\n%.300s", out)
+	}
+	ratio := map[string]float64{}
+	var normal []float64
+	for _, d := range docs {
+		pairs := make([]float64, 0, limitDocCostPairs)
+		for range limitDocCostPairs {
+			c, _ := renderCPU(t, reg, cal)
+			r, _ := renderCPU(t, reg, d.Doc)
+			if c > 0 {
+				pairs = append(pairs, float64(r)/float64(c))
+			}
+		}
+		if len(pairs) == 0 {
+			t.Fatalf("%s: the calibration render took no measurable CPU time", d.Name)
+		}
+		ratio[d.Name] = median(pairs)
+		if base := limitDocCostBase[d.Name]; base > 0 {
+			normal = append(normal, ratio[d.Name]/base)
+		}
+	}
+	if len(normal) == 0 {
+		t.Fatal("no limit doc with a base in limitDocCostBase was measured, so there is no machine factor to normalise by; give the docs their bases as the comment at the top of this file says")
+	}
+	factor := median(normal)
+	t.Logf("machine factor %.2f (about 1.00 on the machine that measured the bases)", factor)
+	for _, d := range docs {
+		base, held := limitDocCostBase[d.Name], "base"
+		if base == 0 {
+			base, held = limitDocCostFloor, "floor"
+		}
+		cost := ratio[d.Name] / base / factor
+		t.Logf("%-16s ratio %7.3f  %-5s %7.3f  normalised %5.2f", d.Name, ratio[d.Name], held, base, cost)
+		switch {
+		case cost > limitDocCostSlack:
+			t.Errorf("%s costs %.2f times its %s against the calibration render, over %.1f: a slowdown in its renderer, or a change that made it legitimately more expensive (then re-measure limitDocCostBase)", d.Name, cost, held, limitDocCostSlack)
+		case cost > limitDocCostDrift:
+			msg := fmt.Sprintf("limit-doc cost drift: %s reads %.2f of its %s (warns above %.1f, fails above %.1f); re-measure limitDocCostBase in internal/pdrender/limits_cost_test.go", d.Name, cost, held, limitDocCostDrift, limitDocCostSlack)
+			t.Log(msg)
+			if os.Getenv("GITHUB_ACTIONS") == "true" {
+				// A workflow command must start its own line on stdout;
+				// t.Log prefixes the file and line, so print it directly.
+				fmt.Printf("::warning::%s\n", msg)
+			}
+		}
+	}
+}

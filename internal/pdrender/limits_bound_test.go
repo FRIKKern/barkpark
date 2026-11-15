@@ -10,3 +10,7 @@ import "time"
 // the test once without -race to hold it (.github/workflows/go-tests.yml).
 // limits_bound_race_test.go holds the wider backstop for `go test -race`.
 const limitDocTime = time.Second
+
+// raceDetector reports whether the test binary runs under -race. The cost
+// check in limits_cost_test.go runs only without it.
+const raceDetector = false
