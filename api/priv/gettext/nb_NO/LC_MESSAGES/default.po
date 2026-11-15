@@ -1853,6 +1853,18 @@ msgstr "Forkaste alle ulagrede endringer i"
 msgid "Disconnect references and delete"
 msgstr "Koble fra referansene og slett"
 
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:74
+#, elixir-autogen, elixir-format
+msgid "1 document refers to “%{title}”"
+msgid_plural "%{count} documents refer to “%{title}”"
+msgstr[0] "1 dokument refererer til «%{title}»"
+msgstr[1] "%{count} dokumenter refererer til «%{title}»"
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:171
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab (%{type})"
+msgstr "Åpne i ny fane (%{type})"
+
 #: lib/barkpark_web/components/studio_components/modals.ex:740
 #, elixir-autogen, elixir-format
 msgid "Docs"
@@ -2574,6 +2586,36 @@ msgstr "Dette arbeidsområdet har ingen offentlig side for artikler, så bare me
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
 msgstr "Avpubliser likevel"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Unpublish document?"
+msgstr "Avpublisere dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:104
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to unpublish “%{title}”?"
+msgstr "Er du sikker på at du vil avpublisere «%{title}»?"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:47
+#, elixir-autogen, elixir-format
+msgid "Referring to %{title}"
+msgstr "Refererer til %{title}"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:51
+#, elixir-autogen, elixir-format
+msgid "You may not be able to unpublish “%{title}” because the following documents refer to it:"
+msgstr "Du kan kanskje ikke avpublisere «%{title}» fordi følgende dokumenter refererer til det:"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:58
+#, elixir-autogen, elixir-format
+msgid "If you unpublish this document, documents that refer to it will no longer be able to access it."
+msgstr "Hvis du avpubliserer dette dokumentet, får dokumenter som refererer til det, ikke lenger tilgang til det."
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:88
+#, elixir-autogen, elixir-format
+msgid "Unpublish now"
+msgstr "Avpubliser nå"
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2202
 #, elixir-autogen, elixir-format

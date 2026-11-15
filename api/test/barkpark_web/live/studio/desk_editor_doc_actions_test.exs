@@ -173,16 +173,14 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     |> element(~s{[data-pane-editing] button[phx-click="unpublish"]:not([role="menuitem"])})
     |> render_click()
 
-    assert has_element?(view, "#unpublish-guard-dialog[role=dialog]")
-
-    assert has_element?(
-             view,
-             ~s(#unpublish-guard-dialog [data-test-id="unpublish-ref"]),
-             "Post One"
-           )
-
-    view |> element("#unpublish-guard-dialog button[data-modal-focus]") |> render_click()
+    # The desk's own dialog (`Desk.UnpublishDialog`), not the Studio's modal.
+    dialog = ~s([data-pane-editing] [role="dialog"][data-desk-dialog="unpublish"])
+    assert has_element?(view, dialog)
     refute has_element?(view, "#unpublish-guard-dialog")
+    assert has_element?(view, ~s(#{dialog} .used-in li .t), "Post One")
+
+    view |> element(~s(#{dialog} button[data-modal-focus])) |> render_click()
+    refute has_element?(view, dialog)
     {_doc, _draft?, published?} = Content.fetch_doc_with_draft(c.author, c.ada, @dataset)
     assert published?
   end
