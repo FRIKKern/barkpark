@@ -291,7 +291,8 @@ const mountDesk = (attrs) => {
   el.id = "desk-panes";
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
   el.innerHTML =
-    `<section data-pane-index="1"><div class="dk-toast" popover="manual"></div>` +
+    `<section data-pane-index="1" data-pane-editing><div class="dk-toast" popover="manual"></div>` +
+    `<div class="view-tabs" role="tablist"><button id="tab-editor" role="tab" aria-selected="true" tabindex="0">Editor</button><button role="tab" aria-selected="false" tabindex="-1">JSON</button></div>` +
     `<div class="field" id="f-late"><div class="field-actions"><button id="b-late" popovertarget="m" data-desk-field="late" aria-expanded="false"></button></div><input id="late-input"></div>` +
     `<div class="field" id="f-fixed"><div class="field-actions"><button id="b-fixed" popovertarget="m" data-desk-field="fixed" data-desk-paste-off aria-expanded="false"></button></div><input type="hidden"><input id="fixed-input"></div>` +
     `<div id="m" class="dk-doc-menu-list" popover role="menu" data-desk-unavailable="Copy and paste did not load. Reload the page.">` +
@@ -390,8 +391,10 @@ assert.equal(document.activeElement, lateField.querySelector("#fixed-input"), "t
 lateField.id = "f-fixed";
 lateField.insertAdjacentHTML("beforebegin", `<div class="field" id="f-late"><div class="field-actions"><button id="b-late" popovertarget="m" data-desk-field="late" aria-expanded="false"></button></div><input id="late-input"></div>`);
 toggle("closed");
-//     The field is taken out of the page and there is no field after it:
-//     the focus goes to what holds the form.
+//     The LAST field is taken out under its open menu (re-review of #26479):
+//     the focus goes to the field before it. Nothing is made focusable by the
+//     script: the next patch would take a `tabindex` the server did not draw
+//     away again, and the focus with it.
 deskRoot.querySelector("#f-late").hidden = false;
 press(opener("b-fixed"));
 toggle("open");
@@ -399,7 +402,23 @@ hidden = 0;
 deskRoot.querySelector("#f-fixed").remove();
 await tick(20);
 assert.equal(hidden, 1, "the menu is closed when its field is removed");
-assert.equal(document.activeElement, deskRoot.querySelector("section"), "never the body");
+assert.equal(document.activeElement.id, "late-input", "the field before it");
+//     No field is left at all: the pane's selected view tab, which the
+//     server draws focusable. Still there after a wait and one more patch.
+toggle("closed");
+press(opener("b-late"));
+toggle("open");
+hidden = 0;
+deskRoot.querySelector("#f-late").remove();
+await tick(20);
+assert.equal(hidden, 1);
+assert.equal(document.activeElement.id, "tab-editor", "never the body");
+await tick(500);
+deskRoot.querySelector("section").setAttribute("data-desk-save", "patched");
+await tick(20);
+assert.equal(document.activeElement.id, "tab-editor");
+assert.equal(deskRoot.querySelector("section").hasAttribute("tabindex"), false, "the script adds no tabindex of its own");
+deskRoot.querySelector("section").insertAdjacentHTML("beforeend", `<div class="field" id="f-late"><div class="field-actions"><button id="b-late" popovertarget="m" data-desk-field="late" aria-expanded="false"></button></div><input id="late-input"></div>`);
 //     Closed: a later patch does nothing.
 toggle("closed");
 deskRoot.querySelector("#f-late").hidden = true;

@@ -299,8 +299,8 @@
   // drawn has nothing to be placed by. So while the menu is open the form is
   // watched: Paste follows the field's button, and when the button is gone
   // or not drawn the menu is closed and the focus is put on the control of
-  // the next field that is still there, else on what holds the form. Never
-  // left on the page's body.
+  // the nearest field that is still there, else on the pane's selected view
+  // tab (`landing`). Never left on the page's body.
   var watch = null;
 
   function drawn(el) {
@@ -349,25 +349,33 @@
       if (paste && paste.disabled !== off) paste.disabled = off;
       return;
     }
-    var to = watch.scope;
-    for (var i = 0; i < watch.after.length; i++) {
-      var later = buttonOf(menu, watch.after[i]);
-      var found = later && control(later.closest(".field"));
-      if (found) {
-        to = found;
-        break;
-      }
-    }
+    var to = landing(menu, watch);
     stopWatch();
     try {
       menu.hidePopover();
     } catch (_error) {
       /* already closed */
     }
-    if (to && to.isConnected) {
-      if (to.tabIndex < 0 && !to.hasAttribute("tabindex")) to.setAttribute("tabindex", "-1");
-      to.focus();
+    if (to) to.focus();
+  }
+
+  // Where the focus goes when the menu's field is gone: the control of the
+  // nearest field still there (after it, else before it), else the pane's
+  // selected view tab, else the pane's first control. Each is focusable as
+  // the server draws it. Nothing is made focusable here: the next patch
+  // takes a `tabindex` the server did not draw away again, and the focus
+  // would fall to the page's body with it.
+  function landing(menu, watching) {
+    var names = watching.after.concat(watching.before);
+    for (var i = 0; i < names.length; i++) {
+      var button = buttonOf(menu, names[i]);
+      var found = button && control(button.closest(".field"));
+      if (found) return found;
     }
+    var pane = watching.scope.closest("[data-pane-editing]") || watching.scope;
+    var tab = pane.querySelector('[role="tab"][aria-selected="true"]');
+    if (tab && tab.tabIndex >= 0 && drawn(tab)) return tab;
+    return control(pane);
   }
 
   function startWatch(menu) {
@@ -377,9 +385,13 @@
     if (!scope || typeof window.MutationObserver !== "function") return;
     // The fields after this one, by name, in the form's order.
     var buttons = Array.prototype.slice.call(scope.querySelectorAll(".field-actions > button[data-desk-field]"));
-    var after = buttons.slice(buttons.indexOf(opener) + 1).map(function (button) {
+    var name = function (button) {
       return button.getAttribute("data-desk-field");
-    });
+    };
+    var at = buttons.indexOf(opener);
+    var after = buttons.slice(at + 1).map(name);
+    // The fields before it, nearest first.
+    var before = buttons.slice(0, at).map(name).reverse();
     var queued = false;
     var observer = new window.MutationObserver(function () {
       if (queued) return;
@@ -390,7 +402,7 @@
       });
     });
     observer.observe(scope, { childList: true, subtree: true, attributes: true });
-    watch = { menu: menu, observer: observer, after: after, scope: scope };
+    watch = { menu: menu, observer: observer, after: after, before: before, scope: scope };
   }
 
   window.document.addEventListener(

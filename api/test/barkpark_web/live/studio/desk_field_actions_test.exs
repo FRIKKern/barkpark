@@ -244,6 +244,22 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
     assert mounted =~ "aria-expanded"
   end
 
+  # When a rule hides the field under its open menu and no field is left to
+  # take the focus, bp-desk-field-actions.js puts it on the pane's selected
+  # view tab. That works only while the SERVER draws the tab focusable: a
+  # tabindex the script added would go with the next patch.
+  test "the edit pane's selected view tab is focusable as the server draws it", c do
+    view = desk(c)
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] .view-tabs [role="tab"][aria-selected="true"][tabindex="0"])
+           )
+
+    refute view |> element("[data-pane-editing] #editor-form") |> render() =~
+             ~r/^<form[^>]*\stabindex=/
+  end
+
   test "a field the schema does not have, or no open document, is answered with nothing", c do
     view = desk(c)
 
