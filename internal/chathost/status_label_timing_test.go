@@ -27,6 +27,13 @@ import (
 // and the test can say what it waited for.
 const labelBackstop = 20 * time.Second
 
+// maxTextLag bounds one lag only: from the helper writing its text to the host
+// publishing it (task-0d2151c31ef9c2a8). It is measured at 0.2-4 ms; a host that
+// waited a grace second or more for the label before the first text would pass
+// the order checks but not this. It never bounds the whole turn or the helper's
+// start, which a loaded machine stretches past any budget.
+const maxTextLag = time.Second
+
 // niceOf reads a process's niceness the same way on macOS and Linux.
 func niceOf(pid int) int {
 	out, err := exec.Command("ps", "-o", "ni=", "-p", strconv.Itoa(pid)).Output()
@@ -84,12 +91,16 @@ func (l *heldLabel) StatusLabel(ctx context.Context, _ string) (string, error) {
 // The first text is published while the label call is still running: the side
 // call is never under the lock the turn's events pass through, and the turn
 // never waits for it. The turn ends with the call still held, so no label goes
-// out.
+// out. Nor does the host wait a while for the label before the text: the text
+// is published within maxTextLag of the helper writing it.
 func TestClaudeTurnTextIsNotHeldByASlowLabelCall(t *testing.T) {
 	label := newHeldLabel(t)
+	textAt := filepath.Join(t.TempDir(), "text-at")
 	var textSeen, textWhileHeld bool
-	events, _ := runLabelledTurnHooked(t, label, "", &syncBuffer{}, func(event map[string]any) {
+	var publishedAt time.Time
+	events, _ := runLabelledTurnEnv(t, label, map[string]string{"BARKPARK_STATUS_HELPER_TEXT_AT": textAt}, "", &syncBuffer{}, func(event map[string]any) {
 		if event["kind"] == "text_delta" && !textSeen {
+			publishedAt = time.Now()
 			textSeen = true
 			textWhileHeld = !label.released.Load()
 		}
@@ -107,6 +118,21 @@ func TestClaudeTurnTextIsNotHeldByASlowLabelCall(t *testing.T) {
 		if event["kind"] == "status" {
 			t.Fatal("a label that came after the turn ended was published")
 		}
+	}
+	raw, err := os.ReadFile(textAt)
+	if err != nil {
+		t.Fatalf("the helper left no time for its text: %v", err)
+	}
+	wroteAt, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil {
+		t.Fatalf("the helper's text time %q: %v", raw, err)
+	}
+	// Both are wall-clock readings: a time read back from a file has no
+	// monotonic reading, so Sub compares wall clocks.
+	lag := publishedAt.Sub(time.Unix(0, wroteAt))
+	t.Logf("text lag %v", lag)
+	if lag > maxTextLag {
+		t.Fatalf("the first text was published %v after the helper wrote it; want at most %v: the host waited for the label before the text", lag, maxTextLag)
 	}
 }
 
