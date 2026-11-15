@@ -1063,10 +1063,7 @@ defmodule Barkpark.Content.Forms do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
-    params =
-      params
-      |> preserve_datetime_values(snapshot, schema)
-      |> preserve_untouched_fields(snapshot, schema)
+    params = edits(params, snapshot, schema)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
@@ -1079,6 +1076,33 @@ defmodule Barkpark.Content.Forms do
       _ ->
         classic_save_without_top_level_blocks(base_content, params, schema, dataset, scope)
     end
+  end
+
+  # The posted content fields the save reads as edits: a field whose post is
+  # only what the form drew for `snapshot` is dropped.
+  defp edits(params, snapshot, schema) do
+    params
+    |> preserve_datetime_values(snapshot, schema)
+    |> preserve_untouched_fields(snapshot, schema)
+  end
+
+  @doc """
+  The keys of `params` that a save from `base_doc` reads as edits: the ones
+  `upsert_draft/6` writes. Every other posted value is what the form drew for
+  `base_doc`, and the save keeps what the store holds for it.
+
+  The Studio puts only these into its form buffer after a save
+  (`BarkparkWeb.Studio.StudioLive.PostedEdits`), so the buffer and the store
+  take the same fields from a post.
+  """
+  @spec edited_keys(map(), String.t() | nil, map() | nil, map()) :: [term()]
+  def edited_keys(base_doc, type, schema, params) when is_map(base_doc) and is_map(params) do
+    params
+    |> Map.reject(fn {key, posted} ->
+      key in ["title", "status"] and row_untouched?(posted, key, base_doc)
+    end)
+    |> edits(Map.get(base_doc, :content) || %{}, CanonicalShapes.for_type(schema, type))
+    |> Map.keys()
   end
 
   defp classic_save_top_level_blocks(base_content, blocks, params, schema, dataset, scope) do
@@ -1404,7 +1428,7 @@ defmodule Barkpark.Content.Forms do
   defp row_field(params, key, base_doc, current) do
     case Map.fetch(params, key) do
       {:ok, posted} ->
-        if posted == Map.get(base_doc, String.to_existing_atom(key)),
+        if row_untouched?(posted, key, base_doc),
           do: Map.get(current, String.to_existing_atom(key)) || posted,
           else: posted
 
@@ -1412,6 +1436,9 @@ defmodule Barkpark.Content.Forms do
         Map.get(current, String.to_existing_atom(key))
     end
   end
+
+  defp row_untouched?(posted, key, base_doc),
+    do: posted == Map.get(base_doc, String.to_existing_atom(key))
 
   defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
     with content when is_map(content) <-

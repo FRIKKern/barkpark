@@ -346,6 +346,32 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
     end
   end
 
+  # The form buffer after a save takes only the fields the save read as edits
+  # (`StudioLive.PostedEdits`, task-a4ded0be5c8ec3cb), so the next post is
+  # drawn from a buffer the first save left. Each post here is the form as the
+  # page draws it after the one before.
+  describe "Studio Classic form — a second change and a Save, each from the redrawn form" do
+    test "every untouched cell is byte-identical after each", %{type: type, token: token} do
+      doc_id = seed_draft!(type)
+      view = classic_edit_probe!(token, type, doc_id)
+      assert_matrix!("classic_form", stored(type, doc_id))
+
+      redrawn = fn probe ->
+        deep_merge(browser_sanitised(render(view)), %{"doc" => %{"probe" => probe}})
+      end
+
+      view |> form("#editor-form") |> render_change(redrawn.("probe second"))
+      doc = stored(type, doc_id)
+      assert doc.content["probe"] == "probe second"
+      assert_cells!("classic_form second change", doc)
+
+      view |> form("#editor-form") |> render_submit(redrawn.("probe saved"))
+      doc = stored(type, doc_id)
+      assert doc.content["probe"] == "probe saved"
+      assert_cells!("classic_submit after two changes", doc)
+    end
+  end
+
   # A Beta op that rewrites the probe's bound block to its own value — the
   # first Beta edit materialises the synthesized block list.
   defp materialise_blocks!(type, doc_id) do
