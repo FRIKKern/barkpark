@@ -26,11 +26,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperExport do
   attributes, which is where everything that changes lives.
 
   It only reads. The export holds what this viewer already sees in the editor,
-  and Print opens the same reader page as "Open standalone".
+  and Print opens the same reader page as "Open standalone". A Table the table
+  editor can edit rides as that editor's projection, so its cells carry no
+  inline source metadata (`_key`, producer fields) the editor keeps off the
+  page either (`Barkpark.PortableDoc.TableEditing.project/1`).
   """
   use BarkparkWeb, :html
 
   alias Barkpark.Content
+  alias Barkpark.PortableDoc.TableEditing
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Paths}
 
   attr(:slug, :string, required: true)
@@ -85,17 +89,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperExport do
 
   @doc """
   The top-level blocks the editor renders outside every canvas, in document
-  order.
+  order, each as the export may hold it (`export_block/1`).
   """
   @spec blocks_outside_canvases([map()], term(), String.t()) :: [map()]
   def blocks_outside_canvases(blocks, retained, slug) when is_list(blocks) do
     if PaperCanvas.paper_canvas_enabled?() do
       retained_ids = PaperCanvas.retained_ids(retained, slug)
-      for {:block, block} <- PaperCanvas.partition_runs(blocks, retained_ids), do: block
+
+      for {:block, block} <- PaperCanvas.partition_runs(blocks, retained_ids),
+          do: export_block(block)
     else
-      blocks
+      Enum.map(blocks, &export_block/1)
     end
   end
 
   def blocks_outside_canvases(_blocks, _retained, _slug), do: []
+
+  @doc """
+  A block as the export holds it. A Table the table editor projects keeps its
+  id, its head and rows and each cell's `align`, with each cell's inline as the
+  projection has it; any other block is as saved.
+  """
+  @spec export_block(term()) :: term()
+  def export_block(%{"type" => "table", "rows" => rows} = table) do
+    case TableEditing.project(table) do
+      {:ok, %{head: head, rows: projected}} ->
+        %{
+          "id" => table["id"],
+          "type" => "table",
+          "rows" => Enum.zip_with(rows, projected, &row/2)
+        }
+        |> put_head(table["head"], head)
+
+      {:error, _} ->
+        table
+    end
+  end
+
+  def export_block(block), do: block
+
+  defp put_head(block, _saved, nil), do: block
+  defp put_head(block, saved, head), do: Map.put(block, "head", cells(saved, head))
+
+  defp row(%{"cells" => saved}, inline), do: %{"cells" => cells(saved, inline)}
+  defp row(saved, inline), do: cells(saved, inline)
+
+  defp cells(saved, inline), do: Enum.zip_with(saved, inline, &cell/2)
+
+  defp cell(%{"align" => align}, inline) when align in ["center", "right"],
+    do: %{"content" => inline, "align" => align}
+
+  defp cell(_saved, inline), do: inline
 end

@@ -66,6 +66,53 @@ defmodule BarkparkWeb.PaperExportTest do
     assert attr(html, "data-paper-export-print-state") == "draft"
   end
 
+  # The same cell the table editor test keeps off the page
+  # (paper_table_editing_test.exs, "without exposing inline source metadata").
+  test "a Table the table editor projects rides without its inline source metadata" do
+    secret = %{
+      "type" => "link",
+      "href" => "/source",
+      "_key" => "link-source-secret",
+      "producer" => %{"role" => "primary"},
+      "children" => [
+        %{
+          "type" => "text",
+          "value" => "Kept words",
+          "_key" => "text-source-secret",
+          "producer" => %{"offset" => 9}
+        }
+      ]
+    }
+
+    table = %{
+      "id" => "t-meta",
+      "type" => "table",
+      "rows" => [
+        # A row map with nothing beside `cells` normalizes to a bare list, so
+        # the table editor would leave it read-only; the note keeps it editable.
+        %{
+          "row-note" => "keep",
+          "cells" => [
+            %{"content" => [secret], "align" => "right"},
+            [%{"type" => "text", "value" => "Plain"}]
+          ]
+        }
+      ]
+    }
+
+    html = render_component(&PaperExport.export_button/1, slug: "meta", blocks: [table])
+
+    refute html =~ "source-secret"
+    refute html =~ "producer"
+
+    assert [%{"id" => "t-meta", "rows" => [%{"cells" => [first, second]}]}] =
+             html |> attr("data-paper-export-blocks") |> Jason.decode!()
+
+    assert first["align"] == "right"
+    assert [%{"href" => "/source", "children" => [%{"value" => "Kept words"}]}] = first["content"]
+    assert second == [%{"type" => "text", "value" => "Plain"}]
+  end
+
   test "a paper that was never published has no page to print" do
     html =
       render_component(&PaperExport.export_button/1,
