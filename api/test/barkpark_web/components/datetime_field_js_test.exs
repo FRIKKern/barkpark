@@ -84,4 +84,22 @@ defmodule BarkparkWeb.Components.DatetimeFieldJsTest do
     [picker] = Regex.run(~r/<input[^>]*type="datetime-local"[^>]*>/, html)
     refute picker =~ "name="
   end
+
+  # task-2be7cd2bd845c2da: the hook keeps an unposted edit through a patch only
+  # for the document the wrapper names. A first draft turns `p1` into
+  # `drafts.p1`, which is the same document.
+  test "the wrapper names the open document by its published id" do
+    for doc_key <- ["p1", "drafts.p1"] do
+      html =
+        render_component(&BarkparkWeb.Components.FieldInputs.input/1, %{
+          field: %{"type" => "datetime", "name" => "publishedAt"},
+          editor_form: %{"publishedAt" => "2026-10-03T08:30:00Z"},
+          doc_key: doc_key
+        })
+
+      [wrapper] = Regex.run(~r/<div[^>]*phx-hook="BarkparkDatetimeField"[^>]*>/, html)
+      assert wrapper =~ ~s(data-doc="p1")
+      assert wrapper =~ ~s(data-value="2026-10-03T08:30:00Z")
+    end
+  end
 end
