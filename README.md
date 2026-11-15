@@ -36,6 +36,13 @@ Keep the server, database, and files on your computer. Local work continues when
 the internet or a remote server fails. Run remotely for shared access.
 Local and remote instances hold separate data; transfers are explicit today.
 
+<!-- news:start -->
+## News
+- 15 Nov 2026 · [Take a paper with you: Markdown, copy, or PDF](docs/news/2026-11-15-paper-export.md) · A Barkpark paper can now leave the Studio as a Markdown file, clipboard text, or a printed PDF.
+- 15 Nov 2026 · [Save any web page as a note](https://github.com/FRIKKern/barkdown/blob/main/docs/news/2026-11-15-save-web-page-as-note.md) · Barkdown turns the page you are reading into a clean note. Two reviews made sure a hostile page cannot sneak anything harmful in.
+- 15 Nov 2026 · [Two editors, one paragraph](https://github.com/FRIKKern/barkpark-studio/blob/main/docs/news/2026-11-15-two-editors-one-paragraph.md) · Two people can now type in the same paragraph at once and both keep every word. On the old code, a third of the words vanished.
+<!-- news:end -->
+
 ## What's new
 
 <!-- highlights:start -->
