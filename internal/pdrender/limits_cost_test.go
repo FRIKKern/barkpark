@@ -49,6 +49,14 @@ import (
 // the floor instead. That still catches a blowup (a quadratic polyline scan
 // takes the route doc from 0.005 to over 100), not a 5x slowdown.
 //
+// The floor is 0.5 because of the two deep-nesting docs, "nested columns"
+// (0.31 here) and "nested strong" (0.23). On a hosted x86 CI runner they cost
+// about twice as much against the calibration doc as on the Mac (1.95 and
+// 2.07 normalised in PR #26427's run, while every other doc read 0.82 to
+// 1.02), which left too little room under the slack. On the floor they read
+// about 1.2 and 0.95 there. The cost of that: on the Mac they now fail only
+// past about 4.6x (nested columns) and 6x (nested strong) their usual cost.
+//
 // To re-measure after a change that legitimately makes a doc more expensive,
 // run `go test ./internal/pdrender -run '^TestLimitDocsRenderWithinTheirBound$'
 // -count=20 -v` and take the median of the "ratio" column per doc.
@@ -61,10 +69,10 @@ var limitDocCostBase = map[string]float64{
 	"record table":   0,
 	"tool diff":      3.119,
 	"multi edit":     3.933,
-	"nested columns": 0.311,
+	"nested columns": 0,
 	"nested section": 2.970,
 	"big number":     0,
-	"nested strong":  0.230,
+	"nested strong":  0,
 	"many merges":    2.229,
 	"many spans":     2.151,
 	"many marks":     0,
@@ -75,12 +83,12 @@ var limitDocCostBase = map[string]float64{
 const (
 	// limitDocCostSlack is how far a doc's normalised cost may rise above its
 	// base. On the measuring Mac the normalised cost of the docs with a base
-	// stayed within 0.73 to 1.86 over 50 runs, 20 of them with eight extra
-	// busy processes (load average up to 38). A renderer made 5x slower moved
-	// its doc to 2.3 to 5.4, depending on how much of the doc's render that
-	// renderer is.
+	// stayed within 0.73 to 1.83 over 50 runs, 20 of them with eight extra
+	// busy processes (load average up to 30); the docs on the floor stayed
+	// under 1.07. A renderer made 5x slower moved its doc to 2.3 to 5.4,
+	// depending on how much of the doc's render that renderer is.
 	limitDocCostSlack = 2.5
-	limitDocCostFloor = 0.2
+	limitDocCostFloor = 0.5
 	limitDocCostPairs = 7
 )
 
