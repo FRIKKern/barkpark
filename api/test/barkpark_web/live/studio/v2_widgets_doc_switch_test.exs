@@ -85,7 +85,10 @@ defmodule BarkparkWeb.Studio.V2WidgetsDocSwitchTest do
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/talk/t1"))
     assert hidden_value(html, "doc[abstract].nob") =~ "first nob"
 
-    html = render_patch(view, scoped_studio("/d/#{@dataset}/studio/talk/t2"))
+    # The old Studio opens another document in two patches: the first draws
+    # no form, the next draws t2's (DocSwap). Read the page after both.
+    render_patch(view, scoped_studio("/d/#{@dataset}/studio/talk/t2"))
+    html = render(view)
     assert hidden_value(html, "doc[abstract].nob") =~ "second nob"
     assert hidden_value(html, "doc[abstract].eng") =~ "second eng"
   end
@@ -94,7 +97,10 @@ defmodule BarkparkWeb.Studio.V2WidgetsDocSwitchTest do
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/talk/t1"))
     assert hidden_value(html, "doc[venue].photo") =~ "one.png"
 
-    html = render_patch(view, scoped_studio("/d/#{@dataset}/studio/talk/t2"))
+    # The old Studio opens another document in two patches: the first draws
+    # no form, the next draws t2's (DocSwap). Read the page after both.
+    render_patch(view, scoped_studio("/d/#{@dataset}/studio/talk/t2"))
+    html = render(view)
     assert hidden_value(html, "doc[venue].photo") =~ "two.png"
   end
 end

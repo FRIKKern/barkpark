@@ -97,8 +97,11 @@ defmodule BarkparkWeb.Studio.StudioRowClickReplacesPathTest do
     {:ok, view, html} = live(conn, desk_url(ws, proj) <> "/publication/#{a}")
     assert html =~ ~s(value="Over My Dead Body")
 
-    html = click_row(view, b)
+    click_row(view, b)
     path = assert_patch(view)
+    # Another document opens in two patches (DocSwap): the click's own reply
+    # draws no form, the next patch draws B's. Read the page after both.
+    html = render(view)
 
     segments = path |> String.split("?") |> hd() |> String.split("/", trim: true)
 
