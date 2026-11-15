@@ -146,7 +146,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
   # An unticked checkbox sends no key at all, so absent reads as off.
   defp form_state(params) do
     %{
-      "id" => to_string(params["id"] || ""),
+      "id" => to_string(params["chart_id"] || ""),
       "range" => to_string(params["range"] || ""),
       "type" => if(params["type"] == "bar", do: "bar", else: "line"),
       "title" => to_string(params["title"] || ""),
@@ -192,7 +192,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
           <button type="button" class="btn btn-ghost btn-sm" phx-click="chart-close" phx-target={@myself} aria-label={gettext("Close chart form")} data-test-id="sheet-chart-close">×</button>
         </div>
         <form class="sheet-cf-form" phx-submit="chart-save" phx-change="chart-form-change" phx-target={@myself} data-test-id="sheet-chart-form">
-          <input type="hidden" name="id" value={@panel["id"]} />
+          <input type="hidden" name="chart_id" value={@panel["id"]} />
           <label class="sheet-cf-field">
             <span><%= gettext("Cells to chart") %></span>
             <.bp_input name="range" value={@panel["range"]} placeholder="A1:C6" autocomplete="off" spellcheck="false" data-test-id="sheet-chart-range" />
@@ -208,7 +208,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Charts do
           </label>
           <label class="sheet-cf-field">
             <span><%= gettext("Title") %></span>
-            <.bp_input name="title" value={@panel["title"]} maxlength="120" autocomplete="off" data-test-id="sheet-chart-title" />
+            <.bp_input name="title" value={@panel["title"]} autocomplete="off" data-test-id="sheet-chart-title" />
           </label>
           <div class="sheet-cf-field">
             <.bp_checkbox name="headers" label={gettext("First row is headers")} checked={@panel["headers"]} data-test-id="sheet-chart-headers" />

@@ -4,10 +4,10 @@ defmodule Barkpark.Plugins.Sheets.ChartsTest do
   their undo, how a row/column edit moves a chart's range, what the gate
   refuses, and what a chart reads from the cells.
 
-  Offline: `Session.Ops.apply_one/2` is a state-map transform (the delta
-  broadcast needs only the app's PubSub), so no DB and no session process.
+  No session process: `Session.Ops.apply_one/2` is a state-map transform. It
+  needs the DB only because the delta broadcast resolves its topic there.
   """
-  use ExUnit.Case, async: true
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Plugins.Sheets.Charts
   alias Barkpark.Plugins.Sheets.Session.Ops

@@ -89,7 +89,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     view
     |> element(~s([data-test-id="sheet-chart-form"]))
     |> render_submit(%{
-      "id" => "",
+      "chart_id" => "",
       "range" => "A1:C3",
       "type" => "line",
       "title" => "Sales and cost",
@@ -128,7 +128,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     view
     |> element(~s([data-test-id="sheet-chart-form"]))
     |> render_submit(%{
-      "id" => "ch-1",
+      "chart_id" => "ch-1",
       "range" => "A1:C3",
       "type" => "bar",
       "title" => "Sales and cost",
@@ -145,7 +145,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
 
     view
     |> element(~s([data-test-id="sheet-chart-form"]))
-    |> render_submit(%{"id" => "", "range" => "A1:A3", "type" => "line", "title" => ""})
+    |> render_submit(%{"chart_id" => "", "range" => "A1:A3", "type" => "line", "title" => ""})
 
     assert view |> element(~s([data-test-id="sheet-chart-empty"])) |> render() =~
              "No numbers in A1:A3"
@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.ChartsLiveTest do
     render_hook(reader_grid, "chart-delete", %{"id" => "ch-1"})
 
     render_hook(reader_grid, "chart-save", %{
-      "id" => "",
+      "chart_id" => "",
       "range" => "B1:B3",
       "type" => "line",
       "title" => "forged"
