@@ -192,7 +192,7 @@ defmodule BarkparkWeb.ChatHostController do
     |> ErrorResponse.emit_fields(:conflict, %{
       code: "host_limit_reached",
       message:
-        "this workspace has reached its limit of #{limit} enrolled chat hosts; revoke one to enrol another",
+        "this workspace has reached its limit of #{limit} enrolled chat hosts; revoke one to enroll another",
       details: %{limit: limit}
     })
   end
