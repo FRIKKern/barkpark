@@ -71,6 +71,7 @@ defmodule BarkparkWeb.CapabilityGateTest do
       {:get,
        "/v1/chat-host/leases/00000000-0000-0000-0000-000000000000/attachments/" <>
          String.duplicate("0", 64)},
+      {:post, "/v1/chat-host/leases/00000000-0000-0000-0000-000000000000/status"},
       {:post, "/v1/chat/sessions/00000000-0000-0000-0000-000000000000/state"},
       # The workspace-bound chat token mint (task-71ea7ca2c8fabce2).
       {:post, "/w/#{ws}/p/default/v1/chat/tokens"}

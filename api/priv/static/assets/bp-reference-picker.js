@@ -76,7 +76,11 @@ class BpReferencePicker extends HTMLElement {
   }
 
   connectedCallback() {
-    if (this._mounted) return;
+    if (this._mounted) {
+      // Moved in the page: listen again (disconnectedCallback stopped).
+      if (this._onTargets) window.addEventListener("phx:desk:ref-targets", this._onTargets);
+      return;
+    }
     this._mounted = true;
     // Gyldendal parity E7: workspace-locale strings stamped by the server as
     // `data-strings` (JSON); each key falls back to the English literal.
@@ -109,6 +113,31 @@ class BpReferencePicker extends HTMLElement {
     this._box = !!(this.closest && this.closest(".dk-edit"));
     this._render();
     if (this._value) this._loadSelectedTitle();
+    // The desk sends the targets it reads for the open document, at once and
+    // again when one of them changes: the card follows (a rename elsewhere).
+    if (this._box) {
+      this._onTargets = (e) => this._followTargets((e.detail && e.detail.refs) || []);
+      window.addEventListener("phx:desk:ref-targets", this._onTargets);
+    }
+  }
+
+  // Only the target this field holds now: an answer for a value replaced or
+  // cleared meanwhile is dropped. `_served` keeps a slower read of the same
+  // document (the mount's own) from painting an older title over it.
+  _followTargets(refs) {
+    const field = this.getAttribute("data-input-id");
+    const held = this._value || (this._prior && this._prior.value);
+    const ref = refs.find((r) => r && r.path === field && r.id === held && typeof r.title === "string");
+    if (!field || !held || !ref) return;
+    this._served = held;
+    if (this._prior && !this._value) {
+      this._prior.title = ref.title;
+      this._prior.type = ref.type || this._prior.type;
+      return;
+    }
+    this._selectedTitle = ref.title;
+    this._selectedType = ref.type || this._selectedType;
+    this._paintSelected();
   }
 
   _t(key, fallback) {
@@ -123,6 +152,7 @@ class BpReferencePicker extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this._onTargets) window.removeEventListener("phx:desk:ref-targets", this._onTargets);
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
   }
@@ -185,15 +215,28 @@ class BpReferencePicker extends HTMLElement {
   // TanStack's reference card (RefInput.tsx, RefMenu): a preview row (the
   // type's tile, the title, the type under it) and a "…" button whose menu
   // holds Clear and Replace. Replace is Change (the old pick comes back on
-  // Cancel or Escape); Clear is Remove. The menu button stands where Change
-  // stood, so a pick or a cancelled Replace lands the focus on it.
+  // Cancel or Escape); Clear is Remove.
   _renderBox() {
     const box = document.createElement("div");
     box.className = "ref-field ref-box ref-row";
     box.tabIndex = -1;
 
-    const preview = document.createElement("div");
+    // The preview opens the document in the next pane, as TanStack's
+    // (DocPreview in RefInput.tsx): a link LiveView patches to.
+    const href = this._openHref();
+    const preview = document.createElement(href ? "a" : "div");
     preview.className = "ref-preview preview";
+    if (href) {
+      preview.href = href;
+      preview.setAttribute("data-phx-link", "patch");
+      preview.setAttribute("data-phx-link-state", "push");
+      preview.style.textDecoration = "none";
+      // The panes can change under a card LiveView never redraws (a split
+      // opened or closed, an inspector): the href is read again as the link
+      // is reached, before LiveView's own click handler on window.
+      const fresh = () => preview.setAttribute("href", this._openHref() || href);
+      for (const on of ["pointerdown", "focus", "click", "contextmenu"]) preview.addEventListener(on, fresh);
+    }
     const media = document.createElement("span");
     media.className = "dk-media";
     media.setAttribute("aria-hidden", "true");
@@ -296,6 +339,37 @@ class BpReferencePicker extends HTMLElement {
     box.append(preview, wrap);
     this.appendChild(box);
     this._changeButton = button;
+    this._openLink = href ? preview : null;
+  }
+
+  // The path that opens the picked document in the pane after this one, in
+  // the desk's pane grammar (`Desk.Panes.open_after/4`):
+  // `<panes up to this one>;<id>,type=<type>,parentRefPath=<field>`. Pane 0
+  // has no segment; a segment holds one pane, and one more per `|` sibling.
+  // Null outside a desk pane, or for a field the host gave no path.
+  _openHref() {
+    const field = this.getAttribute("data-input-id");
+    const pane = this.closest && this.closest("[data-pane-index]");
+    if (!field || !pane || !this._value) return null;
+    const path = window.location.pathname;
+    const cut = path.lastIndexOf("/");
+    const segments = path.slice(cut + 1).split(";");
+    const index = Number(pane.getAttribute("data-pane-index"));
+    let keep = 0;
+    for (let panes = 0; keep < segments.length && panes < index; keep++) {
+      panes += segments[keep].split(/\||%7C/i).length;
+    }
+    const type = this._selectedType || (this._refTypes.length === 1 ? this._refTypes[0] : "");
+    return (
+      path.slice(0, cut + 1) +
+      // The browser's pathname prints a split's `|` as %7C; the server prints `|`.
+      segments.slice(0, keep).join(";").replace(/%7C/gi, "|") +
+      ";" +
+      encodeURIComponent(this._value) +
+      (type ? ",type=" + encodeURIComponent(type) : "") +
+      ",parentRefPath=" +
+      encodeURIComponent(field)
+    );
   }
 
   // One declared type reads as before; several read as the PICKED type
@@ -361,6 +435,8 @@ class BpReferencePicker extends HTMLElement {
     type.textContent = this._typeLabel();
     const media = this._box && this.querySelector(".ref-box .dk-media");
     if (media) media.innerHTML = this._typeIconSvg(this._selectedType || this._refTypes[0] || "") || "";
+    const link = this._box && this.querySelector("a.ref-preview");
+    if (link) link.href = this._openHref() || link.href;
   }
 
   _renderSearch() {
@@ -506,7 +582,14 @@ class BpReferencePicker extends HTMLElement {
     this._selectedTitle = prior.title;
     this._selectedType = prior.type;
     this._render();
-    if (this._changeButton) this._changeButton.focus();
+    this._focusPicked();
+  }
+
+  // The pick is back or new: land on the card's link, so Enter opens it (as
+  // TanStack's focusPreview); with no link, on the Change or menu button.
+  _focusPicked() {
+    const to = (this._box && this._openLink) || this._changeButton;
+    if (to) to.focus();
   }
 
   _clear() {
@@ -534,7 +617,7 @@ class BpReferencePicker extends HTMLElement {
     this._hideDropdown();
     this._render();
     // The picked option is gone from the DOM; keep focus in the field.
-    if (this._changeButton) this._changeButton.focus();
+    this._focusPicked();
     this._emit(this._value);
   }
 
@@ -659,8 +742,25 @@ class BpReferencePicker extends HTMLElement {
         });
       }
     }
-    this._lastSearchMatches = Array.from(byCanonical.values());
+    this._lastSearchMatches = this._rank(Array.from(byCanonical.values()), query);
     return this._lastSearchMatches;
+  }
+
+  // The desk's order for a typed search, as TanStack's (lib/ref-rank.ts) and
+  // Sanity's: the hits whose title has a word starting with each query word
+  // first, then by title with numbers in order ("post 2" before "post 10").
+  // Elsewhere the server's order stands.
+  _rank(hits, query) {
+    const terms = this._box ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
+    if (!terms.length) return hits;
+    const score = (hit) => {
+      const words = hit.title.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+      return terms.filter((q) => words.some((w) => w.startsWith(q))).length;
+    };
+    return hits
+      .map((hit) => ({ hit, score: score(hit) }))
+      .sort((a, b) => b.score - a.score || a.hit.title.localeCompare(b.hit.title, undefined, { numeric: true }))
+      .map((x) => x.hit);
   }
 
   _filterParams() {
@@ -973,7 +1073,7 @@ class BpReferencePicker extends HTMLElement {
       const body = await res.json();
       const doc = (body && body.result) || body || {};
       const title = doc.title || doc._id || "";
-      if (title && this._value) {
+      if (title && this._value && this._served !== this._value) {
         this._selectedTitle = title;
         if (this._mounted && this._value) this._paintSelected();
       }
@@ -1001,7 +1101,7 @@ class BpReferencePicker extends HTMLElement {
       const match =
         docs.find((d) => canon(d._id || d.id) === canon(id)) || null;
       const title = match && (match.title || match._id || match.id);
-      if (title && this._value) {
+      if (title && this._value && this._served !== this._value) {
         this._selectedTitle = title;
         this._selectedType = (match && (match._type || match.type)) || "";
         if (this._mounted && this._value) this._paintSelected();

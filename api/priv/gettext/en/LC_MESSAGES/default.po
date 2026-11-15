@@ -379,6 +379,23 @@ msgstr ""
 msgid "Draft: no changes"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:53
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:128
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:134
+#, elixir-autogen, elixir-format
+msgid "Incoming references"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:138
+#, elixir-autogen, elixir-format
+msgid "Close incoming references"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:148
+#, elixir-autogen, elixir-format
+msgid "No incoming references found."
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Drop or paste an image to replace it"
@@ -1726,6 +1743,31 @@ msgstr ""
 msgid "Are you sure you want to delete"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:34
+#, elixir-autogen, elixir-format
+msgid "Delete document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:35
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to delete this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Used in"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:46
+#, elixir-autogen, elixir-format
+msgid "You may not be able to delete “%{title}” because the following documents refer to it:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:53
+#, elixir-autogen, elixir-format
+msgid "If you delete this document, documents that refer to it will no longer be able to access it."
+msgstr ""
+
 #: lib/barkpark_web/components/studio_components/modals.ex:875
 #, elixir-autogen, elixir-format
 msgid "Aug"
@@ -1851,6 +1893,18 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:940
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and delete"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:74
+#, elixir-autogen, elixir-format
+msgid "1 document refers to “%{title}”"
+msgid_plural "%{count} documents refer to “%{title}”"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:171
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab (%{type})"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:740
@@ -2573,6 +2627,36 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2235
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Unpublish document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:104
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to unpublish “%{title}”?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:47
+#, elixir-autogen, elixir-format
+msgid "Referring to %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:51
+#, elixir-autogen, elixir-format
+msgid "You may not be able to unpublish “%{title}” because the following documents refer to it:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:58
+#, elixir-autogen, elixir-format
+msgid "If you unpublish this document, documents that refer to it will no longer be able to access it."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:88
+#, elixir-autogen, elixir-format
+msgid "Unpublish now"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2202
@@ -13373,6 +13457,11 @@ msgstr ""
 msgid "Showing the first %{count}."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:189
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{shown} of %{total}."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "Sort by"
@@ -13848,6 +13937,11 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:324
 #, elixir-autogen, elixir-format
 msgid "Show replace"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgid "Field actions"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:300

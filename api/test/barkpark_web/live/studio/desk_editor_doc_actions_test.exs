@@ -121,13 +121,15 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     |> element(~s{[data-pane-editing] button[phx-click="delete-doc"]:not([role="menuitem"])})
     |> render_click()
 
-    assert has_element?(view, "#delete-modal-dialog[role=dialog]")
-    assert has_element?(view, "#delete-modal-dialog .delete-ref-title", "Post One")
-    assert has_element?(view, "#delete-modal-dialog .delete-ref-meta", c.post)
-    assert has_element?(view, "#delete-modal-dialog [data-modal-focus]", "Cancel")
-
-    view |> element("#delete-modal-dialog button[data-modal-focus]") |> render_click()
+    # The desk's own dialog (`Desk.DeleteDialog`), not the Studio's modal.
+    dialog = ~s([data-pane-editing] [role="dialog"][data-desk-dialog="delete"])
+    assert has_element?(view, dialog)
     refute has_element?(view, "#delete-modal-dialog")
+    assert has_element?(view, ~s(#{dialog} .used-in li .t), "Post One")
+    assert has_element?(view, ~s(#{dialog} [data-modal-focus]), "Cancel")
+
+    view |> element(~s(#{dialog} button[data-modal-focus])) |> render_click()
+    refute has_element?(view, dialog)
     assert Content.fetch_doc_with_draft(c.author, c.ada, @dataset) |> elem(0)
   end
 
@@ -136,7 +138,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     view = open(c.conn, "#{c.base}/#{deep(c, c.lone)}")
 
     render_hook(view, "delete-doc", %{})
-    view |> element("#delete-modal-dialog button.btn-destructive") |> render_click()
+
+    view
+    |> element(~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
+    |> render_click()
 
     landed = assert_patch(view, 2_000)
     assert landed == "#{c.base}/#{c.post};#{c.one}"
@@ -148,7 +153,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     view = open(c.conn, "#{c.base}/#{c.author};#{c.lone}")
 
     render_hook(view, "delete-doc", %{})
-    view |> element("#delete-modal-dialog button.btn-destructive") |> render_click()
+
+    view
+    |> element(~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
+    |> render_click()
 
     landed = assert_patch(view, 2_000)
     assert String.starts_with?(landed, c.base <> "/")
@@ -173,16 +181,14 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     |> element(~s{[data-pane-editing] button[phx-click="unpublish"]:not([role="menuitem"])})
     |> render_click()
 
-    assert has_element?(view, "#unpublish-guard-dialog[role=dialog]")
-
-    assert has_element?(
-             view,
-             ~s(#unpublish-guard-dialog [data-test-id="unpublish-ref"]),
-             "Post One"
-           )
-
-    view |> element("#unpublish-guard-dialog button[data-modal-focus]") |> render_click()
+    # The desk's own dialog (`Desk.UnpublishDialog`), not the Studio's modal.
+    dialog = ~s([data-pane-editing] [role="dialog"][data-desk-dialog="unpublish"])
+    assert has_element?(view, dialog)
     refute has_element?(view, "#unpublish-guard-dialog")
+    assert has_element?(view, ~s(#{dialog} .used-in li .t), "Post One")
+
+    view |> element(~s(#{dialog} button[data-modal-focus])) |> render_click()
+    refute has_element?(view, dialog)
     {_doc, _draft?, published?} = Content.fetch_doc_with_draft(c.author, c.ada, @dataset)
     assert published?
   end

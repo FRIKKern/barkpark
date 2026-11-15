@@ -16,17 +16,18 @@ import (
 // A turn's status label: 2 to 4 words, such as "Explaining ocean tides", that
 // say what the assistant is about to do (task-a9983f9aeffb5430). A small side
 // call of the owner's own claude CLI makes it, started with the turn and run
-// below the turn's CPU priority (task-b235ae3b7f8fdc46). It rides
-// the turn's own event stream as one event:
+// below the turn's CPU priority (task-b235ae3b7f8fdc46). It is posted OUT of
+// the turn's event sequence (task-768e7dc4449cc7b9), from its own goroutine:
 //
-//	{"kind": "status", "label": "Explaining ocean tides"}
+//	POST /v1/chat-host/leases/:lease_id/status  {"epoch": 1, "label": "Explaining ocean tides"}
 //
-// after turn_started and before the first text. It is cosmetic, so it never
-// blocks, delays, fails or reorders the turn: the turn does not wait for it, a
-// failing or slow call publishes nothing, a label that arrives after the first
-// text or after the turn ended is dropped, and a server that refuses the event
-// leaves the turn running. The refused event moved no cursor (Runner.start), so
-// the next event takes its cursor and leaves no gap.
+// after turn_started was taken and before the first text. It is cosmetic, so
+// it never blocks, delays, fails or reorders the turn: the turn does not wait
+// for the side call or for the POST, the POST has no cursor, so the turn's
+// events never queue behind it, it is tried once under statusPostTimeout, and
+// any failure (an old server's 404, a 5xx, a 429, a timeout) drops it. A label
+// that is ready only after the first text or after the turn ended is never
+// sent; the server also drops one that reaches it after the turn's first text.
 
 // StatusLabeler says, in 2 to 4 words, what an assistant is about to do for a
 // request. It must return once ctx is done.
@@ -40,6 +41,16 @@ type StatusLabelFunc func(ctx context.Context, request string) (string, error)
 func (f StatusLabelFunc) StatusLabel(ctx context.Context, request string) (string, error) {
 	return f(ctx, request)
 }
+
+// StatusPoster sends a turn's label to the server for the lease it serves
+// (Client.PostStatus).
+type StatusPoster interface {
+	PostStatus(ctx context.Context, command RemoteCommand, label string) error
+}
+
+// How long one label POST may take. Past it the label is dropped: by then the
+// turn's text is usually out and a late label is not shown.
+const statusPostTimeout = 2 * time.Second
 
 const (
 	// The prompt the side call gets as its system prompt; the person's text is
@@ -68,6 +79,9 @@ const (
 type ClaudeStatusLabeler struct {
 	Model   string
 	Timeout time.Duration
+	// WaitDelay bounds Wait for the side call's child (defaultProviderWaitDelay
+	// when zero).
+	WaitDelay time.Duration
 }
 
 // StatusLabelerFromEnv reads the side call's settings. It returns nil (no
@@ -136,7 +150,7 @@ func (l *ClaudeStatusLabeler) StatusLabel(ctx context.Context, request string) (
 	cmd.Stdout = out
 	// Stderr goes to the null device. WaitDelay bounds Wait when a grandchild
 	// still holds stdout after claude exited or was killed (#26164).
-	cmd.WaitDelay = providerWaitDelay
+	cmd.WaitDelay = providerWaitDelay(l.WaitDelay)
 	// Run waits for the child on every path, so it is never left a zombie.
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -213,16 +227,19 @@ func (b *cappedBuffer) String() string {
 	return string(b.buf)
 }
 
-// turnStatus puts at most one status label on a turn's event stream. Every
-// event of the turn passes through forward, and the label is published under
-// the same lock, so the Runner's cursor is never moved by two goroutines and
-// the label lands between turn_started and the first text.
+// turnStatus sends at most one status label for a turn. Every event of the turn
+// passes through forward to emit; the label never does, so it never takes a
+// cursor and the turn's events never wait for it. The lock guards the flags
+// alone and is never held across emit or a network call.
 type turnStatus struct {
-	mu   sync.Mutex
+	mu sync.Mutex
+	// emit publishes one of the turn's events (the Runner's cursor).
 	emit func(map[string]any) error
+	// post sends the label; it is run on its own goroutine.
+	post func(label string)
 	// started: turn_started was taken. A label that comes sooner waits for it.
 	started bool
-	// closed: text began or the turn ended; no label is published after it.
+	// closed: text began or the turn ended; no label is sent after it.
 	closed  bool
 	sent    bool
 	pending string
@@ -234,16 +251,24 @@ type turnStatus struct {
 // Mac (task-b235ae3b7f8fdc46, 13 interleaved turns a variant), starting
 // together did not delay the first text, and starting at the first line made
 // the label lose to the text in 12 of 13 turns.
-// The end does not wait for the side call: it cancels it, and the side call
-// reaps its own child. A side call that fails or times out logs one line, so
-// labels that stop (a CLI that dropped a flag) are seen; the line never carries
-// the person's text. One the turn's end cancelled logs nothing.
-func (h *LocalHandler) startStatusLabel(ctx context.Context, request string, emit func(map[string]any) error) (func(map[string]any) error, func()) {
-	if h.StatusLabel == nil || strings.TrimSpace(request) == "" {
+// The end does not wait for the side call or the POST: it cancels both, and the
+// side call reaps its own child. A side call that fails or times out, and a
+// POST the server did not take, log one line, so labels that stop (a CLI that
+// dropped a flag, a server without the endpoint) are seen; the line never
+// carries the person's text. One the turn's end cancelled logs nothing.
+func (h *LocalHandler) startStatusLabel(ctx context.Context, remote RemoteCommand, request string, emit func(map[string]any) error) (func(map[string]any) error, func()) {
+	if h.StatusLabel == nil || h.Status == nil || strings.TrimSpace(request) == "" {
 		return emit, func() {}
 	}
-	status := &turnStatus{emit: emit}
 	labelCtx, cancel := context.WithCancel(ctx)
+	poster := h.Status
+	status := &turnStatus{emit: emit, post: func(label string) {
+		postCtx, done := context.WithTimeout(labelCtx, statusPostTimeout)
+		defer done()
+		if err := poster.PostStatus(postCtx, remote, label); err != nil && labelCtx.Err() == nil {
+			h.logf("status label not taken: %v", err)
+		}
+	}}
 	labeler := h.StatusLabel
 	go h.runStatusLabel(labelCtx, labeler, request, status)
 	return status.forward, func() {
@@ -275,25 +300,38 @@ func (h *LocalHandler) logf(format string, args ...any) {
 	fmt.Fprintf(w, "barkpark-chat-host: "+format+"\n", args...)
 }
 
+// forward publishes one of the turn's events. Text or the turn's end closes the
+// label before the event goes out, so a label not yet sent is never sent after
+// it. Once turn_started is taken, a pending label goes out.
 func (s *turnStatus) forward(event map[string]any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	switch event["kind"] {
-	case "text_delta", "turn_completed", "error", "terminal":
-		s.closed = true
-	case "item_started":
-		if item, _ := event["item"].(map[string]any); item["type"] == "text" {
-			s.closed = true
-		}
-	}
+	s.watch(event)
 	if err := s.emit(event); err != nil {
 		return err
 	}
 	if event["kind"] == "turn_started" {
+		s.mu.Lock()
 		s.started = true
 		s.flush()
+		s.mu.Unlock()
 	}
 	return nil
+}
+
+func (s *turnStatus) watch(event map[string]any) {
+	closes := false
+	switch event["kind"] {
+	case "text_delta", "turn_completed", "error", "terminal":
+		closes = true
+	case "item_started":
+		if item, _ := event["item"].(map[string]any); item["type"] == "text" {
+			closes = true
+		}
+	}
+	if closes {
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+	}
 }
 
 func (s *turnStatus) offer(label string) {
@@ -313,9 +351,8 @@ func (s *turnStatus) close() {
 	s.mu.Unlock()
 }
 
-// flush publishes the pending label once the turn has started. Called with
-// s.mu held. A refused label is dropped: the Runner kept its cursor, so the
-// turn's next event takes that cursor and the turn goes on.
+// flush sends the pending label once the turn has started, on its own
+// goroutine. Called with s.mu held.
 func (s *turnStatus) flush() {
 	if s.pending == "" || !s.started || s.closed || s.sent {
 		return
@@ -323,5 +360,5 @@ func (s *turnStatus) flush() {
 	label := s.pending
 	s.pending = ""
 	s.sent = true
-	_ = s.emit(map[string]any{"kind": "status", "label": label})
+	go s.post(label)
 }

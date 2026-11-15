@@ -894,21 +894,30 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@ref_type};#{linked}")
       settle(view)
 
-      to_a = "#{base}/#{@ref_type};#{linked};#{a},type=#{@type_name},parentRefPath=note"
-
-      # The edit pane's links are in its "…" menu, as patches.
+      # A single reference's link is its card in the form, drawn in the
+      # browser (`bp-reference-picker.js`) and sent its target; the "…" menu
+      # holds no hidden anchor for it.
       ref = ~s([data-pane-index="2"] .pane-header a[data-desk-doc-action="open-reference"])
+      refute has_element?(view, ~s([data-pane-index="2"] a[href$="parentRefPath=note"]))
+
+      assert_push_event(view, "desk:ref-targets", %{refs: targets}, 1_000)
+
+      assert %{path: "note", id: a, title: "Alpha note", type: @type_name} in targets
+      # A target the viewer cannot read is not sent, as it was never linked.
+      refute Enum.any?(targets, &(&1.id == "dsn-gone"))
+
+      # An array of references: one menu link each, as patches, in stored
+      # order; a bare id reads too.
+      to_b = "#{base}/#{@ref_type};#{linked};#{b},type=#{@type_name},parentRefPath=more"
+      to_a = "#{base}/#{@ref_type};#{linked};#{a},type=#{@type_name},parentRefPath=more"
 
       assert has_element?(
                view,
-               ~s(#{ref}[href="#{to_a}"][data-phx-link="patch"]),
-               "Open reference: Alpha note"
+               ~s(#{ref}[href="#{to_b}"][data-phx-link="patch"]),
+               "Open reference: Beta note"
              )
 
-      # An array of references: one link each, in stored order; a bare id reads too.
-      to_b = "#{base}/#{@ref_type};#{linked};#{b},type=#{@type_name},parentRefPath=more"
-
-      assert has_element?(view, ~s(#{ref}[href="#{to_b}"]), "Open reference: Beta note")
+      assert has_element?(view, ~s(#{ref}[href="#{to_a}"]), "Open reference: Alpha note")
 
       view |> element(~s(#{ref}[href="#{to_a}"])) |> render_click()
       assert_patch(view, to_a)

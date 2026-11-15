@@ -73,9 +73,15 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     conn =
       post(bearer(conn, raw), "/w/#{ws.slug}/v1/chat-hosts/enrollments", %{"name" => "third"})
 
-    assert %{"error" => %{"code" => "host_limit_reached", "details" => %{"limit" => 2}}} =
-             json_response(conn, 409)
+    assert %{
+             "error" => %{
+               "code" => "host_limit_reached",
+               "details" => %{"limit" => 2},
+               "message" => message
+             }
+           } = json_response(conn, 409)
 
+    assert message =~ "revoke one to enroll another"
     assert rows(ws) == before
   end
 
@@ -151,6 +157,149 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     {:ok, _} = ChatHosts.revoke(ws.id, id)
 
     assert {:ok, _} = ChatHosts.enroll(issue!(ws, "new"))
+  end
+
+  test "an expired credential holds no slot and cannot come back past the cap" do
+    limit(1)
+    ws = create_workspace!()
+    {:ok, %{host: %{id: old_id}, credential: old_credential}} = enrol_result(ws, "old")
+    {:ok, old} = ChatHosts.authenticate(old_credential)
+
+    # The old host's 30-day credential runs out; nobody revokes it.
+    past = DateTime.add(DateTime.utc_now(), -1)
+
+    {1, _} =
+      Repo.update_all(from(h in RegisteredHost, where: h.id == ^old_id),
+        set: [credential_expires_at: past]
+      )
+
+    # It cannot write, so its slot is free.
+    assert {:ok, %{credential: new_credential}} = ChatHosts.enroll(issue!(ws, "new"))
+
+    # It cannot come back: authenticate refuses it, and a rotation that was
+    # authenticated just before the expiry is refused after it, so the
+    # workspace never holds two live hosts under a cap of one.
+    assert {:error, :invalid_credential} = ChatHosts.authenticate(old_credential)
+    assert {:error, :invalid_credential} = ChatHosts.rotate_credential(old)
+    assert DateTime.compare(Repo.get!(RegisteredHost, old_id).credential_expires_at, past) == :eq
+
+    # A host that rotates before its expiry keeps its slot.
+    {:ok, new} = ChatHosts.authenticate(new_credential)
+    assert {:ok, _} = ChatHosts.rotate_credential(new)
+    assert {:error, {:host_limit_reached, 1}} = ChatHosts.issue_enrollment(ws.id, %{name: "x"})
+  end
+
+  # From the review of #26408 (its straddle probe). A rotation waits on the
+  # host row (held here as a heartbeat or a second rotation would hold it),
+  # the credential expires while it waits, and a new host takes the freed
+  # slot. When the rotation gets the row it must see the expiry, not the
+  # clock it read before it waited.
+  test "a rotation that waits past its credential's expiry cannot bring the host back" do
+    limit(1)
+
+    unboxed(fn ->
+      ws = create_workspace!()
+
+      try do
+        token = issue!(ws, "new")
+        {:ok, %{host: %{id: id}, credential: credential}} = enrol_result(ws, "old")
+
+        {1, _} =
+          Repo.update_all(from(h in RegisteredHost, where: h.id == ^id),
+            set: [credential_expires_at: DateTime.add(DateTime.utc_now(), 1_000, :millisecond)]
+          )
+
+        {:ok, host} = ChatHosts.authenticate(credential)
+        parent = self()
+
+        holder =
+          Task.async(fn ->
+            unboxed(fn ->
+              Repo.transaction(fn ->
+                Repo.one!(from(h in RegisteredHost, where: h.id == ^id, lock: "FOR UPDATE"))
+                send(parent, :held)
+
+                receive do
+                  :release -> :ok
+                after
+                  10_000 -> :timeout
+                end
+              end)
+            end)
+          end)
+
+        assert_receive :held, 5_000
+        rotor = Task.async(fn -> unboxed(fn -> ChatHosts.rotate_credential(host) end) end)
+        Process.sleep(1_300)
+
+        # Past the expiry the old host holds no slot, so the new one enrols.
+        assert {:ok, _} = ChatHosts.enroll(token)
+
+        send(holder.pid, :release)
+        assert {:ok, :ok} = Task.await(holder, 10_000)
+        assert {:error, :invalid_credential} = Task.await(rotor, 10_000)
+        assert usable(ws) == 1
+      after
+        {:ok, _} = Tenancy.delete_workspace(ws)
+      end
+    end)
+  end
+
+  # From the re-review of #26408. The straddle test above can pass without
+  # the key (the row lock alone orders it), so this pins that rotation takes
+  # the workspace's live-slot key: with the key held, it must wait on it.
+  test "rotation waits on the workspace's live-slot key" do
+    limit(2)
+
+    unboxed(fn ->
+      ws = create_workspace!()
+
+      try do
+        {:ok, %{credential: credential}} = enrol_result(ws, "mac")
+        {:ok, host} = ChatHosts.authenticate(credential)
+        parent = self()
+
+        holder =
+          Task.async(fn ->
+            unboxed(fn ->
+              Repo.transaction(fn ->
+                Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [
+                  "chat_host_live:" <> ws.id
+                ])
+
+                send(parent, :held)
+
+                receive do
+                  :release -> :ok
+                after
+                  10_000 -> :timeout
+                end
+              end)
+            end)
+          end)
+
+        assert_receive :held, 5_000
+
+        rotor =
+          Task.async(fn ->
+            unboxed(fn ->
+              %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+              send(parent, {:rotor_pid, pid})
+              ChatHosts.rotate_credential(host)
+            end)
+          end)
+
+        assert_receive {:rotor_pid, rotor_pid}, 5_000
+        waited = waits_on_advisory_lock?(rotor_pid)
+
+        send(holder.pid, :release)
+        assert {:ok, :ok} = Task.await(holder, 10_000)
+        assert {:ok, _} = Task.await(rotor, 10_000)
+        assert waited, "rotation never waited on the live-slot key"
+      after
+        {:ok, _} = Tenancy.delete_workspace(ws)
+      end
+    end)
   end
 
   test "two enrolments at once: the second waits for the first and is refused" do
@@ -230,7 +379,7 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
       })
       |> render_submit()
 
-    assert html =~ "reached its limit of 1 enrolled chat hosts"
+    assert html =~ "reached its limit of 1 enrolled chat hosts. Revoke one to enroll another."
     refute html =~ "One-time enrollment token"
     assert [%{name: "laptop"}] = live_hosts(ws)
   end
@@ -257,6 +406,20 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
 
   defp live_hosts(ws), do: ws.id |> ChatHosts.list_hosts() |> Enum.filter(& &1.enrolled)
 
+  # Hosts that can authenticate right now: the quantity the cap bounds.
+  defp usable(ws) do
+    now = DateTime.utc_now()
+
+    Repo.aggregate(
+      from(h in RegisteredHost,
+        where:
+          h.workspace_id == ^ws.id and not is_nil(h.enrolled_at) and is_nil(h.revoked_at) and
+            h.credential_expires_at > ^now
+      ),
+      :count
+    )
+  end
+
   defp rows(ws) do
     Repo.all(from h in RegisteredHost, where: h.workspace_id == ^ws.id, order_by: h.id)
   end
@@ -268,6 +431,24 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
   end
 
   defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+
+  defp waits_on_advisory_lock?(pid, tries \\ 100)
+  defp waits_on_advisory_lock?(_pid, 0), do: false
+
+  defp waits_on_advisory_lock?(pid, tries) do
+    %{rows: [[waiting]]} =
+      Repo.query!(
+        "SELECT count(*) FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND NOT granted",
+        [pid]
+      )
+
+    if waiting == 1 do
+      true
+    else
+      Process.sleep(20)
+      waits_on_advisory_lock?(pid, tries - 1)
+    end
+  end
 
   defp await_lock_wait(pid, tries \\ 250) do
     %{rows: [[waiting]]} =

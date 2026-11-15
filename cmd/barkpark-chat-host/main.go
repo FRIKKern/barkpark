@@ -70,6 +70,7 @@ func newRunner(state chathost.State) *chathost.Runner {
 	handler := chathost.NewLocalHandler(state.Host.ApprovedRoots)
 	handler.Images = client
 	handler.StatusLabel = chathost.StatusLabelerFromEnv(os.Getenv)
+	handler.Status = client
 	return &chathost.Runner{Client: client, Handler: handler, Capabilities: capabilities()}
 }
 

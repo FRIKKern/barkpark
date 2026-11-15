@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
+  alias BarkparkWeb.Studio.Desk.Fieldsets
 
   attr :field, :map, required: true
   attr :value, :map, default: %{}
@@ -82,6 +83,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put(:depth, path_depth(path))
       |> Map.put(:groups, groups_for(assigns.field))
       |> Map.put(:tabs_id, "bp-obj-tabs-" <> sanitize_id("#{path}-#{assigns.field.name}"))
+      |> put_fold()
 
     ~H"""
     <%= cond do %>
@@ -104,8 +106,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           />
         </details>
       <% true -> %>
-        <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth}>
-          <legend class="bp-field-title"><%= @title %></legend>
+        <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} id={@fold_id} data-collapsible={@folds}>
+          <legend class="bp-field-title"><%= if @folds do %><Fieldsets.toggle id={@fold_id <> "-toggle"} open={@open} title={@title} /><% else %><%= @title %><% end %></legend>
           <p :if={@description} class="bp-field-description"><%= @description %></p>
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
@@ -117,6 +119,24 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     <% end %>
     """
   end
+
+  # In the desk (`id_base` set) an object with `options.collapsible` or
+  # `options.collapsed` folds, as the TanStack Studio's and Sanity's: its
+  # title is a button. Every subfield stays in the page and posts, folded or
+  # open (`Desk.Fieldsets`).
+  defp put_fold(%{id_base: base, field: field} = assigns) when is_binary(base) do
+    options = Fieldsets.options(field)
+
+    folds = Fieldsets.folds?(options)
+
+    assigns
+    |> Map.put(:folds, folds)
+    |> Map.put(:open, Fieldsets.open?(options))
+    |> Map.put(:fold_id, if(folds, do: Fieldsets.fold_id("bp-fold", base)))
+  end
+
+  defp put_fold(assigns),
+    do: assigns |> Map.put(:folds, false) |> Map.put(:open, true) |> Map.put(:fold_id, nil)
 
   # The subfields, optionally under Sanity-style OBJECT GROUPS (Gyldendal
   # parity E1.5). A composite declaring `"groups": [{"name","title","default"?}]`
@@ -586,7 +606,6 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={to_string(@value || "")}>
       <input
         type="hidden"
-        id={@input_id}
         name={@input_name}
         value={to_string(@value || "")}
         data-datetime-value
@@ -594,10 +613,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         disabled={@readonly}
       />
       <%!-- Ignored by LiveView patches, which reset a picker with no value
-            attribute (task-cf45242ef3477fba); see FieldInputs' datetime. --%>
+            attribute (task-cf45242ef3477fba); see FieldInputs' datetime. The
+            subfield's id is on the picker, the control its label reaches. --%>
       <span id={"#{@input_id}-dt-pick"} phx-update="ignore" class="bp-datetime-picker">
         <input
           type="datetime-local"
+          id={@input_id}
           class="bp-input"
           aria-label={title_for(@field)}
           disabled={@readonly}

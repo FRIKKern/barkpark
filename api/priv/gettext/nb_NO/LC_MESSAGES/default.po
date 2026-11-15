@@ -379,6 +379,23 @@ msgstr "Utkast: upubliserte endringer"
 msgid "Draft: no changes"
 msgstr "Utkast: ingen endringer"
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:53
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:128
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:134
+#, elixir-autogen, elixir-format
+msgid "Incoming references"
+msgstr "Innkommende referanser"
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:138
+#, elixir-autogen, elixir-format
+msgid "Close incoming references"
+msgstr "Lukk innkommende referanser"
+
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:148
+#, elixir-autogen, elixir-format
+msgid "No incoming references found."
+msgstr "Fant ingen innkommende referanser."
+
 #: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Drop or paste an image to replace it"
@@ -1726,6 +1743,31 @@ msgstr "apr."
 msgid "Are you sure you want to delete"
 msgstr "Er du sikker på at du vil slette"
 
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:34
+#, elixir-autogen, elixir-format
+msgid "Delete document?"
+msgstr "Slette dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:35
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to delete this document?"
+msgstr "Er du sikker på at du vil slette dette dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Used in"
+msgstr "Brukt i"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:46
+#, elixir-autogen, elixir-format
+msgid "You may not be able to delete “%{title}” because the following documents refer to it:"
+msgstr "Du kan kanskje ikke slette «%{title}» fordi følgende dokumenter refererer til det:"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:53
+#, elixir-autogen, elixir-format
+msgid "If you delete this document, documents that refer to it will no longer be able to access it."
+msgstr "Hvis du sletter dette dokumentet, får dokumenter som refererer til det, ikke lenger tilgang til det."
+
 #: lib/barkpark_web/components/studio_components/modals.ex:875
 #, elixir-autogen, elixir-format
 msgid "Aug"
@@ -1852,6 +1894,18 @@ msgstr "Forkaste alle ulagrede endringer i"
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and delete"
 msgstr "Koble fra referansene og slett"
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:74
+#, elixir-autogen, elixir-format
+msgid "1 document refers to “%{title}”"
+msgid_plural "%{count} documents refer to “%{title}”"
+msgstr[0] "1 dokument refererer til «%{title}»"
+msgstr[1] "%{count} dokumenter refererer til «%{title}»"
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:171
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab (%{type})"
+msgstr "Åpne i ny fane (%{type})"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:740
 #, elixir-autogen, elixir-format
@@ -2574,6 +2628,36 @@ msgstr "Dette arbeidsområdet har ingen offentlig side for artikler, så bare me
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
 msgstr "Avpubliser likevel"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Unpublish document?"
+msgstr "Avpublisere dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:104
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to unpublish “%{title}”?"
+msgstr "Er du sikker på at du vil avpublisere «%{title}»?"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:47
+#, elixir-autogen, elixir-format
+msgid "Referring to %{title}"
+msgstr "Refererer til %{title}"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:51
+#, elixir-autogen, elixir-format
+msgid "You may not be able to unpublish “%{title}” because the following documents refer to it:"
+msgstr "Du kan kanskje ikke avpublisere «%{title}» fordi følgende dokumenter refererer til det:"
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:58
+#, elixir-autogen, elixir-format
+msgid "If you unpublish this document, documents that refer to it will no longer be able to access it."
+msgstr "Hvis du avpubliserer dette dokumentet, får dokumenter som refererer til det, ikke lenger tilgang til det."
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex:88
+#, elixir-autogen, elixir-format
+msgid "Unpublish now"
+msgstr "Avpubliser nå"
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2202
 #, elixir-autogen, elixir-format
@@ -13375,6 +13459,11 @@ msgstr "Søk i listen"
 msgid "Showing the first %{count}."
 msgstr "Viser de første %{count}."
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:189
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{shown} of %{total}."
+msgstr "Viser de første %{shown} av %{total}."
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "Sort by"
@@ -13851,6 +13940,11 @@ msgstr "Erstattet %{count}"
 #, elixir-autogen, elixir-format
 msgid "Show replace"
 msgstr "Vis erstatt"
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgid "Field actions"
+msgstr "Felthandlinger"
 
 #: lib/barkpark_web/studio_locale.ex:300
 #, elixir-autogen, elixir-format

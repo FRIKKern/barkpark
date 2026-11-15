@@ -19,7 +19,7 @@ defmodule Barkpark.ChatHosts do
   # `:chat_host_expired_turn_floor` app env; never edit it to reach old rows.
   @expired_turn_floor ~U[2026-11-14 12:00:00Z]
   @online_window 90
-  # Live hosts (enrolled, not revoked) one workspace may hold. Each has its own
+  # Live hosts (see live_count/1) one workspace may hold. Each has its own
   # :host_write_per_minute bucket, so this bounds a workspace's host writes.
   # People run one or two machines each; 10 leaves room for a small team.
   # Set with `config :barkpark, :chat_host_live_limit` (task-4abf105be723796a).
@@ -88,16 +88,26 @@ defmodule Barkpark.ChatHosts do
   # the token unused until it expires. Hosts already enrolled are never
   # touched, so a workspace over the cap keeps them all.
   defp claim_live_slot(workspace_id) do
-    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["chat_host_live:" <> workspace_id])
+    lock_live_slots(workspace_id)
     limit = live_limit()
 
     if live_count(workspace_id) >= limit, do: Repo.rollback({:host_limit_reached, limit})
   end
 
+  defp lock_live_slots(workspace_id) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["chat_host_live:" <> workspace_id])
+  end
+
+  # Live means it can still write: enrolled, not revoked, credential unexpired.
+  # An expired credential never comes back (authenticate/1 and
+  # rotate_credential/1 both refuse it), so freeing its slot is final.
   defp live_count(workspace_id) do
+    now = DateTime.utc_now()
+
     RegisteredHost
     |> where([h], h.workspace_id == ^workspace_id)
     |> where([h], not is_nil(h.enrolled_at) and is_nil(h.revoked_at))
+    |> where([h], h.credential_expires_at > ^now)
     |> Repo.aggregate(:count)
   end
 
@@ -145,7 +155,6 @@ defmodule Barkpark.ChatHosts do
 
   def rotate_credential(%RegisteredHost{} = host) do
     credential = Security.mint_secret()
-    now = DateTime.utc_now()
 
     Repo.transaction(fn ->
       current =
@@ -154,8 +163,22 @@ defmodule Barkpark.ChatHosts do
         |> lock("FOR UPDATE")
         |> Repo.one()
 
+      # The same order as enrol: this host's own row, then the workspace key,
+      # and the clock read only after both. Holding the key, nothing waits on
+      # a row, so no cycle forms, and a rotation stuck behind a row lock never
+      # stalls the workspace's enrolments. The key orders this expiry check
+      # against claim_live_slot/1's count: an enrolment that saw this host
+      # expired is committed before `now` is read here.
+      if current, do: lock_live_slots(current.workspace_id)
+      now = DateTime.utc_now()
+
       cond do
         is_nil(current) or not is_nil(current.revoked_at) ->
+          Repo.rollback(:invalid_credential)
+
+        # Authenticated just before the expiry, rotating just after: refused,
+        # so an expired host, which holds no live slot, cannot come back.
+        DateTime.compare(current.credential_expires_at, now) != :gt ->
           Repo.rollback(:invalid_credential)
 
         current.credential_hash != host.credential_hash or
@@ -422,6 +445,51 @@ defmodule Barkpark.ChatHosts do
     |> elem(0)
     |> Enum.reverse()
     |> Enum.join()
+  end
+
+  @doc """
+  A turn's status label posted OUT of the cursor sequence
+  (`POST /v1/chat-host/leases/:lease_id/status`, task-768e7dc4449cc7b9), so a
+  label in flight never holds the turn's next event.
+
+  The fence is `live_lease_for_host/2` (this host's live lease, in its
+  workspace, on a session it executes) plus the lease's integer `epoch`; every
+  miss is the one `{:error, :stale_fence}`. The label is checked by the same
+  rules as a `status` event. Nothing is written: no ExecutionEvent row, no
+  cursor, no lease or session change, so it cannot reach the expired-lease
+  close or the run-once rule. The Recorder streams it as the same runtime
+  `:status` event the cursor path does, once per turn, only while the turn is
+  open and has no text yet. Answers `{:ok, :streamed}`, or `{:ok, :dropped}`
+  when the turn is not open, already has text or already streamed a label, or
+  when the session has no Recorder or it did not answer within 2 s.
+  """
+  def accept_status(%RegisteredHost{} = host, lease_id, attrs) when is_map(attrs) do
+    epoch = value(attrs, :epoch)
+
+    with %ExecutionLease{epoch: ^epoch} = lease when is_integer(epoch) <-
+           live_lease_for_host(host, lease_id),
+         {:ok, event} <- normalize_status_label(value(attrs, :label)) do
+      {:ok, stream_status(lease, event)}
+    else
+      {:error, :invalid_status_label} = refused -> refused
+      _miss -> {:error, :stale_fence}
+    end
+  end
+
+  defp stream_status(lease, event) do
+    status = %Barkpark.StudioChat.Runtime.Event{
+      provider: lease.provider,
+      session_id: lease.session_id,
+      kind: :status,
+      native: event
+    }
+
+    case Barkpark.StudioChat.Recorder.whereis(lease.session_id) do
+      pid when is_pid(pid) -> GenServer.call(pid, {:offer_status, status}, 2_000)
+      nil -> :dropped
+    end
+  catch
+    :exit, _ -> :dropped
   end
 
   @doc """

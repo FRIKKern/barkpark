@@ -2,6 +2,9 @@
 // picked reference is the TanStack Studio's card (RefInput.tsx): the type's
 // tile, the title, the type under it, and one "Reference actions" menu with
 // Clear and Replace. Outside the desk the pill with Change and Remove stays.
+// The card's preview is a link that opens the document in the next pane
+// (refs.spec.ts refMenu and refLink: `.ref-row` holds both the link and the
+// button), and a pick or a cancelled Replace lands the focus on it.
 //
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom.
@@ -12,7 +15,7 @@ import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
-  url: "http://localhost/",
+  url: "http://localhost/w/acme/p/web/d/production/studio/_desk/post;post-07",
 });
 const { window } = dom;
 for (const name of ["customElements", "CustomEvent", "document", "Element", "Event", "EventTarget",
@@ -50,12 +53,13 @@ const key = (el, k) =>
 // The desk's edit pane: the shell stamps the type words and icons.
 document.body.innerHTML =
   `<div data-type-labels='{"author":"Author"}' data-type-icons='{"*":"<svg data-icon=\\"doc\\"></svg>"}'>` +
-  `<section class="dk-edit"><div id="desk"></div></section><div id="studio"></div></div>`;
+  `<section class="dk-edit" data-pane-index="2"><div id="desk"></div></section><div id="studio"></div></div>`;
 
 function mount(where) {
   const picker = document.createElement("bp-reference-picker");
   picker.setAttribute("ref-type", "author");
   picker.setAttribute("value", "author-berg");
+  picker.setAttribute("data-input-id", "author");
   document.getElementById(where).appendChild(picker);
   const emitted = [];
   picker.addEventListener("bp-change", (e) => emitted.push(e.detail.value));
@@ -74,6 +78,44 @@ try {
   assert.equal(card.querySelector(".s").textContent, "Author", "the type under it");
   const actions = card.querySelector('button[aria-label="Reference actions"]');
   assert.ok(actions, "one Reference actions button");
+
+  // ── The link: in the same .ref-row as the button, to the next pane ────────
+  const BASE = "/w/acme/p/web/d/production/studio/_desk/";
+  const link = card.querySelector('a[href$="parentRefPath=author"]');
+  assert.ok(link, "the preview is a link ending parentRefPath=<field>");
+  assert.equal(link.getAttribute("href"), BASE + "post;post-07;author-berg,type=author,parentRefPath=author");
+  assert.equal(link.getAttribute("data-phx-link"), "patch", "LiveView patches to it");
+  assert.equal(link.getAttribute("data-phx-link-state"), "push");
+  assert.equal(link.textContent, "Ola BergAuthor", "named by the target's title and type");
+  assert.equal(link.closest(".ref-row"), actions.closest(".ref-row"), "one row holds the link and the button");
+  assert.ok(link.compareDocumentPosition(actions) & window.Node.DOCUMENT_POSITION_FOLLOWING, "the link comes first");
+  assert.equal(link.tabIndex, 0, "a Tab stop");
+  // The panes kept: up to this pane's own, its split siblings with it.
+  const at = (path, index) => {
+    dom.reconfigure({ url: "http://localhost" + BASE + path });
+    card.closest("[data-pane-index]").setAttribute("data-pane-index", String(index));
+    return picker._openHref().slice(BASE.length);
+  };
+  assert.equal(at("post;post-07;author-x,type=author,parentRefPath=author", 2),
+    "post;post-07;author-berg,type=author,parentRefPath=author", "panes to the right are dropped");
+  assert.equal(at("post;post-07|,view=preview", 3),
+    "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "a split group stays whole");
+  assert.equal(at("post;post-07|,view=preview", 2),
+    "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "from either side of it");
+  assert.equal(at("post;post-07%7C,view=preview", 3),
+    "post;post-07|,view=preview;author-berg,type=author,parentRefPath=author", "a split's bar is printed as the server prints it");
+  // The panes changed under the card (Split pane right is a patch; the card is
+  // not drawn again): the href is read again as the link is reached.
+  dom.reconfigure({ url: "http://localhost" + BASE + "post;post-07%7C," });
+  card.closest("[data-pane-index]").setAttribute("data-pane-index", "3");
+  assert.equal(link.getAttribute("href"), BASE + "post;post-07;author-berg,type=author,parentRefPath=author", "stale until reached");
+  for (const reach of ["pointerdown", "focus", "click"]) {
+    link.setAttribute("href", "/stale");
+    link.dispatchEvent(new window.Event(reach, { bubbles: reach !== "focus", cancelable: true }));
+    assert.equal(link.getAttribute("href"), BASE + "post;post-07|,;author-berg,type=author,parentRefPath=author", reach + " reads the panes again");
+  }
+  assert.equal(at("post;post-07", 2), "post;post-07;author-berg,type=author,parentRefPath=author");
+  link.dispatchEvent(new window.Event("focus"));
   assert.equal(actions.getAttribute("aria-haspopup"), "menu");
   assert.equal(
     [...card.querySelectorAll("button")].filter((b) => /Change|Remove/.test(b.textContent)).length,
@@ -110,8 +152,8 @@ try {
   assert.ok(picker.querySelector(".ref-box"), "Escape brings the card back");
   assert.equal(
     document.activeElement,
-    picker.querySelector('button[aria-label="Reference actions"]'),
-    "with the focus on its menu button"
+    picker.querySelector(".ref-row a.ref-preview"),
+    "with the focus on its link"
   );
   assert.deepEqual(emitted, [], "nothing changed");
 
@@ -126,7 +168,9 @@ try {
   await tick();
   assert.equal(picker.querySelector(".ref-box .t").textContent, "Ingrid Ness");
   assert.deepEqual(emitted, ["author-ness"], "the pick is sent");
-  assert.equal(document.activeElement, picker.querySelector('button[aria-label="Reference actions"]'));
+  const picked = picker.querySelector('.ref-row a[href$="parentRefPath=author"]');
+  assert.equal(picked.getAttribute("href"), BASE + "post;post-07;author-ness,type=author,parentRefPath=author", "the link follows the pick");
+  assert.equal(document.activeElement, picked, "the focus is on the link: Enter opens it");
 
   // ── Clear: the value goes, the search takes the focus ─────────────────────
   picker.querySelector('button[aria-label="Reference actions"]').click();
@@ -143,11 +187,55 @@ try {
   document.body.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
   assert.equal(other.querySelector('[role="menu"]').hidden, true, "a click outside closes it");
 
+  // ── The desk's targets (EditorHost pushes desk:ref-targets) ───────────────
+  // With no event the card is right by its own read (above: "Ola Berg").
+  const targets = (refs) => window.dispatchEvent(new window.CustomEvent("phx:desk:ref-targets", { detail: { refs } }));
+  const live = mount("desk").picker;
+  await tick();
+  const liveTitle = () => live.querySelector(".ref-box .t").textContent;
+  assert.equal(liveTitle(), "Ola Berg", "no event: the mount's own read");
+  targets([{ path: "author", id: "author-berg", title: "Ola Berg X", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "a rename elsewhere shows on the card");
+  assert.equal(live.querySelector("a.ref-preview").textContent, "Ola Berg XAuthor", "and names its link");
+  targets([{ path: "author", id: "author-other", title: "Someone else", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "a target this field does not hold is ignored");
+  targets([{ path: "reviewer", id: "author-berg", title: "Wrong field", type: "author" }]);
+  assert.equal(liveTitle(), "Ola Berg X", "as is another field's");
+  // The value changed meanwhile (a pick): a late answer for the old id is dropped.
+  live.querySelector('button[aria-label="Reference actions"]').click();
+  live.querySelectorAll('[role="menuitem"]')[1].click();
+  const s2 = live.querySelector(".bp-ref-search-input");
+  s2.value = "in";
+  s2.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await tick(500);
+  live.querySelector('[role="option"]').click();
+  targets([{ path: "author", id: "author-berg", title: "Late", type: "author" }]);
+  assert.equal(liveTitle(), "Ingrid Ness", "a late answer for the replaced value is ignored");
+  // The mount's own read, answering after the desk did, does not paint over it.
+  let answer;
+  globalThis.fetch = window.fetch = (url, options = {}) =>
+    String(url).includes("/v1/data/doc/") ? new Promise((r) => (answer = r)) : fetchMock(url, options);
+  const slow = mount("desk").picker;
+  await tick();
+  targets([{ path: "author", id: "author-berg", title: "Ola Berg, renamed", type: "author" }]);
+  answer({ ok: true, json: async () => ({ result: { _id: "author-berg", _type: "author", title: "Ola Berg" } }) });
+  await tick();
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Ola Berg, renamed", "an older read does not replace the desk's title");
+  globalThis.fetch = window.fetch = fetchMock;
+  // Taken out of the page it stops listening; put back, it listens again.
+  slow.remove();
+  targets([{ path: "author", id: "author-berg", title: "While away", type: "author" }]);
+  document.getElementById("desk").appendChild(slow);
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Ola Berg, renamed");
+  targets([{ path: "author", id: "author-berg", title: "Back", type: "author" }]);
+  assert.equal(slow.querySelector(".ref-box .t").textContent, "Back", "re-attached: it follows again");
+
   // ── Control: outside the desk, the pill with Change and Remove ────────────
   const studio = mount("studio").picker;
   await tick();
   assert.equal(studio.querySelector(".ref-box"), null, "no card outside the desk");
   assert.ok(studio.querySelector(".ref-selected"), "the pill");
+  assert.equal(studio.querySelector("a"), null, "and no link");
   assert.deepEqual(
     [...studio.querySelectorAll("button")].map((b) => b.textContent),
     ["Change", "Remove"]

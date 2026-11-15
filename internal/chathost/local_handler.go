@@ -26,8 +26,15 @@ type LocalHandler struct {
 	// StatusLabel makes a claude turn's 2 to 4 word status label
 	// (status_label.go). Nil means no label.
 	StatusLabel StatusLabeler
+	// Status sends that label to the server, out of the turn's event sequence.
+	// Nil means no label: the side call is not run.
+	Status StatusPoster
 	// Log receives the line a skipped status label leaves. Nil means os.Stderr.
 	Log io.Writer
+	// WaitDelay bounds cmd.Wait for the provider (defaultProviderWaitDelay when
+	// zero). Each handler holds its own, so a test that shortens it does not race
+	// a turn another test left running.
+	WaitDelay time.Duration
 
 	mu       sync.Mutex
 	sessions map[string]*activeLocalSession
@@ -211,7 +218,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.WaitDelay = providerWaitDelay
+	cmd.WaitDelay = providerWaitDelay(h.WaitDelay)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -222,8 +229,9 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 		return err
 	}
 	defer h.unregister(sessionID, session)
-	// The label's side call runs alongside the turn; the turn never waits for it.
-	emit, endStatus := h.startStatusLabel(ctx, content, emit)
+	// The label's side call and its POST run alongside the turn; the turn never
+	// waits for either.
+	emit, endStatus := h.startStatusLabel(ctx, remote, content, emit)
 	defer endStatus()
 
 	if err := session.write(claudeUserFrame(content, files, images)); err != nil {
@@ -320,7 +328,7 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.WaitDelay = providerWaitDelay
+	cmd.WaitDelay = providerWaitDelay(h.WaitDelay)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -433,10 +441,20 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	return nil
 }
 
-// providerWaitDelay bounds cmd.Wait once the provider has exited or been
+// defaultProviderWaitDelay bounds cmd.Wait once the provider has exited or been
 // killed: a grandchild that inherited stderr (an MCP server) cannot hold the
-// turn open past it.
-var providerWaitDelay = 5 * time.Second
+// turn open past it. LocalHandler.WaitDelay and ClaudeStatusLabeler.WaitDelay
+// set it per instance.
+const defaultProviderWaitDelay = 5 * time.Second
+
+// providerWaitDelay is the WaitDelay for a provider child: the instance's own,
+// or the default when it set none.
+func providerWaitDelay(own time.Duration) time.Duration {
+	if own > 0 {
+		return own
+	}
+	return defaultProviderWaitDelay
+}
 
 // reapUnlessWaited kills and waits for a provider that a turn left without
 // waiting for (an emit error, a decode error, a failed request). Without the

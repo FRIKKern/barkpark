@@ -122,6 +122,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
       "serves the schema itself; a miss is a 404, not a render",
+    "barkpark_web/live/studio/desk/doc_dialog.ex:kind" =>
+      "reads only the type's title, for the \"Post / author\" line under a referring " <>
+        "document in the desk's delete and unpublish dialogs; a miss prints the type " <>
+        "name; no document field is read or rendered with it",
     "barkpark_web/controllers/document_ops_controller.ex:apply_op" =>
       "presence check before a block-op write; a miss is a 404, the schema is never rendered",
     "barkpark_web/controllers/document_ops_controller.ex:apply_field_ops" =>
@@ -133,6 +137,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/content/preview_locations.ex:preview_template" =>
       "reads only desk.preview's URL template string to interpolate a backlink's " <>
         "preview href — never a document field, so it never reaches Envelope redaction",
+    "barkpark_web/live/studio/desk/incoming_refs.ex:type_title" =>
+      "reads only the type's title, for a group heading in the desk's Incoming " <>
+        "references panel; a miss prints the type name; the rows themselves come " <>
+        "from Content.Graph.backlinks/2, which applies its own field visibility",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/media/sanity_image_asset_doc.ex:do_ensure" =>

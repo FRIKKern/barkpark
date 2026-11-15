@@ -336,7 +336,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           [dataset: socket.assigns.dataset] ++ ScopeHelpers.scope_opts(socket)
         )
 
-      if refs == [] do
+      # The desk asks every time, as the TanStack Studio does (its own
+      # dialog, `Desk.UnpublishDialog`). The Studio asks only when another
+      # document refers to this one.
+      if refs == [] and not desk?(socket) do
         Shared.do_unpublish(socket)
       else
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
@@ -346,6 +349,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
        put_flash(socket, :error, gettext("Nothing to unpublish — open a document first"))}
     end
   end
+
+  # `DeskLive` is the only host with a `:desk_base`.
+  defp desk?(socket), do: is_binary(socket.assigns[:desk_base])
 
   def close_unpublish_guard(socket) do
     {:noreply, assign(socket, show_unpublish_guard: false, unpublish_refs: [])}
