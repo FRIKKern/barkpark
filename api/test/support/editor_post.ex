@@ -16,7 +16,11 @@ defmodule BarkparkWeb.EditorPost do
 
   @doc "`params` with the name of the document `view`'s editor holds now."
   def named(view, params \\ %{}) when is_map(params) do
-    Map.put_new(params, PostIdentity.key(), PostIdentity.of(:sys.get_state(view.pid).socket))
+    open = PostIdentity.of(:sys.get_state(view.pid).socket)
+
+    params
+    |> Map.put_new(PostIdentity.key(), open)
+    |> Map.put_new(PostIdentity.end_key(), open)
   end
 
   @doc "A `phx-change` of the editor form."

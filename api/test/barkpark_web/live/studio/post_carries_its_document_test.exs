@@ -168,6 +168,42 @@ defmodule BarkparkWeb.Studio.PostCarriesItsDocumentTest do
       assert stored(c, c.a) == untouched(1)
     end
 
+    test "#{surface}: a post built in the middle of the patch from A to B is not written",
+         c do
+      {view, _sel} = page = open(c, @surface, c.a)
+      of_a = identity(page)
+      goes_to(page, c, @surface, c.b)
+      of_b = identity(page)
+
+      # The form's attributes are B's already, its inputs and last child A's.
+      render_change(view, "autosave", %{
+        "_target" => ["doc", "title"],
+        "_bp_doc" => of_b,
+        "_bp_doc_end" => of_a,
+        "doc" => form_of(1, "Title 1 typed")
+      })
+
+      render_submit(view, "save", %{
+        "_bp_doc" => of_b,
+        "_bp_doc_end" => of_a,
+        "doc" => form_of(1, "Title 1 typed")
+      })
+
+      assert stored(c, c.b) == untouched(2)
+      assert stored(c, c.a) == untouched(1)
+    end
+
+    test "#{surface}: the form's last child carries the same name as the form", c do
+      {view, sel} = page = open(c, @surface, c.a)
+      html = view |> element(sel) |> render()
+
+      assert [[_, value]] =
+               Regex.scan(~r/<input[^>]*\sname="_bp_doc_end"[^>]*\svalue="([^"]*)"/, html)
+
+      assert String.replace(value, "&quot;", ~s(")) == identity(page)
+      assert html =~ ~r/<input[^>]*\sname="_bp_doc_end"[^>]*>\s*<\/form>/
+    end
+
     test "#{surface}: a Save built from A that arrives after the pane opened B is not written",
          c do
       {view, _sel} = page = open(c, @surface, c.a)
@@ -248,8 +284,11 @@ defmodule BarkparkWeb.Studio.PostCarriesItsDocumentTest do
 
       # The key is no field: not in the content, not in the form buffer.
       state = :sys.get_state(view.pid).socket.assigns
-      refute Map.has_key?(state.editor_form, PostIdentity.key())
-      refute Map.has_key?(state.editor_doc.content, PostIdentity.key())
+
+      for key <- [PostIdentity.key(), PostIdentity.end_key()] do
+        refute Map.has_key?(state.editor_form, key)
+        refute Map.has_key?(state.editor_doc.content, key)
+      end
     end
   end
 end

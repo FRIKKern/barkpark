@@ -1016,6 +1016,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   data-test-id="validation-warnings"
                 ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
+              <%!-- Last child on purpose: the end mark of `PostIdentity`. --%>
+              <input type="hidden" name={BarkparkWeb.Studio.StudioLive.PostIdentity.end_key()} value={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)} />
             </form>
             </div>
           <% end %>
