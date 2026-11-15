@@ -14,18 +14,24 @@ import (
 
 // leaseServer plays the server's side of one lease: it hands the lease out on
 // every poll until it holds a completed event (ChatHosts.next_commands/1), takes
-// an event only at last_cursor+1, answers a repeat of a taken cursor as a
-// duplicate, and refuses a gap (ChatHosts.reconcile_event/4).
+// an event only at last_cursor+1, answers a repeat of a taken cursor with the
+// same key and event as a duplicate and any other as cursor_conflict, and
+// refuses a gap (ChatHosts.reconcile_event/4).
 type leaseServer struct {
 	mu         sync.Mutex
 	lastCursor uint64
-	completed  bool
-	kinds      []string
-	refuse     func(cursor uint64) int // non-zero: answer this attempt with that status
-	posts      int                     // event POSTs received
+	// taken: the key and event taken at each cursor.
+	taken     map[uint64]string
+	completed bool
+	kinds     []string
+	refuse    func(cursor uint64) int // non-zero: answer this attempt with that status
+	posts     int                     // event POSTs received
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
+	// closeDeadline: the TerminalTimeout startRunner gives this test's Runner
+	// (zero: the default).
+	closeDeadline time.Duration
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -73,6 +79,7 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		case "/v1/chat-host/events":
 			var payload struct {
 				Cursor uint64         `json:"cursor"`
+				Key    string         `json:"idempotency_key"`
 				Event  map[string]any `json:"event"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -88,21 +95,36 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 			if status == 0 && s.refuse != nil {
 				status = s.refuse(payload.Cursor)
 			}
+			encoded, _ := json.Marshal(payload.Event)
+			signature := payload.Key + "|" + string(encoded)
+			prior, recorded := s.taken[payload.Cursor]
 			switch {
 			case status != 0:
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"error":{"code":"refused"}}`))
-			case payload.Cursor <= s.lastCursor && s.completed:
+			// The same cursor, key and event as one already taken: a duplicate,
+			// whether or not the lease completed since.
+			case payload.Cursor <= s.lastCursor && recorded && prior == signature:
+				_, _ = w.Write([]byte(`{"accepted":false,"duplicate":true}`))
+			case payload.Cursor <= s.lastCursor && (recorded || s.completed):
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"error":{"code":"unprocessable","message":":cursor_conflict"}}`))
-				s.kinds = append(s.kinds, "refused-after-completed")
+				if s.completed {
+					s.kinds = append(s.kinds, "refused-after-completed")
+				}
 			case payload.Cursor <= s.lastCursor:
+				// A cursor taken before this server kept history (lastCursor set
+				// by the test): taken as a duplicate, as before.
 				_, _ = w.Write([]byte(`{"accepted":false,"duplicate":true}`))
 			case payload.Cursor != s.lastCursor+1:
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = w.Write([]byte(`{"error":{"code":"unprocessable","message":":cursor_gap"}}`))
 			default:
 				s.lastCursor = payload.Cursor
+				if s.taken == nil {
+					s.taken = map[uint64]string{}
+				}
+				s.taken[payload.Cursor] = signature
 				kind, _ := payload.Event["kind"].(string)
 				s.kinds = append(s.kinds, kind)
 				if kind == "turn_completed" || kind == "terminal" {
@@ -154,10 +176,11 @@ func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Co
 	t.Helper()
 	ts := httptest.NewServer(server.handler(t))
 	runner := Runner{
-		Client:       &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
-		Handler:      handler,
-		PollInterval: time.Millisecond,
-		Log:          &syncBuffer{},
+		Client:          &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
+		Handler:         handler,
+		PollInterval:    time.Millisecond,
+		Log:             &syncBuffer{},
+		TerminalTimeout: server.closeDeadline,
 	}
 	// As main.go wires it: the handler posts labels through the Runner's client.
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {
@@ -271,10 +294,8 @@ func TestRunnerDoesNotRestartALeaseItJustFinished(t *testing.T) {
 // was refused too, is listed again with last_cursor 0. This process started
 // it, so it is closed, never handed to the provider a second time.
 func TestRunnerNeverRunsALeaseTwiceEvenWhenNoEventWasTaken(t *testing.T) {
-	defer func(old time.Duration) { terminalPublishTimeout = old }(terminalPublishTimeout)
-	terminalPublishTimeout = 20 * time.Millisecond
 	opened := time.Now()
-	server := &leaseServer{refuse: func(uint64) int {
+	server := &leaseServer{closeDeadline: 20 * time.Millisecond, refuse: func(uint64) int {
 		if time.Since(opened) < 150*time.Millisecond {
 			return http.StatusServiceUnavailable
 		}

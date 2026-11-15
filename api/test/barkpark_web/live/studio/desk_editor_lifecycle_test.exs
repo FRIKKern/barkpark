@@ -127,6 +127,11 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
       |> element(~s([data-pane-editing] .pane-header button[aria-label="Unpublish"]))
       |> render_click()
 
+      # The desk asks first, also when nobody refers to the document.
+      view
+      |> element(~s([data-desk-dialog="unpublish"] button[data-desk-confirm="unpublish"]))
+      |> render_click()
+
       assert flash?(view, "Unpublished")
       assert badge?(view, "draft")
       assert offered?(view, "Publish")

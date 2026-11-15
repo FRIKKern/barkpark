@@ -52,7 +52,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
          put_flash(
            socket,
            :error,
-           "This workspace has reached its limit of #{limit} enrolled chat hosts. Revoke one to enrol another."
+           "This workspace has reached its limit of #{limit} enrolled chat hosts. Revoke one to enroll another."
          )}
 
       {:error, _} ->

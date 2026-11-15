@@ -168,6 +168,10 @@ func TestRunnerKeepsActiveCommandsThroughAnOutage(t *testing.T) {
 // Revocation that arrives after an outage still ends Run and cancels the work.
 func TestRunnerRevokedAfterAnOutageStillEndsRun(t *testing.T) {
 	var polls atomic.Int32
+	// The cancelled command still posts its close after Run returned; the test
+	// waits for it, so its goroutine is not left running into later tests.
+	closed := make(chan struct{})
+	var closeOnce sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -183,6 +187,7 @@ func TestRunnerRevokedAfterAnOutageStillEndsRun(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 			}
 		case "/v1/chat-host/events":
+			closeOnce.Do(func() { close(closed) })
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"accepted":true}`))
 		}
@@ -205,6 +210,11 @@ func TestRunnerRevokedAfterAnOutageStillEndsRun(t *testing.T) {
 	case <-handler.canceled:
 	case <-time.After(time.Second):
 		t.Fatal("revocation did not cancel the running command")
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the cancelled command never posted its close")
 	}
 }
 
