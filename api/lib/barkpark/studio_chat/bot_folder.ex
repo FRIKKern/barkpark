@@ -38,6 +38,31 @@ defmodule Barkpark.StudioChat.BotFolder do
   def valid?(_), do: false
 
   @doc """
+  The `bot_folder` of a `POST /v1/chat/sessions` body: `{:ok, nil}` when absent
+  or null, `{:ok, name}` on a registered-host claude session, otherwise
+  `{:error, message}` (the controller's 400 `invalid_request`).
+  """
+  @spec create_param(map(), String.t(), String.t()) ::
+          {:ok, String.t() | nil} | {:error, String.t()}
+  def create_param(params, provider, target) do
+    case Map.get(params, "bot_folder") do
+      nil ->
+        {:ok, nil}
+
+      _ when target != "registered_host" ->
+        {:error, "bot_folder is only for registered_host execution"}
+
+      _ when provider != "claude" ->
+        {:error, "bot_folder is only for the claude provider"}
+
+      folder ->
+        if valid?(folder),
+          do: {:ok, folder},
+          else: {:error, "bot_folder must match #{pattern_source()}"}
+    end
+  end
+
+  @doc """
   The stored bot folder of session `id`, or nil. The Recorder reads it when it
   opens a runtime, so no caller of `Recorder.ensure/1` has to carry it.
   """

@@ -1342,7 +1342,7 @@ defmodule BarkparkWeb.ChatController do
            opt_enum(params, "execution_target", StudioChat.Session.execution_targets(), "managed"),
          {:ok, host_id} <- opt_uuid(params, "execution_host_id"),
          :ok <- validate_execution_identity(target, host_id),
-         {:ok, bot_folder} <- opt_bot_folder(params, provider, target),
+         {:ok, bot_folder} <- StudioChat.BotFolder.create_param(params, provider, target),
          capabilities = Runtime.capabilities(provider),
          {:ok, mode} <-
            opt_capability(params, "mode", capabilities.modes -- ["bypassPermissions"]),
@@ -1403,26 +1403,6 @@ defmodule BarkparkWeb.ChatController do
 
   defp validate_execution_identity("registered_host", nil),
     do: {:error, "execution_host_id is required for registered_host execution"}
-
-  # The bot folder (`StudioChat.BotFolder`): a name on a registered-host claude
-  # session, never a path. `nil` and an absent key are the same: no folder.
-  defp opt_bot_folder(params, provider, target) do
-    case Map.get(params, "bot_folder") do
-      nil ->
-        {:ok, nil}
-
-      _ when target != "registered_host" ->
-        {:error, "bot_folder is only for registered_host execution"}
-
-      _ when provider != "claude" ->
-        {:error, "bot_folder is only for the claude provider"}
-
-      folder ->
-        if StudioChat.BotFolder.valid?(folder),
-          do: {:ok, folder},
-          else: {:error, "bot_folder must match #{StudioChat.BotFolder.pattern_source()}"}
-    end
-  end
 
   defp opt_capability(params, key, allowed) do
     case Map.get(params, key) do
