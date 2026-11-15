@@ -137,6 +137,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/content/preview_locations.ex:preview_template" =>
       "reads only desk.preview's URL template string to interpolate a backlink's " <>
         "preview href — never a document field, so it never reaches Envelope redaction",
+    "barkpark_web/live/studio/desk/incoming_refs.ex:type_title" =>
+      "reads only the type's title, for a group heading in the desk's Incoming " <>
+        "references panel; a miss prints the type name; the rows themselves come " <>
+        "from Content.Graph.backlinks/2, which applies its own field visibility",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/media/sanity_image_asset_doc.ex:do_ensure" =>

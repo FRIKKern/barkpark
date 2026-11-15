@@ -12,7 +12,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   `DeskLive` keeps the callbacks and hands each one here; this module owns
   the `active`, `editing`, `pending`, `active_refs`, `desk_ref_ids`,
-  `desk_nav` and `desk_used_in` (`DocDialog`) assigns.
+  `desk_nav`, `desk_incoming` (`IncomingRefs`) and `desk_used_in`
+  (`DocDialog`) assigns.
 
   When a Studio handler navigates (delete, duplicate, discard, open a
   backlink, new document), it prints a Studio path under the desk's base
@@ -23,7 +24,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   use BarkparkWeb, :html
 
-  import Phoenix.LiveView, only: [push_navigate: 2, push_patch: 2]
+  import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, push_patch: 2]
 
   require Logger
 
@@ -33,6 +34,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.DocMenu
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
+  alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -54,8 +56,22 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     {:ok, socket} = StudioLive.mount(params, session, socket)
 
     {:ok,
-     socket |> assign(active: nil, editing: nil, pending: nil, desk_used_in: nil) |> put_away()}
+     socket
+     |> assign(
+       active: nil,
+       editing: nil,
+       pending: nil,
+       desk_incoming: nil,
+       desk_used_in: nil
+     )
+     # The open Incoming references panel reads again when someone saves.
+     |> attach_hook(:desk_incoming_refs, :handle_info, &on_info/2)
+     |> put_away()}
   end
+
+  # The hook's function is this module's own, so the page's hooks can be read
+  # from where they are attached; the panel decides what a message means.
+  defp on_info(message, socket), do: IncomingRefs.on_info(message, socket)
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
   def target(panes, dataset) do
@@ -79,8 +95,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     cond do
       # The same document is still the last pane (a pane closed to its left,
       # a param changed): its editor stays as it is, typing and all.
+      # Its inspector may have opened or closed with the URL (`IncomingRefs`).
       target != nil and target == socket.assigns.editing ->
-        assign(socket, :active, length(panes) - 1)
+        socket |> assign(:active, length(panes) - 1) |> IncomingRefs.load()
 
       # A new document: the page sends itself `{:desk_edit, target}` for it.
       target ->
@@ -93,7 +110,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # No document is handed to the Studio: no path, no reference links.
   defp put_away(socket),
-    do: assign(socket, active_refs: [], desk_ref_ids: nil, desk_nav: nil, edit_failed: false)
+    do:
+      assign(socket,
+        active_refs: [],
+        desk_ref_ids: nil,
+        desk_nav: nil,
+        edit_failed: false,
+        desk_incoming: nil
+      )
 
   @doc """
   Loads the pending document into the Studio's editor.
@@ -115,12 +139,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         |> ours(:settled)
 
       {:noreply,
-       assign(loaded,
+       loaded
+       |> assign(
          active: length(panes) - 1,
          editing: target,
          pending: nil,
          edit_failed: false
-       )}
+       )
+       |> IncomingRefs.load()}
     rescue
       error in [DBConnection.ConnectionError, Postgrex.Error] ->
         Logger.warning(
@@ -427,6 +453,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp desk_pane(_params, _chain), do: nil
 
+  # What the URL asks for that the pane does not draw (`PaneComponent`). The
+  # Incoming references inspector is drawn, so its `inspect` is not left out.
+  defp left_out(pane) do
+    if IncomingRefs.open?(pane),
+      do: PaneComponent.left_out(Map.delete(pane, :inspect)),
+      else: PaneComponent.left_out(pane)
+  end
+
   # `inspect=on` is the Inspect dialog, drawn over the form, not an inspector.
   defp inspector(pane), do: if(pane[:inspect] == "on", do: nil, else: pane[:inspect])
 
@@ -504,7 +538,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           items={
             if @edit_failed or gone?(assigns),
               do: [],
-              else: DocMenu.with_refs(DocMenu.items(assigns), ref_items(assigns))
+              else:
+                assigns
+                |> DocMenu.items()
+                |> DocMenu.with_incoming(IncomingRefs.menu_item(@chain, @view.index, @base))
+                |> DocMenu.with_refs(ref_items(assigns))
           }
         />
         <%!-- Sanity's "Split pane right": the same document again, beside
@@ -561,7 +599,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           :for={
             note <-
               (assigns[:editor_doc] && !@edit_failed && !gone?(assigns) &&
-                 PaneComponent.left_out(@view.pane)) || []
+                 left_out(@view.pane)) || []
           }
           class="dk-note"
           data-desk-left-out
@@ -648,17 +686,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           )}
         <% end %>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
-              validation, history, incoming references). Nothing fills it yet,
-              so it is hidden; `data-inspect` is the pane's `inspect` from the
-              URL, which says which inspector a later one draws here. --%>
-        <aside
+              validation, history, incoming references). Hidden until an
+              inspector fills it; `data-inspect` is the pane's `inspect` from
+              the URL, which says which one. Incoming references is the first
+              (`IncomingRefs`), and never over a document that could not be
+              read or was deleted. --%>
+        <IncomingRefs.holder
           id={"#{@view.id}-inspector"}
-          class="dk-inspector"
-          data-desk-inspector
-          data-inspect={inspector(@view.pane)}
-          hidden
-        >
-        </aside>
+          panel={if(@edit_failed or gone?(assigns), do: nil, else: assigns[:desk_incoming])}
+          inspect={inspector(@view.pane)}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+          menu_button={"#{@view.id}-actions-button"}
+        />
         <%!-- The desk's own dialogs for the Studio's document actions
               (`DocDialog`): the Studio's handlers open and close them. The
               holder is always here, as the notes' is. --%>
