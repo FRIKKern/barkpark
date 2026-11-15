@@ -8,7 +8,19 @@
 // browser that refuses the write begun in the click gets one after the
 // answer, down to the plain words. A failed copy says so.
 //
-// Runs the TRACKED static asset api/priv/static/assets/bp-desk-field-actions.js
+// PASTE. The click on "Paste field" is held back while the clipboard is
+// read (Sanity's item under its own type, else the one in text/html); then
+// the item's JSON rides on the menu item as `phx-value-clip` for exactly one
+// click, which LiveView sends. Anything else on the clipboard is "Nothing to
+// paste" and no click goes on. A browser that will not let the page read
+// the clipboard is told so, and nothing is sent. The server's refusal
+// (`desk:field-toast`) is shown as an alert.
+//
+// THE SCRIPT ITSELF is loaded by bp-desk.js when the desk mounts. A click on
+// Copy or Paste before it has arrived waits for it; if it never arrives the
+// pane's toast says so and the next click loads it again.
+//
+// Runs the TRACKED static assets api/priv/static/assets/bp-desk-field-actions.js
 // under jsdom.
 //
 // Run: node ../paper-editor-host-tests/__desk_field_actions.test.mjs
@@ -76,8 +88,18 @@ Object.defineProperty(window.navigator, "clipboard", {
       held = text;
       writes.push(["writeText"]);
     },
+    // What a paste reads: `reads` is the clipboard's items, or an error to throw.
+    read: async () => {
+      if (reads instanceof Error) throw reads;
+      return reads.map((types) => ({
+        types: Object.keys(types),
+        getType: async (type) => ({ text: async () => types[type] }),
+      }));
+    },
   },
 });
+let reads = [];
+const clipboardApi = window.navigator.clipboard;
 
 await import("../../priv/static/assets/bp-desk-field-actions.js");
 
@@ -87,6 +109,10 @@ document.body.innerHTML =
   `<div id="field-actions-excerpt" popover role="menu" data-desk-copy-failed="Could not copy to the clipboard">` +
   `<button role="menuitem" data-desk-field-copy="excerpt">Copy field<span><svg></svg></span></button>` +
   `<button role="menuitem" data-desk-field-paste="excerpt" disabled>Paste field</button>` +
+  `</div></div></div>` +
+  `<div class="field"><div class="field-actions"><div id="field-actions-title" popover role="menu">` +
+  `<button role="menuitem" phx-click="desk-field-paste" phx-value-field="title" data-desk-field-paste="title" ` +
+  `data-desk-nothing="Nothing to paste" data-desk-invalid="Invalid clipboard item" data-desk-denied="The browser did not let this page read the clipboard">Paste field</button>` +
   `</div></div></div>`;
 
 const item = document.querySelector("[data-desk-field-copy]");
@@ -129,6 +155,8 @@ answer({ ...copy, text: "Again" });
 await tick(80);
 assert.equal(held["text/plain"], "Again");
 assert.equal(writes.length, 2);
+assert.equal(toast().textContent, "", "the earlier \"Empty value\" toast is taken down by a copy that lands");
+assert.equal(toast().hasAttribute("data-open"), false);
 
 // 4. A browser without web custom types: the item rides in text/html.
 refuse = (it) => SANITY in it.types;
@@ -162,14 +190,112 @@ answer(copy);
 await tick(80);
 assert.equal(toast().textContent, "Could not copy to the clipboard", "no new toast");
 
-// 8. bp-desk.js loads this script when the desk mounts, once, from the
+// ── Paste ──────────────────────────────────────────────────────────────
+// LiveView's click listener is on the window, in the bubble phase: it sees
+// only the click this script hands on, with the item on the button.
+Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: clipboardApi });
+const sent = [];
+window.addEventListener("click", (e) => {
+  const el = e.target.closest("[phx-click]");
+  if (el) sent.push({ event: el.getAttribute("phx-click"), field: el.getAttribute("phx-value-field"), clip: el.getAttribute("phx-value-clip") });
+});
+const pasteItem = document.querySelector('[data-desk-field-paste="title"]');
+const ITEM = JSON.stringify({ type: "sanityClipboardItem", value: "Short", barkpark: { kind: "field", field: { name: "excerpt", sig: "string", value: "Short" } } });
+const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
+const paste = async () => {
+  sent.length = 0;
+  toast().textContent = "";
+  press(pasteItem);
+  assert.equal(sent.length, 0, "the click is held back while the clipboard is read");
+  await tick(80);
+  return sent.slice();
+};
+
+// 8a. Sanity's item under its own type: one click goes on, carrying it.
+reads = [{ [SANITY]: ITEM, "text/html": "<p>x</p>", "text/plain": "Short" }];
+assert.deepEqual(await paste(), [{ event: "desk-field-paste", field: "title", clip: ITEM }]);
+assert.equal(pasteItem.hasAttribute("phx-value-clip"), false, "the item is on the button for that click only");
+assert.equal(toast().textContent, "", "no toast: the server answers");
+
+// 8b. No custom type (another browser): the item in text/html, base64, UTF-8.
+const UTF = JSON.stringify({ type: "sanityClipboardItem", value: "Blåbær", barkpark: { kind: "field", field: { name: "x", sig: "string", value: "Blåbær" } } });
+reads = [{ "text/html": `<div data-sanity-clipboard-base64="${b64(UTF)}"><p>Blåbær</p></div>`, "text/plain": "Blåbær" }];
+assert.deepEqual((await paste()).map((x) => x.clip), [UTF]);
+
+// 8c. Anything else on the clipboard: nothing to paste, and no click goes on.
+for (const other of [
+  [],
+  [{ "text/plain": "just words" }],
+  [{ "text/html": "<p>no item</p>" }],
+  [{ "text/html": `<div data-sanity-clipboard-base64="!!!"></div>` }],
+  [{ [SANITY]: "not json" }],
+  [{ [SANITY]: JSON.stringify({ type: "other" }) }],
+]) {
+  reads = other;
+  assert.deepEqual(await paste(), [], JSON.stringify(other));
+  assert.equal(toast().textContent, "Nothing to paste");
+  assert.equal(toast().getAttribute("role"), "status");
+}
+
+// 8d. An item over the cap is not sent at all.
+reads = [{ [SANITY]: JSON.stringify({ type: "sanityClipboardItem", value: "x".repeat(262144) }) }];
+assert.deepEqual(await paste(), []);
+assert.equal(toast().textContent, "Invalid clipboard item");
+assert.equal(toast().getAttribute("role"), "alert");
+
+// 8e. A browser that will not let the page read the clipboard: Paste says
+//     so and sends nothing. It does not paste what was copied here earlier:
+//     something else may have been copied since (review of #26467).
+window.localStorage.clear();
+refuse = () => false;
+press();
+answer({ ...copy, json: ITEM });
+await tick(80);
+assert.equal(window.localStorage.length, 0, "no copy is kept in the browser");
+for (const error of [new window.DOMException("denied", "NotAllowedError"), new window.DOMException("no data", "DataError"), new Error("broken")]) {
+  reads = error;
+  assert.deepEqual(await paste(), [], error.name);
+  assert.equal(toast().textContent, "The browser did not let this page read the clipboard", error.name);
+  assert.equal(toast().getAttribute("role"), "alert");
+}
+// No clipboard to read at all (an old browser, a page not on https): the same.
+Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { write: clipboardApi.write, writeText: clipboardApi.writeText } });
+assert.deepEqual(await paste(), []);
+assert.equal(toast().textContent, "The browser did not let this page read the clipboard");
+Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: clipboardApi });
+
+// 8f. The disabled Paste item reads nothing and sends nothing.
+reads = [{ [SANITY]: ITEM }];
+sent.length = 0;
+press(document.querySelector('[data-desk-field-paste="excerpt"]'));
+await tick(80);
+assert.deepEqual(sent, []);
+
+// 8g. The server's refusal is shown: a title and the reason, as an alert.
+window.dispatchEvent(new window.CustomEvent("phx:desk:field-toast", { detail: { tone: "critical", title: "Invalid clipboard item", description: "Source and target schema types are not compatible" } }));
+assert.equal(toast().querySelector("strong").textContent, "Invalid clipboard item");
+assert.equal(toast().querySelector("span").textContent, "Source and target schema types are not compatible");
+assert.equal(toast().getAttribute("role"), "alert");
+window.dispatchEvent(new window.CustomEvent("phx:desk:field-toast", { detail: { tone: "default", title: "Nothing to paste" } }));
+assert.equal(toast().textContent, "Nothing to paste");
+assert.equal(toast().getAttribute("role"), "status");
+
+// 9. bp-desk.js loads this script when the desk mounts, once, from the
 //    address on the desk's root; a page with no address loads nothing.
-delete window.BarkparkDeskFieldActions;
 await import("../../priv/static/assets/bp-desk.js");
+const api = window.BarkparkDeskFieldActions;
+delete window.BarkparkDeskFieldActions;
+const SRC = "/assets/v/0123456789abcdef/bp-desk-field-actions.js";
 const mountDesk = (attrs) => {
   const el = document.createElement("div");
   el.id = "desk-panes";
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  el.innerHTML =
+    `<section data-pane-index="1"><div class="dk-toast" popover="manual"></div>` +
+    `<div class="field"><div class="field-actions"><div popover role="menu" data-desk-unavailable="Copy and paste did not load. Reload the page.">` +
+    `<button role="menuitem" phx-click="desk-field-copy" phx-value-field="late" data-desk-field-copy="late">Copy field</button>` +
+    `<button role="menuitem" phx-click="desk-field-paste" phx-value-field="late" data-desk-field-paste="late">Paste field</button>` +
+    `</div></div></div></section>`;
   document.body.appendChild(el);
   Object.defineProperty(el, "clientWidth", { get: () => 1440 });
   const hook = Object.assign(Object.create(window.BarkparkDesk), { el, pushEvent() {} });
@@ -179,12 +305,48 @@ const mountDesk = (attrs) => {
 const loaded = () => [...document.querySelectorAll("head > script[data-desk-field-actions]")];
 mountDesk({}).remove();
 assert.equal(loaded().length, 0, "no address, no script");
-const SRC = "/assets/v/0123456789abcdef/bp-desk-field-actions.js";
 mountDesk({ "data-desk-field-actions": SRC }).remove();
-mountDesk({ "data-desk-field-actions": SRC });
+const deskRoot = mountDesk({ "data-desk-field-actions": SRC });
 assert.equal(loaded().length, 1, "loaded once, however often the desk mounts");
 assert.equal(loaded()[0].getAttribute("src"), SRC);
 assert.equal(loaded()[0].async, true);
 
-console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said, loaded by the desk)");
+// 10. A click made before the script has arrived waits for it and is then
+//     made again: it does not vanish, and it is not sent half-handled.
+const late = (what) => deskRoot.querySelector(`[data-desk-field-${what}="late"]`);
+const paneToast = () => deskRoot.querySelector(".dk-toast");
+sent.length = 0;
+press(late("copy"));
+await tick(20);
+assert.deepEqual(sent, [], "held: LiveView does not see the click yet");
+assert.equal(paneToast().textContent, "");
+window.BarkparkDeskFieldActions = api;
+loaded()[0].dispatchEvent(new window.Event("load"));
+assert.deepEqual(sent.map((x) => [x.event, x.field]), [["desk-field-copy", "late"]], "made again once the script is there");
+answer({ field: "late", empty: "Empty value, nothing to copy" });
+
+// 11. The script does not arrive: the pane's toast says so, the click is
+//     not sent, and the next click tries the load again.
+delete window.BarkparkDeskFieldActions;
+sent.length = 0;
+press(late("copy"));
+loaded()[0].dispatchEvent(new window.Event("error"));
+assert.deepEqual(sent, [], "nothing is sent for a script that failed");
+assert.equal(paneToast().textContent, "Copy and paste did not load. Reload the page.");
+assert.ok(paneToast().hasAttribute("data-open"), "the pane's toast is shown");
+assert.equal(loaded().length, 0, "the failed script is taken out");
+press(late("copy"));
+assert.equal(loaded().length, 1, "the next click loads it again");
+window.BarkparkDeskFieldActions = api;
+loaded()[0].dispatchEvent(new window.Event("load"));
+assert.deepEqual(sent.map((x) => [x.event, x.field]), [["desk-field-copy", "late"]]);
+answer({ field: "late", empty: "Empty value, nothing to copy" });
+
+// 12. With the script there, bp-desk.js holds nothing back.
+sent.length = 0;
+press(late("copy"));
+assert.equal(sent.length, 1);
+answer({ field: "late", empty: "Empty value, nothing to copy" });
+
+console.log("desk field actions: ok (copy in three types, empty refused, fallbacks, failure said, paste reads and hands on, loaded by the desk, a click waits for the script)");
 process.exit(0);

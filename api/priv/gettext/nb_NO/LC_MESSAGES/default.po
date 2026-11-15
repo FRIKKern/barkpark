@@ -13941,7 +13941,7 @@ msgstr "Erstattet %{count}"
 msgid "Show replace"
 msgstr "Vis erstatt"
 
-#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
 #, elixir-autogen, elixir-format
 msgid "Field actions"
 msgstr "Felthandlinger"
@@ -14115,3 +14115,53 @@ msgstr "Lim inn felt"
 #, elixir-autogen, elixir-format
 msgid "Empty value, nothing to copy"
 msgstr "Tom verdi, ingenting å kopiere"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to paste"
+msgstr "Ingenting å lime inn"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Invalid clipboard item"
+msgstr "Ugyldig utklippstavleelement"
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy and paste did not load. Reload the page."
+msgstr "Kopier og lim inn ble ikke lastet. Last siden på nytt."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Source and target schema types are not compatible"
+msgstr "Kilde- og målskjematypene er ikke kompatible"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Value \"%{value}\" is not allowed in \"%{list}\""
+msgstr "Verdien \"%{value}\" er ikke tillatt i \"%{list}\""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "References of type \"%{source}\" is not allowed in reference field that accepts types \"%{target}\""
+msgstr "Referanser av typen \"%{source}\" er ikke tillatt i et referansefelt som godtar typene \"%{target}\""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Value of type \"%{type}\" is not allowed in this array field"
+msgstr "Verdi av typen \"%{type}\" er ikke tillatt i dette listefeltet"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "A field of type \"%{type}\" cannot be pasted into"
+msgstr "Det går ikke å lime inn i et felt av typen \"%{type}\""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "The browser did not let this page read the clipboard"
+msgstr "Nettleseren lot ikke denne siden lese utklippstavlen"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "The number is too large to paste"
+msgstr "Tallet er for stort til å limes inn"
