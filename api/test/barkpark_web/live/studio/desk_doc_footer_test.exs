@@ -83,6 +83,24 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
     assert publish_at < menu_at
   end
 
+  test "the footer carries the TanStack Studio's names: .doc-footer, .save-state, .save-state-text",
+       c do
+    view = open(c)
+    words = ~s([data-pane-editing] .doc-footer .save-state .save-state-text)
+
+    assert view |> element(words) |> render() |> strip() == "Last published just now"
+
+    # The status is a button named by its words. It opens nothing yet: disabled.
+    button = ~s([data-pane-editing] .doc-footer button.save-state-btn[type="button"][disabled])
+    assert view |> element(button) |> render() |> strip() == "Last published just now"
+    refute view |> element(button) |> render() =~ "aria-label"
+
+    view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
+    render_async(view, 5_000)
+
+    assert eventually(fn -> view |> element(words) |> render() |> strip() =~ ~r/^Edited/ end)
+  end
+
   test "an edit: Edited on the left, and Publish publishes it", c do
     view = open(c)
 

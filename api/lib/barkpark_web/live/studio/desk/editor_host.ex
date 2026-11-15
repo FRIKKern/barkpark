@@ -629,7 +629,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             `Desk.DocFooter`. It is the pane's last child, so its coming and
             going moves nothing. --%>
       <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
-      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer">
+      <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}
           status={BarkparkWeb.Studio.Desk.DocFooter.status(assigns)}
