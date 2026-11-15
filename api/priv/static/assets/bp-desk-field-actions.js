@@ -10,8 +10,24 @@
 // promise for each type and the answer settles them. An empty field rejects
 // them: the clipboard keeps what it held.
 //
+// PASTE. Only the browser can read the clipboard, and only the server may
+// write the document. So "Paste field" reads the clipboard first: Sanity's
+// item under its web custom type, else the one in text/html. Anything else
+// is "Nothing to paste". The item's JSON is then put on the menu item as
+// `phx-value-clip` and the click is handed on, so LiveView sends
+// `desk-field-paste` with it. The server checks it against the field's
+// schema and saves it as a typed edit, or answers `desk:field-toast` with
+// the words that refuse it. Nothing is written to the form here.
+//
+// A browser that refuses to let a page read the clipboard pastes the last
+// field copied in this browser (kept in localStorage), as the TanStack
+// Studio does.
+//
 // The words are shown in a toast on the page's body (`.dk-field-toast`,
-// `Desk.DocStyle`): a status, or an alert when something was refused.
+// `Desk.DocStyle`): a status, or an alert when something was refused. A
+// copy that lands, and a paste handed to the server, take an earlier toast
+// down: its words were about something else. A copy the server never
+// answers says it failed.
 //
 // A document-level listener, no phx-hook, as bp-array-focus.js. Only the
 // desk needs it, so bp-desk.js loads it when the desk mounts (the address is
@@ -25,8 +41,15 @@
   var ANSWER_MS = 5000;
   var TOAST_MS = 5000;
 
+  // The last field copied here, for a browser that cannot read the clipboard.
+  var KEPT = "barkpark.desk.field-clip";
+  // More than the server takes (`FieldPaste`): not sent at all.
+  var MAX_CLIP = 262144;
+
   var pending = null;
   var toastTimer = null;
+  // The click handed on to LiveView is this script's own.
+  var passing = false;
 
   function toast(tone, title, description) {
     var doc = window.document;
@@ -55,6 +78,14 @@
       el.textContent = "";
       if (el.hidePopover && el.matches(":popover-open")) el.hidePopover();
     }, TOAST_MS);
+  }
+
+  function hideToast() {
+    var el = window.document.querySelector(".dk-field-toast");
+    window.clearTimeout(toastTimer);
+    if (!el) return;
+    el.textContent = "";
+    if (el.hidePopover && el.matches(":popover-open")) el.hidePopover();
   }
 
   function blob(type, body) {
@@ -95,9 +126,11 @@
     });
     // Settled by hand below; never an unhandled rejection.
     data.catch(function () {});
+    // No answer (the server is away): the copy did not happen, and says so.
     answer.timer = window.setTimeout(function () {
       if (pending === answer) pending = null;
       answer.reject(new Error("no answer"));
+      if (answer.failed) toast("critical", answer.failed);
     }, ANSWER_MS);
     answer.written = null;
     var clipboard = window.navigator.clipboard;
@@ -139,6 +172,9 @@
       return;
     }
     answer.resolve(detail);
+    keep(detail.json);
+    // An earlier refusal ("Empty value…") is not this copy's.
+    hideToast();
     // The write begun in the click, else (it was refused, or never begun) one now.
     var written = answer.written || Promise.reject(new Error("not begun"));
     written
@@ -150,18 +186,130 @@
       });
   }
 
+  function keep(json) {
+    try {
+      window.localStorage.setItem(KEPT, json);
+    } catch (_error) {
+      /* private mode: the system clipboard still has it */
+    }
+  }
+
+  function kept() {
+    try {
+      return window.localStorage.getItem(KEPT);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  // The text when it is a Sanity clipboard item, else null.
+  function sanityItem(json) {
+    try {
+      var item = JSON.parse(json);
+      return item && item.type === "sanityClipboardItem" ? json : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function fromBase64(text) {
+    var bytes = Uint8Array.from(window.atob(text), function (c) {
+      return c.charCodeAt(0);
+    });
+    return new TextDecoder().decode(bytes);
+  }
+
+  function textOf(item, type) {
+    return item.getType(type).then(function (body) {
+      return body.text();
+    });
+  }
+
+  // One clipboard item's Sanity item: under its own type, else in text/html.
+  function itemJson(item) {
+    var types = Array.prototype.slice.call(item.types || []);
+    var own = types.indexOf(SANITY_TYPE) >= 0 ? textOf(item, SANITY_TYPE).then(sanityItem) : Promise.resolve(null);
+    return own.then(function (json) {
+      if (json || types.indexOf("text/html") < 0) return json;
+      return textOf(item, "text/html").then(function (html) {
+        var found = /data-sanity-clipboard-base64="([^"]+)"/.exec(html);
+        try {
+          return found ? sanityItem(fromBase64(found[1])) : null;
+        } catch (_error) {
+          return null;
+        }
+      });
+    });
+  }
+
+  // What the system clipboard holds now, as a Sanity item's JSON, or null.
+  function readClip() {
+    var clipboard = window.navigator.clipboard;
+    if (!clipboard || !clipboard.read) return Promise.resolve(kept());
+    return clipboard.read().then(
+      function (items) {
+        var list = Array.prototype.slice.call(items || []);
+        var next = function (at) {
+          if (at >= list.length) return null;
+          return itemJson(list[at]).then(function (json) {
+            return json || next(at + 1);
+          });
+        };
+        return next(0);
+      },
+      function (error) {
+        // Refused outright: this browser's own copy. An empty or unreadable
+        // clipboard is nothing to paste.
+        var refused = !(window.DOMException && error instanceof window.DOMException) || error.name === "NotAllowedError";
+        return refused ? kept() : null;
+      }
+    );
+  }
+
+  // The click is held back, the clipboard read, and the click handed on with
+  // the item on it. The menu closes by itself: the click's default is kept.
+  function startPaste(item, event) {
+    event.stopPropagation();
+    readClip()
+      .catch(function () {
+        return null;
+      })
+      .then(function (json) {
+        if (!json) return toast("default", item.getAttribute("data-desk-nothing") || "");
+        if (json.length > MAX_CLIP) return toast("critical", item.getAttribute("data-desk-invalid") || "");
+        if (!item.isConnected) return;
+        hideToast();
+        item.setAttribute("phx-value-clip", json);
+        passing = true;
+        try {
+          item.click();
+        } finally {
+          passing = false;
+          item.removeAttribute("phx-value-clip");
+        }
+      });
+  }
+
   window.document.addEventListener(
     "click",
     function (event) {
-      var item = event.target && event.target.closest ? event.target.closest("[data-desk-field-copy]") : null;
-      if (item && !item.disabled) startCopy(item);
+      if (passing || !event.target || !event.target.closest) return;
+      var copy = event.target.closest("[data-desk-field-copy]");
+      if (copy && !copy.disabled) return startCopy(copy);
+      var paste = event.target.closest("[data-desk-field-paste]");
+      if (paste && !paste.disabled) startPaste(paste, event);
     },
     true
   );
+
+  window.addEventListener("phx:desk:field-toast", function (event) {
+    var detail = event.detail || {};
+    if (detail.title) toast(detail.tone === "critical" ? "critical" : "default", detail.title, detail.description);
+  });
 
   window.addEventListener("phx:desk:field-copied", function (event) {
     finishCopy(event.detail);
   });
 
-  window.BarkparkDeskFieldActions = { toast: toast, writeAll: writeAll };
+  window.BarkparkDeskFieldActions = { toast: toast, writeAll: writeAll, readClip: readClip };
 })();

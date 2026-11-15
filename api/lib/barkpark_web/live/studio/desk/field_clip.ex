@@ -52,14 +52,14 @@ defmodule BarkparkWeb.Studio.Desk.FieldClip do
   defp member_sig(_of), do: "?"
 
   @doc """
-  Sanity's `isEmptyValue`: nothing, an empty list, an object holding only its
-  `_key`. An empty text is empty too: the form stores a cleared field as "".
+  Sanity's `isEmptyValue`, as `clipboard.ts` `isEmpty`: nothing, an empty
+  list, or an object holding only its `_key`. An empty text and an object
+  with no keys are values: they copy, and they paste.
   """
   @spec empty?(term()) :: boolean()
   def empty?(nil), do: true
-  def empty?(""), do: true
   def empty?([]), do: true
-  def empty?(%{} = map), do: Map.keys(map) in [[], ["_key"]]
+  def empty?(%{} = map), do: Map.keys(map) == ["_key"]
   def empty?(_value), do: false
 
   @doc "The value in words (the clipboard's plain text), as `clipboard.ts` `asText`."

@@ -13939,7 +13939,7 @@ msgstr ""
 msgid "Show replace"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
 #, elixir-autogen, elixir-format
 msgid "Field actions"
 msgstr ""
@@ -14112,4 +14112,44 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/field_actions.ex
 #, elixir-autogen, elixir-format
 msgid "Empty value, nothing to copy"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to paste"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Invalid clipboard item"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Copy and paste did not load. Reload the page."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Source and target schema types are not compatible"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Value \"%{value}\" is not allowed in \"%{list}\""
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "References of type \"%{source}\" is not allowed in reference field that accepts types \"%{target}\""
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "Value of type \"%{type}\" is not allowed in this array field"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_paste.ex
+#, elixir-autogen, elixir-format
+msgid "A field of type \"%{type}\" cannot be pasted into"
 msgstr ""
