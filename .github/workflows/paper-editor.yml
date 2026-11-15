@@ -151,6 +151,7 @@ jobs:
           node ../paper-editor-host-tests/__form_remote_values.test.mjs
           node ../paper-editor-host-tests/__asset_browser_strings.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_add_collection_name.test.mjs
+          node ../paper-editor-host-tests/__asset_explorer_bulk.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_landmarks.test.mjs
           node ../paper-editor-host-tests/__datetime_hook_late_script.test.mjs
           node ../paper-editor-host-tests/__datetime_edit_survives_patch.test.mjs

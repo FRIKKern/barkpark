@@ -13945,3 +13945,158 @@ msgstr "Vis erstatt"
 #, elixir-autogen, elixir-format
 msgid "Field actions"
 msgstr "Felthandlinger"
+
+#: lib/barkpark_web/studio_locale.ex:300
+#, elixir-autogen, elixir-format
+msgid "%{count} files deleted"
+msgstr "%{count} filer slettet"
+
+#: lib/barkpark_web/studio_locale.ex:302
+#, elixir-autogen, elixir-format
+msgid "%{count} files were not deleted"
+msgstr "%{count} filer ble ikke slettet"
+
+#: lib/barkpark_web/studio_locale.ex:305
+#, elixir-autogen, elixir-format
+msgid "%{failed} of %{count} could not be added"
+msgstr "%{failed} av %{count} kunne ikke legges til"
+
+#: lib/barkpark_web/studio_locale.ex:310
+#, elixir-autogen, elixir-format
+msgid "%{failed} of %{count} could not be removed"
+msgstr "%{failed} av %{count} kunne ikke fjernes"
+
+#: lib/barkpark_web/studio_locale.ex:314
+#, elixir-autogen, elixir-format
+msgid "1 file deleted"
+msgstr "1 fil slettet"
+
+#: lib/barkpark_web/studio_locale.ex:315
+#, elixir-autogen, elixir-format
+msgid "1 file was not deleted"
+msgstr "1 fil ble ikke slettet"
+
+#: lib/barkpark_web/studio_locale.ex:316
+#, elixir-autogen, elixir-format
+msgid "Add to folder"
+msgstr "Legg til i mappe"
+
+#: lib/barkpark_web/studio_locale.ex:317
+#, elixir-autogen, elixir-format
+msgid "Add to folder…"
+msgstr "Legg til i mappe …"
+
+#: lib/barkpark_web/studio_locale.ex:319
+#, elixir-autogen, elixir-format
+msgid "Added %{count} to %{name}"
+msgstr "La til %{count} i %{name}"
+
+#: lib/barkpark_web/studio_locale.ex:320
+#, elixir-autogen, elixir-format
+msgid "Clear selection"
+msgstr "Fjern markeringen"
+
+#: lib/barkpark_web/studio_locale.ex:322
+#, elixir-autogen, elixir-format
+msgid "Could not be deleted"
+msgstr "Kunne ikke slettes"
+
+#: lib/barkpark_web/studio_locale.ex:325
+#, elixir-autogen, elixir-format
+msgid "Delete %{count} files that documents use?"
+msgstr "Slette %{count} filer som brukes i dokumenter?"
+
+#: lib/barkpark_web/studio_locale.ex:326
+#, elixir-autogen, elixir-format
+msgid "Delete %{count} files?"
+msgstr "Slette %{count} filer?"
+
+#: lib/barkpark_web/studio_locale.ex:327
+#, elixir-autogen, elixir-format
+msgid "Delete 1 file that documents use?"
+msgstr "Slette 1 fil som brukes i dokumenter?"
+
+#: lib/barkpark_web/studio_locale.ex:328
+#, elixir-autogen, elixir-format
+msgid "Delete 1 file?"
+msgstr "Slette 1 fil?"
+
+#: lib/barkpark_web/studio_locale.ex:329
+#, elixir-autogen, elixir-format
+msgid "Delete anyway"
+msgstr "Slett likevel"
+
+#: lib/barkpark_web/studio_locale.ex:330
+#, elixir-autogen, elixir-format
+msgid "Delete failed (%{status})"
+msgstr "Slettingen mislyktes (%{status})"
+
+#: lib/barkpark_web/studio_locale.ex:332
+#, elixir-autogen, elixir-format
+msgid "Deleting… %{done} of %{total}"
+msgstr "Sletter … %{done} av %{total}"
+
+#: lib/barkpark_web/studio_locale.ex:334
+#, elixir-autogen, elixir-format
+msgid "Documents that use these files will show a broken file. This cannot be undone."
+msgstr "Dokumenter som bruker disse filene, vil vise en ødelagt fil. Dette kan ikke angres."
+
+#: lib/barkpark_web/studio_locale.ex:335
+#, elixir-autogen, elixir-format
+msgid "Drop files to upload"
+msgstr "Slipp filer her for å laste opp"
+
+#: lib/barkpark_web/studio_locale.ex:336
+#, elixir-autogen, elixir-format
+msgid "Remove from folder"
+msgstr "Fjern fra mappen"
+
+#: lib/barkpark_web/studio_locale.ex:338
+#, elixir-autogen, elixir-format
+msgid "Removed %{count} from %{name}"
+msgstr "Fjernet %{count} fra %{name}"
+
+#: lib/barkpark_web/studio_locale.ex:339
+#, elixir-autogen, elixir-format
+msgid "Select %{name}"
+msgstr "Velg %{name}"
+
+#: lib/barkpark_web/studio_locale.ex:340
+#, elixir-autogen, elixir-format
+msgid "Selected files"
+msgstr "Valgte filer"
+
+#: lib/barkpark_web/studio_locale.ex:342
+#, elixir-autogen, elixir-format
+msgid "The delete request failed. The list shows what is left."
+msgstr "Slettingen mislyktes. Listen viser det som er igjen."
+
+#: lib/barkpark_web/studio_locale.ex:344
+#, elixir-autogen, elixir-format
+msgid "This cannot be undone. Files that documents use are kept."
+msgstr "Dette kan ikke angres. Filer som brukes i dokumenter, blir beholdt."
+
+#: lib/barkpark_web/studio_locale.ex:345
+#, elixir-autogen, elixir-format
+msgid "Used by %{count} documents"
+msgstr "Brukes i %{count} dokumenter"
+
+#: lib/barkpark_web/studio_locale.ex:346
+#, elixir-autogen, elixir-format
+msgid "Used by 1 document"
+msgstr "Brukes i 1 dokument"
+
+#: lib/barkpark_web/studio_locale.ex:348
+#, elixir-autogen, elixir-format
+msgid "Working… %{done} of %{total}"
+msgstr "Arbeider … %{done} av %{total}"
+
+#: lib/barkpark_web/studio_locale.ex:350
+#, elixir-autogen, elixir-format
+msgid "You do not have permission to change these files."
+msgstr "Du har ikke tilgang til å endre disse filene."
+
+#: lib/barkpark_web/studio_locale.ex:352
+#, elixir-autogen, elixir-format
+msgid "Your session has ended. Sign in again."
+msgstr "Økten er utløpt. Logg inn på nytt."

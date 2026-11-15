@@ -374,10 +374,11 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
 
       assert stylesheet_links == [
                ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-paper-editor-shell.css")} />|,
-               ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-media-picker.css")} />|
+               ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-media-picker.css")} />|,
+               ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-asset-explorer-bulk.css")} />|
              ],
-             "the Studio root layout's stylesheet links are exactly the same-origin " <>
-               "editor shell and media picker; an external/CDN stylesheet must not come back"
+             "the Studio root layout's stylesheet links are exactly the same-origin editor " <>
+               "shell, media picker and media library bulk styles; an external/CDN stylesheet must not come back"
     end
   end
 end
