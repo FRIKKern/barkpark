@@ -15,7 +15,7 @@ import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
-for (const name of ["document", "Element", "Event", "MouseEvent", "HTMLElement", "Node", "MutationObserver"]) {
+for (const name of ["document", "Element", "Event", "CustomEvent", "MouseEvent", "HTMLElement", "Node", "MutationObserver"]) {
   globalThis[name] = window[name];
 }
 globalThis.window = window;
@@ -129,6 +129,41 @@ await check("an input that left the page is not blurred", () => {
   els.at.remove();
   click(els.row);
   assert.deepEqual(blurred, []);
+});
+
+await check("focus in the form, and the input leaves the page after a navigation: the header's focus is asked for", async () => {
+  const els = mount();
+  let asked = 0;
+  const count = () => (asked += 1);
+  window.addEventListener("phx:bp:focus-doc-header", count);
+  els.row.focus();
+  fire("phx:navigate");
+  await sleep(120);
+  assert.equal(asked, 0, "focus on a list row: left alone");
+  els.title.focus();
+  fire("phx:navigate");
+  await sleep(120);
+  assert.equal(asked, 0, "the input is still on the page: nothing yet");
+  els.title.remove();
+  await sleep(120);
+  assert.equal(asked, 1, "the input went: the header is asked for, once");
+  await sleep(120);
+  assert.equal(asked, 1);
+  window.removeEventListener("phx:bp:focus-doc-header", count);
+});
+
+await check("a key pressed after the navigation ends the wait", async () => {
+  const els = mount();
+  let asked = 0;
+  const count = () => (asked += 1);
+  window.addEventListener("phx:bp:focus-doc-header", count);
+  els.title.focus();
+  fire("phx:navigate");
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "a", bubbles: true }));
+  els.title.remove();
+  await sleep(150);
+  assert.equal(asked, 0);
+  window.removeEventListener("phx:bp:focus-doc-header", count);
 });
 
 await check("with nothing waiting a press does nothing", () => {

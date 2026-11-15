@@ -334,7 +334,39 @@
   // On window, in the capture phase: before LiveView's own click listener
   // pushes the event or the patch, and before any other listener redraws.
   window.addEventListener("click", press, true);
-  window.addEventListener("phx:page-loading-start", flush);
-  window.addEventListener("phx:navigate", flush);
+  // A navigation that takes the form away takes the focus in it too (the old
+  // Studio draws the next document's form new, and Back can mount the page
+  // again, which may take seconds). Once the focused input has left the page
+  // the document header is asked to take the focus, as after a search hit:
+  // the root layout's `bp:focus-doc-header` focuses it only while focus is
+  // on <body>. An input that stays, or a key or press meanwhile, ends it.
+  function leave() {
+    var form = document.getElementById("editor-form");
+    var active = document.activeElement;
+    flush();
+    if (!form || !active || !form.contains(active)) return;
+    var moved = false;
+    var move = function () {
+      moved = true;
+    };
+    document.addEventListener("keydown", move, { capture: true, once: true });
+    document.addEventListener("pointerdown", move, { capture: true, once: true });
+    var until = Date.now() + 10000;
+    var wait = function () {
+      if (moved) return;
+      if (!active.isConnected) {
+        window.dispatchEvent(new CustomEvent("phx:bp:focus-doc-header"));
+      } else if (Date.now() < until) {
+        setTimeout(wait, 50);
+        return;
+      }
+      document.removeEventListener("keydown", move, { capture: true });
+      document.removeEventListener("pointerdown", move, { capture: true });
+    };
+    wait();
+  }
+
+  window.addEventListener("phx:page-loading-start", leave);
+  window.addEventListener("phx:navigate", leave);
   window.BarkparkFormLeave = flush;
 })();
