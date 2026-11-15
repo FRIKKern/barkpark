@@ -1304,6 +1304,14 @@
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
           (!!pane && pane.getAttribute("data-desk-save") === "Save failed");
       };
+      // The TanStack Studio's e2e probe (its lib/edits.ts; the rig waits on
+      // it before it resets its documents): an edit still on its way, typed
+      // and not yet sent or any event not yet answered. Not a failed save,
+      // which no wait ends. It only reports.
+      hook._savesPending = function () {
+        return (hook._typed && !!editForm()) || !!root.ownerDocument.querySelector("[data-phx-ref-loading]");
+      };
+      window.__savesPending = hook._savesPending;
       hook._onUnload = function (e) {
         if (!hook._owes()) return;
         e.preventDefault();
@@ -1725,6 +1733,7 @@
       this._sending.disconnect();
       root.removeEventListener("input", this._onTyped, true);
       window.removeEventListener("beforeunload", this._onUnload);
+      if (window.__savesPending === this._savesPending) delete window.__savesPending;
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
       root.removeEventListener("pointerdown", this._onPointerDown);
