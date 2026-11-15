@@ -248,7 +248,7 @@
               ? _t("Used by %{count} documents", { count: r.count })
               : _t("Could not be deleted");
         var li = h("li");
-        li.append(h("span", "bp-ae-bulk-refused-name", nameOf(r.doc)), h("span", "text-muted", why));
+        li.append(h("span", "bp-ae-bulk-refused-name", nameOf(r.doc)), h("span", "bp-ae-bulk-refused-why", why));
         list.appendChild(li);
       });
       var actions = h("div", "bp-ae-bulk-refused-actions");
@@ -339,6 +339,7 @@
       }
       busy = false;
       gone.forEach(function (id) { ticked.delete(id); });
+      paint();
       dropInspected(gone);
       if (failure) ex._toast(failure);
       else if (gone.size === 1) ex._toast(_t("1 file deleted"));
@@ -381,6 +382,7 @@
         }
       }
       busy = false;
+      paint();
       var vars = { count: docs.length, failed: failed, name: folder.title || folder.id };
       if (stop) ex._toast(stop);
       else if (failed) ex._toast(add ? _t("%{failed} of %{count} could not be added", vars) : _t("%{failed} of %{count} could not be removed", vars));
