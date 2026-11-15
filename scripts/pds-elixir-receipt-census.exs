@@ -1549,7 +1549,7 @@ defmodule PDS.Census do
     {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll} => {"BarkparkWeb.ChatHostController.enroll/2", 2, "64163799"},
     {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat} => {"BarkparkWeb.ChatHostController.heartbeat/2", 1, "116850088"},
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate} => {"BarkparkWeb.ChatHostController.rotate/2", 1, "66505558"},
-    {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create} => {"BarkparkWeb.ChatController.create/2", 1, "102474247"},
+    {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create} => {"BarkparkWeb.ChatController.create/2", 1, "33385735"},
     {:post, "/v1/chat/sessions/:id/answer", "BarkparkWeb.ChatController", :answer} => {"BarkparkWeb.ChatController.answer/2", 1, "133125244"},
     {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive} => {"BarkparkWeb.ChatController.archive/2", 1, "104476556"},
     {:post, "/v1/chat/sessions/:id/attachments", "BarkparkWeb.ChatAttachmentController", :create} => {"BarkparkWeb.ChatAttachmentController.create/2", 1, "78424610"},

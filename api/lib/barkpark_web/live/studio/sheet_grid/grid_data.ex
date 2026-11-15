@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias BarkparkWeb.Studio.SheetGrid.Charts
   alias BarkparkWeb.Studio.SheetGrid.Filter
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
@@ -146,7 +147,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       # + edit form — the panel authors the full list the session op replaces.
       # Always a list so the panel's :for never faults on a malformed (non-list)
       # stored value the gate would reject anyway.
-      cf_rules: cf_rules_list(Map.get(tab, "cond_formats"))
+      cf_rules: cf_rules_list(Map.get(tab, "cond_formats")),
+      # The tab's charts, drawn from its cells — redrawn on every delta.
+      chart_views: Charts.views(tab)
     )
   end
 

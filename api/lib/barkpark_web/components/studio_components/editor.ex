@@ -173,7 +173,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # "required" twice; that is the price of no field going silent.
   attr :mark_hidden, :boolean, default: false
   # The desk's Field actions menu and change bar place (`Desk.FieldSlots`):
-  # the schema field they are for. Nothing is drawn without it.
+  # `FieldSlots.of/2`, the schema field they are for and the editor's
+  # capabilities. Nothing is drawn without it.
   attr :slots, :any, default: false
   slot :inner_block, required: true
 
@@ -189,7 +190,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label><% end %>
-      <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={@slots} field={@slots} />
+      <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={@slots} {@slots} />
       <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
@@ -453,7 +454,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
       <div class={"editor-field field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
-        <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={desk?(@parent_assigns)} field={@field} />
+        <BarkparkWeb.Studio.Desk.FieldSlots.slots :if={desk?(@parent_assigns)} {BarkparkWeb.Studio.Desk.FieldSlots.of(@field, @parent_assigns)} />
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
@@ -499,7 +500,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         description={field_description(@field)}
         fieldset={type == "image" and desk?(@parent_assigns)}
         mark_hidden={desk?(@parent_assigns)}
-        slots={desk?(@parent_assigns) && @field}
+        slots={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.FieldSlots.of(@field, @parent_assigns)}
       >
         <%= if body_in_blocks? do %>
           <div class="bp-classic-body-blocks" data-test-id="classic-body-in-blocks" role="note">
@@ -961,6 +962,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <%!-- Per field, the number of the last remote value this page
                     showed (bp-array-focus.js; `RemoteValues`). --%>
               <input type="hidden" name="_bp_seen" id={"bp-seen-" <> Barkpark.Content.published_id(@editor_doc.doc_id)} value="{}" phx-update="ignore" />
+              <%!-- The desk's one Field actions menu, opened by each field's button. --%>
+              <BarkparkWeb.Studio.Desk.FieldActions.shared_menu :if={desk?(@parent_assigns)} />
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
@@ -975,7 +978,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 label={title_label(@editor_schema)}
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 mark_hidden={desk?(@parent_assigns)}
-                slots={desk?(@parent_assigns) && %{"name" => "title", "type" => "string"}}
+                slots={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.FieldSlots.of(%{"name" => "title", "type" => "string"}, @parent_assigns)}
                 errors={Map.get(@validation_errors, "title", [])}
                 warnings={Map.get(@validation_warnings, "title", [])}
                 for={field_id_prefix(@editor_doc.doc_id, @parent_assigns) <> "title"}

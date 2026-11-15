@@ -9,6 +9,7 @@ defmodule Barkpark.StudioChat.Runtime do
   events into durable chat rows.
   """
 
+  alias Barkpark.StudioChat.BotFolder
   alias Barkpark.StudioChat.HostExecution
   alias Barkpark.StudioChat.Runtime.Claude
   alias Barkpark.StudioChat.RuntimeAdmission
@@ -129,6 +130,7 @@ defmodule Barkpark.StudioChat.Runtime do
       :workspace_id,
       :execution_host_id,
       :cwd,
+      :bot_folder,
       :host_directory,
       :remote_dispatch,
       :lease_id,
@@ -370,6 +372,7 @@ defmodule Barkpark.StudioChat.Runtime do
       workspace_id: Map.fetch!(opts, :workspace_id),
       execution_host_id: Map.fetch!(opts, :execution_host_id),
       cwd: Map.get(opts, :cwd),
+      bot_folder: Map.get(opts, :bot_folder),
       host_directory: Map.get(opts, :host_directory, Barkpark.ChatHosts),
       remote_dispatch: Map.get(opts, :remote_dispatch, Barkpark.ChatHosts.RemoteDispatch),
       developer_instructions: Map.get(opts, :developer_instructions),
@@ -425,7 +428,8 @@ defmodule Barkpark.StudioChat.Runtime do
     with {:ok, directory} <- fetch_contract(:host_directory, opts),
          {:ok, dispatcher} <- fetch_contract(:remote_dispatch, opts),
          {:ok, host} <- directory.resolve(opts[:workspace_id], opts[:execution_host_id]),
-         :ok <- TurnAttachments.admit(host, provider, command) do
+         :ok <- TurnAttachments.admit(host, provider, command),
+         :ok <- BotFolder.admit(host, provider, command) do
       dispatcher.dispatch(host, command, opts)
     end
   end
@@ -536,6 +540,10 @@ defmodule Barkpark.StudioChat.Runtime do
       {:ok,
        payload
        |> Map.put(:cwd, ref.cwd)
+       # A bot folder rides beside the root, never joined onto it: the host
+       # checks the name again and works in {root}/{bot_folder} (BotFolder).
+       # No folder sends no key, so such a turn is leased as it was before.
+       |> maybe_put_runtime_option(:bot_folder, ref.bot_folder)
        |> maybe_put_developer_instructions(ref.developer_instructions)
        |> maybe_put_runtime_option(:mode, ref.mode)
        |> maybe_put_runtime_option(:model, ref.model)

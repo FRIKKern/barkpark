@@ -263,7 +263,9 @@ defmodule Barkpark.Plugins.Sheets do
         other -> ["tab #{idx}: color must be a #rrggbb string, got #{inspect(other)}"]
       end
 
-    cells_errors ++ merges_errors ++ cond_formats_errors ++ color_errors
+    charts_errors = Barkpark.Plugins.Sheets.Charts.list_errors(Map.get(tab, "charts"), idx)
+
+    cells_errors ++ merges_errors ++ cond_formats_errors ++ color_errors ++ charts_errors
   end
 
   defp tab_errors({_tab, idx}), do: ["tab #{idx}: tab must be a map"]

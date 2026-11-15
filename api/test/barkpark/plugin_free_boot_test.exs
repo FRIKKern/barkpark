@@ -92,6 +92,9 @@ defmodule Barkpark.PluginFreeBootTest do
   @coupling_studio_ui [
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/cells.ex"},
+    # The grid's charts (task-74878cce84d7f026): the same host-owned Studio
+    # grid, split into its own file; it reads Sheets.Charts and Sheets.Core.
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/charts.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/file_io.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/filter.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/geometry.ex"},

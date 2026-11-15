@@ -185,6 +185,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"{} / null / {\"result\":null} all decode to ok:false and become an error; a non-JSON or empty body " +
 			"fails the envelope decode outright.",
 	},
+	// ---- doc ---------------------------------------------------------------
+	{
+		File: "internal/cli/doc_duplicate_cmd.go", Func: "runDocDuplicate", Sites: 1,
+		Endpoint: "POST /v1/data/mutate/:dataset", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the receipt is the new document's id, which a script reads back; the 2xx goes through " +
+			"screenBuiltinWriteReceipt, and a body with no results[0].id is then refused, not printed as an empty id.",
+	},
 	// ---- hetzner control plane -------------------------------------------
 	{
 		File: "internal/cli/hetzner_instance_cmd.go", Func: "Deprovision", Sites: 1,

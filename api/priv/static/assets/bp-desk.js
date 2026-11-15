@@ -699,15 +699,75 @@
       hook._warmed = {};
 
       // A field's Copy and Paste (bp-desk-field-actions.js) are the desk's
-      // alone: loaded here, once, from the address the page gives.
-      var fieldActions = root.getAttribute("data-desk-field-actions");
-      if (fieldActions && !window.BarkparkDeskFieldActions && !root.ownerDocument.querySelector("script[data-desk-field-actions]")) {
-        var script = root.ownerDocument.createElement("script");
-        script.src = fieldActions;
+      // alone: loaded here from the address the page gives. A click on Copy
+      // or Paste made before the script has arrived waits for it and is then
+      // made again. If it does not arrive, the pane's toast says so, and the
+      // next click tries the load again.
+      var fieldScript = function () {
+        var doc = root.ownerDocument;
+        var src = root.getAttribute("data-desk-field-actions");
+        var script = doc.querySelector("script[data-desk-field-actions]");
+        if (script || !src || window.BarkparkDeskFieldActions) return script;
+        script = doc.createElement("script");
+        script.src = src;
         script.async = true;
         script.setAttribute("data-desk-field-actions", "");
-        root.ownerDocument.head.appendChild(script);
-      }
+        script.addEventListener("error", function () {
+          script.remove();
+        });
+        doc.head.appendChild(script);
+        return script;
+      };
+      fieldScript();
+      hook._onFieldAction = function (e) {
+        // A field's "…" opens the form's one menu: the menu is told which
+        // field, placed by that button, and Paste is off where the field takes none.
+        var opener = e.target.closest ? e.target.closest(".field-actions > button[data-desk-field]") : null;
+        var shared = opener && root.ownerDocument.getElementById(opener.getAttribute("popovertarget"));
+        if (shared) {
+          // Open for another field: closed first, so this click opens it for
+          // this one (a second press of the same button closes it, as before).
+          if (hook._fieldOpener && hook._fieldOpener !== opener && shared.matches(":popover-open")) {
+            hook._fieldOpener.setAttribute("aria-expanded", "false");
+            shared.hidePopover();
+          }
+          if (hook._fieldOpener) hook._fieldOpener.style.removeProperty("anchor-name");
+          hook._fieldOpener = opener;
+          opener.style.setProperty("anchor-name", "--dk-field-actions");
+          shared.setAttribute("data-desk-field", opener.getAttribute("data-desk-field"));
+          var pasteItem = shared.querySelector("[data-desk-field-paste]");
+          if (pasteItem) pasteItem.disabled = opener.hasAttribute("data-desk-paste-off");
+          return;
+        }
+        var item = e.target.closest ? e.target.closest("[data-desk-field-copy], [data-desk-field-paste]") : null;
+        if (!item || item.disabled || window.BarkparkDeskFieldActions) return;
+        e.stopPropagation();
+        var script = fieldScript();
+        var done = false;
+        var timer = null;
+        var settle = function () {
+          if (done) return;
+          done = true;
+          window.clearTimeout(timer);
+          if (window.BarkparkDeskFieldActions) return item.click();
+          var menu = item.closest("[data-desk-unavailable]");
+          var pane = item.closest("[data-pane-index]");
+          var toast = pane && pane.querySelector(".dk-toast");
+          if (!toast || !menu) return;
+          if (toast.showPopover && !toast.matches(":popover-open")) toast.showPopover();
+          toast.textContent = menu.getAttribute("data-desk-unavailable");
+          window.clearTimeout(hook._toastTimer);
+          hook._toastTimer = window.setTimeout(function () {
+            toast.textContent = "";
+            if (toast.hidePopover && toast.matches(":popover-open")) toast.hidePopover();
+          }, 4000);
+        };
+        if (!script) return settle();
+        timer = window.setTimeout(settle, 4000);
+        script.addEventListener("load", settle);
+        script.addEventListener("error", settle);
+      };
+      root.addEventListener("click", hook._onFieldAction, true);
 
       hook._settle = function (landed) {
         var ahead = hook._ahead;
@@ -1137,7 +1197,7 @@
         var menu = e.target;
         if (!menu.matches || !menu.matches(MENU)) return;
         var open = e.newState === "open";
-        var button = root.ownerDocument.getElementById(menu.id + "-button");
+        var button = root.ownerDocument.getElementById(menu.id + "-button") || (menu.hasAttribute("data-desk-field") ? hook._fieldOpener : null);
         if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
         var first = menu.querySelector(MENU_ITEM);
         if (open && first) first.focus();
@@ -1843,6 +1903,7 @@
       window.removeEventListener("phx:bp:focus-new-doc", this._focusNewDoc);
       window.removeEventListener("phx:bp:focus-after-delete", this._focusAfterDelete);
       root.removeEventListener("click", this._onCopy);
+      root.removeEventListener("click", this._onFieldAction, true);
       root.removeEventListener("keydown", this._onInspectKey);
       root.removeEventListener("keydown", this._onDocKey);
       root.removeEventListener("desk:show-modal", this._onShowModal);
