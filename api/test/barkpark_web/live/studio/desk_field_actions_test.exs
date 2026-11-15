@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
   menu with "Copy field" and "Paste field". Copy answers with the field's
   stored value in the TanStack Studio's clipboard format (`Desk.FieldClip`);
   the browser writes the clipboard (`__desk_field_actions.test.mjs`). An
-  empty field is refused. Paste is drawn and not on yet.
+  empty field is refused. Paste: `desk_field_paste_test.exs`.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -36,6 +36,10 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
             f.("excerpt", "text", %{}),
             f.("count", "number", %{}),
             f.("empty", "string", %{}),
+            f.("blank", "string", %{}),
+            f.("hidden", "string", %{
+              "visibleWhen" => %{"field" => "excerpt", "operator" => "eq", "value" => "show it"}
+            }),
             f.("tags", "arrayOf", %{"of" => [%{"type" => "string"}]}),
             f.("cta", "composite", %{"fields" => [%{"name" => "url", "type" => "string"}]})
           ]
@@ -53,6 +57,8 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
           "title" => "Here",
           "excerpt" => "Short <excerpt> & more.",
           "count" => 3,
+          "blank" => "",
+          "hidden" => "not shown",
           "tags" => ["a", "b"],
           "cta" => %{"url" => "https://example.com"}
         },
@@ -92,7 +98,7 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
   test "each field's button opens a menu with Copy field and Paste field", c do
     view = desk(c)
 
-    for name <- ~w(title excerpt count empty tags cta) do
+    for name <- ~w(title excerpt count empty blank tags cta) do
       actions = ~s|#{@form} .field:has([id^="#{name}"]) > .field-actions|
       button = ~s(#{actions} > button.icon-btn[type="button"][aria-label="Field actions"])
       menu = ~s(#{actions} > [popover][role="menu"][id="field-actions-#{name}"])
@@ -117,7 +123,7 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
           {String.trim(words), attrs =~ ~r/\sdisabled[\s=>]|\sdisabled$/}
         end
 
-      assert items == [{"Copy field", false}, {"Paste field", true}], name
+      assert items == [{"Copy field", false}, {"Paste field", false}], name
     end
 
     refute render(view) =~ ~s(class="field-actions" data-desk-field-actions aria-hidden)
@@ -192,6 +198,31 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
 
     refute Map.has_key?(answer, :json)
     refute Map.has_key?(answer, :text)
+  end
+
+  # Sanity's isEmptyValue, as TanStack's: a cleared text is a value.
+  test "an empty text copies; only nothing, an empty list and a lone _key are empty", c do
+    view = desk(c)
+    copy(view, "blank")
+    assert_push_event(view, "desk:field-copied", %{field: "blank", json: json, text: ""})
+    assert %{"value" => "", "barkpark" => %{"field" => %{"value" => ""}}} = Jason.decode!(json)
+  end
+
+  test "a field the form hides (visibleWhen) is not answered for, whatever the page sent", c do
+    view = desk(c)
+    refute has_element?(view, ~s(#{@form} [id="field-actions-hidden"]))
+
+    render_hook(view, "desk-field-copy", %{"field" => "hidden"})
+    refute_push_event(view, "desk:field-copied", _, 50)
+  end
+
+  test "aria-expanded is the browser's: a patch of the form leaves an open menu's alone", c do
+    view = desk(c)
+    button = view |> element(~s(#{@form} [id="field-actions-title-button"])) |> render()
+
+    assert [_, mounted] = Regex.run(~r/phx-mounted="([^"]+)"/, button)
+    assert mounted =~ "ignore_attrs"
+    assert mounted =~ "aria-expanded"
   end
 
   test "a field the schema does not have, or no open document, is answered with nothing", c do
@@ -275,9 +306,11 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
       assert FieldClip.sig(%{}) == "?"
     end
 
-    test "empty is nothing, an empty text or list, or an object with only its _key" do
-      for value <- [nil, "", [], %{}, %{"_key" => "k"}], do: assert(FieldClip.empty?(value))
-      for value <- [false, 0, "a", [nil], %{"a" => nil}], do: refute(FieldClip.empty?(value))
+    test "empty is nothing, an empty list, or an object with only its _key (clipboard.ts isEmpty)" do
+      for value <- [nil, [], %{"_key" => "k"}], do: assert(FieldClip.empty?(value))
+
+      for value <- ["", %{}, false, 0, "a", [nil], %{"a" => nil}],
+          do: refute(FieldClip.empty?(value))
     end
 
     test "the words leave out keys that start with an underscore" do
