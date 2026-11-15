@@ -521,7 +521,7 @@ defmodule Barkpark.Media.WhereUsed do
   rows. The delete guard's `scan/3` is not this query: it still counts every
   referrer.
   """
-  def textual_rows(%MediaFile{path: path} = file, dataset, opts, keep \\ & &1)
+  def textual_rows(%MediaFile{path: path} = file, dataset, opts, keep)
       when is_binary(path) and is_binary(dataset) do
     scoped =
       &(&1

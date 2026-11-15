@@ -255,6 +255,11 @@ defmodule BarkparkWeb.V1MediaUsageTest do
     Repo.insert_all(Document, [raw_row(file, "m-memo", "usage_memo", %{"secret" => url})])
 
     assert usage.() == without
+
+    # One more own use lands on the second page and still counts.
+    Repo.insert_all(Document, [raw_row(file, "zz-more", "paper", image(url))])
+
+    assert %{"total" => ^cap, "truncated" => true} = usage.()["result"]
   end
 
   # ── fixtures ──────────────────────────────────────────────────────────────
