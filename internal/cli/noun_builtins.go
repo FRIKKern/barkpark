@@ -178,6 +178,22 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun:    "doc",
+		Verb:    "diff",
+		Summary: "What publishing would change: the draft compared to the published version (exits 1 when they differ).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runDocDiff(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "doc",
+		Verb:    "duplicate",
+		Summary: "Copy a document's content into a new draft and print the new id.",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runDocDuplicate(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "schema",
 		Verb:    "pull",
 		Summary: "Write every schema of the dataset to a folder, one <name>.json per schema.",
