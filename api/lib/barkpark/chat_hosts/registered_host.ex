@@ -28,7 +28,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   end
 
   @enrollment_fields ~w(workspace_id name enrollment_hash enrollment_expires_at approved_roots protocol_version capabilities)a
-  @heartbeat_fields ~w(protocol_version capabilities last_seen_at)a
+  @host_declared_fields ~w(protocol_version capabilities)a
 
   def enrollment_changeset(host, attrs) do
     host
@@ -41,7 +41,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       message: "must not be null"
     )
     |> validate_length(:name, min: 1, max: 120)
-    |> validate_number(:protocol_version, greater_than: 0)
+    |> validate_protocol_version()
     |> validate_roots()
     |> validate_capabilities()
     |> unique_constraint([:workspace_id, :name])
@@ -55,13 +55,13 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       :credential_version,
       :credential_expires_at,
       :approved_roots,
-      :protocol_version,
-      :capabilities,
       :last_seen_at
     ])
+    |> cast_host_declared(attrs)
     |> validate_required([:enrolled_at, :credential_hash, :credential_expires_at])
     |> validate_host_declared()
     |> validate_number(:credential_version, greater_than: 0)
+    |> validate_protocol_version()
     |> validate_roots()
     |> validate_capabilities()
     |> check_constraint(:credential_hash, name: :registered_chat_hosts_credential_state)
@@ -69,11 +69,22 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
 
   def heartbeat_changeset(host, attrs) do
     host
-    |> cast(attrs, @heartbeat_fields)
+    |> cast(attrs, [:last_seen_at])
+    |> cast_host_declared(attrs)
     |> validate_host_declared()
-    |> validate_number(:protocol_version, greater_than: 0)
+    |> validate_protocol_version()
     |> validate_capabilities()
   end
+
+  # The host sends these two on enroll and heartbeat. By default `cast/4`
+  # swaps an empty value ("" or whitespace) for the field default BEFORE any
+  # validation, so `capabilities: ""` became `%{}` and reset the stored map,
+  # and `protocol_version: ""` became 1. With no empty values, a string is
+  # cast as itself and refused as invalid (task-7dfa8c4e8a410e96). A map,
+  # `%{}` included, is never an empty value, so the Go host's bodies cast as
+  # before.
+  defp cast_host_declared(changeset, attrs),
+    do: cast(changeset, attrs, @host_declared_fields, empty_values: [])
 
   # The host sends these two on enroll and heartbeat. The context keeps the
   # stored value only when a key is ABSENT, so a key sent as JSON null casts
@@ -84,6 +95,19 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     do:
       validate_required(changeset, [:protocol_version, :capabilities],
         message: "must not be null"
+      )
+
+  # Only version 1 exists (the Go host sends the literal 1), and no contract
+  # names a ceiling, so the bound is the column's: protocol_version is a
+  # Postgres integer. Above it Postgrex raised DBConnection.EncodeError, a 500
+  # on all three changesets (task-7dfa8c4e8a410e96).
+  @protocol_version_max 2_147_483_647
+
+  defp validate_protocol_version(changeset),
+    do:
+      validate_number(changeset, :protocol_version,
+        greater_than: 0,
+        less_than_or_equal_to: @protocol_version_max
       )
 
   def revoke_changeset(host, at), do: change(host, revoked_at: at)
