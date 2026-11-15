@@ -68,6 +68,12 @@ defmodule Barkpark.StudioChat.Session do
     field :execution_host_id, Ecto.UUID
     field :provider_session_id, :string
 
+    # The bot folder (task-ed93b8c0ab2b44b8): one name, never a path, that a
+    # registered-host claude session's turns run in under the host's root. NULL
+    # on every other row: the turn runs in the root, as before. Create-only
+    # like the identity above; `Barkpark.StudioChat.BotFolder` holds the rule.
+    field :bot_folder, :string
+
     # The session-scoped Cloud sandbox binding (Connectors wave 14, charter
     # D136/D137/D139). The opaque id of the Vercel Sandbox the :cloud execution
     # profile keeps alive across turns — the durable memory that lets a one-shot
@@ -190,7 +196,7 @@ defmodule Barkpark.StudioChat.Session do
 
   @create_fields ~w(
     id owner_workspace_id provider execution_target execution_host_id provider_session_id
-    title title_source cwd mode model status last_active_at summary
+    bot_folder title title_source cwd mode model status last_active_at summary
   )a
 
   @doc """
@@ -209,6 +215,8 @@ defmodule Barkpark.StudioChat.Session do
     |> validate_inclusion(:provider, @providers)
     |> validate_inclusion(:execution_target, @execution_targets)
     |> validate_execution_host()
+    |> validate_bot_folder()
+    |> check_constraint(:bot_folder, name: :chat_sessions_bot_folder_check)
     |> validate_length(:provider_session_id, min: 1)
     |> check_constraint(:provider, name: :chat_sessions_provider_check)
     |> check_constraint(:execution_target, name: :chat_sessions_execution_target_check)
@@ -258,6 +266,34 @@ defmodule Barkpark.StudioChat.Session do
 
       _ ->
         changeset
+    end
+  end
+
+  # A folder only where a host's own root exists to hold it: a registered-host
+  # claude session. The codex host path keeps its single cwd.
+  defp validate_bot_folder(changeset) do
+    case get_field(changeset, :bot_folder) do
+      nil ->
+        changeset
+
+      folder ->
+        cond do
+          not Barkpark.StudioChat.BotFolder.valid?(folder) ->
+            add_error(
+              changeset,
+              :bot_folder,
+              "must match #{Barkpark.StudioChat.BotFolder.pattern_source()}"
+            )
+
+          get_field(changeset, :execution_target) != "registered_host" ->
+            add_error(changeset, :bot_folder, "is only for registered-host execution")
+
+          get_field(changeset, :provider) != "claude" ->
+            add_error(changeset, :bot_folder, "is only for the claude provider")
+
+          true ->
+            changeset
+        end
     end
   end
 

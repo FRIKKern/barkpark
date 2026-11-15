@@ -124,6 +124,73 @@ defmodule Barkpark.ChatHosts.GoHostCapabilitiesTest do
     end
   end
 
+  # The shape the Go host emits once it makes and uses bot folders
+  # (task-d63221c26f47cdba; server side task-ed93b8c0ab2b44b8): the attachments
+  # shape plus `providers.claude.bot_folders: true`, codex unchanged. The server
+  # must admit it before any binary sends it, or that host's heartbeats are
+  # refused and it goes offline. The Go PR carries a byte-identical copy.
+  describe "the Go binary's bot_folders shape" do
+    @bot_folders_fixture Path.expand(
+                           "../../support/fixtures/chat_host_go_capabilities_bot_folders.json",
+                           __DIR__
+                         )
+    @attachments_fixture_path Path.expand(
+                                "../../support/fixtures/chat_host_go_capabilities_attachments.json",
+                                __DIR__
+                              )
+
+    defp bot_folders_capabilities, do: @bot_folders_fixture |> File.read!() |> Jason.decode!()
+
+    defp claude_valid?(value) do
+      caps = put_in(bot_folders_capabilities(), ["providers", "claude", "bot_folders"], value)
+      RegisteredHost.heartbeat_changeset(%RegisteredHost{}, %{capabilities: caps}).valid?
+    end
+
+    test "it is the attachments fixture plus providers.claude.bot_folders and nothing else" do
+      caps = bot_folders_capabilities()
+      {flag, claude} = Map.pop(caps["providers"]["claude"], "bot_folders")
+      assert flag == true
+
+      attachments = @attachments_fixture_path |> File.read!() |> Jason.decode!()
+      assert put_in(caps, ["providers", "claude"], claude) == attachments
+    end
+
+    test "enroll/2 and heartbeat/2 accept it and store the flag" do
+      issued = issue()
+
+      assert {:ok, %{credential: credential}} =
+               ChatHosts.enroll(issued.enrollment_token, %{
+                 "protocol_version" => 1,
+                 "capabilities" => bot_folders_capabilities()
+               })
+
+      {:ok, host} = ChatHosts.authenticate(credential)
+
+      assert {:ok, _} =
+               ChatHosts.heartbeat(host, %{
+                 "protocol_version" => 1,
+                 "capabilities" => bot_folders_capabilities()
+               })
+
+      assert Repo.get!(RegisteredHost, host.id).capabilities == bot_folders_capabilities()
+    end
+
+    test "the flag is a boolean or absent" do
+      assert claude_valid?(true)
+      assert claude_valid?(false)
+      refute claude_valid?("true")
+      refute claude_valid?(1)
+      refute claude_valid?(%{"root" => "/"})
+    end
+
+    test "a codex entry carrying it is refused" do
+      for value <- [true, false] do
+        caps = put_in(bot_folders_capabilities(), ["providers", "codex", "bot_folders"], value)
+        refute RegisteredHost.heartbeat_changeset(%RegisteredHost{}, %{capabilities: caps}).valid?
+      end
+    end
+  end
+
   describe "chat_runtime stays non-secret readiness metadata only" do
     defp heartbeat_valid?(chat_runtime) do
       caps = Map.put(go_capabilities(), "chat_runtime", chat_runtime)
