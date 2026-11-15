@@ -49,7 +49,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 4542 deploy/site-deploy-node.sh
 4416 api/lib/barkpark/content/query.ex
 4372 tooling/studio-journey/journey.mjs
-4321 api/lib/barkpark_web/live/studio/sheet_grid.ex
+4332 api/lib/barkpark_web/live/studio/sheet_grid.ex
 4281 deploy/site-deploy.sh
 4230 api/lib/barkpark/sites/deploy_runner.ex
 4104 api/lib/barkpark_web/controllers/tasks_controller.ex
@@ -108,7 +108,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2190 api/lib/barkpark/portable_doc/render/data_viz.ex
 2176 internal/cli/cloud/warmpool.go
 2171 .codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py
-2169 api/lib/barkpark/plugins/sheets/session/ops.ex
+2197 api/lib/barkpark/plugins/sheets/session/ops.ex
 2152 api/priv/static/assets/bp-asset-explorer.js
 2135 internal/cli/cloud12_cmd.go
 2130 api/lib/barkpark/content/papers.ex
