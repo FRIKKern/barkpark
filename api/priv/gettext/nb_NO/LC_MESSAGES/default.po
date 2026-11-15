@@ -1726,6 +1726,31 @@ msgstr "apr."
 msgid "Are you sure you want to delete"
 msgstr "Er du sikker på at du vil slette"
 
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:34
+#, elixir-autogen, elixir-format
+msgid "Delete document?"
+msgstr "Slette dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:35
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to delete this document?"
+msgstr "Er du sikker på at du vil slette dette dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:40
+#, elixir-autogen, elixir-format
+msgid "Used in"
+msgstr "Brukt i"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:46
+#, elixir-autogen, elixir-format
+msgid "You may not be able to delete “%{title}” because the following documents refer to it:"
+msgstr "Du kan kanskje ikke slette «%{title}» fordi følgende dokumenter refererer til det:"
+
+#: lib/barkpark_web/live/studio/desk/delete_dialog.ex:53
+#, elixir-autogen, elixir-format
+msgid "If you delete this document, documents that refer to it will no longer be able to access it."
+msgstr "Hvis du sletter dette dokumentet, får dokumenter som refererer til det, ikke lenger tilgang til det."
+
 #: lib/barkpark_web/components/studio_components/modals.ex:875
 #, elixir-autogen, elixir-format
 msgid "Aug"
@@ -1852,6 +1877,18 @@ msgstr "Forkaste alle ulagrede endringer i"
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and delete"
 msgstr "Koble fra referansene og slett"
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:74
+#, elixir-autogen, elixir-format
+msgid "1 document refers to “%{title}”"
+msgid_plural "%{count} documents refer to “%{title}”"
+msgstr[0] "1 dokument refererer til «%{title}»"
+msgstr[1] "%{count} dokumenter refererer til «%{title}»"
+
+#: lib/barkpark_web/live/studio/desk/doc_dialog.ex:171
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab (%{type})"
+msgstr "Åpne i ny fane (%{type})"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:740
 #, elixir-autogen, elixir-format

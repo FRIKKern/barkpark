@@ -11,8 +11,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   stay read-only panes.
 
   `DeskLive` keeps the callbacks and hands each one here; this module owns
-  the `active`, `editing`, `pending`, `active_refs`, `desk_ref_ids` and
-  `desk_nav` assigns.
+  the `active`, `editing`, `pending`, `active_refs`, `desk_ref_ids`,
+  `desk_nav` and `desk_used_in` (`DocDialog`) assigns.
 
   When a Studio handler navigates (delete, duplicate, discard, open a
   backlink, new document), it prints a Studio path under the desk's base
@@ -27,7 +27,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   require Logger
 
+  alias BarkparkWeb.Studio.Desk.DeleteDialog
   alias BarkparkWeb.Studio.Desk.Discarded
+  alias BarkparkWeb.Studio.Desk.DocDialog
   alias BarkparkWeb.Studio.Desk.DocMenu
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -49,7 +51,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def mount(params, session, socket) do
     {:ok, socket} = StudioLive.mount(params, session, socket)
-    {:ok, socket |> assign(active: nil, editing: nil, pending: nil) |> put_away()}
+
+    {:ok,
+     socket |> assign(active: nil, editing: nil, pending: nil, desk_used_in: nil) |> put_away()}
   end
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
@@ -277,7 +281,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
   defp settle(socket, how),
-    do: socket |> steer(how) |> strip() |> form_only() |> assign(:panes, [])
+    do: socket |> steer(how) |> strip() |> form_only() |> DocDialog.follow() |> assign(:panes, [])
 
   # A document the desk opens from a document node of its own (an
   # `S.document()` child: a singleton) shows the form only, as Sanity's
@@ -635,8 +639,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <div :if={!@edit_failed and gone?(assigns)} class="dk-note" role="main" data-desk-edit-gone>
           <p>{gettext("This document has been deleted.")}</p>
         </div>
+        <%!-- The Studio's own delete modal is kept out of the desk: the
+              desk draws its dialog below, from the same assigns. --%>
         <%= if !@edit_failed and !gone?(assigns) do %>
-          {Components.studio_live_shell(assigns)}
+          {Components.studio_live_shell(assign(assigns, :show_delete, false))}
         <% end %>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Nothing fills it yet,
@@ -650,6 +656,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           hidden
         >
         </aside>
+        <%!-- The desk's own dialogs for the Studio's document actions
+              (`DocDialog`): the Studio's handlers open and close them. The
+              holder is always here, as the notes' is. --%>
+        <div id={"#{@view.id}-dialogs"}>
+          <DeleteDialog.dialog
+            :if={assigns[:show_delete] == true and !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+            id={"#{@view.id}-delete-dialog"}
+            title={@page_title}
+            published?={DocStatus.state(assigns).published?}
+            rows={DocDialog.rows(assigns[:desk_used_in])}
+            base={@base}
+          />
+        </div>
       </div>
       <%!-- Sanity's pane footer: what happened last, Publish, and the same
             actions behind its own "…" ("Open document actions"),
