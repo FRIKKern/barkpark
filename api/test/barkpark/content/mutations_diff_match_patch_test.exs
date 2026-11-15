@@ -53,6 +53,46 @@ defmodule Barkpark.Content.MutationsDiffMatchPatchTest do
     end
   end
 
+  test "an offset inside a character of the text as it is now is a hint, and the context places the hunk" do
+    # task-4ea9e7a54ca8bb04: another editor typed æ before my place, so my
+    # byte offset 12 is the second byte of æ in the text the server holds.
+    typed = "@@ -13,8 +13,9 @@\n cdefghij\n+X\n"
+
+    assert DiffMatchPatch.apply(typed, "01234567890æcdefghij") ==
+             {:ok, "01234567890æcdefghijX", [true]}
+
+    # Inside a 4-byte emoji, and inside the last part of a ZWJ family.
+    for before <- ["0123456789😀", "012👨‍👩‍👧", "0123456789e\u0301"] do
+      assert DiffMatchPatch.apply(typed, before <> "cdefghij") ==
+               {:ok, before <> "cdefghijX", [true]},
+             before
+    end
+
+    # The context is in two places: the one nearest the hint takes the hunk.
+    assert DiffMatchPatch.apply(
+             "@@ -13,8 +13,9 @@\n cdef\n+X\n ghij\n",
+             "cdefghij 01æcdefghij and far away cdefghij"
+           ) == {:ok, "cdefghij 01æcdefXghij and far away cdefghij", [true]}
+
+    # An earlier hunk moves the later one, whose own offset is inside ø.
+    assert DiffMatchPatch.apply(
+             "@@ -1,4 +1,5 @@\n+A\n 0123\n@@ -13,8 +14,9 @@\n cdefghij\n+X\n",
+             "012345678901øcdefghij"
+           ) == {:ok, "A012345678901øcdefghijX", [true, true]}
+
+    # An offset past the end is the end.
+    assert DiffMatchPatch.apply("@@ -113,8 +113,9 @@\n cdefghij\n+X\n", "0æcdefghij") ==
+             {:ok, "0æcdefghijX", [true]}
+
+    # No context anywhere: still not applied, wherever the offset falls.
+    assert DiffMatchPatch.apply(typed, "01234567890æzzzzzzzz") ==
+             {:ok, "01234567890æzzzzzzzz", [false]}
+
+    # Bytes that are not text are refused, not crashed on.
+    assert DiffMatchPatch.apply(typed, <<"01234567890", 0xC3, "cdefghij">>) == :error
+    assert DiffMatchPatch.apply("@@ -13,8 +13,9 @@\n %FF%C3\n", "01234567890æcdefghij") == :error
+  end
+
   test "work past the limits is refused, not done" do
     %{patch_bytes: bytes, hunks: hunks, text_units: units, fuzzy_units: fuzzy} =
       DiffMatchPatch.limits()
@@ -139,6 +179,18 @@ defmodule Barkpark.Content.MutationsDiffMatchPatchTest do
                )
 
       assert span_text(scope) == "The very quick brown fox jumps"
+    end
+
+    test "a patch made before another editor typed æ ahead of it still lands", %{scope: scope} do
+      assert {:ok, _} = mutate(%{"set" => %{@span => "01234567890æcdefghij"}}, scope)
+
+      assert {:ok, _} =
+               mutate(
+                 %{"diffMatchPatch" => %{@span => "@@ -13,8 +13,9 @@\n cdefghij\n+X\n"}},
+                 scope
+               )
+
+      assert span_text(scope) == "01234567890æcdefghijX"
     end
 
     test "a hunk that no longer matches leaves the text as it is", %{scope: scope} do
