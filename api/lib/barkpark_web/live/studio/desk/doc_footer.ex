@@ -20,9 +20,10 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     `Panes.perspective/1`) the button is Unpublish, red, as TanStack's
     `PublishedFooter`. It sends the Studio's own `unpublish` event, which
     opens the desk's dialog (`UnpublishDialog`): nothing is unpublished
-    until that dialog is confirmed. It is greyed out when the Studio offers
-    no Unpublish (nothing is published, or a draft is open over the
-    published version, which an unpublish would overwrite).
+    until that dialog is confirmed. It is greyed out, and says "Not
+    published", when no published version exists. Over a draft it stays
+    offered, as TanStack's: an unpublish keeps an existing draft as it is
+    (`Content.Lifecycle.unpublish_document`, draft wins).
 
   The words are drawn when the pane renders, so "5m ago" moves on with the
   next change, not with the clock.
@@ -50,9 +51,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     values: [:drafts, :published],
     doc: "`:published` draws Unpublish in Publish's place"
 
-  attr :unpublish, :map,
-    default: nil,
-    doc: "the menu's Unpublish item, nil when the Studio does not offer it"
+  attr :published?, :boolean,
+    default: false,
+    doc: "whether a published version exists; Unpublish is greyed out without one"
 
   @doc "The left's words and the Publish button, or Unpublish in the published perspective."
   def bar(%{perspective: :published} = assigns) do
@@ -68,7 +69,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       type="button"
       id={"#{@id}-unpublish"}
       class="dk-publish publish danger"
-      disabled={is_nil(@unpublish)}
+      disabled={!@published?}
+      title={!@published? && gettext("Not published")}
       phx-click="unpublish"
       data-desk-unpublish
     >

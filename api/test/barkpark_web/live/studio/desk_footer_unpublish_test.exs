@@ -114,7 +114,7 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     confirm = ~s(#{@dialog} button.danger[data-desk-confirm="unpublish"])
 
     # A greyed-out opener cannot take the focus back, so the confirm sends it
-    # to "Show document actions" (unpublish-guard.spec.ts:41).
+    # to "Show document actions", where unpublish-guard.spec.ts expects it.
     [_, button_id] =
       Regex.run(
         ~r/ id="([^"]+)"/,
@@ -141,15 +141,71 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     assert has_element?(view, ~s(#{@footer} [data-desk-doc-action="publish"]))
   end
 
-  test "a draft over the published version: Unpublish is greyed out (it would overwrite the draft)",
+  test "a draft over the published version: Unpublish unpublishes and keeps the draft as it is",
        c do
     view = open(c, "#{c.type};#{c.id}?perspective=published")
 
     view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
     render_async(view, 5_000)
 
-    assert eventually(fn -> has_element?(view, ~s(#{@unpublish}[disabled])) end)
+    draft = fn -> Content.get_document("drafts." <> c.id, c.type, @dataset) end
+    assert eventually(fn -> match?({:ok, %{title: "Typed"}}, draft.()) end)
+    {:ok, before} = draft.()
+
+    # Still offered, as the TanStack Studio's: only "nothing published" greys it out.
+    refute has_element?(view, ~s(#{@unpublish}[disabled]))
+    view |> element(@unpublish) |> render_click()
     assert published?(c.type, c.id)
+
+    view
+    |> element(~s(#{@dialog} button[data-desk-confirm="unpublish"]), "Unpublish now")
+    |> render_click()
+
+    refute published?(c.type, c.id)
+    assert {:error, _} = Content.get_document(c.id, c.type, @dataset)
+    {:ok, kept} = draft.()
+    assert {kept.title, kept.content, kept.rev} == {before.title, before.content, before.rev}
+    assert eventually(fn -> has_element?(view, ~s(#{@unpublish}[disabled])) end)
+  end
+
+  test "nothing published: Unpublish is greyed out and says why", c do
+    {:ok, _} =
+      Content.create_document(c.type, %{"doc_id" => "fu-draft-#{c.id}", "title" => "D"}, @dataset)
+
+    view = open(c, "#{c.type};fu-draft-#{c.id}?perspective=published")
+
+    assert has_element?(view, ~s(#{@unpublish}[disabled][title="Not published"]), "Unpublish")
+
+    # Offered: no title to explain.
+    view = open(c, "#{c.type};#{c.id}?perspective=published")
+    refute has_element?(view, ~s(#{@unpublish}[title]))
+  end
+
+  test "the pane's own inspector keeps the perspective: Incoming references opens and closes with it",
+       c do
+    view = open(c, "#{c.type};#{c.id}?perspective=published")
+    inspect = "inspect=sanity%2Fstructure%2Fincoming-references"
+
+    view
+    |> element(~s(#{@pane} .pane-header [data-desk-doc-action="incoming-references"]))
+    |> render_click()
+
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id},#{inspect}?perspective=published")
+    assert has_element?(view, @unpublish)
+    refute has_element?(view, @publish)
+
+    view |> element(~s(#{@pane} [data-desk-inspector-close])) |> render_click()
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id}?perspective=published")
+    assert has_element?(view, @unpublish)
+
+    # Without the perspective the same links carry no query.
+    view = open(c, "#{c.type};#{c.id}")
+
+    view
+    |> element(~s(#{@pane} .pane-header [data-desk-doc-action="incoming-references"]))
+    |> render_click()
+
+    assert_patch(view, "#{c.base}/#{c.type};#{c.id},#{inspect}")
   end
 
   test "no perspective, drafts, or any other value: the footer is Publish, as it was", c do
@@ -214,6 +270,11 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     assert Panes.perspective("http://x/_desk/post;p1?perspective=%ZZ") == :drafts
     assert Panes.perspective("http://x/_desk/post;p1") == :drafts
     assert Panes.perspective(nil) == :drafts
+
+    assert Panes.keep_perspective("/d/_desk/post;p1", :published) ==
+             "/d/_desk/post;p1?perspective=published"
+
+    assert Panes.keep_perspective("/d/_desk/post;p1", :drafts) == "/d/_desk/post;p1"
   end
 
   # Control: the old Studio reads no perspective.

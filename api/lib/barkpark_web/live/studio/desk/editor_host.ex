@@ -552,7 +552,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               else:
                 assigns
                 |> DocMenu.items()
-                |> DocMenu.with_incoming(IncomingRefs.menu_item(@chain, @view.index, @base))
+                |> DocMenu.with_incoming(
+                  IncomingRefs.menu_item(
+                    @chain,
+                    @view.index,
+                    @base,
+                    Panes.perspective(assigns[:desk_uri])
+                  )
+                )
                 |> DocMenu.with_refs(ref_items(assigns))
           }
         />
@@ -710,6 +717,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           index={@view.index}
           base={@base}
           menu_button={"#{@view.id}-actions-button"}
+          perspective={Panes.perspective(assigns[:desk_uri])}
         />
         <%!-- The desk's own dialogs for the Studio's document actions
               (`DocDialog`): the Studio's handlers open and close them. The
@@ -745,7 +753,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           publish={Enum.find(items, &(&1.event == "publish"))}
           menu_button={"#{@view.id}-footer-actions-button"}
           perspective={footer_perspective(assigns)}
-          unpublish={Enum.find(items, &(&1.event == "unpublish"))}
+          published?={DocStatus.state(assigns).published?}
         />
         <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
       </div>

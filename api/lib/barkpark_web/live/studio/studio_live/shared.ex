@@ -908,8 +908,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   # A sheet's cells live in its session, which persists on a debounce, and
   # Unpublish is offered only while no draft row exists. Flushing first (as
-  # Publish does) would create that draft, and `unpublish_document` then
-  # overwrites an existing draft with the published content, losing the cells.
+  # Publish does) would create that draft. `unpublish_document` once overwrote
+  # an existing draft with the published content; it now keeps it (draft wins).
   # So read the live cells, unpublish, and put them on the new draft when they
   # differ; the session's next persist writes the same draft
   # (task-3b3209373291e9fd).

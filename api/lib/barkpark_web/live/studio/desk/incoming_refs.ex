@@ -64,8 +64,12 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   The document menu's item: a patch that opens the inspector on pane `index`.
   A button, so the menu's popover closes on the press.
   """
-  def menu_item(chain, index, base) do
-    to = Panes.with_params(chain, index, %{inspect: @inspect_param}, base)
+  def menu_item(chain, index, base, perspective \\ :drafts) do
+    to =
+      chain
+      |> Panes.with_params(index, %{inspect: @inspect_param}, base)
+      |> Panes.keep_perspective(perspective)
+
     %{label: gettext("Incoming references"), name: "incoming-references", event: JS.patch(to)}
   end
 
@@ -140,6 +144,7 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   attr :index, :integer, required: true
   attr :base, :string, required: true
   attr :menu_button, :string, required: true, doc: "the \"…\" button the close gives the focus to"
+  attr :perspective, :atom, default: :drafts, doc: "the page's, kept by the close button's patch"
 
   @doc """
   The edit pane's inspector holder, filled while this inspector is open. The
@@ -155,7 +160,10 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
         groups: (panel && panel.groups) || [],
         total: (panel && panel.total) || 0,
         close:
-          JS.patch(Panes.with_params(assigns.chain, assigns.index, %{inspect: nil}, assigns.base))
+          assigns.chain
+          |> Panes.with_params(assigns.index, %{inspect: nil}, assigns.base)
+          |> Panes.keep_perspective(assigns.perspective)
+          |> JS.patch()
           |> JS.focus(to: ~s([id="#{assigns.menu_button}"]))
       )
 
