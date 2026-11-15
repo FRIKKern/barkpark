@@ -104,12 +104,23 @@
               "marks": [
                 "code"
               ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "bp capabilities",
+              "marks": [
+                "code"
+              ]
             }
           ],
           [
             {
               "type": "text",
-              "value": "active server + auth tier"
+              "value": "server + auth tier / whole API, one call"
             }
           ],
           [
@@ -126,74 +137,44 @@
           [
             {
               "type": "text",
-              "value": "bp capabilities",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "the whole API surface, one call"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp capabilities",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
               "value": "bp doc ls <type>",
               "marks": [
                 "code"
               ]
-            }
-          ],
-          [
+            },
             {
               "type": "text",
-              "value": "list documents"
-            }
-          ],
-          [
+              "value": "/"
+            },
             {
               "type": "text",
-              "value": "bp doc ls post",
+              "value": "get",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "diff <type> <id>",
               "marks": [
                 "code"
               ]
             }
-          ]
-        ],
-        [
+          ],
           [
             {
               "type": "text",
-              "value": "bp doc get <type> <id>",
-              "marks": [
-                "code"
-              ]
+              "value": "list / one doc / draft vs published, exits 1 on a difference"
             }
           ],
           [
             {
               "type": "text",
-              "value": "one doc"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp doc get post p1",
+              "value": "bp doc diff post p1",
               "marks": [
                 "code"
               ]
@@ -241,7 +222,18 @@
             },
             {
               "type": "text",
-              "value": "patch <type> <id>",
+              "value": "patch",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "duplicate <type> <id>",
               "marks": [
                 "code"
               ]
@@ -250,7 +242,7 @@
           [
             {
               "type": "text",
-              "value": "write / edit one document"
+              "value": "create / edit / copy as a draft"
             }
           ],
           [
