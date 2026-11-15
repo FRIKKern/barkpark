@@ -192,8 +192,17 @@ class BpReferencePicker extends HTMLElement {
     box.className = "ref-field ref-box ref-row";
     box.tabIndex = -1;
 
-    const preview = document.createElement("div");
+    // The preview opens the document in the next pane, as TanStack's
+    // (DocPreview in RefInput.tsx): a link LiveView patches to.
+    const href = this._openHref();
+    const preview = document.createElement(href ? "a" : "div");
     preview.className = "ref-preview preview";
+    if (href) {
+      preview.href = href;
+      preview.setAttribute("data-phx-link", "patch");
+      preview.setAttribute("data-phx-link-state", "push");
+      preview.style.textDecoration = "none";
+    }
     const media = document.createElement("span");
     media.className = "dk-media";
     media.setAttribute("aria-hidden", "true");
@@ -296,6 +305,34 @@ class BpReferencePicker extends HTMLElement {
     box.append(preview, wrap);
     this.appendChild(box);
     this._changeButton = button;
+    this._openLink = href ? preview : null;
+  }
+
+  // The path that opens the picked document in the pane after this one, in
+  // the desk's pane grammar (`Desk.Panes.open_after/4`):
+  // `<panes up to this one>;<id>,type=<type>,parentRefPath=<field>`. Pane 0
+  // has no segment; a segment holds one pane, and one more per `|` sibling.
+  // Null outside a desk pane, or for a field the host gave no path.
+  _openHref() {
+    const field = this.getAttribute("data-input-id");
+    const pane = this.closest && this.closest("[data-pane-index]");
+    if (!field || !pane || !this._value) return null;
+    const path = window.location.pathname;
+    const cut = path.lastIndexOf("/");
+    const segments = path.slice(cut + 1).split(";");
+    const index = Number(pane.getAttribute("data-pane-index"));
+    let keep = 0;
+    for (let panes = 0; keep < segments.length && panes < index; keep++) {
+      panes += segments[keep].split(/\||%7C/i).length;
+    }
+    const type = this._selectedType || (this._refTypes.length === 1 ? this._refTypes[0] : "");
+    return (
+      path.slice(0, cut + 1) +
+      segments.slice(0, keep).concat(encodeURIComponent(this._value)).join(";") +
+      (type ? ",type=" + encodeURIComponent(type) : "") +
+      ",parentRefPath=" +
+      encodeURIComponent(field)
+    );
   }
 
   // One declared type reads as before; several read as the PICKED type
@@ -361,6 +398,8 @@ class BpReferencePicker extends HTMLElement {
     type.textContent = this._typeLabel();
     const media = this._box && this.querySelector(".ref-box .dk-media");
     if (media) media.innerHTML = this._typeIconSvg(this._selectedType || this._refTypes[0] || "") || "";
+    const link = this._box && this.querySelector("a.ref-preview");
+    if (link) link.href = this._openHref() || link.href;
   }
 
   _renderSearch() {
@@ -506,7 +545,14 @@ class BpReferencePicker extends HTMLElement {
     this._selectedTitle = prior.title;
     this._selectedType = prior.type;
     this._render();
-    if (this._changeButton) this._changeButton.focus();
+    this._focusPicked();
+  }
+
+  // The pick is back or new: land on the card's link, so Enter opens it (as
+  // TanStack's focusPreview); with no link, on the Change or menu button.
+  _focusPicked() {
+    const to = (this._box && this._openLink) || this._changeButton;
+    if (to) to.focus();
   }
 
   _clear() {
@@ -534,7 +580,7 @@ class BpReferencePicker extends HTMLElement {
     this._hideDropdown();
     this._render();
     // The picked option is gone from the DOM; keep focus in the field.
-    if (this._changeButton) this._changeButton.focus();
+    this._focusPicked();
     this._emit(this._value);
   }
 
