@@ -4279,9 +4279,11 @@ defmodule Barkpark.Content.Query do
   cannot read never take a slot (`Media.WhereUsed.textual_rows/3`).
   """
   def scope_as_id_read(query, dataset, opts) do
+    {workspace_id, project_id} = {opts[:workspace_id], opts[:project_id]}
+
     query
     |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
+    |> scope_to_workspace_or_global(workspace_id, project_id)
     # Row/ownership ACL (Phase 4). This read is TYPELESS, so `scope_to_owner/2`
     # applies UNCONDITIONALLY: rows of non-owner_scoped types carry a NULL
     # `owner_id`, which always passes, so only another user's owner_scoped row drops.
