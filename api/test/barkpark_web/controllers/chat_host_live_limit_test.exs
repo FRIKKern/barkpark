@@ -245,6 +245,63 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     end)
   end
 
+  # From the re-review of #26408. The straddle test above can pass without
+  # the key (the row lock alone orders it), so this pins that rotation takes
+  # the workspace's live-slot key: with the key held, it must wait on it.
+  test "rotation waits on the workspace's live-slot key" do
+    limit(2)
+
+    unboxed(fn ->
+      ws = create_workspace!()
+
+      try do
+        {:ok, %{credential: credential}} = enrol_result(ws, "mac")
+        {:ok, host} = ChatHosts.authenticate(credential)
+        parent = self()
+
+        holder =
+          Task.async(fn ->
+            unboxed(fn ->
+              Repo.transaction(fn ->
+                Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [
+                  "chat_host_live:" <> ws.id
+                ])
+
+                send(parent, :held)
+
+                receive do
+                  :release -> :ok
+                after
+                  10_000 -> :timeout
+                end
+              end)
+            end)
+          end)
+
+        assert_receive :held, 5_000
+
+        rotor =
+          Task.async(fn ->
+            unboxed(fn ->
+              %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+              send(parent, {:rotor_pid, pid})
+              ChatHosts.rotate_credential(host)
+            end)
+          end)
+
+        assert_receive {:rotor_pid, rotor_pid}, 5_000
+        waited = waits_on_advisory_lock?(rotor_pid)
+
+        send(holder.pid, :release)
+        assert {:ok, :ok} = Task.await(holder, 10_000)
+        assert {:ok, _} = Task.await(rotor, 10_000)
+        assert waited, "rotation never waited on the live-slot key"
+      after
+        {:ok, _} = Tenancy.delete_workspace(ws)
+      end
+    end)
+  end
+
   test "two enrolments at once: the second waits for the first and is refused" do
     limit(1)
 
@@ -374,6 +431,24 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
   end
 
   defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+
+  defp waits_on_advisory_lock?(pid, tries \\ 100)
+  defp waits_on_advisory_lock?(_pid, 0), do: false
+
+  defp waits_on_advisory_lock?(pid, tries) do
+    %{rows: [[waiting]]} =
+      Repo.query!(
+        "SELECT count(*) FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND NOT granted",
+        [pid]
+      )
+
+    if waiting == 1 do
+      true
+    else
+      Process.sleep(20)
+      waits_on_advisory_lock?(pid, tries - 1)
+    end
+  end
 
   defp await_lock_wait(pid, tries \\ 250) do
     %{rows: [[waiting]]} =
