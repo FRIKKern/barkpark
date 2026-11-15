@@ -109,6 +109,11 @@ defmodule BarkparkWeb.Studio.DeskFieldSlotsTest do
     refute html =~ "tabindex"
     refute html =~ "aria-haspopup"
 
+    # Until the menu exists a screen reader does not meet the button: its
+    # holder is aria-hidden. Not `hidden`, which would undraw it for the specs.
+    assert html =~ ~r/^<div[^>]*\sclass="field-actions"[^>]*\saria-hidden="true"/
+    refute html =~ ~r/^<div[^>]*\shidden[\s=>]/
+
     assert BarkparkWeb.Studio.Desk.Style.sheet(%{}) |> rendered_to_string() =~
              ".dk .field > .field-actions { position: absolute; opacity: 0; pointer-events: none; }"
   end
