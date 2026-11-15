@@ -18,6 +18,16 @@
  * editor's local time. A stored value with no zone (written before this
  * change) is shown as written; it becomes an instant only when edited.
  *
+ * The form posts that `input` after the hidden input's phx-debounce. Until
+ * then the edit lives only in the hidden input's `value`, and a hidden
+ * input's value is its attribute: any LiveView patch of the form in that
+ * window (another editor's save) wrote the server's old value back, the
+ * focused picker kept showing the new time, and the post carried the old one
+ * (task-2be7cd2bd845c2da). So the hook holds the value it wrote and puts it
+ * back after a patch, until the server shows a new value for the field
+ * (`data-value`: the saved edit, or another editor's) or another document
+ * (`data-doc`). A wrapper that does not name its document holds nothing.
+ *
  * Loaded with `defer` at the bottom of <body> (never <head>, Golden Rule 4);
  * the inline Hooks map delegates to `window.BarkparkDatetimeFieldHook` once it
  * exists. Pure functions are exported for the node test in
@@ -82,6 +92,7 @@
         var next = toInstant(e.target.value);
         if (hidden.value === next) return;
         hidden.value = next;
+        self._hold(next);
         hidden.dispatchEvent(new Event("input", { bubbles: true }));
       };
 
@@ -90,6 +101,7 @@
     },
 
     updated: function () {
+      this._keep();
       this._sync();
     },
 
@@ -104,6 +116,30 @@
 
     _picker: function () {
       return this.el.querySelector('input[type="datetime-local"]');
+    },
+
+    // Remember an edit the form has not posted yet, with the server value
+    // and the document it was made on.
+    _hold: function (value) {
+      var doc = this.el.getAttribute("data-doc");
+      var base = this.el.getAttribute("data-value") || "";
+      this._held = doc && value !== base ? { value: value, base: base, doc: doc } : null;
+    },
+
+    // After a patch: the held edit goes back into the hidden input when the
+    // server still shows the same value for the same document.
+    _keep: function () {
+      var held = this._held;
+      if (!held) return;
+      var hidden = this._hidden();
+      var same =
+        this.el.getAttribute("data-doc") === held.doc &&
+        (this.el.getAttribute("data-value") || "") === held.base;
+      if (!hidden || !same) {
+        this._held = null;
+        return;
+      }
+      if (hidden.value !== held.value) hidden.value = held.value;
     },
 
     // Show the stored value in local time, unless the editor is typing.
