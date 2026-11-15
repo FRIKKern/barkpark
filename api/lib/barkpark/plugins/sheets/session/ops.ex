@@ -20,6 +20,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   inverse-entry term shapes.
   """
 
+  alias Barkpark.Plugins.Sheets.Charts
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Engine
@@ -151,6 +152,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       # (own tab and every other tab holding a cross-tab ref), which is what
       # makes the undo lossless. See `shift_inverse/6`.
       inverse = shift_inverse(op, tab_idx, old_tab, state, axis, change)
+      # A delete that shrinks or removes a chart: undo puts the chart back too.
+      inverse =
+        if kind == :delete,
+          do: Charts.wrap_delete_inverse(inverse, old_tab, new_tab, tab_idx),
+          else: inverse
 
       state =
         apply_structural(state, tab_idx, new_tab, true, %{
@@ -303,6 +309,17 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   def apply_one(%{"op" => "set_cond_format", "tab" => _tab}, _state),
     do: {:error, "invalid_cond_format", "\"rules\" must be a list"}
+
+  # Charts on a tab — model, validation and inverses live in `Charts`.
+  def apply_one(%{"op" => op, "tab" => tab} = op_map, state)
+      when op in ["set_chart", "delete_chart"] do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         old_tab = Sheets.get_tab(state.content, tab_idx),
+         {:ok, new_tab, inverse} <- Charts.apply_op(op_map, old_tab, tab_idx) do
+      structure = %{op: op, at: nil, count: nil, tab: tab_idx}
+      {:ok, apply_structural(state, tab_idx, new_tab, false, structure), inverse}
+    end
+  end
 
   # Sort a range's rows in place (SF-A) — a PURE row permutation that moves
   # every cell map VERBATIM (`f` never rewritten, SF-D1). Validate the range
@@ -593,6 +610,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
        "set_tab_color (\"tab\"+\"color\"), " <>
        "set_cond_format (\"tab\"+\"rules\"), " <>
+       "set_chart (\"tab\"+\"chart\"), delete_chart (\"tab\"+\"id\"), " <>
        "sort_range (\"tab\"+\"range\"+\"keys\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
        "move_tab (\"from\"+\"to\"), duplicate_tab (\"tab\"), " <>

@@ -124,6 +124,18 @@ defmodule Barkpark.Plugins.Sheets.Session do
       an invalid list is rejected whole (`invalid_cond_format`). No recompute
       (rules change render style, never a cell value); the inverse restores the
       prior list.
+    * `%{"op" => "set_chart", "tab" => i, "chart" => chart, "at" => n?}` and
+      `%{"op" => "delete_chart", "tab" => i, "id" => id}` — charts on a tab
+      (`Barkpark.Plugins.Sheets.Charts`). `chart` is
+      `%{"id"?, "range", "type" => "line" | "bar", "title"?, "headers"?,
+      "labels"?}`; the same id replaces, a new or absent id adds. `"at"`
+      (0-based) places or moves it in the tab's list. Refused as
+      `invalid_chart`: a range outside the sheet or over 2,000 cells, an
+      unknown type or key, a 21st chart on a tab; `chart_not_found` for a
+      delete of an unknown id. No recompute. A row/column insert or delete
+      moves the range like a conditional-format range; deleting every row or
+      column of the range removes the chart, and undo of that delete puts it
+      back.
     * `%{"op" => "sort_range", "tab" => i, "range" => "A2:D50",
       "keys" => [%{"col" => 0, "dir" => "asc"}, …]}` — sorts the range's rows
       in place (SF-A): a PURE row permutation that moves every cell map

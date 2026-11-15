@@ -695,6 +695,7 @@ defmodule Barkpark.Plugins.Sheets.Structure do
        tab
        |> rewrite_cells(axis, change)
        |> rewrite_merges(axis, change)
+       |> rewrite_charts(axis, change)
        |> rewrite_cond_formats(axis, change)
        |> rekey_sizes(axis, change)
        |> adjust_frozen(axis, change)}
@@ -847,6 +848,14 @@ defmodule Barkpark.Plugins.Sheets.Structure do
         tab
     end
   end
+
+  # A chart's `"range"` moves with the rows and columns it reads — the same
+  # arithmetic as a conditional-format range. A chart whose whole range is
+  # deleted goes with it (the session's undo brings it back; see `Charts`).
+  defp rewrite_charts(%{"charts" => charts} = tab, axis, change) when is_list(charts),
+    do: Map.put(tab, "charts", Enum.flat_map(charts, &rewrite_cond_format(&1, axis, change)))
+
+  defp rewrite_charts(tab, _axis, _change), do: tab
 
   # A delete can clip two DISTINCT ranges down to the same normalized range
   # (B2:B3 and B2:B4 both collapse to "B2" when rows 3-4 go). The gate
