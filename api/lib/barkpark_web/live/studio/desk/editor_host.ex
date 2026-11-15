@@ -143,7 +143,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             %{type: ref_type} = ref when is_binary(ref_type) <- targets,
             do: Map.put(ref, :path, field)
 
-      assign(socket, active_refs: refs, desk_ref_ids: ids)
+      # The reference cards in the form are drawn in the browser
+      # (`bp-reference-picker.js`): they follow these same targets.
+      socket
+      |> assign(active_refs: refs, desk_ref_ids: ids)
+      |> Phoenix.LiveView.push_event("desk:ref-targets", %{
+        refs: Enum.map(refs, &Map.take(&1, [:path, :id, :title, :type]))
+      })
     else
       _ -> socket
     end
@@ -152,9 +158,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp strip(socket), do: socket
 
   # The references as menu items, "Open reference: <title>", each a patch to
-  # the next pane, as the strip's links were.
-  defp ref_items(%{active_refs: refs, chain: chain, view: view, base: base}) do
-    for ref <- refs do
+  # the next pane, as the strip's links were. Not a single reference field's:
+  # its card in the form is that link (TanStack's RefInput), and a hidden
+  # twin here would answer for it first. An array's rows are not links yet.
+  defp ref_items(%{active_refs: refs, chain: chain, view: view, base: base} = assigns) do
+    carded = for {name, :one} <- Refs.fields(assigns[:editor_schema] || %{}), do: name
+
+    for ref <- refs, ref.path not in carded do
       %{
         label: gettext("Open reference: %{title}", title: ref.title),
         name: "open-reference",
