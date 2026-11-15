@@ -206,6 +206,79 @@ defmodule BarkparkWeb.Studio.DeskIncomingRefsTest do
 
     refute has_element?(view, @panel)
     assert has_element?(view, ~s([data-pane-editing] aside[data-inspect="validation"][hidden]))
+    # The desk does not draw that one, and says so.
+    assert has_element?(view, "[data-pane-editing] [data-desk-left-out]")
+  end
+
+  test "the open inspector is not said to be left out; a revision beside it still is", c do
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
+    assert has_element?(view, @panel)
+    refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
+
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param},rev=abc123")
+    assert has_element?(view, @panel)
+    assert has_element?(view, "[data-pane-editing] [data-desk-left-out]", "abc123")
+    refute has_element?(view, "[data-pane-editing] [data-desk-left-out]", "inspectors")
+  end
+
+  test "opening focuses the close button; Escape inside closes it and hands the focus back", c do
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
+
+    close = view |> element(~s(#{@panel} button[data-desk-inspector-close])) |> render()
+    # `phx-mounted`: the button takes the focus when the panel is drawn.
+    assert close =~ ~r/phx-mounted="[^"]*focus/
+
+    panel = view |> element(@panel) |> render() |> String.split(">", parts: 2) |> hd()
+    assert panel =~ ~s(phx-key="escape")
+    # Escape patches the param out, then focuses the "…" button.
+    assert panel =~ ~r/phx-keydown="[^"]*patch[^"]*focus[^"]*-editor-actions-button/
+
+    view |> element(@panel) |> render_keydown(%{"key" => "Escape"})
+    assert_patch(view, "#{c.base}/#{c.author};#{c.ada}")
+    refute has_element?(view, @panel)
+    # Closed, the holder listens for no key.
+    refute view |> element("[data-pane-editing] aside[data-desk-inspector]") |> render() =~
+             "phx-keydown"
+  end
+
+  test "a re-read while the database is out keeps the list and the page", c do
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
+    assert has_element?(view, row("inc-post-1-#{c.n}"))
+
+    Barkpark.Repo.query!("ALTER TABLE documents RENAME TO documents_out")
+    send(view.pid, :desk_refresh)
+    # A message the page does not know does not stop it either.
+    send(view.pid, {:desk_refresh, :weird})
+    html = render(view)
+    Barkpark.Repo.query!("ALTER TABLE documents_out RENAME TO documents")
+
+    assert Process.alive?(view.pid)
+    assert html =~ "inc-post-1-#{c.n}"
+    assert has_element?(view, row("inc-post-1-#{c.n}"), "Post One")
+    assert has_element?(view, row("inc-note-1-#{c.n}"))
+  end
+
+  test "more than 100 referrers: the first 100 and a line that says how many there are", c do
+    for i <- 1..101 do
+      c.refer.(c.post, "inc-many-#{i}-#{c.n}", "Many #{i}", "author", c.lone)
+    end
+
+    view = open(c, "#{c.author};#{c.lone},#{@inspect_param}")
+
+    rows =
+      view |> element(@panel) |> render() |> String.split("data-desk-incoming-row=") |> length()
+
+    assert rows - 1 == 100
+
+    assert has_element?(
+             view,
+             ~s(#{@panel} [role="status"][data-desk-incoming-more]),
+             "Showing the first 100 of 101."
+           )
+
+    # At the cap or under it there is no such line.
+    view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
+    refute has_element?(view, ~s(#{@panel} [data-desk-incoming-more]))
   end
 
   # Control: the old Studio's document actions are as they were.

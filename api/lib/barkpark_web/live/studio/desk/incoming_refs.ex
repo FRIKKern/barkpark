@@ -1,4 +1,7 @@
 defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
+  # The most rows the panel draws.
+  @cap 100
+
   @moduledoc """
   Sanity's "Incoming references" inspector for the document in the desk's
   edit pane, as the TanStack Studio draws it (`IncomingReferences.tsx`):
@@ -18,13 +21,20 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   document this caller may not read is not listed. They are read when the
   panel opens and again after someone saves (`:desk_refresh`, the desk's one
   debounced tick): a document that starts to refer shows up, one that stops
-  goes.
+  goes. A re-read that fails (the database is out) keeps the list it had.
+
+  At most #{@cap} rows are drawn; past that a line says how many there are.
+
+  Opening it puts the focus on its close button. Escape from inside it, or
+  the close button, closes it and gives the focus back to the "…" button.
 
   `EditorHost` owns the `desk_incoming` assign: `nil` while the panel is
-  closed, else the groups.
+  closed, else `%{groups: groups, total: n}`.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
+
+  require Logger
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.Desk.Panes
@@ -36,6 +46,9 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
 
   @typedoc "One type's referring documents."
   @type group :: %{type: String.t(), title: String.t(), rows: [map()]}
+
+  @doc "The most rows the panel draws."
+  def cap, do: @cap
 
   @doc "The pane's `inspect` value that opens this inspector."
   def param, do: @inspect_param
@@ -69,31 +82,45 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   A `handle_info` hook (`EditorHost.mount/3`): on the desk's refresh tick the
   open panel reads again. The message goes on to the page either way.
   """
-  def on_info(:desk_refresh, %{assigns: %{desk_incoming: open}} = socket) when is_list(open),
-    do: {:cont, load(socket)}
+  def on_info(:desk_refresh, %{assigns: %{desk_incoming: %{}}} = socket) do
+    {:cont, load(socket)}
+  rescue
+    # The database is out: the panel keeps its list, the page stays up, and
+    # the next tick reads again.
+    error in [DBConnection.ConnectionError, Postgrex.Error] ->
+      Logger.warning("desk: incoming references were not read again: #{Exception.message(error)}")
+      {:cont, socket}
+  end
 
   def on_info(_message, socket), do: {:cont, socket}
 
   # One row per referring document, grouped by type in the order the types
   # first appear, each group under its schema's title.
-  @spec read(String.t(), String.t(), map()) :: [group()]
+  @spec read(String.t(), String.t(), map()) :: %{groups: [group()], total: non_neg_integer()}
   defp read(id, dataset, assigns) do
-    scope = assigns[:scope] || []
+    # The page's scope, always set before a document is edited: without it
+    # the read would not be fenced, so its absence raises.
+    scope = Map.fetch!(assigns, :scope)
     here = Content.published_id(id)
 
-    rows =
+    all =
       here
       |> Content.Graph.backlinks([dataset: dataset] ++ scope)
       |> Enum.reject(&(Content.published_id(&1.from_doc_id) == here))
       |> Enum.uniq_by(&Content.published_id(&1.from_doc_id))
 
-    for type <- rows |> Enum.map(& &1.type) |> Enum.uniq() do
-      %{
-        type: type,
-        title: type_title(type, dataset, scope),
-        rows: Enum.filter(rows, &(&1.type == type))
-      }
-    end
+    rows = Enum.take(all, @cap)
+
+    groups =
+      for type <- rows |> Enum.map(& &1.type) |> Enum.uniq() do
+        %{
+          type: type,
+          title: type_title(type, dataset, scope),
+          rows: Enum.filter(rows, &(&1.type == type))
+        }
+      end
+
+    %{groups: groups, total: length(all)}
   end
 
   defp type_title(type, dataset, scope) do
@@ -104,7 +131,7 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   end
 
   attr :id, :string, required: true, doc: "the holder's id (`<pane>-inspector`)"
-  attr :groups, :any, required: true, doc: "`desk_incoming`: nil while closed"
+  attr :panel, :any, required: true, doc: "`desk_incoming`: nil while closed"
   attr :inspect, :string, default: nil, doc: "the pane's `inspect`, whatever it names"
   attr :chain, :list, required: true
   attr :index, :integer, required: true
@@ -117,7 +144,17 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   and closing moves nothing around it.
   """
   def holder(assigns) do
-    assigns = assign(assigns, :open, is_list(assigns.groups))
+    panel = assigns.panel
+
+    assigns =
+      assign(assigns,
+        open: is_map(panel),
+        groups: (panel && panel.groups) || [],
+        total: (panel && panel.total) || 0,
+        close:
+          JS.patch(Panes.with_params(assigns.chain, assigns.index, %{inspect: nil}, assigns.base))
+          |> JS.focus(to: ~s([id="#{assigns.menu_button}"]))
+      )
 
     ~H"""
     <aside
@@ -127,6 +164,8 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
       data-inspect={@inspect}
       aria-label={@open && gettext("Incoming references")}
       hidden={!@open}
+      phx-keydown={@open && @close}
+      phx-key={@open && "escape"}
     >
       <%= if @open do %>
         <.sheet />
@@ -136,16 +175,18 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
             type="button"
             class="dk-inspector-close icon-btn"
             aria-label={gettext("Close incoming references")}
-            phx-click={
-              JS.patch(Panes.with_params(@chain, @index, %{inspect: nil}, @base))
-              |> JS.focus(to: ~s([id="#{@menu_button}"]))
-            }
+            phx-click={@close}
+            phx-mounted={JS.focus()}
+            data-desk-inspector-close
           >
             <BarkparkWeb.Icons.desk_icon name="close" size={21} />
           </button>
         </header>
         <p :if={@groups == []} class="incoming-card dk-incoming-empty">
           {gettext("No incoming references found.")}
+        </p>
+        <p :if={@total > cap()} class="dk-incoming-more" role="status" data-desk-incoming-more>
+          {gettext("Showing the first %{shown} of %{total}.", shown: cap(), total: @total)}
         </p>
         <section :for={group <- @groups} class="incoming-group" aria-label={group.title}>
           <h3>{group.title}</h3>
@@ -200,6 +241,7 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
       .dk .dk-inspector-close:focus-visible, .dk .dk-incoming-row:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: -2px; }
       .dk .dk-inspector ul { list-style: none; margin: 0 8px; padding: 4px; display: flex; flex-direction: column; gap: 0; border: 1px solid var(--dk-border); border-radius: 4px; }
       .dk .dk-inspector .dk-incoming-empty { margin: 12px 0 0; padding: 11px 12px; border: 1px solid var(--dk-border); border-radius: 4px; color: var(--dk-muted); }
+      .dk .dk-inspector .dk-incoming-more { margin: 0 8px 4px 16px; color: var(--dk-muted); }
       .dk .dk-inspector .incoming-group + .incoming-group { margin-top: 16px; }
       .dk .dk-inspector .incoming-group h3 { margin: 23px 8px 15px 16px; font-size: 13px; line-height: 19px; font-weight: 500; color: var(--dk-fg); }
       .dk .dk-incoming-row { display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 33px; margin-bottom: 2px; padding: 5px 8px 5px 12px; border-radius: 3px; color: var(--dk-fg); text-decoration: none; }

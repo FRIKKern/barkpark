@@ -429,6 +429,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp desk_pane(_params, _chain), do: nil
 
+  # What the URL asks for that the pane does not draw (`PaneComponent`). The
+  # Incoming references inspector is drawn, so its `inspect` is not left out.
+  defp left_out(pane) do
+    if IncomingRefs.open?(pane),
+      do: PaneComponent.left_out(Map.delete(pane, :inspect)),
+      else: PaneComponent.left_out(pane)
+  end
+
   # `inspect=on` is the Inspect dialog, drawn over the form, not an inspector.
   defp inspector(pane), do: if(pane[:inspect] == "on", do: nil, else: pane[:inspect])
 
@@ -567,7 +575,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           :for={
             note <-
               (assigns[:editor_doc] && !@edit_failed && !gone?(assigns) &&
-                 PaneComponent.left_out(@view.pane)) || []
+                 left_out(@view.pane)) || []
           }
           class="dk-note"
           data-desk-left-out
@@ -657,7 +665,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               read or was deleted. --%>
         <IncomingRefs.holder
           id={"#{@view.id}-inspector"}
-          groups={if(@edit_failed or gone?(assigns), do: nil, else: assigns[:desk_incoming])}
+          panel={if(@edit_failed or gone?(assigns), do: nil, else: assigns[:desk_incoming])}
           inspect={inspector(@view.pane)}
           chain={@chain}
           index={@view.index}

@@ -13387,6 +13387,11 @@ msgstr ""
 msgid "Showing the first %{count}."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/incoming_refs.ex:189
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{shown} of %{total}."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/pane_component.ex
 #, elixir-autogen, elixir-format
 msgid "Sort by"
