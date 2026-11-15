@@ -19,11 +19,11 @@ Attachments: magic-byte MIME (not client header); `png/jpeg/gif/webp/pdf/txt/log
 
 ## Sheets — `POST /v1/plugins/sheets/:slug/ops` [admin]
 
-Body `{"ops":[…]}` (`?dataset=` default `production`); ingest token also authorizes. Ops apply individually; refusals ride 200's `errors` as `{index,code,message}`. Grammar: `Barkpark.Plugins.Sheets.Session`.
+Body `{"ops":[…]}` (`?dataset=` default `production`); ingest token also authorizes. Ops apply individually; refusals ride 200's `errors` as `{index,code,message}`. Grammar, incl. `set_chart`/`delete_chart`: `Barkpark.Plugins.Sheets.Session`.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a row permutation of the rect (formulas move verbatim). Refuses: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — permutes rows (formulas move verbatim). Refuses: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
 
-Filtering is per-viewer (no endpoint); sorting edits data. Publishing a sheet makes it public at `/sheets/:slug`, whatever its visibility (ruling #58).
+Filtering is per-viewer (no endpoint). Publishing a sheet makes it public at `/sheets/:slug`, whatever its visibility (ruling #58).
 
 ## Bulldocs — `POST /v1/plugins/bulldocs/papers/:slug/ops`
 

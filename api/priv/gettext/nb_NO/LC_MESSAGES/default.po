@@ -14165,3 +14165,140 @@ msgstr "Nettleseren lot ikke denne siden lese utklippstavlen"
 #, elixir-autogen, elixir-format
 msgid "The number is too large to paste"
 msgstr "Tallet er for stort til å limes inn"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:365
+#, elixir-autogen, elixir-format
+msgid "%{count} row left out: it holds a cell that is not a number."
+msgid_plural "%{count} rows left out: they hold a cell that is not a number."
+msgstr[0] "%{count} rad utelatt: den har en celle som ikke er et tall."
+msgstr[1] "%{count} rader utelatt: de har en celle som ikke er et tall."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:337
+#, elixir-autogen, elixir-format
+msgid "%{title}. Bar chart of %{series}, %{count} points."
+msgstr "%{title}. Stolpediagram av %{series}, %{count} punkter."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:343
+#, elixir-autogen, elixir-format
+msgid "%{title}. Line chart of %{series}, %{count} points."
+msgstr "%{title}. Linjediagram av %{series}, %{count} punkter."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:205
+#, elixir-autogen, elixir-format
+msgid "Bar"
+msgstr "Stolper"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:197
+#, elixir-autogen, elixir-format
+msgid "Cells to chart"
+msgstr "Celler i diagrammet"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:177
+#, elixir-autogen, elixir-format
+msgid "Chart"
+msgstr "Diagram"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:327
+#, elixir-autogen, elixir-format
+msgid "Chart of %{range}"
+msgstr "Diagram av %{range}"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:201
+#, elixir-autogen, elixir-format
+msgid "Chart type"
+msgstr "Diagramtype"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:166
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:235
+#, elixir-autogen, elixir-format
+msgid "Charts"
+msgstr "Diagrammer"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:192
+#, elixir-autogen, elixir-format
+msgid "Close chart form"
+msgstr "Lukk diagramskjemaet"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:303
+#, elixir-autogen, elixir-format
+msgid "Data"
+msgstr "Data"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:296
+#, elixir-autogen, elixir-format
+msgid "Delete %{chart}"
+msgstr "Slett %{chart}"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:295
+#, elixir-autogen, elixir-format
+msgid "Edit %{chart}"
+msgstr "Rediger %{chart}"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:183
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:191
+#, elixir-autogen, elixir-format
+msgid "Edit chart"
+msgstr "Rediger diagram"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:215
+#, elixir-autogen, elixir-format
+msgid "First column is labels"
+msgstr "Første kolonne er etiketter"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:214
+#, elixir-autogen, elixir-format
+msgid "First row is headers"
+msgstr "Første rad er overskrifter"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:174
+#, elixir-autogen, elixir-format
+msgid "Insert a chart of the selected cells"
+msgstr "Sett inn et diagram av de valgte cellene"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3857
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:183
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:191
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:218
+#, elixir-autogen, elixir-format
+msgid "Insert chart"
+msgstr "Sett inn diagram"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:205
+#, elixir-autogen, elixir-format
+msgid "Line"
+msgstr "Linje"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:294
+#, elixir-autogen, elixir-format
+msgid "Move %{chart} down"
+msgstr "Flytt %{chart} ned"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:293
+#, elixir-autogen, elixir-format
+msgid "Move %{chart} up"
+msgstr "Flytt %{chart} opp"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:355
+#, elixir-autogen, elixir-format
+msgid "No numbers in %{range}, so there is nothing to draw."
+msgstr "Ingen tall i %{range}, så det er ingenting å tegne."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:218
+#, elixir-autogen, elixir-format
+msgid "Save chart"
+msgstr "Lagre diagram"
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:376
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{count} rows."
+msgstr "Viser de første %{count} radene."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:371
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{shown} number columns of %{total}."
+msgstr "Viser de første %{shown} tallkolonnene av %{total}."
+
+#: lib/barkpark_web/live/studio/sheet_grid/charts.ex:360
+#, elixir-autogen, elixir-format
+msgid "This chart's cells cannot be read. Edit it to pick new ones."
+msgstr "Cellene til dette diagrammet kan ikke leses. Rediger det for å velge nye."

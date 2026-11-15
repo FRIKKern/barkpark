@@ -35,6 +35,10 @@ debounce of 2s or 25 ops, plus on terminate.
   (owner ruling 2026-10-03). Studio's Publish control and flash say so.
 - Error envelopes (413/422/503) live in `plugins/sheets.ex`.
 
+## Charts
+
+Tab `"charts"`, ops `set_chart`/`delete_chart`. `sheets/charts.ex` @moduledoc owns the rules: 2,000 cells per chart, 20 per tab, total reads, undo.
+
 ## Embed pipeline
 
 Sheet saves run an Engine recompute, then the write-through refreshes every embedding

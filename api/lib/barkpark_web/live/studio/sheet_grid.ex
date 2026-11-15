@@ -253,7 +253,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
-  alias BarkparkWeb.Studio.SheetGrid.{Cells, FileIO, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.SheetGrid.{Cells, Charts, FileIO, Filter, Geometry, GridData, Ops}
   alias BarkparkWeb.Studio.StudioLive.DocActions
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.TokensGen
@@ -334,6 +334,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # Conditional-format panel (editable hosts, CF-C stage B): nil = closed;
        # a map = open with the create/edit form prefilled. See cf-open/cf-save.
        cf_panel: nil,
+       # The Insert/Edit chart form: nil = closed. See SheetGrid.Charts.
+       chart_panel: nil,
        # Per-viewer FILTER view-state (SF-B, paper §3+§4). `filters` is a
        # `%{col_index => criterion}` map held ONLY on this socket — it never
        # mutates the document, sends no op, and dies with the socket (SF-D2).
@@ -1757,6 +1759,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         end
     end
   end
+
+  # Charts: events, form and drawing live in SheetGrid.Charts.
+  def handle_event("chart-" <> _ = event, params, socket),
+    do: {:noreply, Charts.handle_event(event, params, socket, &send_ops/2)}
 
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
@@ -3527,6 +3533,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           </div>
         </div>
 
+        <Charts.chart_tools id={@id} panel={@chart_panel} myself={@myself} />
+
         <%!-- Visible undo/redo — the ghost buttons a MOUSE user needs; they
               phx-click the SAME "undo"/"redo" events the keyboard fires, so
               zero new server logic. --%>
@@ -3813,6 +3821,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </div>
       </div>
 
+      <Charts.charts id={@id} views={@chart_views} editable={@editable} myself={@myself} />
+
       <%!-- Right-click cell context menu (SF context-menu). Edit-only; the JS
             contextmenu hook sets the @menu {:cell, x, y} variant and positions
             it at the cursor (position:fixed + a viewport clamp in updated()). A
@@ -3844,6 +3854,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-row"><%= gettext("Delete row") %></button>
         <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-col"><%= gettext("Insert column") %></button>
         <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-col"><%= gettext("Delete column") %></button>
+        <button type="button" role="menuitem" phx-click="chart-open" phx-target={@myself} data-test-id="sheet-ctx-insert-chart"><%= gettext("Insert chart") %></button>
       </div>
 
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
