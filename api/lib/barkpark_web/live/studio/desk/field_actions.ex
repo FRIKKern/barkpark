@@ -45,7 +45,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   A field the form does not let this editor change takes no paste
   (`paste?/2`): one locked by its `readOnly` rule (`FieldLock`), or declared
   read-only for an editor who is not an admin. Its Paste item is off, and a
-  paste sent by hand is dropped. So is one for a field the form is hiding.
+  paste for it is dropped and the editor is told, since a rule can lock or hide
+  a field while its menu is open. So is one for a field the form is hiding.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -176,8 +177,18 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   def handle_event("desk-field-paste", %{"field" => name, "clip" => clip}, socket)
       when is_binary(name) and is_binary(clip) do
     case target(socket.assigns, name) do
+      # The page offered a paste the form no longer allows (a rule locked or
+      # hid the field since): said, not dropped in silence. A name the
+      # schema does not have is nobody's field and is not answered.
       nil ->
-        {:noreply, socket}
+        if known?(socket.assigns, name),
+          do:
+            {:noreply,
+             push_event(socket, @toast, %{
+               tone: "critical",
+               title: gettext("This field cannot be edited, so nothing was pasted")
+             })},
+          else: {:noreply, socket}
 
       field ->
         current = stored(socket.assigns.editor_doc, name)
@@ -239,6 +250,11 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
       _ -> nil
     end
   end
+
+  defp known?(%{editor_doc: %{}, editor_schema: %{fields: fields}}, name),
+    do: field(fields, name) != nil
+
+  defp known?(_assigns, _name), do: false
 
   # The open document's field of that name, when the form shows it: in the
   # schema, and not hidden by its `visibleWhen`. nil otherwise.

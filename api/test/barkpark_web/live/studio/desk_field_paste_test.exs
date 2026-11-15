@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
   @form "[data-pane-editing] #editor-form"
   @toast "desk:field-toast"
   @incompatible "Source and target schema types are not compatible"
+  @dropped "This field cannot be edited, so nothing was pasted"
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -645,7 +646,22 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
     test "hidden by its visibleWhen: a paste sent by hand writes nothing", c do
       view = desk(c)
       assert changes(c, view, "hidden", clip("string", "forced")) == %{}
-      refute_push_event(view, @toast, _, 50)
+      assert_push_event(view, @toast, %{tone: "critical", title: @dropped})
+    end
+
+    # Review of #26479: a rule can lock or hide the field under an open menu,
+    # and the paste then vanished without a word.
+    test "a rule locks the field after the page drew it: the paste is dropped, in words", c do
+      view = desk(c)
+      # `fixed` is locked while choice is "b"; open it, then lock it again.
+      paste(view, "choice", clip("string", "a"))
+      assert changes(c, view, "fixed", clip("string", "open now")) != %{}
+      refute has_element?(view, ~s(#{@form} button[data-desk-field="fixed"][data-desk-paste-off]))
+
+      paste(view, "choice", clip("string", "b"))
+      assert has_element?(view, ~s(#{@form} button[data-desk-field="fixed"][data-desk-paste-off]))
+      assert changes(c, view, "fixed", clip("string", "forced")) == %{}
+      assert_push_event(view, @toast, %{tone: "critical", title: @dropped})
     end
 
     test "locked by its rule: Paste is off in the menu and a paste sent by hand writes nothing",
@@ -661,7 +677,7 @@ defmodule BarkparkWeb.Studio.DeskFieldPasteTest do
              )
 
       assert changes(c, view, "fixed", clip("string", "forced")) == %{}
-      refute_push_event(view, @toast, _, 50)
+      assert_push_event(view, @toast, %{tone: "critical", title: @dropped})
     end
   end
 

@@ -14160,3 +14160,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The number is too large to paste"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_actions.ex
+#, elixir-autogen, elixir-format
+msgid "This field cannot be edited, so nothing was pasted"
+msgstr ""
