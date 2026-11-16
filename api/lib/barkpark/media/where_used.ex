@@ -107,6 +107,10 @@ defmodule Barkpark.Media.WhereUsed do
   # a sample, and the envelope says which is which.
   @sample_limit 20
 
+  # `textual_rows/2` stops here: a logo on more pages than this is listed from
+  # its first 1000 referring rows, by doc_id.
+  @rows_limit 1000
+
   @doc """
   The delivery path a document would carry for this blob: `/media/files/<path>`.
 
@@ -370,23 +374,12 @@ defmodule Barkpark.Media.WhereUsed do
   # delete answered 200 over live `_ref`s.
   defp structural_referrers(%MediaFile{} = file) do
     scope = MediaFile.scope_opts(file)
-    asset_doc = Barkpark.Media.asset_doc_for_file(file, file.dataset, scope)
-    patterns = sanity_ref_patterns(file)
 
-    case {asset_doc, patterns} do
-      {nil, []} ->
+    case structural_target(file) do
+      nil ->
         %{count: 0, sample: []}
 
-      _ ->
-        # The upload mints the companion as a DRAFT (`drafts.asset-…`) while a
-        # field holds the bare `asset-…`; `list_reference_holders/3` matches the
-        # published id, so normalise here. A blob with no companion (a bare
-        # import) still has its Sanity ids to match.
-        target =
-          if asset_doc,
-            do: Barkpark.Content.published_id(asset_doc.doc_id),
-            else: "asset-" <> to_string(file.id)
-
+      {target, patterns} ->
         ctx = %Barkpark.Content.CallerContext{
           principal_type: :api_token,
           is_admin: true,
@@ -413,6 +406,30 @@ defmodule Barkpark.Media.WhereUsed do
           end)
 
         %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
+    end
+  end
+
+  @doc """
+  What a schema image/file field holds when it shows this blob:
+  `{asset_doc_id, sanity_ref_patterns}`, or `nil` when there is nothing to
+  match (no companion asset document and no Sanity id).
+
+  The upload mints the companion as a DRAFT (`drafts.asset-…`) while a field
+  holds the bare `asset-…`; `list_reference_holders/3` matches the published
+  id, so the id is normalised here. A blob with no companion (a bare import)
+  still has its Sanity ids to match. The companion is found under the blob's
+  OWN tenancy scope (task-fe13ea62be4a69e6).
+  """
+  def structural_target(%MediaFile{id: nil}), do: nil
+
+  def structural_target(%MediaFile{} = file) do
+    asset_doc =
+      Barkpark.Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
+
+    case {asset_doc, sanity_ref_patterns(file)} do
+      {nil, []} -> nil
+      {nil, patterns} -> {"asset-" <> to_string(file.id), patterns}
+      {doc, patterns} -> {Barkpark.Content.published_id(doc.doc_id), patterns}
     end
   end
 
@@ -462,6 +479,26 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   defp scan(url, workspace_id, narrow \\ & &1) do
+    query =
+      url
+      |> scan_query(workspace_id, narrow)
+      |> select([d], %{
+        row_id: d.id,
+        doc_id: d.doc_id,
+        type: d.type,
+        dataset: d.dataset,
+        title: d.title
+      })
+
+    count = Repo.aggregate(query, :count)
+    sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
+
+    %{count: count, sample: sample}
+  end
+
+  # The textual scan's rows, before any select: `scan/3` counts and samples
+  # them, `textual_rows/4` hands the caller's own to `Media.Usage`.
+  defp scan_query(url, workspace_id, narrow) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
     # stored `path`), never caller text, but it is still bound as a PARAMETER so
@@ -469,34 +506,76 @@ defmodule Barkpark.Media.WhereUsed do
     # both wildcards and the query declares its own ESCAPE character.
     pattern = "%" <> like_escape(url) <> "%"
 
-    query =
-      from(d in Document,
-        where: d.status in ["published", "draft"],
-        # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
-        # document. Every upload's `Assets.create_draft/1` stamps
-        # `content.fileInfo.url` with this blob's OWN delivery path, and a
-        # mediaAsset row is ALWAYS a draft (never published) — so widening
-        # this scan to drafts made every blob with a companion asset doc
-        # match ITSELF, one false "referrer" that is really just the blob
-        # describing its own metadata, never a reader- or editor-visible use.
-        where: d.type != "mediaAsset",
-        where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern),
-        select: %{
-          row_id: d.id,
-          doc_id: d.doc_id,
-          type: d.type,
-          dataset: d.dataset,
-          title: d.title
-        }
-      )
-      |> scope_to_owner_tenant(workspace_id)
-      |> narrow.()
-
-    count = Repo.aggregate(query, :count)
-    sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
-
-    %{count: count, sample: sample}
+    from(d in Document,
+      where: d.status in ["published", "draft"],
+      # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
+      # document. Every upload's `Assets.create_draft/1` stamps
+      # `content.fileInfo.url` with this blob's OWN delivery path, and a
+      # mediaAsset row is ALWAYS a draft (never published) — so widening
+      # this scan to drafts made every blob with a companion asset doc
+      # match ITSELF, one false "referrer" that is really just the blob
+      # describing its own metadata, never a reader- or editor-visible use.
+      where: d.type != "mediaAsset",
+      where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern)
+    )
+    |> scope_to_owner_tenant(workspace_id)
+    |> narrow.()
   end
+
+  @doc "The most textual uses `textual_rows/4` returns."
+  def rows_limit, do: @rows_limit
+
+  @doc """
+  The textual scan's documents in `dataset` that the caller behind `opts` may
+  read and that `keep` accepts, at most #{@rows_limit}: `{documents, truncated}`.
+
+  The caller's read scope (`Content.Query.scope_as_id_read/3`: dataset,
+  workspace and project, owner-scoped rows, grants, private schemas) is part of
+  the SQL, on top of the blob's own workspace fence, so a row the caller cannot
+  read is never fetched. `keep` takes one page of documents and returns the
+  ones to count (`Media.Usage` drops a use that sits only in a field the caller
+  may not read). The scan reads pages of #{@rows_limit + 1} in `doc_id` order
+  and stops once more than #{@rows_limit} rows have passed `keep`, or the
+  matches run out. No other bound: a page bound would make `truncated` depend
+  on how many rows `keep` dropped. So the cap and `truncated` count only kept
+  rows. The delete guard's `scan/3` is not this query: it still counts every
+  referrer.
+  """
+  def textual_rows(%MediaFile{path: path} = file, dataset, opts, keep)
+      when is_binary(path) and is_binary(dataset) do
+    scoped =
+      &(&1
+        |> where([d], d.dataset == ^dataset)
+        |> Barkpark.Content.Query.scope_as_id_read(dataset, opts))
+
+    query =
+      file
+      |> delivery_path()
+      |> scan_query(Map.get(file, :workspace_id), scoped)
+      |> order_by([d], asc: d.doc_id, asc: d.id)
+      |> limit(@rows_limit + 1)
+
+    rows = kept_pages(query, nil, keep, [])
+    {Enum.take(rows, @rows_limit), length(rows) > @rows_limit}
+  end
+
+  def textual_rows(%MediaFile{}, _dataset, _opts, _keep), do: {[], false}
+
+  # Keyset pages on (doc_id, id): `id` breaks a tie should two rows in scope
+  # share a doc_id, so no row is skipped or read twice.
+  defp kept_pages(query, last, keep, kept) do
+    page = query |> after_row(last) |> Repo.all()
+    kept = kept ++ keep.(page)
+
+    if length(kept) > @rows_limit or length(page) <= @rows_limit,
+      do: kept,
+      else: kept_pages(query, List.last(page), keep, kept)
+  end
+
+  defp after_row(query, nil), do: query
+
+  defp after_row(query, %{doc_id: doc_id, id: id}),
+    do: where(query, [d], d.doc_id > ^doc_id or (d.doc_id == ^doc_id and d.id > ^id))
 
   # LIKE metacharacters in the blob path would otherwise make the pattern match
   # MORE than the literal path — an over-broad match here means a refusal that

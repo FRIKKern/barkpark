@@ -21,7 +21,6 @@ barkpark/content/query.ex	fail-open-scope	|> scope_to_workspace_or_global(worksp
 barkpark/content/query.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
 barkpark/content/query.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
 barkpark/content/query.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
-barkpark/content/query.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
 barkpark/content/revisions.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
 barkpark/content/revisions.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
 barkpark/content/schema.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)

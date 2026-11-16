@@ -1949,6 +1949,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "media.usage",
+        "media",
+        "usage",
+        "List the documents that use an asset (those you can read), draft or published.",
+        "GET",
+        "/v1/media/:dataset/:id/usage",
+        "read",
+        args: [arg("id", true, "string", "Asset id.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.checkout",
         "media",
         "checkout",
