@@ -75,19 +75,18 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveOrgScopeTest do
       refute html =~ org_b.slug
 
       html = render_click(view, "mint_scim", %{"org" => org_b.id})
+      assert scim_count(org_b) == 0
       assert html =~ @refused
       refute html =~ "scim_"
-      assert scim_count(org_b) == 0
     end
 
     test "cannot toggle MFA for an organisation they do not administer",
          %{conn: conn, raw: raw, org_b: org_b} do
       {:ok, view, _html} = open(conn, raw)
 
-      assert render_click(view, "toggle_require_mfa", %{"org" => org_b.id, "to" => "true"}) =~
-               @refused
-
+      html = render_click(view, "toggle_require_mfa", %{"org" => org_b.id, "to" => "true"})
       assert unchanged?(org_b)
+      assert html =~ @refused
     end
 
     test "cannot set the session policy of an organisation they do not administer",
@@ -101,8 +100,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveOrgScopeTest do
           "absolute" => "120"
         })
 
-      assert html =~ @refused
       assert unchanged?(org_b)
+      assert html =~ @refused
     end
 
     test "cannot set the sign-in methods of an organisation they do not administer",
@@ -112,8 +111,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveOrgScopeTest do
       html =
         render_submit(view, "set_allowed_auth_methods", %{"org" => org_b.id, "methods" => ["sso"]})
 
-      assert html =~ @refused
       assert unchanged?(org_b)
+      assert html =~ @refused
     end
 
     test "an organisation that also holds a workspace they do not administer is not theirs",

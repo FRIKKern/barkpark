@@ -14798,3 +14798,8 @@ msgstr "Person"
 #, elixir-autogen, elixir-format
 msgid "Not recorded"
 msgstr "Ikke registrert"
+
+#: lib/barkpark_web/live/studio/org_admin_live/org_scope.ex:88
+#, elixir-autogen, elixir-format
+msgid "You do not administer this organization."
+msgstr "Du administrerer ikke denne organisasjonen."
