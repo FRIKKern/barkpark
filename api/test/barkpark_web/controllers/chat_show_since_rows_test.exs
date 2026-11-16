@@ -155,6 +155,36 @@ defmodule BarkparkWeb.ChatShowSinceRowsTest do
     assert ChatController.replay_events(sid, 99_999_999_999_999_999_999, :global) == []
   end
 
+  # chat_messages.seq is a 32-bit `integer`; `?since=` takes up to the bigint
+  # max and Last-Event-ID has no bound. A since past the int4 max must answer
+  # [] as the old in-memory filter did, never reach the query (Postgrex cannot
+  # encode it for an int4 column: a 500 on the read, a dead stream on replay).
+  @past_int4 [2_147_483_647, 2_147_483_648, 1_099_511_627_776, 9_223_372_036_854_775_806]
+
+  test "a since past the int4 seq column answers [] on the read and the replay",
+       %{admin: admin} do
+    sid = session_with!(5)
+
+    for since <- @past_int4 do
+      {conn, rows} = show(admin, sid, "?since=#{since}")
+      body = json_response(conn, 200)
+      assert body["messages"] == [], "?since=#{since}"
+      assert rows == 0
+
+      assert ChatController.replay_events(sid, since, :global) == [], "replay since=#{since}"
+    end
+  end
+
+  test "seq is still a 32-bit integer column (MessagesSince's @seq_max is its max)" do
+    %{rows: [[type]]} =
+      Repo.query!(
+        "SELECT data_type FROM information_schema.columns WHERE table_name = 'chat_messages' AND column_name = 'seq'"
+      )
+
+    assert type == "integer",
+           "chat_messages.seq is now #{type}: raise @seq_max in Barkpark.StudioChat.MessagesSince to its max"
+  end
+
   describe "tenancy is unchanged" do
     setup do
       ws_a = create_workspace!()

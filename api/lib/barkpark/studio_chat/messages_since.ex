@@ -11,10 +11,14 @@ defmodule Barkpark.StudioChat.MessagesSince do
   the tail, and that past-the-end read loads none.
 
   `since = nil` is the full read and goes straight to
-  `StudioChat.list_messages/2`, unchanged. A `since` at or past the largest
-  `bigint` (`seq`'s column type) answers `[]` without a query: no row can be
-  newer, and a larger value would fail to encode as a query parameter (the
-  event stream's Last-Event-ID parse has no upper bound).
+  `StudioChat.list_messages/2`, unchanged. A `since` at or past 2_147_483_647
+  answers `[]` without a query. `chat_messages.seq` is a 32-bit `integer`
+  (migration 20260709120000, `add :seq, :integer`), so no row can be newer,
+  and Postgrex refuses to encode a larger parameter for that column
+  (`DBConnection.EncodeError`). `?since=` accepts up to the bigint max and the
+  event stream's Last-Event-ID parse has no upper bound, so both reach here
+  with such values; on the old in-memory filter they answered `[]`, and they
+  still do.
 
   The scope gate is `StudioChat.list_messages/2`'s, restated: `:global` reads;
   a workspace reads only when `StudioChat.get_session/2` sees the session in
@@ -28,7 +32,8 @@ defmodule Barkpark.StudioChat.MessagesSince do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Message
 
-  @seq_max 9_223_372_036_854_775_807
+  # The largest value `chat_messages.seq` (Postgres `integer`) can hold.
+  @seq_max 2_147_483_647
 
   @spec list(String.t(), non_neg_integer() | nil, :global | binary()) :: [Message.t()]
   def list(session_id, nil, scope), do: StudioChat.list_messages(session_id, scope)
