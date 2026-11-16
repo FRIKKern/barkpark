@@ -680,6 +680,11 @@
         "env": {}
       },
       {
+        "name": "news render: a fixture day renders the expected README block, finished days only",
+        "run": "python3 tooling/news/run-daily --help >/dev/null\nbash tooling/news/render.test.sh\n",
+        "env": {}
+      },
+      {
         "name": "audit-paper-readers.sh syntax check",
         "run": "bash -n scripts/audit-paper-readers.sh",
         "env": {}

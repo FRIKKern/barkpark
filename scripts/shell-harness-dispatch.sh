@@ -316,6 +316,9 @@ tooling-harnesses tooling/fleet/fleet-run.sh
 tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
 tooling-harnesses tooling/fleet/spend-aggregate.py
 tooling-harnesses tooling/fleet/spend-aggregate.test.sh
+tooling-harnesses tooling/news/render.py
+tooling-harnesses tooling/news/render.test.sh
+tooling-harnesses tooling/news/run-daily
 tooling-harnesses scripts/audit-paper-readers.sh
 tooling-harnesses scripts/audit-paper-readers-test.sh
 tooling-harnesses scripts/paper_structure.py

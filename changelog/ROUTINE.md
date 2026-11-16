@@ -107,8 +107,9 @@ A day entry:
 
 **READMEs are not yours.** Since 2026-11-16 each README carries a written daily
 News block between `<!-- news:start -->` and `<!-- news:end -->`, with full days
-in `docs/news/YYYY-MM-DD.md`. The daily news run writes them; never edit them, and
-never add a highlights block back.
+in `docs/news/YYYY-MM-DD.md`. The daily news run writes them
+([tooling/news/DAILY.md](../tooling/news/DAILY.md)); never edit them, and never add a
+highlights block back.
 
 ## Weekly editorial (Barkpark)
 

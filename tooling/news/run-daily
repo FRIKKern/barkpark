@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""The daily README News run for one finished day. Needs git, gh (authenticated) and python3 >= 3.9.
+
+    tooling/news/run-daily <DATE> [--workdir DIR] [--repos a,b] [--dry-run | --publish [--task ID]]
+
+1. Prepare (default): clone each repo in repos.json into --workdir (default: a new temp dir),
+   list the pull requests merged on <DATE> (Europe/Oslo) into <workdir>/<repo>.merges.json,
+   and report per repo: merges, whether docs/news/<DATE>.md exists with its news-day line,
+   and what the README block would become. Writes only inside the workdir.
+2. The agent writes docs/news/<DATE>.md in each clone that had merges (tooling/news/DAILY.md).
+3. --publish: render each README, run the repo's doc checks and the link check, then
+   branch docs/news-<DATE>, commit, push and open one pull request per changed repo.
+   Merging stays with the review step in DAILY.md.
+
+--dry-run is prepare with nothing written outside the temp dir and no network writes.
+"""
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from zoneinfo import ZoneInfo
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import render  # noqa: E402
+
+
+def sh(cmd, cwd=None, check=True, capture=True):
+    r = subprocess.run(cmd, cwd=cwd, text=True, shell=isinstance(cmd, str),
+                       stdout=subprocess.PIPE if capture else None, stderr=subprocess.PIPE if capture else None)
+    if check and r.returncode != 0:
+        raise SystemExit(f"run-daily: `{cmd if isinstance(cmd, str) else ' '.join(cmd)}` failed:\n{r.stderr or r.stdout}")
+    return r
+
+
+def day_window(day, tz):
+    """The local day as a UTC range for GitHub search: 2026-11-14T23:00:00Z..2026-11-15T23:00:00Z."""
+    start = datetime.datetime.combine(day, datetime.time(), ZoneInfo(tz))
+    end = datetime.datetime.combine(day + datetime.timedelta(days=1), datetime.time(), ZoneInfo(tz))
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    utc = datetime.timezone.utc
+    return start.astimezone(utc).strftime(fmt), end.astimezone(utc).strftime(fmt)
+
+
+def merged_prs(owner, repo, window):
+    out = sh(["gh", "pr", "list", "-R", f"{owner}/{repo}", "--state", "merged", "-L", "300",
+              "--search", f"merged:{window[0]}..{window[1]}", "--json", "number,title,mergedAt"]).stdout
+    return sorted(json.loads(out), key=lambda p: p["mergedAt"])
+
+
+def clone(owner, repo, dest):
+    if os.path.isdir(os.path.join(dest, ".git")):
+        sh(["git", "fetch", "-q", "origin", "main"], cwd=dest)
+        return
+    sh(["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "-q", "--depth=50"])
+
+
+def page_state(clone_dir, day):
+    page = os.path.join(clone_dir, "docs/news", f"{day}.md")
+    if not os.path.exists(page):
+        return "missing"
+    try:
+        meta = render.read_meta(page)
+    except render.Bad as e:
+        return f"malformed: {e}"
+    return "ok" if meta else "no news-day line"
+
+
+def preview(clone_dir, slug, today, days):
+    """The README block render.py would write, without writing it."""
+    found = render.finished_days(os.path.join(clone_dir, "docs/news"), today, days)
+    owner, repo = slug.split("/", 1)
+    return [d for d, _ in found], render.render_block(owner, repo, found)
+
+
+def pr_body(cfg, day, task):
+    body = cfg.get("pr_body_head", "")
+    body += (f"\n## What it does\n\nThe daily News for {day}: `docs/news/{day}.md` (the full day, with its "
+             "news-day line) and the README block between `<!-- news:start -->` and `<!-- news:end -->`, "
+             "rendered by barkpark `tooling/news/render.py` (finished days that had merges only).\n")
+    if cfg.get("pr_body_needs_task"):
+        if not task:
+            raise SystemExit("run-daily: this repo's PR needs --task <id> (a `Task:` line)")
+        body += f"\nTask: {task}\n"
+    return body
+
+
+def publish(owner, repo, cfg, clone_dir, day, today, task):
+    slug = f"{owner}/{repo}"
+    if render.main([clone_dir, "--repo", slug, "--today", today, "--days", str(cfg["days"]), "--links"]) != 0:
+        raise SystemExit(f"run-daily: {repo}: render or link check failed")
+    for check in cfg.get("checks", []):
+        r = sh(check, cwd=clone_dir, check=False)
+        if r.returncode != 0:
+            raise SystemExit(f"run-daily: {repo}: `{check}` failed:\n{(r.stdout + r.stderr)[-2000:]}")
+    if not sh(["git", "status", "--porcelain", "--", "README.md", "docs/news"], cwd=clone_dir).stdout.strip():
+        print(f"  {repo}: nothing to publish")
+        return
+    branch = f"docs/news-{day}"
+    sh(["git", "switch", "-q", "-c", branch], cwd=clone_dir)
+    sh(["git", "add", "README.md", "docs/news"], cwd=clone_dir)
+    hooks = ["-c", "core.hooksPath=/dev/null"]
+    sh(["git", *hooks, "commit", "-q", "-m", f"docs(news): the day {day}"], cwd=clone_dir)
+    sh(["git", "push", "-q", "-u", "origin", branch], cwd=clone_dir)
+    url = sh(["gh", "pr", "create", "-R", slug, "--base", "main", "--head", branch,
+              "--title", f"docs(news): {render.day_label(day)}", "--body", pr_body(cfg, day, task)],
+             cwd=clone_dir).stdout.strip()
+    print(f"  {repo}: opened {url} (merge with --{cfg['merge']} after a fresh PASS and green checks)")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("date", help="the finished day, YYYY-MM-DD")
+    ap.add_argument("--workdir")
+    ap.add_argument("--repos", help="comma list; default: every repo in repos.json")
+    ap.add_argument("--config", default=os.path.join(HERE, "repos.json"))
+    ap.add_argument("--task", help="bp task id for repos whose PR body needs `Task:`")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--publish", action="store_true")
+    a = ap.parse_args(argv)
+
+    day = datetime.date.fromisoformat(a.date)
+    today = (day + datetime.timedelta(days=1)).isoformat()
+    conf = json.load(open(a.config))
+    owner = conf["owner"]
+    names = a.repos.split(",") if a.repos else list(conf["repos"])
+    unknown = [n for n in names if n not in conf["repos"]]
+    if unknown:
+        raise SystemExit(f"run-daily: not in repos.json: {', '.join(unknown)}")
+    if a.publish and not a.workdir:
+        raise SystemExit("run-daily: --publish needs the --workdir the prepare step used")
+    work = a.workdir or tempfile.mkdtemp(prefix=f"news-{a.date}-")
+    os.makedirs(work, exist_ok=True)
+    window = day_window(day, conf["timezone"])
+    print(f"run-daily {a.date} ({conf['timezone']}: {window[0]}..{window[1]}) in {work}")
+
+    for repo in names:
+        cfg = conf["repos"][repo]
+        dest = os.path.join(work, repo)
+        if a.publish:
+            if page_state(dest, a.date) == "ok":
+                publish(owner, repo, cfg, dest, a.date, today, a.task)
+            else:
+                print(f"  {repo}: skipped (docs/news/{a.date}.md: {page_state(dest, a.date)})")
+            continue
+        clone(owner, repo, dest)
+        prs = merged_prs(owner, repo, window)
+        with open(os.path.join(work, f"{repo}.merges.json"), "w") as fh:
+            json.dump(prs, fh, indent=1)
+        state = page_state(dest, a.date)
+        shown, block = preview(dest, f"{owner}/{repo}", today, cfg["days"])
+        todo = "write it" if prs and state != "ok" else ("no merges: no PR" if not prs else "ready")
+        print(f"\n== {repo}: {len(prs)} merged · docs/news/{a.date}.md: {state} · {todo}")
+        print(f"   merge with --{cfg['merge']}; checks: {'; '.join(cfg['checks']) or 'link check only'}")
+        print(f"   README would show: {', '.join(shown) or 'no finished day yet'}")
+        if block and not a.dry_run:
+            print("   " + block.replace("\n", "\n   "))
+    if not a.publish:
+        print(f"\nnext: write docs/news/{a.date}.md in each clone marked 'write it' (tooling/news/DAILY.md), "
+              f"then: tooling/news/run-daily {a.date} --workdir {work} --publish [--task <id>]")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,51 @@
+{
+  "owner": "FRIKKern",
+  "timezone": "Europe/Oslo",
+  "repos": {
+    "barkpark": {
+      "days": 2,
+      "merge": "squash",
+      "page_header": "<!-- doc-tier: human | canonical-for: news-{date} | budget: 3000tok -->",
+      "checks": ["bash scripts/check-doc-budgets.sh", "bash scripts/docs-anchors-check.sh"],
+      "pr_body_head": "",
+      "pr_body_needs_task": true,
+      "notes": "README cap 7,400 bytes."
+    },
+    "barkpark-studio": {
+      "days": 2,
+      "merge": "squash",
+      "page_header": "",
+      "checks": ["node scripts/check-docs.mjs"],
+      "pr_body_head": "**Journey / task:** none: tooling/docs\n\n- [x] Journey id and Barkpark task named above (or \"none: tooling/docs\")\n- [x] Side by side against `reference/sanity` done, clip linked (or not a UI change) — not a UI change\n- [x] Docs touched by this change updated in this PR (one fact, one home)\n- [x] Test budget respected — no tests touched\n",
+      "pr_body_needs_task": false,
+      "notes": "README cap 80 lines. Never run prettier."
+    },
+    "barkbot": {
+      "days": 2,
+      "merge": "squash",
+      "page_header": "",
+      "checks": ["node scripts/check.mjs"],
+      "pr_body_head": "",
+      "pr_body_needs_task": false,
+      "notes": "README cap 80 lines. Pictures stay out of git (decision 0003)."
+    },
+    "fluid-editor": {
+      "days": 2,
+      "merge": "squash",
+      "page_header": "",
+      "checks": ["node scripts/check-docs.mjs", "node scripts/check-markdown.mjs", "node scripts/check-claims.mjs", "node scripts/check-oracle-site.mjs"],
+      "pr_body_head": "",
+      "pr_body_needs_task": false,
+      "notes": "README cap 80 lines. Never force push: merge origin/main."
+    },
+    "barkdown": {
+      "days": 2,
+      "merge": "merge",
+      "page_header": "",
+      "checks": [],
+      "pr_body_head": "",
+      "pr_body_needs_task": false,
+      "notes": "Merge with --merge, never squash (the concept check needs the status-shot commit). Never edit 'Where we are'. Shipped only after a green nightly."
+    }
+  }
+}
