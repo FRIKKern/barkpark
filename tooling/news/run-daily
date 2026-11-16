@@ -55,7 +55,7 @@ def clone(owner, repo, dest):
     if os.path.isdir(os.path.join(dest, ".git")):
         sh(["git", "fetch", "-q", "origin", "main"], cwd=dest)
         return
-    sh(["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "-q", "--depth=50"])
+    sh(["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "-q", "--depth=1"])
 
 
 def page_state(clone_dir, day):
