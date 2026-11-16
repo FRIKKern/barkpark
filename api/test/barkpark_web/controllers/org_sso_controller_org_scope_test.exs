@@ -310,10 +310,12 @@ defmodule BarkparkWeb.OrgSsoControllerOrgScopeTest do
 
     assert req(op, :post, "/v1/admin/orgs", %{slug: "scope-op-#{ctx.n}"}) |> json_response(201)
 
-    expected = [200, 200, 409, 200, 200, 200, 201, 200]
+    # S already has a connection, so create_oidc reaches the action and gets its
+    # own 422 (one per org), not the plug's 403.
+    expected = [200, 200, 422, 200, 200, 200, 201, 200]
 
     for {{method, path, body}, status} <- Enum.zip(routes(slug, ctx), expected) do
-      assert req(op, method, path, body).status == status, "#{method} #{path}"
+      assert {method, path, req(op, method, path, body).status} == {method, path, status}
     end
 
     assert Repo.reload!(ctx.ws_a).organization_id == ctx.org_s.id
