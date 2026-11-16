@@ -215,8 +215,9 @@ defmodule Barkpark.Api.OpenApi do
   # `Idempotency-Key` header is server-honoured ONLY where
   # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
   # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
-  # (router.ex), and the chat send, via `pipeline :idempotent_chat_send`
-  # (router.ex), which also binds the request body. Advertising it on every write would be a LIE: a POST to a route
+  # (router.ex), and the chat send, via a `plug ... when action ==
+  # :create_message` in ChatController, which also binds the request body.
+  # Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
   # that double-applies.

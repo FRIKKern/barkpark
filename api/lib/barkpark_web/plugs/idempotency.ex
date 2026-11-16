@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   releases the claim so a retry can re-claim. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
-  `bind_body: true` (the chat send mount) adds a fingerprint of the parsed
+  `bind_body: true` (the chat send mount, in ChatController) adds a fingerprint of the parsed
   request body to the claim's scope, so the same key sent with a different
   body is refused 422 `idempotency_key_reused` instead of replaying an answer
   to a request the client did not make. Without the option the scope is the

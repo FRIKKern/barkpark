@@ -37,7 +37,14 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   # failure — it is a PROMPT: the new pipeline's routes now dedup, so their path
   # templates belong in `@idempotent_templates` (lib/barkpark/api/openapi.ex)
   # and this list.
-  @mounted_on [:scoped_mutate, :idempotent, :idempotent_chat_send]
+  @mounted_on [:scoped_mutate, :idempotent]
+
+  # Controllers that mount the plug themselves for one action, because
+  # router.ex may not grow (scripts/file-size-ratchet.py). Pinned the same way:
+  # a new controller mount is a PROMPT to add its template to
+  # `@idempotent_templates`.
+  @controllers_dir Path.expand("../../../lib/barkpark_web/controllers", __DIR__)
+  @controller_mounts ["chat_controller.ex"]
 
   # Spec operations whose replay is driven in their own test file, because a
   # 2xx needs more than a mutate body (a chat send needs a session and a
@@ -98,6 +105,19 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
              "now dedup (or stopped): update `@idempotent_templates` in " <>
              "lib/barkpark/api/openapi.ex, re-run `mix barkpark.openapi`, and update " <>
              "@mounted_on here."
+  end
+
+  test "the dedup plug is mounted in exactly the controllers the spec was written against" do
+    mounted =
+      Path.wildcard(Path.join(@controllers_dir, "**/*.ex"))
+      |> Enum.filter(&Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, File.read!(&1)))
+      |> Enum.map(&Path.relative_to(&1, @controllers_dir))
+      |> Enum.sort()
+
+    assert mounted == Enum.sort(@controller_mounts),
+           "the set of controllers mounting BarkparkWeb.Plugs.Idempotency changed. Update " <>
+             "`@idempotent_templates` in lib/barkpark/api/openapi.ex, re-run " <>
+             "`mix barkpark.openapi`, and update @controller_mounts here."
   end
 
   test "the spec declares the header on at least one operation" do
