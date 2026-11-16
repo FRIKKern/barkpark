@@ -71,7 +71,8 @@ func newRunner(state chathost.State) *chathost.Runner {
 	handler.Images = client
 	handler.StatusLabel = chathost.StatusLabelerFromEnv(os.Getenv)
 	handler.Status = client
-	return &chathost.Runner{Client: client, Handler: handler, Capabilities: capabilities()}
+	return &chathost.Runner{Client: client, Handler: handler, Capabilities: capabilities(),
+		FirstEventTimeout: chathost.FirstEventTimeoutFromEnv(os.Getenv)}
 }
 
 func capabilities() map[string]any {

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -242,15 +244,27 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		// it is sent. Taken, or refused for good (409, 422), the lease is done:
 		// re-posting a refused close every poll spends the write budget that
 		// started this. A refusal retrying can heal leaves it to the next poll.
+		//
+		// firstUnconfirmed: the first-event bound (below) cut event 1's publish
+		// before the server answered it. The server may still have taken it:
+		// its answer was slow or lost. Then cursor 1 holds event 1, the close
+		// sent there is refused as cursor_conflict, and it goes at cursor 2.
+		firstUnconfirmed := false
 		terminal := func(state string, err error) {
 			cancel()
 			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), r.terminalTimeout())
 			defer publishCancel()
-			perr := publish(publishCtx, map[string]any{
+			closing := map[string]any{
 				"kind":           "terminal",
 				"terminal_state": state,
 				"error":          map[string]any{"message": err.Error()},
-			})
+			}
+			perr := publish(publishCtx, closing)
+			if perr != nil && firstUnconfirmed && cursorConflict(perr) {
+				r.logf("lease %s: the server holds the turn's first event after all; closing after it", command.LeaseID)
+				cursor++
+				perr = publish(publishCtx, closing)
+			}
 			if perr != nil {
 				r.logf("lease %s: its %s terminal was not taken: %v", command.LeaseID, state, perr)
 			}
@@ -278,7 +292,8 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		// the person the message was not sent (task-53bbabed87944b89). So that
 		// publish gets FirstEventTimeout, not the 2 minute outage bound: past it,
 		// emit fails, the handler returns and the provider is killed. Once one
-		// event is taken, the general bound applies, as before.
+		// event is taken, the general bound applies, as before. Control leases
+		// (steer, interrupt, ...) start no provider and keep the general bound.
 		turn := command.Command["operation"] == "send_turn"
 		emit := func(event map[string]any) error {
 			if !turn || cursor != command.LastCursor {
@@ -289,7 +304,8 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 			defer cancelFirst()
 			err := publish(firstCtx, event)
 			if err != nil && ctx.Err() == nil && firstCtx.Err() != nil {
-				return fmt.Errorf("the turn's first event was not taken within %s, so the provider was stopped: %w", bound, err)
+				firstUnconfirmed = true
+				return fmt.Errorf("the server did not confirm the turn's first event within %s, so the provider was stopped: %w", bound, err)
 			}
 			return err
 		}
@@ -350,6 +366,25 @@ func (r *Runner) firstEventTimeout() time.Duration {
 		return r.FirstEventTimeout
 	}
 	return defaultFirstEventTimeout
+}
+
+// FirstEventTimeoutFromEnv reads BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT (a Go
+// duration) for Runner.FirstEventTimeout. Unset or not a positive duration, it
+// returns zero: the 10 s default.
+func FirstEventTimeoutFromEnv(getenv func(string) string) time.Duration {
+	timeout, err := time.ParseDuration(strings.TrimSpace(getenv("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT")))
+	if err != nil || timeout <= 0 {
+		return 0
+	}
+	return timeout
+}
+
+// cursorConflict reports whether the server refused an event because its
+// cursor already holds a different one (ChatHosts.reconcile_event/4, answered
+// 422 ":cursor_conflict").
+func cursorConflict(err error) bool {
+	var status *StatusError
+	return errors.As(err, &status) && status.Code == http.StatusUnprocessableEntity && strings.Contains(status.Body, "cursor_conflict")
 }
 
 func (r *Runner) terminalTimeout() time.Duration {

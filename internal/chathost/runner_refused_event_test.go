@@ -177,7 +177,14 @@ func (h *failingHandler) Handle(context.Context, RemoteCommand, func(map[string]
 
 func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Context, func()) {
 	t.Helper()
-	ts := httptest.NewServer(server.handler(t))
+	return startRunnerOn(t, server.handler(t), server, handler)
+}
+
+// startRunnerOn is startRunner with the HTTP side served by front, which may
+// wrap server's handler.
+func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handler Handler) (context.Context, func()) {
+	t.Helper()
+	ts := httptest.NewServer(front)
 	runner := Runner{
 		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
 		Handler:           handler,
