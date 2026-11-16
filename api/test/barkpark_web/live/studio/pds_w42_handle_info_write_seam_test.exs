@@ -298,7 +298,9 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # `{:desk_edit, …}` is the desk slice asking itself to load the Studio's
     # editor for the last document, one message after the pane's frame went
     # out; the writes that follow are the Studio's own guarded handlers
-    # (task-017dd7504c5c553a). The two `paper_op` sites deliberately cover the
+    # (task-017dd7504c5c553a). `{:forget_secret, …}` writes nothing: the
+    # Webhooks page drops a one-time signing secret from its assigns right
+    # after the render that showed it (task-5f8d5c17c98e2e03). The two `paper_op` sites deliberately cover the
     # ordinary op and its save-ack-correlated variant; both terminate on the
     # same guarded parent chokepoint. Pinning the set means a NEW in-process
     # sender — the exact event that turned `paper_op` from "safe by
@@ -320,7 +322,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
                {"live/studio/studio_live/handlers/refs.ex", "{:autosave_form,"},
-               {"live/studio/studio_live/handlers/refs.ex", "{:autosave_form,"}
+               {"live/studio/studio_live/handlers/refs.ex", "{:autosave_form,"},
+               {"live/studio/webhooks_live.ex", "{:forget_secret,"}
              ]
     end
   end
