@@ -23,11 +23,11 @@ defmodule Barkpark.Audit.Feed do
   row carries only:
 
     * `at`, `category`, `action`
-    * `actor`: `type`, `id` (a user or token id, or a fixed system label), and
-      `name`, the person's display name, only when that user holds a seat in
-      this workspace (the member list shows admins the same name)
-    * `target`: `type` (derived from category and action) and `id` (the row's
-      `subject`, an id); a subject that looks like an email is dropped
+    * `actor_type`, `actor_id` (a user or token id, or a fixed system label),
+      and `actor_name`, the person's display name, only when that user holds a
+      seat in this workspace (the member list shows admins the same name)
+    * `target_type` (derived from category and action) and `target_id` (the
+      row's `subject`, an id); an actor or target id holding "@" is dropped
     * `dataset` and `doc_type`: `metadata.dataset` and, for content changes,
       `metadata.type`, only when each is a plain slug
     * `project_wide`: true for a row with no project
@@ -68,8 +68,11 @@ defmodule Barkpark.Audit.Feed do
           at: DateTime.t(),
           category: String.t(),
           action: String.t(),
-          actor: %{type: String.t() | nil, id: String.t() | nil, name: String.t() | nil},
-          target: %{type: String.t() | nil, id: String.t() | nil},
+          actor_type: String.t() | nil,
+          actor_id: String.t() | nil,
+          actor_name: String.t() | nil,
+          target_type: String.t() | nil,
+          target_id: String.t() | nil,
           dataset: String.t() | nil,
           doc_type: String.t() | nil,
           project_wide: boolean()
@@ -218,12 +221,11 @@ defmodule Barkpark.Audit.Feed do
       at: e.occurred_at,
       category: e.category,
       action: e.action,
-      actor: %{
-        type: e.actor_type,
-        id: plain(e.actor_id),
-        name: if(e.actor_type == "user", do: Map.get(names, e.actor_id))
-      },
-      target: %{type: target_type(e.category, e.action), id: plain(e.subject)},
+      actor_type: e.actor_type,
+      actor_id: plain(e.actor_id),
+      actor_name: if(e.actor_type == "user", do: Map.get(names, e.actor_id)),
+      target_type: target_type(e.category, e.action),
+      target_id: plain(e.subject),
       dataset: slug(e.metadata, "dataset"),
       doc_type: if(e.category == "content_mutation", do: slug(e.metadata, "type")),
       project_wide: is_nil(e.project_id)

@@ -3425,7 +3425,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "audit.ls",
         "audit",
         "ls",
-        "This workspace's audit log, newest first: who changed content, tokens, access, members and webhooks.",
+        "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
         "GET",
         "/v1/audit",
         "scoped_admin",

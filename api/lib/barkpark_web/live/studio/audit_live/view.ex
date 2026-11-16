@@ -42,7 +42,7 @@ defmodule BarkparkWeb.Studio.AuditLive.View do
       <h1 class="h1" style="margin-bottom: 4px;">{gettext("Activity")}</h1>
       <p style={@muted <> " margin-top: 0;"}>
         {gettext(
-          "Who changed what in this workspace: content, tokens, access, members and webhooks. Sign-ins and other account events are not listed here."
+          "Who changed what in this workspace, such as content, tokens, access grants and webhooks. Sign-ins and other account events are not listed here."
         )}
       </p>
 
@@ -130,17 +130,17 @@ defmodule BarkparkWeb.Studio.AuditLive.View do
               <tr :for={e <- @events} data-test-id="audit-row">
                 <td style={@cell <> " white-space: nowrap;"}>{time(e.at)}</td>
                 <td style={@cell}>{category_label(e.category)}</td>
-                <td style={@cell <> @mono}>{e.action}</td>
-                <td style={@cell}><.actor actor={e.actor} mono={@mono} muted={@muted} /></td>
+                <td style={@cell <> " font-family: var(--font-mono); white-space: nowrap;"}>{e.action}</td>
+                <td style={@cell}><.actor e={e} mono={@mono} muted={@muted} /></td>
                 <td style={@cell}>
-                  <span :if={e.target.type} style={@muted}>{e.target.type}</span>
-                  <span :if={e.target.id} style={@mono}>{e.target.id}</span>
+                  <span :if={e.target_type} style={@muted}>{e.target_type}</span>
+                  <span :if={e.target_id} style={@mono}>{e.target_id}</span>
                   <span :if={e.doc_type} class="badge badge-muted">{e.doc_type}</span>
                   <span :if={e.project_wide} class="badge badge-muted">
                     {gettext("every project")}
                   </span>
                 </td>
-                <td style={@cell <> @mono}>{e.dataset || "–"}</td>
+                <td style={@cell <> " font-family: var(--font-mono);"}>{e.dataset || "–"}</td>
               </tr>
             </tbody>
           </table>
@@ -154,28 +154,28 @@ defmodule BarkparkWeb.Studio.AuditLive.View do
     """
   end
 
-  attr :actor, :map, required: true
+  attr :e, :map, required: true
   attr :mono, :string, required: true
   attr :muted, :string, required: true
 
   defp actor(assigns) do
     ~H"""
     <%= cond do %>
-      <% @actor.id -> %>
+      <% @e.actor_id -> %>
         <button
           type="button"
           class="btn btn-sm btn-ghost"
           phx-click="actor"
-          phx-value-id={@actor.id}
+          phx-value-id={@e.actor_id}
           title={gettext("Show only this actor")}
           style="padding: 0; text-align: left;"
         >
-          <span :if={@actor.name}>{@actor.name}</span>
-          <span :if={is_nil(@actor.name)} style={@mono}>{@actor.id}</span>
+          <span :if={@e.actor_name}>{@e.actor_name}</span>
+          <span :if={is_nil(@e.actor_name)} style={@mono}>{@e.actor_id}</span>
         </button>
-        <div class="text-sm" style={@muted}>{actor_type_label(@actor.type)}</div>
+        <div class="text-sm" style={@muted}>{actor_type_label(@e.actor_type)}</div>
       <% true -> %>
-        <span style={@muted}>{actor_type_label(@actor.type)}</span>
+        <span style={@muted}>{actor_type_label(@e.actor_type)}</span>
     <% end %>
     """
   end

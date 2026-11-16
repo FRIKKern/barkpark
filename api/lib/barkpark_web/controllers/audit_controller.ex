@@ -24,7 +24,8 @@ defmodule BarkparkWeb.AuditController do
   Query: `category`, `actor`, `since`, `until`, `limit` (capped at 200, never
   refused for size) and `cursor`. A cursor is the `next_cursor` of an earlier
   page, encrypted and bound to this workspace and project, so a cursor from
-  another workspace or a made-up one answers 422 `invalid_filter`.
+  another workspace or a made-up one answers 400 `invalid_filter`, as does a
+  filter the feed cannot read (`details.field` names it).
 
   200 `{"events": [...], "next_cursor": "..." | null, "limit": n}`.
   """
@@ -90,10 +91,11 @@ defmodule BarkparkWeb.AuditController do
   defp invalid(conn, field) do
     ErrorResponse.emit_custom(
       conn,
-      422,
+      400,
       "invalid_filter",
       invalid_message(field),
-      %{field: field}
+      %{field: field},
+      "Fix the #{field} query parameter, or leave it out, and send the request again."
     )
   end
 

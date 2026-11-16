@@ -14701,7 +14701,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/audit_live/view.ex:44
 #, elixir-autogen, elixir-format
-msgid "Who changed what in this workspace: content, tokens, access, members and webhooks. Sign-ins and other account events are not listed here."
+msgid "Who changed what in this workspace, such as content, tokens, access grants and webhooks. Sign-ins and other account events are not listed here."
 msgstr ""
 
 #: lib/barkpark_web/live/studio/audit_live/view.ex:50 lib/barkpark_web/live/studio/audit_live/view.ex:87

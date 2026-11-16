@@ -18,7 +18,7 @@ func TestAuditLsSendsFiltersToTheWorkspaceRouteAndPrintsEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"events":[{"at":"2026-11-16T10:00:00Z","category":"token","action":"token_minted","actor":{"type":"user","id":"u-1","name":"Ada"},"target":{"type":"token","id":"tok-9"},"dataset":null,"doc_type":null,"project_wide":true}],"next_cursor":null,"limit":2}`))
+		_, _ = w.Write([]byte(`{"events":[{"at":"2026-11-16T10:00:00Z","category":"token","action":"token_minted","actor_type":"user","actor_id":"u-1","actor_name":"Ada","target_type":"token","target_id":"tok-9","dataset":null,"doc_type":null,"project_wide":true}],"next_cursor":null,"limit":2}`))
 	}))
 	t.Cleanup(srv.Close)
 

@@ -40,7 +40,7 @@ defmodule BarkparkWeb.AuditControllerTest do
     _global = event!(nil, nil, subject: "doc-global")
 
     body = get_json(ctx.admin_a.raw, audit_path(ctx)) |> json_response(200)
-    subjects = Enum.map(body["events"], & &1["target"]["id"])
+    subjects = Enum.map(body["events"], & &1["target_id"])
 
     assert "doc-mine" in subjects
     assert "doc-wide" in subjects
@@ -52,14 +52,14 @@ defmodule BarkparkWeb.AuditControllerTest do
     assert Enum.find_index(subjects, &(&1 == "doc-wide")) <
              Enum.find_index(subjects, &(&1 == "doc-mine"))
 
-    row = Enum.find(body["events"], &(&1["target"]["id"] == "doc-mine"))
+    row = Enum.find(body["events"], &(&1["target_id"] == "doc-mine"))
     assert row["category"] == "content_mutation"
     assert row["action"] == "document.update"
-    assert row["target"]["type"] == "document"
+    assert row["target_type"] == "document"
     assert row["dataset"] == "production"
     assert row["doc_type"] == "post"
     assert row["at"] == DateTime.to_iso8601(mine.occurred_at)
-    assert Enum.find(body["events"], &(&1["target"]["id"] == "doc-wide"))["project_wide"]
+    assert Enum.find(body["events"], &(&1["target_id"] == "doc-wide"))["project_wide"]
     refute row["project_wide"]
     assert wide
   end
@@ -93,14 +93,14 @@ defmodule BarkparkWeb.AuditControllerTest do
     assert body["events"] == []
 
     body = get_json(ctx.admin_a.raw, audit_path(ctx, actor: actor_a)) |> json_response(200)
-    assert Enum.map(body["events"], & &1["target"]["id"]) == ["a-3", "a-2", "a-1"]
+    assert Enum.map(body["events"], & &1["target_id"]) == ["a-3", "a-2", "a-1"]
 
     body = get_json(ctx.admin_a.raw, audit_path(ctx, category: "token")) |> json_response(200)
     assert Enum.map(body["events"], & &1["category"]) |> Enum.uniq() == ["token"]
-    assert "a-token" in Enum.map(body["events"], & &1["target"]["id"])
+    assert "a-token" in Enum.map(body["events"], & &1["target_id"])
 
-    assert get_json(ctx.admin_a.raw, audit_path(ctx, category: "nope")).status == 422
-    assert get_json(ctx.admin_a.raw, audit_path(ctx, since: "yesterday")).status == 422
+    assert get_json(ctx.admin_a.raw, audit_path(ctx, category: "nope")).status == 400
+    assert get_json(ctx.admin_a.raw, audit_path(ctx, since: "yesterday")).status == 400
 
     future = Date.utc_today() |> Date.add(2) |> Date.to_iso8601()
     body = get_json(ctx.admin_a.raw, audit_path(ctx, since: future)) |> json_response(200)
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.AuditControllerTest do
     page1 =
       get_json(ctx.admin_a.raw, audit_path(ctx, actor: actor_a, limit: 2)) |> json_response(200)
 
-    assert Enum.map(page1["events"], & &1["target"]["id"]) == ["a-3", "a-2"]
+    assert Enum.map(page1["events"], & &1["target_id"]) == ["a-3", "a-2"]
     assert is_binary(page1["next_cursor"])
 
     page2 =
@@ -124,13 +124,13 @@ defmodule BarkparkWeb.AuditControllerTest do
       )
       |> json_response(200)
 
-    assert Enum.map(page2["events"], & &1["target"]["id"]) == ["a-1"]
+    assert Enum.map(page2["events"], & &1["target_id"]) == ["a-1"]
     assert page2["next_cursor"] == nil
 
     # Workspace B's admin cannot use A's cursor, and a made-up one is refused.
     b_path = "/w/#{ctx.ws_b.slug}/p/#{ctx.proj_b.slug}/v1/audit?cursor=#{page1["next_cursor"]}"
-    assert get_json(ctx.admin_b.raw, b_path).status == 422
-    assert get_json(ctx.admin_a.raw, audit_path(ctx, cursor: "12")).status == 422
+    assert get_json(ctx.admin_b.raw, b_path).status == 400
+    assert get_json(ctx.admin_a.raw, audit_path(ctx, cursor: "12")).status == 400
   end
 
   test "a secret-bearing metadata field never appears in the answer", ctx do
@@ -149,7 +149,7 @@ defmodule BarkparkWeb.AuditControllerTest do
 
     conn = get_json(ctx.admin_a.raw, audit_path(ctx))
     body = json_response(conn, 200)
-    assert Enum.any?(body["events"], &(&1["target"]["id"] == "doc-meta"))
+    assert Enum.any?(body["events"], &(&1["target_id"] == "doc-meta"))
 
     for needle <- ["SECRET-HASH-VALUE", "someone-else@example.com", "admin-token.txt", "leak@"],
         do: refute(conn.resp_body =~ needle, "answer carries #{needle}")
