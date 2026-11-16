@@ -98,6 +98,7 @@ defmodule Barkpark.Media.WhereUsed do
   require Logger
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Query
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
@@ -218,6 +219,7 @@ defmodule Barkpark.Media.WhereUsed do
           where: d.type != "mediaAsset",
           where: fragment("strpos((?)::text, '/media/files/') > 0", d.content),
           select: %{
+            row_id: d.id,
             doc_id: d.doc_id,
             type: d.type,
             dataset: d.dataset,
@@ -300,7 +302,13 @@ defmodule Barkpark.Media.WhereUsed do
       |> Enum.reduce(acc, fn {file_id, rows}, acc ->
         sample =
           Enum.map(rows, fn row ->
-            %{doc_id: row.doc_id, type: row.type, dataset: dataset, title: row.title}
+            %{
+              row_id: Map.get(row, :id),
+              doc_id: row.doc_id,
+              type: row.type,
+              dataset: dataset,
+              title: row.title
+            }
           end)
 
         Map.put(acc, file_id, %{count: length(sample), sample: Enum.take(sample, @sample_limit)})
@@ -388,7 +396,13 @@ defmodule Barkpark.Media.WhereUsed do
         sample =
           rows
           |> Enum.map(fn row ->
-            %{doc_id: row.doc_id, type: row.type, dataset: file.dataset, title: row.title}
+            %{
+              row_id: Map.get(row, :id),
+              doc_id: row.doc_id,
+              type: row.type,
+              dataset: file.dataset,
+              title: row.title
+            }
           end)
 
         %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
@@ -468,7 +482,13 @@ defmodule Barkpark.Media.WhereUsed do
     query =
       url
       |> scan_query(workspace_id, narrow)
-      |> select([d], %{doc_id: d.doc_id, type: d.type, dataset: d.dataset, title: d.title})
+      |> select([d], %{
+        row_id: d.id,
+        doc_id: d.doc_id,
+        type: d.type,
+        dataset: d.dataset,
+        title: d.title
+      })
 
     count = Repo.aggregate(query, :count)
     sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
@@ -568,13 +588,64 @@ defmodule Barkpark.Media.WhereUsed do
   end
 
   @doc """
-  The 409 envelope a delete refuses with, naming the referrers.
+  The 409 envelope a delete refuses with, naming the referrers the caller
+  behind `opts` may read (`visible_census/2`).
 
   Rendered by the controllers directly (not through `FallbackController`) so the
   referrer census can ride in `details` — the envelope reuses the already-public
   `conflict` code, so no client's error branching changes.
   """
-  def refusal_envelope(%MediaFile{} = file, %{count: count, sample: sample}) do
+  def refusal_envelope(%MediaFile{} = file, %{count: _, sample: _} = census, opts)
+      when is_list(opts) do
+    %{count: count, sample: sample} = visible_census(census, opts)
+    envelope(file, count, sample)
+  end
+
+  @doc """
+  `census` as the caller behind `opts` may see it (task-29ef6d1ab344a01b).
+
+  The census is the delete GATE's answer: it counts every document that uses
+  the blob, in every project, dataset and for every owner, because a delete
+  must refuse on any of them. The refusal hands `sample` back to the caller,
+  so it keeps only the rows that caller can read: the same stored row (by its
+  primary key, so a hidden row sharing a readable row's `doc_id` is not
+  named) comes back from `Content.Query.get_documents_by_ids/3` under the
+  caller's read `opts` (dataset, workspace and project, owner-scoped types,
+  grants, private schemas), and, for a dataset-bound token
+  (`opts[:bound_dataset]`), only rows of that dataset. A row the caller cannot
+  read is never named, by title or by id. `count` stays the gate's count: the
+  refusal itself already says the file is in use.
+  """
+  @spec visible_census(%{count: non_neg_integer(), sample: [map()]}, keyword()) ::
+          %{count: non_neg_integer(), sample: [map()]}
+  def visible_census(%{sample: sample} = census, opts) when is_list(opts) do
+    {bound, read_opts} = Keyword.pop(opts, :bound_dataset)
+
+    candidates =
+      Enum.filter(sample, fn row ->
+        is_binary(row.dataset) and not is_nil(Map.get(row, :row_id)) and
+          (is_nil(bound) or row.dataset == bound)
+      end)
+
+    readable =
+      candidates
+      |> Enum.group_by(& &1.dataset, & &1.doc_id)
+      |> Enum.flat_map(fn {dataset, ids} ->
+        ids |> Query.get_documents_by_ids(dataset, read_opts) |> Enum.map(fn {_, d} -> d.id end)
+      end)
+      |> MapSet.new()
+
+    %{census | sample: Enum.filter(candidates, &MapSet.member?(readable, &1.row_id))}
+  end
+
+  @doc """
+  A census sample as it may leave the server: without the internal row key
+  `visible_census/2` matches on.
+  """
+  @spec public_sample([map()]) :: [map()]
+  def public_sample(sample) when is_list(sample), do: Enum.map(sample, &Map.delete(&1, :row_id))
+
+  defp envelope(file, count, sample) do
     %{
       code: "conflict",
       message:
@@ -588,7 +659,7 @@ defmodule Barkpark.Media.WhereUsed do
       details: %{
         path: delivery_path(file),
         referencedByCount: count,
-        referencedBy: sample,
+        referencedBy: public_sample(sample),
         sampleTruncated: count > length(sample),
         override: "force=true"
       }

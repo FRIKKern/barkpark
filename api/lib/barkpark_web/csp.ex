@@ -61,6 +61,9 @@ defmodule BarkparkWeb.CSP do
   # string is stable and hashable — see dataset_switcher.ex / modals.ex.
   @handler_dataset_switch "window.location = '/studio/' + encodeURIComponent(this.value) + this.dataset.sectionSuffix"
   @handler_copy_data_url "if(navigator.clipboard){var u=this.dataset.url;navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"
+  # Copies the readonly input just before the button as-is (no origin prefix:
+  # it is a secret, not a link) — the Studio Webhooks page's one-time secret.
+  @handler_copy_previous_value "var v=this.previousElementSibling.value;if(navigator.clipboard){navigator.clipboard.writeText(v);this.textContent=this.dataset.copied}"
 
   # Dead-stable static handlers (kept as literals in their templates):
   #   modals.ex          — img onerror (thumbnail fallback)
@@ -88,6 +91,7 @@ defmodule BarkparkWeb.CSP do
   @inline_handlers [
     @handler_dataset_switch,
     @handler_copy_data_url,
+    @handler_copy_previous_value,
     @handler_img_error,
     @handler_select,
     @handler_copy_prev,
@@ -110,6 +114,9 @@ defmodule BarkparkWeb.CSP do
 
   @doc "Handler string for the data-url copy button (static)."
   def copy_data_url_onclick, do: @handler_copy_data_url
+
+  @doc "Handler string for a copy button that copies the input before it (static)."
+  def copy_previous_value_onclick, do: @handler_copy_previous_value
 
   @doc "The swatch theme-boot script body for a given mode (`\"light\"`/`\"dark\"`)."
   def swatch_theme_script(mode) when mode in ~w(light dark),

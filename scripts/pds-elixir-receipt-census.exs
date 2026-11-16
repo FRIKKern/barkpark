@@ -1112,6 +1112,7 @@ defmodule PDS.Census do
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/api-tester", "BarkparkWeb.Studio.ApiTesterLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/media", "BarkparkWeb.Studio.MediaLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_search", "BarkparkWeb.Studio.SearchLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_webhooks", "BarkparkWeb.Studio.WebhooksLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/papers/:slug", "BarkparkWeb.BulldocsLive", :index, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/chat", "BarkparkWeb.Studio.ChatLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/chat-hosts", "BarkparkWeb.Studio.ChatHostsLive", nil, :liveview_handle_event},

@@ -930,8 +930,10 @@ defmodule BarkparkWeb.V1.MediaController do
     {:refused, %{code: env[:code], message: env[:message]}}
   end
 
+  # Only the message and the count ride a delete-many row, never the sample,
+  # so no document is named and no read is needed.
   defp refusal(file, census) do
-    env = WhereUsed.refusal_envelope(file, census)
+    env = WhereUsed.refusal_envelope(file, %{census | sample: []}, [])
     %{code: env.code, message: env.message, referencedByCount: census.count}
   end
 
@@ -983,7 +985,15 @@ defmodule BarkparkWeb.V1.MediaController do
           {:ok, nil}
 
         census ->
-          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+          env =
+            Errors.stamp(
+              WhereUsed.refusal_envelope(
+                file,
+                census,
+                BarkparkWeb.ScopeHelpers.scope_opts_with_binding(conn)
+              ),
+              conn
+            )
 
           conn
           |> put_status(:conflict)
