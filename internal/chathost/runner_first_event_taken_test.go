@@ -31,6 +31,45 @@ type takenFirstServer struct {
 	closes     []int // the status each close POST got
 	closeSeen  chan struct{}
 	closeOnce  sync.Once
+	// taken is closed once the lease server took event 1.
+	taken chan struct{}
+}
+
+// deliverTransport sends every request it starts through to the server, even
+// when the caller's context ends first, and reports that end to the caller
+// only once the server took event 1. So the bound can never fire before the
+// server holds event 1: the order the tests need, on any machine.
+type deliverTransport struct {
+	base  http.RoundTripper
+	taken <-chan struct{}
+}
+
+func (d deliverTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	type result struct {
+		res *http.Response
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		res, err := d.base.RoundTrip(req.WithContext(context.WithoutCancel(req.Context())))
+		done <- result{res, err}
+	}()
+	select {
+	case got := <-done:
+		return got.res, got.err
+	case <-req.Context().Done():
+	}
+	select {
+	case <-d.taken:
+	case <-time.After(3 * time.Second):
+	}
+	go func() {
+		if got := <-done; got.res != nil {
+			_, _ = io.Copy(io.Discard, got.res.Body)
+			got.res.Body.Close()
+		}
+	}()
+	return nil, req.Context().Err()
 }
 
 func (s *takenFirstServer) handler(t *testing.T) http.Handler {
@@ -57,6 +96,7 @@ func (s *takenFirstServer) handler(t *testing.T) http.Handler {
 			case n == 1:
 				taken := httptest.NewRecorder()
 				inner.ServeHTTP(taken, r)
+				close(s.taken)
 				if s.lost {
 					w.WriteHeader(http.StatusServiceUnavailable)
 					return
@@ -93,8 +133,12 @@ func (s *takenFirstServer) handler(t *testing.T) http.Handler {
 func runTakenFirst(t *testing.T, server *takenFirstServer) {
 	t.Helper()
 	server.closeSeen = make(chan struct{})
+	server.taken = make(chan struct{})
 	server.inner.firstEventDeadline = 100 * time.Millisecond
 	server.inner.closeDeadline = 2 * time.Second
+	server.inner.transport = func(base http.RoundTripper) http.RoundTripper {
+		return deliverTransport{base: base, taken: server.taken}
+	}
 	handler := &turnHandler{}
 	ctx, stop := startRunnerOn(t, server.handler(t), server.inner, handler)
 	defer stop()

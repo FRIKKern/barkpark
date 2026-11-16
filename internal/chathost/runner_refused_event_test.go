@@ -35,6 +35,8 @@ type leaseServer struct {
 	// firstEventDeadline: the FirstEventTimeout startRunner gives this test's
 	// Runner (zero: the default).
 	firstEventDeadline time.Duration
+	// transport, when set, wraps the HTTP transport of the Runner's client.
+	transport func(http.RoundTripper) http.RoundTripper
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -185,8 +187,12 @@ func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Co
 func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handler Handler) (context.Context, func()) {
 	t.Helper()
 	ts := httptest.NewServer(front)
+	httpClient := ts.Client()
+	if server.transport != nil {
+		httpClient = &http.Client{Transport: server.transport(httpClient.Transport)}
+	}
 	runner := Runner{
-		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
+		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: httpClient, AllowInsecureLoopback: true},
 		Handler:           handler,
 		PollInterval:      time.Millisecond,
 		Log:               &syncBuffer{},
