@@ -131,4 +131,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive.OrgScope do
     )
     |> Enum.filter(&Auth.workspace_admin?(principal, &1))
   end
+
+  @doc """
+  True when the viewer sees only the organizations they administer (everyone
+  but a listed operator). The page then says so in one line, naming no hidden
+  organization and no count.
+  """
+  @spec scoped?(map()) :: boolean()
+  def scoped?(assigns), do: not listed_operator?(principal(assigns))
 end

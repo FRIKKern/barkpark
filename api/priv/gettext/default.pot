@@ -14799,6 +14799,11 @@ msgstr ""
 msgid "You do not administer this organization."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/org_admin_live.ex:279
+#, elixir-autogen, elixir-format
+msgid "Organization settings are shown only for organizations you administer in full."
+msgstr ""
+
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
 #, elixir-autogen, elixir-format
