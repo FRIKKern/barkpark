@@ -389,8 +389,11 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   def button_sheet(assigns) do
     ~H"""
     <style>
+      /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
+         measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
       .dk .dk-doc > .pane-header .validation-btn { position: relative; cursor: pointer; --dk-critical-icon: #ef3d2f; --dk-caution-icon: #cf8212; }
       html[data-theme="dark"] .dk .dk-doc > .pane-header .validation-btn { --dk-critical-icon: #f3503e; --dk-caution-icon: #da951b; }
+      /* studio-literal-check: skip-end */
       .dk .dk-doc > .pane-header .validation-btn[data-problems], .dk .dk-doc > .pane-header .validation-btn[data-problems]:hover { color: var(--dk-critical-icon); }
       .dk .dk-doc > .pane-header .validation-btn[data-level="warning"], .dk .dk-doc > .pane-header .validation-btn[data-level="warning"]:hover { color: var(--dk-caution-icon); }
       .dk .dk-doc > .pane-header .validation-btn[aria-pressed="true"] { background: var(--dk-selected-fill); }
@@ -424,10 +427,13 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
       .dk .validation .dk-inspector-close:focus-visible, .dk .validation .problem:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: -2px; }
       .dk .validation .dk-problems-none { margin: 0; padding: 0 8px; color: var(--dk-muted); }
       .dk .validation .problems { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
+         measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
       .dk .validation .problem { --tone-bg: #fff6f5; --tone-fg: #4d1714; --tone-muted: #a8554f; --tone-icon: #cc2719; width: 100%; display: flex; gap: 6px; align-items: flex-start; text-align: left; font: inherit; font-size: 13px; padding: 8px 12px 7px 6px; border: 0; border-radius: 3px; background: var(--tone-bg); color: var(--tone-muted); cursor: pointer; }
       .dk .validation .problem[data-level="warning"] { --tone-bg: #fefae1; --tone-fg: #3b2212; --tone-muted: #8b6946; --tone-icon: #955712; }
       html[data-theme="dark"] .dk .validation .problem { --tone-bg: #24161b; --tone-fg: #ffdfdd; --tone-muted: #c78a85; --tone-icon: #f87c6f; }
       html[data-theme="dark"] .dk .validation .problem[data-level="warning"] { --tone-bg: #1e1a1b; --tone-fg: #f9ea98; --tone-muted: #c2a74b; --tone-icon: #f9bf1e; }
+      /* studio-literal-check: skip-end */
       .dk .validation .problem svg { flex: none; width: 21px; height: 21px; }
       .dk .validation .problem span { display: flex; flex-direction: column; }
       .dk .validation .problem > span > span { line-height: 19px; }
