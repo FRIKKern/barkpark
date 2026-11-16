@@ -204,6 +204,10 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       doc_id: doc_id,
       type: "paper",
       dataset: dataset,
+      # In the blob's own workspace and project, as a real referrer is: the
+      # refusal names only documents the caller can read (task-29ef6d1ab344a01b).
+      workspace_id: file.workspace_id,
+      project_id: file.project_id,
       title: "Where-used fixture",
       status: Keyword.get(opts, :status, "published"),
       rev: "rev-#{System.unique_integer([:positive])}",
