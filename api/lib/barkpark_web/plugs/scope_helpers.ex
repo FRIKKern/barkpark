@@ -68,18 +68,6 @@ defmodule BarkparkWeb.ScopeHelpers do
   def scope_opts(%Phoenix.Socket{assigns: assigns}), do: scope_opts_from_assigns(assigns)
 
   @doc """
-  `scope_opts/1` plus the dataset a dataset-bound token is held to
-  (`bound_dataset:`, nil for any other caller). For an answer that names
-  documents across datasets, which a per-dataset read cannot fence: the media
-  delete refusal (`Barkpark.Media.WhereUsed.visible_census/2`).
-  """
-  @spec scope_opts_with_binding(Conn.t()) :: keyword()
-  def scope_opts_with_binding(%Conn{assigns: assigns} = conn),
-    do:
-      scope_opts(conn) ++
-        [bound_dataset: Barkpark.Auth.ApiToken.bound_dataset(Map.get(assigns, :api_token))]
-
-  @doc """
   `scope_opts/1` for a caller that holds the ASSIGNS MAP but not the socket
   around it — a LiveView render/component function, which Phoenix hands
   `assigns` and nothing else.
@@ -217,4 +205,16 @@ defmodule BarkparkWeb.ScopeHelpers do
     do: Keyword.put(opts, :workspace_id, :shared_only)
 
   defp put_workspace_scope(opts, _unresolved, :legacy), do: opts
+
+  @doc """
+  `scope_opts/1` plus the dataset a dataset-bound token is held to
+  (`bound_dataset:`, nil for any other caller). For an answer that names
+  documents across datasets, which a per-dataset read cannot fence: the media
+  delete refusal (`Barkpark.Media.WhereUsed.visible_census/2`).
+  """
+  @spec scope_opts_with_binding(Conn.t()) :: keyword()
+  def scope_opts_with_binding(%Conn{assigns: assigns} = conn),
+    do:
+      scope_opts(conn) ++
+        [bound_dataset: Barkpark.Auth.ApiToken.bound_dataset(Map.get(assigns, :api_token))]
 end
