@@ -41,6 +41,7 @@ defmodule BarkparkWeb.DatasetController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.DatasetDelete
   alias Barkpark.Tenancy.DatasetDelete.Runs
+  alias Barkpark.Media.WhereUsed
   alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
@@ -124,7 +125,7 @@ defmodule BarkparkWeb.DatasetController do
           409,
           "dataset_media_referenced",
           "documents outside this dataset embed #{length(files)} of its media files",
-          %{media: files},
+          %{media: visible_media(conn, files)},
           "Remove those references, then delete the dataset again."
         )
 
@@ -248,7 +249,7 @@ defmodule BarkparkWeb.DatasetController do
           409,
           "dataset_media_referenced",
           "documents outside this dataset embed #{length(files)} of its media files",
-          %{media: files},
+          %{media: visible_media(conn, files)},
           "Remove those references, then empty the dataset again."
         )
 
@@ -340,4 +341,17 @@ defmodule BarkparkWeb.DatasetController do
   defp failed_hint(_reason), do: "Transient: nothing was deleted. Send the DELETE again."
 
   defp wait_ms, do: Application.get_env(:barkpark, :dataset_delete_wait_ms, 5_000)
+
+  # The refusal's sample names only documents this caller can read: the run's
+  # result is computed off the request and answers whoever polls, so the read
+  # scope is applied here, at render, never in the domain. The count stays the
+  # gate's.
+  defp visible_media(conn, files) do
+    opts = BarkparkWeb.ScopeHelpers.scope_opts_with_binding(conn)
+
+    Enum.map(files, fn file ->
+      %{sample: sample} = WhereUsed.visible_census(file, opts)
+      %{file | sample: WhereUsed.public_sample(sample)}
+    end)
+  end
 end
