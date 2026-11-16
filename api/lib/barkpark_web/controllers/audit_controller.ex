@@ -112,4 +112,10 @@ defmodule BarkparkWeb.AuditController do
     do: "#{field} must be a date (2026-11-16) or an ISO 8601 time."
 
   defp invalid_message(_field), do: "actor must be an actor id of 200 characters or fewer."
+
+  # A dataset-bound admin token on a workspace-level read: observed or refused
+  # (`DatasetBoundAdminReads`). Declared at the end so no line above moves
+  # (line-cited anchors stay true); a controller plug runs before the action
+  # wherever it is declared.
+  plug(BarkparkWeb.Plugs.DatasetBoundAdminReads, [surface: "audit"] when action in [:index])
 end

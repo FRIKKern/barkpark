@@ -734,4 +734,10 @@ defmodule BarkparkWeb.AppTokenController do
       inserted_at: token.inserted_at
     }
   end
+
+  # A dataset-bound admin token on a workspace-level read: observed or refused
+  # (`DatasetBoundAdminReads`). Declared at the end so no line above moves
+  # (line-cited anchors stay true); a controller plug runs before the action
+  # wherever it is declared.
+  plug(BarkparkWeb.Plugs.DatasetBoundAdminReads, [surface: "tokens"] when action in [:index])
 end
