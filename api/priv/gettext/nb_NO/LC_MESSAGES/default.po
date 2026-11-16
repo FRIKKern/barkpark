@@ -14698,3 +14698,47 @@ msgstr "prøver igjen etter %{code}"
 #, elixir-autogen, elixir-format
 msgid "waiting"
 msgstr "venter"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
+#, elixir-autogen, elixir-format
+msgid "Ecosystem panel"
+msgstr "Økosystempanel"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:114
+#, elixir-autogen, elixir-format
+msgid "No snapshot yet"
+msgstr "Ingen øyeblikksbilde ennå"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "Built just now"
+msgstr "Bygget nå nettopp"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:169
+#, elixir-autogen, elixir-format
+msgid "Built 1 minute ago"
+msgid_plural "Built %{count} minutes ago"
+msgstr[0] "Bygget for 1 minutt siden"
+msgstr[1] "Bygget for %{count} minutter siden"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:172
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 minute ago"
+msgid_plural "Stale: built %{count} minutes ago"
+msgstr[0] "Foreldet: bygget for 1 minutt siden"
+msgstr[1] "Foreldet: bygget for %{count} minutter siden"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:175
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 hour ago"
+msgid_plural "Stale: built %{count} hours ago"
+msgstr[0] "Foreldet: bygget for 1 time siden"
+msgstr[1] "Foreldet: bygget for %{count} timer siden"
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:178
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 day ago"
+msgid_plural "Stale: built %{count} days ago"
+msgstr[0] "Foreldet: bygget for 1 dag siden"
+msgstr[1] "Foreldet: bygget for %{count} dager siden"
