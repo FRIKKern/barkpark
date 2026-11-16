@@ -141,11 +141,13 @@ defmodule BarkparkWeb.Studio.StudioObjectsTest do
       stored = published(fixture, "frontPage")["content"]["frontpageSections"]
       {:ok, view, _html} = live(conn, doc_path(ws, proj, "frontPage", "frontPage"))
 
-      view
-      |> element(
-        ~s([data-field-name="frontpageSections"] button[data-member="newsletterSection"])
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(
+          view,
+          ~s([data-field-name="frontpageSections"] button[data-member="newsletterSection"])
+        )
       )
-      |> render_click()
 
       saved = draft!("frontPage", "frontPage", scope).content["frontpageSections"]
       new = List.last(saved)
@@ -223,11 +225,13 @@ defmodule BarkparkWeb.Studio.StudioObjectsTest do
         members
         |> Enum.with_index(length(stored))
         |> Enum.map(fn {member, idx} ->
-          view
-          |> element(
-            ~s([data-field-name="landingPageSections"] > details button[data-member="#{member}"])
+          BarkparkWeb.EditorPost.press_on(
+            view,
+            element(
+              view,
+              ~s([data-field-name="landingPageSections"] > details button[data-member="#{member}"])
+            )
           )
-          |> render_click()
 
           # the first top-level string field of the member, when it has one
           case Enum.find(objects[member]["fields"], &(&1["type"] == "string")) do
@@ -289,11 +293,13 @@ defmodule BarkparkWeb.Studio.StudioObjectsTest do
       idx = length(stored)
       {:ok, view, _html} = live(conn, doc_path(ws, proj, "page", "demo-landing-page"))
 
-      view
-      |> element(
-        ~s([data-field-name="landingPageSections"] > details button[data-member="anchorJumpNavSection"])
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(
+          view,
+          ~s([data-field-name="landingPageSections"] > details button[data-member="anchorJumpNavSection"])
+        )
       )
-      |> render_click()
 
       # The nested list's Add resolves its field through the item's `_type`.
       BarkparkWeb.EditorPost.press(view, "array_op", %{

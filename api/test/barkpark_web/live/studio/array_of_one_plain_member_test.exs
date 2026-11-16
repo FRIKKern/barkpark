@@ -106,9 +106,10 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
 
       refute has_element?(view, ~s(#editor-form [data-field-name="tags"] [data-structured-value]))
 
-      view
-      |> element(~s(#editor-form button.bp-array-btn-add[phx-value-field="tags"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(#editor-form button.bp-array-btn-add[phx-value-field="tags"]))
+      )
 
       assert has_element?(view, ~s(#editor-form input[type="text"][name="doc[tags][1]"]))
       refute has_element?(view, ~s(#editor-form [data-field-name="tags"] [data-structured-value]))
@@ -118,9 +119,10 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
   test "typing alpha in the new row stores a string, not an object", c do
     view = studio(c, c.plain)
 
-    view
-    |> element(~s(#editor-form button.bp-array-btn-add[phx-value-field="tags"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#editor-form button.bp-array-btn-add[phx-value-field="tags"]))
+    )
 
     change(view, ["doc", "tags", "1"], %{
       "title" => "Here",
@@ -133,9 +135,10 @@ defmodule BarkparkWeb.Studio.ArrayOfOnePlainMemberTest do
   test "a list of one plain member inside an object is a text input too", c do
     view = studio(c, c.plain)
 
-    view
-    |> element(~s(#editor-form button.bp-array-btn-add[phx-value-path="doc[box].notes"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#editor-form button.bp-array-btn-add[phx-value-path="doc[box].notes"]))
+    )
 
     assert has_element?(view, ~s(#editor-form [name="doc[box].notes[0]"]))
     refute has_element?(view, ~s(#editor-form [data-field-name="notes"] [data-structured-value]))
