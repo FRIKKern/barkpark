@@ -32,6 +32,9 @@ type leaseServer struct {
 	// closeDeadline: the TerminalTimeout startRunner gives this test's Runner
 	// (zero: the default).
 	closeDeadline time.Duration
+	// firstEventDeadline: the FirstEventTimeout startRunner gives this test's
+	// Runner (zero: the default).
+	firstEventDeadline time.Duration
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -176,11 +179,12 @@ func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Co
 	t.Helper()
 	ts := httptest.NewServer(server.handler(t))
 	runner := Runner{
-		Client:          &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
-		Handler:         handler,
-		PollInterval:    time.Millisecond,
-		Log:             &syncBuffer{},
-		TerminalTimeout: server.closeDeadline,
+		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
+		Handler:           handler,
+		PollInterval:      time.Millisecond,
+		Log:               &syncBuffer{},
+		TerminalTimeout:   server.closeDeadline,
+		FirstEventTimeout: server.firstEventDeadline,
 	}
 	// As main.go wires it: the handler posts labels through the Runner's client.
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {

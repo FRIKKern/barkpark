@@ -28,6 +28,9 @@ type Runner struct {
 	// means defaultTerminalTimeout. Each Runner holds its own, so a test that
 	// shortens it does not race a lease goroutine another test left running.
 	TerminalTimeout time.Duration
+	// FirstEventTimeout bounds the publish of a turn's first event, retries
+	// included. Zero means defaultFirstEventTimeout.
+	FirstEventTimeout time.Duration
 	// now is the clock the retry backoff reads. Nil means time.Now. A test
 	// sets it on its own Runner to hold the clock still.
 	now func() time.Time
@@ -270,7 +273,28 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 			return
 		}
 
-		if err := r.Handler.Handle(ctx, command, func(event map[string]any) error { return publish(ctx, event) }); err != nil {
+		// Until the server takes a turn's first event, the provider keeps running
+		// on this computer while the server may still withdraw the lease and tell
+		// the person the message was not sent (task-53bbabed87944b89). So that
+		// publish gets FirstEventTimeout, not the 2 minute outage bound: past it,
+		// emit fails, the handler returns and the provider is killed. Once one
+		// event is taken, the general bound applies, as before.
+		turn := command.Command["operation"] == "send_turn"
+		emit := func(event map[string]any) error {
+			if !turn || cursor != command.LastCursor {
+				return publish(ctx, event)
+			}
+			bound := r.firstEventTimeout()
+			firstCtx, cancelFirst := context.WithTimeout(ctx, bound)
+			defer cancelFirst()
+			err := publish(firstCtx, event)
+			if err != nil && ctx.Err() == nil && firstCtx.Err() != nil {
+				return fmt.Errorf("the turn's first event was not taken within %s, so the provider was stopped: %w", bound, err)
+			}
+			return err
+		}
+
+		if err := r.Handler.Handle(ctx, command, emit); err != nil {
 			terminalState := "error"
 			if errors.Is(err, context.Canceled) {
 				terminalState = "interrupted"
@@ -313,6 +337,20 @@ const maxPublishOutage = 2 * time.Minute
 // Bound on the terminal publish after the run has ended, unless the Runner
 // sets TerminalTimeout.
 const defaultTerminalTimeout = 30 * time.Second
+
+// Bound on publishing a turn's first event, unless the Runner sets
+// FirstEventTimeout. Long enough to outlast a short blip (with the default
+// 1 s PollInterval: attempts at about 0, 1, 3 and 7 s), short enough that the
+// provider is stopped before it gets far into a turn the server may never
+// count as sent.
+const defaultFirstEventTimeout = 10 * time.Second
+
+func (r *Runner) firstEventTimeout() time.Duration {
+	if r.FirstEventTimeout > 0 {
+		return r.FirstEventTimeout
+	}
+	return defaultFirstEventTimeout
+}
 
 func (r *Runner) terminalTimeout() time.Duration {
 	if r.TerminalTimeout > 0 {
