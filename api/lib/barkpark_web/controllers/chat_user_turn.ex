@@ -200,19 +200,22 @@ defmodule BarkparkWeb.ChatUserTurn do
   Store the user's row for a turn that was just dispatched, and say what the
   send's answer is (task-583b6031c13b28ac).
 
-  `:ok` (202) when the row is stored. When it is not, the answer follows the
-  turn: a registered-host lease the server ends (`ChatHosts.withdraw_turn/2`,
-  under the `command_key` the turn was leased with) is never run, so it is
-  `{:error, :turn_not_stored}`, the retryable `runtime_unavailable`, and the
-  client may send again. A turn the server cannot take back runs: a managed
-  turn is already in the provider process, and a lease it could not end is
-  still handed to the host. That answer stays `:ok`, because a 5xx would
-  invite a second send of a turn that went.
+  `:ok` (202) when the row is stored. A failed store is tried once more, so a
+  passing fault does not lose the row for good. When it still fails, the
+  answer follows the turn: a registered-host lease the server ends
+  (`ChatHosts.withdraw_turn/2`, under the `command_key` the turn was leased
+  with) is never run, so it is `{:error, :turn_not_stored}`, the retryable
+  `runtime_unavailable`, and the client may send again. A turn the server
+  cannot take back runs: a managed turn is already in the provider process,
+  a host may already have started the lease, and a lease the server could not
+  end is still handed to the host. That answer stays `:ok`, because a 5xx
+  would invite a second send of a turn that went.
   """
   @spec persist_sent(StudioChat.Session.t(), String.t(), map(), String.t()) ::
           :ok | {:error, :turn_not_stored}
   def persist_sent(%StudioChat.Session{} = session, text, metadata, command_key) do
     with {:error, _reason} <- persist(session.id, text, metadata),
+         {:error, _reason} <- persist(session.id, text, metadata),
          "registered_host" <- session.execution_target,
          :ok <- ChatHosts.withdraw_turn(session.id, command_key) do
       {:error, :turn_not_stored}

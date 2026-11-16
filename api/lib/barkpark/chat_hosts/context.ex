@@ -344,11 +344,15 @@ defmodule Barkpark.ChatHosts do
   Ends the `send_turn` lease leased under `command_key` for `session_id` when
   the server cannot stand behind the send: the user's row could not be stored
   (task-583b6031c13b28ac). The server writes the turn's close itself, as for an
-  expired or unservable lease, so no host is handed it, a host already running
-  it has its next event refused, and the session leaves `working`.
+  expired or unservable lease, so no host is handed it again.
 
-  `:ok` when the lease is ended now. `:error` when it is not: no such live
-  lease, it already closed (the host ran it), or the write failed. Never raises.
+  Only a lease no host has started is ended: still `leased`, with no event
+  taken. A host that took the command but has posted nothing has its first
+  event refused (a cursor conflict), and stops.
+
+  `:ok` when the lease is ended now. `:error` when it is not: no such lease, a
+  host already posted an event for it (some of the turn ran), it already
+  closed, or the write failed. Never raises.
   """
   @spec withdraw_turn(String.t(), String.t()) :: :ok | :error
   def withdraw_turn(session_id, command_key)
@@ -359,12 +363,18 @@ defmodule Barkpark.ChatHosts do
   end
 
   # One transaction under the lease row lock, then the same settle as every
-  # server close. A fault anywhere before the commit is `:error`; after it the
-  # lease is ended, so a failed settle still answers `:ok`.
+  # server close. Only a lease no host has started is ended: `leased`, with no
+  # event taken (cursor 0). A host that has posted an event ran some of the
+  # turn, so the caller must not be told it was not sent. The guard sits in
+  # the locking read, so a host event committing first makes the row miss it
+  # (Postgres re-checks the WHERE on the locked row), and one arriving after
+  # the close takes a cursor conflict. A fault anywhere before the commit is
+  # `:error`; after it the lease is ended, so a failed settle still answers
+  # `:ok`.
   defp end_server_turn(lease_query, reason) do
     Repo.transaction(fn ->
       lease_query
-      |> where([l], is_nil(l.revoked_at))
+      |> where([l], is_nil(l.revoked_at) and l.status == "leased" and l.last_cursor == 0)
       |> lock("FOR UPDATE")
       |> Repo.one()
       |> case do

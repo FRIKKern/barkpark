@@ -128,6 +128,99 @@ defmodule BarkparkWeb.ChatSendUnstoredTurnTest do
              "a send refused before it was taken stores no user row"
     end
 
+    test "a store fault that clears on the second try answers 202 with the row stored",
+         %{host_id: host_id, raw: raw} do
+      sid = create_host_session!(raw, host_id)
+      fail_inserts!("chat_messages", "NEW.role = 'user' AND nextval('sut_once') = 1", "sut_once")
+
+      capture_log(fn ->
+        assert send_message(raw, sid, "second try") |> json_response(202)
+      end)
+
+      host = Repo.get!(RegisteredHost, host_id)
+      assert [_] = send_turns(host, sid)
+
+      assert [%{role: "user", source_markdown: "second try"}] =
+               StudioChat.list_messages(sid, :global)
+    end
+
+    # The server may only say "not sent" for a lease no host has started. A host
+    # that took the command and posted an event ran some of the turn.
+    test "a lease a host has started is not withdrawn", %{host_id: host_id, raw: raw} do
+      sid = create_host_session!(raw, host_id)
+      assert send_message(raw, sid, "started") |> json_response(202)
+      host = Repo.get!(RegisteredHost, host_id)
+      [%{lease_id: lease_id, epoch: epoch}] = send_turns(host, sid)
+
+      assert {:ok, :accepted} = host_event(host, lease_id, epoch, 1, "turn_started")
+      assert {:ok, :accepted} = host_event(host, lease_id, epoch, 2, "text_delta")
+
+      [lease] = leases(sid)
+      assert ChatHosts.withdraw_turn(sid, lease.command_key) == :error
+
+      assert %ExecutionLease{status: "running", last_cursor: 2} =
+               Repo.get!(ExecutionLease, lease_id)
+
+      refute Enum.any?(events(lease_id), &(&1.idempotency_key == "server:turn_not_stored"))
+    end
+
+    test "a host that took the command but posted nothing is refused its first event",
+         %{host_id: host_id, raw: raw} do
+      sid = create_host_session!(raw, host_id)
+      assert send_message(raw, sid, "polled") |> json_response(202)
+      host = Repo.get!(RegisteredHost, host_id)
+      [%{lease_id: lease_id, epoch: epoch}] = send_turns(host, sid)
+
+      [lease] = leases(sid)
+      assert ChatHosts.withdraw_turn(sid, lease.command_key) == :ok
+
+      assert {:error, :cursor_conflict} = host_event(host, lease_id, epoch, 1, "turn_started")
+      assert send_turns(host, sid) == []
+    end
+
+    # The host's first event and the withdraw race. Whichever commits first
+    # decides, and the two answers always agree: a withdraw that answers :ok
+    # means the host's event was refused and nothing ran; an :error means the
+    # host's event was taken. (The sandbox shares one connection, so this
+    # races whole transactions; the row lock itself is Postgres's.)
+    test "a host event racing the withdraw: exactly one of them wins",
+         %{host_id: host_id, raw: raw} do
+      host = Repo.get!(RegisteredHost, host_id)
+
+      outcomes =
+        for n <- 1..12 do
+          sid = create_host_session!(raw, host_id)
+          assert send_message(raw, sid, "race #{n}") |> json_response(202)
+          [%{lease_id: lease_id, epoch: epoch}] = send_turns(host, sid)
+          [lease] = leases(sid)
+
+          event = Task.async(fn -> host_event(host, lease_id, epoch, 1, "turn_started") end)
+          poll = Task.async(fn -> send_turns(host, sid) end)
+          withdraw = Task.async(fn -> ChatHosts.withdraw_turn(sid, lease.command_key) end)
+          [event, poll, withdraw] = Task.await_many([event, poll, withdraw])
+          assert is_list(poll)
+
+          stored = Repo.get!(ExecutionLease, lease_id)
+
+          case withdraw do
+            :ok ->
+              assert {:error, :cursor_conflict} = event
+              assert stored.status == "completed"
+              assert [%{idempotency_key: "server:turn_not_stored"}] = events(lease_id)
+              assert send_turns(host, sid) == []
+
+            :error ->
+              assert {:ok, :accepted} = event
+              assert stored.status == "running"
+              refute Enum.any?(events(lease_id), &(&1.idempotency_key =~ "server:"))
+          end
+
+          withdraw
+        end
+
+      assert Enum.all?(outcomes, &(&1 in [:ok, :error]))
+    end
+
     test "a stored send is unchanged: 202, one live lease, one user row",
          %{host_id: host_id, raw: raw} do
       sid = create_host_session!(raw, host_id)
@@ -168,8 +261,11 @@ defmodule BarkparkWeb.ChatSendUnstoredTurnTest do
 
   # A BEFORE INSERT trigger that raises when `condition` holds. DDL runs inside
   # the sandbox transaction, so the rollback at the end of the test drops it.
-  defp fail_inserts!(table, condition) do
+  # `sequence`, when named, is created first: a sequence is not rolled back
+  # with the failed insert, so `nextval(...) = 1` fails the first try only.
+  defp fail_inserts!(table, condition, sequence \\ nil) do
     name = "sut_fail_#{table}"
+    if sequence, do: Repo.query!("CREATE SEQUENCE #{sequence}")
 
     Repo.query!("""
     CREATE FUNCTION #{name}() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -249,6 +345,17 @@ defmodule BarkparkWeb.ChatSendUnstoredTurnTest do
     host
     |> ChatHosts.next_commands()
     |> Enum.filter(&(&1.command.operation == :send_turn and &1.command.session_id == sid))
+  end
+
+  # What `POST /v1/chat-host/events` does with one host event.
+  defp host_event(host, lease_id, epoch, cursor, kind) do
+    ChatHosts.accept_event(host, %{
+      lease_id: lease_id,
+      epoch: epoch,
+      cursor: cursor,
+      idempotency_key: "#{kind}-#{cursor}",
+      event: %{"kind" => kind, "turn_id" => "turn-1", "text" => "partial reply"}
+    })
   end
 
   defp leases(sid), do: Repo.all(from(l in ExecutionLease, where: l.session_id == ^sid))
