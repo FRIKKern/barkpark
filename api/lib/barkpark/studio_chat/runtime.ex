@@ -302,10 +302,21 @@ defmodule Barkpark.StudioChat.Runtime do
 
   def turn_outcome_metadata(_event), do: %{}
 
-  def send_turn(_provider, %RemoteRef{} = runtime_ref, content),
-    do: dispatch_remote(runtime_ref, :send_turn, %{content: content})
+  @doc """
+  Send one user turn. `opts[:idempotency_key]` names the registered-host
+  lease's `command_key`, so the caller can find and end that lease if it cannot
+  stand behind the send (`ChatHosts.withdraw_turn/2`). Without it the key is
+  minted here. A managed runtime takes no lease and ignores it.
+  """
+  def send_turn(provider, runtime_ref, content, opts \\ [])
 
-  def send_turn(provider, runtime_ref, content),
+  def send_turn(_provider, %RemoteRef{} = runtime_ref, content, opts),
+    do:
+      dispatch_remote(runtime_ref, :send_turn, %{content: content},
+        idempotency_key: opts[:idempotency_key]
+      )
+
+  def send_turn(provider, runtime_ref, content, _opts),
     do: adapter(provider).send_turn(runtime_ref, content)
 
   def steer(_provider, %RemoteRef{} = runtime_ref, command),
@@ -562,7 +573,7 @@ defmodule Barkpark.StudioChat.Runtime do
       session_id: ref.session_id,
       provider_session_id: ref.provider_session_id,
       approval_id: command_opts[:approval_id],
-      idempotency_key: Ecto.UUID.generate(),
+      idempotency_key: command_opts[:idempotency_key] || Ecto.UUID.generate(),
       payload: payload
     }
 

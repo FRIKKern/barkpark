@@ -26,6 +26,11 @@ defmodule BarkparkWeb.ChatSendFailure do
   def classify(:runtime_session_missing), do: :unavailable
   # The registered host is enrolled but has not heartbeated within the window.
   def classify(:host_offline), do: :unavailable
+  # The turn was leased, then withdrawn by the server before the answer: the
+  # host queue's call exited, or the user's row could not be stored
+  # (task-583b6031c13b28ac). The lease is ended, so nothing runs: a retry is safe.
+  def classify(:host_queue_unavailable), do: :unavailable
+  def classify(:turn_not_stored), do: :unavailable
 
   # Unsupported: the provider/operation combination can never succeed as asked.
   # `:host_not_found`: the session's registered host is revoked, never finished
