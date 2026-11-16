@@ -14,7 +14,9 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminReads do
       config :barkpark, :dataset_bound_admin_reads, :observe   # default
       config :barkpark, :dataset_bound_admin_reads, :enforce
 
-  (`BARKPARK_DATASET_BOUND_ADMIN_READS=enforce` in runtime.exs.)
+  `BARKPARK_DATASET_BOUND_ADMIN_READS=enforce|observe` in the environment wins
+  over the config value; it is read here, not in runtime.exs, which may not
+  grow (scripts/file-size-ratchet.py).
 
     * `:observe` lets the request through unchanged: same status, body and
       headers. After a successful read it writes one log line and one audit
@@ -46,14 +48,21 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminReads do
   @message "this token is bound to one dataset and cannot read workspace admin lists"
   @hint "Audit, members, tokens, secrets and the workspace export answer for the whole workspace. Use a token minted without `dataset` (`bp token create --permissions admin` with no -d), or your account. `GET /v1/auth/token` shows the binding. Write and admin tokens minted by bp before 2026-11-13 are bound to production: mint a new one."
 
-  @doc "`:observe` (the default) or `:enforce`. Any other value reads as `:observe`."
+  @doc """
+  `:observe` (the default) or `:enforce`. `BARKPARK_DATASET_BOUND_ADMIN_READS`
+  (`enforce` or `observe`) wins; otherwise the config value, where anything
+  but `:enforce` reads as `:observe`.
+  """
   @spec mode() :: :observe | :enforce
   def mode do
-    case Application.get_env(:barkpark, :dataset_bound_admin_reads, :observe) do
-      :enforce -> :enforce
-      _ -> :observe
+    case System.get_env("BARKPARK_DATASET_BOUND_ADMIN_READS") do
+      "enforce" -> :enforce
+      "observe" -> :observe
+      _ -> if config_mode() == :enforce, do: :enforce, else: :observe
     end
   end
+
+  defp config_mode, do: Application.get_env(:barkpark, :dataset_bound_admin_reads, :observe)
 
   @doc "True for a dataset-bound token that holds the `admin` permission."
   @spec bound_admin?(term()) :: boolean()

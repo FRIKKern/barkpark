@@ -142,6 +142,10 @@ services:
       # Canonical value-shape writes (owner rulings #42/#43/#44; read in
       # api/config/runtime.exs). Unset = off: Studio keeps each field's stored shape.
       - BARKPARK_CANONICAL_SHAPE_WRITES
+      # Dataset-bound admin tokens on workspace admin reads: `observe` (unset,
+      # the default: log + audit row) or `enforce` (403). Read per request in
+      # BarkparkWeb.Plugs.DatasetBoundAdminReads.
+      - BARKPARK_DATASET_BOUND_ADMIN_READS
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       # Unset = the Barkpark Cloud list (barkpark.cloud, www, *.vercel.app). Set,

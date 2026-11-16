@@ -276,4 +276,23 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
     enforce!()
     assert DatasetBoundAdminReads.mode() == :enforce
   end
+
+  test "BARKPARK_DATASET_BOUND_ADMIN_READS wins over the config value" do
+    var = "BARKPARK_DATASET_BOUND_ADMIN_READS"
+    previous = System.get_env(var)
+
+    on_exit(fn ->
+      if previous, do: System.put_env(var, previous), else: System.delete_env(var)
+    end)
+
+    System.put_env(var, "enforce")
+    assert DatasetBoundAdminReads.mode() == :enforce
+
+    enforce!()
+    System.put_env(var, "observe")
+    assert DatasetBoundAdminReads.mode() == :observe
+
+    System.put_env(var, "loud")
+    assert DatasetBoundAdminReads.mode() == :enforce
+  end
 end
