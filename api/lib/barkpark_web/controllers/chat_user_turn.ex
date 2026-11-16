@@ -59,6 +59,25 @@ defmodule BarkparkWeb.ChatUserTurn do
   def max_attachments, do: @max_attachments
 
   @doc """
+  Refuses a chat body whose top-level text holds U+0000. Postgres refuses it
+  in any text column or parameter (22021), so such text fails the same way
+  every time: the chat routes answer it as a 400 before anything is
+  dispatched or stored (task-c663ef1789269e86). Run it after the unknown-key
+  check, so the key it names is one the route takes. An attachment name is
+  refused by `AttachmentName.valid?/1`, which already rejects control
+  characters.
+  """
+  @spec reject_nul(map()) :: :ok | {:error, String.t()}
+  def reject_nul(params) when is_map(params) do
+    case Enum.find(params, fn {_key, value} -> is_binary(value) and nul?(value) end) do
+      nil -> :ok
+      {key, _value} -> {:error, "#{key} must not contain a NUL character"}
+    end
+  end
+
+  defp nul?(text), do: String.contains?(text, <<0>>)
+
+  @doc """
   The shape check on the body's `attachments` value. Absent (`nil`) is no
   attachments. Anything else must be a list of at most four entries, each a
   well-formed id or an `{"id", "name"}` object with a valid name, and no id

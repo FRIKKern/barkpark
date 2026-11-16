@@ -1423,7 +1423,8 @@ defmodule BarkparkWeb.ChatController do
   @patch_keys ~w(draft mode model_choice effort_choice title)
   defp validate_patch(params, provider) do
     with :ok <- reject_non_object(params),
-         :ok <- reject_unknown_keys(params, @patch_keys) do
+         :ok <- reject_unknown_keys(params, @patch_keys),
+         :ok <- ChatUserTurn.reject_nul(params) do
       collect_patch_ops(params, @patch_keys, provider, [])
     end
   end
@@ -1473,6 +1474,7 @@ defmodule BarkparkWeb.ChatController do
   defp validate_content(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, ["content", "attachments"]),
+         :ok <- ChatUserTurn.reject_nul(params),
          {:ok, attachment_ids} <- ChatUserTurn.validate_ids(Map.get(params, "attachments")),
          value <- Map.get(params, "content") do
       cond do
@@ -1495,6 +1497,7 @@ defmodule BarkparkWeb.ChatController do
   defp validate_answer(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, ["request_id", "answers"]),
+         :ok <- ChatUserTurn.reject_nul(params),
          {:ok, request_id} <- req_request_id(Map.get(params, "request_id")),
          {:ok, answers} <- req_answers(Map.get(params, "answers")) do
       {:ok, {request_id, answers}}
@@ -1519,6 +1522,7 @@ defmodule BarkparkWeb.ChatController do
   defp validate_approval(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, ["request_id", "decision"]),
+         :ok <- ChatUserTurn.reject_nul(params),
          {:ok, request_id} <- req_request_id(Map.get(params, "request_id")),
          {:ok, decision} <- req_decision(Map.get(params, "decision")) do
       {:ok, {request_id, decision}}
