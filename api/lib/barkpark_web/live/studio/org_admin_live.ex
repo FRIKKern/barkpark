@@ -86,7 +86,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   @impl true
   def handle_event(event, params, socket) do
     if operator?(socket) and still_admin?(socket),
-      do: do_event(event, params, socket),
+      do: BarkparkWeb.Studio.OrgAdminLive.OrgScope.guard(event, params, socket, &do_event/3),
       else: {:noreply, put_flash(socket, :error, operator_only())}
   end
 
@@ -227,7 +227,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   defp methods_label(methods) when is_list(methods), do: Enum.join(methods, ", ")
 
   defp load(socket) do
-    orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
+    orgs = Enum.map(BarkparkWeb.Studio.OrgAdminLive.OrgScope.orgs(socket.assigns), &org_status/1)
 
     assign(socket,
       page_title: gettext("Organization Admin"),
