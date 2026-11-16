@@ -179,7 +179,7 @@ defmodule BarkparkWeb.Studio.AuditLive do
   # refuses instead.
   defp admin?(socket) do
     is_binary(id_of(socket.assigns[:current_workspace])) and
-      is_binary(id_of(socket.assigns[:current_project])) and Caps.admin?(socket)
+      is_binary(id_of(socket.assigns[:current_project])) and unbound_admin?(socket)
   end
 
   defp id_of(%{id: id}), do: id
@@ -190,5 +190,14 @@ defmodule BarkparkWeb.Studio.AuditLive do
     socket
     |> put_flash(:error, gettext("Admin access required"))
     |> redirect(to: "/studio")
+  end
+
+  # The admin seat, held by a session whose token is not bound to a dataset:
+  # the feed answers for the whole workspace, which a bound token may not read
+  # (`BarkparkWeb.Plugs.RefuseDatasetBound`, the same rule as `GET …/v1/audit`).
+  # Kept last so the gettext references above keep their lines.
+  defp unbound_admin?(socket) do
+    Caps.admin?(socket) and
+      not BarkparkWeb.Plugs.RefuseDatasetBound.refused?(socket.assigns[:api_token])
   end
 end
