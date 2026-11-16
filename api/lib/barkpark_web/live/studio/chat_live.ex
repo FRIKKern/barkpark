@@ -502,7 +502,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # a restore-on-failure could never be SEEN and a clear-on-send could never
   # stick. Enter still submits via the form's `phx-submit="send"`.
   def handle_event("composer-change", %{"message" => text}, socket) do
-    {:noreply, assign(socket, composer_draft: text)}
+    if String.contains?(text, <<0>>),
+      do: {:noreply, nul_note(socket, "A draft")},
+      else: {:noreply, assign(socket, composer_draft: text)}
   end
 
   # Two-phase send (charter D24). PHASE 1 is instant and pure UI: echo the user
@@ -564,6 +566,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
         cond do
           text == "" and not has_attachments? ->
             {:noreply, socket}
+
+          String.contains?(text, <<0>>) ->
+            {:noreply, nul_note(socket, "A message")}
 
           true ->
             # Queue-honest send (charter D43): a mid-turn send is NO LONGER
@@ -1073,8 +1078,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # rename/2 pins title_source: "human" — a human name is never
         # overwritten by the AI titler (charter D13). rename/2 takes no scope
         # argument (it reads :global), so the tenancy check is made here.
-        if tenancy_permits?(socket, id), do: StudioChat.rename(id, title)
-        refresh_sessions(socket)
+        result = if tenancy_permits?(socket, id), do: StudioChat.rename(id, title)
+        socket = refresh_sessions(socket)
+        if result == {:error, :nul_character}, do: nul_note(socket, "A chat title"), else: socket
       end
 
     {:noreply, socket}
@@ -6425,6 +6431,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp codex_error_text(value) when is_binary(value), do: String.trim(value)
   defp codex_error_text(value) when is_integer(value), do: Integer.to_string(value)
   defp codex_error_text(_), do: ""
+
+  # The store refuses U+0000 (NulText, task-820afe5940d0e6e0): say so plainly.
+  defp nul_note(socket, what),
+    do: append_message(socket, :system, "⚠ #{what} can't contain a NUL character (U+0000).")
 
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
