@@ -36,18 +36,16 @@ Keep the server, database, and files on your computer. Local work continues when
 the internet or a remote server fails. Run remotely for shared access.
 Local and remote instances hold separate data; transfers are explicit today.
 
-## What's new
+## News
 
-<!-- highlights:start -->
-**Where we are · 5 October 2026.** A security sweep is turning the owner's access rulings into code, the paper editor is catching up with Notion, and Cloud can adopt servers it did not create.
+<!-- news:start -->
+**Sunday 15 November.** 51 pull requests merged. The desk, Barkpark's own document editor, got closer to the TanStack Studio: Delete and Unpublish now ask first and list the documents that still point to the one you remove, and every field has a menu that copies and pastes it. The code for chat hosts, the computers BarkBot's bots work on, to give each bot its own folder was merged. A silent bug is gone: an edit could be saved into the next document you opened. [The full day](docs/news/2026-11-15.md)
+- **Desk:** Delete and Unpublish ask in the desk's own dialog with who refers; an Incoming references panel; Copy field and Paste field; fieldsets fold; an edit is saved only into the document it was made in ([#26379](https://github.com/FRIKKern/barkpark/pull/26379), [#26381](https://github.com/FRIKKern/barkpark/pull/26381), [#26377](https://github.com/FRIKKern/barkpark/pull/26377), [#26448](https://github.com/FRIKKern/barkpark/pull/26448), [#26467](https://github.com/FRIKKern/barkpark/pull/26467), [#26390](https://github.com/FRIKKern/barkpark/pull/26390), [#26482](https://github.com/FRIKKern/barkpark/pull/26482))
+- **Chat hosts:** a bot can work in its own folder, and a turn the computer can no longer serve is ended, not handed out; a workspace holds at most 10 live hosts ([#26451](https://github.com/FRIKKern/barkpark/pull/26451), [#26449](https://github.com/FRIKKern/barkpark/pull/26449), [#26484](https://github.com/FRIKKern/barkpark/pull/26484), [#26353](https://github.com/FRIKKern/barkpark/pull/26353), [#26408](https://github.com/FRIKKern/barkpark/pull/26408))
+- **Papers, sheets, media:** find and replace in a paper (Cmd+F); export a paper as Markdown or print it to PDF; charts in sheets; tick many files in the media library and delete or file them at once ([#26319](https://github.com/FRIKKern/barkpark/pull/26319), [#26513](https://github.com/FRIKKern/barkpark/pull/26513), [#26446](https://github.com/FRIKKern/barkpark/pull/26446), [#26376](https://github.com/FRIKKern/barkpark/pull/26376))
+<!-- news:end -->
 
-**This week (28 Sep – 4 Oct)** · 633 merges
-- **Security sweep:** 32 owner rulings shipped. Examples: the task ledger is private ([#21558](https://github.com/FRIKKern/barkpark/pull/21558)), preview tokens read only what they name ([#21512](https://github.com/FRIKKern/barkpark/pull/21512)), the Studio cookie no longer carries a readable token ([#21534](https://github.com/FRIKKern/barkpark/pull/21534)).
-- **Papers:** six heading levels ([#21521](https://github.com/FRIKKern/barkpark/pull/21521)), quotes ([#21524](https://github.com/FRIKKern/barkpark/pull/21524)), and pasted pictures that upload ([#21358](https://github.com/FRIKKern/barkpark/pull/21358)).
-- **Cloud:** `bp barkparks adopt` attaches a running server ([#21478](https://github.com/FRIKKern/barkpark/pull/21478)), and the API ships as a public image ([#21544](https://github.com/FRIKKern/barkpark/pull/21544)).
-
-[Weekly edition](https://github.com/FRIKKern/barkpark/issues/21659) · [Paper](https://guerrilla.barkpark.cloud/papers/barkpark-changelog-2026-w40) · [All editions](CHANGELOG.md) · [How this is written](changelog/ROUTINE.md)
-<!-- highlights:end -->
+Earlier: [weekly editions](CHANGELOG.md)
 
 ## Get started
 
