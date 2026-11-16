@@ -74,35 +74,44 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
     |> get(path)
   end
 
-  # Every read, with the token that makes it and the surface it is recorded as.
-  # `ws` is the workspace the record names.
+  # Every read: {group, token kind, surface recorded, path}. One test per group
+  # and mode, so each surface fails or passes on its own.
+  @groups [
+    "audit",
+    "members",
+    "workspace tokens",
+    "app tokens",
+    "share tokens",
+    "scoped secrets",
+    "flat secrets",
+    "workspace export"
+  ]
+
   defp reads(ctx, cursor) do
     b = ctx.base
 
-    scoped =
-      [
-        {"audit", b <> "/v1/audit"},
-        {"audit", b <> "/v1/audit?limit=1&cursor=" <> URI.encode_www_form(cursor)},
-        {"members", b <> "/v1/members"},
-        {"members", b <> "/v1/members?limit=1&offset=1"},
-        {"members", b <> "/v1/invitations"},
-        {"tokens", b <> "/v1/tokens"},
-        {"tokens", b <> "/v1/tokens?limit=1&offset=1"},
-        {"tokens", "/v1/auth/app-tokens"},
-        {"tokens", "/v1/shares/tokens"},
-        {"secrets", b <> "/v1/secrets"},
-        {"secrets", b <> "/v1/secrets/BOUND_PROBE"},
-        {"secrets", b <> "/v1/secrets/BOUND_PROBE/audit"},
-        {"workspace_export", "/api/workspaces/#{ctx.ws.slug}/export"}
-      ]
-      |> Enum.map(fn {surface, path} -> {:ws, surface, path} end)
-
-    flat =
-      ["/v1/secrets", "/v1/secrets/BOUND_PROBE_GLOBAL", "/v1/secrets/BOUND_PROBE_GLOBAL/audit"]
-      |> Enum.map(&{:flat, "secrets", &1})
-
-    scoped ++ flat
+    [
+      {"audit", :ws, "audit", b <> "/v1/audit"},
+      {"audit", :ws, "audit", b <> "/v1/audit?limit=1&cursor=" <> URI.encode_www_form(cursor)},
+      {"members", :ws, "members", b <> "/v1/members"},
+      {"members", :ws, "members", b <> "/v1/members?limit=1&offset=1"},
+      {"members", :ws, "members", b <> "/v1/invitations"},
+      {"workspace tokens", :ws, "tokens", b <> "/v1/tokens"},
+      {"workspace tokens", :ws, "tokens", b <> "/v1/tokens?limit=1&offset=1"},
+      {"app tokens", :ws, "tokens", "/v1/auth/app-tokens"},
+      {"share tokens", :ws, "tokens", "/v1/shares/tokens"},
+      {"scoped secrets", :ws, "secrets", b <> "/v1/secrets"},
+      {"scoped secrets", :ws, "secrets", b <> "/v1/secrets/BOUND_PROBE"},
+      {"scoped secrets", :ws, "secrets", b <> "/v1/secrets/BOUND_PROBE/audit"},
+      {"flat secrets", :flat, "secrets", "/v1/secrets"},
+      {"flat secrets", :flat, "secrets", "/v1/secrets/BOUND_PROBE_GLOBAL"},
+      {"flat secrets", :flat, "secrets", "/v1/secrets/BOUND_PROBE_GLOBAL/audit"},
+      {"workspace export", :ws, "workspace_export", "/api/workspaces/#{ctx.ws.slug}/export"}
+    ]
   end
+
+  defp reads(ctx, cursor, group),
+    do: for({^group, kind, surface, path} <- reads(ctx, cursor), do: {kind, surface, path})
 
   defp raw_for(ctx, :ws, :bound), do: ctx.bound
   defp raw_for(ctx, :flat, :bound), do: ctx.flat_bound
@@ -127,30 +136,32 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
   end
 
   describe "observe (the default)" do
-    test "a bound admin token's read writes one audit row and nothing else changes", ctx do
-      assert DatasetBoundAdminReads.mode() == :observe
+    for group <- @groups do
+      test "#{group}: a bound admin token's read writes one audit row", ctx do
+        assert DatasetBoundAdminReads.mode() == :observe
 
-      for {kind, surface, path} <- reads(ctx, cursor!(ctx)) do
-        token = raw_for(ctx, kind, :bound)
-        before = records()
+        for {kind, surface, path} <- reads(ctx, cursor!(ctx), unquote(group)) do
+          token = raw_for(ctx, kind, :bound)
+          before = records()
 
-        conn = get_as(token.raw, path)
-        assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
+          conn = get_as(token.raw, path)
+          assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
 
-        new_rows = records() -- before
-        assert length(new_rows) == 1, "#{path} wrote #{length(new_rows)} rows"
-        [row] = new_rows
-        assert row.category == "access"
-        assert row.actor_type == "api_token"
-        assert row.actor_id == token.id
-        assert row.subject == token.id
-        assert row.workspace_id == if(kind == :ws, do: ctx.ws.id)
-        assert row.metadata["surface"] == surface
-        assert row.metadata["route"] =~ ~r/^GET BarkparkWeb\.\w+\.\w+$/
+          new_rows = records() -- before
+          assert length(new_rows) == 1, "#{path} wrote #{length(new_rows)} rows"
+          [row] = new_rows
+          assert row.category == "access"
+          assert row.actor_type == "api_token"
+          assert row.actor_id == token.id
+          assert row.subject == token.id
+          assert row.workspace_id == if(kind == :ws, do: ctx.ws.id)
+          assert row.metadata["surface"] == surface
+          assert row.metadata["route"] =~ ~r/^GET BarkparkWeb\.\w+\.\w+$/
 
-        written = inspect(Map.from_struct(row))
-        refute written =~ token.raw
-        refute written =~ "bound reads"
+          written = inspect(Map.from_struct(row))
+          refute written =~ token.raw
+          refute written =~ "bound reads"
+        end
       end
     end
 
@@ -159,6 +170,7 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
 
       paths =
         reads(ctx, cursor)
+        |> Enum.map(fn {_group, kind, surface, path} -> {kind, surface, path} end)
         # The export is a fresh bundle each time (its own timestamps).
         |> Enum.reject(fn {_, surface, _} -> surface == "workspace_export" end)
         # Page 1 of the audit log would show the previous read's record: the
@@ -205,20 +217,22 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
       :ok
     end
 
-    test "every read refuses a bound admin token with 403 dataset_not_bound", ctx do
-      assert DatasetBoundAdminReads.mode() == :enforce
+    for group <- @groups do
+      test "#{group}: a bound admin token gets 403 dataset_not_bound", ctx do
+        assert DatasetBoundAdminReads.mode() == :enforce
 
-      for {kind, _surface, path} <- reads(ctx, cursor!(ctx)) do
-        conn = get_as(raw_for(ctx, kind, :bound).raw, path)
-        assert conn.status == 403, "#{path} answered #{conn.status}: #{conn.resp_body}"
-        error = Jason.decode!(conn.resp_body)["error"]
-        assert error["code"] == "forbidden"
-        assert error["reason"] == "dataset_not_bound"
-        refute conn.resp_body =~ "doc-1"
-        refute conn.resp_body =~ "value"
+        for {kind, _surface, path} <- reads(ctx, cursor!(ctx), unquote(group)) do
+          conn = get_as(raw_for(ctx, kind, :bound).raw, path)
+          assert conn.status == 403, "#{path} answered #{conn.status}: #{conn.resp_body}"
+          error = Jason.decode!(conn.resp_body)["error"]
+          assert error["code"] == "forbidden"
+          assert error["reason"] == "dataset_not_bound"
+          refute conn.resp_body =~ "doc-1"
+          refute conn.resp_body =~ "value"
+        end
+
+        assert records() == []
       end
-
-      assert records() == []
     end
 
     test "the Studio Activity page refuses a session signed in with a bound admin token", ctx do
@@ -233,7 +247,7 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
     test "#{mode}: an unbound admin token on the same seat reads all of them, unrecorded", ctx do
       Application.put_env(:barkpark, :dataset_bound_admin_reads, unquote(mode))
 
-      for {kind, _surface, path} <- reads(ctx, cursor!(ctx)) do
+      for {_group, kind, _surface, path} <- reads(ctx, cursor!(ctx)) do
         conn = get_as(raw_for(ctx, kind, :unbound).raw, path)
         assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
       end
