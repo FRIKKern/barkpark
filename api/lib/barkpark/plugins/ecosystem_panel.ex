@@ -16,12 +16,19 @@ defmodule Barkpark.Plugins.EcosystemPanel do
       controller also requires `Tenancy.Auth.authorize/3` `:admin`, so a
       read-only token on an admin seat is refused too.
 
-  The bucket also mounts a flat copy at `/v1/plugins/ecosystem-panel/snapshot`
-  on the global-permission gate. The controller answers that copy 404 and
-  writes nothing: a flat path names no workspace, and acting on the stamped
+    * `GET /w/:ws/p/:proj/studio/ecosystem-panel/frame` — the stored page for
+      the shell's iframe (task-d76b1c09fe303401). Default `:admin` bucket, so
+      the scoped copy rides `:scoped_browser`. A controller gets no
+      `on_mount`: `EcosystemPanelFrameController` checks
+      `Tenancy.Auth.workspace_admin?/2` on every request and answers with a
+      sandbox CSP.
+
+  Each bucket also mounts a flat copy (`/v1/plugins/ecosystem-panel/snapshot`,
+  `/studio/ecosystem-panel/frame`) with no workspace in the path. Both
+  controllers answer that copy 404 and touch no row: acting on the stamped
   Default workspace there is the bug class `docs/auth.md` warns about.
 
-  The frame and shell routes come in later tasks.
+  The shell route comes in a later task.
 
   `register_schemas/1` is `[]`: a snapshot is a row, not a document, so it
   keeps no revision history and never reaches search, webhooks or the desk.
@@ -33,7 +40,8 @@ defmodule Barkpark.Plugins.EcosystemPanel do
   def register_routes(_ctx) do
     [
       {:post, "/ecosystem-panel/snapshot", BarkparkWeb.EcosystemPanelSnapshotController, :create,
-       auth: :api}
+       auth: :api},
+      {:get, "/ecosystem-panel/frame", BarkparkWeb.EcosystemPanelFrameController, :show}
     ]
   end
 end
