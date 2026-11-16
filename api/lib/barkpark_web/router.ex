@@ -1358,6 +1358,14 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # The chat send's optional Idempotency-Key (task-88749c42544d7f09). The body
+  # is bound into the claim, so one key reused for another message is a 422,
+  # never a replay of the first message's answer. Runs AFTER
+  # :require_chat_access, which assigns the `:api_token` the key is scoped to.
+  pipeline :idempotent_chat_send do
+    plug(BarkparkWeb.Plugs.Idempotency, scope: "chat_send", bind_body: true)
+  end
+
   pipeline :scoped_action_read do
     plug(BarkparkWeb.Plugs.RequireTokenOrMemberSession, token_policy: :scoped_admin)
   end
@@ -2931,7 +2939,6 @@ defmodule BarkparkWeb.Router do
     post("/sessions", ChatController, :create)
     get("/sessions/:id", ChatController, :show)
     patch("/sessions/:id", ChatController, :update)
-    post("/sessions/:id/messages", ChatController, :create_message)
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
 
@@ -2959,6 +2966,21 @@ defmodule BarkparkWeb.Router do
     # `GET /media/files/*` is any-token-public by design.
     post("/sessions/:id/attachments", ChatAttachmentController, :create)
     get("/sessions/:id/attachments/:attachment_id", ChatAttachmentController, :show)
+  end
+
+  # The chat send, on the same gates as the scope above plus its optional
+  # Idempotency-Key. A repeat of one key, from the same token, to the same
+  # session, with the same body, replays the first answer and dispatches
+  # nothing. Without the header the plug does nothing and runs no query.
+  scope "/v1/chat", BarkparkWeb do
+    pipe_through([
+      :studio_chat_capability,
+      :api,
+      :require_chat_access,
+      :idempotent_chat_send
+    ])
+
+    post("/sessions/:id/messages", ChatController, :create_message)
   end
 
   scope "/w/:workspace_slug/v1/chat-hosts", BarkparkWeb do

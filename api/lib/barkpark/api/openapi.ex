@@ -215,7 +215,8 @@ defmodule Barkpark.Api.OpenApi do
   # `Idempotency-Key` header is server-honoured ONLY where
   # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
   # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
-  # (router.ex). Advertising it on every write would be a LIE: a POST to a route
+  # (router.ex), and the chat send, via `pipeline :idempotent_chat_send`
+  # (router.ex), which also binds the request body. Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
   # that double-applies.
@@ -225,7 +226,11 @@ defmodule Barkpark.Api.OpenApi do
   # from one, remove the template, or the spec starts promising dedup the server
   # does not do. `openapi_idempotent_routes_test.exs` re-derives this list from
   # router.ex and reds on either drift.
-  @idempotent_templates ["/v1/data/mutate/:dataset"]
+  @idempotent_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
+
+  # Templates whose mount binds the request body into the key
+  # (`bind_body: true`), so the spec also states the 422.
+  @body_bound_templates ["/v1/chat/sessions/:id/messages"]
 
   defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
     # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
@@ -248,7 +253,8 @@ defmodule Barkpark.Api.OpenApi do
               "to the presenting token AND the request path, so two tenants cannot " <>
               "collide on one key, and they expire after 24h. Generate ONE key per " <>
               "logical operation and reuse it across that operation's retries — a fresh " <>
-              "key per attempt is exactly the double-write this header prevents.",
+              "key per attempt is exactly the double-write this header prevents." <>
+              body_bound_note(template),
           "schema" => %{"type" => "string"}
         }
       ]
@@ -258,6 +264,15 @@ defmodule Barkpark.Api.OpenApi do
   end
 
   defp idempotency_param(_template, _method), do: []
+
+  defp body_bound_note(template) do
+    if Enum.any?(@body_bound_templates, &String.ends_with?(template, &1)),
+      do:
+        " On this route the key is also bound to the request body: the same key " <>
+          "with a different body is refused 422 `idempotency_key_reused`, and a " <>
+          "5xx answer is not remembered, so its retry runs.",
+      else: ""
+  end
 
   defp path_placeholders(template) do
     Regex.scan(~r/:([a-zA-Z_][a-zA-Z0-9_]*)/, template)

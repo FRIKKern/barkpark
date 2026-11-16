@@ -37,7 +37,15 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   # failure — it is a PROMPT: the new pipeline's routes now dedup, so their path
   # templates belong in `@idempotent_templates` (lib/barkpark/api/openapi.ex)
   # and this list.
-  @mounted_on [:scoped_mutate, :idempotent]
+  @mounted_on [:scoped_mutate, :idempotent, :idempotent_chat_send]
+
+  # Spec operations whose replay is driven in their own test file, because a
+  # 2xx needs more than a mutate body (a chat send needs a session and a
+  # runtime). Listed by path so a NEW advertised route cannot hide here.
+  @driven_elsewhere %{
+    "/v1/chat/sessions/{id}/messages" =>
+      "test/barkpark_web/controllers/chat_send_idempotency_key_test.exs"
+  }
 
   setup do
     {:ok, _} =
@@ -59,7 +67,8 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     ~r/^  pipeline :(\w+) do\n(.*?)^  end$/ms
     |> Regex.scan(source)
     |> Enum.filter(fn [_, _name, body] ->
-      String.contains?(body, "plug(BarkparkWeb.Plugs.Idempotency)")
+      # `)` or `,`: a mount WITH options (`scope:`, `bind_body:`) is a mount too.
+      Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, body)
     end)
     |> Enum.map(fn [_, name, _body] -> String.to_atom(name) end)
     |> Enum.sort()
@@ -97,8 +106,15 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
              "over an empty list"
   end
 
+  test "an operation driven elsewhere is still advertised, and its test file exists" do
+    for {path, file} <- @driven_elsewhere do
+      assert {"POST", path} in spec_ops(), "#{path} is no longer advertised idempotent"
+      assert File.exists?(Path.expand("../../../" <> file, __DIR__)), "#{file} is gone"
+    end
+  end
+
   test "EVERY operation the spec marks idempotent actually replays", ctx do
-    for {"POST", path} <- spec_ops() do
+    for {"POST", path} <- spec_ops(), not Map.has_key?(@driven_elsewhere, path) do
       url =
         path
         |> String.replace("{workspace_slug}", ctx.ws.slug)

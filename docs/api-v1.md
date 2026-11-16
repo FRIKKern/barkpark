@@ -80,7 +80,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 **Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
-**`Idempotency-Key`** (optional). A repeat replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
+**`Idempotency-Key`** (optional; chat send too). A repeat replays the first response, never reapplies; concurrent: `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
 
