@@ -2,7 +2,7 @@ defmodule Barkpark.Audit.Feed do
   @moduledoc """
   The one read of the audit log a workspace admin gets: the HTTP route
   (`BarkparkWeb.AuditController`, `bp audit ls`) and the Studio Activity page
-  (`BarkparkWeb.Studio.AuditLive`) both call `list/3`. There is no second path.
+  (`BarkparkWeb.Studio.AuditLive`) call `list/3`; Studio org-admin calls `recent/2`.
 
   ## Which rows
 
