@@ -13,6 +13,7 @@ defmodule BarkparkWeb.EcosystemPanelLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Accounts
+  alias Barkpark.Auth
   alias Barkpark.EcosystemPanel
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -60,9 +61,8 @@ defmodule BarkparkWeb.EcosystemPanelLiveTest do
     refute html =~ "<iframe"
   end
 
-  test "a member, an owner of another workspace and the flat mount are sent away", ctx do
+  test "a member and an owner of another workspace are sent away", ctx do
     put!(ctx.ws_a, "<p>secret</p>", minutes_ago(1))
-    {default_ws, _} = TenancyFixtures.ensure_default_scope!()
 
     member = user!([{ctx.ws_a, "member"}])
     owner_of_b = user!([{ctx.ws_b, "owner"}])
@@ -70,15 +70,34 @@ defmodule BarkparkWeb.EcosystemPanelLiveTest do
     assert {:error, {:redirect, %{to: "/studio"}}} = live(user_conn(member), ctx.path_a)
     # Not a member of A at all: ResolveWorkspace refuses before the LiveView.
     assert get(user_conn(owner_of_b), ctx.path_a).status == 403
+  end
 
-    # An owner of the default workspace passes the flat `:admin` gate, so the
-    # redirect (with no denial flash) is the shell's own.
-    default_owner = user!([{default_ws, "owner"}, {ctx.ws_a, "admin"}])
+  test "the flat mount reads nothing, even with ?workspace_slug= in the query" do
+    {default_ws, _} = TenancyFixtures.ensure_default_scope!()
+    {:ok, row} = put!(default_ws, "<p>default</p>", minutes_ago(2))
 
-    assert {:error, {:redirect, %{to: "/studio"} = redirect}} =
-             live(user_conn(default_owner), "/studio/ecosystem-panel")
+    # Instance-wide admin permission, but only a member seat in Default: it
+    # passes the flat `:admin` gate and is refused on the scoped page.
+    {raw, tok} = token!(["read", "write", "admin"], nil)
+    {:ok, _} = TenancyAuth.create_membership(default_ws.id, tok.id, "member")
+    default_owner = user!([{default_ws, "owner"}])
 
-    refute Map.get(redirect, :flash, %{})["error"]
+    for {label, conn} <- [
+          {"admin-permission token, member of Default", token_session_conn(raw, tok)},
+          {"owner of Default", user_conn(default_owner)}
+        ],
+        path <- ["/studio/ecosystem-panel", "/studio/ecosystem-panel?workspace_slug=x"] do
+      dead = get(conn, path)
+      refute dead.resp_body =~ row.sha256, "#{label} #{path}: dead render carried the sha"
+
+      refute dead.resp_body =~ "Built 2 minutes ago",
+             "#{label} #{path}: dead render carried the age"
+
+      result = live(conn, path)
+
+      assert match?({:error, {:redirect, %{to: "/studio"}}}, result),
+             "#{label} #{path}: the flat mount did not redirect: #{inspect(result)}"
+    end
   end
 
   test "a broadcast with a new sha swaps the iframe src; a demoted admin is sent away", ctx do
@@ -117,6 +136,17 @@ defmodule BarkparkWeb.EcosystemPanelLiveTest do
     end
 
     user
+  end
+
+  defp token!(permissions, workspace_id) do
+    raw = "eco-shell-#{System.unique_integer([:positive])}"
+    {:ok, tok} = Auth.create_token(raw, "eco shell test", "production", permissions, workspace_id)
+    {raw, tok}
+  end
+
+  defp token_session_conn(raw, tok) do
+    {:ok, session_id} = Auth.create_token_session(raw, tok)
+    Plug.Test.init_test_session(scoped_conn(), %{"api_token_session" => session_id})
   end
 
   defp user_conn(user) do

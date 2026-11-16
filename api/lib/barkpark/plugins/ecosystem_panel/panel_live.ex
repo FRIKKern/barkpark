@@ -38,8 +38,10 @@ defmodule Barkpark.Plugins.EcosystemPanel.PanelLive do
   `SettingsLive` and `ConnectorsLive` use), for the socket's token or user.
   A demoted admin gets the `:scoped_admin` denial: the flash and `/studio`.
 
-  The flat `/studio/ecosystem-panel` copy has no workspace in the path and
-  redirects to `/studio` without reading anything.
+  The flat `/studio/ecosystem-panel` copy redirects to `/studio` without
+  reading anything, whatever its query string says. The page reads a
+  workspace only when `LiveAuth :scoped_admin` admitted that same workspace
+  (its `:scoped_admin_workspace_slug` assign equals `current_workspace.slug`).
   """
   use BarkparkWeb, :live_view
 
@@ -49,10 +51,15 @@ defmodule Barkpark.Plugins.EcosystemPanel.PanelLive do
   @tick_ms 60_000
   @stale_after_minutes 30
 
+  # Scoped or flat is decided by what the scoped live_session wrote, never by
+  # params: LiveView merges the query string into them, so the flat route can
+  # send `?workspace_slug=`. `:scoped_admin_workspace_slug` is set only by
+  # `LiveAuth :scoped_admin` once it has proved an owner/admin role in that
+  # workspace; it must name the same workspace this page reads.
   @impl true
-  def mount(%{"workspace_slug" => _}, _session, socket) do
-    case socket.assigns[:current_workspace] do
-      %{id: workspace_id} when is_binary(workspace_id) ->
+  def mount(_params, _session, socket) do
+    case admitted_workspace(socket.assigns) do
+      %{id: workspace_id} ->
         if connected?(socket) do
           Phoenix.PubSub.subscribe(Barkpark.PubSub, EcosystemPanel.topic(workspace_id))
           schedule_tick()
@@ -65,13 +72,11 @@ defmodule Barkpark.Plugins.EcosystemPanel.PanelLive do
          |> load_stamp()
          |> assign_age()}
 
-      _ ->
+      # The flat mount, or a scope the admin gate did not admit. Nothing is read.
+      nil ->
         {:ok, redirect(socket, to: "/studio")}
     end
   end
-
-  # No workspace in the path: the flat mount. Nothing is read.
-  def mount(_params, _session, socket), do: {:ok, redirect(socket, to: "/studio")}
 
   @impl true
   def handle_info(:tick, socket) do
@@ -118,6 +123,15 @@ defmodule Barkpark.Plugins.EcosystemPanel.PanelLive do
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
+
+  defp admitted_workspace(%{
+         scoped_admin_workspace_slug: slug,
+         current_workspace: %{id: id, slug: slug} = workspace
+       })
+       when is_binary(id) and is_binary(slug),
+       do: workspace
+
+  defp admitted_workspace(_assigns), do: nil
 
   defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
 
