@@ -280,4 +280,46 @@ defmodule Barkpark.Audit.Feed do
   defp target_type("membership", _action), do: "user"
   defp target_type("secret", _action), do: "secret"
   defp target_type(_category, _action), do: nil
+
+  # ── org-admin page (task-fa907a54028f501c) ────────────────────────────
+
+  @doc """
+  The newest `limit` rows for the Studio org-admin page, in the same shape as
+  `list/3` (never `metadata`).
+
+    * `{:workspaces, ids}`: rows whose workspace is one of `ids`, in any of
+      their projects. Never a row of another workspace and never a row with no
+      workspace. An empty list, or ids that are not UUIDs, read nothing.
+    * `:instance`: every row, rows with no workspace included. Only for a
+      listed instance operator (`BarkparkWeb.Studio.OrgAdminLive.AuditScope`).
+
+  `actor_name` is filled only for a user seated in the row's own workspace.
+  """
+  @spec recent({:workspaces, [String.t()]} | :instance, pos_integer()) :: [row()]
+  def recent({:workspaces, ids}, limit) when is_list(ids) do
+    case for(id <- ids, {:ok, uuid} <- [Ecto.UUID.cast(id)], uniq: true, do: uuid) do
+      [] -> []
+      ws_ids -> recent_rows(from(e in Event, where: e.workspace_id in ^ws_ids), limit)
+    end
+  end
+
+  def recent(:instance, limit), do: recent_rows(Event, limit)
+
+  defp recent_rows(query, limit) do
+    events =
+      query
+      |> order_by([e], desc: e.id)
+      |> limit(^(limit |> min(@max_limit) |> max(1)))
+      |> Repo.all()
+
+    names =
+      events
+      |> Enum.group_by(& &1.workspace_id)
+      |> Map.new(fn
+        {nil, _} -> {nil, %{}}
+        {ws, evs} -> {ws, seated_names(evs, ws)}
+      end)
+
+    Enum.map(events, &row(&1, Map.get(names, &1.workspace_id, %{})))
+  end
 end
