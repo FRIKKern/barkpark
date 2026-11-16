@@ -257,6 +257,16 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       active: "Tickets"
     },
 
+    # Ecosystem panel shell: no tab of its own. The flat copy only redirects
+    # to /studio, so it is counted, not mounted.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/ecosystem-panel",
+      disposition: :mount,
+      url: {:scoped, "/studio/ecosystem-panel"},
+      active: :none
+    },
+    %{route: "/studio/ecosystem-panel", disposition: :reflect_only},
+
     # ── other installed-plugin routes — counted, not mounted here ──
     %{route: "/studio/onixedit/ping", disposition: :reflect_only},
     %{route: "/admin/projects/list", disposition: :reflect_only},
