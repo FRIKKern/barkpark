@@ -191,7 +191,11 @@ defmodule BarkparkWeb.ChatMessageAttachmentsTest do
       assert row.role == "user"
       assert row.source_markdown == "what is this?"
 
-      assert row.metadata == %{
+      # The turn's command_key rides along (task-f2b66baab8a251f2).
+      assert %{"command_key" => command_key} = row.metadata
+      assert {:ok, _} = Ecto.UUID.cast(command_key)
+
+      assert Map.delete(row.metadata, "command_key") == %{
                "origin" => "api",
                "attachments" => [Attachments.pointer_json(studio_pointer)]
              }
@@ -211,7 +215,7 @@ defmodule BarkparkWeb.ChatMessageAttachmentsTest do
         |> Map.fetch!("messages")
 
       assert message["attachments"] == [reference]
-      assert message["metadata"] == %{"origin" => "api"}
+      assert message["metadata"] == %{"origin" => "api", "command_key" => command_key}
 
       # The event stream's history row is the same projection.
       [frame] = ChatController.replay_events(sid, 0, :global)
@@ -254,7 +258,7 @@ defmodule BarkparkWeb.ChatMessageAttachmentsTest do
       end
 
       for row <- StudioChat.list_messages(sid, :global) do
-        assert row.metadata == %{"origin" => "api"}
+        assert Map.delete(row.metadata, "command_key") == %{"origin" => "api"}
       end
     end
   end

@@ -36,9 +36,12 @@ defmodule BarkparkWeb.ChatUserTurn do
 
   require Logger
 
+  import Ecto.Query, only: [where: 3]
+
   alias Barkpark.ChatHosts
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{AttachmentName, Attachments}
+  alias Barkpark.StudioChat.{AttachmentName, Attachments, Message}
 
   # The Studio composer's cap (its allow_upload max_entries).
   @max_attachments 4
@@ -190,34 +193,14 @@ defmodule BarkparkWeb.ChatUserTurn do
   end
 
   @doc """
-  Append the caller's turn as a `role:"user"` row, so the session's replayable
-  history carries the human side (the Studio composer persists its own rows).
-  `metadata` is `resolve/3`'s: `origin: "api"` plus any attachment pointers.
-
-  The turn has already been dispatched, so this never raises: a refused insert
-  and a database fault (the append's transaction raises on one) are both
-  logged and returned as `{:error, reason}`. `persist_sent/4` decides what the
-  send's answer is (task-583b6031c13b28ac).
-  """
-  @spec persist(String.t(), String.t(), map()) :: :ok | {:error, term()}
-  def persist(session_id, text, metadata) do
-    case StudioChat.append_message(session_id, %{
-           role: "user",
-           source_markdown: text,
-           metadata: metadata
-         }) do
-      {:ok, _message} -> :ok
-      {:error, reason} -> persist_failed(reason)
-    end
-  rescue
-    exception -> persist_failed(exception)
-  catch
-    :exit, reason -> persist_failed({:exit, reason})
-  end
-
-  @doc """
   Store the user's row for a turn that was just dispatched, and say what the
   send's answer is (task-583b6031c13b28ac).
+
+  The row is the caller's turn as a `role:"user"` row, so the session's
+  replayable history carries the human side (the Studio composer persists its
+  own rows). Its metadata is `resolve/3`'s (`origin: "api"` plus any
+  attachment pointers) and the turn's `command_key`, the key a registered
+  host's lease is made under (task-f2b66baab8a251f2).
 
   `:ok` (202) when the row is stored. A failed store is tried once more, so a
   passing fault does not lose the row for good. When it still fails, the
@@ -229,18 +212,63 @@ defmodule BarkparkWeb.ChatUserTurn do
   a host may already have started the lease, and a lease the server could not
   end is still handed to the host. That answer stays `:ok`, because a 5xx
   would invite a second send of a turn that went.
+
+  A store never raises: a refused insert and a database fault are logged and
+  count as failed. `append` is `StudioChat.append_message/2`; a test passes
+  its own to play a fault.
   """
-  @spec persist_sent(StudioChat.Session.t(), String.t(), map(), String.t()) ::
+  @spec persist_sent(StudioChat.Session.t(), String.t(), map(), String.t(), function()) ::
           :ok | {:error, :turn_not_stored}
-  def persist_sent(%StudioChat.Session{} = session, text, metadata, command_key) do
-    with {:error, _reason} <- persist(session.id, text, metadata),
-         {:error, _reason} <- persist(session.id, text, metadata),
+  def persist_sent(
+        %StudioChat.Session{} = session,
+        text,
+        metadata,
+        command_key,
+        append \\ &StudioChat.append_message/2
+      ) do
+    row = %{
+      role: "user",
+      source_markdown: text,
+      metadata: Map.put(metadata, "command_key", command_key)
+    }
+
+    # An insert can commit and still raise (the reply to COMMIT is lost), so
+    # a failed store looks for the turn's row before it stores again and
+    # before it withdraws the lease. Found, or not knowable: the turn stays
+    # sent, never stored twice, never answered "not sent" (task-f2b66baab8a251f2).
+    with {:error, _reason} <- persist(session.id, row, append),
+         false <- stored?(session.id, command_key),
+         {:error, _reason} <- persist(session.id, row, append),
+         false <- stored?(session.id, command_key),
          "registered_host" <- session.execution_target,
          :ok <- ChatHosts.withdraw_turn(session.id, command_key) do
       {:error, :turn_not_stored}
     else
       _ -> :ok
     end
+  end
+
+  # One query, on the failure path only. `:unknown` when the read fails too.
+  defp stored?(session_id, command_key) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role == "user")
+    |> where([m], fragment("?->>'command_key' = ?", m.metadata, ^command_key))
+    |> Repo.exists?()
+  rescue
+    _ -> :unknown
+  catch
+    :exit, _ -> :unknown
+  end
+
+  defp persist(session_id, row, append) do
+    case append.(session_id, row) do
+      {:ok, _message} -> :ok
+      {:error, reason} -> persist_failed(reason)
+    end
+  rescue
+    exception -> persist_failed(exception)
+  catch
+    :exit, reason -> persist_failed({:exit, reason})
   end
 
   defp persist_failed(reason) do
