@@ -610,7 +610,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
     structure_active =
       Regex.compile!(
-        "^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|_webhooks(?:/|$)|api-tester(?:/|$)).*)"
+        "^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|_webhooks(?:/|$)|_activity(?:/|$)|api-tester(?:/|$)).*)"
       )
 
     media_path = "#{base}/media"
@@ -655,6 +655,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ] ++
       search_entry(base, admin?) ++
       webhooks_entry(base, admin?) ++
+      activity_entry(base, admin?) ++
       tmux_console_entry(admin?, return_path) ++
       claude_chat_entry(scope_prefix, admin?, return_path) ++
       styleguide_entry(admin?, return_path) ++
@@ -681,6 +682,15 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   end
 
   defp webhooks_entry(_base, _admin?), do: []
+
+  # The Activity tab (`Studio.AuditLive`, which asks again at mount and on
+  # every event): the workspace's audit log.
+  defp activity_entry(base, true) do
+    path = "#{base}/_activity"
+    [%{label: gettext("Activity"), path: path, icon: "activity", order: 37, active_when: path}]
+  end
+
+  defp activity_entry(_base, _admin?), do: []
 
   # The Connectors tab (connectors D49). Admin-only. Scope-prefixed EXACTLY like
   # Settings, and for the same reason: the catalog is scoped-in-substance (an

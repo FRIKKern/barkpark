@@ -2265,6 +2265,7 @@ defmodule BarkparkWeb.Router do
       live("/media", MediaLive)
       live("/_search", SearchLive)
       live("/_webhooks", WebhooksLive)
+      live("/_activity", AuditLive)
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
 
@@ -4219,6 +4220,12 @@ defmodule BarkparkWeb.Router do
     post("/v1/webhooks/:dataset/:id/test-send", WebhookController, :test_send)
     put("/v1/webhooks/:dataset/:id", WebhookController, :update)
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
+  end
+
+  # Scoped audit log (admin). Scoped only: a flat path names no workspace.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+    get("/v1/audit", AuditController, :index)
   end
 
   # Scoped run-secrets (admin) — the per-workspace tier of the encrypted
