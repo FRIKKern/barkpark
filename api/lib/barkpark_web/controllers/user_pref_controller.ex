@@ -78,7 +78,7 @@ defmodule BarkparkWeb.UserPrefController do
           conn,
           422,
           "bad_request",
-          "body must be {op: push_front | add | remove, field: string, item: non-null, max?: positive integer}"
+          "body must be {op: push_front | add | remove | set, field: string, item: non-null, max?: positive integer}"
         )
 
       {:error, :not_a_list} ->
@@ -95,7 +95,7 @@ defmodule BarkparkWeb.UserPrefController do
     end
   end
 
-  @list_ops %{"push_front" => :push_front, "add" => :add, "remove" => :remove}
+  @list_ops %{"push_front" => :push_front, "add" => :add, "remove" => :remove, "set" => :set}
 
   defp list_op(%{"op" => op, "field" => field, "item" => item} = params)
        when is_binary(field) and field != "" and not is_nil(item) do
