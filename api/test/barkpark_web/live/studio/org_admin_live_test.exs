@@ -271,11 +271,17 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
   end
 
   describe "audit activity" do
+    # Rows of a workspace the viewer administers (task-fa907a54028f501c; the
+    # scope itself is pinned in OrgAdminLiveAuditScopeTest).
     test "recent audit events are listed", %{conn: conn} do
-      org_with_ws("auditco")
-      {:ok, _} = Audit.emit(%{category: "auth", action: "sso_login", actor_id: "u1"})
+      {_org, ws} = org_with_ws("auditco")
+      raw = "org-admin-audit-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw, "auditco admin", "production", ["admin"], ws.id)
+      {:ok, _} = Audit.emit(%{category: "auth", action: "sso_login", workspace_id: ws.id})
 
-      {:ok, _view, html} = live(admin_conn(conn), "/studio/org-admin")
+      {:ok, _view, html} =
+        live(init_test_session(conn, %{"api_token" => raw}), "/studio/org-admin")
+
       assert html =~ "Recent activity"
       assert html =~ "sso_login"
     end
