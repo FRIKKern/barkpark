@@ -246,7 +246,10 @@ defmodule BarkparkWeb.Studio.WebhooksLive do
   end
 
   defp event("deliveries", %{"id" => id}, socket),
-    do: with_hook(socket, id, fn wh -> socket |> assign(open: wh.id) |> load_deliveries() end)
+    do:
+      with_hook(socket, id, fn wh ->
+        socket |> assign(open: wh.id) |> load_deliveries() |> load()
+      end)
 
   defp event("deliveries_close", _params, socket), do: assign(socket, open: nil, deliveries: [])
 

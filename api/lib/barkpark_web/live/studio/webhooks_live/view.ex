@@ -236,14 +236,17 @@ defmodule BarkparkWeb.Studio.WebhooksLive.View do
           <p class="text-sm" style="margin: 0 0 8px;">
             {gettext("Copy it now and give it to the receiver. It is shown only this once.")}
           </p>
+          <label class="sr-only" for={"webhook-secret-value-#{@reveal.key}"}>
+            {gettext("Signing secret")}
+          </label>
           <div style="display: flex; gap: 8px;">
             <input
+              id={"webhook-secret-value-#{@reveal.key}"}
               type="text"
               readonly
               value={@reveal.secret}
               class="form-input"
               style="font-family: var(--font-mono);"
-              aria-label={gettext("Signing secret")}
               data-test-id="webhook-secret-value"
             />
             <button
