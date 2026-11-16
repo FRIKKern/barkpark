@@ -128,6 +128,14 @@ defmodule BarkparkWeb.EcosystemPanelFrameController do
     end
   end
 
+  # Sobelow XSS.SendResp, accepted on purpose: serving the stored page as HTML,
+  # its inline script included, is this route's job. The page is only
+  # reachable by an admin of the URL workspace (`authorize/1` above), and the
+  # `sandbox allow-scripts` CSP set here gives it an opaque origin: no cookies,
+  # no storage, no same-origin requests, no forms, no network but two font
+  # hosts. Pinned by `EcosystemPanelFrameTest` ("an admin of A gets the HTML
+  # with exactly the frame headers").
+  # sobelow_skip ["XSS.SendResp"]
   defp serve(conn, %{html: html}) when is_binary(html) do
     conn
     |> put_resp_header("content-security-policy", @csp)
