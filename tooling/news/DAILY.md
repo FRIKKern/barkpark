@@ -5,7 +5,7 @@ Every morning, one agent writes yesterday's News for each Barkpark repo. Hand it
 
     Run the daily news for <DATE> (yesterday, Oslo time): follow tooling/news/DAILY.md in FRIKKern/barkpark.
 
-It needs a clone of this repo, `git`, `python3` (3.9+) and `gh auth login`. Nothing else, and no state on any one machine: each repo keeps its own days in `docs/news/`.
+It needs a clone of this repo, `git` (with a commit name and email set), `python3` (3.9+) and `gh auth login`. Nothing else, and no state on any one machine: each repo keeps its own days in `docs/news/`. Prepare takes seconds: its clones are shallow and hold only `README.md` and `docs/news/`; `--publish` widens a clone to the full tree before that repo's doc checks run, and barkpark's tree is about 4 GB.
 
 ```
 tooling/news/run-daily <DATE>                      clone the repos into a temp dir, list each repo's merges

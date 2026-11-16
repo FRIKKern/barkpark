@@ -52,10 +52,13 @@ def merged_prs(owner, repo, window):
 
 
 def clone(owner, repo, dest):
+    """A shallow, sparse clone: only README.md and docs/news/ are checked out (barkpark's
+    full tree is ~4 GB). publish() widens it to the whole tree before the doc checks run."""
     if os.path.isdir(os.path.join(dest, ".git")):
         sh(["git", "fetch", "-q", "origin", "main"], cwd=dest)
         return
-    sh(["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "-q", "--depth=1"])
+    sh(["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "-q", "--depth=1", "--filter=blob:none", "--sparse"])
+    sh(["git", "sparse-checkout", "set", "--no-cone", "/README.md", "/docs/news/"], cwd=dest)
 
 
 def page_state(clone_dir, day):
@@ -92,6 +95,8 @@ def publish(owner, repo, cfg, clone_dir, day, today, task):
     slug = f"{owner}/{repo}"
     if render.main([clone_dir, "--repo", slug, "--today", today, "--days", str(cfg["days"]), "--links"]) != 0:
         raise SystemExit(f"run-daily: {repo}: render or link check failed")
+    if cfg.get("checks"):
+        sh(["git", "sparse-checkout", "disable"], cwd=clone_dir)
     for check in cfg.get("checks", []):
         r = sh(check, cwd=clone_dir, check=False)
         if r.returncode != 0:
