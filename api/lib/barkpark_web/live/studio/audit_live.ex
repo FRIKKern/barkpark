@@ -156,7 +156,7 @@ defmodule BarkparkWeb.Studio.AuditLive do
             filters
           )
 
-        {:ok, %{events: events, next: next}}
+        {:ok, observed(socket, %{events: events, next: next})}
 
       {:error, {:invalid, field}} ->
         {:error, View.invalid_message(field)}
@@ -194,10 +194,23 @@ defmodule BarkparkWeb.Studio.AuditLive do
 
   # The admin seat, held by a session whose token is not bound to a dataset:
   # the feed answers for the whole workspace, which a bound token may not read
-  # (`BarkparkWeb.Plugs.RefuseDatasetBound`, the same rule as `GET …/v1/audit`).
+  # (`BarkparkWeb.Plugs.DatasetBoundAdminReads`, the same rule as `GET …/v1/audit`).
   # Kept last so the gettext references above keep their lines.
   defp unbound_admin?(socket) do
     Caps.admin?(socket) and
-      not BarkparkWeb.Plugs.RefuseDatasetBound.refused?(socket.assigns[:api_token])
+      not BarkparkWeb.Plugs.DatasetBoundAdminReads.refused?(socket.assigns[:api_token])
+  end
+
+  # In `:observe` a bound admin token reads the page, and each page it reads is
+  # recorded after the rows are fetched, so the record is never on that page.
+  defp observed(socket, page) do
+    BarkparkWeb.Plugs.DatasetBoundAdminReads.observe(
+      socket.assigns[:api_token],
+      "audit",
+      "LIVE BarkparkWeb.Studio.AuditLive",
+      socket.assigns.current_workspace.id
+    )
+
+    page
   end
 end

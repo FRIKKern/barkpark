@@ -749,4 +749,11 @@ config :barkpark, canonical_shape_writes: false
 # (unless BARKPARK_AUTHORING_WALL is falsy).
 config :barkpark, :authoring_wall, false
 
+# A dataset-bound admin token on a workspace-level admin read (audit, members,
+# tokens, secrets, workspace export): `:observe` lets it through and records
+# it, `:enforce` refuses it with 403 `dataset_not_bound`
+# (`BarkparkWeb.Plugs.DatasetBoundAdminReads`). runtime.exs maps
+# BARKPARK_DATASET_BOUND_ADMIN_READS=enforce|observe.
+config :barkpark, :dataset_bound_admin_reads, :observe
+
 import_config "#{config_env()}.exs"

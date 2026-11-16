@@ -2089,3 +2089,12 @@ case System.get_env("BARKPARK_MAX_DOCUMENT_BYTES") do
   _ ->
     :ok
 end
+
+# Dataset-bound admin tokens on workspace-level admin reads
+# (`BarkparkWeb.Plugs.DatasetBoundAdminReads`): `observe` (config.exs default)
+# or `enforce`. Any other value leaves the default.
+case System.get_env("BARKPARK_DATASET_BOUND_ADMIN_READS") do
+  "enforce" -> config :barkpark, :dataset_bound_admin_reads, :enforce
+  "observe" -> config :barkpark, :dataset_bound_admin_reads, :observe
+  _ -> :ok
+end

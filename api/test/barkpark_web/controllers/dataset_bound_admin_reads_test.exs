@@ -1,21 +1,29 @@
 defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
   @moduledoc """
-  A token minted with an explicit dataset is held to that dataset, so the
-  workspace-level admin reads refuse it: the audit log, the member roster and
-  its invitations, the token inventory, and run secrets (scoped and flat).
-  Every read path is covered: list, page 2 or cursor, reveal and a secret's
-  audit trail. The same seat on an unbound admin token still reads all of them.
-  The Studio Activity page, which reads the same audit feed, refuses a session
-  signed in with a bound token.
+  A dataset-bound admin token on the workspace-level admin reads: the audit log,
+  the member roster and its invitations, the token inventories (workspace
+  tokens, app tokens, share-edit tokens), run secrets (scoped and flat: list,
+  reveal, audit trail), the workspace export, and the Studio Activity page.
+
+  `:observe` (the default) answers exactly as before and writes one audit row
+  per read. `:enforce` refuses with 403 `dataset_not_bound`. An unbound admin
+  token on the same seat reads everything in both modes and is never recorded.
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Observe mode logs one line per read; keep them out of the test output.
+  @moduletag :capture_log
+
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
-  alias Barkpark.{Audit, Auth, Secrets, Tenancy}
+  alias Barkpark.{Audit, Auth, Repo, Secrets, Tenancy}
+  alias Barkpark.Audit.Event
   alias Barkpark.TenancyFixtures
+  alias BarkparkWeb.Plugs.DatasetBoundAdminReads
 
   @admin ["read", "write", "admin"]
+  @action "bound_token.admin_read"
 
   setup do
     ws = TenancyFixtures.create_workspace!()
@@ -39,21 +47,25 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
     {:ok, _} = Secrets.put("BOUND_PROBE", "scoped-value", scope: ws.id)
     {:ok, _} = Secrets.put("BOUND_PROBE_GLOBAL", "global-value", scope: :global)
 
-    %{
-      ws: ws,
-      base: "/w/#{ws.slug}/p/default",
-      bound: token!(ws.id, dataset_bound: true),
-      unbound: token!(ws.id, []),
-      flat_bound: token!(nil, dataset_bound: true),
-      flat_unbound: token!(nil, [])
-    }
+    previous = Application.get_env(:barkpark, :dataset_bound_admin_reads)
+    on_exit(fn -> Application.put_env(:barkpark, :dataset_bound_admin_reads, previous) end)
+
+    {:ok,
+     ws: ws,
+     base: "/w/#{ws.slug}/p/default",
+     bound: token!(ws.id, dataset_bound: true),
+     unbound: token!(ws.id, []),
+     flat_bound: token!(nil, dataset_bound: true),
+     flat_unbound: token!(nil, [])}
   end
 
   defp token!(ws_id, opts) do
     raw = "bound-reads-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "bound reads", "production", @admin, ws_id, opts)
-    raw
+    {:ok, token} = Auth.create_token(raw, "bound reads", "production", @admin, ws_id, opts)
+    %{raw: raw, id: token.id}
   end
+
+  defp enforce!, do: Application.put_env(:barkpark, :dataset_bound_admin_reads, :enforce)
 
   defp get_as(raw, path) do
     scoped_conn()
@@ -62,95 +74,192 @@ defmodule BarkparkWeb.DatasetBoundAdminReadsTest do
     |> get(path)
   end
 
-  defp assert_bound_refusal(conn, path) do
-    assert conn.status == 403, "#{path} answered #{conn.status}: #{conn.resp_body}"
-    error = Jason.decode!(conn.resp_body)["error"]
-    assert error["code"] == "forbidden"
-    assert error["reason"] == "dataset_not_bound"
-    refute conn.resp_body =~ "doc-1"
-    refute conn.resp_body =~ "value"
+  # Every read, with the token that makes it and the surface it is recorded as.
+  # `ws` is the workspace the record names.
+  defp reads(ctx, cursor) do
+    b = ctx.base
+
+    scoped =
+      [
+        {"audit", b <> "/v1/audit"},
+        {"audit", b <> "/v1/audit?limit=1&cursor=" <> URI.encode_www_form(cursor)},
+        {"members", b <> "/v1/members"},
+        {"members", b <> "/v1/members?limit=1&offset=1"},
+        {"members", b <> "/v1/invitations"},
+        {"tokens", b <> "/v1/tokens"},
+        {"tokens", b <> "/v1/tokens?limit=1&offset=1"},
+        {"tokens", "/v1/auth/app-tokens"},
+        {"tokens", "/v1/shares/tokens"},
+        {"secrets", b <> "/v1/secrets"},
+        {"secrets", b <> "/v1/secrets/BOUND_PROBE"},
+        {"secrets", b <> "/v1/secrets/BOUND_PROBE/audit"},
+        {"workspace_export", "/api/workspaces/#{ctx.ws.slug}/export"}
+      ]
+      |> Enum.map(fn {surface, path} -> {:ws, surface, path} end)
+
+    flat =
+      ["/v1/secrets", "/v1/secrets/BOUND_PROBE_GLOBAL", "/v1/secrets/BOUND_PROBE_GLOBAL/audit"]
+      |> Enum.map(&{:flat, "secrets", &1})
+
+    scoped ++ flat
   end
 
-  defp scoped_paths(base, cursor) do
-    [
-      base <> "/v1/audit",
-      base <> "/v1/audit?limit=1&cursor=" <> URI.encode_www_form(cursor),
-      base <> "/v1/members",
-      base <> "/v1/members?limit=1&offset=1",
-      base <> "/v1/invitations",
-      base <> "/v1/tokens",
-      base <> "/v1/tokens?limit=1&offset=1",
-      base <> "/v1/secrets",
-      base <> "/v1/secrets/BOUND_PROBE",
-      base <> "/v1/secrets/BOUND_PROBE/audit"
-    ]
-  end
-
-  @flat_paths [
-    "/v1/secrets",
-    "/v1/secrets/BOUND_PROBE_GLOBAL",
-    "/v1/secrets/BOUND_PROBE_GLOBAL/audit"
-  ]
+  defp raw_for(ctx, :ws, :bound), do: ctx.bound
+  defp raw_for(ctx, :flat, :bound), do: ctx.flat_bound
+  defp raw_for(ctx, :ws, :unbound), do: ctx.unbound
+  defp raw_for(ctx, :flat, :unbound), do: ctx.flat_unbound
 
   # A real page-2 cursor, read by the unbound admin of the same workspace.
   defp cursor!(ctx) do
-    body = get_as(ctx.unbound, ctx.base <> "/v1/audit?limit=1") |> json_response(200)
+    body = get_as(ctx.unbound.raw, ctx.base <> "/v1/audit?limit=1") |> json_response(200)
     assert is_binary(body["next_cursor"])
     body["next_cursor"]
   end
 
-  test "audit: a bound admin token gets 403 on the first page and on a cursor page", ctx do
-    cursor = cursor!(ctx)
+  defp with_query(path, q),
+    do: if(String.contains?(path, "?"), do: path <> "&" <> q, else: path <> "?" <> q)
 
-    for path <- [ctx.base <> "/v1/audit", ctx.base <> "/v1/audit?cursor=" <> cursor] do
-      assert_bound_refusal(get_as(ctx.bound, path), path)
+  defp records, do: Repo.all(from(e in Event, where: e.action == @action, order_by: e.id))
+
+  defp comparable(conn) do
+    {conn.status, conn.resp_body,
+     conn.resp_headers |> Enum.reject(fn {k, _} -> k == "x-request-id" end) |> Enum.sort()}
+  end
+
+  describe "observe (the default)" do
+    test "a bound admin token's read writes one audit row and nothing else changes", ctx do
+      assert DatasetBoundAdminReads.mode() == :observe
+
+      for {kind, surface, path} <- reads(ctx, cursor!(ctx)) do
+        token = raw_for(ctx, kind, :bound)
+        before = records()
+
+        conn = get_as(token.raw, path)
+        assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
+
+        new_rows = records() -- before
+        assert length(new_rows) == 1, "#{path} wrote #{length(new_rows)} rows"
+        [row] = new_rows
+        assert row.category == "access"
+        assert row.actor_type == "api_token"
+        assert row.actor_id == token.id
+        assert row.subject == token.id
+        assert row.workspace_id == if(kind == :ws, do: ctx.ws.id)
+        assert row.metadata["surface"] == surface
+        assert row.metadata["route"] =~ ~r/^GET BarkparkWeb\.\w+\.\w+$/
+
+        written = inspect(Map.from_struct(row))
+        refute written =~ token.raw
+        refute written =~ "bound reads"
+      end
+    end
+
+    test "the answer is the one the same request gets again: status, body, headers", ctx do
+      cursor = cursor!(ctx)
+
+      paths =
+        reads(ctx, cursor)
+        # The export is a fresh bundle each time (its own timestamps).
+        |> Enum.reject(fn {_, surface, _} -> surface == "workspace_export" end)
+        # Page 1 of the audit log would show the previous read's record: the
+        # category filter keeps that row out of both answers.
+        |> Enum.map(fn
+          {k, "audit", path} -> {k, "audit", with_query(path, "category=content_mutation")}
+          other -> other
+        end)
+
+      for {kind, _surface, path} <- paths do
+        token = raw_for(ctx, kind, :bound)
+        first = get_as(token.raw, path)
+        second = get_as(token.raw, path)
+        assert first.status == 200, "#{path} answered #{first.status}: #{first.resp_body}"
+        assert comparable(first) == comparable(second), "#{path} changed between two reads"
+      end
+    end
+
+    test "a read never contains its own record", ctx do
+      conn = get_as(ctx.bound.raw, ctx.base <> "/v1/audit")
+      actions = conn |> json_response(200) |> Map.fetch!("events") |> Enum.map(& &1["action"])
+      refute @action in actions
+      assert [_] = records()
+    end
+
+    test "a refused or failed read is not recorded", ctx do
+      conn = get_as(ctx.bound.raw, ctx.base <> "/v1/audit?cursor=not-a-cursor")
+      assert conn.status == 400
+      assert records() == []
+    end
+
+    test "the Studio Activity page opens for a bound admin session and records the read", ctx do
+      bound = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => ctx.bound.raw})
+      assert {:ok, _view, html} = live(bound, ctx.base <> "/d/production/studio/_activity")
+      assert html =~ "doc-1"
+      assert [_ | _] = rows = records()
+      assert Enum.all?(rows, &(&1.metadata["surface"] == "audit" and &1.actor_id == ctx.bound.id))
     end
   end
 
-  test "members: a bound admin token gets 403 on the roster, page 2 and invitations", ctx do
-    for path <- ~w(/v1/members /v1/members?limit=1&offset=1 /v1/invitations) do
-      assert_bound_refusal(get_as(ctx.bound, ctx.base <> path), path)
+  describe "enforce" do
+    setup do
+      enforce!()
+      :ok
+    end
+
+    test "every read refuses a bound admin token with 403 dataset_not_bound", ctx do
+      assert DatasetBoundAdminReads.mode() == :enforce
+
+      for {kind, _surface, path} <- reads(ctx, cursor!(ctx)) do
+        conn = get_as(raw_for(ctx, kind, :bound).raw, path)
+        assert conn.status == 403, "#{path} answered #{conn.status}: #{conn.resp_body}"
+        error = Jason.decode!(conn.resp_body)["error"]
+        assert error["code"] == "forbidden"
+        assert error["reason"] == "dataset_not_bound"
+        refute conn.resp_body =~ "doc-1"
+        refute conn.resp_body =~ "value"
+      end
+
+      assert records() == []
+    end
+
+    test "the Studio Activity page refuses a session signed in with a bound admin token", ctx do
+      bound = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => ctx.bound.raw})
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               live(bound, ctx.base <> "/d/production/studio/_activity")
     end
   end
 
-  test "tokens: a bound admin token gets 403 on the inventory and page 2", ctx do
-    for path <- ~w(/v1/tokens /v1/tokens?limit=1&offset=1) do
-      assert_bound_refusal(get_as(ctx.bound, ctx.base <> path), path)
+  for mode <- [:observe, :enforce] do
+    test "#{mode}: an unbound admin token on the same seat reads all of them, unrecorded", ctx do
+      Application.put_env(:barkpark, :dataset_bound_admin_reads, unquote(mode))
+
+      for {kind, _surface, path} <- reads(ctx, cursor!(ctx)) do
+        conn = get_as(raw_for(ctx, kind, :unbound).raw, path)
+        assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
+      end
+
+      unbound = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => ctx.unbound.raw})
+      assert {:ok, _view, html} = live(unbound, ctx.base <> "/d/production/studio/_activity")
+      assert html =~ "doc-1"
+
+      assert records() == []
     end
   end
 
-  test "secrets: a bound admin token gets 403 on list, reveal and audit, scoped and flat", ctx do
-    for path <- ~w(/v1/secrets /v1/secrets/BOUND_PROBE /v1/secrets/BOUND_PROBE/audit) do
-      assert_bound_refusal(get_as(ctx.bound, ctx.base <> path), path)
-    end
-
-    for path <- @flat_paths do
-      assert_bound_refusal(get_as(ctx.flat_bound, path), path)
-    end
+  test "the token inventory says which tokens are bound", ctx do
+    body = get_as(ctx.unbound.raw, ctx.base <> "/v1/tokens") |> json_response(200)
+    by_id = Map.new(body["tokens"], &{&1["id"], &1["dataset_bound"]})
+    assert by_id[ctx.bound.id] == true
+    assert by_id[ctx.unbound.id] == false
   end
 
-  test "an unbound admin token on the same seat still reads all four", ctx do
-    cursor = cursor!(ctx)
-
-    for path <- scoped_paths(ctx.base, cursor) do
-      conn = get_as(ctx.unbound, path)
-      assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
+  test "any setting other than :enforce reads as :observe" do
+    for value <- [nil, :observe, "enforce", :other] do
+      Application.put_env(:barkpark, :dataset_bound_admin_reads, value)
+      assert DatasetBoundAdminReads.mode() == :observe
     end
 
-    for path <- @flat_paths do
-      conn = get_as(ctx.flat_unbound, path)
-      assert conn.status == 200, "#{path} answered #{conn.status}: #{conn.resp_body}"
-    end
-  end
-
-  test "the Studio Activity page refuses a session signed in with a bound admin token", ctx do
-    path = ctx.base <> "/d/production/studio/_activity"
-    bound = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => ctx.bound})
-
-    assert {:error, {:redirect, %{to: "/studio"}}} = live(bound, path)
-
-    unbound = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => ctx.unbound})
-    assert {:ok, _view, html} = live(unbound, path)
-    assert html =~ "doc-1"
+    enforce!()
+    assert DatasetBoundAdminReads.mode() == :enforce
   end
 end
