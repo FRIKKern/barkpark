@@ -228,6 +228,11 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
   @census %{
     # ── plugin bucket: `plugin_routes(scope: :api)` inside
     #    `scope "/v1/plugins" do pipe_through([:api, :require_admin])` ──
+    {:post, "/v1/plugins/ecosystem-panel/snapshot"} =>
+      {:tenant_bound, ~s(path_params: %{"workspace_slug" => _}),
+       "EcosystemPanelSnapshotController.create/2 writes only when the path carries a " <>
+         "workspace_slug; this flat copy falls to the 404 clause. The scoped mirror keys the " <>
+         "row on the URL workspace and re-checks Tenancy.Auth.authorize/3 :admin."},
     {:post, "/v1/plugins/tickets/keys"} =>
       {:tenant_bound, "current_workspace_id(conn)",
        "TicketKeysController.current_workspace_id/1 reads :current_workspace, which " <>

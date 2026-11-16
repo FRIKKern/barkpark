@@ -117,8 +117,13 @@ defmodule BarkparkWeb.Integration.MediaDeleteRecheckRaceTest do
     assert {:ok, _} = Media.get_file(png_id, scope)
 
     # The doors render it as their own check does: 409, the referrer named.
+    # The refusal names only what the caller may read (task-29ef6d1ab344a01b),
+    # so the fallback gets the caller the router resolved for this token.
+    routed = get(conn, base(ws, proj) <> "/#{png_id}")
+    assert routed.status == 200
+
     body =
-      conn
+      %{conn | assigns: routed.assigns}
       |> BarkparkWeb.FallbackController.call({:error, {:referenced, file, census}})
       |> json_response(409)
 

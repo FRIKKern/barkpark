@@ -14363,3 +14363,448 @@ msgstr "Nettleseren tillot ikke kopieringen. Last ned filen i stedet."
 #, elixir-autogen, elixir-format
 msgid "The paper is still loading. Try again in a moment."
 msgstr "Artikkelen lastes fortsatt. Prøv igjen om litt."
+
+#: lib/barkpark_web/studio_locale.ex:302
+#, elixir-autogen, elixir-format
+msgid "Checking where this file is used…"
+msgstr "Sjekker hvor filen er brukt …"
+
+#: lib/barkpark_web/studio_locale.ex:304
+#, elixir-autogen, elixir-format
+msgid "Could not check where this file is used"
+msgstr "Kunne ikke sjekke hvor filen er brukt"
+
+#: lib/barkpark_web/studio_locale.ex:301
+#, elixir-autogen, elixir-format
+msgid "Not used anywhere"
+msgstr "Ikke brukt noe sted"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:81
+#, elixir-autogen, elixir-format
+msgid "A webhook tells another system when content in %{dataset} changes."
+msgstr "En webhook varsler et annet system når innhold i %{dataset} endres."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:211
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:382
+#, elixir-autogen, elixir-format
+msgid "Add a webhook"
+msgstr "Legg til en webhook"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:428
+#, elixir-autogen, elixir-format
+msgid "Add webhook"
+msgstr "Legg til webhook"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:388
+#, elixir-autogen, elixir-format
+msgid "Address"
+msgstr "Adresse"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:457
+#, elixir-autogen, elixir-format
+msgid "All events"
+msgstr "Alle hendelser"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:343
+#, elixir-autogen, elixir-format
+msgid "Attempts"
+msgstr "Forsøk"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:237
+#, elixir-autogen, elixir-format
+msgid "Copy it now and give it to the receiver. It is shown only this once."
+msgstr "Kopier den nå og gi den til mottakeren. Den vises bare denne ene gangen."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:188
+#: lib/barkpark_web/live/studio/webhooks_live.ex:197
+#: lib/barkpark_web/live/studio/webhooks_live.ex:236
+#, elixir-autogen, elixir-format
+msgid "Could not change the webhook."
+msgstr "Kunne ikke endre webhooken."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:360
+#, elixir-autogen, elixir-format
+msgid "Could not save the webhook. Check the fields and try again."
+msgstr "Kunne ikke lagre webhooken. Sjekk feltene og prøv igjen."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:185
+#, elixir-autogen, elixir-format
+msgid "Delete this webhook?"
+msgstr "Slette denne webhooken?"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:170
+#, elixir-autogen, elixir-format
+msgid "Deliveries"
+msgstr "Leveranser"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:411
+#, elixir-autogen, elixir-format
+msgid "Document types"
+msgstr "Dokumenttyper"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:90
+#, elixir-autogen, elixir-format
+msgid "Each delivery is signed with the webhook's secret."
+msgstr "Hver leveranse signeres med webhookens hemmelighet."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:382
+#, elixir-autogen, elixir-format
+msgid "Edit webhook"
+msgstr "Rediger webhook"
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:357
+#, elixir-autogen, elixir-format
+msgid "Enter an address that starts with http:// or https://."
+msgstr "Skriv inn en adresse som begynner med http:// eller https://."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:340
+#, elixir-autogen, elixir-format
+msgid "Event"
+msgstr "Hendelse"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:398
+#, elixir-autogen, elixir-format
+msgid "Events"
+msgstr "Hendelser"
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:354
+#, elixir-autogen, elixir-format
+msgid "Give the webhook a name."
+msgstr "Gi webhooken et navn."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:134
+#, elixir-autogen, elixir-format
+msgid "It tries again after %{time}."
+msgstr "Den prøver igjen etter %{time}."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:119
+#, elixir-autogen, elixir-format
+msgid "Last delivery:"
+msgstr "Siste leveranse:"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:409
+#, elixir-autogen, elixir-format
+msgid "Leave all unticked to send every event."
+msgstr "La alle stå uavkrysset for å sende alle hendelser."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:177
+#, elixir-autogen, elixir-format
+msgid "Make a new secret? The old one keeps working for 24 hours."
+msgstr "Lage en ny hemmelighet? Den gamle virker i 24 timer til."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:176
+#, elixir-autogen, elixir-format
+msgid "New secret"
+msgstr "Ny hemmelighet"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:231
+#, elixir-autogen, elixir-format
+msgid "New secret for %{name}"
+msgstr "Ny hemmelighet for %{name}"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:121
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:334
+#, elixir-autogen, elixir-format
+msgid "No deliveries yet."
+msgstr "Ingen leveranser ennå."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:94
+#, elixir-autogen, elixir-format
+msgid "No webhooks yet."
+msgstr "Ingen webhooks ennå."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:413
+#, elixir-autogen, elixir-format
+msgid "Only send changes to these types, separated by commas. Leave empty for every type."
+msgstr "Send bare endringer i disse typene, skilt med komma. La feltet stå tomt for alle typer."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:341
+#, elixir-autogen, elixir-format
+msgid "Result"
+msgstr "Resultat"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:428
+#, elixir-autogen, elixir-format
+msgid "Save webhook"
+msgstr "Lagre webhook"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:232
+#, elixir-autogen, elixir-format
+msgid "Secret for %{name}"
+msgstr "Hemmelighet for %{name}"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:363
+#, elixir-autogen, elixir-format
+msgid "Send again"
+msgstr "Send på nytt"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:161
+#, elixir-autogen, elixir-format
+msgid "Send test"
+msgstr "Send test"
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:348
+#, elixir-autogen, elixir-format
+msgid "Sent again, but the receiver did not accept it."
+msgstr "Sendt på nytt, men mottakeren godtok den ikke."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:346
+#, elixir-autogen, elixir-format
+msgid "Sent again. The receiver answered %{code}."
+msgstr "Sendt på nytt. Mottakeren svarte %{code}."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:246
+#, elixir-autogen, elixir-format
+msgid "Signing secret"
+msgstr "Signeringshemmelighet"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:197
+#, elixir-autogen, elixir-format
+msgid "Test:"
+msgstr "Test:"
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:264
+#, elixir-autogen, elixir-format
+msgid "That event can no longer be sent again."
+msgstr "Den hendelsen kan ikke sendes på nytt lenger."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:223
+#: lib/barkpark_web/live/studio/webhooks_live.ex:286
+#: lib/barkpark_web/live/studio/webhooks_live.ex:303
+#, elixir-autogen, elixir-format
+msgid "That webhook is already gone."
+msgstr "Den webhooken finnes ikke lenger."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:260
+#, elixir-autogen, elixir-format
+msgid "The secret was shown once. Make a new secret if you did not copy it."
+msgstr "Hemmeligheten ble vist én gang. Lag en ny hvis du ikke kopierte den."
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:339
+#, elixir-autogen, elixir-format
+msgid "Time"
+msgstr "Tid"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:158
+#, elixir-autogen, elixir-format
+msgid "Turn off"
+msgstr "Slå av"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:158
+#, elixir-autogen, elixir-format
+msgid "Turn on"
+msgstr "Slå på"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:149
+#, elixir-autogen, elixir-format
+msgid "Turn on again"
+msgstr "Slå på igjen"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:130
+#, elixir-autogen, elixir-format
+msgid "Turned off by Barkpark after %{count} failed deliveries in a row."
+msgstr "Slått av av Barkpark etter %{count} mislykkede leveranser på rad."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:164
+#, elixir-autogen, elixir-format
+msgid "Webhook added."
+msgstr "Webhook lagt til."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:219
+#, elixir-autogen, elixir-format
+msgid "Webhook deleted."
+msgstr "Webhook slettet."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Webhook saved."
+msgstr "Webhook lagret."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:185
+#, elixir-autogen, elixir-format
+msgid "Webhook turned off."
+msgstr "Webhook slått av."
+
+#: lib/barkpark_web/live/studio/webhooks_live.ex:182
+#: lib/barkpark_web/live/studio/webhooks_live.ex:196
+#, elixir-autogen, elixir-format
+msgid "Webhook turned on."
+msgstr "Webhook slått på."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:680
+#: lib/barkpark_web/live/studio/webhooks_live.ex:63
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:79
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:89
+#, elixir-autogen, elixir-format
+msgid "Webhooks"
+msgstr "Webhooks"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:178
+#, elixir-autogen, elixir-format
+msgid "Yes, make a new secret"
+msgstr "Ja, lag en ny hemmelighet"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:460
+#, elixir-autogen, elixir-format
+msgid "all types"
+msgstr "alle typer"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:108
+#, elixir-autogen, elixir-format
+msgid "audit events"
+msgstr "revisjonshendelser"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:109
+#, elixir-autogen, elixir-format
+msgid "chat alerts"
+msgstr "chatvarsler"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:445
+#, elixir-autogen, elixir-format
+msgid "delivered (%{code})"
+msgstr "levert (%{code})"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:106
+#, elixir-autogen, elixir-format
+msgid "every project"
+msgstr "alle prosjekter"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:453
+#, elixir-autogen, elixir-format
+msgid "failed (%{code})"
+msgstr "mislyktes (%{code})"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:455
+#, elixir-autogen, elixir-format
+msgid "failed (no answer)"
+msgstr "mislyktes (ikke svar)"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:107
+#, elixir-autogen, elixir-format
+msgid "not signed"
+msgstr "ikke signert"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:280
+#, elixir-autogen, elixir-format
+msgid "off after failures"
+msgstr "av etter feil"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:450
+#, elixir-autogen, elixir-format
+msgid "retrying after %{code}"
+msgstr "prøver igjen etter %{code}"
+
+#: lib/barkpark_web/live/studio/webhooks_live/view.ex:447
+#, elixir-autogen, elixir-format
+msgid "waiting"
+msgstr "venter"
+
+#: lib/barkpark_web/live/studio/audit_live.ex:55 lib/barkpark_web/live/studio/audit_live/view.ex:42 lib/barkpark_web/components/studio_components/nav.ex:690
+#, elixir-autogen, elixir-format
+msgid "Activity"
+msgstr "Aktivitet"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:44
+#, elixir-autogen, elixir-format
+msgid "Who changed what in this workspace, such as content, tokens, access grants and webhooks. Sign-ins and other account events are not listed here."
+msgstr "Hvem som endret hva i dette arbeidsområdet, for eksempel innhold, tokener, tilgangsgranter og webhooks. Innlogginger og andre kontohendelser vises ikke her."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:50 lib/barkpark_web/live/studio/audit_live/view.ex:87
+#, elixir-autogen, elixir-format
+msgid "Filter"
+msgstr "Filtrer"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:57 lib/barkpark_web/live/studio/audit_live/view.ex:122
+#, elixir-autogen, elixir-format
+msgid "Category"
+msgstr "Kategori"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:70
+#, elixir-autogen, elixir-format
+msgid "Actor id"
+msgstr "Aktør-ID"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:89
+#, elixir-autogen, elixir-format
+msgid "Clear filters"
+msgstr "Fjern filtrene"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:105
+#, elixir-autogen, elixir-format
+msgid "Newest first. Times are UTC."
+msgstr "Nyeste først. Tidene er i UTC."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:114
+#, elixir-autogen, elixir-format
+msgid "No events match."
+msgstr "Ingen hendelser passer."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:124
+#, elixir-autogen, elixir-format
+msgid "Actor"
+msgstr "Aktør"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:125
+#, elixir-autogen, elixir-format
+msgid "Target"
+msgstr "Mål"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:170
+#, elixir-autogen, elixir-format
+msgid "Show only this actor"
+msgstr "Vis bare denne aktøren"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:184
+#, elixir-autogen, elixir-format
+msgid "Pick a category from the list."
+msgstr "Velg en kategori fra listen."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:187
+#, elixir-autogen, elixir-format
+msgid "Enter dates as year-month-day, for example 2026-11-16."
+msgstr "Skriv datoer som år-måned-dag, for eksempel 2026-11-16."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:189
+#, elixir-autogen, elixir-format
+msgid "The actor id is too long."
+msgstr "Aktør-ID-en er for lang."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:192
+#, elixir-autogen, elixir-format
+msgid "Sign-in"
+msgstr "Innlogging"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:194
+#, elixir-autogen, elixir-format
+msgid "Secrets"
+msgstr "Hemmeligheter"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:195
+#, elixir-autogen, elixir-format
+msgid "Settings and webhooks"
+msgstr "Innstillinger og webhooks"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:196
+#, elixir-autogen, elixir-format
+msgid "Tokens"
+msgstr "Tokener"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:200
+#, elixir-autogen, elixir-format
+msgid "Person"
+msgstr "Person"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:204
+#, elixir-autogen, elixir-format
+msgid "Not recorded"
+msgstr "Ikke registrert"
+
+#: lib/barkpark_web/live/studio/org_admin_live/org_scope.ex:88
+#, elixir-autogen, elixir-format
+msgid "You do not administer this organization."
+msgstr "Du administrerer ikke denne organisasjonen."
+
+#: lib/barkpark_web/live/studio/org_admin_live.ex:279
+#, elixir-autogen, elixir-format
+msgid "Organization settings are shown only for organizations you administer in full."
+msgstr "Organisasjonsinnstillinger vises bare for organisasjoner du administrerer fullt ut."

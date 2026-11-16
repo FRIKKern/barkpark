@@ -475,7 +475,16 @@ defmodule Barkpark.Tenancy.DatasetDelete do
             []
 
           census ->
-            [%{media_id: file.id, path: file.path, count: census.count, sample: census.sample}]
+            [
+              %{
+                media_id: file.id,
+                path: file.path,
+                count: census.count,
+                # Raw rows, `row_id` included: the HTTP door filters them by
+                # the READER's scope and strips `row_id` before rendering.
+                sample: census.sample
+              }
+            ]
         end
       end)
 

@@ -46,7 +46,7 @@ defmodule Barkpark.SchemaOwnership do
     access_grants api_tokens audit_events audit_export_sinks authoring_exemptions
     codelist_value_translations codelist_values codelists
     collapsed_schema_definitions_backup content_edges data_keys datasets document_popularity
-    document_view_days documents
+    document_view_days documents ecosystem_panel_snapshots
     idempotency_keys login_tickets media_delete_operations_v1 media_files
     media_object_reservations_v1 mutation_events oban_jobs oban_peers
     oidc_connections org_domains organizations paper_access_log paper_events

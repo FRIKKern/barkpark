@@ -23,6 +23,13 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
     {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
     {:ok, ws} = Tenancy.create_workspace(%{slug: slug <> "-ws", name: "WS"})
     {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+    # The viewer administers the org (task-4d44f2aefec77aff): an admin seat in its workspace.
+    admin =
+      Repo.get_by!(Barkpark.Auth.ApiToken,
+        token_hash: Barkpark.Auth.ApiToken.hash_token(@admin_token)
+      )
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, admin.id, "admin", "api_token")
     {org, ws}
   end
 
@@ -271,11 +278,17 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
   end
 
   describe "audit activity" do
+    # Rows of a workspace the viewer administers (task-fa907a54028f501c; the
+    # scope itself is pinned in OrgAdminLiveAuditScopeTest).
     test "recent audit events are listed", %{conn: conn} do
-      org_with_ws("auditco")
-      {:ok, _} = Audit.emit(%{category: "auth", action: "sso_login", actor_id: "u1"})
+      {_org, ws} = org_with_ws("auditco")
+      raw = "org-admin-audit-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw, "auditco admin", "production", ["admin"], ws.id)
+      {:ok, _} = Audit.emit(%{category: "auth", action: "sso_login", workspace_id: ws.id})
 
-      {:ok, _view, html} = live(admin_conn(conn), "/studio/org-admin")
+      {:ok, _view, html} =
+        live(init_test_session(conn, %{"api_token" => raw}), "/studio/org-admin")
+
       assert html =~ "Recent activity"
       assert html =~ "sso_login"
     end
@@ -299,7 +312,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
   # per-event operator check admits everyone while the allowlist is unset.
   describe "an admin demoted after mount" do
     test "can no longer mint a SCIM token", %{conn: conn} do
-      {org, _ws} = org_with_ws("demoteco")
+      {org, ws} = org_with_ws("demoteco")
       default_ws = Tenancy.get_default_workspace()
 
       {:ok, user} =
@@ -309,6 +322,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
         })
 
       {:ok, _} = Tenancy.Auth.create_membership(default_ws.id, user.id, "admin", "user")
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "admin", "user")
       {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
 
       {:ok, view, _html} =

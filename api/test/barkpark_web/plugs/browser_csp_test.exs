@@ -125,9 +125,9 @@ defmodule BarkparkWeb.Plugs.BrowserCspTest do
 
       assert emitted == MapSet.new(CSP.script_hashes())
 
-      # 6 inline handlers + 2 swatch variants. Was 9 before the stop-propagation
-      # entry was retired; the previous set minus exactly one.
-      assert MapSet.size(emitted) == 8
+      # 7 inline handlers + 2 swatch variants. Was 9 before the stop-propagation
+      # entry was retired; the Webhooks page's secret copy button added one back.
+      assert MapSet.size(emitted) == 9
     end
   end
 

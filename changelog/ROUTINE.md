@@ -9,10 +9,10 @@ one below it, so the record stacks:
 git first-parent log ──► DAILY  paper + changelog/daily/YYYY-MM.md
                               │ 7 days
                               ▼
-                         WEEKLY paper + editorial (Barkpark) + README "What's new"
+                         WEEKLY paper + editorial (Barkpark)
                               │ ~4 weeks
                               ▼
-                         MONTHLY paper + changelog/monthly/YYYY.md + README months line
+                         MONTHLY paper + changelog/monthly/YYYY.md
 ```
 
 | Routine | Oslo time | UTC cron | Runs after |
@@ -35,7 +35,7 @@ Improve a routine by editing this file. Change its schedule at claude.ai/code/ro
   dependency bumps, CI plumbing and test-only commits unless they are the story.
 - A quiet day is fine: say so in one line.
 - Barkdown's `README.md` "Where we are" section belongs to its build agents.
-  Never edit it. Only edit between the highlight markers.
+  Never edit it. Neither README is yours to edit (see "READMEs are not yours").
 
 ## Setup (every run)
 
@@ -90,8 +90,8 @@ chronicle paper to see a valid payload.
 
 | Repo | Daily | Weekly | Monthly |
 |---|---|---|---|
-| Barkpark | `changelog/daily/YYYY-MM.md` | `changelog/editorial.json` + `README.md` | `changelog/monthly/YYYY.md` + `README.md` |
-| Barkdown | `docs/changelog/daily/YYYY-MM.md` | `docs/changelog/weekly/YYYY.md` + `README.md` | `docs/changelog/monthly/YYYY.md` + `README.md` |
+| Barkpark | `changelog/daily/YYYY-MM.md` | `changelog/editorial.json` | `changelog/monthly/YYYY.md` |
+| Barkdown | `docs/changelog/daily/YYYY-MM.md` | `docs/changelog/weekly/YYYY.md` | `docs/changelog/monthly/YYYY.md` |
 
 Newest entry on top. A new Barkpark file starts with
 `<!-- doc-tier: human | canonical-for: changelog-<daily|monthly>-<period> | budget: 9000tok -->`.
@@ -105,18 +105,10 @@ A day entry:
 [Paper](https://guerrilla.barkpark.cloud/papers/barkpark-changelog-2026-10-04) · 87 merges
 ```
 
-**README block.** Both READMEs carry the block between
-`<!-- highlights:start -->` and `<!-- highlights:end -->`. Barkdown gets it
-right after its "Where we are" section, under a `## This week` heading; add the
-markers on the first weekly run. Content, at most ~1,500 bytes:
-
-1. `**Where we are · <date>**`: one or two sentences, Barkdown style.
-2. `**This week (<range>)**`: three bullets with links, then `[Weekly edition](…) · [Paper](…)`.
-3. `**Earlier weeks**`: the last four weeks, one line each, newest first.
-4. `**Months**`: the last three months, one line each.
-
-The weekly run rewrites 1–3 and shifts 3; the monthly run rewrites 4. Barkpark's
-README has a hard 7,400-byte cap (`scripts/check-doc-budgets.sh`).
+**READMEs are not yours.** Since 2026-11-16 each README carries a written daily
+News block between `<!-- news:start -->` and `<!-- news:end -->`, with full days
+in `docs/news/YYYY-MM-DD.md`. The daily news run writes them; never edit them, and
+never add a highlights block back.
 
 ## Weekly editorial (Barkpark)
 
@@ -157,7 +149,7 @@ If a check fails on something you didn't touch, leave the PR open, say so in
 the summary, and don't retry it more than once. Claims lapse after 45 minutes,
 so `bp task pulse` during a long wait (it changes the epoch).
 
-**Barkdown**: commit only the changelog files and README block. Push to `main`
+**Barkdown**: commit only the changelog files. Push to `main`
 (it's unprotected and its docs commits go straight there). Run
 `node scripts/check.cjs`. If it fails on your files, fix them. If it fails on
 something else, note it and push anyway.

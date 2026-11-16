@@ -1201,6 +1201,117 @@
         "x-barkpark-scope": "ingest"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/audit": {
+      "get": {
+        "operationId": "audit.ls.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "content_mutation, token, access, membership, plugin_settings, secret or auth.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only events by this actor id.",
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "From this date or ISO 8601 time.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Up to this date (the whole day) or ISO 8601 time.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max events to return (at most 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "next_cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
+        "tags": [
+          "audit"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/schedules/{dataset}": {
       "get": {
         "operationId": "doc.schedules.scoped",
@@ -3647,6 +3758,79 @@
           "media"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/usage": {
+      "get": {
+        "operationId": "media.usage.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the documents that use an asset (those you can read), draft or published.",
+        "tags": [
+          "media"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/media/{dataset}/search": {
@@ -6871,6 +7055,98 @@
           "paper"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "operationId": "audit.ls",
+        "parameters": [
+          {
+            "description": "content_mutation, token, access, membership, plugin_settings, secret or auth.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only events by this actor id.",
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "From this date or ISO 8601 time.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Up to this date (the whole day) or ISO 8601 time.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max events to return (at most 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "next_cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
+        "tags": [
+          "audit"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/assets": {
@@ -21872,6 +22148,63 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/media/{dataset}/{id}/usage": {
+      "get": {
+        "operationId": "media.usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the documents that use an asset (those you can read), draft or published.",
+        "tags": [
+          "media"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/datasets/{dataset}": {
       "delete": {
         "operationId": "dataset.delete.scoped",
@@ -25946,6 +26279,10 @@
     {
       "description": "Outbound webhook subscriptions.",
       "name": "webhook"
+    },
+    {
+      "description": "The workspace's audit log.",
+      "name": "audit"
     },
     {
       "description": "Mint read-only, workspace-bound API tokens.",
