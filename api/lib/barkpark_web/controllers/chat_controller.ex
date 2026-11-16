@@ -84,6 +84,7 @@ defmodule BarkparkWeb.ChatController do
     Attachments,
     FleetHub,
     HostExecution,
+    MessagesSince,
     PlanPapers,
     QuestionAnswer,
     Recorder,
@@ -267,12 +268,12 @@ defmodule BarkparkWeb.ChatController do
   effort_choice, title, status, metrics — D14) plus `messages` seq-ascending.
   Assistant rows carry `blocks` (`FromMarkdown.blocks/1`, D8) alongside
   `source_markdown`. `?since=<seq>` returns only newer rows (the turn-boundary
-  tail refetch).
+  tail refetch), filtered in SQL: a past-the-end `since` reads no message rows.
   """
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
-      messages = id |> StudioChat.list_messages(store_scope(scope(conn))) |> filter_since(since)
+      messages = MessagesSince.list(id, since, store_scope(scope(conn)))
       json(conn, full_session_json(session, messages, conn.assigns[:api_token]))
     else
       nil -> not_found(conn)
@@ -1054,8 +1055,7 @@ defmodule BarkparkWeb.ChatController do
   # (drafts.task-bb38ed88099c9723).
   def replay_events(id, since, scope) do
     id
-    |> StudioChat.list_messages(scope)
-    |> filter_since(since)
+    |> MessagesSince.list(since, scope)
     |> Enum.map(&sse_message_frame/1)
   end
 
@@ -1961,9 +1961,6 @@ defmodule BarkparkWeb.ChatController do
   defp toolrow_blocks(_), do: nil
 
   # ── replay / request helpers ────────────────────────────────────────────────
-
-  defp filter_since(messages, nil), do: messages
-  defp filter_since(messages, since), do: Enum.filter(messages, &(&1.seq > since))
 
   # Lenient Last-Event-ID parse for the SSE resume header (mirrors
   # ListenController): a malformed value ⇒ nil ⇒ start live with no replay. The
