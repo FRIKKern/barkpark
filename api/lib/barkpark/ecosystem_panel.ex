@@ -20,6 +20,7 @@ defmodule Barkpark.EcosystemPanel do
     * `put/4` writes the row and broadcasts only `{:ecosystem_panel_snapshot,
       %{sha256: sha}}` on `topic/1`. The HTML never rides PubSub.
     * `get/1` returns the row for one workspace, or `nil`.
+    * `get_stamp/1` returns only its `built_at` and `sha256` (the shell).
 
   ## Limits
 
@@ -33,6 +34,8 @@ defmodule Barkpark.EcosystemPanel do
   is core-owned in `Barkpark.SchemaOwnership`. The routes that reach it belong
   to the `Barkpark.Plugins.EcosystemPanel` plugin.
   """
+
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.EcosystemPanel.Snapshot
   alias Barkpark.Repo
@@ -83,6 +86,25 @@ defmodule Barkpark.EcosystemPanel do
     case Ecto.UUID.cast(workspace_id) do
       {:ok, id} -> Repo.get(Snapshot, id)
       :error -> nil
+    end
+  end
+
+  @doc """
+  The `built_at` and `sha256` of `workspace_id`'s snapshot, without the HTML,
+  or `nil`. The shell's age line and iframe src need only these two.
+  """
+  @spec get_stamp(term()) :: %{built_at: DateTime.t(), sha256: String.t()} | nil
+  def get_stamp(workspace_id) do
+    case Ecto.UUID.cast(workspace_id) do
+      {:ok, id} ->
+        Repo.one(
+          from s in Snapshot,
+            where: s.workspace_id == ^id,
+            select: %{built_at: s.built_at, sha256: s.sha256}
+        )
+
+      :error ->
+        nil
     end
   end
 
