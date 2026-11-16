@@ -615,6 +615,8 @@ defmodule Barkpark.Tenancy.Members do
                 kind: t.kind,
                 permissions: t.permissions,
                 dataset: t.dataset,
+                # True only when the mint named a dataset; NULL (older rows) reads false.
+                dataset_bound: coalesce(t.dataset_bound, false),
                 role: m.role,
                 revoked_at: t.revoked_at,
                 expires_at: t.expires_at,
