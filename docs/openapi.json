@@ -1305,7 +1305,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "This workspace's audit log, newest first: who changed content, tokens, access, members and webhooks.",
+        "summary": "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
         "tags": [
           "audit"
         ],
@@ -7142,7 +7142,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "This workspace's audit log, newest first: who changed content, tokens, access, members and webhooks.",
+        "summary": "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
         "tags": [
           "audit"
         ],
