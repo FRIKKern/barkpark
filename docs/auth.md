@@ -24,18 +24,20 @@ no membership row → `403 forbidden`, reason
 
 Mutate needs `write` after tenancy (else `403`). Minted naming a
 `dataset` (`dataset_bound`), it gets `403 dataset_not_bound` elsewhere, on
-workspace/project create, playground, import, audit/members/tokens/secrets
-reads (old `bp` write/admin mints: re-mint); unbound, it binds nothing.
+workspace/project create, playground, import (old `bp` mints: re-mint);
+unbound, binds nothing. Admin reads (audit, members, tokens, secrets,
+export): audited (`:dataset_bound_admin_reads` `:observe`, default) or
+403 (`:enforce`).
 
 ## Roles (`ApiToken.permissions`)
 
 | Permission | Grants | Surfaces |
 |---|---|---|
 | `read` | Reads on private datasets/schemas | `…/v1/data/query/*` `/media` |
-| `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
-| `public-read` | Anonymous-equivalent GET-only reads | `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
+| `write` | Mutations | `POST …/v1/data/mutate/:dataset` |
+| `public-read` | Anonymous-level GET reads | `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
-| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
+| `ops` | Bokbasen publishing | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
 | `admin` | The above + plugin-settings reveal/audit, schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
@@ -47,7 +49,7 @@ reads (old `bp` write/admin mints: re-mint); unbound, it binds nothing.
 `ops` ⊃ `read`+`write`; `:ops` is separate so Bokbasen operators never see
 `client_secret`) and confers **no membership anywhere**.
 
-Three tiers (seat rule since ruling #2, 2026-10-03):
+Three tiers (ruling #2, 2026-10-03):
 `RequireAdmin`: `admin` permission, plus admin authority in the token's
 workspace (bound token) or its owner's (workspace-less PAT); a workspace-less
 machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
