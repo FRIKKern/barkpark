@@ -165,6 +165,14 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"POST", "/v1/admin/write-admission/recover"} =>
       "managed explicit recovery — operator asserts reconciliation from Barkdown, not a CLI verb",
 
+    # ── Ecosystem panel upload (task-270112c682dc71de) ─────────────────────
+    # The eco-dash builder on the Mac POSTs the built page here every 15
+    # minutes (barkpark-supervision panel/push.py). The flat copy answers 404;
+    # only the scoped mirror writes. A person reads the page in Studio, so
+    # there is no operator intent a `bp` verb would serve.
+    {"POST", "/v1/plugins/ecosystem-panel/snapshot"} =>
+      "ecosystem panel upload — the panel builder's push, not a CLI verb; the flat copy is a 404",
+
     # ── CORS preflight ─────────────────────────────────────────────────────
     # An OPTIONS probe a browser sends before the real request. There is no
     # operator intent behind it and nothing to render.
