@@ -14803,3 +14803,8 @@ msgstr "Ikke registrert"
 #, elixir-autogen, elixir-format
 msgid "You do not administer this organization."
 msgstr "Du administrerer ikke denne organisasjonen."
+
+#: lib/barkpark_web/live/studio/org_admin_live.ex:279
+#, elixir-autogen, elixir-format
+msgid "Organization settings are shown only for organizations you administer in full."
+msgstr "Organisasjonsinnstillinger vises bare for organisasjoner du administrerer fullt ut."

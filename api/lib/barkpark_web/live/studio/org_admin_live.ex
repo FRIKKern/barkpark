@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         assign(socket,
           page_title: gettext("Organization Admin"),
           orgs: [],
+          org_scoped: false,
           recent_audit: [],
           minted: %{}
         )
@@ -232,6 +233,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     assign(socket,
       page_title: gettext("Organization Admin"),
       orgs: orgs,
+      org_scoped: BarkparkWeb.Studio.OrgAdminLive.OrgScope.scoped?(socket.assigns),
       recent_audit: BarkparkWeb.Studio.OrgAdminLive.AuditScope.rows(socket.assigns),
       minted: socket.assigns[:minted] || %{}
     )
@@ -273,7 +275,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         {gettext("Configure enterprise SSO and directory sync, and review activity — per organization.")}
       </p>
 
-      <.bp_card :if={@orgs == []}>
+      <p :if={@org_scoped} class="text-sm" data-org-scope-note style="color: var(--fg-muted);">
+        {gettext("Organization settings are shown only for organizations you administer in full.")}
+      </p>
+
+      <.bp_card :if={@orgs == [] and not @org_scoped}>
         <p style="margin: 0; color: var(--fg-muted);">{gettext("No organizations yet.")}</p>
       </.bp_card>
 
