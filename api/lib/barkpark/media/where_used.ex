@@ -215,6 +215,7 @@ defmodule Barkpark.Media.WhereUsed do
           where: d.type != "mediaAsset",
           where: fragment("strpos((?)::text, '/media/files/') > 0", d.content),
           select: %{
+            row_id: d.id,
             doc_id: d.doc_id,
             type: d.type,
             dataset: d.dataset,
@@ -297,7 +298,13 @@ defmodule Barkpark.Media.WhereUsed do
       |> Enum.reduce(acc, fn {file_id, rows}, acc ->
         sample =
           Enum.map(rows, fn row ->
-            %{doc_id: row.doc_id, type: row.type, dataset: dataset, title: row.title}
+            %{
+              row_id: Map.get(row, :id),
+              doc_id: row.doc_id,
+              type: row.type,
+              dataset: dataset,
+              title: row.title
+            }
           end)
 
         Map.put(acc, file_id, %{count: length(sample), sample: Enum.take(sample, @sample_limit)})
@@ -396,7 +403,13 @@ defmodule Barkpark.Media.WhereUsed do
         sample =
           rows
           |> Enum.map(fn row ->
-            %{doc_id: row.doc_id, type: row.type, dataset: file.dataset, title: row.title}
+            %{
+              row_id: Map.get(row, :id),
+              doc_id: row.doc_id,
+              type: row.type,
+              dataset: file.dataset,
+              title: row.title
+            }
           end)
 
         %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
@@ -469,6 +482,7 @@ defmodule Barkpark.Media.WhereUsed do
         where: d.type != "mediaAsset",
         where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern),
         select: %{
+          row_id: d.id,
           doc_id: d.doc_id,
           type: d.type,
           dataset: d.dataset,
@@ -512,30 +526,45 @@ defmodule Barkpark.Media.WhereUsed do
   `census` as the caller behind `opts` may see it (task-29ef6d1ab344a01b).
 
   The census is the delete GATE's answer: it counts every document that uses
-  the blob, in every project and for every owner, because a delete must refuse
-  on any of them. The refusal hands `sample` back to the caller, so it keeps
-  only the documents that caller can read by id
-  (`Content.Query.get_documents_by_ids/3` with their read `opts`: dataset,
-  workspace and project, owner-scoped types, grants, private schemas). A
-  document they cannot read is never named, by title or by id. `count` stays
-  the gate's count: the refusal itself already says the file is in use.
+  the blob, in every project, dataset and for every owner, because a delete
+  must refuse on any of them. The refusal hands `sample` back to the caller,
+  so it keeps only the rows that caller can read: the same stored row (by its
+  primary key, so a hidden row sharing a readable row's `doc_id` is not
+  named) comes back from `Content.Query.get_documents_by_ids/3` under the
+  caller's read `opts` (dataset, workspace and project, owner-scoped types,
+  grants, private schemas), and, for a dataset-bound token
+  (`opts[:bound_dataset]`), only rows of that dataset. A row the caller cannot
+  read is never named, by title or by id. `count` stays the gate's count: the
+  refusal itself already says the file is in use.
   """
   @spec visible_census(%{count: non_neg_integer(), sample: [map()]}, keyword()) ::
           %{count: non_neg_integer(), sample: [map()]}
   def visible_census(%{sample: sample} = census, opts) when is_list(opts) do
+    {bound, read_opts} = Keyword.pop(opts, :bound_dataset)
+
+    candidates =
+      Enum.filter(sample, fn row ->
+        is_binary(row.dataset) and not is_nil(Map.get(row, :row_id)) and
+          (is_nil(bound) or row.dataset == bound)
+      end)
+
     readable =
-      sample
-      |> Enum.filter(&is_binary(&1.dataset))
+      candidates
       |> Enum.group_by(& &1.dataset, & &1.doc_id)
       |> Enum.flat_map(fn {dataset, ids} ->
-        ids
-        |> Query.get_documents_by_ids(dataset, opts)
-        |> Enum.map(fn {id, _} -> {dataset, id} end)
+        ids |> Query.get_documents_by_ids(dataset, read_opts) |> Enum.map(fn {_, d} -> d.id end)
       end)
       |> MapSet.new()
 
-    %{census | sample: Enum.filter(sample, &MapSet.member?(readable, {&1.dataset, &1.doc_id}))}
+    %{census | sample: Enum.filter(candidates, &MapSet.member?(readable, &1.row_id))}
   end
+
+  @doc """
+  A census sample as it may leave the server: without the internal row key
+  `visible_census/2` matches on.
+  """
+  @spec public_sample([map()]) :: [map()]
+  def public_sample(sample) when is_list(sample), do: Enum.map(sample, &Map.delete(&1, :row_id))
 
   defp envelope(file, count, sample) do
     %{
@@ -551,7 +580,7 @@ defmodule Barkpark.Media.WhereUsed do
       details: %{
         path: delivery_path(file),
         referencedByCount: count,
-        referencedBy: sample,
+        referencedBy: public_sample(sample),
         sampleTruncated: count > length(sample),
         override: "force=true"
       }

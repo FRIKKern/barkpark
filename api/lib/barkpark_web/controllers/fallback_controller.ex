@@ -45,7 +45,7 @@ defmodule BarkparkWeb.FallbackController do
       file
       |> Barkpark.Media.WhereUsed.refusal_envelope(
         census,
-        BarkparkWeb.ScopeHelpers.scope_opts(conn)
+        BarkparkWeb.ScopeHelpers.scope_opts_with_binding(conn)
       )
       |> Errors.stamp(conn)
 

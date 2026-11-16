@@ -960,7 +960,15 @@ defmodule BarkparkWeb.V1.MediaController do
           {:ok, nil}
 
         census ->
-          env = Errors.stamp(WhereUsed.refusal_envelope(file, census, scope_opts(conn)), conn)
+          env =
+            Errors.stamp(
+              WhereUsed.refusal_envelope(
+                file,
+                census,
+                BarkparkWeb.ScopeHelpers.scope_opts_with_binding(conn)
+              ),
+              conn
+            )
 
           conn
           |> put_status(:conflict)
