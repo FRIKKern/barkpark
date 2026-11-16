@@ -99,7 +99,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_correction_promotion_events cycle_correction_quarantines
     cycle_correction_roots cycle_correction_targets
     cycle_release_gate_admissions cycle_release_gate_challenges cycle_waves
-    data_keys documents epic_assignments
+    data_keys documents ecosystem_panel_snapshots epic_assignments
     epic_benchmark_experiments github_sync_conflicts media_files mutation_events
     paper_access_log
     paper_events
@@ -782,7 +782,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_release_gate_admissions cycle_release_gate_captures
     cycle_release_gate_challenges cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes cycle_waves
-    data_keys document_popularity document_view_days
+    data_keys document_popularity document_view_days ecosystem_panel_snapshots
     epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events

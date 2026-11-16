@@ -23,9 +23,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     # pins the full-schema E1 count, so it needs the plugin/fleet tables present
     # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
     @tag :owned_tables
-    test "E1 = the 47 workspace_id tables including correction and release authority" do
+    test "E1 = the 48 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 47
+      assert length(e1) == 48
+      # ecosystem_panel_snapshots (task-270112c682dc71de): one overwritten row per
+      # workspace, keyed by workspace_id — E1, and denied from the dev profile.
+      assert "ecosystem_panel_snapshots" in e1
       # scheduled_publishes (task-8e88b5539acafdae): a scheduled publish names
       # its workspace — the same E1 shape as preview_links below.
       assert "scheduled_publishes" in e1
