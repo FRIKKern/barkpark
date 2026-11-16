@@ -39,8 +39,6 @@ Local and remote instances hold separate data; transfers are explicit today.
 ## News
 
 <!-- news:start -->
-**Monday 16 November.** Nothing merged yet today.
-
 **Sunday 15 November.** 51 pull requests merged. The desk, Barkpark's own document editor, got closer to the TanStack Studio: Delete and Unpublish now ask first and list the documents that still point to the one you remove, and every field has a menu that copies and pastes it. The code for chat hosts, the computers BarkBot's bots work on, to give each bot its own folder was merged. A silent bug is gone: an edit could be saved into the next document you opened. [The full day](docs/news/2026-11-15.md)
 - **Desk:** Delete and Unpublish ask in the desk's own dialog with who refers; an Incoming references panel; Copy field and Paste field; fieldsets fold; an edit is saved only into the document it was made in ([#26379](https://github.com/FRIKKern/barkpark/pull/26379), [#26381](https://github.com/FRIKKern/barkpark/pull/26381), [#26377](https://github.com/FRIKKern/barkpark/pull/26377), [#26448](https://github.com/FRIKKern/barkpark/pull/26448), [#26467](https://github.com/FRIKKern/barkpark/pull/26467), [#26390](https://github.com/FRIKKern/barkpark/pull/26390), [#26482](https://github.com/FRIKKern/barkpark/pull/26482))
 - **Chat hosts:** a bot can work in its own folder, and a turn the computer can no longer serve is ended, not handed out; a workspace holds at most 10 live hosts ([#26451](https://github.com/FRIKKern/barkpark/pull/26451), [#26449](https://github.com/FRIKKern/barkpark/pull/26449), [#26484](https://github.com/FRIKKern/barkpark/pull/26484), [#26353](https://github.com/FRIKKern/barkpark/pull/26353), [#26408](https://github.com/FRIKKern/barkpark/pull/26408))
