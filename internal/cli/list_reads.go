@@ -44,6 +44,7 @@ var listReadCommands = map[string]bool{
 	"access.mine":        true, // access_controller.ex  -> grants
 	"app_token.ls":       true, // app_token_controller.ex -> tokens
 	"auth.invitation-ls": true, // invitation_controller.ex -> invitations
+	"audit.ls":           true, // audit_controller.ex   -> events
 	"chat.list_sessions": true, // chat_controller.ex    -> sessions
 	"dataset.stats":      true, // analytics_controller.ex -> types
 	"doc.actions":        true, // document_actions_controller.ex -> actions

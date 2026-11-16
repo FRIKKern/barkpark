@@ -35,8 +35,8 @@ defmodule Barkpark.Audit.Feed do
   ## Filters and paging
 
   `parse/1` reads string params: `category` (one of `Event.categories/0`),
-  `actor` (an exact actor id), `from` and `to` (an ISO 8601 date or time; a
-  `to` date includes that whole day), `limit` (default 50, capped at 200).
+  `actor` (an exact actor id), `since` and `until` (an ISO 8601 date or time; an
+  `until` date includes that whole day), `limit` (default 50, capped at 200).
   Every filter narrows the scoped query; none can widen it. Paging is by
   keyset: `:before_id` lists rows older than that id. The HTTP route hands
   callers an encrypted cursor bound to the workspace and project, so the raw
@@ -87,8 +87,8 @@ defmodule Barkpark.Audit.Feed do
   def parse(params) when is_map(params) do
     with {:ok, acc} <- put_category(present(params["category"]), %{}),
          {:ok, acc} <- put_actor(present(params["actor"]), acc),
-         {:ok, acc} <- put_from(present(params["from"]), acc),
-         {:ok, acc} <- put_to(present(params["to"]), acc) do
+         {:ok, acc} <- put_from(present(params["since"]), acc),
+         {:ok, acc} <- put_to(present(params["until"]), acc) do
       put_limit(present(params["limit"]), acc)
     end
   end
@@ -167,7 +167,7 @@ defmodule Barkpark.Audit.Feed do
     case moment(v) do
       {:date, d} -> {:ok, Map.put(acc, :from, DateTime.new!(d, ~T[00:00:00], "Etc/UTC"))}
       {:time, t} -> {:ok, Map.put(acc, :from, t)}
-      :error -> {:error, {:invalid, "from"}}
+      :error -> {:error, {:invalid, "since"}}
     end
   end
 
@@ -183,7 +183,7 @@ defmodule Barkpark.Audit.Feed do
         {:ok, Map.put(acc, :to, {:until, t})}
 
       :error ->
-        {:error, {:invalid, "to"}}
+        {:error, {:invalid, "until"}}
     end
   end
 

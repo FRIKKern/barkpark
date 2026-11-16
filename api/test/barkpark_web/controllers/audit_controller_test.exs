@@ -100,10 +100,10 @@ defmodule BarkparkWeb.AuditControllerTest do
     assert "a-token" in Enum.map(body["events"], & &1["target"]["id"])
 
     assert get_json(ctx.admin_a.raw, audit_path(ctx, category: "nope")).status == 422
-    assert get_json(ctx.admin_a.raw, audit_path(ctx, from: "yesterday")).status == 422
+    assert get_json(ctx.admin_a.raw, audit_path(ctx, since: "yesterday")).status == 422
 
     future = Date.utc_today() |> Date.add(2) |> Date.to_iso8601()
-    body = get_json(ctx.admin_a.raw, audit_path(ctx, from: future)) |> json_response(200)
+    body = get_json(ctx.admin_a.raw, audit_path(ctx, since: future)) |> json_response(200)
     assert body["events"] == []
 
     # A huge limit is capped, not refused.

@@ -21,7 +21,7 @@ defmodule BarkparkWeb.AuditController do
   an instance-level row. Each row carries only the fields that module
   documents; `metadata` is never sent.
 
-  Query: `category`, `actor`, `from`, `to`, `limit` (capped at 200, never
+  Query: `category`, `actor`, `since`, `until`, `limit` (capped at 200, never
   refused for size) and `cursor`. A cursor is the `next_cursor` of an earlier
   page, encrypted and bound to this workspace and project, so a cursor from
   another workspace or a made-up one answers 422 `invalid_filter`.
@@ -106,7 +106,7 @@ defmodule BarkparkWeb.AuditController do
     do:
       "This cursor is not from this workspace's audit log, or it is too old. Start again without it."
 
-  defp invalid_message(field) when field in ["from", "to"],
+  defp invalid_message(field) when field in ["since", "until"],
     do: "#{field} must be a date (2026-11-16) or an ISO 8601 time."
 
   defp invalid_message(_field), do: "actor must be an actor id of 200 characters or fewer."
