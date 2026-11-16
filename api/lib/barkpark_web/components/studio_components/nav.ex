@@ -609,7 +609,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     base_re = Regex.escape(base)
 
     structure_active =
-      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!(
+        "^#{base_re}(?:$|/(?!media(?:/|$)|_search(?:/|$)|_webhooks(?:/|$)|api-tester(?:/|$)).*)"
+      )
 
     media_path = "#{base}/media"
     api_path = "#{base}/api-tester"
@@ -652,6 +654,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       }
     ] ++
       search_entry(base, admin?) ++
+      webhooks_entry(base, admin?) ++
       tmux_console_entry(admin?, return_path) ++
       claude_chat_entry(scope_prefix, admin?, return_path) ++
       styleguide_entry(admin?, return_path) ++
@@ -669,6 +672,15 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   end
 
   defp search_entry(_base, _admin?), do: []
+
+  # The Webhooks tab, beside Search and gated the same way (`Studio.WebhooksLive`
+  # asks again at mount and on every event): the dataset's webhooks.
+  defp webhooks_entry(base, true) do
+    path = "#{base}/_webhooks"
+    [%{label: gettext("Webhooks"), path: path, icon: "send", order: 36, active_when: path}]
+  end
+
+  defp webhooks_entry(_base, _admin?), do: []
 
   # The Connectors tab (connectors D49). Admin-only. Scope-prefixed EXACTLY like
   # Settings, and for the same reason: the catalog is scoped-in-substance (an

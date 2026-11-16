@@ -2,10 +2,8 @@ defmodule BarkparkWeb.WebhookController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content.Errors
-  alias Barkpark.Content.MutationEvent
-  alias Barkpark.Repo
   alias Barkpark.Webhooks
-  alias Barkpark.Webhooks.Dispatcher
+  alias Barkpark.Webhooks.{Console, Dispatcher}
   alias BarkparkWeb.ScopeHelpers
 
   def index(conn, %{"dataset" => dataset}) do
@@ -29,7 +27,7 @@ defmodule BarkparkWeb.WebhookController do
   # secret is GENERATED here and returned ONCE as `secret` (rotate's contract).
   # A caller-supplied secret is stored as given and never echoed back.
   def create(conn, %{"dataset" => dataset} = params) do
-    {attrs, generated} = ensure_secret(Map.put(params, "dataset", dataset))
+    {attrs, generated} = Console.ensure_secret(Map.put(params, "dataset", dataset))
 
     with :ok <- refuse_audit_subscription(params),
          {:ok, wh} <- Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
@@ -124,40 +122,15 @@ defmodule BarkparkWeb.WebhookController do
   404 if the webhook (under this dataset) or the event id is unknown.
   """
   def replay(conn, %{"dataset" => dataset, "id" => id, "event_id" => event_id}) do
-    with {:ok, wh} <- fetch_scoped(conn, dataset, id),
-         {:ok, eid} <- parse_event_id(event_id),
-         %MutationEvent{} = ev <- Repo.get(MutationEvent, eid),
-         # Tenant isolation: only an event auto-dispatch could have delivered to
-         # this webhook may be replayed to it — anything else is refused as
-         # not-found, never leaked into another tenant's endpoint.
-         true <- event_in_scope?(ev, wh) do
-      body =
-        Dispatcher.build_payload(
-          ev.mutation,
-          ev.type,
-          ev.doc_id,
-          ev.document,
-          ev.dataset,
-          workspace_id: ev.workspace_id,
-          project_id: ev.project_id
-        )
-        |> Jason.encode!()
+    case fetch_scoped(conn, dataset, id) do
+      {:ok, wh} ->
+        case Console.replay(wh, event_id) do
+          {:ok, delivery} -> json(conn, %{delivery: render_delivery(delivery)})
+          {:error, _not_found} -> event_not_found(conn)
+        end
 
-      case Dispatcher.replay_delivery(wh, body, eid) do
-        {:ok, delivery} ->
-          json(conn, %{delivery: render_delivery(delivery)})
-
-        # The event or its delivery row was deleted between the guard above and
-        # the claim (`:event_gone` / `:delivery_gone`). Same verdict as an
-        # unknown event id: 404, never a 500 from a bare match on the crash.
-        {:error, _gone} ->
-          event_not_found(conn)
-      end
-    else
-      :error -> webhook_not_found(conn)
-      {:error, :bad_event_id} -> event_not_found(conn)
-      nil -> event_not_found(conn)
-      false -> event_not_found(conn)
+      :error ->
+        webhook_not_found(conn)
     end
   end
 
@@ -170,7 +143,7 @@ defmodule BarkparkWeb.WebhookController do
   def rotate(conn, %{"dataset" => dataset, "id" => id}) do
     case fetch_scoped(conn, dataset, id) do
       {:ok, wh} ->
-        new_secret = generate_secret()
+        new_secret = Console.generate_secret()
 
         case Webhooks.rotate_secret(wh, new_secret) do
           {:ok, rotated} ->
@@ -220,12 +193,7 @@ defmodule BarkparkWeb.WebhookController do
   def test_send(conn, %{"dataset" => dataset, "id" => id}) do
     case fetch_scoped(conn, dataset, id) do
       {:ok, wh} ->
-        body = wh |> test_payload() |> Jason.encode!()
-        # `endpoint_id` intentionally omitted (NULL) — the snapshot holds the
-        # target url + probe body; the secret is NOT snapshotted (a test is never
-        # resumed, so there is nothing to re-sign later).
-        {:ok, delivery} = Webhooks.create_test_delivery(%{"url" => wh.url, "body" => body})
-        {:ok, delivery} = Dispatcher.deliver_test(wh, body, delivery)
+        {:ok, delivery} = Console.send_test(wh)
         json(conn, %{delivery: render_delivery(delivery)})
 
       :error ->
@@ -233,67 +201,11 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
-  # Synthetic probe payload: a self-describing `webhook.test` envelope so the
-  # receiver can tell a manual test apart from a real content event.
-  defp test_payload(wh) do
-    %{
-      type: "webhook.test",
-      dataset: wh.dataset,
-      delivery: "test",
-      message:
-        "Test delivery from Barkpark — someone clicked \"Send test\" to verify this endpoint.",
-      webhook: %{id: wh.id, name: wh.name},
-      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
-    }
-  end
-
-  # Mirror of the dispatch-time selection scope (`Webhooks.active_webhooks_for`
-  # through `Scope.scope_to_workspace_or_global`): a webhook may REPLAY an event
-  # only if auto-dispatch could have SELECTED it for that event. The dataset
-  # must match, and a workspace-scoped event additionally requires the webhook
-  # to live in the same workspace (and same project, when the event carries
-  # one); an unscoped (legacy) event replays only to a shared-layer webhook,
-  # exactly as dispatch selects it. The dataset STRING alone is NOT a
-  # tenant boundary — "production" exists in every workspace and event ids are
-  # global sequential integers, so without the workspace clause a wsB admin
-  # could point a wsB webhook at their own URL and replay wsA's event ids into
-  # it (cross-tenant document-snapshot exfiltration).
-  # A NULL-project webhook is workspace-wide (see `Webhooks.scope/2`), so it may
-  # replay any event of its own workspace.
-  # task-ae096a1b6ef7f5a6: listener presence is per-machine heartbeat truth and
-  # never fans out to a webhook (PDF-D18). Automatic dispatch, the SSE live leg
-  # and the SSE replay leg all drop `type == "listener"`; the replay door must
-  # agree, or an admin can hand-deliver what no automatic path would send.
-  defp event_in_scope?(%MutationEvent{type: "listener"}, _wh), do: false
-
-  # A workspace-less event replays only to a shared-layer (NULL-workspace)
-  # webhook, the same fail-closed rule dispatch applies (owner ruling #51, RQ2).
-  defp event_in_scope?(ev, wh) do
-    ev.dataset == wh.dataset and
-      ((is_nil(ev.workspace_id) and is_nil(wh.workspace_id)) or
-         (is_binary(ev.workspace_id) and ev.workspace_id == wh.workspace_id and
-            (is_nil(ev.project_id) or is_nil(wh.project_id) or ev.project_id == wh.project_id)))
-  end
-
   # Load a webhook by id, enforcing BOTH the tenant scope (workspace/project via
-  # scope_opts) AND the :dataset path segment — a webhook id fetched under the
-  # wrong dataset is refused as not-found (cross-dataset access guard).
-  defp fetch_scoped(conn, dataset, id) do
-    with :ok <- validate_uuid(id),
-         {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
-         true <- wh.dataset == dataset do
-      {:ok, wh}
-    else
-      _ -> :error
-    end
-  end
-
-  defp parse_event_id(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {n, ""} -> {:ok, n}
-      _ -> {:error, :bad_event_id}
-    end
-  end
+  # scope_opts) AND the :dataset path segment — `Console.fetch_scoped/3`, the
+  # same lookup the Studio Webhooks page uses.
+  defp fetch_scoped(conn, dataset, id),
+    do: Console.fetch_scoped(id, dataset, ScopeHelpers.scope_opts(conn))
 
   # A garbage ?limit= is treated as absent so the context applies its default.
   # Clamped and defaulted HERE, not left to the context: `deliveries/2` needs
@@ -335,19 +247,6 @@ defmodule BarkparkWeb.WebhookController do
 
   defp parse_offset(value) when is_integer(value), do: max(value, 0)
   defp parse_offset(_), do: 0
-
-  defp ensure_secret(attrs) do
-    if Dispatcher.blank_secret?(Map.get(attrs, "secret")) do
-      secret = generate_secret()
-      {Map.put(attrs, "secret", secret), secret}
-    else
-      {attrs, nil}
-    end
-  end
-
-  defp generate_secret do
-    "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
-  end
 
   defp render_delivery(d) do
     %{
