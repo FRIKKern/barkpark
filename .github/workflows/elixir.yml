@@ -1626,6 +1626,14 @@ jobs:
         working-directory: .
         run: bash scripts/elixir-test-partition.test.sh
 
+      # The Test step runs `mix test` under scripts/ci-test-watchdog.sh
+      # (task-6d4727b7cff1f2bd). Its harness proves it keeps a red red and a
+      # green green, and that a silent BEAM is dumped and failed.
+      - name: The test watchdog keeps exit codes and can fire
+        if: matrix.partition == 1
+        working-directory: .
+        run: bash scripts/ci-test-watchdog.test.sh
+
       - name: No NEW unreachable assert messages (never-worse ratchet)
         # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
         if: matrix.partition == 1
@@ -2145,7 +2153,27 @@ jobs:
             exit 0
           fi
           echo "running ${#files[@]} test files in this cell"
-          mix test --slowest 50 "${files[@]}"
+          # THE WATCHDOG (task-6d4727b7cff1f2bd): partition 2 has died ~1 run in
+          # 5 since 2026-11-12 ("The hosted runner lost communication with the
+          # server", ~50 min, no dump). The watchdog prints one health line every
+          # 30 s (free memory, swap, disk, load, BEAM RSS), and if the output is
+          # silent for 300 s (green max: 149 s) or memory/disk run out, it dumps
+          # the BEAM, prints the top processes, and fails with 124. It never
+          # changes the exit code of a run it did not stop.
+          bash ../scripts/ci-test-watchdog.sh --out "$RUNNER_TEMP/test-watchdog" -- \
+            mix test --slowest 50 "${files[@]}"
+
+      - name: Upload the test watchdog dump (when it fired or the step failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-watchdog-p${{ matrix.partition }}
+          path: |
+            ${{ runner.temp }}/test-watchdog/watchdog.txt
+            ${{ runner.temp }}/test-watchdog/procs.tsv
+            ${{ runner.temp }}/test-watchdog/erl_crash.dump
+          if-no-files-found: ignore
+          retention-days: 14
 
       # The selection is UPLOADED on every run, pass or fail. It is the only
       # record of what a given sha actually executed, and the attribution
