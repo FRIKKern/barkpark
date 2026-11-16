@@ -1,0 +1,7 @@
+{
+  "plugin_name": "ecosystem_panel",
+  "version": "0.1.0",
+  "description": "Ecosystem panel — the eco-dash status page behind Barkpark sign-in. A workspace owner or admin pushes the built page; the server keeps one overwritten row per workspace and shows it only to that workspace's owners and admins.",
+  "capabilities": ["routes"],
+  "module": "Barkpark.Plugins.EcosystemPanel"
+}

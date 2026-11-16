@@ -36,8 +36,12 @@ defmodule BarkparkWeb.ChatUserTurn do
 
   require Logger
 
+  import Ecto.Query, only: [where: 3]
+
+  alias Barkpark.ChatHosts
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{AttachmentName, Attachments}
+  alias Barkpark.StudioChat.{AttachmentName, Attachments, Message}
 
   # The Studio composer's cap (its allow_upload max_entries).
   @max_attachments 4
@@ -56,6 +60,25 @@ defmodule BarkparkWeb.ChatUserTurn do
   @doc "The most attachments one message may name."
   @spec max_attachments() :: pos_integer()
   def max_attachments, do: @max_attachments
+
+  @doc """
+  Refuses a chat body whose top-level text holds U+0000. Postgres refuses it
+  in any text column or parameter (22021), so such text fails the same way
+  every time: the chat routes answer it as a 400 before anything is
+  dispatched or stored (task-c663ef1789269e86). Run it after the unknown-key
+  check, so the key it names is one the route takes. An attachment name is
+  refused by `AttachmentName.valid?/1`, which already rejects control
+  characters.
+  """
+  @spec reject_nul(map()) :: :ok | {:error, String.t()}
+  def reject_nul(params) when is_map(params) do
+    case Enum.find(params, fn {_key, value} -> is_binary(value) and nul?(value) end) do
+      nil -> :ok
+      {key, _value} -> {:error, "#{key} must not contain a NUL character"}
+    end
+  end
+
+  defp nul?(text), do: String.contains?(text, <<0>>)
 
   @doc """
   The shape check on the body's `attachments` value. Absent (`nil`) is no
@@ -170,26 +193,86 @@ defmodule BarkparkWeb.ChatUserTurn do
   end
 
   @doc """
-  Append the caller's turn as a `role:"user"` row, so the session's replayable
-  history carries the human side (the Studio composer persists its own rows).
-  `metadata` is `resolve/3`'s: `origin: "api"` plus any attachment pointers.
+  Store the user's row for a turn that was just dispatched, and say what the
+  send's answer is (task-583b6031c13b28ac).
 
-  Best-effort: the turn has already been dispatched, so a persist error is
-  logged and never turns a live send into an error.
+  The row is the caller's turn as a `role:"user"` row, so the session's
+  replayable history carries the human side (the Studio composer persists its
+  own rows). Its metadata is `resolve/3`'s (`origin: "api"` plus any
+  attachment pointers) and the turn's `command_key`, the key a registered
+  host's lease is made under (task-f2b66baab8a251f2).
+
+  `:ok` (202) when the row is stored. A failed store is tried once more, so a
+  passing fault does not lose the row for good. When it still fails, the
+  answer follows the turn: a registered-host lease the server ends
+  (`ChatHosts.withdraw_turn/2`, under the `command_key` the turn was leased
+  with) is never run, so it is `{:error, :turn_not_stored}`, the retryable
+  `runtime_unavailable`, and the client may send again. A turn the server
+  cannot take back runs: a managed turn is already in the provider process,
+  a host may already have started the lease, and a lease the server could not
+  end is still handed to the host. That answer stays `:ok`, because a 5xx
+  would invite a second send of a turn that went.
+
+  A store never raises: a refused insert and a database fault are logged and
+  count as failed. `append` is `StudioChat.append_message/2`; a test passes
+  its own to play a fault.
   """
-  @spec persist(String.t(), String.t(), map()) :: :ok
-  def persist(session_id, text, metadata) do
-    case StudioChat.append_message(session_id, %{
-           role: "user",
-           source_markdown: text,
-           metadata: metadata
-         }) do
-      {:ok, _message} ->
-        :ok
+  @spec persist_sent(StudioChat.Session.t(), String.t(), map(), String.t(), function()) ::
+          :ok | {:error, :turn_not_stored}
+  def persist_sent(
+        %StudioChat.Session{} = session,
+        text,
+        metadata,
+        command_key,
+        append \\ &StudioChat.append_message/2
+      ) do
+    row = %{
+      role: "user",
+      source_markdown: text,
+      metadata: Map.put(metadata, "command_key", command_key)
+    }
 
-      {:error, reason} ->
-        Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
-        :ok
+    # An insert can commit and still raise (the reply to COMMIT is lost), so
+    # a failed store looks for the turn's row before it stores again and
+    # before it withdraws the lease. Found, or not knowable: the turn stays
+    # sent, never stored twice, never answered "not sent" (task-f2b66baab8a251f2).
+    with {:error, _reason} <- persist(session.id, row, append),
+         false <- stored?(session.id, command_key),
+         {:error, _reason} <- persist(session.id, row, append),
+         false <- stored?(session.id, command_key),
+         "registered_host" <- session.execution_target,
+         :ok <- ChatHosts.withdraw_turn(session.id, command_key) do
+      {:error, :turn_not_stored}
+    else
+      _ -> :ok
     end
+  end
+
+  # One query, on the failure path only. `:unknown` when the read fails too.
+  defp stored?(session_id, command_key) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role == "user")
+    |> where([m], fragment("?->>'command_key' = ?", m.metadata, ^command_key))
+    |> Repo.exists?()
+  rescue
+    _ -> :unknown
+  catch
+    :exit, _ -> :unknown
+  end
+
+  defp persist(session_id, row, append) do
+    case append.(session_id, row) do
+      {:ok, _message} -> :ok
+      {:error, reason} -> persist_failed(reason)
+    end
+  rescue
+    exception -> persist_failed(exception)
+  catch
+    :exit, reason -> persist_failed({:exit, reason})
+  end
+
+  defp persist_failed(reason) do
+    Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
+    {:error, reason}
   end
 end

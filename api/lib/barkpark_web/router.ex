@@ -2264,6 +2264,8 @@ defmodule BarkparkWeb.Router do
       live("/", StudioLive)
       live("/media", MediaLive)
       live("/_search", SearchLive)
+      live("/_webhooks", WebhooksLive)
+      live("/_activity", AuditLive)
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
 
@@ -3637,6 +3639,7 @@ defmodule BarkparkWeb.Router do
     get("/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
     get("/:dataset/collections/:id", V1.MediaCollectionsController, :show)
     get("/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/:dataset/:id/usage", V1.MediaController, :usage)
     get("/:dataset", V1.MediaController, :index)
     get("/:dataset/:id", V1.MediaController, :show)
   end
@@ -4219,6 +4222,12 @@ defmodule BarkparkWeb.Router do
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
   end
 
+  # Scoped audit log (admin). Scoped only: a flat path names no workspace.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+    get("/v1/audit", AuditController, :index)
+  end
+
   # Scoped run-secrets (admin) — the per-workspace tier of the encrypted
   # store (connectors D197/D199). Same SecretController as the flat
   # /v1/secrets route; the controller keys the tier off the ROUTE
@@ -4257,6 +4266,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/media/:dataset/collections/:id/assets", V1.MediaCollectionsController, :assets)
     get("/v1/media/:dataset/collections/:id", V1.MediaCollectionsController, :show)
     get("/v1/media/:dataset/:id/relations", V1.MediaController, :relations)
+    get("/v1/media/:dataset/:id/usage", V1.MediaController, :usage)
     get("/v1/media/:dataset", V1.MediaController, :index)
     get("/v1/media/:dataset/:id", V1.MediaController, :show)
   end

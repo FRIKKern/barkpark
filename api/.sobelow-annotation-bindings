@@ -173,6 +173,7 @@ lib/barkpark/tenancy/workspace_bundle/janitor.ex	own
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	owner_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	remove
 lib/barkpark_web/controllers/cycle_fleet_controller.ex	release_paper_render
+lib/barkpark_web/controllers/ecosystem_panel_frame_controller.ex	serve
 lib/barkpark_web/controllers/error_html.ex	render
 lib/barkpark_web/controllers/media_controller.ex	maybe_send_file
 lib/barkpark_web/controllers/saml_controller.ex	slo

@@ -9,7 +9,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     * **Directory Sync (SCIM)** — the active SCIM tokens, plus a one-click
       **mint** (the token plaintext is shown ONCE, right after minting).
     * **Members & Roles** — the user-member count.
-    * **Audit Log** — the recent audit activity.
+    * **Audit Log** — recent activity of the workspaces you administer (`AuditScope`).
 
   Note: gating is the existing global `:admin` (API-token) hook PLUS the
   platform-operator tier (task-05cf6cbd1b0460fe): every org's SCIM mint and
@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   import Ecto.Query, warn: false
   import BarkparkWeb.StudioComponents.Controls
 
-  alias Barkpark.{Audit, Repo, Scim, Tenancy}
+  alias Barkpark.{Repo, Scim, Tenancy}
   alias Barkpark.Sso.{Oidc, Saml}
   alias Barkpark.Tenancy.Membership
   alias BarkparkWeb.Plugs.RequirePlatformOperator
@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
     # the moment the WebSocket connects and mount re-runs. `load/1` fans out to
     # `list_organizations` + per-org status (SSO/SAML/SCIM/member-count) +
-    # `Audit.recent(20)` — a heavy read. This portal is admin-gated (no crawler
+    # `AuditScope.rows/1` — a heavy read. This portal is admin-gated (no crawler
     # consumes the dead HTML), so run `load/1` ONLY on the live mount; the dead
     # render carries empty placeholders (there is no handle_params here).
     socket =
@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         assign(socket,
           page_title: gettext("Organization Admin"),
           orgs: [],
+          org_scoped: false,
           recent_audit: [],
           minted: %{}
         )
@@ -86,7 +87,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   @impl true
   def handle_event(event, params, socket) do
     if operator?(socket) and still_admin?(socket),
-      do: do_event(event, params, socket),
+      do: BarkparkWeb.Studio.OrgAdminLive.OrgScope.guard(event, params, socket, &do_event/3),
       else: {:noreply, put_flash(socket, :error, operator_only())}
   end
 
@@ -227,12 +228,13 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   defp methods_label(methods) when is_list(methods), do: Enum.join(methods, ", ")
 
   defp load(socket) do
-    orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
+    orgs = Enum.map(BarkparkWeb.Studio.OrgAdminLive.OrgScope.orgs(socket.assigns), &org_status/1)
 
     assign(socket,
       page_title: gettext("Organization Admin"),
       orgs: orgs,
-      recent_audit: Audit.recent(20),
+      org_scoped: BarkparkWeb.Studio.OrgAdminLive.OrgScope.scoped?(socket.assigns),
+      recent_audit: BarkparkWeb.Studio.OrgAdminLive.AuditScope.rows(socket.assigns),
       minted: socket.assigns[:minted] || %{}
     )
   end
@@ -273,7 +275,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         {gettext("Configure enterprise SSO and directory sync, and review activity — per organization.")}
       </p>
 
-      <.bp_card :if={@orgs == []}>
+      <p :if={@org_scoped} class="text-sm" data-org-scope-note style="color: var(--fg-muted);">
+        {gettext("Organization settings are shown only for organizations you administer in full.")}
+      </p>
+
+      <.bp_card :if={@orgs == [] and not @org_scoped}>
         <p style="margin: 0; color: var(--fg-muted);">{gettext("No organizations yet.")}</p>
       </.bp_card>
 
@@ -463,7 +469,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
           <li :for={e <- @recent_audit}>
             <span class="org-admin-audit-action">{e.action}</span>
             <span class="badge badge-muted">{e.category}</span>
-            <span class="org-admin-audit-actor">{e.actor_id}</span>
+            <span class="org-admin-audit-actor">{e.actor_name || e.actor_id}</span>
           </li>
         </ul>
       </.bp_card>

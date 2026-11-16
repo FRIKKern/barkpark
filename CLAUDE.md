@@ -5,7 +5,7 @@ Read [Writing standard](docs/contracts/writing.md) for every task, alongside its
 
 ## Identity
 
-Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (root + `internal/cli/`; one binary driven by `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 13 today (Bulldocs, Forms, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64. Core is Barkpark's lake; Studio and every surface attach to it, in three shapes: Cloud (`cloud/`), Solo, App.
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (root + `internal/cli/`; one binary driven by `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 14 today (Bulldocs, Ecosystem_panel, Forms, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64. Core is Barkpark's lake; Studio and every surface attach to it, in three shapes: Cloud (`cloud/`), Solo, App.
 
 ## Golden Rules
 

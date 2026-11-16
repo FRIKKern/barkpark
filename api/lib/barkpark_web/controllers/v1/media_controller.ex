@@ -13,9 +13,10 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Access, Actor, Checkout, MediaFile, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
-  alias Barkpark.Media.WhereUsed
+  alias Barkpark.Media.{Usage, WhereUsed}
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.MediaVisibilityCopy
   alias BarkparkWeb.Plugs.RequireWritePermission
   alias BarkparkWeb.SearchIntel
@@ -476,6 +477,30 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  @doc """
+  `GET /v1/media/:dataset/:id/usage` — the documents that use this file, as
+  this caller may read them (`Barkpark.Media.Usage`). `bp media usage` and the
+  Studio media library's "Used in" list read it.
+
+  A caller with no principal is refused before the file is looked up: who
+  uses a file is an editor's question, and an anonymous answer would have to
+  hold every row to the public tier anyway. Past that, the file is gated
+  exactly like `show/2`: out of scope or in another dataset is a 404.
+  """
+  def usage(conn, %{"dataset" => dataset, "id" => id}) do
+    with :ok <- require_principal(conn),
+         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         :ok <- ensure_dataset(file, dataset),
+         :ok <- ensure_viewable(conn, file, asset_doc(file, dataset)) do
+      opts = scope_opts(conn) ++ [published_only: AnonPerspective.anon_pinned?(conn)]
+      json(conn, %{result: Usage.list(file, dataset, opts)})
+    end
+  end
+
+  defp require_principal(conn) do
+    if Access.authenticated?(conn), do: :ok, else: {:error, :unauthorized}
+  end
+
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn),
          {:ok, source_id} <- source_id_param(params),
@@ -905,8 +930,10 @@ defmodule BarkparkWeb.V1.MediaController do
     {:refused, %{code: env[:code], message: env[:message]}}
   end
 
+  # Only the message and the count ride a delete-many row, never the sample,
+  # so no document is named and no read is needed.
   defp refusal(file, census) do
-    env = WhereUsed.refusal_envelope(file, census)
+    env = WhereUsed.refusal_envelope(file, %{census | sample: []}, [])
     %{code: env.code, message: env.message, referencedByCount: census.count}
   end
 
@@ -958,7 +985,15 @@ defmodule BarkparkWeb.V1.MediaController do
           {:ok, nil}
 
         census ->
-          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+          env =
+            Errors.stamp(
+              WhereUsed.refusal_envelope(
+                file,
+                census,
+                BarkparkWeb.ScopeHelpers.scope_opts_with_binding(conn)
+              ),
+              conn
+            )
 
           conn
           |> put_status(:conflict)

@@ -859,6 +859,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "plugin" => nil
       },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
+      %{"name" => "audit", "summary" => "The workspace's audit log.", "plugin" => nil},
       %{
         "name" => "token",
         "summary" => "Mint read-only, workspace-bound API tokens.",
@@ -1943,6 +1944,19 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/media/:dataset/:id/relations",
         "none",
+        args: [arg("id", true, "string", "Asset id.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.usage",
+        "media",
+        "usage",
+        "List the documents that use an asset (those you can read), draft or published.",
+        "GET",
+        "/v1/media/:dataset/:id/usage",
+        "read",
         args: [arg("id", true, "string", "Asset id.")],
         writes: false,
         default_output: "table",
@@ -3403,6 +3417,30 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("offset", "int", "Tokens to skip.", default: 0)
         ],
         paginated: true,
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "audit.ls",
+        "audit",
+        "ls",
+        "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
+        "GET",
+        "/v1/audit",
+        "scoped_admin",
+        flags: [
+          flag(
+            "category",
+            "string",
+            "content_mutation, token, access, membership, plugin_settings, secret or auth."
+          ),
+          flag("actor", "string", "Only events by this actor id."),
+          flag("since", "string", "From this date or ISO 8601 time."),
+          flag("until", "string", "Up to this date (the whole day) or ISO 8601 time."),
+          flag("limit", "int", "Max events to return (at most 200).", default: 50),
+          flag("cursor", "string", "next_cursor from the previous page.")
+        ],
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

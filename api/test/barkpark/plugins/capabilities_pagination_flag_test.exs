@@ -556,6 +556,9 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
       {:signalled, "public share view: hasMore + nextOffset beside total"},
     "BarkparkWeb.TasksController.events" =>
       {:signalled, "keyset replay: has_more + cursor, passed back as ?since="},
+    "BarkparkWeb.AuditController.index" =>
+      {:signalled,
+       "keyset: next_cursor (null on the last page), passed back as ?cursor=; walked in audit_controller_test.exs"},
     "BarkparkWeb.PulseController.recent" =>
       {:signalled, "keyset: Pulse.recent/3 returns next (pass back as since) and total"},
     "BarkparkWeb.ScheduleController.index" =>

@@ -848,6 +848,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # V1.MediaController.usage
+    {"GET", "/v1/media/:dataset/:id/usage"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the file read and every document read " <>
+         "(Media.Usage), so the rows are the pipeline-derived :current_workspace's — " <>
+         "which DeriveWorkspaceFromToken fills from the token before AssignDefaultScope."},
     # V1.MediaCollectionsController.index
     {"GET", "/v1/media/:dataset/collections"} =>
       {:workspace_derived,
@@ -935,6 +941,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "instance settings keyed on the ADMIN TOKEN's own id (Settings.get/put/delete take " <>
          "user_id:); the plugin_settings table has no workspace column. Source carries no " <>
          "scope marker at all."},
+    # EcosystemPanelSnapshotController.create
+    {"POST", "/v1/plugins/ecosystem-panel/snapshot"} =>
+      {:workspace_derived,
+       "the flat copy answers 404 and writes nothing (create/2 matches only a path with " <>
+         "workspace_slug); the scoped mirror keys the row on conn.assigns[:current_workspace] " <>
+         "resolved from the URL slug, never on a body or query workspace_id."},
     # TicketKeysController.index
     {"GET", "/v1/plugins/tickets/keys"} =>
       {:workspace_derived,

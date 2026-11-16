@@ -44,6 +44,7 @@ var listReadCommands = map[string]bool{
 	"access.mine":        true, // access_controller.ex  -> grants
 	"app_token.ls":       true, // app_token_controller.ex -> tokens
 	"auth.invitation-ls": true, // invitation_controller.ex -> invitations
+	"audit.ls":           true, // audit_controller.ex   -> events
 	"chat.list_sessions": true, // chat_controller.ex    -> sessions
 	"dataset.stats":      true, // analytics_controller.ex -> types
 	"doc.actions":        true, // document_actions_controller.ex -> actions
@@ -64,6 +65,7 @@ var listReadCommands = map[string]bool{
 	"graph.show":              true, // tasks_controller.ex  -> nodes
 	"graph.tasks":             true, // tasks_controller.ex  -> tasks
 	"media.search-synonyms":   true, // v1/media_controller.ex -> result (bare array)
+	"media.usage":             true, // v1/media_controller.ex -> result.documents
 	"paper.access":            true, // paper_access_controller.ex -> access
 	"paper.masters":           true, // paper_masters_controller.ex -> masters
 	"plugin.ls":               true, // plugins_controller.ex  -> plugins
