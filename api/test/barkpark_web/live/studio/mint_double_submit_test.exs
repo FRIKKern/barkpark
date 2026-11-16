@@ -31,6 +31,13 @@ defmodule BarkparkWeb.Studio.MintDoubleSubmitTest do
     {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
     {:ok, ws} = Tenancy.create_workspace(%{slug: slug <> "-ws", name: "WS"})
     {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+    # The viewer administers the org (task-4d44f2aefec77aff): an admin seat in its workspace.
+    admin =
+      Repo.get_by!(Barkpark.Auth.ApiToken,
+        token_hash: Barkpark.Auth.ApiToken.hash_token(@admin_token)
+      )
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, admin.id, "admin", "api_token")
     {org, ws}
   end
 

@@ -14794,6 +14794,11 @@ msgstr ""
 msgid "Not recorded"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/org_admin_live/org_scope.ex:88
+#, elixir-autogen, elixir-format
+msgid "You do not administer this organization."
+msgstr ""
+
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
 #, elixir-autogen, elixir-format
