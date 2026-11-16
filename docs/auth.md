@@ -17,15 +17,15 @@ The principal is the API token; each binds to one **workspace** (tenancy boundar
 - a `workspace_memberships` row: its membership.
 
 Requests carry both in the path
-(`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
+(`/w/:ws/p/:proj/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
 no membership row → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`, …) resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). Minted with an explicit
-`dataset` (`dataset_bound`), a token gets `403 dataset_not_bound` elsewhere and on
-workspace/project create, playground, import (old `bp` bound every
-`write`/`admin` mint: re-mint); unbound, `dataset` binds nothing.
+`dataset` (`dataset_bound`), it gets `403 dataset_not_bound` elsewhere, on
+workspace/project create, playground, import and audit/members/tokens/secrets
+reads (old `bp` bound `write`/`admin` mints: re-mint); unbound, it binds nothing.
 
 ## Roles (`ApiToken.permissions`)
 
