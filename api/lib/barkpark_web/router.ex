@@ -2264,6 +2264,7 @@ defmodule BarkparkWeb.Router do
       live("/", StudioLive)
       live("/media", MediaLive)
       live("/_search", SearchLive)
+      live("/_webhooks", WebhooksLive)
       live("/api-tester", ApiTesterLive)
       live("/_account", AccountLive)
 
