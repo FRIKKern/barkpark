@@ -14699,6 +14699,106 @@ msgstr "prøver igjen etter %{code}"
 msgid "waiting"
 msgstr "venter"
 
+#: lib/barkpark_web/live/studio/audit_live.ex:55 lib/barkpark_web/live/studio/audit_live/view.ex:42 lib/barkpark_web/components/studio_components/nav.ex:690
+#, elixir-autogen, elixir-format
+msgid "Activity"
+msgstr "Aktivitet"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:44
+#, elixir-autogen, elixir-format
+msgid "Who changed what in this workspace, such as content, tokens, access grants and webhooks. Sign-ins and other account events are not listed here."
+msgstr "Hvem som endret hva i dette arbeidsområdet, for eksempel innhold, tokener, tilgangsgranter og webhooks. Innlogginger og andre kontohendelser vises ikke her."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:50 lib/barkpark_web/live/studio/audit_live/view.ex:87
+#, elixir-autogen, elixir-format
+msgid "Filter"
+msgstr "Filtrer"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:57 lib/barkpark_web/live/studio/audit_live/view.ex:122
+#, elixir-autogen, elixir-format
+msgid "Category"
+msgstr "Kategori"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:70
+#, elixir-autogen, elixir-format
+msgid "Actor id"
+msgstr "Aktør-ID"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:89
+#, elixir-autogen, elixir-format
+msgid "Clear filters"
+msgstr "Fjern filtrene"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:105
+#, elixir-autogen, elixir-format
+msgid "Newest first. Times are UTC."
+msgstr "Nyeste først. Tidene er i UTC."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:114
+#, elixir-autogen, elixir-format
+msgid "No events match."
+msgstr "Ingen hendelser passer."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:124
+#, elixir-autogen, elixir-format
+msgid "Actor"
+msgstr "Aktør"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:125
+#, elixir-autogen, elixir-format
+msgid "Target"
+msgstr "Mål"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:170
+#, elixir-autogen, elixir-format
+msgid "Show only this actor"
+msgstr "Vis bare denne aktøren"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:184
+#, elixir-autogen, elixir-format
+msgid "Pick a category from the list."
+msgstr "Velg en kategori fra listen."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:187
+#, elixir-autogen, elixir-format
+msgid "Enter dates as year-month-day, for example 2026-11-16."
+msgstr "Skriv datoer som år-måned-dag, for eksempel 2026-11-16."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:189
+#, elixir-autogen, elixir-format
+msgid "The actor id is too long."
+msgstr "Aktør-ID-en er for lang."
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:192
+#, elixir-autogen, elixir-format
+msgid "Sign-in"
+msgstr "Innlogging"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:194
+#, elixir-autogen, elixir-format
+msgid "Secrets"
+msgstr "Hemmeligheter"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:195
+#, elixir-autogen, elixir-format
+msgid "Settings and webhooks"
+msgstr "Innstillinger og webhooks"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:196
+#, elixir-autogen, elixir-format
+msgid "Tokens"
+msgstr "Tokener"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:200
+#, elixir-autogen, elixir-format
+msgid "Person"
+msgstr "Person"
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:204
+#, elixir-autogen, elixir-format
+msgid "Not recorded"
+msgstr "Ikke registrert"
+
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
 #, elixir-autogen, elixir-format

@@ -14694,6 +14694,106 @@ msgstr ""
 msgid "waiting"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/audit_live.ex:55 lib/barkpark_web/live/studio/audit_live/view.ex:42 lib/barkpark_web/components/studio_components/nav.ex:690
+#, elixir-autogen, elixir-format
+msgid "Activity"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:44
+#, elixir-autogen, elixir-format
+msgid "Who changed what in this workspace, such as content, tokens, access grants and webhooks. Sign-ins and other account events are not listed here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:50 lib/barkpark_web/live/studio/audit_live/view.ex:87
+#, elixir-autogen, elixir-format
+msgid "Filter"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:57 lib/barkpark_web/live/studio/audit_live/view.ex:122
+#, elixir-autogen, elixir-format
+msgid "Category"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:70
+#, elixir-autogen, elixir-format
+msgid "Actor id"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:89
+#, elixir-autogen, elixir-format
+msgid "Clear filters"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:105
+#, elixir-autogen, elixir-format
+msgid "Newest first. Times are UTC."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:114
+#, elixir-autogen, elixir-format
+msgid "No events match."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:124
+#, elixir-autogen, elixir-format
+msgid "Actor"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:125
+#, elixir-autogen, elixir-format
+msgid "Target"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:170
+#, elixir-autogen, elixir-format
+msgid "Show only this actor"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:184
+#, elixir-autogen, elixir-format
+msgid "Pick a category from the list."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:187
+#, elixir-autogen, elixir-format
+msgid "Enter dates as year-month-day, for example 2026-11-16."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:189
+#, elixir-autogen, elixir-format
+msgid "The actor id is too long."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:192
+#, elixir-autogen, elixir-format
+msgid "Sign-in"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:194
+#, elixir-autogen, elixir-format
+msgid "Secrets"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:195
+#, elixir-autogen, elixir-format
+msgid "Settings and webhooks"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:196
+#, elixir-autogen, elixir-format
+msgid "Tokens"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:200
+#, elixir-autogen, elixir-format
+msgid "Person"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/audit_live/view.ex:204
+#, elixir-autogen, elixir-format
+msgid "Not recorded"
+msgstr ""
+
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
 #: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
 #, elixir-autogen, elixir-format

@@ -112,6 +112,12 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       active: "Webhooks"
     },
     %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_activity",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/_activity"},
+      active: "Activity"
+    },
+    %{
       route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/api-tester",
       disposition: :mount,
       url: {:scoped, "/d/production/studio/api-tester"},
