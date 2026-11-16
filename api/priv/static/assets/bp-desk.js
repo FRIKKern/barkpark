@@ -703,32 +703,27 @@
       // or Paste made before the script has arrived waits for it and is then
       // made again. If it does not arrive, the pane's toast says so, and the
       // next click tries the load again.
-      var fieldScript = function () {
+      var deskScript = function (attr, loaded) {
         var doc = root.ownerDocument;
-        var src = root.getAttribute("data-desk-field-actions");
-        var script = doc.querySelector("script[data-desk-field-actions]");
-        if (script || !src || window.BarkparkDeskFieldActions) return script;
+        var src = root.getAttribute(attr);
+        var script = doc.querySelector("script[" + attr + "]");
+        if (script || !src || loaded) return script;
         script = doc.createElement("script");
         script.src = src;
         script.async = true;
-        script.setAttribute("data-desk-field-actions", "");
+        script.setAttribute(attr, "");
         script.addEventListener("error", function () {
           script.remove();
         });
         doc.head.appendChild(script);
         return script;
       };
+      var fieldScript = function () {
+        return deskScript("data-desk-field-actions", window.BarkparkDeskFieldActions);
+      };
       fieldScript();
-      // The Validation panel's jump to a field (bp-desk-validation.js), the
-      // desk's alone too: loaded once, from the address the page gives.
-      var jumpSrc = root.getAttribute("data-desk-validation");
-      if (jumpSrc && !window.BarkparkDeskValidation && !document.querySelector("script[data-desk-validation]")) {
-        var jump = document.createElement("script");
-        jump.src = jumpSrc;
-        jump.async = true;
-        jump.setAttribute("data-desk-validation", "");
-        document.head.appendChild(jump);
-      }
+      // The Validation panel's jump to a field (bp-desk-validation.js).
+      deskScript("data-desk-validation", window.BarkparkDeskValidation);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.

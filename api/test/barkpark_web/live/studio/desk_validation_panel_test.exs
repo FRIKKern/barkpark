@@ -200,7 +200,14 @@ defmodule BarkparkWeb.Studio.DeskValidationPanelTest do
     assert view |> element(problem) |> render() |> text() ==
              "Limit Must be lower than or equal to 10"
 
-    # The fieldset is still folded: the browser opens it on the way.
+    # Limit is in no group, so the Content tab does not draw it.
+    refute has_element?(view, ~s(#{@pane} fieldset[data-fieldset="more"]))
+
+    view |> element(problem) |> render_click()
+
+    # All fields now, and the fieldset still folded: the browser opens it.
+    assert has_element?(view, ~s(#{@pane} [role="tab"][aria-selected="true"]), "All fields")
+
     assert has_element?(
              view,
              ~s(#{@pane} fieldset[data-fieldset="more"] .object-toggle[aria-expanded="false"])
@@ -264,7 +271,7 @@ defmodule BarkparkWeb.Studio.DeskValidationPanelTest do
     js = File.read!(Application.app_dir(:barkpark, "priv/static/assets/bp-desk-validation.js"))
     assert js =~ ~s("desk:goto-field")
     desk = File.read!(Application.app_dir(:barkpark, "priv/static/assets/bp-desk.js"))
-    assert desk =~ ~s|getAttribute("data-desk-validation")|
+    assert desk =~ ~s|deskScript("data-desk-validation"|
   end
 
   test "problems/1: none without a document or a schema; errors are what block" do

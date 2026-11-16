@@ -14808,3 +14808,58 @@ msgstr "Du administrerer ikke denne organisasjonen."
 #, elixir-autogen, elixir-format
 msgid "Organization settings are shown only for organizations you administer in full."
 msgstr "Organisasjonsinnstillinger vises bare for organisasjoner du administrerer fullt ut."
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Validation"
+msgstr "Validering"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close validation"
+msgstr "Lukk validering"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No validation errors"
+msgstr "Ingen valideringsfeil"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be lower than or equal to %{max}"
+msgstr "Må være mindre enn eller lik %{max}"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be greater than or equal to %{min}"
+msgstr "Må være større enn eller lik %{min}"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at most %{max} characters long"
+msgstr "Må være maksimalt %{max} tegn lang"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at least %{min} characters long"
+msgstr "Må være minst %{min} tegn lang"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at most %{max} items"
+msgstr "Kan ha høyst %{max} elementer"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at least %{min} items"
+msgstr "Må ha minst %{min} elementer"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Can't be a duplicate"
+msgstr "Kan ikke være et duplikat"
+
+#: lib/barkpark_web/live/studio/desk/doc_footer.ex
+#, elixir-autogen, elixir-format
+msgid "There are validation errors that need to be fixed before this document can be published"
+msgstr "Valideringsfeil må rettes før det kan publiseres"

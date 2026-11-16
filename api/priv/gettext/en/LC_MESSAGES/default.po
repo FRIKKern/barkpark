@@ -14806,3 +14806,58 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Organization settings are shown only for organizations you administer in full."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Validation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close validation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No validation errors"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be lower than or equal to %{max}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be greater than or equal to %{min}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at most %{max} characters long"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at least %{min} characters long"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at most %{max} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at least %{min} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Can't be a duplicate"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_footer.ex
+#, elixir-autogen, elixir-format
+msgid "There are validation errors that need to be fixed before this document can be published"
+msgstr ""
