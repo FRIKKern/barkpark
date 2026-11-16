@@ -1740,4 +1740,13 @@ defmodule BarkparkWeb.WorkspaceController do
   defp render_dataset(%Tenancy.Dataset{} = dataset) do
     %{id: dataset.id, slug: dataset.slug, name: dataset.name}
   end
+
+  # A dataset-bound admin token on a workspace-level read: observed or refused
+  # (`DatasetBoundAdminReads`). Declared at the end so no line above moves
+  # (line-cited anchors stay true); a controller plug runs before the action
+  # wherever it is declared.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminReads,
+    [surface: "workspace_export"] when action in [:export]
+  )
 end

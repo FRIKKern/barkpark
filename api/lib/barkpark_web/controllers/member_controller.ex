@@ -708,4 +708,15 @@ defmodule BarkparkWeb.MemberController do
       _ -> nil
     end
   end
+
+  # A dataset-bound admin token on a workspace-level read: observed or refused
+  # (`DatasetBoundAdminReads`). Declared at the end so no line above moves
+  # (line-cited anchors stay true); a controller plug runs before the action
+  # wherever it is declared.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminReads,
+    [surface: "members"] when action in [:index, :invitations]
+  )
+
+  plug(BarkparkWeb.Plugs.DatasetBoundAdminReads, [surface: "tokens"] when action in [:tokens])
 end

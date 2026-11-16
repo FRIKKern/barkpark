@@ -306,4 +306,13 @@ defmodule BarkparkWeb.SecretController do
       _ -> nil
     end
   end
+
+  # A dataset-bound admin token on a workspace-level read: observed or refused
+  # (`DatasetBoundAdminReads`). Declared at the end so no line above moves
+  # (line-cited anchors stay true); a controller plug runs before the action
+  # wherever it is declared.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminReads,
+    [surface: "secrets"] when action in [:index, :show, :audit]
+  )
 end
