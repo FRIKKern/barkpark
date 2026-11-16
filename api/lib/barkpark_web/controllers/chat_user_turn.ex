@@ -36,6 +36,7 @@ defmodule BarkparkWeb.ChatUserTurn do
 
   require Logger
 
+  alias Barkpark.ChatHosts
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{AttachmentName, Attachments}
 
@@ -174,22 +175,54 @@ defmodule BarkparkWeb.ChatUserTurn do
   history carries the human side (the Studio composer persists its own rows).
   `metadata` is `resolve/3`'s: `origin: "api"` plus any attachment pointers.
 
-  Best-effort: the turn has already been dispatched, so a persist error is
-  logged and never turns a live send into an error.
+  The turn has already been dispatched, so this never raises: a refused insert
+  and a database fault (the append's transaction raises on one) are both
+  logged and returned as `{:error, reason}`. `persist_sent/4` decides what the
+  send's answer is (task-583b6031c13b28ac).
   """
-  @spec persist(String.t(), String.t(), map()) :: :ok
+  @spec persist(String.t(), String.t(), map()) :: :ok | {:error, term()}
   def persist(session_id, text, metadata) do
     case StudioChat.append_message(session_id, %{
            role: "user",
            source_markdown: text,
            metadata: metadata
          }) do
-      {:ok, _message} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
-        :ok
+      {:ok, _message} -> :ok
+      {:error, reason} -> persist_failed(reason)
     end
+  rescue
+    exception -> persist_failed(exception)
+  catch
+    :exit, reason -> persist_failed({:exit, reason})
+  end
+
+  @doc """
+  Store the user's row for a turn that was just dispatched, and say what the
+  send's answer is (task-583b6031c13b28ac).
+
+  `:ok` (202) when the row is stored. When it is not, the answer follows the
+  turn: a registered-host lease the server ends (`ChatHosts.withdraw_turn/2`,
+  under the `command_key` the turn was leased with) is never run, so it is
+  `{:error, :turn_not_stored}`, the retryable `runtime_unavailable`, and the
+  client may send again. A turn the server cannot take back runs: a managed
+  turn is already in the provider process, and a lease it could not end is
+  still handed to the host. That answer stays `:ok`, because a 5xx would
+  invite a second send of a turn that went.
+  """
+  @spec persist_sent(StudioChat.Session.t(), String.t(), map(), String.t()) ::
+          :ok | {:error, :turn_not_stored}
+  def persist_sent(%StudioChat.Session{} = session, text, metadata, command_key) do
+    with {:error, _reason} <- persist(session.id, text, metadata),
+         "registered_host" <- session.execution_target,
+         :ok <- ChatHosts.withdraw_turn(session.id, command_key) do
+      {:error, :turn_not_stored}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp persist_failed(reason) do
+    Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
+    {:error, reason}
   end
 end

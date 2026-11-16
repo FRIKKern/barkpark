@@ -320,10 +320,94 @@ defmodule Barkpark.ChatHosts do
       end
 
     with {:ok, lease} <- result,
-         :ok <- Transport.enqueue(host_id, lease.id, command) do
+         :ok <- enqueue(lease, command) do
       {:ok, %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}}
     end
   end
+
+  # `Transport.enqueue/3` is a GenServer.call: a timeout exits AFTER the lease
+  # row exists, and the call can still land in the queue later. The lease is
+  # ended first, so no host runs a command its caller is told was not sent
+  # (task-583b6031c13b28ac). When it cannot be ended the exit goes on: the
+  # outcome is unknown, and the crash answer does not claim either way.
+  defp enqueue(lease, command) do
+    Transport.enqueue(lease.host_id, lease.id, command)
+  catch
+    :exit, reason ->
+      case end_server_turn(where(ExecutionLease, [l], l.id == ^lease.id), :host_queue_unavailable) do
+        :ok -> {:error, :host_queue_unavailable}
+        :error -> exit(reason)
+      end
+  end
+
+  @doc """
+  Ends the `send_turn` lease leased under `command_key` for `session_id` when
+  the server cannot stand behind the send: the user's row could not be stored
+  (task-583b6031c13b28ac). The server writes the turn's close itself, as for an
+  expired or unservable lease, so no host is handed it, a host already running
+  it has its next event refused, and the session leaves `working`.
+
+  `:ok` when the lease is ended now. `:error` when it is not: no such live
+  lease, it already closed (the host ran it), or the write failed. Never raises.
+  """
+  @spec withdraw_turn(String.t(), String.t()) :: :ok | :error
+  def withdraw_turn(session_id, command_key)
+      when is_binary(session_id) and is_binary(command_key) do
+    ExecutionLease
+    |> where([l], l.session_id == ^session_id and l.command_key == ^command_key)
+    |> end_server_turn(:turn_not_stored)
+  end
+
+  # One transaction under the lease row lock, then the same settle as every
+  # server close. A fault anywhere before the commit is `:error`; after it the
+  # lease is ended, so a failed settle still answers `:ok`.
+  defp end_server_turn(lease_query, reason) do
+    Repo.transaction(fn ->
+      lease_query
+      |> where([l], is_nil(l.revoked_at))
+      |> lock("FOR UPDATE")
+      |> Repo.one()
+      |> case do
+        nil ->
+          Repo.rollback(reason)
+
+        lease ->
+          lease
+          |> end_turn(reason, "server:#{reason}", withdrawn_message(reason))
+          |> ended_or_rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, {:ended, execution_event, lease}} ->
+        settle_withdrawn(execution_event, lease)
+
+      _ ->
+        :error
+    end
+  rescue
+    _ -> :error
+  catch
+    :exit, _ -> :error
+  end
+
+  # The session half first: the lease row is `completed`, so `next_commands/1`
+  # never hands it out even while it is still in the queue. Then the queue,
+  # which may be the thing that just failed.
+  defp settle_withdrawn(execution_event, lease) do
+    settle_session(execution_event, lease)
+    Transport.complete(lease.id)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp withdrawn_message(:turn_not_stored),
+    do: "The message could not be stored, so this turn was not sent. Send it again."
+
+  defp withdrawn_message(:host_queue_unavailable),
+    do: "The chat host's queue did not take this turn, so it was not sent. Send it again."
 
   @doc """
   The commands `host` is handed on its poll: every live lease it holds.
@@ -667,7 +751,10 @@ defmodule Barkpark.ChatHosts do
   # lease's own close ends the recorder's turn (task-d8685be32b21e31b).
   defp settle_ended_turn(execution_event, lease) do
     Transport.complete(lease.id)
+    settle_session(execution_event, lease)
+  end
 
+  defp settle_session(execution_event, lease) do
     if is_nil(live_report_fence(lease.session_id)) and
          match?({1, _}, exit_if_working(lease.session_id)),
        do: project_event(execution_event, lease),

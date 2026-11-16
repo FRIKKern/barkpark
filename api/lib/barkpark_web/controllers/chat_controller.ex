@@ -355,17 +355,18 @@ defmodule BarkparkWeb.ChatController do
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
          {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
-      case ensure_and_send(id, session, turn.content, conn) do
-        :ok ->
-          # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send
-          # derived `resume?` from the pre-turn message_count, so the append
-          # cannot false-flip turn 1 into a resume. Fail-soft: the turn is
-          # already on its way, so a persist miss still answers 202.
-          ChatUserTurn.persist(id, content, turn.metadata)
-          conn |> put_status(:accepted) |> json(%{accepted: true})
+      # A registered host's lease is made under this key, so a send the server
+      # cannot stand behind can be found and ended (task-583b6031c13b28ac).
+      command_key = Ecto.UUID.generate()
 
-        {:error, reason} ->
-          send_failure_response(conn, reason)
+      # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send
+      # derived `resume?` from the pre-turn message_count, so the append cannot
+      # false-flip turn 1 into a resume.
+      with :ok <- ensure_and_send(id, session, turn.content, command_key, conn),
+           :ok <- ChatUserTurn.persist_sent(session, content, turn.metadata, command_key) do
+        conn |> put_status(:accepted) |> json(%{accepted: true})
+      else
+        {:error, reason} -> send_failure_response(conn, reason)
       end
     else
       nil -> not_found(conn)
@@ -1233,7 +1234,7 @@ defmodule BarkparkWeb.ChatController do
   # writes: strict Recorder/ClaudeChat adapter
   # ─────────────────────────────────────────────────────────────────────────
 
-  defp ensure_and_send(id, session, content, conn) do
+  defp ensure_and_send(id, session, content, command_key, conn) do
     # First send is a fresh `--session-id` pin; a session that already has rows
     # lazy-`--resume`s (a reap may have closed the runtime). The `resume` flag is
     # inert when a runtime is already live (Recorder.ensure is idempotent).
@@ -1261,7 +1262,7 @@ defmodule BarkparkWeb.ChatController do
              bypass_armed: false
            }),
          {:ok, session_pid} when not is_nil(session_pid) <- Recorder.session_pid(recorder) do
-      Runtime.send_turn(session.provider, session_pid, content)
+      Runtime.send_turn(session.provider, session_pid, content, idempotency_key: command_key)
     else
       # `Recorder.session_pid/1` has NO failure branch — a Recorder whose
       # provider runtime never came up (or already exited) replies `{:ok, nil}`.
