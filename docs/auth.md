@@ -20,14 +20,14 @@ Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
 no membership row → `403 forbidden`, reason
-`not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`, …) resolve to `"Default"`.
+`not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). Minted naming a
 `dataset` (`dataset_bound`), it gets `403 dataset_not_bound` elsewhere, on
 workspace/project create, playground, import (old `bp` mints: re-mint);
-unbound, binds nothing. Admin reads (audit, members, tokens, secrets,
-export): audited (`:dataset_bound_admin_reads` `:observe`, default) or
-403 (`:enforce`).
+unbound, binds nothing. Admin reads + writes (audit, members, tokens,
+secrets, export; not self-revoke): audited
+(`:dataset_bound_admin_reads` `:observe`, default) or 403 (`:enforce`).
 
 ## Roles (`ApiToken.permissions`)
 
