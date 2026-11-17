@@ -138,7 +138,7 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
           {:turn_completed, %{terminal_state: :completed}}
         ] do
       event = struct(%Event{provider: "claude", session_id: sid, kind: kind}, extra)
-      assert :ok = GenServer.call(recorder, {:project_runtime_event, event})
+      assert :ok = GenServer.call(recorder, {:project_runtime_event, event, nil})
     end
 
     assert replies(sid) == ["A.\n\nB."]
