@@ -178,7 +178,8 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
   defp string_items?(field) do
     case field_attr(field, :of) do
       %{} = of -> field_attr(of, :type) in ["string", nil]
-      _ -> true
+      nil -> true
+      _other -> false
     end
   end
 
