@@ -1385,14 +1385,18 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       end
 
+    # A codex error that will retry is not the end of the turn: no usage
+    # boundary, no persist, no status change (task-7d3afdffa1fd4473).
+    retrying? = Event.retrying_error?(event)
+
     state =
-      if trusted_source? and trusted_runtime_usage_identity?(state, event) do
+      if trusted_source? and not retrying? and trusted_runtime_usage_identity?(state, event) do
         capture_runtime_usage(state, event)
       else
         state
       end
 
-    case event.kind do
+    case if(retrying?, do: :retrying_error, else: event.kind) do
       :session_started ->
         state
 

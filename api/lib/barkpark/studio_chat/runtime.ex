@@ -117,6 +117,20 @@ defmodule Barkpark.StudioChat.Runtime do
             observed_effort: String.t() | nil,
             native: map()
           }
+
+    @doc """
+    True for a codex `error` notification that says `willRetry: true`: the
+    app-server retries the request itself and the turn goes on
+    (task-7d3afdffa1fd4473). A registered host forwards the notification's
+    params as `error`; the managed adapter keeps them under `native["params"]`.
+    """
+    @spec retrying_error?(t()) :: boolean()
+    def retrying_error?(%__MODULE__{kind: :error, error: error, native: native}),
+      do:
+        match?(%{"willRetry" => true}, error) or
+          match?(%{"params" => %{"willRetry" => true}}, native)
+
+    def retrying_error?(%__MODULE__{}), do: false
   end
 
   defmodule RemoteRef do

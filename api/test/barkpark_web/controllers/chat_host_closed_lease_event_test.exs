@@ -18,14 +18,15 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
       host retrying after a lost 2xx is not told it failed;
     * a host's close at the cursor the server's close took is the cursor
       conflict it always was;
-    * a lease closed by a host `error` event still takes the turn's next
-      event: codex app-server forwards a retrying error as kind `error` and
-      the turn goes on (internal/chathost/local_handler.go, codexMessage).
-      So does one closed by `control_completed`, a Stop's ack followed by the
-      turn's own close (recorder_host_interrupt_test.exs). Either one is
-      refused once the session has a newer lease (task-1eefeeb52ed19e73):
-      Claude's `error` result is followed by the host's terminal after the
-      provider exits, and a person can send again in that gap.
+    * a codex `error` that will retry does not close the lease at all
+      (task-7d3afdffa1fd4473): the turn goes on, the expiry sweep can still
+      end it, and its own close after a Stop is taken;
+    * a lease closed by any other host `error` event still takes the turn's
+      next event (the host's terminal when the app-server exits). So does
+      one closed by `control_completed`, a Stop's ack followed by the turn's
+      own close (recorder_host_interrupt_test.exs). Either one is refused
+      once the session has a newer lease (task-1eefeeb52ed19e73): a person
+      can send again in that gap.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -161,7 +162,7 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     }
 
     assert {:ok, :accepted} = event(ctx, lease, 2, retrying)
-    assert Repo.get!(ExecutionLease, lease.lease_id).status == "completed"
+    assert Repo.get!(ExecutionLease, lease.lease_id).status == "running"
 
     assert {:ok, :accepted} = event(ctx, lease, 3, %{"kind" => "text_delta", "delta" => "back"})
 
@@ -201,32 +202,55 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     assert ChatHosts.replay_unprojected(sid) == []
   end
 
-  test "a codex turn's close after a retrying error is refused once a newer lease exists",
-       %{sid: sid} = ctx do
-    old = lease!(ctx, "old")
+  # A codex app-server `error` that will retry, as the Go host forwards it
+  # (the notification's params as `error`).
+  @retrying %{
+    "kind" => "error",
+    "error" => %{"error" => %{"message" => "Reconnecting... 1/5"}, "willRetry" => true}
+  }
+
+  test "a codex turn whose host dies after a retrying error is ended by the expiry sweep" do
+    ctx = host_session("codex")
+    turn = lease!(ctx, "turn")
+
+    assert {:ok, :accepted} = event(ctx, turn, 1, %{"kind" => "turn_started", "turn_id" => "t-1"})
 
     assert {:ok, :accepted} =
-             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+             event(ctx, turn, 2, %{"kind" => "text_delta", "delta" => "Before. "})
 
-    retrying = %{
-      "kind" => "error",
-      "error" => %{"willRetry" => true, "message" => "Reconnecting"}
-    }
+    assert {:ok, :accepted} = event(ctx, turn, 3, @retrying)
 
-    assert {:ok, :accepted} = event(ctx, old, 2, retrying)
+    # Far past every lease's expiry and the grace; the floor is before everything.
+    later = DateTime.add(DateTime.utc_now(), 3600)
+    assert ChatHosts.end_expired_turns(later, ~U[2000-01-01 00:00:00Z]) == 1
 
-    new = lease!(ctx, "new")
+    assert StudioChat.get_session(ctx.sid).status == "exited"
+    assert ["Before. "] = Enum.map(assistant_rows(ctx.sid), & &1.source_markdown)
+  end
+
+  test "the first Stop during a codex retry ends the turn, though the Stop is a newer lease" do
+    ctx = host_session("codex")
+    turn = lease!(ctx, "turn")
+
+    assert {:ok, :accepted} = event(ctx, turn, 1, %{"kind" => "turn_started", "turn_id" => "t-1"})
 
     assert {:ok, :accepted} =
-             event(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+             event(ctx, turn, 2, %{"kind" => "text_delta", "delta" => "Before. "})
 
-    old_before = rows(old.lease_id)
+    assert {:ok, :accepted} = event(ctx, turn, 3, @retrying)
 
-    assert {:error, :stale_fence} =
-             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+    # The Go host acks the Stop on its own lease, then codex closes the turn.
+    stop = lease!(ctx, "stop", :interrupt)
+    ack = %{"kind" => "control_completed", "operation" => "interrupt"}
+    assert {:ok, :accepted} = event(ctx, stop, 1, ack)
 
-    assert rows(old.lease_id) == old_before
-    assert StudioChat.get_session(sid).status == "working"
+    assert {:ok, :accepted} =
+             event(ctx, turn, 4, %{"kind" => "turn_completed", "terminal_state" => "interrupted"})
+
+    assert StudioChat.get_session(ctx.sid).status == "active"
+    assert [reply] = assistant_rows(ctx.sid)
+    assert reply.source_markdown == "Before. "
+    assert reply.metadata["turn_outcome"] == "interrupted"
   end
 
   # ── helpers ─────────────────────────────────────────────────────────────────
@@ -257,13 +281,18 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     )
   end
 
-  defp lease!(%{host: host, sid: sid}, tag) do
+  defp lease!(%{host: host, sid: sid, provider: provider}, tag, operation \\ :start) do
+    payload =
+      if operation == :start,
+        do: %{cwd: System.tmp_dir!(), content: "hello #{tag}"},
+        else: %{}
+
     command = %Command{
-      operation: :start,
-      provider: "claude",
+      operation: operation,
+      provider: provider,
       session_id: sid,
       idempotency_key: "closed-#{tag}-#{System.unique_integer([:positive])}",
-      payload: %{cwd: System.tmp_dir!(), content: "hello #{tag}"}
+      payload: payload
     }
 
     {:ok, fence} = ChatHosts.lease_and_enqueue(host, command, [])
@@ -277,8 +306,11 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     {Repo.get!(ExecutionLease, lease_id), events}
   end
 
-  # One registered-host Claude session with a live Recorder.
-  defp host_session do
+  defp assistant_rows(sid),
+    do: sid |> StudioChat.list_messages(:global) |> Enum.filter(&(&1.role == "assistant"))
+
+  # One registered-host session (Claude unless named) with a live Recorder.
+  defp host_session(provider \\ "claude") do
     suffix = System.unique_integer([:positive])
 
     {:ok, ws} =
@@ -300,7 +332,7 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
         %{
           id: sid,
           mode: "plan",
-          provider: "claude",
+          provider: provider,
           execution_target: "registered_host",
           execution_host_id: host.id
         },
@@ -308,13 +340,16 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
       )
 
     {:ok, _recorder} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
-    %{host: host, credential: enrolled.credential, sid: sid}
+    %{host: host, credential: enrolled.credential, sid: sid, provider: provider}
   end
 
   defp capabilities do
     %{
       "protocol_version" => 1,
-      "providers" => %{"claude" => %{"installed" => true, "auth_ready" => true}}
+      "providers" => %{
+        "claude" => %{"installed" => true, "auth_ready" => true},
+        "codex" => %{"installed" => true, "auth_ready" => true}
+      }
     }
   end
 
