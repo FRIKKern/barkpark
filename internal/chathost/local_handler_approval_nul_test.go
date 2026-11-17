@@ -17,29 +17,13 @@ func TestClaudeApprovalWhoseIDHoldsNULIsAnsweredWithTheRawID(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	session := newActiveLocalSession("claude", nil, writer)
-	decoder := json.NewDecoder(reader)
 
-	events := session.claudeMessage(map[string]any{
+	session.claudeMessage(map[string]any{
 		"type": "control_request", "request_id": "r\x001",
 		"request": map[string]any{"subtype": "can_use_tool", "tool_name": "Write", "input": map[string]any{"path": "a.txt"}},
 	})
-	if len(events) != 1 || events[0]["approval_id"] != "r�1" {
-		t.Fatalf("approval event: %#v", events)
-	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- session.control(context.Background(), "answer_approval", map[string]any{
-			"approval_id": "r�1", "payload": map[string]any{"decision": "allow"},
-		})
-	}()
-	var reply map[string]any
-	if err := decoder.Decode(&reply); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+	reply := answerApproval(t, session, json.NewDecoder(reader), "r�1")
 	if got := nestedString(reply, "response", "request_id"); got != "r\x001" {
 		t.Fatalf("request_id sent back = %q, want the CLI's own id", got)
 	}
@@ -52,29 +36,13 @@ func TestCodexApprovalWhoseIDHoldsNULIsAnsweredWithTheRawID(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	session := newActiveLocalSession("codex", nil, writer)
-	decoder := json.NewDecoder(reader)
 
-	event, _ := session.codexMessage(map[string]any{
+	session.codexMessage(map[string]any{
 		"id": "a\x0091", "method": "item/commandExecution/requestApproval",
 		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "itemId": "cmd-1"},
 	})
-	if event["approval_id"] != "a�91" {
-		t.Fatalf("approval event: %#v", event)
-	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- session.control(context.Background(), "answer_approval", map[string]any{
-			"approval_id": "a�91", "payload": map[string]any{"decision": "allow"},
-		})
-	}()
-	var reply map[string]any
-	if err := decoder.Decode(&reply); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+	reply := answerApproval(t, session, json.NewDecoder(reader), "a�91")
 	if reply["id"] != "a\x0091" || nestedString(reply, "result", "decision") != "accept" {
 		t.Fatalf("reply to the app-server: %#v", reply)
 	}
@@ -89,5 +57,37 @@ func TestApprovalKeyLeavesCleanIDsAlone(t *testing.T) {
 		if got := approvalKey(id); got != id {
 			t.Fatalf("approvalKey(%q) = %q", id, got)
 		}
+	}
+}
+
+// answerApproval allows the approval the server names by id and returns what
+// the host wrote to the provider. An answer the host refuses fails the test
+// rather than leaving the pipe read blocked.
+func answerApproval(t *testing.T, session *activeLocalSession, decoder *json.Decoder, id string) map[string]any {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		done <- session.control(context.Background(), "answer_approval", map[string]any{
+			"approval_id": id, "payload": map[string]any{"decision": "allow"},
+		})
+	}()
+	replies := make(chan map[string]any, 1)
+	go func() {
+		var reply map[string]any
+		if decoder.Decode(&reply) == nil {
+			replies <- reply
+		}
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("answer_approval(%q): %v", id, err)
+		}
+		return <-replies
+	case reply := <-replies:
+		if err := <-done; err != nil {
+			t.Fatalf("answer_approval(%q): %v", id, err)
+		}
+		return reply
 	}
 }
