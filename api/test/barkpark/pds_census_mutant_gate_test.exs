@@ -199,7 +199,30 @@ defmodule Barkpark.PdsCensusMutantGateTest do
 
     names = [:plain, :unknown_flag, :routed_rows, :routed_rows_typo, :classification, :baseline]
 
-    assert Gate.run_arms(Enum.map(names, arm)) == Map.new(names, &{&1, {"out #{&1}", 0}})
+    me = self()
+    say = &send(me, {:said, &1})
+
+    assert Gate.run_arms(Enum.map(names, arm), say: say) ==
+             Map.new(names, &{&1, {"out #{&1}", 0}})
+
     assert Agent.get(live, & &1) == {0, 2}, "peak live arms must be exactly 2"
+
+    # One line per finished arm, so the CI log is never silent for a whole
+    # round of walks (the test watchdog fails a step that goes quiet).
+    said = for _ <- names, do: receive(do: ({:said, line} -> line), after: (0 -> nil))
+    assert_received {:said, done}
+
+    assert done =~
+             ~r/^\[PdsCensusMutantGate\] 6 arms done in \d+ ms; lowest MemAvailable (\d+ MB|n\/a)/
+
+    refute_received {:said, _}
+
+    for name <- names do
+      assert Enum.any?(
+               said,
+               &(&1 =~ ~r/^\[PdsCensusMutantGate\] arm #{name} finished in \d+ ms \(one of 6\)$/)
+             ),
+             "no finish line for #{name}: #{inspect(said)}"
+    end
   end
 end
