@@ -18,16 +18,16 @@ The principal is the API token; each binds to one **workspace** (tenancy boundar
 
 Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
-**before** any permission check: slug unresolved → `404 not_found`; resolved but
-no membership row → `403 forbidden`, reason
+**before** any permission check: slug unresolved → `404 not_found`; resolved, no
+seat → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
 
-Mutate needs `write` after tenancy (else `403`). Minted naming a
-`dataset` (`dataset_bound`), it gets `403 dataset_not_bound` elsewhere, on
-workspace/project create, playground, import (old `bp` mints: re-mint);
-unbound, binds nothing. Admin reads, writes (audit, members, tokens,
-secrets, export; not self-revoke): audited (403 if
-`:dataset_bound_admin_reads` is `:enforce`).
+Mutate needs `write` after tenancy (else `403`). A token bound to a
+`dataset` (`dataset_bound`) gets `403 dataset_not_bound` elsewhere, on
+workspace/project create, playground, import. Admin reads/writes (audit,
+export, seats, grants, shares, tokens, chat hosts, secrets, workspace
+delete/archive/restore/reinstate; not self-revoke): audited; 403 on
+`:dataset_bound_admin_reads` `:enforce`.
 
 ## Roles (`ApiToken.permissions`)
 
