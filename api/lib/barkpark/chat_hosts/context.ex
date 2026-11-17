@@ -1371,6 +1371,17 @@ defmodule Barkpark.ChatHosts do
 
   @doc false
   def replay_unprojected(session_id) when is_binary(session_id) do
+    session_id
+    |> replay_unprojected_by_lease()
+    |> Enum.map(fn {event_id, normalized, _lease_id} -> {event_id, normalized} end)
+  end
+
+  @doc """
+  The session's unprojected events as `{event_id, event, lease_id}`. The lease
+  id rides beside the event, never in it (`Runtime.Event` goes on the wire), so
+  the Recorder can tell two leases' turns apart (task-b0cbddc9d0f2e2aa).
+  """
+  def replay_unprojected_by_lease(session_id) when is_binary(session_id) do
     ExecutionEvent
     |> join(:inner, [e], l in ExecutionLease, on: l.id == e.lease_id)
     |> where([e, l], l.session_id == ^session_id and is_nil(e.projected_at))
@@ -1379,7 +1390,7 @@ defmodule Barkpark.ChatHosts do
     |> Repo.all()
     |> Enum.map(fn {event, lease} ->
       normalized = broadcast_event(lease, event.cursor, event.idempotency_key, event.payload)
-      {event.id, normalized}
+      {event.id, normalized, lease.id}
     end)
   end
 
@@ -1407,7 +1418,7 @@ defmodule Barkpark.ChatHosts do
 
     case {normalized, Barkpark.StudioChat.Recorder.whereis(lease.session_id)} do
       {%Barkpark.StudioChat.Runtime.Event{} = event, recorder} when is_pid(recorder) ->
-        case GenServer.call(recorder, {:project_runtime_event, event}) do
+        case GenServer.call(recorder, {:project_runtime_event, event, lease.id}) do
           :ok ->
             execution_event
             |> Ecto.Changeset.change(projected_at: DateTime.utc_now())

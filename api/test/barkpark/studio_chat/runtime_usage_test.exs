@@ -1348,7 +1348,7 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
   end
 
   defp generic_project(recorder, event) do
-    assert :ok = GenServer.call(recorder, {:project_runtime_event, event})
+    assert :ok = GenServer.call(recorder, {:project_runtime_event, event, nil})
   end
 
   defp identity(ctx, turn_id) do

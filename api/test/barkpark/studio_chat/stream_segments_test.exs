@@ -1178,7 +1178,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
 
       # (c) the synchronous projection call
       drive_runtime_turn(recorder, fn event ->
-        :ok = GenServer.call(recorder, {:project_runtime_event, event})
+        :ok = GenServer.call(recorder, {:project_runtime_event, event, nil})
       end)
 
       # (d) the registered-host replay fold — handle_info(:replay_registered_host_events),
