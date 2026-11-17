@@ -280,7 +280,11 @@ defmodule Barkpark.Api.OpenApi do
     if String.ends_with?(template, "/v1/data/mutate/:dataset"),
       do:
         "5xx answer is not remembered, so its retry runs, unless the write had " <>
-          "already committed: then that 5xx is replayed and nothing runs twice.",
+          "already committed: then that 5xx carries `Idempotency-Committed: true`, " <>
+          "is replayed with it, and nothing runs twice. If the server stopped after " <>
+          "the commit and before any answer, the key answers 409 " <>
+          "`idempotency_key_in_use` until it expires (24h): the write landed, so " <>
+          "read it back rather than retrying under a new key.",
       else: "5xx answer is not remembered, so its retry runs."
   end
 
