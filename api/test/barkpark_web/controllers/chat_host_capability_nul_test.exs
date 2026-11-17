@@ -164,6 +164,58 @@ defmodule BarkparkWeb.ChatHostCapabilityNulTest do
 
       assert ChatHosts.list_hosts(ws.id) == []
     end
+
+    # task-164da10964d8a38b: name and approved_roots are text columns, so
+    # U+0000 in either raised 22021, a 500 on this route.
+    for {field, body} <- [
+          {"name", %{"name" => "build" <> @nul <> "box"}},
+          {"approved_roots", %{"name" => "roots", "approved_roots" => ["/tmp/a" <> @nul <> "b"]}}
+        ] do
+      test "U+0000 in the issued #{field} answers 422 on #{field} and inserts no row", %{
+        conn: conn,
+        workspace: ws,
+        raw: raw,
+        path: path
+      } do
+        resp =
+          conn
+          |> put_req_header("authorization", "Bearer #{raw}")
+          |> post_json(path, unquote(Macro.escape(body)))
+
+        assert %{"error" => %{"code" => "unprocessable", "fields" => fields}} =
+                 json_response(resp, 422)
+
+        assert Map.has_key?(fields, unquote(field))
+        assert ChatHosts.list_hosts(ws.id) == []
+      end
+    end
+
+    test "a name and roots an owner sends today are stored as sent", %{
+      conn: conn,
+      raw: raw,
+      path: path
+    } do
+      for {name, i} <-
+            Enum.with_index([
+              "build box",
+              "byggeboks 🐕‍🦺 שלום",
+              <<1>>,
+              <<0x7F>>,
+              "�",
+              "the literal \\u0000"
+            ]) do
+        roots = [System.tmp_dir!(), "/tmp/a b/🐕/#{i}", "/tmp/" <> name]
+
+        resp =
+          conn
+          |> put_req_header("authorization", "Bearer #{raw}")
+          |> post_json(path, %{"name" => name, "approved_roots" => roots})
+
+        assert %{"host" => host} = json_response(resp, 201)
+        stored = Repo.get!(RegisteredHost, host["id"])
+        assert {stored.name, stored.approved_roots} == {name, roots}
+      end
+    end
   end
 
   describe "values a host sends today" do

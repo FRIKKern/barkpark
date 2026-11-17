@@ -42,6 +42,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       message: "must not be null"
     )
     |> validate_length(:name, min: 1, max: 120)
+    |> validate_change(:name, &nul_free/2)
     |> validate_protocol_version()
     |> validate_roots()
     |> validate_capabilities()
@@ -126,6 +127,9 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
         not is_list(roots) ->
           [approved_roots: "must be a list"]
 
+        nul_free(:approved_roots, roots) != [] ->
+          nul_free(:approved_roots, roots)
+
         Enum.any?(roots, &(not is_binary(&1) or Path.type(&1) != :absolute)) ->
           [approved_roots: "must be absolute"]
 
@@ -138,13 +142,21 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     end)
   end
 
-  # jsonb refuses U+0000 (22P05): a version or operations item holding it was a
-  # 500 on enroll, heartbeat and the owner's issue (task-214ecfd6ffe27b56).
+  # Postgres refuses U+0000 in text (22021) and jsonb (22P05): a name, root,
+  # version or operations item holding it was a 500 (task-214ecfd6ffe27b56,
+  # task-164da10964d8a38b).
+  defp nul_free(field, value),
+    do:
+      if(NulText.check(value) == :ok,
+        do: [],
+        else: [{field, "must not contain a NUL character (U+0000)"}]
+      )
+
   defp validate_capabilities(changeset) do
     validate_change(changeset, :capabilities, fn :capabilities, value ->
       cond do
-        NulText.check(value) != :ok ->
-          [capabilities: "must not contain a NUL character (U+0000)"]
+        nul_free(:capabilities, value) != [] ->
+          nul_free(:capabilities, value)
 
         safe_capabilities?(value) ->
           []
