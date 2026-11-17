@@ -98,15 +98,61 @@ defmodule Barkpark.UserPrefs do
     end
   end
 
-  defp locked_pref(scope) do
-    Repo.one(
-      from p in UserPref,
-        where:
-          p.user_id == ^scope.user_id and p.workspace_id == ^scope.workspace_id and
-            p.dataset == ^scope.dataset and p.key == ^scope.key,
-        lock: "FOR UPDATE"
+  @doc """
+  Create the value only if the key is unset (`If-None-Match: *`,
+  task-c1f9452e1b8216ee), so a create cannot overwrite a value another writer
+  made in between; `If-Match` cannot say "unset", since no tag names it.
+
+  The compare and the write are one statement: `INSERT … ON CONFLICT DO
+  NOTHING` on the key's unique index. A set key inserts nothing; of two creates
+  at once, the second waits on the first's insert, then inserts nothing; a
+  create waiting on a DELETE inserts once the DELETE commits. No separate
+  locked read is needed, as it is for If-Match, which compares a value.
+
+  `{:error, {:precondition_failed, actual}}` (the stored value's tag, read
+  after the refused insert; `nil` if it was deleted in between) when the key
+  is set, and `{:error, changeset}` for a value or name `put/5` refuses.
+  Neither writes. The answered pref holds the value as stored.
+  """
+  @spec put_if_absent(binary(), binary(), String.t(), String.t(), map()) ::
+          {:ok, UserPref.t()}
+          | {:error, {:precondition_failed, String.t() | nil} | Ecto.Changeset.t()}
+  def put_if_absent(user_id, workspace_id, dataset, key, value) when is_map(value) do
+    scope = %{user_id: user_id, workspace_id: workspace_id, dataset: dataset, key: key}
+    changeset = UserPref.changeset(%UserPref{}, Map.put(scope, :value, value))
+
+    if changeset.valid?, do: create_if_absent(scope, value), else: {:error, changeset}
+  end
+
+  defp create_if_absent(scope, value) do
+    case insert_unless_present(scope, value) do
+      {1, [pref]} -> {:ok, pref}
+      {0, []} -> {:error, {:precondition_failed, scope |> stored_pref() |> tag_of()}}
+    end
+  end
+
+  defp insert_unless_present(scope, value) do
+    now = DateTime.utc_now()
+    row = Map.merge(scope, %{value: value, inserted_at: now, updated_at: now})
+
+    Repo.insert_all(UserPref, [row],
+      on_conflict: :nothing,
+      conflict_target: [:user_id, :workspace_id, :dataset, :key],
+      returning: [:value]
     )
   end
+
+  defp stored_pref(scope), do: Repo.one(scope_query(scope))
+  defp tag_of(pref), do: pref && etag(pref.value)
+
+  defp scope_query(scope) do
+    from p in UserPref,
+      where:
+        p.user_id == ^scope.user_id and p.workspace_id == ^scope.workspace_id and
+          p.dataset == ^scope.dataset and p.key == ^scope.key
+  end
+
+  defp locked_pref(scope), do: scope |> scope_query() |> lock("FOR UPDATE") |> Repo.one()
 
   @doc """
   A stored value's tag, as the `ETag` header carries it: a quoted hash of its
