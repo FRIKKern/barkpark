@@ -36,9 +36,11 @@ defmodule BarkparkWeb.UserPrefController do
     with {:ok, user_id} <- resolve_user_id(conn),
          {:ws, %{id: ws_id}} <- {:ws, conn.assigns[:current_workspace]},
          {:ok, pref} <- write(conn, {user_id, ws_id, dataset, key}, value) do
+      # The tag is the STORED value's (Postgres rewrites some numbers, 1e20 to
+      # 100000000000000000000); the body is the value as sent, as it always was.
       conn
       |> tagged(pref.value)
-      |> json(%{ok: true, key: key, dataset: dataset, value: pref.value})
+      |> json(%{ok: true, key: key, dataset: dataset, value: value})
     else
       {:ws, _} ->
         not_found(conn)
@@ -51,7 +53,7 @@ defmodule BarkparkWeb.UserPrefController do
           conn,
           412,
           "precondition_failed",
-          "the pref changed after the read its If-Match came from",
+          "the stored pref is not one the If-Match names",
           %{expected: Enum.join(get_req_header(conn, "if-match"), ", "), actual: actual},
           "GET the key again, apply your change to that value, and PUT it with the new ETag"
         )
@@ -74,16 +76,17 @@ defmodule BarkparkWeb.UserPrefController do
 
   # A PUT with If-Match writes only over the value a tag names
   # (task-f88365602c49be57); without one it is the plain upsert it always was.
+  # The header's presence decides: one that holds no tag names no value, so it
+  # is refused like a stale one, never read as "no header".
   defp write(conn, {user_id, ws_id, dataset, key}, value) do
-    case if_match(conn) do
+    case get_req_header(conn, "if-match") do
       [] -> UserPrefs.put(user_id, ws_id, dataset, key, value)
-      tags -> UserPrefs.put_if_match(user_id, ws_id, dataset, key, value, tags)
+      headers -> UserPrefs.put_if_match(user_id, ws_id, dataset, key, value, tags(headers))
     end
   end
 
-  defp if_match(conn) do
-    conn
-    |> get_req_header("if-match")
+  defp tags(headers) do
+    headers
     |> Enum.flat_map(&String.split(&1, ","))
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))

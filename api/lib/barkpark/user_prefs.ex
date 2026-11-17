@@ -36,7 +36,9 @@ defmodule Barkpark.UserPrefs do
   @doc """
   Upsert one named value. `value` must be a JSON-encodable map (the
   changeset enforces the size cap); an invalid value or an over-length
-  key/dataset returns `{:error, changeset}` and writes nothing.
+  key/dataset returns `{:error, changeset}` and writes nothing. The answered
+  pref holds the value as stored: Postgres rewrites some numbers (1e20 comes
+  back as 100000000000000000000), and `etag/1` must hash what a read answers.
   """
   @spec put(binary(), binary(), String.t(), String.t(), map()) ::
           {:ok, UserPref.t()} | {:error, Ecto.Changeset.t()}
@@ -53,7 +55,8 @@ defmodule Barkpark.UserPrefs do
     |> UserPref.changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace, [:value, :updated_at]},
-      conflict_target: [:user_id, :workspace_id, :dataset, :key]
+      conflict_target: [:user_id, :workspace_id, :dataset, :key],
+      returning: [:value]
     )
   end
 
@@ -86,7 +89,8 @@ defmodule Barkpark.UserPrefs do
     actual = pref && etag(pref.value)
 
     with true <- ("*" in tags and actual != nil) or actual in tags,
-         {:ok, pref} <- pref |> UserPref.changeset(%{value: value}) |> Repo.update() do
+         {:ok, pref} <-
+           pref |> UserPref.changeset(%{value: value}) |> Repo.update(returning: [:value]) do
       pref
     else
       false -> Repo.rollback({:precondition_failed, actual})
@@ -134,7 +138,7 @@ defmodule Barkpark.UserPrefs do
   Edit `value[field]` in one transaction under a row lock, so two tabs,
   devices or servers editing the same key both land. A missing row is
   created (except by `:remove`); the rest of `value` is kept. Answers the
-  new `value`.
+  new `value` as stored (see `put/5`).
 
     * `:set` — make `item` the value of top-level `field`, whatever it held
       (task-e016c981d677f3aa). The way to change one field of an object
@@ -217,7 +221,7 @@ defmodule Barkpark.UserPrefs do
   defp write_field(pref, field, item) do
     pref
     |> UserPref.changeset(%{value: Map.put(pref.value, field, item)})
-    |> Repo.update()
+    |> Repo.update(returning: [:value])
     |> case do
       {:ok, pref} -> {:ok, pref.value}
       error -> error
