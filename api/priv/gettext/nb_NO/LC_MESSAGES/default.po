@@ -14955,12 +14955,12 @@ msgstr "Publiserer %{at} av %{n}…"
 msgid "Unpublishing %{at} of %{n}…"
 msgstr "Avpubliserer %{at} av %{n}…"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Your role cannot publish here"
 msgstr "Rollen din kan ikke publisere her"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Barkpark refused the change"
 msgstr "Barkpark avviste endringen"
@@ -14970,27 +14970,27 @@ msgstr "Barkpark avviste endringen"
 msgid "The bulk action stopped before it finished"
 msgstr "Massehandlingen stoppet før den ble ferdig"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Published %{done} of %{total}"
 msgstr "Publiserte %{done} av %{total}"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublished %{done} of %{total}"
 msgstr "Avpubliserte %{done} av %{total}"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} blocked by the publish wall — %{reason}"
 msgstr "%{n} stoppet av publiseringsveggen — %{reason}"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} failed: %{reason}"
 msgstr "%{n} mislyktes: %{reason}"
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} had no changes to publish."
 msgstr "%{n} hadde ingen endringer å publisere."
@@ -15005,7 +15005,7 @@ msgstr "Avpubliser %{n} dokumenter?"
 msgid "They will no longer be live. Each one stays as a draft you can publish again."
 msgstr "De vil ikke lenger være publisert. Hvert av dem blir værende som et utkast du kan publisere igjen."
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} was not published."
 msgid_plural "%{n} were not published."

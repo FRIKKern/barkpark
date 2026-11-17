@@ -454,11 +454,18 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   @doc """
   The open document was written by this page's own bulk action (`Bulk`): the
-  editor reads what is stored now, as after its own Publish. With no
+  editor reads what is stored now, as after its own Publish. The writes came
+  from the action's task, so the Studio took their frames for another
+  user's save; they were this tab's, and the footer stops saying so. With no
   document in the editor, nothing.
   """
-  def reread(%{assigns: %{editing: {_dataset, _type, _id}, desk_nav: [_ | _]}} = socket),
-    do: socket |> reload(:reload) |> settle(:settled)
+  def reread(%{assigns: %{editing: {_dataset, _type, _id}, desk_nav: [_ | _]}} = socket) do
+    socket = socket |> reload(:reload) |> settle(:settled)
+
+    if socket.assigns[:save_status] == "Updated by another user",
+      do: assign(socket, :save_status, ""),
+      else: socket
+  end
 
   def reread(socket), do: socket
 

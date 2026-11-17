@@ -14953,12 +14953,12 @@ msgstr ""
 msgid "Unpublishing %{at} of %{n}…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Your role cannot publish here"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Barkpark refused the change"
 msgstr ""
@@ -14968,27 +14968,27 @@ msgstr ""
 msgid "The bulk action stopped before it finished"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Published %{done} of %{total}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublished %{done} of %{total}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} blocked by the publish wall — %{reason}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} failed: %{reason}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} had no changes to publish."
 msgstr ""
@@ -15003,7 +15003,7 @@ msgstr ""
 msgid "They will no longer be live. Each one stays as a draft you can publish again."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/bulk.ex
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} was not published."
 msgid_plural "%{n} were not published."
