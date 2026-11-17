@@ -799,6 +799,7 @@ defmodule Barkpark.StudioChat do
       )
       |> Repo.update()
     else
+      {:error, :nul_character} = refused -> refused
       nil -> {:error, :not_found}
     end
   end
