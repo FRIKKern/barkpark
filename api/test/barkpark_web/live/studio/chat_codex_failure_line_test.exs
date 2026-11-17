@@ -97,6 +97,38 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
     assert byte_size(line) <= 2_100
   end
 
+  # task-ed920e5459df0ab5: one letter with 200,000 combining marks is one
+  # grapheme, so the 2,000-grapheme cut alone kept all 400 KB of it.
+  test "a host reason of one letter and 200,000 combining marks is cut to about 8 KB" do
+    huge = "x" <> String.duplicate("́", 200_000)
+    event = %Event{kind: :error, error: %{"error" => %{"message" => huge}, "willRetry" => false}}
+
+    line = BarkparkWeb.Studio.CodexFailureLine.line(event)
+    assert byte_size(line) <= 8_100
+    assert String.valid?(line)
+    assert String.starts_with?(line, "The codex turn ended with an error — x́")
+    assert String.ends_with?(line, ".")
+  end
+
+  test "three long pieces of a host reason together stay under about 8 KB" do
+    dogs = String.duplicate("🐕", 2_000)
+    reason = %{"message" => "m" <> dogs, "detail" => "d" <> dogs, "code" => "c" <> dogs}
+    event = %Event{kind: :error, error: %{"error" => reason, "willRetry" => false}}
+
+    line = BarkparkWeb.Studio.CodexFailureLine.line(event)
+    assert byte_size(line) <= 8_100
+    assert String.valid?(line)
+    assert String.starts_with?(line, "The codex turn ended with an error — m🐕")
+  end
+
+  test "each piece is cut on its own, so a long message does not push the detail out" do
+    reason = %{"message" => String.duplicate("x", 10_000), "detail" => "why"}
+    event = %Event{kind: :error, error: %{"error" => reason, "willRetry" => false}}
+
+    assert BarkparkWeb.Studio.CodexFailureLine.line(event) ==
+             "The codex turn ended with an error — " <> String.duplicate("x", 2_000) <> " — why."
+  end
+
   test "the other failure kinds keep their lines", %{view: view} do
     assert line(view, %Event{kind: :process_failed, error: %{"code" => "process_exit"}}) =~
              "The codex process exited unexpectedly — process_exit."

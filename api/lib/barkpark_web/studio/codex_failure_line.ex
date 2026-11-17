@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
   its line says the turn is retrying (task-4644f29b5663bc5f).
   """
 
+  alias Barkpark.StudioChat.Runtime.Codex.Protocol
   alias Barkpark.StudioChat.Runtime.Event
 
   @spec line(Event.t()) :: String.t()
@@ -24,7 +25,9 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
         true -> "The codex turn ended with an error"
       end
 
-    case detail(error) do
+    # Each piece is cut, and what they make together is cut to the same bytes,
+    # so three long pieces are not three times the cut (task-ed920e5459df0ab5).
+    case error |> detail() |> Protocol.cut_bytes() do
       "" -> label <> "."
       detail -> label <> " — " <> detail <> "."
     end
@@ -53,8 +56,9 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
   defp detail(_), do: ""
 
   # A host's reason is unscrubbed; cut it as the managed adapter does
-  # (codex/protocol.ex scrub_text/1), so a 1 MB message is not a 1 MB line.
-  defp text(value) when is_binary(value), do: value |> String.trim() |> String.slice(0, 2_000)
+  # (Protocol.cut_text/1: 2,000 graphemes and 8,000 bytes), so a 1 MB message
+  # is not a 1 MB line.
+  defp text(value) when is_binary(value), do: value |> String.trim() |> Protocol.cut_text()
   defp text(value) when is_integer(value), do: Integer.to_string(value)
   defp text(_), do: ""
 end

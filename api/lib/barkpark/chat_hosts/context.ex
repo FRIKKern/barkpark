@@ -217,6 +217,7 @@ defmodule Barkpark.ChatHosts do
 
     host
     |> RegisteredHost.heartbeat_changeset(params)
+    |> held_leases_capped(attrs)
     |> Repo.update()
     |> case do
       {:ok, updated} ->
@@ -249,6 +250,23 @@ defmodule Barkpark.ChatHosts do
   # request after 30 s, so a lease that took an event within @lease_ttl s is
   # renewed though the list leaves it off. A `leased` lease (not started) is
   # renewed as before: the host may not have it yet.
+  #
+  # A list past @max_held_leases ids is refused whole (422, nothing renewed or
+  # stored; task-bbb32ae64e56c1e0), so a heartbeat's cost does not grow with
+  # what a host sends. The Go host leaves a longer list out (client.go
+  # MaxHeldLeases).
+  @max_held_leases 1_000
+  defp held_leases_capped(changeset, attrs) do
+    with ids when is_list(ids) <- value(attrs, :held_leases),
+         true <- Enum.count_until(ids, @max_held_leases + 1) > @max_held_leases do
+      Ecto.Changeset.add_error(changeset, :held_leases, "has more than %{count} ids",
+        count: @max_held_leases
+      )
+    else
+      _ -> changeset
+    end
+  end
+
   defp held_leases(attrs) do
     case value(attrs, :held_leases) do
       ids when is_list(ids) -> Enum.flat_map(ids, &lease_uuid/1)
@@ -1110,6 +1128,25 @@ defmodule Barkpark.ChatHosts do
   end
 
   def live_lease_for_host(_host, _lease_id, _now), do: nil
+
+  @doc """
+  Is the lease `lease_id` still live: `leased` or `running`, not revoked, not
+  past its expiry? False for an id that is not a UUID or names no lease. The
+  Recorder asks before it ignores another lease's close (`Recorder.TurnOwner`).
+  """
+  @spec lease_live?(String.t(), DateTime.t()) :: boolean()
+  def lease_live?(lease_id, now \\ DateTime.utc_now()) when is_binary(lease_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, id} ->
+        ExecutionLease
+        |> where([l], l.id == ^id and l.status in ["leased", "running"])
+        |> where([l], is_nil(l.revoked_at) and l.expires_at > ^now)
+        |> Repo.exists?()
+
+      :error ->
+        false
+    end
+  end
 
   @doc """
   The session's current live report fence, or nil (herd-s6). The Recorder's
