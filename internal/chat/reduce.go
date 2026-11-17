@@ -399,6 +399,15 @@ func reduceQuestionAnswer(st State, ev QuestionAnswerEvent) (State, []Effect) {
 // row's metadata flip lands in place; the in-flight badge lingers until that
 // refetch confirms the terminal status (reduceTailFetched drops it).
 func reduceAnswered(st State, ev AnsweredEvent) (State, []Effect) {
+	// The ask was settled before the answer reached it (409, #26895): nothing
+	// was sent and a retry changes nothing, so say what happened and refetch;
+	// the refetched row resolves the stale card (task-6d6dc151c1dab808).
+	if status, ok := settledAskStatus(ev.Err); ok {
+		delete(st.AnswerInFlight, ev.RequestID)
+		st.Notice = askSettledNotice(status)
+		st.Settling = true
+		return st, []Effect{FetchTailEffect{SinceSeq: 0, Gen: st.Gen}}
+	}
 	if ev.Err != nil {
 		delete(st.AnswerInFlight, ev.RequestID)
 		st.Notice = "answer failed — " + ev.Err.Error()
