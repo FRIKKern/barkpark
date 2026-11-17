@@ -30,6 +30,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   alias Barkpark.Sso.{Oidc, Saml}
   alias Barkpark.Tenancy.Membership
   alias BarkparkWeb.Plugs.RequirePlatformOperator
+  alias BarkparkWeb.Studio.BoundAdminWrite
 
   defp operator_only,
     do:
@@ -85,10 +86,19 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   # Every event re-checks the operator tier (a socket mounted before the
   # allowlist was armed must not keep minting).
   @impl true
+  # A dataset-bound admin token follows the admin write rule first
+  # (`BoundAdminWrite`): refused in `:enforce`, each write recorded in `:observe`.
   def handle_event(event, params, socket) do
-    if operator?(socket) and still_admin?(socket),
-      do: BarkparkWeb.Studio.OrgAdminLive.OrgScope.guard(event, params, socket, &do_event/3),
-      else: {:noreply, put_flash(socket, :error, operator_only())}
+    cond do
+      BoundAdminWrite.refused?(socket.assigns[:api_token]) ->
+        {:noreply, BoundAdminWrite.refuse(socket)}
+
+      operator?(socket) and still_admin?(socket) ->
+        BarkparkWeb.Studio.OrgAdminLive.OrgScope.guard(event, params, socket, &do_event/3)
+
+      true ->
+        {:noreply, put_flash(socket, :error, operator_only())}
+    end
   end
 
   # The mount gate (`LiveAuth :admin`) is the only admin check, and
@@ -128,6 +138,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     else
       case Scim.mint_token(org_id, "admin-portal") do
         {:ok, {plaintext, _tok}} ->
+          observe(socket, "tokens_write", "mint_scim", org_id)
+
           {:noreply,
            socket |> assign(minted: Map.put(socket.assigns.minted, org_id, plaintext)) |> load()}
 
@@ -142,6 +154,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   defp do_event("toggle_require_mfa", %{"org" => org_id, "to" => to}, socket) do
     case Tenancy.set_organization_require_mfa(org_id, to == "true") do
       {:ok, _org} ->
+        observe(socket, "org_write", "toggle_require_mfa", org_id)
         {:noreply, load(socket)}
 
       {:error, _} ->
@@ -159,6 +172,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
 
       case Tenancy.set_organization_session_policy(org_id, policy) do
         {:ok, _org} ->
+          observe(socket, "org_write", "set_session_policy", org_id)
           {:noreply, socket |> put_flash(:info, gettext("Session policy updated.")) |> load()}
 
         {:error, _} ->
@@ -181,6 +195,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   defp do_event("set_allowed_auth_methods", %{"org" => org_id} = params, socket) do
     case Tenancy.set_organization_allowed_auth_methods(org_id, methods_param(params["methods"])) do
       {:ok, _org} ->
+        observe(socket, "org_write", "set_allowed_auth_methods", org_id)
+
         {:noreply,
          socket |> put_flash(:info, gettext("Allowed sign-in methods updated.")) |> load()}
 
@@ -189,6 +205,18 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
          put_flash(socket, :error, gettext("could not update the allowed sign-in methods"))}
     end
   end
+
+  # An organization spans workspaces, so the row names none: the organization
+  # rides the metadata, where `Barkpark.Audit`'s organization listing reads it.
+  defp observe(socket, surface, event, org_id),
+    do:
+      BoundAdminWrite.observe(
+        socket.assigns[:api_token],
+        surface,
+        "live OrgAdminLive.#{event}",
+        nil,
+        %{"organization_id" => org_id}
+      )
 
   # THE TRAP, named: no box checked must mean NULL — "this org expresses no
   # opinion, every door open, zero tax" — and NEVER []. They are different

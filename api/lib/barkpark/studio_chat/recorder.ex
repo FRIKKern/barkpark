@@ -27,7 +27,7 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
-  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
+  alias Barkpark.StudioChat.{Recorder.TurnOwner, RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
   alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
@@ -576,8 +576,8 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
-  def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
-    state = ingest_runtime_event(state, event, false)
+  def handle_call({:project_runtime_event, %Event{} = event, lease_id}, _from, state) do
+    state = project_host_event(state, event, lease_id)
     {:reply, :ok, touch(state)}
   end
 
@@ -659,10 +659,10 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info(:replay_registered_host_events, state) do
     state =
       state.session_id
-      |> Barkpark.ChatHosts.replay_unprojected()
+      |> Barkpark.ChatHosts.replay_unprojected_by_lease()
       |> Enum.reduce(state, fn
-        {event_id, %Event{} = event}, acc ->
-          acc = ingest_runtime_event(acc, event, false)
+        {event_id, %Event{} = event, lease_id}, acc ->
+          acc = project_host_event(acc, event, lease_id)
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
 
@@ -1669,6 +1669,15 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_runtime_text(_state, _event), do: :ok
+
+  # Two leases' replies are never one row, and only the turn's own lease ends
+  # it (TurnOwner, task-b0cbddc9d0f2e2aa, task-5d1f639852927c4e).
+  defp project_host_event(state, event, lease_id) do
+    case TurnOwner.take(state, event, lease_id, &persist_runtime_text/2, &stable_settle/2) do
+      {:ignore, state} -> state
+      state -> ingest_runtime_event(state, event, false)
+    end
+  end
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
   # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the

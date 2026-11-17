@@ -15026,3 +15026,8 @@ msgstr "Kunne ikke sjekke hvilke dokumenter som refererer til dem. Prøv igjen f
 #, elixir-autogen, elixir-format
 msgid "The document is no longer there"
 msgstr "Dokumentet finnes ikke lenger"
+
+#: lib/barkpark_web/live/studio/bound_admin_write.ex:41
+#, elixir-autogen, elixir-format
+msgid "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
+msgstr "dette tokenet er bundet til ett datasett og kan ikke endre medlemmer, tilgang, tokener eller hemmeligheter i arbeidsområdet"

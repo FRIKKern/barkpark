@@ -91,7 +91,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2575 api/lib/barkpark/studio_chat/provider/claude.ex
 2562 api/lib/barkpark/tenancy.ex
 2557 api/lib/barkpark/auth.ex
-2554 api/lib/barkpark/studio_chat/recorder.ex
+2563 api/lib/barkpark/studio_chat/recorder.ex
 2540 api/priv/static/assets/bp-sheet-grid.js
 2527 api/lib/barkpark/plugins/tasks.ex
 2486 api/assets/paper-surface/paper-surface.css
