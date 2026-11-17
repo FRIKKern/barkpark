@@ -3,7 +3,9 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
   The transcript's system line for a codex runtime failure event
   (`:protocol_error`, `:error`, `:process_failed`; codex/protocol.ex). Names
   the failure class, then the scrubbed reason from the event's `error` map
-  (message/detail, with the machine code in parens) when one is present.
+  (message/detail, with the machine code in parens) when one is present. A
+  registered host forwards the notification's params, so its reason sits one
+  level down, under `error["error"]` (task-1ea3bfbe6d47e2bb).
 
   A codex `error` that will retry (`Runtime.Event.retrying_error?/1`) is not
   the end of the turn: the Recorder keeps it open and the reply follows, so
@@ -27,6 +29,8 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
       detail -> label <> " — " <> detail <> "."
     end
   end
+
+  defp detail(%{"error" => nested}) when is_map(nested), do: detail(nested)
 
   defp detail(error) when is_map(error) do
     reason =
