@@ -226,7 +226,10 @@ defmodule Barkpark.StudioChat.RecorderNulTextTest do
     end)
 
     id = Ecto.UUID.generate()
-    {:ok, _} = StudioChat.create_session(%{id: id, cwd: ClaudeChat.cwd(), mode: "plan"})
+
+    {:ok, _} =
+      StudioChat.create_session(%{id: id, provider: "codex", cwd: ClaudeChat.cwd(), mode: "plan"})
+
     {:ok, recorder} = Recorder.ensure(%{session_id: id, provider: "codex", mode: "plan"})
     :sys.get_state(recorder)
 
