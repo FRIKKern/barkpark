@@ -41,10 +41,13 @@ type takenFirstServer struct {
 // deliverTransport sends every request it starts through to the server, even
 // when the caller's context ends first, and reports that end to the caller
 // only once the server took event 1. So the bound can never fire before the
-// server holds event 1: the order the tests need, on any machine.
+// server holds event 1: the order the tests need, on any machine. With
+// untilAnswered it also waits for the server's answer to the cut request, so
+// the server sees the host's requests in the order the host sent them.
 type deliverTransport struct {
-	base  http.RoundTripper
-	taken <-chan struct{}
+	base          http.RoundTripper
+	taken         <-chan struct{}
+	untilAnswered bool
 }
 
 func (d deliverTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -65,6 +68,13 @@ func (d deliverTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	select {
 	case <-d.taken:
 	case <-time.After(3 * time.Second):
+	}
+	if d.untilAnswered {
+		if got := <-done; got.res != nil {
+			_, _ = io.Copy(io.Discard, got.res.Body)
+			got.res.Body.Close()
+		}
+		return nil, req.Context().Err()
 	}
 	go func() {
 		if got := <-done; got.res != nil {
@@ -119,6 +129,8 @@ func (s *takenFirstServer) handler(t *testing.T) http.Handler {
 
 		answer := httptest.NewRecorder()
 		inner.ServeHTTP(answer, r)
+		// Recorded before the answer goes out, so the host never acts on an
+		// answer the record does not hold yet.
 		if kind == "terminal" {
 			s.mu.Lock()
 			s.closes = append(s.closes, answer.Code)
@@ -148,9 +160,11 @@ func runTakenFirst(t *testing.T, server *takenFirstServer) {
 	}
 	handler := &turnHandler{}
 	ctx, stop := startRunnerOn(t, server.handler(t), server.inner, handler)
-	defer stop()
-
 	completed := waitCompleted(ctx, server.inner)
+	// The lease server marks the lease completed inside its handler, before
+	// this front records the close's answer: read the records once the
+	// server is shut, every handler done.
+	stop()
 	_, kinds := server.inner.snapshot()
 	server.mu.Lock()
 	closes := append([]int(nil), server.closes...)

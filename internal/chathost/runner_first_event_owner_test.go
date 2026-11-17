@@ -89,19 +89,19 @@ func (p *plantFront) handler(t *testing.T) http.Handler {
 			status = 0
 		}
 		p.mu.Unlock()
+		answer := []byte(`{"error":{"code":"refused"}}`)
 		if status == 0 {
-			answer := httptest.NewRecorder()
-			inner.ServeHTTP(answer, r)
-			status = answer.Code
-			w.WriteHeader(answer.Code)
-			_, _ = w.Write(answer.Body.Bytes())
-		} else {
-			w.WriteHeader(status)
-			_, _ = w.Write([]byte(`{"error":{"code":"refused"}}`))
+			taken := httptest.NewRecorder()
+			inner.ServeHTTP(taken, r)
+			status, answer = taken.Code, taken.Body.Bytes()
 		}
+		// Recorded before the answer goes out, so the host never acts on an
+		// answer the record does not hold yet.
 		p.mu.Lock()
 		p.posts = append(p.posts, fmt.Sprintf("%s@%d=%d", kind, payload.Cursor, status))
 		p.mu.Unlock()
+		w.WriteHeader(status)
+		_, _ = w.Write(answer)
 	})
 }
 
@@ -118,7 +118,7 @@ func runPlanted(t *testing.T, front *plantFront) ([]string, []string, string) {
 	log := &lineSignal{want: "terminal was not taken", seen: make(chan struct{})}
 	front.inner.log = log
 	front.inner.transport = func(base http.RoundTripper) http.RoundTripper {
-		return deliverTransport{base: base, taken: front.planted}
+		return deliverTransport{base: base, taken: front.planted, untilAnswered: true}
 	}
 	ctx, stop := startRunnerOn(t, front.handler(t), front.inner, &turnHandler{})
 	defer stop()
