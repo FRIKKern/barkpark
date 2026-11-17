@@ -15081,3 +15081,78 @@ msgstr "sorterbar"
 #, elixir-autogen, elixir-format
 msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
 msgstr "For å plukke opp et element, trykk Mellomrom eller Enter på håndtaket. Bruk piltastene for å flytte det, Mellomrom eller Enter for å slippe det, Escape for å avbryte."
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Inspector"
+msgstr "Inspektør"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Review changes"
+msgstr "Gjennomgå endringer"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close history"
+msgstr "Lukk gjennomgang av endringer"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the history for the %{draft} version of this document."
+msgstr "Viser historikken for %{draft}-versjonen av dette dokumentet."
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Document revisions"
+msgstr "Dokumentrevisjoner"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Expand"
+msgstr "Utvid"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Discarded draft"
+msgstr "Forkastet utkast"
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Draft created"
+msgstr "Utkast opprettet"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revision from"
+msgstr "Revisjon fra"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revert to revision"
+msgstr "Gjenopprett"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore this document?"
+msgstr "Gjenopprette dette dokumentet?"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to restore this document?"
+msgstr "Er du sikker på at du vil gjenopprette til valgte versjon?"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm"
+msgstr "Bekreft"
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore most recent revision"
+msgstr "Gjenopprett nyeste versjon"
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "This revision can't be found. Pick another entry in the history."
+msgstr "Denne versjonen finnes ikke. Velg en annen oppføring i historikken."

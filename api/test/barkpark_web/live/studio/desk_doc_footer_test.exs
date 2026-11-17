@@ -90,10 +90,14 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
 
     assert view |> element(words) |> render() |> strip() == "Last published just now"
 
-    # The status is a button named by its words. It opens nothing yet: disabled.
-    button = ~s([data-pane-editing] .doc-footer button.save-state-btn[type="button"][disabled])
+    # The status is a button named by its words, as Sanity's: it opens History
+    # on Review changes (`HistoryPanel`).
+    button =
+      ~s{[data-pane-editing] .doc-footer button.save-state-btn[type="button"]:not([disabled])}
+
     assert view |> element(button) |> render() |> strip() == "Last published just now"
-    refute view |> element(button) |> render() =~ "aria-label"
+    assert view |> element(button) |> render() =~ ~s(aria-label="Last published just now")
+    assert view |> element(button) |> render() =~ "changesInspectorTab=review"
 
     view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
     render_async(view, 5_000)

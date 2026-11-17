@@ -15079,3 +15079,78 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Inspector"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Review changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close history"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the history for the %{draft} version of this document."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Document revisions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Expand"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Discarded draft"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Draft created"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revision from"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revert to revision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to restore this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore most recent revision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "This revision can't be found. Pick another entry in the history."
+msgstr ""
