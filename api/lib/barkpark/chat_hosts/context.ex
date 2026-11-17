@@ -848,14 +848,25 @@ defmodule Barkpark.ChatHosts do
     from(l in ExecutionLease,
       join: s in Barkpark.StudioChat.Session,
       on: s.id == l.session_id,
-      where: s.status == "working",
-      where: l.status in ["leased", "running"],
-      where: is_nil(l.revoked_at) and l.expires_at < ^cutoff and l.inserted_at >= ^floor,
+      where: ^open_turn_lease(),
+      where: ^sweepable(floor),
+      where: l.expires_at < ^cutoff,
       select: l.id
     )
     |> Repo.all()
     |> Enum.count(&end_expired_turn_by_id(&1, cutoff, floor))
   end
+
+  # A turn's lease that nothing has closed or revoked. Binds the lease first.
+  defp open_turn_lease,
+    do: dynamic([l], l.status in ["leased", "running"] and is_nil(l.revoked_at))
+
+  # What `end_expired_turns/2` can end once the lease is past its grace: a
+  # lease created at or after `floor` on a `working` session. Binds the lease
+  # first and its session second. `turn_held?/1` reads the same rule, so the
+  # sweep and the answer routes cannot disagree on which turns can still end.
+  defp sweepable(floor),
+    do: dynamic([l, s], s.status == "working" and l.inserted_at >= ^floor)
 
   defp end_expired_turn_by_id(lease_id, cutoff, floor) do
     Repo.transaction(fn ->
@@ -1276,22 +1287,31 @@ defmodule Barkpark.ChatHosts do
   end
 
   @doc """
-  Whether a host still holds the session's turn: a `leased`/`running` lease that
-  is not revoked, whatever its `expires_at`. Only `end_expired_turns/2` decides
-  that a turn is over, by ending the lease. Until it does, `heartbeat/2` revives
-  any `leased`/`running` lease, and the sweep runs only every few minutes, so
-  any time cutoff here would call a turn over that can still come back.
-  Wider than `live_report_fence/2`, which stops at `expires_at`. An ask on a
-  held turn can still be delivered, so it is never canceled
-  (task-dc4980982da790c9, rev26731 H3/H4).
+  Whether a host still holds the session's turn: a `leased`/`running` lease, not
+  revoked, that is either inside the sweep's #{@expired_turn_grace}s grace
+  past `expires_at`, or one `end_expired_turns/2` can still end (`sweepable/1`:
+  a `working` session, created at or after the sweep's floor). Until the sweep
+  ends such a lease, `heartbeat/2` can revive it, and the sweep runs only every
+  few minutes. A lease past the grace that the sweep can never end (created
+  before the floor, or its session not `working`) is not held, so its asks
+  do not wait forever. Wider than `live_report_fence/2`, which stops at
+  `expires_at`. An ask on a held turn can still be delivered, so it is never
+  canceled (task-dc4980982da790c9, rev26731 H3/H4/N1/N2).
   """
   @spec turn_held?(String.t()) :: boolean()
   def turn_held?(session_id) when is_binary(session_id) do
     case Ecto.UUID.cast(session_id) do
       {:ok, id} ->
-        ExecutionLease
-        |> where([l], l.session_id == ^id and l.status in ["leased", "running"])
-        |> where([l], is_nil(l.revoked_at))
+        cutoff = DateTime.add(DateTime.utc_now(), -@expired_turn_grace)
+        in_grace = dynamic([l], l.expires_at >= ^cutoff)
+
+        from(l in ExecutionLease,
+          join: s in Barkpark.StudioChat.Session,
+          on: s.id == l.session_id,
+          where: l.session_id == ^id,
+          where: ^open_turn_lease(),
+          where: ^dynamic(^in_grace or ^sweepable(expired_turn_floor()))
+        )
         |> Repo.exists?()
 
       :error ->

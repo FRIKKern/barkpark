@@ -59,9 +59,9 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
       or no local Recorder while a host still holds the session's turn (a
       registered host's turn after a restart, still blocked on its ask):
       `{:error, _}`. The ask must stay pending, and a send brings a Recorder
-      back to deliver it. "Holds the turn" is `ChatHosts.turn_held?/1`: a lease
-      the expiry sweep has not ended, however far past `expires_at`, since a
-      heartbeat revives it until then;
+      back to deliver it. "Holds the turn" is `ChatHosts.turn_held?/1`: an open
+      lease inside the sweep's grace, or one the expiry sweep can still end
+      (a heartbeat revives it until then);
     * no Recorder and no held turn: nil, so `settle/4` cancels (D11).
   """
   @spec deliverer(String.t(), (term() -> any())) :: (-> any()) | nil | {:error, term()}

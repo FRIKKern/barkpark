@@ -333,13 +333,54 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
       assert_pending_and_unleased(host, sid)
       assert ChatHosts.end_expired_turns() >= 1
       refute ChatHosts.turn_held?(sid)
-
-      assert approve(raw, sid, "ask-b1", "allow").status == 409
-      assert answer(raw, sid, "ask-b1q").status == 404
-      assert host_commands(host, sid, :answer_approval) == []
-      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
-      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "question")
+      assert_canceled(raw, host, sid)
     end
+  end
+
+  # rev26731 round 4, N1/N2: a lease the sweep can never end must not hold its
+  # asks at 503 forever. Past the grace, it no longer holds the turn.
+  describe "an answer on a lease past the grace that the sweep can never end" do
+    test "N1, a lease created before the sweep's floor: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+      created_before_floor!(turn_lease)
+
+      assert ChatHosts.end_expired_turns() == 0
+      assert_canceled(raw, host, sid)
+    end
+
+    test "N2, a lease whose session is not working: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+
+      assert StudioChat.get_session(sid).status == "active"
+      assert ChatHosts.end_expired_turns() == 0
+      assert_canceled(raw, host, sid)
+    end
+  end
+
+  defp assert_canceled(raw, host, sid) do
+    assert approve(raw, sid, "ask-b1", "allow").status == 409
+    assert answer(raw, sid, "ask-b1q").status == 404
+    assert host_commands(host, sid, :answer_approval) == []
+    assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "question")
+  end
+
+  # Older than the sweep's default floor (`@expired_turn_floor`, 2026-11-14).
+  defp created_before_floor!(lease_id) do
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease_id),
+        set: [inserted_at: ~U[2026-11-01 00:00:00.000000Z]]
+      )
   end
 
   # Move the lease's expiry `seconds` from now, as a host that stopped
