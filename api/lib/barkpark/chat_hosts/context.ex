@@ -796,9 +796,11 @@ defmodule Barkpark.ChatHosts do
   # `error` and the turn goes on, internal/chathost/local_handler.go) and
   # `control_completed` (a Stop's ack, followed by the turn's own close). Only
   # a `completed` lease pays the read. Even those are refused once the session
-  # has a newer lease (task-1eefeeb52ed19e73): Claude's `error` result is
-  # followed by the host's terminal when the provider exits, a person can send
-  # again in that gap, and the Recorder would end the newer turn.
+  # has a newer lease (task-1eefeeb52ed19e73): a codex `error` that will not
+  # retry is followed by the host's terminal when the app-server exits ("exited
+  # before turn completion", local_handler.go), a person can send again in that
+  # gap, and the Recorder would end the newer turn. (After a Claude result the
+  # host sends no terminal: `runClaude` returns nil once it saw one.)
   @continuing_kinds ["error", "control_completed"]
   defp takes_new_event?(%ExecutionLease{status: "cancelled", last_cursor: current}, cursor)
        when is_integer(cursor) and cursor > current,
