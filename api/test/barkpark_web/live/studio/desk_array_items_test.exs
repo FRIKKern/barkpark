@@ -375,4 +375,9 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
     assert_push_event(view, "desk:item-open", %{path: "doc[links]", index: 2})
     refute has_element?(view, ~s(#{item(key)} > dialog [name="doc[links][2].url"]))
   end
+
+  test "an item's Copy is a read for the capability gate; the menu's writes stay array_op" do
+    assert BarkparkWeb.Studio.Caps.classify("desk-item-copy") == :read
+    assert BarkparkWeb.Studio.Caps.classify("array_op") == :write
+  end
 end
