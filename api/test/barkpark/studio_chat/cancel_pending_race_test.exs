@@ -10,6 +10,7 @@ defmodule Barkpark.StudioChat.CancelPendingRaceTest do
   """
   use Barkpark.DataCase, async: false
 
+  alias Barkpark.LockWaiter
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Message, Session}
 
@@ -19,9 +20,9 @@ defmodule Barkpark.StudioChat.CancelPendingRaceTest do
     with_session(fn sid ->
       ask!(sid, "r1")
       holder = hold(fn -> {:ok, _} = StudioChat.update_approval_status(sid, "r1", "allowed") end)
-      cancel = Task.async(fn -> unboxed(fn -> StudioChat.cancel_pending_approvals(sid) end) end)
+      {cancel, backend} = LockWaiter.start(fn -> StudioChat.cancel_pending_approvals(sid) end)
 
-      await_lock_waiters(1)
+      LockWaiter.await_lock!(backend)
       release(holder)
 
       assert Task.await(cancel, 10_000) == 0, "the answered ask is not the cancel's to cancel"
@@ -36,9 +37,9 @@ defmodule Barkpark.StudioChat.CancelPendingRaceTest do
     with_session(fn sid ->
       ask!(sid, "old")
       holder = hold(fn -> ask!(sid, "new") end)
-      cancel = Task.async(fn -> unboxed(fn -> StudioChat.cancel_pending_approvals(sid) end) end)
+      {cancel, backend} = LockWaiter.start(fn -> StudioChat.cancel_pending_approvals(sid) end)
 
-      await_lock_waiters(1)
+      LockWaiter.await_lock!(backend)
       release(holder)
 
       assert Task.await(cancel, 10_000) == 1
@@ -102,23 +103,4 @@ defmodule Barkpark.StudioChat.CancelPendingRaceTest do
   end
 
   defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
-
-  defp await_lock_waiters(n, tries \\ 250) do
-    %{rows: [[waiting]]} =
-      Repo.query!(
-        "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%chat_%'"
-      )
-
-    cond do
-      waiting >= n ->
-        :ok
-
-      tries == 0 ->
-        flunk("only #{waiting} of #{n} writers reached the row lock")
-
-      true ->
-        Process.sleep(20)
-        await_lock_waiters(n, tries - 1)
-    end
-  end
 end
