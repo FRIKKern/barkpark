@@ -105,23 +105,32 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   end
 
   @doc "Hook per member. Unconfined, it calls the engine's own `import_member/3`."
-  def import!(nil, entry, dumps, mode, import_member),
-    do: import_member.(entry, Map.get(dumps, entry["name"], ""), mode)
-
-  # `path` is the engine's own extraction path, as in its `release_member/1`.
-  # sobelow_skip ["Traversal.FileModule"]
-  def import!(state, %{"name" => table} = entry, dumps, mode, _import_member) do
+  def import!(state, %{"name" => table} = entry, dumps, mode, import_member) do
     dump = Map.get(dumps, table, "")
 
-    n =
-      cond do
-        state.enforce? and table in @observe_tables -> 0
-        entry["row_count"] == 0 -> 0
-        true -> Rows.import_member!(entry, dump, mode, state.manifest, state.catalog)
-      end
+    cond do
+      is_nil(state) ->
+        import_member.(entry, dump, mode)
 
+      state.enforce? and table in @observe_tables ->
+        release!(dump)
+
+      entry["row_count"] == 0 ->
+        release!(dump)
+
+      true ->
+        n = Rows.import_member!(entry, dump, mode, state.manifest, state.catalog)
+        release!(dump)
+        n
+    end
+  end
+
+  # As the engine's `release_member/1`: the member file is the engine's own
+  # extraction path, deleted once read. Returns 0 rows for the skipped case.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp release!(dump) do
     with {:file, path} <- dump, do: File.rm(path)
-    n
+    0
   end
 
   @doc """
@@ -197,24 +206,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   # ── Workspace row ───────────────────────────────────────────────────────────
 
-  # A new workspace lands in no organization; an existing one keeps what it had.
-  defp settle_workspace_row!(manifest, nil) do
-    Repo.query!("UPDATE workspaces SET organization_id = NULL WHERE id = $1::uuid", [
-      Ecto.UUID.dump!(Rows.ws_id!(manifest))
-    ])
-  end
-
-  # `sets` comes from the fixed @operator_columns list; values are bind params.
+  # A new workspace (`prior` nil) lands in no organization; an existing one
+  # keeps what it had. `sets` comes from the fixed @operator_columns list;
+  # values are bind params.
   # sobelow_skip ["SQL.Query"]
   defp settle_workspace_row!(manifest, prior) do
+    {cols, values} =
+      if prior,
+        do: {@operator_columns, Enum.map(@operator_columns, &prior[&1])},
+        else: {["organization_id"], [nil]}
+
     sets =
-      @operator_columns
+      cols
       |> Enum.with_index(2)
       |> Enum.map_join(", ", fn {col, i} -> "#{Rows.qi(col)} = $#{i}" end)
 
     Repo.query!(
       "UPDATE workspaces SET #{sets} WHERE id = $1::uuid",
-      [Ecto.UUID.dump!(Rows.ws_id!(manifest)) | Enum.map(@operator_columns, &prior[&1])]
+      [Ecto.UUID.dump!(Rows.ws_id!(manifest)) | values]
     )
   end
 

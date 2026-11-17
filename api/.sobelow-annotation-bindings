@@ -167,6 +167,15 @@ lib/barkpark/tenancy/workspace_bundle/archive.ex	open_scratch_dir!
 lib/barkpark/tenancy/workspace_bundle/archive.ex	pack
 lib/barkpark/tenancy/workspace_bundle/archive.ex	spill_dir
 lib/barkpark/tenancy/workspace_bundle/archive.ex	unpack_to_dir
+lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	read_operator_columns
+lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	release!
+lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	settle_workspace_row!
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	copy_source
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	count
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	delete!
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	import_member!
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	insert!
+lib/barkpark/tenancy/workspace_bundle/import_confinement/rows.ex	refuse_if!
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	disown
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	os_process_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	own

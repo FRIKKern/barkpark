@@ -242,7 +242,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
     end
   end
 
-  # sobelow_skip ["SQL.Query"]
   defp drop_user_rows!(table, tmp, cols) do
     case Map.get(@user_rows, table) do
       nil -> :ok
