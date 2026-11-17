@@ -250,6 +250,41 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     end
   end
 
+  test "enforce: the other token and seat writes refuse a bound admin token too", ctx do
+    enforce!()
+    victim = token!(ctx.ws.id, [], ["read"])
+    b = ctx.base
+
+    for {kind, method, path, body} <- [
+          {:ws, :post, b <> "/v1/tokens", %{label: "read", permissions: ["read"]}},
+          {:ws, :post, b <> "/v1/chat/tokens", %{label: "chat"}},
+          {:ws, :post, "/v1/auth/studio-tokens", %{workspace: ctx.ws.slug}},
+          {:ws, :post, "/v1/auth/app-tokens", %{email: email()}},
+          {:ws, :delete, "/v1/auth/app-tokens", %{email: email()}},
+          {:ws, :delete, "/v1/auth/app-tokens/" <> victim.id, %{}},
+          {:ws, :delete, "/v1/shares/tokens/" <> victim.id, %{}},
+          {:ws, :post, "/v1/fleet/support-tokens", %{name: "box"}},
+          {:ws, :delete, "/v1/fleet/support-tokens/" <> victim.id, %{}},
+          {:ws, :post, "/v1/auth/login-tickets", %{email: email()}},
+          {:ws, :post, "/v1/auth/cloud-users/deprovision", %{email: email()}},
+          {:flat, :post, "/v1/admin/tokens/" <> victim.id <> "/seats/restore", %{}}
+        ] do
+      conn = send_as(raw_for(ctx, kind, :bound).raw, method, path, body)
+      assert conn.status == 403, "#{method} #{path} answered #{conn.status}: #{conn.resp_body}"
+      assert Jason.decode!(conn.resp_body)["error"]["reason"] == "dataset_not_bound", path
+    end
+
+    refute revoked?(victim.id)
+    assert records() == []
+  end
+
+  test "observe: a login ticket without an email is not a seat write, so it is not recorded",
+       ctx do
+    conn = send_as(ctx.bound.raw, :post, "/v1/auth/login-tickets", %{})
+    assert conn.status == 201, conn.resp_body
+    assert records() == []
+  end
+
   for mode <- [:observe, :enforce] do
     test "#{mode}: a bound admin token may revoke itself, unrecorded", ctx do
       Application.put_env(:barkpark, :dataset_bound_admin_reads, unquote(mode))
