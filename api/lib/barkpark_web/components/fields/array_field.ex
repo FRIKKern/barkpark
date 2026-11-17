@@ -35,7 +35,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     CodelistField,
     CompositeField,
     LocalizedTextField,
-    ObjectForm
+    ObjectForm,
+    TagsField
   }
 
   attr :field, :map, required: true
@@ -173,9 +174,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   end
 
   def array_field(assigns) do
-    if select_list?(assigns.field),
-      do: select_list(assigns),
-      else: row_list(assigns)
+    cond do
+      # `options.layout: "tags"` in the desk: one input, Enter adds (`TagsField`).
+      TagsField.tags?(assigns) -> TagsField.tags_field(assigns)
+      select_list?(assigns.field) -> select_list(assigns)
+      true -> row_list(assigns)
+    end
   end
 
   # An array of `select` values is Sanity's array of strings with

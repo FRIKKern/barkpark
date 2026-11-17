@@ -15026,3 +15026,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{tag}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Enter tag and press ENTER…"
+msgstr ""
