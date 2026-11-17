@@ -275,11 +275,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @type stats :: %{
-          tables: %{optional(String.t()) => non_neg_integer()},
-          total_rows: non_neg_integer(),
-          manifest: map(),
-          attempts: pos_integer(),
-          optional(:withheld) => %{optional(String.t()) => non_neg_integer()}
+          optional(:withheld) => %{optional(String.t()) => non_neg_integer()},
+          required(:tables) => %{optional(String.t()) => non_neg_integer()},
+          required(:total_rows) => non_neg_integer(),
+          required(:manifest) => map(),
+          required(:attempts) => pos_integer()
         }
 
   @doc """
