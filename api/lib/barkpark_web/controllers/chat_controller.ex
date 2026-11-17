@@ -85,6 +85,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.StudioChat
 
   alias Barkpark.StudioChat.{
+    ApprovalAnswer,
     Attachments,
     FleetHub,
     HostExecution,
@@ -413,11 +414,15 @@ defmodule BarkparkWeb.ChatController do
 
   # ── POST /v1/chat/sessions/:id/approval ────────────────────────────────────
 
+  @ask_hint "This ask is no longer pending. Reload the session to see its current state."
+
   @doc """
   Answer a pending approval → 204. `{request_id, decision:"allow"|"deny"}`. Never
   a caller-supplied `updatedInput` (D22): `allow` echoes the server-held original
   ask, `deny` carries a fixed server message. A no-op (204) when no runtime holds
-  the ask.
+  the ask, or when the ask is already answered or unknown. A canceled ask is a 409
+  `conflict` with `details.approval_status`; nothing reaches the runtime
+  (`ApprovalAnswer`, task-035d3495dae536cf).
   """
   def approval(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -430,45 +435,37 @@ defmodule BarkparkWeb.ChatController do
              do: HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
              else: :ok
            ) do
-      with recorder when is_pid(recorder) <- Recorder.whereis(id),
-           {:ok, session} <- Recorder.session_pid(recorder) do
-        # Soft-match the delivery (D31 seal). For the claude provider answer_approval
-        # is a GenServer.cast → always :ok, but approval/2 is provider-neutral: codex
-        # returns {:error, :unknown_approval} on the double-answer race and
-        # {:error, {:app_server_exit, _}} on a dead app-server, and a RemoteRef host
-        # can leak its own {:error, _} tail. A non-:ok return means the ask is already
-        # gone upstream — that must NOT MatchError → 500 where claude cleanly 204s, so
-        # we still flip our own status and 204, mirroring the update_approval_status
-        # {:error, :not_found} → :ok idempotency just below.
-        _ = Runtime.answer_approval(stored.provider, session, request_id, decision)
+      status = if decision == :allow, do: "allowed", else: "denied"
 
-        status =
-          case decision do
-            :allow -> "allowed"
-            {:deny, _message} -> "denied"
-          end
-
-        case StudioChat.update_approval_status(id, request_id, status) do
-          {:ok, _message} -> :ok
-          {:error, :not_found} -> :ok
+      # nil with no live runtime: the ask is then only checked, never flipped.
+      # Soft-match the delivery (D31 seal): codex returns {:error, :unknown_approval}
+      # on the double-answer race and {:error, {:app_server_exit, _}} on a dead
+      # app-server, and a RemoteRef host can leak its own {:error, _} tail. A
+      # non-:ok return means the ask is gone upstream; never a MatchError → 500.
+      deliver =
+        with recorder when is_pid(recorder) <- Recorder.whereis(id),
+             {:ok, session} <- Recorder.session_pid(recorder) do
+          fn -> Runtime.answer_approval(stored.provider, session, request_id, decision) end
+        else
+          _ -> nil
         end
 
-        # studio-chat D49, adopted into this transport (ct-bl-plan-paper-parity):
-        # an ALLOWED plan row grows up into a published Paper. Before this, the
-        # projection was a Studio-LiveView-only defp, so a TUI-origin allow flipped
-        # the card on BOTH surfaces (update_approval_status is role-agnostic) but
-        # left the Paper — and its "→ published as Paper" link — un-created: a
-        # colleague watching in Studio saw the same approved plan with a different
-        # durable artifact depending on WHO clicked Allow. The seam is the ONE owner
-        # (the LiveView delegates to it too), it reads the server-held plan markdown
-        # itself, and it is idempotent by slug, so a re-allow updates one Paper and
-        # never mints a second. Fire-and-forget inside: the 204 below never waits on
-        # it and never fails because of it, and every non-plan / denied / blank-plan
-        # ask is a documented no-op.
-        PlanPapers.publish_approved_plan(id, request_id, decision)
-      end
+      case ApprovalAnswer.settle(id, request_id, status, deliver) do
+        {:refused, now} ->
+          message = "approval #{request_id} is #{now}; the answer was not sent"
+          details = %{"approval_status" => now}
+          ErrorResponse.emit_custom(conn, 409, "conflict", message, details, @ask_hint)
 
-      send_resp(conn, :no_content, "")
+        _delivered_or_noop ->
+          # studio-chat D49 (ct-bl-plan-paper-parity): an ALLOWED plan row grows
+          # up into a published Paper, whichever surface clicked Allow. The seam
+          # is the ONE owner (the LiveView delegates to it too), reads the
+          # server-held plan itself, is idempotent by slug, and is fire-and-forget:
+          # the 204 never waits on it, and a non-plan / denied / blank-plan ask is
+          # a documented no-op.
+          if deliver, do: PlanPapers.publish_approved_plan(id, request_id, decision)
+          send_resp(conn, :no_content, "")
+      end
     else
       nil -> not_found(conn)
       {:error, :host_execution_not_permitted} -> host_refused(conn)
