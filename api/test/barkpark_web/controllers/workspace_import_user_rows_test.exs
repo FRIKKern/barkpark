@@ -63,7 +63,7 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
 
   defp import!(raw, slug, bundle, query \\ "") do
     resp =
-      build_conn()
+      scoped_conn()
       |> authed(raw)
       |> put_req_header("content-type", "application/x-tar")
       |> post("/api/workspaces/#{slug}/import#{query}", bundle)
