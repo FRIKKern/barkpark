@@ -8,6 +8,7 @@ defmodule Barkpark.ChatHosts do
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
   alias Barkpark.ChatHosts.EventText
   alias Barkpark.ChatHosts.LeaseChain
+  alias Barkpark.ChatHosts.RefusedAnswer
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
@@ -708,6 +709,7 @@ defmodule Barkpark.ChatHosts do
           Repo.rollback(reason)
       end
     end)
+    |> tap(&RefusedAnswer.settle(&1, lease_id, event))
     |> case do
       {:ok, {:accepted, execution_event, lease}} ->
         project_event(execution_event, lease)
