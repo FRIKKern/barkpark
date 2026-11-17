@@ -14847,3 +14847,75 @@ msgid "Stale: built 1 day ago"
 msgid_plural "Stale: built %{count} days ago"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Validation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close validation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No validation errors"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be lower than or equal to %{max}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be greater than or equal to %{min}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at most %{max} characters long"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must be at least %{min} characters long"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at most %{max} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Must have at least %{min} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Can't be a duplicate"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_footer.ex
+#, elixir-autogen, elixir-format
+msgid "There are validation errors that need to be fixed before this document can be published"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Does not match %{pattern}-pattern"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Publishing is blocked."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "1 validation error"
+msgid_plural "%{count} validation errors"
+msgstr[0] ""
+msgstr[1] ""
