@@ -4,6 +4,9 @@ defmodule BarkparkWeb.OrgSsoController do
   server shell (task-25386fa77a664587). The routes ride
   `[:api, :require_admin, :require_platform_operator]`: an org's identity
   connection is instance-wide authority, the same tier as `OrgAdminLive`.
+  Every `/:org_slug` action also runs `BarkparkWeb.Plugs.RequireOrgAdmin`: a
+  caller who is not a listed operator acts only on an org they administer in
+  full (task-e04a14e5834fb086).
 
   Every change writes an `auth` audit event naming the org. A client secret is
   never returned or written to an audit event; responses say only whether one is
@@ -12,6 +15,9 @@ defmodule BarkparkWeb.OrgSsoController do
   use BarkparkWeb, :controller
 
   action_fallback BarkparkWeb.FallbackController
+
+  # Every /:org_slug action: only an org the caller administers in full.
+  plug BarkparkWeb.Plugs.RequireOrgAdmin when action != :create
 
   alias Barkpark.{Audit, Repo, Tenancy}
   alias Barkpark.Sso.{Domains, Oidc, OidcConnection, OrgDomain}

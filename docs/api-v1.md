@@ -80,7 +80,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 **Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
-**`Idempotency-Key`** (optional). A repeat replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
+**`Idempotency-Key`** (optional; chat send too). A repeat only replays the first response; concurrent: `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
 
@@ -154,7 +154,7 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 
 ## 8f. Prefs `/w/…/p/…/v1/prefs/:dataset/:key` [token]
 
-[Per-account JSON, atomic list ops](contracts/user-prefs.md).
+[Per-account JSON, atomic set and list ops](contracts/user-prefs.md).
 
 ## 9. Error Codes
 

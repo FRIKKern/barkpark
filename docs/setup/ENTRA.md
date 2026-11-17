@@ -5,7 +5,7 @@ This guide registers the Entra app an organization signs in through and connects
 
 ## Sign-in URL and redirect URI
 
-The redirect URI holds the organization slug: `https://<host>/v1/auth/oidc/<org>/callback`. Entra accepts sign-ins only for the exact URI on the app. Pick the slug, such as `gyldendal`, before you register the app, and use the same slug in every `bp org` command.
+The redirect URI holds the organization slug: `https://<host>/v1/auth/oidc/<org>/callback`. Entra accepts only the exact URI on the app. Pick the slug, such as `gyldendal`, before you register the app, and use the same slug in every `bp org` command.
 
 Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`. The script prints both URLs.
 
@@ -17,7 +17,7 @@ On Container Apps, `main.bicep` can create the Entra side in the same deployment
 -p entraEnabled=true entraOrg=gyldendal entraOrgName=Gyldendal 'entraOwnerUpns=["owner@example.com"]'
 ```
 
-`entra.bicep` then does script steps 1 to 4 below on the instance host, and adds the deploying user to the owners group. A deployment script writes a client secret for `entraSecretYears`, 1 by default, only to the Key Vault as `oidc-client-secret`. At its first boot the app makes the organization, the workspace link and the connection that the `bp org` commands below make, with `trust_idp_mfa` unless `entraTrustIdpMfa=false`. It never changes a connection that exists. The output `entraSignInUrl` is the sign-in URL. The deploying user needs the roles in [IT-HANDOVER.md](IT-HANDOVER.md#what-you-create).
+`entra.bicep` then does script steps 1 to 4 below on the instance host, and adds the deploying user to the owners group. A deployment script writes a client secret for `entraSecretYears`, 1 by default, only to the Key Vault as `oidc-client-secret`. At its first boot the app does what the `bp org` commands below do, with `trust_idp_mfa` unless `entraTrustIdpMfa=false`. It never changes a connection that exists. The output `entraSignInUrl` is the sign-in URL. The deploying user needs the roles in [IT-HANDOVER.md](IT-HANDOVER.md#what-you-create).
 
 For a VM, `entra.bicep` deploys alone with `-p host=<host> org=<org>` and makes no secret. To add or rotate a secret, run the script with `--app-id <entraClientId>`, `--owners-group "<group name>"` and `--secret-file`.
 
@@ -47,7 +47,7 @@ For a new app, run the printed commands at once. Until the time the script print
 
 ## Connect the app to Barkpark
 
-Run the printed commands on your machine with an operator token. They look like this:
+Run the printed commands on your machine with a token on `BARKPARK_OPERATOR_TOKEN_IDS`; other tokens cannot set up a new organization. They look like this:
 
 ```bash
 bp org create gyldendal Gyldendal --yes
@@ -104,7 +104,7 @@ bp opens the sign-in URL and waits for the answer on a random port on 127.0.0.1.
 
 Entra puts at most 200 groups in a token. A user in more groups gets an overage claim, `_claim_names`, instead of `groups`. Barkpark does not call Microsoft Graph to read the groups. That user's existing role stays as it is, and a new user gets `member`.
 
-`--group-claims application` avoids this. The script uses it when the tenant has Entra ID P1. Entra then puts only the groups assigned to the app in the token. The script assigns the owners group to the app. Assign each other mapped group in the portal under Enterprise applications, Users and groups. This mode counts direct members only. Without P1 the script prints a note and uses `--group-claims security`, which sends every security group. Keep users who need a mapped role under 200 groups.
+`--group-claims application` avoids this. The script uses it when the tenant has Entra ID P1. Entra then sends only the groups assigned to the app. The script assigns the owners group to the app. Assign each other mapped group in the portal under Enterprise applications, Users and groups. This mode counts direct members only. Without P1 the script prints a note and uses `--group-claims security`, which sends every security group. Keep users who need a mapped role under 200 groups.
 
 ## Portal steps
 

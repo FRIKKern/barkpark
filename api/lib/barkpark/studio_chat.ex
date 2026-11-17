@@ -56,7 +56,7 @@ defmodule Barkpark.StudioChat do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.StudioChat.{AgentTaskJoin, Attachments, McpChip, Message, Session}
+  alias Barkpark.StudioChat.{AgentTaskJoin, Attachments, McpChip, Message, NulText, Session}
   alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
@@ -524,14 +524,14 @@ defmodule Barkpark.StudioChat do
   silently drops a message. Any OTHER error (or exhausted retries) surfaces as
   `{:error, _}` — callers must not discard it.
 
-  Returns `{:ok, %Message{}}` or `{:error, reason}`.
+  Returns `{:ok, %Message{}}`, `{:error, :nul_character}` (NulText) or `{:error, reason}`.
   """
   @spec append_message(Session.t() | String.t(), map()) ::
           {:ok, Message.t()} | {:error, term()}
   def append_message(%Session{id: id}, attrs), do: append_message(id, attrs)
 
   def append_message(session_id, attrs) when is_binary(session_id) do
-    do_append(session_id, normalize_keys(attrs), @append_retries)
+    NulText.guard(attrs, fn -> do_append(session_id, normalize_keys(attrs), @append_retries) end)
   end
 
   defp do_append(session_id, attrs, attempts) do
@@ -1167,17 +1167,16 @@ defmodule Barkpark.StudioChat do
   (nil/`""` clears it). Deliberately does NOT bump `last_active_at` — leaving a
   draft must not reorder the sidebar. Restored on reopen from the full session
   struct (`get_session`), NEVER from `list_sessions` (whose select omits it).
-  Returns `{:ok, session}` or `{:error, :not_found}`.
+  Returns `{:ok, session}`, `{:error, :not_found}` or `{:error, :nul_character}`.
   """
   @spec set_draft(String.t(), String.t() | nil) ::
-          {:ok, Session.t()} | {:error, :not_found}
+          {:ok, Session.t()} | {:error, :not_found | :nul_character}
   def set_draft(session_id, draft) do
-    with %Session{} = session <- get_session(session_id) do
-      session
-      |> Ecto.Changeset.change(draft: blank_to_nil(draft))
-      |> Repo.update()
+    with :ok <- NulText.check(draft), %Session{} = session <- get_session(session_id) do
+      session |> Ecto.Changeset.change(draft: blank_to_nil(draft)) |> Repo.update()
     else
       nil -> {:error, :not_found}
+      {:error, :nul_character} = refused -> refused
     end
   end
 
@@ -2704,18 +2703,18 @@ defmodule Barkpark.StudioChat do
   @doc """
   Human rename. Sets `title` and pins `title_source: "human"` UNCONDITIONALLY —
   a human title is never overwritten by the AI titler. Returns `{:ok, session}`
-  or `{:error, :not_found}`.
+  or `{:error, :not_found}`, and `{:error, :nul_character}` for a title holding U+0000.
   """
   @spec rename(String.t(), String.t()) ::
-          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :nul_character}
   def rename(session_id, title) do
-    with %Session{} = session <- get_session(session_id) do
-      session
-      |> Ecto.Changeset.change(title: title, title_source: "human")
+    with :ok <- NulText.check(title), %Session{} = session <- get_session(session_id) do
+      Ecto.Changeset.change(session, title: title, title_source: "human")
       |> Ecto.Changeset.validate_required([:title])
       |> Repo.update()
     else
       nil -> {:error, :not_found}
+      {:error, :nul_character} = refused -> refused
     end
   end
 

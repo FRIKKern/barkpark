@@ -139,4 +139,18 @@ defmodule BarkparkWeb.Studio.OrgAdminLive.OrgScope do
   """
   @spec scoped?(map()) :: boolean()
   def scoped?(assigns), do: not listed_operator?(principal(assigns))
+
+  @doc """
+  True when the viewer in `assigns` holds an admin seat in workspace
+  `workspace_id` by the rule `permits?/2` counts seats with (a listed operator:
+  always; a refused dataset-bound token: never). `BarkparkWeb.Plugs.RequireOrgAdmin`
+  asks it before a workspace with no organization joins one.
+  """
+  @spec administers_workspace?(map(), term()) :: boolean()
+  def administers_workspace?(assigns, workspace_id) do
+    principal = principal(assigns)
+
+    listed_operator?(principal) or
+      (is_binary(workspace_id) and workspace_id in administered(principal))
+  end
 end

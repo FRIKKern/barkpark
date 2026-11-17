@@ -63,6 +63,14 @@ defmodule Barkpark.PdsCensusMutantGate do
   @skip_prefix "mutant arms skipped"
   @run_prefix "mutant arms run"
 
+  # HOW MANY ARMS RUN AT ONCE (task-6d4727b7cff1f2bd). Each full arm is a
+  # separate `elixir` VM walking all of `api/lib`, ~3.8 GB on the 16 GB GitHub
+  # runner: PR run 43984047522 (2 full arms) took free memory from 13.2 GB to
+  # 5.6 GB while the test BEAM held 1.1 GB. A push runs 4 full arms, ~15 GB at
+  # once, and two main runs (jobs 131571123236, 132725500094) lost their runner
+  # 26 s and 50 s into this setup. Two at a time keeps a push at the PR's peak.
+  @arm_concurrency 2
+
   @doc "The glob set the mutant arms are gated on, in the order it is printed."
   def input_globs, do: @input_globs
 
@@ -71,6 +79,75 @@ defmodule Barkpark.PdsCensusMutantGate do
 
   @doc "The literal prefix of a RUN line."
   def run_prefix, do: @run_prefix
+
+  @doc """
+  Run `arms` (`[{name, fun}]`) at most `:max_concurrency` (default 2) at a
+  time, each under `:timeout` ms (default 540_000), and return
+  `%{name => fun.()}`. A raising or overrunning arm takes the caller down, as
+  `Task.await/2` did.
+
+  Each arm prints one line when it finishes, through `:say` (default
+  `IO.puts/1`), so a push's setup is never silent for a whole round of walks
+  and CI shows what each arm cost. A last line gives the lowest MemAvailable
+  seen while the arms ran (sampled each second; Linux only), which is the
+  runner's headroom at its tightest.
+  """
+  def run_arms(arms, opts \\ []) do
+    say = Keyword.get(opts, :say, &IO.puts/1)
+    total = length(arms)
+    t0 = System.monotonic_time(:millisecond)
+    watch = spawn_link(fn -> mem_low_loop(mem_avail_mb()) end)
+
+    results = run_arms_stream(arms, opts, say, total)
+
+    send(watch, {:stop, self()})
+    low = receive do: ({:mem_low, low} -> low)
+    ms = System.monotonic_time(:millisecond) - t0
+    low = if low, do: "#{low} MB", else: "n/a (no /proc/meminfo)"
+    say.("[PdsCensusMutantGate] #{total} arms done in #{ms} ms; lowest MemAvailable #{low}")
+    results
+  end
+
+  defp mem_low_loop(low) do
+    receive do
+      {:stop, from} -> send(from, {:mem_low, low})
+    after
+      1_000 ->
+        mem_low_loop(
+          case {low, mem_avail_mb()} do
+            {nil, now} -> now
+            {low, nil} -> low
+            {low, now} -> min(low, now)
+          end
+        )
+    end
+  end
+
+  defp mem_avail_mb do
+    with {:ok, info} <- File.read("/proc/meminfo"),
+         [_, kb] <- Regex.run(~r/^MemAvailable:\s+(\d+)/m, info) do
+      div(String.to_integer(kb), 1024)
+    else
+      _ -> nil
+    end
+  end
+
+  defp run_arms_stream(arms, opts, say, total) do
+    arms
+    |> Task.async_stream(
+      fn {name, fun} ->
+        t0 = System.monotonic_time(:millisecond)
+        result = fun.()
+        ms = System.monotonic_time(:millisecond) - t0
+        say.("[PdsCensusMutantGate] arm #{name} finished in #{ms} ms (one of #{total})")
+        {name, result}
+      end,
+      max_concurrency: Keyword.get(opts, :max_concurrency, @arm_concurrency),
+      timeout: Keyword.get(opts, :timeout, 540_000),
+      ordered: true
+    )
+    |> Map.new(fn {:ok, pair} -> pair end)
+  end
 
   @doc """
   `{:run, line}` or `{:skip, line}`. The line is one line and is meant to be

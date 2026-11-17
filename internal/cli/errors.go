@@ -395,6 +395,9 @@ var codeExit = map[string]int{
 	// bucketing on the NAME is exactly the guesswork this table exists to end.
 	"label_spine": exitValidation, // 422, errors.ex:561
 	"unknown_tag": exitValidation, // 422, errors.ex:620
+	// A chat send's Idempotency-Key reused with another body: resending the
+	// same request cannot succeed, so validation, not conflict.
+	"idempotency_key_reused": exitValidation, // 422, errors.ex:1066
 	// workspace_scope_required: an unscoped WRITE whose credential could mean
 	// more than one workspace (task-6fa023cdabdc5f6a ruling, errors.ex:413-425).
 	// 422 -> validation; the fix is in the request (a /w/:ws/p/:proj path or a

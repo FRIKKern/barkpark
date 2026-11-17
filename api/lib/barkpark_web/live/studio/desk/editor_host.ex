@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.ShareMenu
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.Desk.UnpublishDialog
+  alias BarkparkWeb.Studio.Desk.ValidationPanel
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Components
   alias BarkparkWeb.Studio.StudioLive.DocActions
@@ -451,6 +452,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
 
+  @doc """
+  The open document was written by this page's own bulk action (`Bulk`): the
+  editor reads what is stored now, as after its own Publish. The writes came
+  from the action's task, so the Studio took their frames for another
+  user's save; they were this tab's, and the footer stops saying so. With no
+  document in the editor, nothing.
+  """
+  def reread(%{assigns: %{editing: {_dataset, _type, _id}, desk_nav: [_ | _]}} = socket) do
+    socket = socket |> reload(:reload) |> settle(:settled)
+
+    if socket.assigns[:save_status] == "Updated by another user",
+      do: assign(socket, :save_status, ""),
+      else: socket
+  end
+
+  def reread(socket), do: socket
+
   # The Studio loads the document again, as its own patch would have; the
   # flash its handler put stays. From the path the desk handed over, not the
   # one asked for, so the Studio's `nav_path` stays `desk_nav` and the next
@@ -478,9 +496,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp desk_pane(_params, _chain), do: nil
 
   # What the URL asks for that the pane does not draw (`PaneComponent`). The
-  # Incoming references inspector is drawn, so its `inspect` is not left out.
+  # Incoming references and Validation inspectors are drawn, so their
+  # `inspect` is not left out.
   defp left_out(pane) do
-    if IncomingRefs.open?(pane),
+    if IncomingRefs.open?(pane) or ValidationPanel.open?(pane),
       do: PaneComponent.left_out(Map.delete(pane, :inspect)),
       else: PaneComponent.left_out(pane)
   end
@@ -505,6 +524,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def pane(assigns, view) do
     assigns = assign(assigns, :view, view)
+
+    # The document's problems (`ValidationPanel`): the header's button, the
+    # panel and the footer's Publish read the one list. None over a document
+    # that could not be read or was deleted.
+    problems =
+      if assigns.edit_failed or gone?(assigns), do: [], else: ValidationPanel.problems(assigns)
+
+    assigns = assign(assigns, :desk_problems, problems)
 
     ~H"""
     <section
@@ -562,6 +589,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           chain={@chain}
           index={@view.index}
           base={@base}
+        />
+        <%!-- Sanity's Validation button, where TanStack has it: after Share,
+              and only while there is a problem to show or its panel is open. --%>
+        <ValidationPanel.button_sheet />
+        <ValidationPanel.status
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-validation-status"}
+          problems={@desk_problems}
+        />
+        <ValidationPanel.button
+          id={"#{@view.id}-validation-button"}
+          problems={@desk_problems}
+          pane={@view.pane}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+          perspective={Panes.perspective(assigns[:desk_uri])}
         />
         <%!-- The document's actions, none over a document that could not be
               read or was deleted. --%>
@@ -742,6 +786,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           menu_button={"#{@view.id}-actions-button"}
           perspective={Panes.perspective(assigns[:desk_uri])}
         />
+        <%!-- The Validation inspector, in the same place beside the form
+              (`ValidationPanel`): one `inspect` in the URL, so one of the
+              two at a time. --%>
+        <ValidationPanel.holder
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-validation"}
+          button={"#{@view.id}-validation-button"}
+          problems={@desk_problems}
+          pane={@view.pane}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+          perspective={Panes.perspective(assigns[:desk_uri])}
+          schema={assigns[:editor_schema]}
+          nav_group={assigns[:nav_group]}
+          form={assigns[:editor_form]}
+        />
         <%!-- The desk's own dialogs for the Studio's document actions
               (`DocDialog`): the Studio's handlers open and close them. The
               holder is always here, as the notes' is. --%>
@@ -777,6 +838,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           menu_button={"#{@view.id}-footer-actions-button"}
           perspective={footer_perspective(assigns)}
           published?={DocStatus.state(assigns).published?}
+          blocked={ValidationPanel.blocking(@desk_problems)}
         />
         <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
       </div>

@@ -134,9 +134,10 @@ defmodule BarkparkWeb.Studio.DeskFieldIdsKindsTest do
 
     refute has_element?(view, ~s(#{@form} [id="highlights[1]"]))
 
-    view
-    |> element(~s(#{@form} button.bp-array-btn-add[phx-value-field="highlights"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@form} button.bp-array-btn-add[phx-value-field="highlights"]))
+    )
 
     assert has_element?(view, ~s(#{@form} ol[id="highlights"] input[id="highlights[1]"]))
 

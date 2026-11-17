@@ -425,6 +425,142 @@ defmodule BarkparkWeb.UserPrefControllerTest do
     end
   end
 
+  defp set(field, item), do: %{op: "set", field: field, item: item}
+
+  defp put_bot!(raw, ws, project, value) do
+    bearer(raw)
+    |> put(prefs_path(ws, project, "recents"), Jason.encode!(%{value: value}))
+    |> json_response(200)
+  end
+
+  describe "PATCH set (task-e016c981d677f3aa)" do
+    test "set changes one top-level field and keeps the others", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      put_bot!(raw, ws, project, %{name: "old", session_id: "s0", host: "h"})
+
+      assert list_op(raw, ws, project, set("name", "renamed")) == %{
+               "key" => "recents",
+               "dataset" => @dataset,
+               "value" => %{"name" => "renamed", "session_id" => "s0", "host" => "h"}
+             }
+
+      assert list_op(raw, ws, project, set("session_id", "s1"))["value"] ==
+               %{"name" => "renamed", "session_id" => "s1", "host" => "h"}
+    end
+
+    test "set on an unset key creates the object, as push_front and add do", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+      assert list_op(raw, ws, project, set("name", "a"))["value"] == %{"name" => "a"}
+    end
+
+    test "set takes any JSON value and replaces whatever the field held", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+      put_bot!(raw, ws, project, %{ids: ~w(a b), v: 1})
+
+      assert list_op(raw, ws, project, set("ids", %{"nested" => [1, 2]}))["value"] ==
+               %{"ids" => %{"nested" => [1, 2]}, "v" => 1}
+
+      assert list_op(raw, ws, project, set("v", false))["value"]["v"] == false
+      assert list_op(raw, ws, project, set("v", 0))["value"]["v"] == 0
+    end
+
+    test "set applied twice answers what it answered once", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      once = list_op(raw, ws, project, set("name", "a"))
+      assert list_op(raw, ws, project, set("name", "a")) == once
+    end
+
+    test "a set that takes the value past 16 KB is refused and writes nothing", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+      put_bot!(raw, ws, project, %{name: "a"})
+
+      resp = list_op(raw, ws, project, set("blob", String.duplicate("x", 20_000)), 422)
+      assert resp["error"]["code"] == "invalid_pref"
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))["value"] == %{"name" => "a"}
+    end
+
+    test "an over-limit set on an unset key leaves the key unset", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      list_op(raw, ws, project, set("blob", String.duplicate("x", 20_000)), 422)
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))["value"] == nil
+    end
+
+    test "a set with no field, an empty field, or a null item is a 422 bad_request", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+
+      for body <- [
+            %{op: "set", item: "a"},
+            %{op: "set", field: "", item: "a"},
+            %{op: "set", field: "name"},
+            %{op: "set", field: "name", item: nil}
+          ] do
+        resp = list_op(raw, ws, project, body, 422)
+        assert resp["error"]["code"] == "bad_request"
+        assert resp["error"]["message"] =~ "push_front | add | remove | set"
+      end
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))["value"] == nil
+    end
+
+    test "one user's set never reaches another user's object", %{ws: ws, project: project} do
+      {raw_a, _} = personal_token!(ws)
+      {raw_b, _} = personal_token!(ws)
+      put_bot!(raw_b, ws, project, %{name: "b"})
+
+      assert list_op(raw_a, ws, project, set("name", "a"))["value"] == %{"name" => "a"}
+
+      assert (bearer(raw_b)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))["value"] == %{"name" => "b"}
+    end
+
+    test "the list ops answer byte for byte as before set existed", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      put_bot!(raw, ws, project, %{v: 1, ids: ~w(a b)})
+      path = prefs_path(ws, project, "recents")
+
+      for {body, expected} <- [
+            {push_front("c"),
+             ~s({"value":{"ids":["c","a","b"],"v":1},"key":"recents","dataset":"production"})},
+            {%{op: "add", field: "ids", item: "d"},
+             ~s({"value":{"ids":["c","a","b","d"],"v":1},"key":"recents","dataset":"production"})},
+            {%{op: "remove", field: "ids", item: "a"},
+             ~s({"value":{"ids":["c","b","d"],"v":1},"key":"recents","dataset":"production"})}
+          ] do
+        conn = bearer(raw) |> patch(path, Jason.encode!(body))
+        assert conn.status == 200
+        assert conn.resp_body == expected
+      end
+
+      resp = list_op(raw, ws, project, push_front("x") |> Map.put(:field, "v"), 422)
+
+      assert Map.take(resp["error"], ["code", "message"]) == %{
+               "code" => "invalid_pref",
+               "message" => %{"value" => ["v is not a list"]}
+             }
+    end
+  end
+
   describe "an account session (no bearer)" do
     test "reads and writes its own prefs via the cookie", %{conn: conn, ws: ws, project: project} do
       {_user, conn} = account_session!(conn, ws, "member")

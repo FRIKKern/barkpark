@@ -73,7 +73,10 @@ defmodule BarkparkWeb.Studio.StudioQuotaGateTest do
   end
 
   defp fire(view, "new-document"), do: render_click(view, "new-document", %{"type" => @type_name})
-  defp fire(view, "upload-image"), do: render_click(view, "upload-image", %{"field" => "image"})
+
+  defp fire(view, "upload-image"),
+    do: BarkparkWeb.EditorPost.press(view, "upload-image", %{"field" => "image"})
+
   defp fire(view, event), do: render_click(view, event)
 
   defp suspend!(ws_id), do: {:ok, _} = Quota.suspend(Tenancy.get_workspace_by_id(ws_id), "test")

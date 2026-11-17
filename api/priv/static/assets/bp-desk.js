@@ -703,22 +703,29 @@
       // or Paste made before the script has arrived waits for it and is then
       // made again. If it does not arrive, the pane's toast says so, and the
       // next click tries the load again.
-      var fieldScript = function () {
+      var deskScript = function (attr, loaded) {
         var doc = root.ownerDocument;
-        var src = root.getAttribute("data-desk-field-actions");
-        var script = doc.querySelector("script[data-desk-field-actions]");
-        if (script || !src || window.BarkparkDeskFieldActions) return script;
+        var src = root.getAttribute(attr);
+        var script = doc.querySelector("script[" + attr + "]");
+        if (script || !src || loaded) return script;
         script = doc.createElement("script");
         script.src = src;
         script.async = true;
-        script.setAttribute("data-desk-field-actions", "");
+        script.setAttribute(attr, "");
         script.addEventListener("error", function () {
           script.remove();
         });
         doc.head.appendChild(script);
         return script;
       };
+      var fieldScript = function () {
+        return deskScript("data-desk-field-actions", window.BarkparkDeskFieldActions);
+      };
       fieldScript();
+      // The Validation panel's jump to a field (bp-desk-validation.js).
+      deskScript("data-desk-validation", window.BarkparkDeskValidation);
+      // A list's selection (bp-desk-bulk.js): the modified clicks, Escape, the toast.
+      deskScript("data-desk-bulk", window.BarkparkDeskBulk);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.
@@ -1118,7 +1125,8 @@
         if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
         var pane = paneOf(root, row);
         if (!pane) return;
-        if (e.key === "Tab") return leaveList(e, pane);
+        // A list that is selecting is no single Tab stop: Tab walks its ticks.
+        if (e.key === "Tab") return row.closest(".list-rows[data-selecting]") ? undefined : leaveList(e, pane);
         var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
         if (step === undefined || e.shiftKey) return;
         var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
@@ -1228,7 +1236,7 @@
         });
         var at = all.indexOf(from);
         var next = at < 0 ? null : all[at + (e.shiftKey ? -1 : 1)];
-        if (!next || !next.matches(ROW) || !root.contains(next)) return;
+        if (!next || !next.matches(ROW) || !root.contains(next) || next.closest(".list-rows[data-selecting]")) return;
         var pane = next.closest("[data-pane-index]");
         var to = pane && (pane.querySelector(ROW + ".selected") || pane.querySelector(ROW));
         if (!to || to === next) return;

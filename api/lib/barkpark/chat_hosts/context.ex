@@ -6,6 +6,7 @@ defmodule Barkpark.ChatHosts do
   import Ecto.Query
 
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
+  alias Barkpark.ChatHosts.EventText
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
@@ -503,8 +504,11 @@ defmodule Barkpark.ChatHosts do
     cursor = value(attrs, :cursor)
     key = value(attrs, :idempotency_key)
 
+    # U+0000 becomes U+FFFD in every string the event carries, after the status
+    # label rules (which fold it to a space), so jsonb can store it and the host
+    # keeps publishing (EventText, task-6497a4925af9b22f).
     with {:ok, event} <- normalize_status_event(value(attrs, :event, %{})) do
-      accept_fenced_event(host, lease_id, epoch, cursor, key, event)
+      accept_fenced_event(host, lease_id, epoch, cursor, key, EventText.replace_nul(event))
     end
   end
 
@@ -514,7 +518,9 @@ defmodule Barkpark.ChatHosts do
 
       case validate_fence(lease, host, epoch) do
         :ok ->
-          reconcile_event(lease, cursor, key, event)
+          if takes_new_event?(lease, cursor),
+            do: reconcile_event(lease, cursor, key, event),
+            else: Repo.rollback(:stale_fence)
 
         # The host's close comes after its lease expired. The fence still
         # refuses it, and the host takes that 409 as final and never sends the
@@ -777,6 +783,39 @@ defmodule Barkpark.ChatHosts do
     from(s in Barkpark.StudioChat.Session, where: s.id == ^session_id and s.status == "working")
     |> Repo.update_all(set: [status: "exited", last_active_at: now, updated_at: now])
   end
+
+  # A closed lease takes no new event (task-77353697aed3ffa4). The fence alone
+  # passed one: a closed lease's `expires_at` is still up to @lease_ttl s
+  # ahead, and the Recorder cannot tell leases apart, so a stray close from a
+  # lease the server withdrew ended the session's NEWER turn. The refusal is
+  # `:stale_fence` (409, final for the host); nothing is written or projected.
+  # A cursor at or below `last_cursor` still reaches `reconcile_event/4`, so a
+  # retry of a taken event stays a duplicate. Two closing kinds are not the
+  # end of a turn, so a lease whose last event is one of them takes the next
+  # event as before: `error` (codex app-server forwards a retrying error as
+  # `error` and the turn goes on, internal/chathost/local_handler.go) and
+  # `control_completed` (a Stop's ack, followed by the turn's own close). Only
+  # a `completed` lease pays the read.
+  @continuing_kinds ["error", "control_completed"]
+  defp takes_new_event?(%ExecutionLease{status: "cancelled", last_cursor: current}, cursor)
+       when is_integer(cursor) and cursor > current,
+       do: false
+
+  defp takes_new_event?(
+         %ExecutionLease{status: "completed", last_cursor: current} = lease,
+         cursor
+       )
+       when is_integer(cursor) and cursor > current do
+    last_kind =
+      ExecutionEvent
+      |> where([e], e.lease_id == ^lease.id and e.cursor == ^current)
+      |> select([e], e.kind)
+      |> Repo.one()
+
+    last_kind in @continuing_kinds
+  end
+
+  defp takes_new_event?(_lease, _cursor), do: true
 
   defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)
        when cursor == current + 1 do

@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Refs do
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   def open_ref_picker(%{"field" => field_name, "ref-type" => ref_type}, socket) do
     docs =
@@ -40,14 +41,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Refs do
     socket =
       assign(socket, editor_form: form, ref_picker_field: nil, ref_candidates: [], ref_search: "")
 
-    send(self(), {:autosave_form, form})
+    send(self(), {:autosave_form, PostIdentity.own(form, socket)})
     {:noreply, socket}
   end
 
   def clear_ref(%{"field" => field_name}, socket) do
     form = Map.put(socket.assigns.editor_form, field_name, "")
     socket = assign(socket, editor_form: form)
-    send(self(), {:autosave_form, form})
+    send(self(), {:autosave_form, PostIdentity.own(form, socket)})
     {:noreply, socket}
   end
 end

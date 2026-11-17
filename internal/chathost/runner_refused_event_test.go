@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -26,12 +27,24 @@ type leaseServer struct {
 	kinds     []string
 	refuse    func(cursor uint64) int // non-zero: answer this attempt with that status
 	posts     int                     // event POSTs received
+	polls     int                     // command polls received
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
 	// closeDeadline: the TerminalTimeout startRunner gives this test's Runner
 	// (zero: the default).
 	closeDeadline time.Duration
+	// firstEventDeadline: the FirstEventTimeout startRunner gives this test's
+	// Runner (zero: the default).
+	firstEventDeadline time.Duration
+	// transport, when set, wraps the HTTP transport of the Runner's client.
+	transport func(http.RoundTripper) http.RoundTripper
+	// log, when set, is the Runner's log (else a fresh buffer).
+	log io.Writer
+	// runFor bounds the Runner's run (zero: 5 s). A test that starts a
+	// provider process sets more: on a loaded machine its start alone can
+	// take seconds.
+	runFor time.Duration
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -49,6 +62,7 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		case "/v1/chat-host/heartbeat":
 			_, _ = w.Write([]byte(`{"host":{"id":"host-1"}}`))
 		case "/v1/chat-host/commands":
+			s.polls++
 			command := s.command
 			if command == "" {
 				command = `{"provider":"claude","operation":"send_turn","session_id":"session-1"}`
@@ -174,19 +188,39 @@ func (h *failingHandler) Handle(context.Context, RemoteCommand, func(map[string]
 
 func startRunner(t *testing.T, server *leaseServer, handler Handler) (context.Context, func()) {
 	t.Helper()
-	ts := httptest.NewServer(server.handler(t))
+	return startRunnerOn(t, server.handler(t), server, handler)
+}
+
+// startRunnerOn is startRunner with the HTTP side served by front, which may
+// wrap server's handler.
+func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handler Handler) (context.Context, func()) {
+	t.Helper()
+	ts := httptest.NewServer(front)
+	httpClient := ts.Client()
+	if server.transport != nil {
+		httpClient = &http.Client{Transport: server.transport(httpClient.Transport)}
+	}
+	var log io.Writer = &syncBuffer{}
+	if server.log != nil {
+		log = server.log
+	}
 	runner := Runner{
-		Client:          &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true},
-		Handler:         handler,
-		PollInterval:    time.Millisecond,
-		Log:             &syncBuffer{},
-		TerminalTimeout: server.closeDeadline,
+		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: httpClient, AllowInsecureLoopback: true},
+		Handler:           handler,
+		PollInterval:      time.Millisecond,
+		Log:               log,
+		TerminalTimeout:   server.closeDeadline,
+		FirstEventTimeout: server.firstEventDeadline,
 	}
 	// As main.go wires it: the handler posts labels through the Runner's client.
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {
 		local.Status = runner.Client
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	runFor := 5 * time.Second
+	if server.runFor > 0 {
+		runFor = server.runFor
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), runFor)
 	result := make(chan error, 1)
 	go func() { result <- runner.Run(ctx) }()
 	return ctx, func() {
@@ -315,18 +349,44 @@ func TestRunnerNeverRunsALeaseTwiceEvenWhenNoEventWasTaken(t *testing.T) {
 // A close the server refuses for good (409: the lease expired) is sent once.
 // Sent again on every poll, each try spends the write budget that started the
 // incident and logs two lines.
+//
+// Ordered, not timed (task-fce5b14c7674d2d4): the test waits for the Runner's
+// line that the close was not taken, then for 50 more polls, each listing the
+// lease again. A close sent again goes out on the first poll after its lease
+// goroutine ended, so by then it would have been posted.
 func TestRunnerDoesNotRepeatACloseTheServerRefusedForGood(t *testing.T) {
-	server := &leaseServer{lastCursor: 4, refuse: func(uint64) int { return http.StatusConflict }}
+	log := &lineSignal{want: "terminal was not taken", seen: make(chan struct{})}
+	server := &leaseServer{lastCursor: 4, refuse: func(uint64) int { return http.StatusConflict }, log: log}
 	handler := &turnHandler{}
-	_, stop := startRunner(t, server, handler)
-	time.Sleep(150 * time.Millisecond)
-	stop()
+	ctx, stop := startRunner(t, server, handler)
+	defer stop()
+
+	select {
+	case <-log.seen:
+	case <-ctx.Done():
+		t.Fatalf("the close was never refused:\n%s", log.String())
+	}
+	server.mu.Lock()
+	until := server.polls + 50
+	server.mu.Unlock()
+	for ctx.Err() == nil {
+		server.mu.Lock()
+		polls := server.polls
+		server.mu.Unlock()
+		if polls >= until {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the Runner stopped polling before 50 polls after the refusal")
+	}
 
 	server.mu.Lock()
 	posts := server.posts
 	server.mu.Unlock()
 	if posts != 1 {
-		t.Fatalf("close POSTs=%d want 1", posts)
+		t.Fatalf("close POSTs=%d want 1, 50 polls after the refusal", posts)
 	}
 	if got := handler.runs.Load(); got != 0 {
 		t.Fatalf("provider runs=%d want 0", got)

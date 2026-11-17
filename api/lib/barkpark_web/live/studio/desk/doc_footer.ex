@@ -12,7 +12,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     refused save names its field or its reason (`RefusedSave.status/1`).
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
-    TanStack's is. A pressed button goes grey, so the focus moves to the "…"
+    TanStack's is, and while a validation error blocks it (`blocked`,
+    `ValidationPanel`): its title then says why, in Sanity's words. A pressed button goes grey, so the focus moves to the "…"
     beside it, as TanStack's does. Found by its id as an attribute: a pane
     id (`desk-pane-2-doc:post;x`) is no CSS id selector.
 
@@ -55,6 +56,10 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     default: false,
     doc: "whether a published version exists; Unpublish is greyed out without one"
 
+  attr :blocked, :integer,
+    default: 0,
+    doc: "how many validation errors the document has; Publish is greyed out over any"
+
   @doc "The left's words and the Publish button, or Unpublish in the published perspective."
   def bar(%{perspective: :published} = assigns) do
     ~H"""
@@ -87,7 +92,13 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       type="button"
       id={"#{@id}-publish"}
       class="dk-publish"
-      disabled={is_nil(@publish)}
+      disabled={is_nil(@publish) or @blocked > 0}
+      title={
+        @blocked > 0 &&
+          gettext(
+            "There are validation errors that need to be fixed before this document can be published"
+          )
+      }
       phx-click={JS.push("publish") |> JS.focus(to: ~s([id="#{@menu_button}"]))}
       data-desk-publish
     >
