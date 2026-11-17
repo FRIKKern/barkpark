@@ -296,7 +296,8 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
           {:ws, :delete, "/v1/fleet/support-tokens/" <> victim.id, %{}},
           {:ws, :post, "/v1/auth/login-tickets", %{email: email()}},
           {:ws, :post, "/v1/auth/cloud-users/deprovision", %{email: email()}},
-          {:flat, :post, "/v1/admin/tokens/" <> victim.id <> "/seats/restore", %{}}
+          {:flat, :post, "/v1/admin/tokens/" <> victim.id <> "/seats/restore", %{}},
+          {:flat, :post, "/v1/admin/workspaces/#{ctx.ws.slug}/reinstate", %{}}
         ] do
       conn = send_as(raw_for(ctx, kind, :bound).raw, method, path, body)
       assert conn.status == 403, "#{method} #{path} answered #{conn.status}: #{conn.resp_body}"
