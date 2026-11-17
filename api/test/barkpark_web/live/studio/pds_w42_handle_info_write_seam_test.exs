@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"(_other, socket)", :no_write}
   ]
 
-  # ChatLive — 44 heads today. Only the store-touching ones are listed; all of
+  # ChatLive — 45 heads today. Only the store-touching ones are listed; all of
   # them write on `socket.assigns.store_session_id`, which is established at
   # mount/handle_params and NEVER taken from the message payload, so none can
   # name another tenant's row the way the by-id `handle_event` clauses could
@@ -120,6 +120,13 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   # — three SELECTs and no store write. (The report's own persisted write is
   # `ChatHosts.report_state/4`'s, server-side, long before this frame is
   # broadcast.) It is driven by runs in chat_context_band_test.exs.
+  #
+  # 44 -> 45: `{:chat_turn_split, _session_id}` arrived (task-f0d668d89e21f5f8 —
+  # the Recorder split two leases' replies into two rows), classified
+  # `:no_write`: its whole body is `commit_streaming/1` (`append_message/4` →
+  # `put_message/2`, assigns only) and `assign(streaming: nil)`. The rows
+  # themselves are stored by the Recorder before the message is broadcast. It
+  # is driven by runs in chat_live_lease_split_test.exs.
   @chat_write_heads [
     # ensure_session → StudioChat.create_session; persist_user_message →
     # persist_store → StudioChat.append_message
@@ -270,7 +277,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every ChatLive handle_info head is enumerated, and the store-touching ones are pinned" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/chat_live.ex")
 
-      assert length(heads) == 44,
+      assert length(heads) == 45,
              "chat_live.ex handle_info head count moved to #{length(heads)}; " <>
                "re-run the write classification over the new head."
 

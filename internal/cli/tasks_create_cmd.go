@@ -292,11 +292,14 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 				renderTaskCreateResidue(out, residuePublishResendKeyRefused, draftID, bareID)
 				return code
 			}
-			// Any other 4xx on a RESEND is not a definite refusal either: the
-			// earlier attempt may have published and removed the draft, so the
-			// resend answers not_found. Kept, checked first, never discarded.
-			// A 4xx on the FIRST send is still the refusal handled below.
-			if pAttempts >= 2 {
+			// A 4xx on a RESEND is not a definite refusal unless its code is a
+			// named wall (publishWallCodes): the server reads the draft before
+			// any wall, so only those prove no earlier attempt published, and
+			// they fall through to the refusal below with their own code and
+			// resume block. Anything else (not_found, 402, a code this binary
+			// does not know) is kept, checked first, never discarded. A 4xx on
+			// the FIRST send is always the refusal below.
+			if resendMayHaveLanded(pAttempts, pStatus, pBody) {
 				code := renderAmbiguousWrite(out, ambiguousWrite{
 					class: residuePublishResendRefused, leg: "publish", docID: bareID,
 					title: title, detail: mutateErrorMessage(pStatus, pBody),
@@ -313,7 +316,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// envelope's details as draft_discarded/discard_error. Exit code is
 			// unchanged: exitGeneric, exactly what discardCreatedTaskDraft
 			// returns on every one of its arms.
-			if code, machine := renderCreatePublishRefusalEnvelope(out, ctx, pStatus, pBody, draftID, bareID); machine {
+			if code, machine := renderCreatePublishRefusalEnvelope(out, ctx, pStatus, pBody, draftID, bareID, title); machine {
 				return code
 			}
 			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
@@ -331,7 +334,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// on a never-published document, i.e. the guard's --delete-unpublished
 			// semantics (discard_draft_guard.go): here the absence of a twin is not
 			// probed but KNOWN, because this process created the draft.
-			return discardCreatedTaskDraft(out, ctx, draftID, bareID, publishRefusalCode(pBody))
+			return discardCreatedTaskDraft(out, ctx, draftID, bareID, title, publishRefusalCode(pBody))
 		}
 		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
 		// It is now read off the record the publish mutation returned, so a
@@ -455,8 +458,11 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 // Returns the process exit code: non-zero either way (the create --publish did
 // not do what was asked), but the two paths differ in what is left on the
 // server, and both say which.
-func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, refusalCode string) int {
-	why, byServer := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, title, refusalCode string) int {
+	why, byServer, foundNothing := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+	if foundNothing {
+		return renderDiscardFoundNothing(out, draftID, bareID, title, refusalCode)
+	}
 	if why != "" {
 		out.errf("  %s", why)
 		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
@@ -489,18 +495,41 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID,
 // discard failure after a duplicate_of. A duplicate_of refusal on a CLAIMED
 // draft keeps the draft server-side; the discard then finds it, so that path
 // never reaches the exemption.
-func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool) {
+//
+// FOUND NOTHING (#26871 review). After any OTHER refusal, a discard answering
+// not_found proves there is no draft, so "DRAFT ONLY" would be false: the third
+// return is true, and the caller says the publish may have landed and to check
+// the row first.
+func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool, bool) {
 	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
 	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
+	notFound := status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found"
 	switch {
 	case err != nil:
-		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false
-	case refusalCode == "duplicate_of" && status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found":
-		return "", true
+		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false, false
+	case refusalCode == "duplicate_of" && notFound:
+		return "", true, false
+	case notFound:
+		return "", false, true
 	case status < 200 || status >= 300:
-		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false
+		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false, false
 	}
-	return "", false
+	return "", false, false
+}
+
+// renderDiscardFoundNothing is the answer when the publish was refused but the
+// follow-up discard found no draft: the row may be published (an earlier
+// attempt, or another writer), so it is ambiguous, exit 9, and the remedy
+// checks the row before it offers anything.
+func renderDiscardFoundNothing(out *writer, draftID, bareID, title, refusalCode string) int {
+	code := renderAmbiguousWrite(out, ambiguousWrite{
+		class: ambiguityPublishDiscardFoundNothing, leg: "publish", docID: bareID, title: title,
+		detail: fmt.Sprintf("the publish was refused (%s), and the follow-up discard found no draft %s", refusalCode, draftID),
+	})
+	for _, line := range maybePublishedRemedyLines(draftID, bareID) {
+		out.errf("  %s", line)
+	}
+	return code
 }
 
 // publishRefusalCode is the server's error.code on a refused publish ("" when
@@ -524,12 +553,15 @@ func publishRefusalCode(body []byte) string {
 //
 // The second return says whether the machine shape was taken at all; false means
 // the caller must print its human block, unchanged.
-func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, status int, body []byte, draftID, bareID string) (int, bool) {
+func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, status int, body []byte, draftID, bareID, title string) (int, bool) {
 	if out.output != "json" && out.output != "yaml" {
 		return 0, false
 	}
 	ae := classifyError(status, body)
-	discardErr, _ := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
+	discardErr, _, foundNothing := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
+	if foundNothing {
+		return renderDiscardFoundNothing(out, draftID, bareID, title, publishRefusalCode(body)), true
+	}
 
 	payload := map[string]any{
 		"draft_id":        draftID,

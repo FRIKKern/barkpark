@@ -75,4 +75,19 @@ defmodule Barkpark.UserPrefsTest do
     assert "is too large" <> _ = errors_on(changeset).value |> List.first()
     assert UserPrefs.get(user.id, ws.id, @dataset, "k") == nil
   end
+
+  # task-f88365602c49be57: the tag hashes the value's JSON with every object's
+  # keys sorted, at any depth. 40 keys: a map of 33 or more is not kept in key
+  # order, so only a real sort gives this JSON.
+  test "etag/1 hashes the JSON with sorted keys, so one value has one tag anywhere" do
+    keys = for n <- 1..40, do: "k#{String.pad_leading("#{n}", 2, "0")}"
+    value = %{"z" => Map.new(keys, &{&1, 1}), "a" => [%{"y" => 1, "b" => 2}]}
+
+    inner = Enum.map_join(keys, ",", &~s("#{&1}":1))
+    json = ~s({"a":[{"b":2,"y":1}],"z":{#{inner}}})
+    hex = :crypto.hash(:sha256, json) |> binary_part(0, 16) |> Base.encode16(case: :lower)
+
+    assert UserPrefs.etag(value) == ~s("#{hex}")
+    assert UserPrefs.etag(nil) == nil
+  end
 end
