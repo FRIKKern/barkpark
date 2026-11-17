@@ -216,6 +216,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-create-new, .dk .dk-list-options { margin-left: auto; display: inline-flex; align-items: center; }
       .dk .dk-create-new + .dk-list-options { margin-left: 0; }
+      .dk .dk-create-new[hidden] { display: none; }
+      .dk .dk-create-new[hidden] + .dk-list-options { margin-left: auto; }
       .dk .dk-menu { box-sizing: border-box; min-width: 160px; padding: 4px; border: 0; border-radius: 6px; background: var(--dk-bg); color: var(--dk-menu-fg); box-shadow: var(--dk-popover-shadow); }
       .dk .dk-menu:popover-open { display: flex; flex-direction: column; gap: 4px; }
       .dk .dk-menu .dk-menu-label { padding: 10px 12px 6px; font-size: 9.5px; line-height: 11px; letter-spacing: 0.5px; font-weight: 600; text-transform: uppercase; color: var(--dk-fg); }

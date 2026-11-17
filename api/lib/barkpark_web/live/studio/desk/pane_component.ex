@@ -320,18 +320,25 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           <% end %>
         </div>
         <%!-- J18: the Studio's own "+" event, which the page hands to the
-              Studio (`EditorHost`); the new document opens after this pane. --%>
+              Studio (`EditorHost`); the new document opens after this pane.
+              The button is in the header from the first render, hidden until
+              the read says the type can be created: a button that arrived
+              with the read made the browser move "List options" and its menu,
+              which closed an open menu and dropped the focus. --%>
         <button
-          :if={@pane.kind == :list && @data.ok? && @data.result[:creatable]}
+          :if={@pane.kind == :list}
           type="button"
           class="dk-create-new dk-doc-menu-button icon-btn"
-          phx-click="new-document"
-          phx-value-type={@pane.type}
-          phx-value-desk-pane={@index}
+          hidden={!creatable?(assigns)}
+          disabled={!creatable?(assigns)}
+          phx-click={creatable?(assigns) && "new-document"}
+          phx-value-type={creatable?(assigns) && @pane.type}
+          phx-value-desk-pane={creatable?(assigns) && @index}
           aria-label={
-            gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
+            creatable?(assigns) &&
+              gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
           }
-          data-tip={gettext("Create new document")}
+          data-tip={creatable?(assigns) && gettext("Create new document")}
         >
           <BarkparkWeb.Studio.Desk.Glyph.glyph name="add" />
         </button>
@@ -627,6 +634,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp ref_pane(ref, path), do: %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: path}
 
   defp selected?(panes, index, next), do: same?(Enum.at(panes, index + 1), next)
+
+  # Whether the list's "Create new" is offered: its read is in and allows it.
+  defp creatable?(%{data: data}), do: data.ok? and data.result[:creatable] == true
 
   # A row with a tick (`Bulk`): a document's row in a plain document list.
   defp tick?(%{pane: pane, node: node}, entry),
