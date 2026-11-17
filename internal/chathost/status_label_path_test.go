@@ -199,16 +199,23 @@ func TestStatusLabelPostThatHangsOrFailsDoesNotHoldTheFirstText(t *testing.T) {
 // The label POST has its own timer, LocalHandler.StatusPostTimeout
 // (task-0d2151c31ef9c2a8). A status endpoint that never answers is given up on
 // when that timer runs out, while the turn is still going: the turn's text
-// waits for the server to see the POST end, so the timer, not the turn's end,
-// must end it. The label is dropped after one try with one log line, and the
-// turn is the same as with no label.
+// waits for the host's "not taken" line, which the host writes only while the
+// turn runs, so the timer, not the turn's end, must end the POST. The label is
+// dropped after one try with one log line, and the turn is the same as with no
+// label.
+//
+// The gate opens on the host's line, not on the server seeing the POST end:
+// under load the 100 ms timer can run out before the POST reaches the server
+// at all (13 of 4000 runs beside 4 package loops, task-c1762a533c619bda), and a
+// gate the server opened then waited out the helper's 20 s backstop. A POST
+// the server did get must still have been ended by the host.
 func TestStatusLabelPostIsDroppedWhenItsOwnTimerRunsOut(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "gate")
 	installStatusHelper(t, map[string]string{"BARKPARK_STATUS_HELPER": "turn", "BARKPARK_STATUS_HELPER_GATE": gate})
 
 	var mu sync.Mutex
 	var posts int
-	var turnEnded, endedByHost, endedWhileTurnRan bool
+	served := make(chan bool, 1) // whether the host ended the POST the server got
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/status") {
 			http.NotFound(w, r)
@@ -225,33 +232,52 @@ func TestStatusLabelPostIsDroppedWhenItsOwnTimerRunsOut(t *testing.T) {
 		case <-r.Context().Done():
 		case <-time.After(labelBackstop):
 		}
-		mu.Lock()
-		endedByHost = r.Context().Err() != nil
-		endedWhileTurnRan = !turnEnded
-		mu.Unlock()
-		_ = os.WriteFile(gate, nil, 0o600)
+		select {
+		case served <- r.Context().Err() != nil:
+		default: // a second POST; the count below reports it
+		}
 		if r.Context().Err() == nil {
 			w.WriteHeader(http.StatusAccepted)
 		}
 	}))
 	defer ts.Close()
+	// A kept-alive connection, so the POST does not wait on a dial and the
+	// server normally gets it before the timer runs out.
+	warm, err := ts.Client().Get(ts.URL + "/warm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, warm.Body)
+	warm.Body.Close()
 
 	handler := NewLocalHandler([]string{t.TempDir()})
 	handler.StatusLabel = StatusLabelFunc(func(context.Context, string) (string, error) { return tidesLabel, nil })
 	handler.Status = &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: ts.Client(), AllowInsecureLoopback: true}
 	handler.StatusPostTimeout = 100 * time.Millisecond
-	log := &syncBuffer{}
+	log := &lineSignal{want: "status label not taken", seen: make(chan struct{})}
 	handler.Log = log
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-log.seen:
+			_ = os.WriteFile(gate, nil, 0o600)
+		case <-finished:
+		}
+	}()
 
 	var events []map[string]any
-	err := handler.Handle(context.Background(), RemoteCommand{LeaseID: "lease-1", Epoch: 1, Command: map[string]any{
+	droppedWhileTurnRan := false
+	err = handler.Handle(context.Background(), RemoteCommand{LeaseID: "lease-1", Epoch: 1, Command: map[string]any{
 		"provider": "claude", "operation": "send_turn", "session_id": "session-label",
 		"payload": map[string]any{"cwd": handler.ApprovedRoots[0], "content": "how do ocean tides work?", "mode": "plan"},
 	}}, func(event map[string]any) error {
 		if event["kind"] == "turn_completed" {
-			mu.Lock()
-			turnEnded = true
-			mu.Unlock()
+			select {
+			case <-log.seen:
+				droppedWhileTurnRan = true
+			default:
+			}
 		}
 		events = append(events, event)
 		return nil
@@ -262,35 +288,29 @@ func TestStatusLabelPostIsDroppedWhenItsOwnTimerRunsOut(t *testing.T) {
 	if want := []string{"session_started", "turn_started", "text_delta", "turn_completed"}; fmt.Sprint(kindsOf(events)) != fmt.Sprint(want) {
 		t.Fatalf("events %v; want %v: a dropped label leaves the turn as it was", kindsOf(events), want)
 	}
+	if !droppedWhileTurnRan {
+		t.Fatalf("the turn ended before the host gave up on the hanging label POST: its own timer never ran out (log %q)", log.String())
+	}
 	mu.Lock()
-	byHost, whileRan := endedByHost, endedWhileTurnRan
+	got := posts
 	mu.Unlock()
-	if !byHost {
+	if got == 1 && !<-served {
 		t.Fatalf("the hanging label POST ran to the server's %v backstop: the host never gave up on it", labelBackstop)
 	}
-	if !whileRan {
-		t.Fatal("the hanging label POST ended only with the turn: its own timer never ran out")
-	}
 
-	// The POST goroutine logs once PostStatus returns, which can be after the
-	// turn's end.
-	for deadline := time.Now().Add(labelBackstop); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		if strings.Contains(log.String(), "status label not taken") {
-			break
-		}
-	}
 	// One try: a dropped label is not retried, after the turn either.
 	time.Sleep(100 * time.Millisecond)
-	got := log.String()
-	if strings.Count(got, "status label not taken") != 1 || !strings.Contains(got, "deadline exceeded") {
-		t.Fatalf("log %q; want one line saying the label was not taken because its time ran out", got)
+	out := log.String()
+	if strings.Count(out, "status label not taken") != 1 || !strings.Contains(out, "deadline exceeded") {
+		t.Fatalf("log %q; want one line saying the label was not taken because its time ran out", out)
 	}
-	if strings.Contains(got, "ocean tides") {
-		t.Fatalf("log %q carries the person's text", got)
+	if strings.Contains(out, "ocean tides") {
+		t.Fatalf("log %q carries the person's text", out)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if posts != 1 {
-		t.Fatalf("status POSTs=%d; want exactly 1", posts)
+	// 0 when the timer ran out before the POST reached the server.
+	if posts > 1 {
+		t.Fatalf("status POSTs=%d; want at most 1", posts)
 	}
 }
