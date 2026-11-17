@@ -18,9 +18,19 @@ defmodule Barkpark.ChatHosts.AskingLease do
   that lease (internal/chathost/answer_lease.go). A host older than this
   ignores the field and answers as before.
 
-  Two runs of one session can ask under one id (Codex). The newest ask is the
-  one named, which is the row `ApprovalAnswer` claims
-  (`StudioChat.get_needs_you_message/2` takes the newest by seq).
+  Two runs of one session can ask under one id (Codex numbers asks per
+  process). The lease named is the one that owns the card the person
+  answered: the NEWEST asking lease, then its newest ask. Two rules make that
+  lease the card's:
+
+    * a newer lease's turn cancels an older lease's pending asks
+      (`Recorder.DisplacedAsks`);
+    * an older lease's ask taken while a newer turn is open is stored but
+      superseded, so it makes no card (`ChatHosts.unless_superseded/1`).
+
+  Ordering by the event alone named that superseded older ask when it was
+  stored after the newer run's card, and the host then refused the newer
+  run's own answer (rev26735 on #26925).
   """
 
   import Ecto.Query, only: [from: 2]
@@ -52,7 +62,7 @@ defmodule Barkpark.ChatHosts.AskingLease do
         where: l.workspace_id == ^workspace_id and l.session_id == ^session_id,
         where: e.kind == "approval_requested",
         where: fragment("?->>'approval_id' = ?", e.payload, ^approval_id),
-        order_by: [desc: e.inserted_at],
+        order_by: [desc: l.inserted_at, desc: e.inserted_at],
         limit: 1,
         select: e.lease_id
       )

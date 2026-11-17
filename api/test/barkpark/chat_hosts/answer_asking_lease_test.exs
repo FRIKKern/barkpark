@@ -101,6 +101,52 @@ defmodule Barkpark.ChatHosts.AnswerAskingLeaseTest do
     assert AskingLease.find(%{host | workspace_id: Ecto.UUID.generate()}, sid, "ap-3") == nil
   end
 
+  # rev26735 on #26925. Run A, still alive (another host), asks "0" after
+  # run B's turn opened and B asked "0": A's ask is stored but superseded, so
+  # the only card is B's. The answer to that card must name B, or the host
+  # refuses it and B waits forever.
+  test "a superseded older ask under the same id does not take the newer card's answer",
+       %{host: host, sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, b, 2, ask("0"))
+
+    assert {:ok, :accepted} =
+             ChatHosts.accept_event(host, %{
+               lease_id: a.lease_id,
+               epoch: a.epoch,
+               cursor: 2,
+               idempotency_key: "#{a.lease_id}:#{a.epoch}:2",
+               event: ask("0")
+             })
+
+    assert :delivered =
+             ApprovalAnswer.settle(sid, "0", "allowed", fn ->
+               Runtime.answer_approval("claude", remote_ref(ctx), "0", :allow)
+             end)
+
+    assert asked_lease(answer_command!(ctx)) == b.lease_id
+  end
+
+  # Codex numbers asks per process, so every session of a workspace can hold
+  # an ask "0". Only the answered session's lease is ever named.
+  test "an ask under the same id in another session of the workspace is never named",
+       %{host: host, sid: sid} = ctx do
+    mine = lease!(ctx, "mine")
+    accept!(ctx, mine, 1, %{"kind" => "turn_started"})
+    accept!(ctx, mine, 2, ask("0"))
+
+    other = host_session_on(host)
+    theirs = lease!(other, "theirs")
+    accept!(other, theirs, 1, %{"kind" => "turn_started"})
+    accept!(other, theirs, 2, ask("0"))
+
+    assert AskingLease.find(host, sid, "0") == mine.lease_id
+    assert AskingLease.find(host, other.sid, "0") == theirs.lease_id
+  end
+
   # The registered-host runtime the Recorder holds for a host session, with
   # the real host directory and RemoteDispatch.
   defp remote_ref(%{host: host, sid: sid}) do
@@ -173,6 +219,11 @@ defmodule Barkpark.ChatHosts.AnswerAskingLeaseTest do
 
     {:ok, enrolled} = ChatHosts.enroll(issued.enrollment_token, %{capabilities: capabilities()})
     {:ok, host} = ChatHosts.authenticate(enrolled.credential)
+    host_session_on(host)
+  end
+
+  # A new session of the host's workspace, run on that host.
+  defp host_session_on(host) do
     sid = Ecto.UUID.generate()
 
     {:ok, _} =
@@ -184,7 +235,7 @@ defmodule Barkpark.ChatHosts.AnswerAskingLeaseTest do
           execution_target: "registered_host",
           execution_host_id: host.id
         },
-        ws.id
+        host.workspace_id
       )
 
     {:ok, _recorder} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
