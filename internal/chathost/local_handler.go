@@ -47,6 +47,9 @@ type activeLocalSession struct {
 	provider string
 	stdin    io.WriteCloser
 	cmd      *exec.Cmd
+	// leaseID: the send_turn lease this run serves; its asks are answered
+	// only under it (answer_lease.go).
+	leaseID string
 
 	mu        sync.Mutex
 	threadID  string
@@ -186,6 +189,11 @@ func (h *LocalHandler) handleControl(ctx context.Context, sessionID, operation s
 	if session == nil {
 		return fmt.Errorf("registered-host session %q has no active turn", sessionID)
 	}
+	if operation == "answer_approval" {
+		if refused := refusedAnswer(session, remote.Command); refused != nil {
+			return emit(refused)
+		}
+	}
 	if err := session.control(ctx, operation, remote.Command); err != nil {
 		return err
 	}
@@ -254,6 +262,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 	waited := false
 	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("claude", cmd, stdin)
+	session.leaseID = remote.LeaseID
 	if err := h.register(sessionID, session); err != nil {
 		return err
 	}
@@ -365,6 +374,7 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	waited := false
 	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("codex", cmd, stdin)
+	session.leaseID = remote.LeaseID
 	if err := h.register(sessionID, session); err != nil {
 		return err
 	}
