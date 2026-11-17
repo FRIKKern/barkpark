@@ -657,12 +657,40 @@ func orphanedDraftRemedyLines(draftID, bareID string) []string {
 	}
 }
 
+// maybePublishedRemedyLines is the remedy when the publish MAY have landed (a
+// transport error, a 5xx, an unreadable 2xx, a resend refused over its own
+// key). "DRAFT ONLY" would be a guess, and `bp doc delete task <id>` deletes
+// the PUBLISHED task too (Content.delete_document removes every variant). So
+// the check comes first, and the delete is offered only for the draft-only
+// answer (#26844 review).
+func maybePublishedRemedyLines(draftID, bareID string) []string {
+	return []string{
+		fmt.Sprintf("the publish of %s may have landed. Check the row BEFORE anything else:", draftID),
+		"  bp task get " + bareID,
+		"if it shows published, the task is filed: nothing to do.",
+		"if it shows a draft only, EITHER publish it:",
+		"  " + taskPublishCommand(bareID),
+		"OR delete it (only after the check said draft only: this deletes a published task too):",
+		"  bp doc delete task " + bareID + " --yes",
+	}
+}
+
 // renderOrphanedDraftRemedy writes those lines to stderr, indented under the
 // refusal they belong to.
 func renderOrphanedDraftRemedy(out *writer, draftID, bareID string) {
 	for _, line := range orphanedDraftRemedyLines(draftID, bareID) {
 		out.errf("  %s", line)
 	}
+}
+
+// mcpPublishFailureRemedy picks the MCP task_create remedy for a failed
+// publish: a transport error or a 5xx may have landed, so the row is checked
+// first; any other refusal left a draft only.
+func mcpPublishFailureRemedy(status int, err error, draftID, bareID string) string {
+	if err != nil || status >= 500 {
+		return "\n" + strings.Join(maybePublishedRemedyLines(draftID, bareID), "\n")
+	}
+	return orphanedDraftRemedyText(draftID, bareID)
 }
 
 // orphanedDraftRemedyText is the same remedy folded into one string, for the MCP

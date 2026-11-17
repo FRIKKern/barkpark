@@ -15021,3 +15021,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The document is no longer there"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/bound_admin_write.ex:41
+#, elixir-autogen, elixir-format
+msgid "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
+msgstr ""

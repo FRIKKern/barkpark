@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel do
 
   alias Barkpark.Access
   alias Barkpark.Tenancy.Auth
+  alias BarkparkWeb.Studio.BoundAdminWrite
 
   @doc """
   Open the panel. Loads the workspace section (membership-gated) and clears any
@@ -70,8 +71,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel do
   def access_revoke(%{"id" => id}, socket) when is_binary(id) do
     principal = principal(socket)
 
+    if BoundAdminWrite.refused?(principal),
+      do: {:noreply, BoundAdminWrite.refuse(socket)},
+      else: do_access_revoke(id, principal, socket)
+  end
+
+  def access_revoke(_params, socket), do: {:noreply, socket}
+
+  defp do_access_revoke(id, principal, socket) do
     case Access.revoke(id, principal) do
-      {:ok, _grant} ->
+      {:ok, grant} ->
+        BoundAdminWrite.observe(
+          principal,
+          "members_write",
+          "live StudioLive.access-revoke",
+          grant.workspace_id
+        )
+
         {grants, workspace_view} = workspace_grants(socket)
 
         {:noreply,
@@ -102,8 +118,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel do
          |> put_flash(:info, gettext("That grant is no longer active."))}
     end
   end
-
-  def access_revoke(_params, socket), do: {:noreply, socket}
 
   # Load the workspace's ACTIVE grants, but ONLY when the caller is authorized to
   # read the workspace — the identical gate AccessController.index applies. A

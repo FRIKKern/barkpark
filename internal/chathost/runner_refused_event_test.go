@@ -51,6 +51,12 @@ type leaseServer struct {
 	onEvent func(kind string)
 	// command: the command JSON to hand out; empty means a bare send_turn.
 	command string
+	// heartbeatEvery: the HeartbeatInterval startRunner gives this test's
+	// Runner (zero: the default).
+	heartbeatEvery time.Duration
+	// heldLists: each heartbeat's held_leases, as fmt.Sprint of the list, or
+	// "absent" when the heartbeat had none.
+	heldLists []string
 }
 
 func (s *leaseServer) handler(t *testing.T) http.Handler {
@@ -60,6 +66,15 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		defer s.mu.Unlock()
 		switch r.URL.Path {
 		case "/v1/chat-host/heartbeat":
+			var beat struct {
+				Held *[]string `json:"held_leases"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&beat)
+			if beat.Held == nil {
+				s.heldLists = append(s.heldLists, "absent")
+			} else {
+				s.heldLists = append(s.heldLists, fmt.Sprint(*beat.Held))
+			}
 			_, _ = w.Write([]byte(`{"host":{"id":"host-1"}}`))
 		case "/v1/chat-host/commands":
 			s.polls++
@@ -211,6 +226,7 @@ func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handle
 		Log:               log,
 		TerminalTimeout:   server.closeDeadline,
 		FirstEventTimeout: server.firstEventDeadline,
+		HeartbeatInterval: server.heartbeatEvery,
 	}
 	// As main.go wires it: the handler posts labels through the Runner's client.
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {

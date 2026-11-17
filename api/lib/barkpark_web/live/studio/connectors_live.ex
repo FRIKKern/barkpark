@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   alias Barkpark.Connectors.Catalog
   alias Barkpark.Connectors.ConnectTicket
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.BoundAdminWrite
   alias BarkparkWeb.Studio.ConnectorsCopy
 
   @dataset "production"
@@ -231,12 +232,14 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   # STEP 2 — CONNECT. Mint, ship, verify, or REVOKE.
   def handle_event("confirm_connect", _params, socket) do
-    with {:ok, ws, _principal} <- authorize(socket),
+    with :ok <- bound_admin_gate(socket),
+         {:ok, ws, _principal} <- authorize(socket),
          %{provider: provider, credential: credential, candidate: %{install_key: key}} <-
            socket.assigns.dialog,
          {:ok, ticket} <- ticket(ws, provider) do
       {:noreply, do_connect(socket, ws, provider, key, credential, ticket)}
     else
+      {:error, :dataset_bound} -> {:noreply, bound_admin_refusal(socket)}
       {:error, :forbidden} -> {:noreply, deny(socket)}
       {:error, :not_configured} -> {:noreply, dialog_error(socket, not_configured_message())}
       _ -> {:noreply, assign(socket, :dialog, nil)}
@@ -271,7 +274,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   end
 
   def handle_event("confirm_disconnect", _params, socket) do
-    with {:ok, ws, _principal} <- authorize(socket),
+    with :ok <- bound_admin_gate(socket),
+         {:ok, ws, _principal} <- authorize(socket),
          %{provider: provider, install_key: key} <- socket.assigns.disconnecting,
          {:ok, ticket} <- ticket(ws, provider) do
       case Connectors.bridge().disconnect(ticket, key) do
@@ -283,6 +287,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           # authenticates nothing — recoverable. The reverse order would leave a
           # live adapter that cannot talk.
           revoked = revoke_install_tokens(ws.id, provider, key)
+          observe(socket, "confirm_disconnect", ws)
 
           {:noreply,
            socket
@@ -308,6 +313,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
            )}
       end
     else
+      {:error, :dataset_bound} ->
+        {:noreply, bound_admin_refusal(socket)}
+
       {:error, :forbidden} ->
         {:noreply, deny(socket)}
 
@@ -333,7 +341,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   # direction so the tool arm never orphans a minted credential.
   defp do_connect(socket, ws, provider, install_key, credential, ticket) do
     case Catalog.direction(provider) do
-      :tool -> connect_tool(socket, provider, install_key, credential, ticket)
+      :tool -> connect_tool(socket, ws, provider, install_key, credential, ticket)
       :channel -> connect_channel(socket, ws, provider, install_key, credential, ticket)
     end
   end
@@ -342,9 +350,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   # was minted to leak. Same 3-branch result handling as the channel arm: the
   # happy path, the wrong-key mismatch (refuse, but nothing to revoke), and the
   # bridge error.
-  defp connect_tool(socket, provider, install_key, credential, ticket) do
+  defp connect_tool(socket, ws, provider, install_key, credential, ticket) do
     case Connectors.bridge().connect(ticket, credential, nil) do
       {:ok, %{install_key: ^install_key}} ->
+        observe(socket, "confirm_connect", ws)
+
         socket
         |> assign(:dialog, nil)
         |> reload()
@@ -376,6 +386,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         # seals it into chat_token_ref, and then it is unrecoverable by design.
         case Connectors.bridge().connect(ticket, credential, raw) do
           {:ok, %{install_key: ^install_key}} ->
+            observe(socket, "confirm_connect", ws)
+
             socket
             |> assign(:dialog, nil)
             |> reload()
@@ -569,37 +581,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         )
 
       cfg ->
-        {:ok, ws, principal} = authorize(socket)
-
-        # Any prior unclicked OAuth token for this workspace is stale on this path
-        # (no Slack install exists), so revoke it before minting a fresh one — at
-        # most one unattached credential at a time, never a growing pile.
-        revoke_slack_oauth_tokens(ws.id)
-
-        with {:ok, ticket} <- ConnectTicket.sign(ws.id, "slack"),
-             {:ok, raw, token} <-
-               Auth.create_chat_token(slack_oauth_label(), @dataset, ws.id, principal) do
-          case Connectors.bridge().stage_pending(ticket, raw) do
-            {:ok, _} ->
-              oauth_link(provider, Catalog.slack_authorize_url(ticket, cfg))
-
-            {:error, reason} ->
-              # Never leave a minted-but-unstaged token live — a chat token with no
-              # pending row is a workspace credential nobody owns.
-              Auth.revoke_token(token)
-
-              oauth_gate(
-                provider,
-                gettext("Add to Slack is unavailable right now: %{reason}",
-                  reason: bridge_message(reason)
-                )
-              )
-          end
-        else
-          {:error, reason} ->
-            Logger.warning("connectors: could not prepare Add to Slack: #{inspect(reason)}")
-            oauth_gate(provider, gettext("Could not prepare Add to Slack."))
-        end
+        if BoundAdminWrite.refused?(socket.assigns[:api_token]),
+          do: oauth_gate(provider, BoundAdminWrite.message()),
+          else: stage_slack_oauth(socket, provider, cfg)
     end
   end
 
@@ -632,6 +616,63 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         end
     end
   end
+
+  # The mint+stage+revoke ladder of the Slack entry above, unchanged.
+  defp stage_slack_oauth(socket, provider, cfg) do
+    {:ok, ws, principal} = authorize(socket)
+
+    # Any prior unclicked OAuth token for this workspace is stale on this path
+    # (no Slack install exists), so revoke it before minting a fresh one — at
+    # most one unattached credential at a time, never a growing pile.
+    revoke_slack_oauth_tokens(ws.id)
+
+    with {:ok, ticket} <- ConnectTicket.sign(ws.id, "slack"),
+         {:ok, raw, token} <-
+           Auth.create_chat_token(slack_oauth_label(), @dataset, ws.id, principal) do
+      case Connectors.bridge().stage_pending(ticket, raw) do
+        {:ok, _} ->
+          observe(socket, "slack_oauth_stage", ws)
+          oauth_link(provider, Catalog.slack_authorize_url(ticket, cfg))
+
+        {:error, reason} ->
+          # Never leave a minted-but-unstaged token live — a chat token with no
+          # pending row is a workspace credential nobody owns.
+          Auth.revoke_token(token)
+
+          oauth_gate(
+            provider,
+            gettext("Add to Slack is unavailable right now: %{reason}",
+              reason: bridge_message(reason)
+            )
+          )
+      end
+    else
+      {:error, reason} ->
+        Logger.warning("connectors: could not prepare Add to Slack: #{inspect(reason)}")
+        oauth_gate(provider, gettext("Could not prepare Add to Slack."))
+    end
+  end
+
+  # The dataset-bound admin write rule (`BoundAdminWrite`): a bound admin token
+  # mints and revokes no connector token in `:enforce`, and each connect,
+  # disconnect and Slack staging it does in `:observe` is recorded.
+  defp bound_admin_gate(socket) do
+    if BoundAdminWrite.refused?(socket.assigns[:api_token]),
+      do: {:error, :dataset_bound},
+      else: :ok
+  end
+
+  defp bound_admin_refusal(socket),
+    do: socket |> assign(dialog: nil, disconnecting: nil) |> BoundAdminWrite.refuse()
+
+  defp observe(socket, event, ws),
+    do:
+      BoundAdminWrite.observe(
+        socket.assigns[:api_token],
+        "tokens_write",
+        "live ConnectorsLive.#{event}",
+        ws.id
+      )
 
   defp oauth_link(provider, url),
     do: %{add_url: url, gate: nil, cta_label: oauth_cta_label(provider)}

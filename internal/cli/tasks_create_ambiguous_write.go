@@ -75,6 +75,8 @@ var taskCreateAmbiguityClasses = map[string]string{
 	residuePublishAmbiguousTransport:   "the publish request was sent and no response came back — it may have committed",
 	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
+	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published",
 }
 
 // ambiguousWrite is one ambiguous outcome, fully described.
@@ -97,11 +99,16 @@ type ambiguousWrite struct {
 // checkCommand is the ONE command the operator should run next. An id beats a
 // search every time, so it is preferred whenever this process actually received
 // one.
+//
+// The search names the drafts perspective: a row an ambiguous create may have
+// landed is a DRAFT (the publish never ran), and search reads published rows
+// by default, so a bare search answers "not found" for exactly that row
+// (task-e897b05667403f28).
 func (a ambiguousWrite) checkCommand() string {
 	if id := strings.TrimPrefix(a.docID, "drafts."); id != "" {
 		return "bp task get " + id
 	}
-	return fmt.Sprintf("bp search query %q", a.title)
+	return fmt.Sprintf("bp search query %q --perspective drafts", a.title)
 }
 
 // renderAmbiguousWrite is the single seam every ambiguous `bp task create`

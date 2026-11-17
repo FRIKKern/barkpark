@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.BoundAdminWrite
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -217,6 +218,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   end
 
   def shares_add(params, socket) do
+    if BoundAdminWrite.refused?(socket.assigns[:api_token]),
+      do: {:noreply, BoundAdminWrite.refuse(socket)},
+      else: admitted_shares_add(params, socket)
+  end
+
+  defp admitted_shares_add(params, socket) do
     if Caps.admin?(socket) do
       scope = params["scope"] |> to_string() |> String.trim()
       surfaces = params["surfaces"] |> List.wrap() |> Enum.join(",")
@@ -247,6 +254,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
         true ->
           case Barkpark.Sharing.add_share("#{scope}:#{surfaces}:read") do
             {:ok, _share} ->
+              observe(socket, "live StudioLive.shares-add", scope)
+
               {:noreply,
                socket
                |> assign(shares_rows: Shared.load_share_rows(socket), shares_error: nil)
@@ -294,6 +303,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   dead, and before the cascade landed they were not.
   """
   def shares_remove(%{"scope" => scope}, socket) do
+    if BoundAdminWrite.refused?(socket.assigns[:api_token]),
+      do: {:noreply, BoundAdminWrite.refuse(socket)},
+      else: admitted_shares_remove(scope, socket)
+  end
+
+  defp admitted_shares_remove(scope, socket) do
     if Caps.admin?(socket) do
       case Barkpark.Sharing.scope_triple(scope) do
         {:ok, {ws, proj, dataset}} ->
@@ -324,6 +339,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
 
             true ->
               {:ok, count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
+              observe(socket, "live StudioLive.shares-remove", ws)
 
               socket =
                 socket
@@ -340,6 +356,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
       {:noreply, put_flash(socket, :error, gettext("Admin access required to manage shares."))}
     end
   end
+
+  # The dataset-bound admin write rule's observe row, naming the workspace the
+  # scope belongs to (`BoundAdminWrite`). `scope_or_ws` is a full scope or its
+  # workspace slug; only its first segment is read.
+  defp observe(socket, route, scope_or_ws) do
+    ws_slug = scope_or_ws |> to_string() |> String.split("/") |> hd() |> String.trim()
+
+    BoundAdminWrite.observe(
+      socket.assigns[:api_token],
+      "shares_write",
+      route,
+      id_of(workspace_by_slug(ws_slug))
+    )
+  end
+
+  defp id_of(%{id: id}), do: id
+  defp id_of(_other), do: nil
 
   # The post-read. Asked AFTER remove_share/3's refresh/0, so it reads the live
   # merged list (env baseline ++ stored rows) — the same list `shared?/4` serves
