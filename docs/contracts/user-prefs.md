@@ -19,8 +19,8 @@ The caller is an account session or a personal token's owner; an ownerless token
 - `set` puts `item` (any JSON but `null`) at top-level `field`.
 - `push_front` moves `item` to the front, removes its other copies, and keeps the first `max` (all when absent).
 - `add` appends `item` unless it is already there.
-- `remove` removes every copy of `item`. On an absent key it writes nothing and answers `value: null`; every other op creates the key. A missing list field is empty.
+- `remove` removes every copy of `item`. On an absent key it writes nothing and answers `value: null`; the other ops create it. A missing list field is empty.
 
 An op applied twice in a row changes nothing, so a retry is safe. A replay after other ops applies it again. Two ops at once both land, as does one waiting on a `DELETE`; two read-then-`PUT`s can lose one.
 
-Errors: `422 bad_request` for an unknown `op`, a missing or empty `field`, a missing or `null` `item`, or a `max` that is not a positive integer (a digit string counts). `422 invalid_pref` when a list op's `value[field]` is not a list, the key or dataset is over 200 characters, or the result is over 16 KB. Nothing is written.
+Errors: `422 bad_request` for an unknown `op`, a missing or empty `field`, a missing or `null` `item`, or a `max` that is not a positive integer (a digit string counts). `422 invalid_pref` when a list op's `value[field]` is not a list, the key or dataset passes 200 characters, the result 16 KB, or any holds U+0000. Nothing is written.
