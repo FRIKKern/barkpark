@@ -202,6 +202,44 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     assert ChatHosts.replay_unprojected(sid) == []
   end
 
+  # Another host, or a Go host older than #24702 (which does not refuse a second
+  # turn), starts the newer turn while the old lease still runs
+  # (task-5831f8e55c7649dd). The old lease's events are still taken, so its
+  # host is not told it failed and the lease closes, but they are not projected:
+  # the Recorder would put the old text in the newer reply and end the newer
+  # turn on the old close.
+  test "an older running lease's text and close do not end a newer lease's turn, and the newer reply is stored",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    new = lease!(ctx, "new")
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+
+    assert StudioChat.get_session(sid).status == "working"
+
+    assert {:ok, :accepted} = event(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Older. "})
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert Repo.get!(ExecutionLease, old.lease_id).status == "completed", "the old lease closes"
+    assert StudioChat.get_session(sid).status == "working", "the newer turn is not ended"
+
+    assert {:ok, :accepted} = event(ctx, new, 2, %{"kind" => "text_delta", "delta" => "Newer."})
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    refute StudioChat.get_session(sid).status == "working"
+    assert ["Newer."] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    assert ChatHosts.replay_unprojected(sid) == []
+  end
+
   # A codex app-server `error` that will retry, as the Go host forwards it
   # (the notification's params as `error`).
   @retrying %{
