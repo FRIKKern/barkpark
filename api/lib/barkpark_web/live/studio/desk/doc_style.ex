@@ -173,6 +173,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk-field-toast[data-tone="critical"] { box-shadow: inset 3px 0 0 var(--danger), 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
       .dk-field-toast[data-tone="caution"] { box-shadow: inset 3px 0 0 var(--warn), 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.Fieldsets.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.ArrayItemStyle.css()) %>
     </style>
     """
   end
