@@ -335,7 +335,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     state = emit(state, Protocol.normalize(message, context(state)))
 
     if Protocol.approval_method?(method) do
-      approval_id = to_string(id)
+      # Keyed by the id the sink got (U+FFFD for U+0000); the reply carries `id` as sent.
+      approval_id = Barkpark.ChatHosts.EventText.replace_nul(to_string(id))
       put_in(state, [:approvals, approval_id], %{request_id: id, method: method})
     else
       state
