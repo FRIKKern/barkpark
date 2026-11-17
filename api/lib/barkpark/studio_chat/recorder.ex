@@ -1673,7 +1673,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # Two leases' replies are never one row, and only the turn's own lease ends
   # it (TurnOwner, task-b0cbddc9d0f2e2aa, task-5d1f639852927c4e).
   defp project_host_event(state, event, lease_id) do
-    case TurnOwner.take(state, event, lease_id, &persist_runtime_text/2, &stable_settle/2) do
+    case TurnOwner.take(state, event, lease_id, &persist_split/2, &stable_settle/2) do
       {:ignore, state} -> state
       state -> ingest_runtime_event(state, event, false)
     end
@@ -2464,6 +2464,14 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp broadcast(state, msg) do
     Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(state.session_id), msg)
+  end
+
+  # A lease split stored the open text as its own row (TurnOwner): live viewers
+  # commit their bubble on `{:chat_turn_split, id}` (task-f0d668d89e21f5f8). Not
+  # a turn_completed, which SSE clients read as the turn ending.
+  defp persist_split(state, event) do
+    persist_runtime_text(state, event)
+    broadcast(state, {:chat_turn_split, state.session_id})
   end
 
   defp touch(state), do: %{state | timer: arm_idle(state.timer)}
