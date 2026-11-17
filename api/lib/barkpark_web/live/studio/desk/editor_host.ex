@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.DocMenu
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
+  alias BarkparkWeb.Studio.Desk.HistoryPanel
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
@@ -41,6 +42,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
+  alias BarkparkWeb.Studio.Desk.RevisionView
   alias BarkparkWeb.Studio.Desk.ShareMenu
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.Desk.UnpublishDialog
@@ -68,7 +70,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
        editing: nil,
        pending: nil,
        desk_incoming: nil,
-       desk_used_in: nil
+       desk_used_in: nil,
+       desk_history: nil,
+       desk_revision: nil,
+       desk_gone_latest: nil
      )
      # The open Incoming references panel reads again when someone saves.
      |> attach_hook(:desk_incoming_refs, :handle_info, &on_info/2)
@@ -77,7 +82,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The hook's function is this module's own, so the page's hooks can be read
   # from where they are attached; the panel decides what a message means.
-  defp on_info(message, socket), do: IncomingRefs.on_info(message, socket)
+  # The deleted document's restore reads its newest revision on the same tick.
+  defp on_info(message, socket) do
+    {:cont, socket} = IncomingRefs.on_info(message, socket)
+    {:cont, RevisionView.on_info(message, socket)}
+  end
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
   def target(panes, dataset) do
@@ -103,7 +112,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       # a param changed): its editor stays as it is, typing and all.
       # Its inspector may have opened or closed with the URL (`IncomingRefs`).
       target != nil and target == socket.assigns.editing ->
-        socket |> assign(:active, length(panes) - 1) |> IncomingRefs.load()
+        socket |> assign(:active, length(panes) - 1) |> load_inspectors()
 
       # A new document: the page sends itself `{:desk_edit, target}` for it.
       target ->
@@ -124,7 +133,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       desk_ref_ids: nil,
       desk_nav: nil,
       edit_failed: false,
-      desk_incoming: nil
+      desk_incoming: nil,
+      desk_history: nil,
+      desk_revision: nil,
+      desk_gone_latest: nil
     )
     |> PostIdentity.close_dialogs()
     |> DocDialog.follow()
@@ -157,7 +169,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
          pending: nil,
          edit_failed: false
        )
-       |> IncomingRefs.load()}
+       |> load_inspectors()}
     rescue
       error in [DBConnection.ConnectionError, Postgrex.Error] ->
         Logger.warning(
@@ -170,6 +182,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The URL moved on before the editor was loaded.
   def edit(socket, _stale_target), do: {:noreply, socket}
+
+  # What the URL opens beside the form or in its place: the Incoming
+  # references and History inspectors, and an old revision (`rev`).
+  defp load_inspectors(socket),
+    do: socket |> IncomingRefs.load() |> HistoryPanel.load() |> RevisionView.load()
 
   # The document's references, as links that open the next pane: the
   # Studio's reference fields pick a target, they do not follow one. The
@@ -259,7 +276,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   }
 
   def handle_event(event, params, socket) when is_map_key(@picks, event) do
-    if is_map_key(socket.assigns, :editor_form) and
+    if is_map_key(socket.assigns, :editor_form) and not RevisionView.shown?(socket.assigns) and
          Enum.all?(@picks[event], &is_map_key(params, &1)),
        do: event |> StudioLive.handle_event(params, socket) |> ours(),
        else: {:noreply, socket}
@@ -267,6 +284,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
+
+  # Those, and the presses inside the form that write a field.
+  @revision_writes @form_writes ++ ~w(array_op slug-generate upload-image paper-publish)
 
   # The browser has the form that replaced a draft discarded elsewhere
   # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
@@ -281,16 +301,26 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # save still in flight from it is dropped here. So is a save from the form
   # a draft discarded elsewhere had (live.spec:48), until the browser has the
   # new one.
+  # While an old revision is shown in the form's place (`RevisionView`), its
+  # form and fields write nothing: a post from them would write the revision.
   def handle_event(event, params, socket) do
     cond do
       event in @form_writes and gone?(socket.assigns) ->
+        {:noreply, socket}
+
+      event in @revision_writes and RevisionView.shown?(socket.assigns) ->
         {:noreply, socket}
 
       event in @form_writes and Discarded.drop?(socket.assigns) ->
         {:noreply, Discarded.drop(socket)}
 
       true ->
-        event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+        before = socket.assigns[:editor_doc]
+
+        event
+        |> StudioLive.handle_event(params, written(socket, event))
+        |> ours()
+        |> after_restore(event, before)
     end
   end
 
@@ -314,6 +344,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         |> ours()
     end
   end
+
+  defp after_restore({:noreply, socket}, event, before),
+    do: {:noreply, RevisionView.restored(socket, event, before)}
+
+  defp after_restore({:reply, reply, socket}, event, before),
+    do: {:reply, reply, RevisionView.restored(socket, event, before)}
 
   # A save from the new form: the line that said the draft was discarded goes.
   defp written(socket, event) when event in @form_writes, do: Discarded.clear(socket)
@@ -347,6 +383,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> ItemRefs.follow()
       |> form_only()
       |> DocDialog.follow()
+      |> HistoryPanel.follow()
       |> assign(:panes, [])
 
   # A document the desk opens from a document node of its own (an
@@ -512,10 +549,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # What the URL asks for that the pane does not draw (`PaneComponent`). The
   # Incoming references and Validation inspectors are drawn, so their
   # `inspect` is not left out.
-  defp left_out(pane) do
-    if IncomingRefs.open?(pane) or ValidationPanel.open?(pane),
-      do: PaneComponent.left_out(Map.delete(pane, :inspect)),
-      else: PaneComponent.left_out(pane)
+  # So are History and the revision it shows (`HistoryPanel`, `RevisionView`).
+  defp left_out(pane, assigns) do
+    pane =
+      if IncomingRefs.open?(pane) or ValidationPanel.open?(pane) or HistoryPanel.open?(pane),
+        do: Map.delete(pane, :inspect),
+        else: pane
+
+    pane =
+      if RevisionView.shown?(assigns) or RevisionView.missing?(assigns),
+        do: Map.delete(pane, :rev),
+        else: pane
+
+    PaneComponent.left_out(pane)
   end
 
   # The footer follows the page's perspective (`Panes.perspective/1`):
@@ -559,6 +605,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
       data-desk-save={BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns)}
+      data-desk-inspecting={inspector(@view.pane) != nil}
       aria-label={@page_title}
     >
       <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;
@@ -642,6 +689,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
                   )
                 )
                 |> DocMenu.with_refs(ref_items(assigns))
+                |> HistoryPanel.with_item(
+                  @chain,
+                  @view.index,
+                  @base,
+                  Panes.perspective(assigns[:desk_uri])
+                )
           }
         />
         <%!-- Sanity's "Split pane right": the same document again, beside
@@ -698,7 +751,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           :for={
             note <-
               (assigns[:editor_doc] && !@edit_failed && !gone?(assigns) &&
-                 left_out(@view.pane)) || []
+                 left_out(@view.pane, assigns)) || []
           }
           class="dk-note"
           data-desk-left-out
@@ -776,13 +829,31 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               page's notice (`LiveRefresh.gone_notice/1`) says it too. --%>
         <div :if={!@edit_failed and gone?(assigns)} class="dk-note" role="main" data-desk-edit-gone>
           <p>{gettext("This document has been deleted.")}</p>
+          <RevisionView.restore_latest
+            doc={PostIdentity.of(%{assigns: assigns})}
+            revision={assigns[:desk_gone_latest]}
+          />
         </div>
         <%!-- The Studio's own delete and unpublish modals are kept out of the
               desk: the desk draws its dialogs below, from the same assigns. --%>
-        <%= if !@edit_failed and !gone?(assigns) do %>
-          {Components.studio_live_shell(
-            assign(assigns, show_delete: false, show_unpublish_guard: false)
-          )}
+        <%!-- An old revision (`rev`) is the Studio's form over its values, in a
+              disabled fieldset (`RevisionView`); one that is not shown says so. --%>
+        <%= cond do %>
+          <% @edit_failed or gone?(assigns) -> %>
+          <% RevisionView.shown?(assigns) -> %>
+            <fieldset disabled class="dk-revision-form" data-desk-revision-form>
+              {Components.studio_live_shell(RevisionView.shell_assigns(assigns))}
+            </fieldset>
+          <% RevisionView.missing?(assigns) -> %>
+            <p class="dk-note" role="alert" data-desk-revision-missing>
+              {gettext("This revision can't be found. Pick another entry in the history.")}
+            </p>
+          <% true -> %>
+            {Components.studio_live_shell(
+              assigns
+              |> assign(show_delete: false, show_unpublish_guard: false)
+              |> HistoryPanel.waiting()
+            )}
         <% end %>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Hidden until an
@@ -794,6 +865,17 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           id={"#{@view.id}-inspector"}
           panel={if(@edit_failed or gone?(assigns), do: nil, else: assigns[:desk_incoming])}
           inspect={inspector(@view.pane)}
+          chain={@chain}
+          index={@view.index}
+          base={@base}
+          menu_button={"#{@view.id}-actions-button"}
+          perspective={Panes.perspective(assigns[:desk_uri])}
+        />
+        <%!-- The History inspector, in the same place (`HistoryPanel`). --%>
+        <HistoryPanel.holder
+          id={"#{@view.id}-history"}
+          panel={if(@edit_failed or gone?(assigns), do: nil, else: assigns[:desk_history])}
+          pane={@view.pane}
           chain={@chain}
           index={@view.index}
           base={@base}
@@ -843,7 +925,17 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             actions behind its own "…" ("Open document actions"),
             `Desk.DocFooter`. It is the pane's last child, so its coming and
             going moves nothing. --%>
-      <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
+      <%!-- While an old revision is shown, its own footer: when it is from,
+            and Revert to revision (`RevisionView`). --%>
+      <RevisionView.footer
+        :if={RevisionView.shown?(assigns) and !@edit_failed and !gone?(assigns)}
+        id={"#{@view.id}-revision-footer"}
+        revision={@desk_revision}
+      />
+      <% items =
+        if @edit_failed or gone?(assigns) or RevisionView.shown?(assigns),
+          do: [],
+          else: DocMenu.items(assigns) %>
       <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}
@@ -853,8 +945,26 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           perspective={footer_perspective(assigns)}
           published?={DocStatus.state(assigns).published?}
           blocked={ValidationPanel.blocking(@desk_problems)}
+          review={
+            HistoryPanel.path(@chain, @view.index, @base, Panes.perspective(assigns[:desk_uri]), %{
+              inspect: "review",
+              rev: nil
+            })
+          }
         />
-        <DocMenu.menu id={"#{@view.id}-footer-actions"} items={items} place={:footer} />
+        <DocMenu.menu
+          id={"#{@view.id}-footer-actions"}
+          items={
+            HistoryPanel.with_item(
+              items,
+              @chain,
+              @view.index,
+              @base,
+              Panes.perspective(assigns[:desk_uri])
+            )
+          }
+          place={:footer}
+        />
       </div>
     </section>
     """

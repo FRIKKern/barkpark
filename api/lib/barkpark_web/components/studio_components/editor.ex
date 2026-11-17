@@ -226,6 +226,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   defp desk?(%{desk_base: base}) when is_binary(base), do: true
   defp desk?(_assigns), do: false
 
+  # The desk's History inspector is open: the form shows every field and its
+  # group tabs wait, as Sanity's (`Desk.HistoryPanel.waiting/1`).
+  defp desk_groups_waiting?(%{desk_groups_waiting: true}), do: true
+  defp desk_groups_waiting?(_assigns), do: false
+
   @doc false
   # Extract the ONIX element name from a field. Handles both atom-keyed
   # `%Field{}` structs (post-adapter) and string-keyed raw maps (book.json
@@ -909,6 +914,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   :if={desk?(@parent_assigns)}
                   type="button"
                   id="bp-group-tab-all-fields"
+                  disabled={desk_groups_waiting?(@parent_assigns)}
                   phx-click="select-group"
                   phx-value-group=""
                   role="tab"
@@ -921,6 +927,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   <button
                     type="button"
                     id={"bp-group-tab-" <> grp["name"]}
+                    disabled={desk_groups_waiting?(@parent_assigns)}
                     phx-click="select-group"
                     phx-value-group={grp["name"]}
                     role="tab"
