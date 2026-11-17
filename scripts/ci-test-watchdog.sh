@@ -20,16 +20,16 @@
 # NEVER GREENS A RED. The exit code is the command's own; when the watchdog
 # fires it is 124 whatever the command would have said.
 #
-# QUIET BUDGET. The longest silent gap in 12 green Test jobs (runs 43899277994,
-# 43905150406, 43925383633, 43930455030; all 3 partitions) was 149 s:
+# QUIET BUDGET. Before #26713 the longest silent gap was 149 s:
 # PdsElixirCensusTest's setup_all, all arms at once. Its arms now run two at a
-# time and print a line as each one finishes (PdsCensusMutantGate.run_arms/2),
-# so a gap is at most one arm. The default --quiet 600 leaves room for a slow
-# runner and a growing api/lib; a real hang still costs 10 min, not 50.
+# time and print a line as each one finishes (PdsCensusMutantGate.run_arms/2).
+# In the 18 Test jobs of the first 6 main pushes after it (44040815245 ..
+# 44047577365) the longest gap was 91 s, between two arm lines. The default
+# --quiet 600 is 6.6x that; a real hang still costs 10 min, not 50.
 #
-# MEMORY FLOOR. --min-mem-mb 700 is far under a healthy run's low point: with
-# two arms at a time, MemAvailable stays above ~5.6 GB on the 16 GB runner
-# (PR run 43984047522, the same two full walks a push now peaks at).
+# MEMORY FLOOR. --min-mem-mb 700 is far under a healthy run's low point: on
+# those pushes MemAvailable never fell below 4687 MB on the 16 GB runner
+# (PdsCensusMutantGate's 1 s sampler), 6.7x the floor.
 #
 # usage: ci-test-watchdog.sh [--quiet S] [--every S] [--min-mem-mb N]
 #                            [--min-disk-mb N] [--out DIR] -- CMD [ARG...]
@@ -73,9 +73,9 @@ mem_avail_mb() { awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo 2
 swap_used_mb() { awk '/^SwapTotal:/ { t = $2 } /^SwapFree:/ { f = $2 } END { if (t != "") print int((t - f) / 1024) }' /proc/meminfo 2>/dev/null; }
 disk_free_mb() { df -Pm "$out" 2>/dev/null | awk 'NR == 2 { print $4 }'; }
 
-# `pid` and every OS process under it, parents first.
+# A process and every OS process under it, parents first (default: `pid`).
 tree() {
-  local p frontier="$pid" kids
+  local p frontier="${1:-$pid}" kids
   while [ -n "${frontier// /}" ]; do
     kids=""
     for p in $frontier; do
@@ -117,16 +117,23 @@ summarize_dump() {
   awk -F'\t' '$3 != "Waiting"' "$out/procs.tsv" | head -40
 }
 
+# True once `$1` has exited: no such pid, or a zombie (on Linux `kill -0`
+# still succeeds on a zombie whose parent has not reaped it yet).
+gone() { case "$(ps -o stat= -p "$1" 2>/dev/null)" in "" | Z*) return 0 ;; esac; return 1; }
+
 fire() {
   local reason="$1" beam pids p
   # Snapshot the tree NOW: once the BEAM exits, its port children are
   # reparented to init and `tree` can no longer find them.
   pids="$(tree)"
   beam="$(beam_pid)"
-  # Freeze everything but the BEAM before the dump: a census arm VM (~3.8 GB)
+  # Freeze the BEAM's own children before the dump: a census arm VM (~3.8 GB)
   # must not keep growing while the BEAM writes, and the frozen state is the
-  # state the dump describes.
-  for p in $pids; do [ "$p" = "$beam" ] || kill -STOP "$p" 2>/dev/null; done
+  # state the dump describes. Never its parents: a frozen parent cannot reap
+  # the dumped BEAM, which then lingers as a zombie.
+  if [ -n "$beam" ]; then
+    for p in $(tree "$beam"); do [ "$p" = "$beam" ] || kill -STOP "$p" 2>/dev/null; done
+  fi
   {
     say "FIRED: $reason (at +$(($(date +%s) - start))s). Dumping the BEAM and failing this step."
     echo "-- free / df / load"
@@ -138,7 +145,12 @@ fire() {
   } >"$report" 2>&1
   if [ -n "$beam" ]; then
     kill -USR1 "$beam" 2>/dev/null
-    for _ in $(seq 1 150); do kill -0 "$beam" 2>/dev/null || break; sleep 1; done
+    # Done when the BEAM is gone or the dump is complete (its last line is =end).
+    for _ in $(seq 1 150); do
+      gone "$beam" && break
+      tail -c 16 "$ERL_CRASH_DUMP" 2>/dev/null | grep -q '^=end' && break
+      sleep 1
+    done
   fi
   # The saved list, plus anything still under `pid` (nothing frozen can fork).
   # shellcheck disable=SC2046,SC2086 # one pid per word
@@ -153,11 +165,13 @@ fire() {
 
 # A SIGTERM or SIGINT to the watchdog alone must not leave the test command
 # running unsupervised (a bash child ignores SIGINT under `&`): pass TERM to
-# the whole tree, give it 10 s, then SIGKILL what is left.
+# the whole tree, give it 10 s, then SIGKILL what is left. `last_tree` (at
+# most 1 s old) covers a BEAM that a group SIGINT has already ended: its port
+# children run in their own session, so the group signal never reached them.
 # shellcheck disable=SC2329 # invoked by the traps below
 on_signal() {
   local pids p q
-  pids="$(tree)"
+  pids="$(tree) $last_tree"
   # shellcheck disable=SC2086 # one pid per word
   kill -TERM $pids 2>/dev/null
   for _ in $(seq 1 10); do
@@ -174,8 +188,9 @@ on_signal() {
 trap 'on_signal TERM 143' TERM
 trap 'on_signal INT 130' INT
 
-start=$(date +%s) last_size=0 last_change=$start next_line=$((start + every)) fired=""
+start=$(date +%s) last_size=0 last_change=$start next_line=$((start + every)) fired="" last_tree=""
 while kill -0 "$pid" 2>/dev/null; do
+  last_tree="$(tree)"
   sleep 1
   now=$(date +%s)
   size=$(wc -c <"$log" | tr -d ' ')

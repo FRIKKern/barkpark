@@ -11,8 +11,11 @@
 #   * a copy with the quiet check cut out must NOT fire               (6)
 #   * on fire, the BEAM's own OS children are killed, not orphaned     (7)
 #   * SIGTERM / SIGINT to the watchdog reach the test command          (8, 9)
+#   * a SIGINT to the whole group leaves no port child behind           (10)
 #
-# Case 6 stops case 3 passing vacuously. Runs in ~30 s, in a temp dir.
+# Case 6 stops case 3 passing vacuously. Cases 4 and 7 must finish in under
+# 60 s: the dump wait must end when the BEAM is done, not at its 150 s cap.
+# Runs in ~40 s, in a temp dir.
 
 set -uo pipefail
 
@@ -58,14 +61,16 @@ if command -v elixir >/dev/null 2>&1; then
   # BEAM on a loaded box can take seconds to boot); THEN the silence starts. The
   # BEAM is a child of bash here, so this also proves the watchdog finds it.
   probe='Process.register(self(), :watchdog_hang_probe); for _ <- 1..5000, do: send(self(), :stuck); File.write!(System.fetch_env!("READY"), ""); Process.sleep(:infinity)'
+  t0=$(date +%s)
   # shellcheck disable=SC2016 # $0 and $READY expand in the inner bash
   run 4 "$DOG" --quiet 3 --out "$tmp/d4" -- env READY="$tmp/ready4" bash -c \
     'elixir -e "$0" & until [ -f "$READY" ]; do echo booting; sleep 0.5; done; wait' "$probe"
   # The probe holds 5000 unread messages: it must top the by-queue list.
-  if [ "$rc" -eq 124 ] && [ -s "$tmp/d4/erl_crash.dump" ] &&
+  dt=$(($(date +%s) - t0))
+  if [ "$rc" -eq 124 ] && [ -s "$tmp/d4/erl_crash.dump" ] && [ "$dt" -lt 60 ] &&
     grep -A1 -- "-- top 15 by message queue" "$tmp/4.out" | grep -q "^5000.*watchdog_hang_probe"; then
-    ok "a silent BEAM leaves erl_crash.dump; the summary puts :watchdog_hang_probe (5000 queued) on top"
-  else bad "case 4: rc=$rc"; sed 's/^/       /' "$tmp/4.out" | tail -30; fi
+    ok "a silent BEAM leaves erl_crash.dump in ${dt}s; the summary puts :watchdog_hang_probe (5000 queued) on top"
+  else bad "case 4: rc=$rc after ${dt}s (want 124 in under 60 s)"; sed 's/^/       /' "$tmp/4.out" | tail -30; fi
 elif [ -n "${CI:-}" ]; then bad "case 4: no elixir on PATH in CI"
 else echo "  skip — case 4 (no elixir on PATH)"; fi
 
@@ -96,15 +101,17 @@ mark=$((7000 + RANDOM % 900))
 # #26696, B2). In CI these are the census arm VMs, ~3.8 GB each.
 if command -v elixir >/dev/null 2>&1; then
   probe="Port.open({:spawn, \"sleep $((mark + 1))\"}, []); spawn(fn -> System.cmd(\"sleep\", [\"$((mark + 2))\"]) end); spawn(fn -> System.cmd(\"elixir\", [\"-e\", \"Process.sleep(:infinity)\", \"wdmark$mark\"]) end); Process.sleep(500); File.write!(System.fetch_env!(\"READY\"), \"\"); Process.sleep(:infinity)"
+  t0=$(date +%s)
   # shellcheck disable=SC2016 # $0 and $READY expand in the inner bash
   run 7 "$DOG" --quiet 3 --out "$tmp/d7" -- env READY="$tmp/ready7" bash -c \
     'elixir -e "$0" & until [ -f "$READY" ]; do echo booting; sleep 0.5; done; wait' "$probe"
+  dt=$(($(date +%s) - t0))
   sleep 1
   left="$(alive "sleep $((mark + 1))")$(alive "sleep $((mark + 2))")$(alive "wdmark$mark")"
-  if [ "$rc" -eq 124 ] && [ -s "$tmp/d7/erl_crash.dump" ] && [ -z "${left// /}" ]; then
-    ok "on fire, the BEAM's Port, System.cmd and child-VM processes are gone too"
+  if [ "$rc" -eq 124 ] && [ -s "$tmp/d7/erl_crash.dump" ] && [ -z "${left// /}" ] && [ "$dt" -lt 60 ]; then
+    ok "on fire, the BEAM's Port, System.cmd and child-VM processes are gone too (${dt}s)"
   else
-    bad "case 7: rc=$rc, still alive: ${left:-none}"; sed 's/^/       /' "$tmp/7.out" | tail -20
+    bad "case 7: rc=$rc after ${dt}s, still alive: ${left:-none}"; sed 's/^/       /' "$tmp/7.out" | tail -20
     # shellcheck disable=SC2086 # one pid per word
     kill -9 $left 2>/dev/null
   fi
@@ -136,6 +143,33 @@ sig_case() { # sig_case <case> <SIG> <want rc> <sleep secs>
 }
 sig_case 8 TERM 143 $((mark + 3))
 sig_case 9 INT 130 $((mark + 4))
+
+# 10. A SIGINT to the whole process group (a Ctrl-C) ends the BEAM at once, but
+# its port children run in their own session and never get it. The watchdog's
+# last tree snapshot must still reach them. Here the BEAM is the command itself,
+# as in CI.
+if command -v elixir >/dev/null 2>&1; then
+  probe="Port.open({:spawn, \"sleep $((mark + 5))\"}, []); spawn(fn -> System.cmd(\"elixir\", [\"-e\", \"Process.sleep(:infinity)\", \"wdgrp$mark\"]) end); Process.sleep(500); File.write!(System.fetch_env!(\"READY\"), \"\"); Process.sleep(:infinity)"
+  set -m
+  bash "$DOG" --out "$tmp/d10" -- env READY="$tmp/ready10" elixir -e "$probe" >"$tmp/10.out" 2>&1 &
+  dog=$!
+  set +m
+  for _ in $(seq 1 120); do [ -f "$tmp/ready10" ] && break; sleep 0.5; done
+  sleep 2 # one watchdog pass, so its snapshot holds the port children
+  kill -INT -- -"$dog"
+  wait "$dog"
+  rc=$?
+  sleep 1
+  left="$(alive "sleep $((mark + 5))")$(alive "wdgrp$mark")"
+  if [ "$rc" -eq 130 ] && [ -z "${left// /}" ]; then
+    ok "SIGINT to the whole group leaves no port child behind (rc 130)"
+  else
+    bad "case 10: rc=$rc (want 130), still alive: ${left:-none}"
+    # shellcheck disable=SC2086 # one pid per word
+    kill -9 $left 2>/dev/null
+  fi
+elif [ -n "${CI:-}" ]; then bad "case 10: no elixir on PATH in CI"
+else echo "  skip — case 10 (no elixir on PATH)"; fi
 
 echo "ci-test-watchdog.test.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
