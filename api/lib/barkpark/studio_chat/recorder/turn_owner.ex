@@ -71,11 +71,19 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
         adopt(state, event, lease_id)
 
       {:split, open?} ->
-        persist.(state, %{event | kind: :turn_completed, terminal_state: nil})
+        # A Stop asked during the split-off turn is that turn's outcome, and
+        # it is spent here: the next turn does not inherit it (task-e10a3e17759cdaab).
+        stopped = if Map.get(state, :turn_interrupted?, false), do: :interrupted
+        persist.(state, %{event | kind: :turn_completed, terminal_state: stopped})
 
         state
         |> settle.(state.runtime_text)
-        |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
+        |> Map.merge(%{
+          runtime_text: "",
+          runtime_break?: false,
+          runtime_turn_open?: open?,
+          turn_interrupted?: false
+        })
         |> adopt(event, lease_id)
     end
   end

@@ -1417,7 +1417,8 @@ defmodule Barkpark.StudioChat.Recorder do
           |> Map.merge(%{
             runtime_turn_open?: true,
             runtime_break?: false,
-            runtime_status_sent?: false
+            runtime_status_sent?: false,
+            turn_interrupted?: false
           })
           |> stable_start()
           |> clear_pending_asks()
