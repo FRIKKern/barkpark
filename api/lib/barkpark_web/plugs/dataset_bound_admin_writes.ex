@@ -48,6 +48,9 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   @doc "The audit action an observed write is recorded under."
   def action, do: @action
 
+  @doc "The refusal sentence, also shown by the Studio panels (`BarkparkWeb.Studio.BoundAdminWrite`)."
+  def message, do: @message
+
   @impl Plug
   def init(opts) do
     %{
@@ -125,23 +128,34 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   defp id_of(%{id: id}), do: id
   defp id_of(_), do: nil
 
-  defp record(token_id, surface, route, workspace_id) do
+  @doc """
+  Record one observed write: a log line and an audit row naming the token id,
+  the surface, the route and the workspace. `metadata` adds keys to the row
+  (never the token, its hash or its label). Never raises. The Studio panels
+  call it through `BarkparkWeb.Studio.BoundAdminWrite`.
+  """
+  @spec record(binary(), String.t(), String.t(), binary() | nil, map()) :: :ok
+  def record(token_id, surface, route, workspace_id, metadata \\ %{}) do
     Logger.warning(
       "dataset_bound_admin_write token_id=#{token_id} surface=#{surface} " <>
         "route=#{inspect(route)} workspace_id=#{workspace_id || "none"}"
     )
 
-    emit = fn -> emit(token_id, surface, route, workspace_id) end
+    emit = fn -> emit(token_id, surface, route, workspace_id, metadata) end
 
     # Async in production, inline in tests (config/test.exs), as for the reads.
     if Application.get_env(:barkpark, :audit_dispatch_async, true),
       do: Task.Supervisor.start_child(Barkpark.TaskSupervisor, emit),
       else: emit.()
+
+    :ok
   rescue
-    error -> Logger.error("dataset_bound_admin_write record failed: #{Exception.message(error)}")
+    error ->
+      Logger.error("dataset_bound_admin_write record failed: #{Exception.message(error)}")
+      :ok
   end
 
-  defp emit(token_id, surface, route, workspace_id) do
+  defp emit(token_id, surface, route, workspace_id, metadata) do
     Barkpark.Audit.emit(%{
       category: "access",
       action: @action,
@@ -149,7 +163,7 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
       actor_type: "api_token",
       actor_id: token_id,
       workspace_id: workspace_id,
-      metadata: %{"surface" => surface, "route" => route}
+      metadata: Map.merge(metadata, %{"surface" => surface, "route" => route})
     })
   rescue
     error -> Logger.error("dataset_bound_admin_write audit failed: #{Exception.message(error)}")
