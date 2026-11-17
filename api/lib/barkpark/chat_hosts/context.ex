@@ -381,6 +381,8 @@ defmodule Barkpark.ChatHosts do
       expires_at: DateTime.add(now, Keyword.get(opts, :lease_ttl, @lease_ttl))
     }
 
+    attrs = Map.merge(attrs, RefusedAnswer.answer_link(command))
+
     result =
       case insert_lease(attrs) do
         {:ok, lease} ->

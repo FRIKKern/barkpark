@@ -13,6 +13,7 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
   @moduletag :requires_plugins
 
   alias Barkpark.ChatHosts
+  alias Barkpark.ChatHosts.RemoteDispatch
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{ApprovalAnswer, Recorder}
   alias Barkpark.StudioChat.Runtime.Command
@@ -48,7 +49,7 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     assert :delivered = ApprovalAnswer.settle(sid, "ap-1", "allowed", fn -> :ok end)
     assert ask_meta(sid)["approval_status"] == "allowed"
 
-    answer = lease!(ctx, "answer", :answer_approval)
+    answer = answer!(ctx, "ap-1")
     accept!(ctx, answer, 1, refused("ap-1", a.lease_id))
 
     meta = ask_meta(sid)
@@ -66,7 +67,7 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
     accept!(ctx, a, 2, ask("ap-2"))
 
-    answer = lease!(ctx, "answer", :answer_approval)
+    answer = answer!(ctx, "ap-2")
     accept!(ctx, answer, 1, refused("ap-2", a.lease_id))
 
     assert ask_meta(sid)["approval_status"] == "canceled"
@@ -82,7 +83,7 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
 
     # The answer was sent, then the user's next message started run b before
     # the host refused it: the refusal is superseded and never projected.
-    answer = lease!(ctx, "answer", :answer_approval)
+    answer = answer!(ctx, "ap-5")
     b = lease!(ctx, "b")
     accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
     accept!(ctx, answer, 1, refused("ap-5", a.lease_id))
@@ -97,7 +98,7 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     accept!(ctx, a, 2, ask("ap-3"))
     assert :delivered = ApprovalAnswer.settle(sid, "ap-3", "allowed", fn -> :ok end)
 
-    answer = lease!(ctx, "answer", :answer_approval)
+    answer = answer!(ctx, "ap-3")
 
     # The host's delivered ack carries no approval_id; one is added here so
     # only the missing `refused` reason keeps the ask answered.
@@ -119,11 +120,105 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     reason = %{"cancel_reason" => "superseded_by_newer_turn"}
     assert {:ok, _} = StudioChat.update_approval_status(sid, "ap-4", "canceled", reason)
 
-    answer = lease!(ctx, "answer", :answer_approval)
+    answer = answer!(ctx, "ap-4")
     accept!(ctx, answer, 1, refused("ap-4", a.lease_id))
 
     assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
     refute_received {:chat_permission_resolved, "ap-4", :canceled}
+  end
+
+  # rev26739 on #26949: Codex numbers asks per process, so run b asks under
+  # run a's id. A late refusal of the answer to a's ask is about a's row only.
+  test "a refusal of a's answer leaves b's same-id pending ask alone", %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("0"))
+    assert :delivered = ApprovalAnswer.settle(sid, "0", "allowed", fn -> :ok end)
+    answer = answer!(ctx, "0")
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, b, 2, ask("0"))
+    assert StudioChat.get_session(sid).pending_approvals == 1
+
+    accept!(ctx, answer, 1, refused("0", a.lease_id))
+
+    [ra, rb] = asks(sid)
+    assert rb.metadata["approval_status"] == "pending", "b's own ask is still waiting"
+    assert StudioChat.get_session(sid).pending_approvals == 1
+    assert ra.metadata["approval_status"] == "canceled", "the refusal was about a's ask"
+  end
+
+  test "a refusal of a's answer leaves b's same-id answered ask alone", %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("0"))
+    assert :delivered = ApprovalAnswer.settle(sid, "0", "allowed", fn -> :ok end)
+    answer = answer!(ctx, "0")
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, b, 2, ask("0"))
+    assert :delivered = ApprovalAnswer.settle(sid, "0", "denied", fn -> :ok end)
+
+    accept!(ctx, answer, 1, refused("0", a.lease_id))
+
+    [ra, rb] = asks(sid)
+    assert rb.metadata["approval_status"] == "denied", "b took its answer"
+    assert ra.metadata["approval_status"] == "canceled"
+  end
+
+  # a's ask was taken while b's newer turn was open, so it made no card; b
+  # then asked under the same id. A refusal naming a has no row of a's to
+  # cancel, and b's row, stored after b asked, is not a's.
+  test "a refusal for an ask that made no card leaves a later same-id ask alone",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, a, 2, ask("0"))
+    assert asks(sid) == []
+    answer = answer!(ctx, "0")
+    accept!(ctx, b, 2, ask("0"))
+
+    accept!(ctx, answer, 1, refused("0", a.lease_id))
+
+    assert [%{metadata: %{"approval_status" => "pending"}}] = asks(sid)
+  end
+
+  # The same, with an older run's same-id ask answered before a asked: that
+  # row was stored before a's ask, so it is not a's either.
+  test "a refusal for an ask that made no card leaves an earlier same-id answer alone",
+       %{sid: sid} = ctx do
+    c = lease!(ctx, "c")
+    accept!(ctx, c, 1, %{"kind" => "turn_started", "turn_id" => "t-c"})
+    accept!(ctx, c, 2, ask("0"))
+    assert :delivered = ApprovalAnswer.settle(sid, "0", "allowed", fn -> :ok end)
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, a, 2, ask("0"))
+    answer = answer!(ctx, "0")
+
+    accept!(ctx, answer, 1, refused("0", a.lease_id))
+
+    assert [%{metadata: %{"approval_status" => "allowed"}}] = asks(sid)
+  end
+
+  # The refused lease must be the answer to this approval: a refusal naming
+  # another id on it touches nothing.
+  test "a refusal naming another approval than its lease answers is ignored",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-6"))
+    accept!(ctx, a, 3, ask("ap-7"))
+    assert :delivered = ApprovalAnswer.settle(sid, "ap-7", "allowed", fn -> :ok end)
+
+    answer = answer!(ctx, "ap-6")
+    accept!(ctx, answer, 1, refused("ap-7", a.lease_id))
+
+    assert Enum.map(asks(sid), & &1.metadata["approval_status"]) == ["pending", "allowed"]
   end
 
   # The ack exactly as the Go host sends it (answer_lease.go).
@@ -156,22 +251,40 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
              })
   end
 
-  defp lease!(%{host: host, sid: sid, provider: provider}, tag, operation \\ :start) do
-    payload =
-      if operation == :start,
-        do: %{cwd: System.tmp_dir!(), content: "hello #{tag}"},
-        else: %{decision: "allow"}
-
+  defp lease!(%{host: host, sid: sid, provider: provider}, tag) do
     command = %Command{
-      operation: operation,
+      operation: :start,
       provider: provider,
       session_id: sid,
       idempotency_key: "refused-#{tag}-#{System.unique_integer([:positive])}",
-      payload: payload
+      payload: %{cwd: System.tmp_dir!(), content: "hello #{tag}"}
     }
 
     {:ok, fence} = ChatHosts.lease_and_enqueue(host, command, [])
     fence
+  end
+
+  # An answer leased the way `Runtime.answer_approval/4` leases one, so
+  # `AskingLease` names the asking lease at dispatch.
+  defp answer!(%{host: host, sid: sid, provider: provider}, approval_id) do
+    command = %Command{
+      operation: :answer_approval,
+      provider: provider,
+      session_id: sid,
+      approval_id: approval_id,
+      idempotency_key: Ecto.UUID.generate(),
+      payload: %{decision: "allow"}
+    }
+
+    {:ok, fence} = RemoteDispatch.dispatch(host, command, [])
+    fence
+  end
+
+  defp asks(sid) do
+    sid
+    |> StudioChat.list_messages(:global)
+    |> Enum.filter(&(&1.role == "approval"))
+    |> Enum.sort_by(& &1.seq)
   end
 
   defp ask(approval_id) do
