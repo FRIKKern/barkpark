@@ -121,6 +121,24 @@ defmodule BarkparkWeb.ChatNulTextTest do
 
       assert body["error"]["code"] == "invalid_request"
     end
+
+    # The /answer route's own reject_nul step (review of #26657, N1): without it
+    # the request_id reaches the store lookup and Postgres refuses it (22021).
+    test "an answer whose request_id holds NUL is a 400 with a live runtime",
+         %{admin: admin, sid: sid} do
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      body =
+        post_json(
+          admin,
+          "/v1/chat/sessions/#{sid}/answer",
+          %{request_id: @nul, answers: %{"Which pet?" => "Cat"}},
+          400
+        )
+
+      assert body["error"]["code"] == "invalid_request"
+      assert body["error"]["message"] =~ "request_id"
+    end
   end
 
   defp post_json(raw, path, body, status),
