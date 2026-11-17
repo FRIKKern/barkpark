@@ -138,6 +138,27 @@ defmodule BarkparkWeb.Studio.ChatResolveSettledAskTest do
     refute html =~ "plan approved"
   end
 
+  # rev26739's M2 on #26934: a stored "allowed" this tab did not deliver must not
+  # read as its own allow, or it broadcasts and publishes the plan Paper again.
+  test "Allow on a plan card another client already allowed sends nothing and does not publish again",
+       ctx do
+    ask!(ctx, "r-plan-done", "ExitPlanMode", %{"plan" => "# Ship it"}, "plan-approve")
+    {:ok, _} = StudioChat.update_approval_status(ctx.sid, "r-plan-done", "allowed")
+
+    topics = Enum.uniq([Recorder.topic(ctx.sid), live_topic(ctx.view)])
+    Enum.each(topics, &Phoenix.PubSub.subscribe(Barkpark.PubSub, &1))
+
+    render_click(element(ctx.view, ~s(button[phx-click=plan-approve][phx-value-rid=r-plan-done])))
+
+    assert_not_sent(ctx, "r-plan-done")
+    assert status(ctx.sid, "r-plan-done") == "allowed"
+    refute_receive {:chat_permission_resolved, "r-plan-done", _}, 300
+    refute_receive {:plan_paper, "r-plan-done", _}, 300
+    refute_receive {:plan_paper_failed, "r-plan-done"}, 300
+  end
+
+  defp live_topic(view), do: :sys.get_state(view.pid).socket.assigns[:subscribed_topic]
+
   # A later ask, answered through the same Session, is the ordering witness.
   defp assert_not_sent(ctx, rid) do
     ask!(ctx, "r-witness")
