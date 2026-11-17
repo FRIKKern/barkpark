@@ -19,7 +19,10 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
       delivered, and the route keeps its 204 no-op (`:noop`, pinned in
       `chat_controller_test.exs`);
     * a delivery that fails or exits: `{:error, _}`, the route answers 503, and
-      a resend delivers.
+      a resend delivers;
+    * no live runtime (a nil `deliver`): nothing can ever answer the session's
+      asks, so its pending asks are canceled first, as Studio does on reopen
+      (D11, task-dc4980982da790c9), and a pending ask is refused as canceled.
 
   The ask stays "pending" until its answer is delivered, so both server
   cancels, which touch only pending rows (`cancel_pending_approvals/1` and
@@ -45,11 +48,14 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
   @doc """
   Claim a pending ask, run `deliver`, then flip it to `status`; any other ask
-  is not delivered. A nil `deliver` (no live runtime) only checks: the ask is
-  never claimed or flipped, as before.
+  is not delivered. A nil `deliver` (no live runtime) cancels the session's
+  pending asks (D11), so the store never holds an answer nothing received.
   """
   @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil) :: outcome()
-  def settle(session_id, request_id, _status, nil), do: check(session_id, request_id)
+  def settle(session_id, request_id, _status, nil) do
+    StudioChat.cancel_pending_approvals(session_id)
+    check(session_id, request_id)
+  end
 
   def settle(session_id, request_id, status, deliver) when is_function(deliver, 0) do
     case claim(session_id, request_id) do

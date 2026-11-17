@@ -1829,22 +1829,27 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert refetched["pending_approvals"] == 0
     end
 
-    test "without a live runtime the request is a 204 no-op and stays pending", %{
+    # task-dc4980982da790c9: nothing can deliver this answer, so the ask is
+    # canceled as Studio does on reopen (D11), never left "pending" behind a 204.
+    test "without a live runtime a pending ask is canceled and the request is a 409", %{
       admin: a1,
       sid: sid
     } do
       pending_approval(sid, "req-pending")
 
-      assert json_conn(a1)
-             |> post(
-               "/v1/chat/sessions/#{sid}/approval",
-               Jason.encode!(%{request_id: "req-pending", decision: "allow"})
-             )
-             |> response(204)
+      body =
+        json_conn(a1)
+        |> post(
+          "/v1/chat/sessions/#{sid}/approval",
+          Jason.encode!(%{request_id: "req-pending", decision: "allow"})
+        )
+        |> json_response(409)
 
+      assert body["error"]["code"] == "conflict"
+      assert body["error"]["details"]["approval_status"] == "canceled"
       [message] = StudioChat.list_messages(sid, :global)
-      assert message.metadata["approval_status"] == "pending"
-      assert StudioChat.get_session(sid).pending_approvals == 1
+      assert message.metadata["approval_status"] == "canceled"
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end
 
     test "a missing or terminal request is a 204 no-op that reaches no runtime", %{
@@ -2498,7 +2503,9 @@ defmodule BarkparkWeb.ChatControllerTest do
              |> json_response(400)
     end
 
-    test "without a live runtime the answer is a 204 that still flips the row", %{
+    # task-dc4980982da790c9: nothing received this answer, so the row must not
+    # say "allowed"; the question is canceled (D11) and the route is its 404.
+    test "without a live runtime the answer is a 404 that cancels the question", %{
       admin: a1,
       sid: sid
     } do
@@ -2509,10 +2516,10 @@ defmodule BarkparkWeb.ChatControllerTest do
                "/v1/chat/sessions/#{sid}/answer",
                Jason.encode!(%{request_id: "q-noruntime", answers: %{"Which color?" => "Blue"}})
              )
-             |> response(204)
+             |> json_response(404)
 
       [message] = StudioChat.list_messages(sid, :global)
-      assert message.metadata["approval_status"] == "allowed"
+      assert message.metadata["approval_status"] == "canceled"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
   end

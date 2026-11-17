@@ -421,10 +421,10 @@ defmodule BarkparkWeb.ChatController do
   @doc """
   Answer a pending approval → 204. `{request_id, decision:"allow"|"deny"}`. Never
   a caller-supplied `updatedInput` (D22): `allow` echoes the server-held original
-  ask, `deny` carries a fixed server message. A no-op (204) when no runtime holds
-  the ask, or when the ask is already answered or unknown. A canceled ask is a 409
-  `conflict` with `details.approval_status`; nothing reaches the runtime
-  (`ApprovalAnswer`, task-035d3495dae536cf).
+  ask, `deny` carries a fixed server message. A no-op (204) when the ask is
+  already answered or unknown. A canceled ask, and with no live runtime (D11) a
+  pending one, is a 409 `conflict` with `details.approval_status`; nothing
+  reaches the runtime (`ApprovalAnswer`, task-035d3495dae536cf).
   """
   def approval(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -439,7 +439,7 @@ defmodule BarkparkWeb.ChatController do
            ) do
       status = if decision == :allow, do: "allowed", else: "denied"
 
-      # nil with no live runtime: the ask is then only checked, never flipped.
+      # nil with no live runtime: settle/4 cancels the pending asks (D11) → 409.
       # Soft-match the delivery (D31 seal): codex returns {:error, :unknown_approval}
       # on the double-answer race and {:error, {:app_server_exit, _}} on a dead
       # app-server, and a RemoteRef host can leak its own {:error, _} tail. A
@@ -509,8 +509,9 @@ defmodule BarkparkWeb.ChatController do
   Past that gate, the 404 leg is the rest of the authorization, ONE oracle: a
   missing session, another tenant's (`fetch_scoped`), a request_id naming an
   approval or plan row, and a question already answered are indistinguishable
-  `nil`s, so a replay is a 404 and is never re-sent. A send that fails or exits
-  is a 503 `runtime_unavailable`, and the question stays pending for a resend.
+  `nil`s, so a replay is a 404 and is never re-sent; so is an answer with no live
+  runtime, which cancels the question (D11). A send that fails or exits is a 503
+  `runtime_unavailable`, and the question stays pending for a resend.
   """
   def answer(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -523,17 +524,16 @@ defmodule BarkparkWeb.ChatController do
          %StudioChat.Message{} = row <- QuestionAnswer.fetch_pending_question(id, request_id),
          server_input = (row.metadata || %{})["input"] || %{},
          {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
-      updated = QuestionAnswer.updated_input(server_input, answers)
+      answer = {:allow, QuestionAnswer.updated_input(server_input, answers)}
 
-      # Claimed first (task-52de5429fbdcb68c); no live runtime still records it and 204s.
-      deliver = fn ->
+      # Claimed first (task-52de5429fbdcb68c); nil with no runtime cancels it (D11) → 404.
+      deliver =
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
              {:ok, session} <- Recorder.session_pid(recorder) do
-          Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+          fn -> Runtime.answer_approval(stored.provider, session, request_id, answer) end
         else
-          _no_runtime -> :ok
+          _no_runtime -> nil
         end
-      end
 
       case ApprovalAnswer.settle(id, request_id, "allowed", deliver) do
         :delivered -> send_resp(conn, :no_content, "")
