@@ -149,6 +149,43 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     refute StudioChat.get_session(sid).status == "working"
   end
 
+  # task-bc312d78041663a8: an ask from the lease a newer turn displaced cannot
+  # be answered by it. The answer is leased by session and approval id, and the
+  # host routes it to the session's one run: the NEWER one, which does not know
+  # the ask, and that answer lease's close then ends the newer turn. So at the
+  # split the displaced ask is canceled in the store, and no card invites it.
+  test "a newer lease's turn cancels the displaced lease's pending ask", %{sid: sid} = ctx do
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, ask("ap-1"))
+    assert ask_status(sid) == "pending"
+    assert StudioChat.get_session(sid).agent_state == "blocked"
+
+    new = lease!(ctx, "new")
+    accept!(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+    expire!(old)
+    ChatHosts.end_expired_turns(DateTime.utc_now(), ~U[2000-01-01 00:00:00Z])
+    accept!(ctx, new, 2, %{"kind" => "text_delta", "delta" => "Newer."})
+
+    assert ask_status(sid) == "canceled", "no card may invite an answer the older run cannot get"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).agent_state == "working"
+    assert MapSet.size(:sys.get_state(Recorder.whereis(sid)).pending_asks) == 0
+    assert_received {:chat_permission_resolved, _request_id, :canceled}
+  end
+
+  test "an ask stays pending while its own lease's turn goes on", %{sid: sid} = ctx do
+    one = lease!(ctx, "one")
+    accept!(ctx, one, 1, %{"kind" => "turn_started"})
+    accept!(ctx, one, 2, ask("ap-2"))
+    accept!(ctx, one, 3, %{"kind" => "turn_started"})
+    accept!(ctx, one, 4, %{"kind" => "text_delta", "delta" => "More."})
+
+    assert ask_status(sid) == "pending"
+    assert StudioChat.get_session(sid).agent_state == "blocked"
+  end
+
   # ── only the turn's own lease ends it (task-5d1f639852927c4e) ──────────
 
   # The superseded? race: the older close reaches the Recorder just after the
@@ -300,6 +337,25 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     {:ok, fence} = ChatHosts.lease_and_enqueue(host, command, [])
     fence
   end
+
+  defp ask(approval_id) do
+    %{
+      "kind" => "approval_requested",
+      "approval_id" => approval_id,
+      "tool_name" => "Bash",
+      "input" => %{"command" => "ls"},
+      "title" => "Run ls"
+    }
+  end
+
+  defp ask_meta(sid) do
+    sid
+    |> StudioChat.list_messages(:global)
+    |> Enum.find(&(&1.role == "approval"))
+    |> Map.fetch!(:metadata)
+  end
+
+  defp ask_status(sid), do: ask_meta(sid)["approval_status"]
 
   defp replies(sid) do
     sid
