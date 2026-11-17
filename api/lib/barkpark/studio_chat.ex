@@ -2384,9 +2384,8 @@ defmodule Barkpark.StudioChat do
   @doc """
   Force-cancel EVERY still-pending approval for a session — the shared teardown
   path (a port crash / a reopen with no live control channel) can never deliver
-  a decision, so a dangling ask is `canceled`, honestly, not left hanging. Flips
-  each pending row's `metadata.approval_status` to `"canceled"` and zeroes the
-  session's `pending_approvals`. Returns the number of approvals canceled.
+  a decision, so a dangling ask is `canceled`, honestly. The read locks each row, so an
+  answer that commits first stands, and the count drops by the asks canceled (returned).
   """
   @spec cancel_pending_approvals(String.t()) :: non_neg_integer()
   def cancel_pending_approvals(session_id) do
@@ -2395,6 +2394,7 @@ defmodule Barkpark.StudioChat do
         Message
         |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
         |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+        |> lock("FOR UPDATE")
         |> Repo.all()
 
       Enum.each(pending, fn message ->
@@ -2402,11 +2402,11 @@ defmodule Barkpark.StudioChat do
         message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
       end)
 
-      Session
-      |> where([s], s.id == ^session_id)
-      |> Repo.update_all(set: [pending_approvals: 0, updated_at: DateTime.utc_now()])
-
-      length(pending)
+      n = length(pending)
+      left = dynamic([s], fragment("GREATEST(? - ?, 0)", s.pending_approvals, ^n))
+      set = [pending_approvals: left, updated_at: DateTime.utc_now()]
+      Repo.update_all(from(s in Session, where: s.id == ^session_id, update: [set: ^set]), [])
+      n
     end)
     |> case do
       {:ok, count} -> count
