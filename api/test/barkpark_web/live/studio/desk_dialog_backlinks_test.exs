@@ -161,7 +161,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
 
   test "Delete lists a referrer that exists only as a draft, and counts it", c do
     view = open(c, c.ada)
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(
              view,
@@ -180,7 +180,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
 
   test "a document only a draft refers to: the dialog says so and offers the disconnect", c do
     view = open(c, c.solo)
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(
              view,
@@ -204,8 +204,12 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
     assert author_of(c, "dbl-draft-4-#{c.n}")["_ref"] == c.solo
 
     # The press takes the reference out of the draft, then deletes.
-    render_hook(view, "delete-doc", %{})
-    view |> element(~s(#{@delete} button[phx-value-disconnect="true"])) |> render_click()
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@delete} button[phx-value-disconnect="true"]))
+    )
 
     refute exists?(c, c.solo)
     assert author_of(c, "dbl-draft-4-#{c.n}") == nil
@@ -213,7 +217,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
 
   test "Unpublish: one row per referring document, so the count is the number of rows", c do
     view = open(c, c.ada)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
     assert has_element?(
              view,
@@ -238,7 +242,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
     assert length(in_panel) == 3
 
     for {event, dialog} <- [{"delete-doc", @delete}, {"unpublish", @unpublish}] do
-      render_hook(view, event, %{})
+      BarkparkWeb.EditorPost.press(view, event, %{})
       html = view |> element("#{dialog} ul.used-in") |> render()
       in_dialog = for [_, id] <- Regex.scan(~r/href="[^"]*;([^";]+)"/, html), do: id
       assert Enum.sort(in_dialog) == Enum.sort(in_panel), event
@@ -249,7 +253,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
 
   test "a referrer that comes while the dialog is closed is in the next one", c do
     view = open(c, c.other)
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
     refute has_element?(view, ~s(#{@delete} ul.used-in))
     assert has_element?(view, ~s(#{@delete} button.danger), "Delete document")
     view |> element(~s(#{@delete} button[data-modal-focus])) |> render_click()
@@ -265,7 +269,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
         @dataset
       )
 
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
     assert titles(view, @delete) == ["Late Draft"]
   end
 
@@ -274,8 +278,12 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
   # list that is left (`bp-desk.js`, `_focusAfterDelete`).
   test "after a delete the page is told which document went, and the desk's script listens", c do
     view = open(c, c.other)
-    render_hook(view, "delete-doc", %{})
-    view |> element(~s(#{@delete} button.danger), "Delete document") |> render_click()
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@delete} button.danger), "Delete document")
+    )
 
     other = c.other
     assert_push_event(view, "bp:focus-after-delete", %{id: ^other})
@@ -296,7 +304,11 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
        c do
     view = open(c, c.solo)
 
-    render_hook(view, "confirm-delete", %{"disconnect" => "TRUE", "id" => c.ada, "type" => c.post})
+    BarkparkWeb.EditorPost.press(view, "confirm-delete", %{
+      "disconnect" => "TRUE",
+      "id" => c.ada,
+      "type" => c.post
+    })
 
     refute exists?(c, c.solo)
     assert exists?(c, c.ada)
@@ -310,7 +322,7 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
     render_async(view, 5_000)
     assert poll(view, fn -> has_element?(view, "#editor-form") end)
 
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(view, "#delete-modal-dialog")
     refute has_element?(view, "[data-desk-dialog]")

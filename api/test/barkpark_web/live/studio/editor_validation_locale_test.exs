@@ -137,7 +137,7 @@ defmodule BarkparkWeb.Studio.EditorValidationLocaleTest do
     assert html =~ ~r/data-row-index="0".*data-error-for="title"[^>]*>Påkrevd</s
     refute html =~ ">Required<"
 
-    view |> element(~s(button[phx-click="publish"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="publish"])))
     html = render(view)
     assert html =~ "Rett valideringsfeilene før du publiserer"
     refute html =~ "Fix validation errors before publishing"

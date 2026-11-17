@@ -110,12 +110,12 @@ defmodule BarkparkWeb.Studio.SingletonDocActionsTest do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sitePrefs/sitePrefs"))
     count = length(Content.list_documents("sitePrefs", @dataset))
 
-    html = render_click(view, "delete-doc", %{})
+    html = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
     refute html =~ "delete-modal"
-    render_click(view, "confirm-delete", %{})
-    render_click(view, "unpublish", %{})
-    render_click(view, "confirm-unpublish", %{})
-    render_click(view, "duplicate-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "confirm-unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
     assert {:ok, %{status: "published"}} =
              Content.get_document("sitePrefs", "sitePrefs", @dataset)

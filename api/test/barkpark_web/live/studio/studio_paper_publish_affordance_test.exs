@@ -233,7 +233,11 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
       # STEP 1 — publish a bare skeleton: the wall's FIRST refusal is the
       # description (metadata, not content), in the validator's own
       # documentation-grade wording — never a raw error atom.
-      view |> element(~s(button[data-test-id="paper-publish"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[data-test-id="paper-publish"]))
+      )
+
       step1 = flash(view, "error")
       assert step1 =~ "Publish blocked:"
       assert step1 =~ "description"
@@ -255,7 +259,11 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
         "rationale" => "This tag names the walk's subject precisely."
       })
 
-      view |> element(~s(button[data-test-id="paper-publish"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[data-test-id="paper-publish"]))
+      )
+
       step2 = flash(view, "error")
 
       assert step2 =~ "no content yet",
@@ -274,7 +282,10 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
         "ops" => [%{"op" => "insert-after", "afterId" => "b0", "block" => content_paragraph()}]
       })
 
-      view |> element(~s(button[data-test-id="paper-publish"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[data-test-id="paper-publish"]))
+      )
 
       info = flash(view, "info")
 

@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.StudioFlashContainerTest do
     refute html =~ ~s(class="flash flash-)
 
     # Publishing answers with a flash.
-    after_html = render_click(view, "publish", %{})
+    after_html = BarkparkWeb.EditorPost.press(view, "publish", %{})
 
     assert after_html =~ ~s(class="flash flash-)
     assert shell_children(after_html) == before

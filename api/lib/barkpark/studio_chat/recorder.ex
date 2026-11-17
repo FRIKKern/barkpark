@@ -1470,11 +1470,11 @@ defmodule Barkpark.StudioChat.Recorder do
       kind when kind in [:error, :process_failed, :protocol_error] ->
         persist_runtime_text(state, event)
         StudioChat.update_status(state.session_id, "exited")
-        # Clear AFTER the offline publish: the D39 prior-state mapping must
-        # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
-        # the offline rule untouched).
+        # Asks clear AFTER the offline publish: D39's prior-state map must still
+        # see :needs_you (a mid-ask death maps to "unknown"; D56h). The text is
+        # stored, so a host's later close must not store it again (task-a326a7a270909052).
         state
-        |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
+        |> Map.merge(%{runtime_text: "", runtime_turn_open?: false, runtime_break?: false})
         |> stable_settle(state.runtime_text)
         |> publish_activity(%{state: :offline, line: nil})
         |> clear_pending_asks()
@@ -1930,7 +1930,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist(session_id, attrs, kind) do
-    case StudioChat.append_message(session_id, attrs) do
+    case StudioChat.append_message(session_id, Barkpark.ChatHosts.EventText.replace_nul(attrs)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist #{kind}: #{inspect(reason)}")
 

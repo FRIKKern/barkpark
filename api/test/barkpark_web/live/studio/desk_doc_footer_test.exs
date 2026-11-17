@@ -110,7 +110,7 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
     assert eventually(fn -> status(view) == "Edited just now" end), status(view)
     refute has_element?(view, ~s(#{@publish}[disabled]))
 
-    view |> element(@publish) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, @publish))
 
     assert eventually(fn ->
              match?({:error, _}, Content.get_document("drafts." <> c.id, c.type, @dataset))

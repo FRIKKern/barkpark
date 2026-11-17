@@ -75,7 +75,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/del-target"))
 
-    html = render_click(view, "delete-doc", %{})
+    html = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert html =~ "delete-modal", "expected the delete-with-reference-check modal to open"
 
@@ -91,8 +91,8 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/del-target"))
 
-    _ = render_click(view, "delete-doc", %{})
-    html = render_click(view, "confirm-delete", %{})
+    _ = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+    html = BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
 
     assert html =~ "Deleted “Target Post”."
   end
@@ -131,7 +131,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/del-target"))
 
-    _ = render_click(view, "delete-doc", %{})
+    _ = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     # Drop the underlying rows straight through Repo (NOT Content.delete_document,
     # whose broadcast would make the LiveView react and clear editor_doc). The
@@ -145,7 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
       )
     )
 
-    html = render_click(view, "confirm-delete", %{})
+    html = BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
 
     assert html =~ "Failed to delete",
            "a failed delete must surface an error flash, not pretend it succeeded"

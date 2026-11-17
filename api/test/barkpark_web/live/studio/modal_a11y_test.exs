@@ -74,7 +74,7 @@ defmodule BarkparkWeb.Studio.ModalA11yTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ma11y-target"))
 
-      html = render_click(view, "unpublish", %{})
+      html = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
       assert html =~ ~s(data-test-id="unpublish-guard-modal")
       assert html =~ ~s(role="dialog")
@@ -89,7 +89,7 @@ defmodule BarkparkWeb.Studio.ModalA11yTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ma11y-target"))
 
-      html = render_click(view, "unpublish", %{})
+      html = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
       assert html =~ ~s(data-test-id="unpublish-guard-modal")
 
       html = render_keydown(view, "close-unpublish-guard", %{"key" => "Escape"})
@@ -113,7 +113,8 @@ defmodule BarkparkWeb.Studio.ModalA11yTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ma11y-target"))
 
-      guard = view |> render_click("unpublish", %{}) |> dialog("unpublish-guard-modal")
+      guard =
+        view |> BarkparkWeb.EditorPost.press("unpublish", %{}) |> dialog("unpublish-guard-modal")
 
       assert LazyHTML.attribute(guard, "phx-hook") == ["ModalFocus"]
       assert LazyHTML.attribute(guard, "id") == ["unpublish-guard-dialog"]

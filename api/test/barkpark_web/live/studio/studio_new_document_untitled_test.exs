@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioNewDocumentUntitledTest do
     assert draft.title == nil
     refute render(view) =~ ~s(value="Untitled")
 
-    html = render_click(view, "publish", %{})
+    html = BarkparkWeb.EditorPost.press(view, "publish", %{})
     assert html =~ "Fix validation errors before publishing"
 
     pub_id = Content.published_id(draft.doc_id)
@@ -80,7 +80,7 @@ defmodule BarkparkWeb.Studio.StudioNewDocumentUntitledTest do
     |> form("#editor-form", %{"doc" => %{"title" => "Fjellet"}})
     |> render_change()
 
-    render_click(view, "publish", %{})
+    BarkparkWeb.EditorPost.press(view, "publish", %{})
     assert {:ok, %{title: "Fjellet"}} = Content.get_document(pub_id, "publication", @dataset)
   end
 

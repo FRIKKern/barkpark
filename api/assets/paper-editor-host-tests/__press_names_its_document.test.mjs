@@ -101,8 +101,40 @@ check("a control drawn after the page loaded, in the form or in a component outs
 check("a press or a submit that is not one of these is left as it is", () => {
   mount(A);
   assert.equal(press("other"), null);
-  assert.equal(press("publish"), null);
   assert.equal(submit("search"), null);
+});
+
+// task-176bd529276ff8b3: the document's actions. Their controls are outside
+// the form: the header, a menu in the top layer, a dialog.
+const ACTIONS = ["publish", "unpublish", "confirm-unpublish", "delete-doc", "confirm-delete", "discard-draft",
+  "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish"];
+
+function actions() {
+  document.body.insertAdjacentHTML("beforeend",
+    ACTIONS.map((name) => `<button id="act-${name}" type="button" phx-click="${name}"><svg id="glyph-${name}"></svg></button>`).join("") +
+    `<div popover id="menu"><button id="menu-publish" type="button" phx-click='[["push",{"event":"publish"}],["focus",{"to":"#x"}]]'>Publish</button></div>` +
+    `<div role="dialog"><button id="dialog-delete" type="button" phx-click="confirm-delete" phx-value-disconnect="true">Delete</button></div>`);
+}
+
+check("each document action carries the form's mark: by name, as JS commands, in a menu, in a dialog", () => {
+  mount(A);
+  actions();
+  for (const name of ACTIONS) assert.equal(press(`glyph-${name}`), A, name);
+  assert.equal(press("menu-publish"), A);
+  assert.equal(press("dialog-delete"), A);
+  assert.equal(window.BarkparkDocMark(), A);
+});
+
+check("a page with no editor form (a sheet, a paper) names its document on #bp-doc; the form's wins", () => {
+  mount(null);
+  actions();
+  assert.equal(press("act-publish"), "");
+  document.body.insertAdjacentHTML("beforeend", `<span id="bp-doc" hidden data-bp-doc="${esc(B)}"></span>`);
+  assert.equal(press("act-publish"), B);
+  assert.equal(press("dialog-delete"), B);
+  assert.equal(window.BarkparkDocMark(), B);
+  document.body.insertAdjacentHTML("afterbegin", `<form id="editor-form" ${MARK}="${esc(A)}"></form>`);
+  assert.equal(press("act-publish"), A);
 });
 
 window.close();

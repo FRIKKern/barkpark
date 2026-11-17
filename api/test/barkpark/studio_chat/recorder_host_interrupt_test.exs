@@ -139,6 +139,23 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
     assert StudioChat.get_session(sid).status == "exited"
   end
 
+  test "a host turn that fails and is then closed by the host keeps one partial reply" do
+    {sid, post} = host_turn()
+
+    post.(%{"kind" => "turn_started"})
+    post.(%{"kind" => "text_delta", "delta" => "Partial before a crash"})
+    post.(%{"kind" => "error", "terminal_state" => "failed", "error" => %{"is_error" => true}})
+    # The Runner's own close on the same lease is a second error-kind projection.
+    post.(%{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "exit 1"}
+    })
+
+    assert ["Partial before a crash"] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    assert StudioChat.get_session(sid).status == "exited"
+  end
+
   # One registered-host session with a live Recorder and a leased
   # send_turn; returns the session id and a function that posts one host event
   # on that lease, the way the Go host's Runner does (cursor by cursor).

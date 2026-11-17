@@ -121,7 +121,7 @@ defmodule BarkparkWeb.Studio.StudioEditorPolishTest do
       )
 
     {:ok, view, _} = open(conn, "polishdup/polishdup-1")
-    view |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="duplicate-doc"])))
     assert render(view) =~ "Duplicated as “Fjellet (copy)”"
   end
 
@@ -162,7 +162,7 @@ defmodule BarkparkWeb.Studio.StudioEditorPolishTest do
       )
 
     {:ok, view, _} = open(conn, "polishdupnb/polishdupnb-1")
-    view |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="duplicate-doc"])))
     assert render(view) =~ "Duplisert som «Fjellet (kopi)»"
 
     titles = fn ->
@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.StudioEditorPolishTest do
 
     before = length(titles.())
     {:ok, view2, _} = open(conn, "polishdupnb/polishdupnb-2")
-    view2 |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view2, element(view2, ~s(button[phx-click="duplicate-doc"])))
     assert length(titles.()) == before + 1, "the untitled source was duplicated"
     refute Enum.any?(titles.(), &(&1 && &1 =~ "Untitled"))
   end

@@ -50,7 +50,7 @@ defmodule BarkparkWeb.Studio.StudioNewTagPublishesByNameTest do
   } do
     {view, generated} = new_tag(conn, "Editorial Process")
 
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
     assert html =~ "Published tag “editorial-process”"
 
     assert {:ok, tag} = Content.get_document("editorial-process", "tag", @dataset)
@@ -72,7 +72,7 @@ defmodule BarkparkWeb.Studio.StudioNewTagPublishesByNameTest do
        %{conn: conn} do
     {view, generated} = new_tag(conn, "Untitled")
 
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
     assert html =~ "Name the tag before publishing"
     assert tag_rows(generated) == [Content.draft_id(generated)]
     assert {:error, _} = Content.get_document(generated, "tag", @dataset)
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.Studio.StudioNewTagPublishesByNameTest do
 
     {view, generated} = new_tag(conn, "Editorial")
 
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
     assert html =~ "A tag named “editorial” already exists"
     assert tag_rows(generated) == [Content.draft_id(generated)]
   end
