@@ -1469,18 +1469,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
   end
 
+  # Another lease's event split the open turn: its text is now its own stored
+  # row, so it is its own live reply too (Recorder.TurnOwner, task-f0d668d89e21f5f8).
+  def handle_info({:chat_turn_split, _session_id}, socket),
+    do: {:noreply, socket |> commit_streaming() |> assign(streaming: nil)}
+
   def handle_info(
         {:studio_chat_runtime_event, %Runtime.Event{kind: :turn_completed} = event},
         socket
       ) do
-    socket =
-      case socket.assigns.streaming do
-        %{text: text} when is_binary(text) and text != "" ->
-          append_message(socket, :assistant, text)
-
-        _ ->
-          socket
-      end
+    socket = commit_streaming(socket)
 
     line =
       case event.terminal_state do
@@ -7199,6 +7197,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # web-only and it has three non-streaming callers.
   defp advance_streaming(state, delta),
     do: StreamTail.advance(state, delta, &render_paper_html/1)
+
+  # The streaming bubble's text becomes a live assistant message (the caller
+  # clears `streaming`).
+  defp commit_streaming(%{assigns: %{streaming: %{text: text}}} = socket)
+       when is_binary(text) and text != "",
+       do: append_message(socket, :assistant, text)
+
+  defp commit_streaming(socket), do: socket
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
   # paper reader uses. The renderer escapes all text at walk time, so the
