@@ -127,3 +127,39 @@ func TestAConflictWithoutAnApprovalStatusIsStillAFailedAnswer(t *testing.T) {
 		t.Fatalf("an unrelated 409 must stay a failed answer, got notice %q effects %+v", st.Notice, effs)
 	}
 }
+
+// Controls for the 404 (rev63 on #26918). /approval's 404 is a gone session,
+// never a settled ask: /approval reports a settled ask with its 409 only.
+func TestAnApprovalToAGoneSessionIsStillAFailedAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"chat session not found"}}`)
+	}))
+	defer srv.Close()
+	err := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"}).RespondChatApproval("s1", "req-1", "allow")
+
+	st := State{SessionID: "s1", AnswerInFlight: map[string]string{"req-1": "allow"}}
+	st, effs := drive(st, t0, AnsweredEvent{RequestID: "req-1", Err: err})
+	if len(effs) != 0 || !strings.Contains(st.Notice, "answer failed — chat session not found") {
+		t.Fatalf("an /approval 404 must stay a failed answer, got notice %q effects %+v", st.Notice, effs)
+	}
+}
+
+// /answer reads only its own not_found oracle as a question no longer
+// pending; a 404 with any other code (a route or plugin refusal) stays a
+// plain error.
+func TestAnAnswer404ThatIsNotNotFoundIsStillAFailedAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"route_not_found","message":"no such route"}}`)
+	}))
+	defer srv.Close()
+	err := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"}).
+		AnswerChatQuestion("s1", "q-1", map[string]any{"Which?": "A"})
+
+	st := State{SessionID: "s1", AnswerInFlight: map[string]string{"q-1": "allow"}}
+	st, effs := drive(st, t0, AnsweredEvent{RequestID: "q-1", Err: err})
+	if len(effs) != 0 || !strings.Contains(st.Notice, "answer failed") || strings.Contains(st.Notice, "no longer waiting") {
+		t.Fatalf("a 404 that is not not_found must stay a failed answer, got notice %q effects %+v", st.Notice, effs)
+	}
+}
