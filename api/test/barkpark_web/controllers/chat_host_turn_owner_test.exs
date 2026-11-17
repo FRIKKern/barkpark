@@ -341,6 +341,20 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert replies(sid) == ["A.\n\nB."]
   end
 
+  # rev26735 round 2: a pending Stop was ordered against a nil lease, and
+  # ChatHosts.lease_inserted_at/1 had no clause for nil, so the Recorder crashed.
+  test "a turn_started projected without a lease while a Stop is pending keeps the Recorder",
+       %{sid: sid} do
+    recorder = Recorder.whereis(sid)
+    Recorder.note_interrupt_requested(sid)
+    event = %Event{provider: "claude", session_id: sid, kind: :turn_started}
+
+    assert :ok = GenServer.call(recorder, {:project_runtime_event, event, nil})
+    assert Process.alive?(recorder)
+    assert Recorder.whereis(sid) == recorder
+    assert :sys.get_state(recorder).turn_interrupted?, "a Stop no lease can order stays pending"
+  end
+
   # Turn 1 by lease A, from turn_started to its own close.
   defp finished_turn!(ctx) do
     a = lease!(ctx, "a")

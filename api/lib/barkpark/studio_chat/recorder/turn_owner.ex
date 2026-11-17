@@ -140,6 +140,9 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
 
   # A lease's new turn does not inherit a Stop asked before that lease
   # existed: an earlier turn's, which its own close already reported.
+  # An event projected with no lease has nothing to order a Stop against.
+  defp drop_stale_stop(state, _event, nil), do: state
+
   defp drop_stale_stop(state, %Event{kind: :turn_started}, lease_id) do
     if Map.get(state, :runtime_turn_open?, false),
       do: state,
