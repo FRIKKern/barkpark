@@ -248,7 +248,20 @@ defmodule BarkparkWeb.ChatUserTurn do
     end
   end
 
-  # One query, on the failure path only. `:unknown` when the read fails too.
+  @doc """
+  `persist_sent/4` for a send that may be a resend: when `command_key` is the
+  request's Idempotency hash (`Barkpark.Idempotency.held_key/0`), a turn
+  already stored under it is not stored again (task-3c949e2977c56597). Any
+  other send stores as `persist_sent/4` does, with no extra read.
+  """
+  def persist_sent_once(%StudioChat.Session{} = session, text, metadata, command_key) do
+    if command_key == Barkpark.Idempotency.held_key() and stored?(session.id, command_key) == true,
+      do: :ok,
+      else: persist_sent(session, text, metadata, command_key)
+  end
+
+  # One query: on the failure path, and before a keyed send stores (above).
+  # `:unknown` when the read fails too.
   defp stored?(session_id, command_key) do
     Message
     |> where([m], m.session_id == ^session_id and m.role == "user")

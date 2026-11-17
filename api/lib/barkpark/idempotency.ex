@@ -90,7 +90,10 @@ defmodule Barkpark.Idempotency do
     :ok
   end
 
-  @doc false
+  @doc """
+  The hash this request process claimed, or nil. The chat send leases its turn
+  under it, so a resend meets the first lease (task-3c949e2977c56597).
+  """
   def held_key, do: Process.get(@held_key)
 
   @doc """
