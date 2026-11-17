@@ -21,7 +21,8 @@
 // UNDER 600 PX the panel covers the form, so the jump closes the panel first
 // (its own close button) and then focuses the field.
 //
-// THE CLOSE. The close button dispatches `desk:validation-close`. Once the
+// THE CLOSE. The close button, and the header's Validation button while the
+// panel is open, dispatch `desk:validation-close`. Once the
 // panel is gone the focus goes to the header's Validation button; that
 // button is not drawn for a document with no problem, so then to the field
 // last jumped to, else the "Show document actions" button, else the form's
@@ -160,14 +161,19 @@
         var close = narrow() && panel() && panel().querySelector("[data-desk-validation-close]");
         if (!close) return focusOn(found);
         // The panel covers the form: it closes, then the field is focused.
+        // The click runs the close's own dispatch before it returns, so
+        // `quiet` is held for that call alone.
         quiet = true;
-        close.click();
+        try {
+          close.click();
+        } finally {
+          quiet = false;
+        }
         wait(
           function () {
             return !panel();
           },
           function () {
-            quiet = false;
             focusOn(targets(path, item) || found);
           }
         );

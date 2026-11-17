@@ -14910,8 +14910,8 @@ msgstr "Valideringsfeil må rettes før det kan publiseres"
 
 #: lib/barkpark_web/live/studio/desk/validation_panel.ex
 #, elixir-autogen, elixir-format
-msgid "Does not match \"%{pattern}\"-pattern"
-msgstr "Samsvarer ikke med mønsteret \"%{pattern}\""
+msgid "Does not match %{pattern}-pattern"
+msgstr "Samsvarer ikke med mønsteret %{pattern}"
 
 #: lib/barkpark_web/live/studio/desk/validation_panel.ex
 #, elixir-autogen, elixir-format

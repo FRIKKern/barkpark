@@ -260,6 +260,12 @@ defmodule BarkparkWeb.Studio.DeskValidationPanelTest do
     # Not a focus on the header button: it is gone when no problem is left.
     refute close =~ ~s(&quot;focus&quot;)
 
+    # The header button closes the panel too, and goes without it when no
+    # problem is left: the same hand-over. Opening hands nothing over.
+    assert view |> element(@button) |> render() =~ "desk:validation-close"
+    shut = open(c, draft(c, "shut", %{"rating" => 9}))
+    refute shut |> element(@button) |> render() =~ "desk:validation-close"
+
     js = File.read!(Application.app_dir(:barkpark, "priv/static/assets/bp-desk-validation.js"))
     assert js =~ ~s("desk:validation-close")
     assert js =~ ~s([id$='-actions-button'])

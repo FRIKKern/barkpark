@@ -179,7 +179,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
          level = if(level == "error", do: :error, else: :warning),
          %{"pattern" => pattern} when is_binary(pattern) <-
            Validation.rules_at(is_map(leaf) && leaf["validation"], level) do
-      gettext("Does not match \"%{pattern}\"-pattern", pattern: "/#{pattern}/")
+      gettext("Does not match %{pattern}-pattern", pattern: ~s("/#{pattern}/"))
     else
       _ -> words(finding)
     end
@@ -260,10 +260,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   attr :base, :string, required: true
   attr :perspective, :atom, default: :drafts
 
-  @doc """
-  The pane header's button: drawn while there is a problem or the panel is
-  open, never over the published version. It opens and closes the panel.
-  """
+  @doc "The pane header's button, drawn while there is a problem or the panel is open."
   def button(assigns) do
     open = open?(assigns.pane)
 
@@ -292,7 +289,11 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
       aria-pressed={to_string(@open)}
       data-problems={@problems != [] && length(@problems)}
       data-level={@level}
-      phx-click={JS.patch(@toggle)}
+      phx-click={
+        if @open,
+          do: @toggle |> JS.patch() |> JS.dispatch("desk:validation-close", detail: %{button: @id}),
+          else: JS.patch(@toggle)
+      }
     >
       <.glyph level={@level || "error"} />
     </button>
@@ -315,10 +316,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   attr :nav_group, :any, default: nil
   attr :form, :any, default: nil
 
-  @doc """
-  The panel, beside the form while the pane's URL asks for it: every problem
-  as a button, or a line that says there is none.
-  """
+  @doc "The panel beside the form: every problem as a button, or a line saying none."
   def holder(assigns) do
     assigns =
       assign(assigns,
