@@ -18,7 +18,10 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
   that does not answer, is a 503 instead (`chat_registered_host_ask_test.exs`).
 
   The sandbox puts every process on ONE connection, so this runs `unboxed_run`
-  on real connections and removes its rows itself. A holder connection cancels
+  on real connections and removes its rows itself. A test body already runs on
+  `with_question`'s unboxed connection and never nests another `unboxed_run`:
+  that would check the connection in and roll the cleanup back
+  (task-23b6ba92b28c809a). A holder connection cancels
   the question and keeps its transaction open, so the request is provably
   waiting on the row lock before the cancel commits.
   """
@@ -85,7 +88,7 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
     with_question(fn raw, sid ->
       start_supervised!({RecorderStub, sid})
 
-      assert unboxed(fn -> answer(raw, sid) end).status == 204
+      assert answer(raw, sid).status == 204
       assert_received {:delivered, "q-1", {:allow, _server_rebuilt_input}}
       refute_received {:delivered, _, _}
       assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] == "allowed"
@@ -113,7 +116,7 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
 
   test "an answer to a pending question with no live runtime cancels it and 404s" do
     with_question(fn raw, sid ->
-      resp = unboxed(fn -> answer(raw, sid) end)
+      resp = answer(raw, sid)
       assert resp.status == 404, "an unsent answer answered #{resp.status}: #{resp.resp_body}"
 
       assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] ==
