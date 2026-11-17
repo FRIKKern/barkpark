@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
+  alias BarkparkWeb.Studio.Desk.ItemRefs
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
@@ -339,7 +340,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp ours({:reply, reply, socket}, how), do: {:reply, reply, settle(socket, how)}
 
   defp settle(socket, how),
-    do: socket |> steer(how) |> strip() |> form_only() |> DocDialog.follow() |> assign(:panes, [])
+    do:
+      socket
+      |> steer(how)
+      |> strip()
+      |> ItemRefs.follow()
+      |> form_only()
+      |> DocDialog.follow()
+      |> assign(:panes, [])
 
   # A document the desk opens from a document node of its own (an
   # `S.document()` child: a singleton) shows the form only, as Sanity's

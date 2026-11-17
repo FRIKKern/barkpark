@@ -15026,3 +15026,43 @@ msgstr "Kunne ikke sjekke hvilke dokumenter som refererer til dem. Prøv igjen f
 #, elixir-autogen, elixir-format
 msgid "The document is no longer there"
 msgstr "Dokumentet finnes ikke lenger"
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Item actions"
+msgstr "Elementhandlinger"
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item before"
+msgstr "Legg til før"
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item after"
+msgstr "Legg til etter"
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Close dialog"
+msgstr "Lukk dialog"
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Move item %{n}"
+msgstr "Flytt element %{n}"
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Drag to re-order"
+msgstr "Dra for å endre rekkefølge"
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "sortable"
+msgstr "sorterbar"
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
+msgstr "For å plukke opp et element, trykk Mellomrom eller Enter på håndtaket. Bruk piltastene for å flytte det, Mellomrom eller Enter for å slippe det, Escape for å avbryte."

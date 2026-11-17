@@ -160,7 +160,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemMenu do
   attr :target, :any, default: nil
 
   @doc """
-  "Add item..." of an array whose items are of several types
+  "Add item" of an array whose items are of several types
   (`ArrayField.member_typing/1`): a menu of the types, as Sanity's insert
   menu. The item added is of the type chosen, at the end, and opens.
   """
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemMenu do
         aria-expanded="false"
         disabled={@readonly}
         phx-mounted={JS.ignore_attributes(["aria-expanded", "style"])}
-      ><span aria-hidden="true">+ </span>{gettext("Add item...")}</button>
+      ><span aria-hidden="true">+ </span>{gettext("Add item")}</button>
       <div
         id={@menu_id}
         popover

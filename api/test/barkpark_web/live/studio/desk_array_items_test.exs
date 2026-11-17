@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
       "title" => "Sanity docs",
       "url" => "https://www.sanity.io/docs"
     },
-    %{"_key" => "l2", "kind" => "docLink", "title" => "Related post", "url" => ""}
+    %{"_key" => "l2", "kind" => "docLink", "title" => "Related post", "target" => "aitems-target"}
   ]
 
   setup %{conn: conn} do
@@ -40,10 +40,13 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
       "ordered" => true,
       "of" => %{
         "type" => "composite",
-        "preview" => %{"title" => "title"},
+        "preview" => %{"title" => "title", "subtitle" => "target"},
         "options" => %{
           "typeField" => "kind",
-          "fieldsByType" => %{"externalLink" => ["title", "url"], "docLink" => ["title"]}
+          "fieldsByType" => %{
+            "externalLink" => ["title", "url"],
+            "docLink" => ["title", "target"]
+          }
         },
         "fields" => [
           %{
@@ -56,7 +59,8 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
             ]
           },
           %{"name" => "title", "title" => "Title", "type" => "string"},
-          %{"name" => "url", "title" => "URL", "type" => "url"}
+          %{"name" => "url", "title" => "URL", "type" => "url"},
+          %{"name" => "target", "title" => "Target", "type" => "reference", "refType" => type}
         ]
       }
     }
@@ -70,13 +74,29 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
           "fields" => [
             %{"name" => "title", "title" => "Title", "type" => "string"},
             %{"name" => "notes", "title" => "Notes", "type" => "string"},
-            links
+            links,
+            %{
+              "name" => "cards",
+              "title" => "Cards",
+              "type" => "arrayOf",
+              "of" => %{
+                "type" => "composite",
+                "fields" => [%{"name" => "label", "title" => "Label", "type" => "string"}]
+              }
+            }
           ]
         },
         @dataset
       )
 
     id = "aitems-#{n}"
+
+    {:ok, _} =
+      Content.create_document(
+        type,
+        %{"doc_id" => "aitems-target", "title" => "The target post"},
+        @dataset
+      )
 
     {:ok, _} =
       Content.create_document(
@@ -226,15 +246,17 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
     assert [%{"_key" => ^new}, %{"_key" => "l2"}] = links(c)
   end
 
-  test "the Add item button opens the item it adds", c do
+  test "the Add item button of an array of one item type opens the item it adds", c do
     view = desk(c)
 
     add =
-      ~s(#{@form} fieldset[data-array-path="doc[links]"] > button.bp-array-btn-add[phx-value-open="item"])
+      ~s(#{@form} fieldset[data-array-path="doc[cards]"] > button.bp-array-btn-add[phx-value-open="item"])
 
     EditorPost.press_on(view, element(view, add))
-    assert [_, _, %{"_key" => _}] = links(c)
-    assert_push_event(view, "desk:item-open", %{path: "doc[links]", index: 2})
+    {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+    assert [%{"_key" => key}] = doc.content["cards"]
+    assert_push_event(view, "desk:item-open", %{path: "doc[cards]", index: 0})
+    assert has_element?(view, ~s(#{@form} li[data-item-path='cards[_key=="#{key}"]'] > dialog))
   end
 
   test "an add pressed in another document is not written", c do
@@ -286,5 +308,62 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
     {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
     assert doc.content["notes"] == "typed"
     assert Jason.encode!(doc.content["links"]) == Jason.encode!(@links)
+  end
+
+  test "a doc link's preview names its target by its title", c do
+    view = desk(c)
+
+    assert view |> element(~s(#{item("l2")} > button[data-desk-item-open] .subtitle)) |> render() =~
+             "The target post"
+
+    refute has_element?(view, ~s(#{item("l1")} > button[data-desk-item-open] .subtitle))
+  end
+
+  test "an item's dialog shows its own type's fields, without the type select", c do
+    view = desk(c)
+    l1 = ~s(#{item("l1")} > dialog)
+    l2 = ~s(#{item("l2")} > dialog)
+
+    assert has_element?(view, ~s(#{l1} [name="doc[links][0].url"]))
+    refute has_element?(view, ~s(#{l1} [name="doc[links][0].target"]))
+    refute has_element?(view, ~s(#{l1} [name="doc[links][0].kind"]))
+    refute has_element?(view, ~s(#{l2} [name="doc[links][1].url"]))
+    refute has_element?(view, ~s(#{l2} [name="doc[links][1].kind"]))
+  end
+
+  test "an edit in an item's dialog keeps the item's type and its other fields", c do
+    view = desk(c)
+
+    view
+    |> form(@form, %{"doc" => %{"links" => %{"0" => %{"title" => "Sanity docs v2"}}}})
+    |> render_change(%{"_target" => ["doc", "links", "0", "title"]})
+
+    assert [l1, l2] = links(c)
+    assert l1 == Map.put(hd(@links), "title", "Sanity docs v2")
+    assert l2 == List.last(@links)
+  end
+
+  test "Add item asks which type, and adds an item of that type that opens", c do
+    view = desk(c)
+    add = ~s(#{@form} fieldset[data-array-path="doc[links]"] .dk-add-item)
+    assert has_element?(view, ~s(#{add} > button[aria-haspopup="menu"]), "Add item")
+
+    names =
+      view
+      |> element(~s(#{add} [role="menu"]))
+      |> render()
+      |> then(&Regex.scan(~r/role="menuitem"[^>]*>([^<]+)</, &1))
+      |> Enum.map(fn [_, name] -> String.trim(name) end)
+
+    assert names == ["External link", "Document link"]
+
+    EditorPost.press_on(
+      view,
+      element(view, ~s(#{add} [role="menuitem"][phx-value-kind="docLink"]))
+    )
+
+    assert [_, _, %{"kind" => "docLink", "_key" => key}] = links(c)
+    assert_push_event(view, "desk:item-open", %{path: "doc[links]", index: 2})
+    refute has_element?(view, ~s(#{item(key)} > dialog [name="doc[links][2].url"]))
   end
 end

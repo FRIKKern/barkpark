@@ -71,6 +71,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # (for an array of options, the box of checkboxes) then carries
   # `id="links"`, the element Sanity's Studio names by the path. nil adds no id.
   attr :id_base, :string, default: nil
+  # The desk's titles of the documents the items point at, by id
+  # (`Desk.ItemRefs`): an item preview's reference reads as its title.
+  attr :ref_titles, :map, default: %{}
 
   # Several named member types (`field.of_types`, Sanity's page-builder
   # array, such as `page.landingPageSections`). Each row opens in the form of
@@ -754,14 +757,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     subs = (Map.get(item, :fields) || []) |> Enum.reject(&is_nil/1)
 
     title =
-      pick(row, spec["title"]) ||
+      text(row, subs, spec["title"], ctx) ||
         first_text(row, subs) ||
         title_for(item) ||
         gettext("Item")
 
     %{
       title: title,
-      subtitle: pick(row, spec["subtitle"]),
+      subtitle: text(row, subs, spec["subtitle"], ctx),
       media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx),
       # task-835fe5219585ca80: the member type's icon (a named object type
       # carries its schema's), drawn when the row has no media; the document
@@ -769,6 +772,38 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       icon: BarkparkWeb.Icons.row_icon((subfield_attr(item, :raw) || %{})["icon"])
     }
   end
+
+  # A preview's title or subtitle as words. A reference subfield (a doc
+  # link's `target`) reads as its target's title when the desk has it
+  # (`ctx.ref_titles`), else as its id; any other value that is not text
+  # shows nothing.
+  defp text(row, subs, path, ctx) do
+    case pick(row, path) do
+      nil ->
+        nil
+
+      value ->
+        if reference_sub?(subs, path),
+          do: ref_title(value, Map.get(ctx, :ref_titles) || %{}),
+          else: if(is_binary(value), do: value)
+    end
+  end
+
+  defp reference_sub?(subs, path) when is_binary(path),
+    do:
+      Enum.any?(
+        subs,
+        &(subfield_attr(&1, :name) == path and subfield_attr(&1, :type) == "reference")
+      )
+
+  defp reference_sub?(_subs, _path), do: false
+
+  defp ref_title(%{"_ref" => id}, titles), do: ref_title(id, titles)
+
+  defp ref_title(id, titles) when is_binary(id),
+    do: Map.get(titles, Barkpark.Content.published_id(id)) || id
+
+  defp ref_title(_value, _titles), do: nil
 
   defp pick(_row, nil), do: nil
 
@@ -809,7 +844,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   # Where a Sanity image id is served from: the field's dataset and scope.
   defp preview_ctx(assigns),
-    do: %{dataset: assigns[:dataset] || "production", scope_prefix: assigns[:scope_prefix] || ""}
+    do: %{
+      dataset: assigns[:dataset] || "production",
+      scope_prefix: assigns[:scope_prefix] || "",
+      ref_titles: assigns[:ref_titles] || %{}
+    }
 
   # A picker value is a bare URL or a JSON/map {url, assetId, …}, or the
   # reference shape {asset: {_ref}} (task-7ea6f41cede5ee97).
