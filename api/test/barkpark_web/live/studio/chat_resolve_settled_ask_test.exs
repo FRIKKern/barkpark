@@ -22,6 +22,23 @@ defmodule BarkparkWeb.Studio.ChatResolveSettledAskTest do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
 
+  # The claude adapter, with a hook that runs inside `answer_approval/3`: the
+  # moment between the claim and the flip, where a cancel can still commit.
+  defmodule HookedClaude do
+    @moduledoc false
+    @real Barkpark.StudioChat.Runtime.Claude
+
+    for {name, arity} <- @real.__info__(:functions), name != :answer_approval do
+      args = Macro.generate_arguments(arity, __MODULE__)
+      def unquote(name)(unquote_splicing(args)), do: @real.unquote(name)(unquote_splicing(args))
+    end
+
+    def answer_approval(ref, request_id, decision) do
+      if hook = Application.get_env(:barkpark, :resolve_settled_send_hook), do: hook.()
+      @real.answer_approval(ref, request_id, decision)
+    end
+  end
+
   setup %{conn: conn} do
     {default_ws, _} = ensure_default_scope!()
     wire = Path.join(System.tmp_dir!(), "resolve-settled-#{System.unique_integer([:positive])}")
@@ -35,8 +52,21 @@ defmodule BarkparkWeb.Studio.ChatResolveSettledAskTest do
     )
 
     Application.put_env(:barkpark, :public_demo_studio, false)
+    prev_adapters = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(prev_adapters || %{}, :claude, HookedClaude)
+    )
 
     on_exit(fn ->
+      Application.delete_env(:barkpark, :resolve_settled_send_hook)
+
+      if prev_adapters,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev_adapters),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+
       if Process.whereis(Barkpark.StudioChat.RuntimeSupervisor) do
         for {_, pid, _, _} <-
               DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
@@ -90,6 +120,45 @@ defmodule BarkparkWeb.Studio.ChatResolveSettledAskTest do
     refute html =~ "✓ allowed"
   end
 
+  # task-a759f535f818d2cb (rev81 on #26911): a cancel that commits while the
+  # answer is being sent wins in the store, and the card drew "plan approved".
+  test "Allow on a plan card whose ask is canceled during the send shows canceled", ctx do
+    ask!(ctx, "r-plan", "ExitPlanMode", %{"plan" => "# Ship it"}, "plan-approve")
+    sid = ctx.sid
+
+    Application.put_env(:barkpark, :resolve_settled_send_hook, fn ->
+      1 = StudioChat.cancel_pending_approvals(sid)
+    end)
+
+    html =
+      render_click(element(ctx.view, ~s(button[phx-click=plan-approve][phx-value-rid=r-plan])))
+
+    assert status(sid, "r-plan") == "canceled"
+    assert html =~ "✗ canceled"
+    refute html =~ "plan approved"
+  end
+
+  # rev26739's M2 on #26934: a stored "allowed" this tab did not deliver must not
+  # read as its own allow, or it broadcasts and publishes the plan Paper again.
+  test "Allow on a plan card another client already allowed sends nothing and does not publish again",
+       ctx do
+    ask!(ctx, "r-plan-done", "ExitPlanMode", %{"plan" => "# Ship it"}, "plan-approve")
+    {:ok, _} = StudioChat.update_approval_status(ctx.sid, "r-plan-done", "allowed")
+
+    topics = Enum.uniq([Recorder.topic(ctx.sid), live_topic(ctx.view)])
+    Enum.each(topics, &Phoenix.PubSub.subscribe(Barkpark.PubSub, &1))
+
+    render_click(element(ctx.view, ~s(button[phx-click=plan-approve][phx-value-rid=r-plan-done])))
+
+    assert_not_sent(ctx, "r-plan-done")
+    assert status(ctx.sid, "r-plan-done") == "allowed"
+    refute_receive {:chat_permission_resolved, "r-plan-done", _}, 300
+    refute_receive {:plan_paper, "r-plan-done", _}, 300
+    refute_receive {:plan_paper_failed, "r-plan-done"}, 300
+  end
+
+  defp live_topic(view), do: :sys.get_state(view.pid).socket.assigns[:subscribed_topic]
+
   # A later ask, answered through the same Session, is the ordering witness.
   defp assert_not_sent(ctx, rid) do
     ask!(ctx, "r-witness")
@@ -98,18 +167,18 @@ defmodule BarkparkWeb.Studio.ChatResolveSettledAskTest do
     refute rid in responses(wire_text(ctx.wire)), "the answer to #{rid} reached the runtime"
   end
 
-  defp ask!(ctx, rid) do
+  defp ask!(ctx, rid, tool \\ "Bash", input \\ %{}, button \\ "approve") do
     recorder = Recorder.whereis(ctx.sid)
     assert is_pid(recorder), "no live recorder for #{ctx.sid}"
 
     send(
       recorder,
       {:claude_chat_permission,
-       %{request_id: rid, tool_name: "Bash", input: %{}, title: nil, decision_reason: nil}}
+       %{request_id: rid, tool_name: tool, input: input, title: nil, decision_reason: nil}}
     )
 
     :sys.get_state(recorder)
-    assert has_element?(ctx.view, ~s(button[phx-click=approve][phx-value-rid=#{rid}]))
+    assert has_element?(ctx.view, ~s(button[phx-click=#{button}][phx-value-rid=#{rid}]))
   end
 
   defp status(sid, rid),
