@@ -71,7 +71,7 @@ defmodule Barkpark.StudioChat.PlanPapers do
   def publish_approved_plan(session_id, request_id, decision)
       when is_binary(session_id) and is_binary(request_id) do
     with true <- allow?(decision),
-         %{role: "plan", metadata: %{"approval_status" => "allowed"}} = row <-
+         %{role: "plan", metadata: %{"approval_status" => st}} = row when st != "denied" <-
            StudioChat.get_needs_you_message(session_id, request_id),
          markdown when is_binary(markdown) <- plan_markdown(row.metadata),
          false <- String.trim(markdown) == "" do
