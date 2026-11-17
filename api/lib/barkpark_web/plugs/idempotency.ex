@@ -16,7 +16,8 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   releases the claim so a retry can re-claim. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
-  `bind_request: true` (the chat send mount, in ChatController) binds the key
+  `bind_request: true` (every mount today: the chat send in ChatController and
+  the router's `:idempotent` and `:scoped_mutate` pipelines) binds the key
   to the request the action will read, so the same key sent for another
   request is refused 422 `idempotency_key_reused` instead of replaying an
   answer to a request the client did not make:
@@ -29,8 +30,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
       every spelling that reaches one session reaches one key.
 
   Without the option the scope is the constant `:scope` string and the path is
-  the raw `request_path`, as before, so keys already stored for those mounts
-  keep matching.
+  the raw `request_path`. A mutate key stored under the bare `"mutation"` scope
+  before the mutate mounts were bound still replays for a bound retry, for the
+  24 h those rows live (`Barkpark.Idempotency`, `pre_binding_row?/2`).
   """
 
   import Plug.Conn

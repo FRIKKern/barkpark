@@ -108,10 +108,14 @@ defmodule BarkparkWeb.TaskCreateIdempotencyTest do
     title = uniq("idem-create")
     key = uniq("key")
 
-    first = post_create(key, title)
+    # One body, sent twice: create_body/1 mints fresh tag names on every call,
+    # and the key is bound to the body, so a second build is another request.
+    body = create_body(title)
+
+    first = post(authed(key), "/v1/data/mutate/#{@dataset}", body)
     assert first.status in 200..299, "first create: #{first.status} #{first.resp_body}"
 
-    second = post_create(key, title)
+    second = post(authed(key), "/v1/data/mutate/#{@dataset}", body)
 
     assert second.status == first.status,
            "the replay must reproduce the original status, got #{second.status}: #{second.resp_body}"
