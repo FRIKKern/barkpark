@@ -6,6 +6,7 @@ defmodule Barkpark.ChatHosts do
   import Ecto.Query
 
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
+  alias Barkpark.ChatHosts.EventText
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
@@ -503,8 +504,11 @@ defmodule Barkpark.ChatHosts do
     cursor = value(attrs, :cursor)
     key = value(attrs, :idempotency_key)
 
+    # U+0000 becomes U+FFFD in every string the event carries, after the status
+    # label rules (which fold it to a space), so jsonb can store it and the host
+    # keeps publishing (EventText, task-6497a4925af9b22f).
     with {:ok, event} <- normalize_status_event(value(attrs, :event, %{})) do
-      accept_fenced_event(host, lease_id, epoch, cursor, key, event)
+      accept_fenced_event(host, lease_id, epoch, cursor, key, EventText.replace_nul(event))
     end
   end
 

@@ -1,6 +1,7 @@
 defmodule Barkpark.UserPrefsRaceTest do
   @moduledoc """
-  task-f150278ead8dbfb3 — list ops on one pref, on real connections. The
+  task-f150278ead8dbfb3 — list ops (and task-e016c981d677f3aa's `set`) on
+  one pref, on real connections. The
   sandbox puts every process on ONE connection, so a second writer would
   queue there and these tests would pass with the row lock deleted; they run
   `unboxed_run` and tear their rows down themselves.
@@ -62,6 +63,33 @@ defmodule Barkpark.UserPrefsRaceTest do
 
       assert {:ok, %{"ids" => ["a"]}} = Task.await(pusher, 10_000)
       assert UserPrefs.get(user.id, ws.id, @dataset, @key) == %{"ids" => ["a"]}
+    end)
+  end
+
+  # task-e016c981d677f3aa: a read-change-PUT of the whole object loses one of
+  # these two changes; `set` takes the row lock, so both land.
+  test "two concurrent sets of different fields of one object both land" do
+    with_user(fn user, ws ->
+      bot = %{"name" => "old", "session_id" => "s0", "host" => "h"}
+      {:ok, pref} = UserPrefs.put(user.id, ws.id, @dataset, @key, bot)
+      holder = hold(lock_row(pref), fn -> :ok end)
+
+      setters =
+        for {field, item} <- [{"name", "renamed"}, {"session_id", "s1"}] do
+          Task.async(fn ->
+            unboxed(fn ->
+              UserPrefs.apply_list_op(user.id, ws.id, @dataset, @key, {:set, field, item, nil})
+            end)
+          end)
+        end
+
+      await_lock_waiters(2)
+      release(holder)
+
+      assert [{:ok, _}, {:ok, _}] = Enum.map(setters, &Task.await(&1, 10_000))
+
+      assert UserPrefs.get(user.id, ws.id, @dataset, @key) ==
+               %{"name" => "renamed", "session_id" => "s1", "host" => "h"}
     end)
   end
 

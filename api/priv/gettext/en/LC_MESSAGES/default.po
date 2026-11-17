@@ -14806,3 +14806,47 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Organization settings are shown only for organizations you administer in full."
 msgstr ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:63
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:110
+#, elixir-autogen, elixir-format
+msgid "Ecosystem panel"
+msgstr ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:114
+#, elixir-autogen, elixir-format
+msgid "No snapshot yet"
+msgstr ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "Built just now"
+msgstr ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:169
+#, elixir-autogen, elixir-format
+msgid "Built 1 minute ago"
+msgid_plural "Built %{count} minutes ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:172
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 minute ago"
+msgid_plural "Stale: built %{count} minutes ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:175
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 hour ago"
+msgid_plural "Stale: built %{count} hours ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark/plugins/ecosystem_panel/panel_live.ex:178
+#, elixir-autogen, elixir-format
+msgid "Stale: built 1 day ago"
+msgid_plural "Stale: built %{count} days ago"
+msgstr[0] ""
+msgstr[1] ""

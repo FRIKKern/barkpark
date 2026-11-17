@@ -23,12 +23,17 @@ defmodule Barkpark.Plugins.EcosystemPanel do
       `Tenancy.Auth.workspace_admin?/2` on every request and answers with a
       sandbox CSP.
 
-  Each bucket also mounts a flat copy (`/v1/plugins/ecosystem-panel/snapshot`,
-  `/studio/ecosystem-panel/frame`) with no workspace in the path. Both
-  controllers answer that copy 404 and touch no row: acting on the stamped
-  Default workspace there is the bug class `docs/auth.md` warns about.
+    * `/w/:ws/p/:proj/studio/ecosystem-panel` — the shell LiveView
+      (task-d599e49ba75bb30b), `Barkpark.Plugins.EcosystemPanel.PanelLive`.
+      Default `:admin` bucket, so the scoped copy rides `live_session
+      :scoped_plugin_admin` (`LiveAuth :scoped_admin`, then
+      `:require_org_mfa`). It draws the age line and frames the route above.
 
-  The shell route comes in a later task.
+  Each bucket also mounts a flat copy (`/v1/plugins/ecosystem-panel/snapshot`,
+  `/studio/ecosystem-panel/frame`, `/studio/ecosystem-panel`) with no
+  workspace in the path. Both controllers answer that copy 404, the shell
+  redirects it to `/studio`, and none of them touches a row: acting on the
+  stamped Default workspace there is the bug class `docs/auth.md` warns about.
 
   `register_schemas/1` is `[]`: a snapshot is a row, not a document, so it
   keeps no revision history and never reaches search, webhooks or the desk.
@@ -41,7 +46,8 @@ defmodule Barkpark.Plugins.EcosystemPanel do
     [
       {:post, "/ecosystem-panel/snapshot", BarkparkWeb.EcosystemPanelSnapshotController, :create,
        auth: :api},
-      {:get, "/ecosystem-panel/frame", BarkparkWeb.EcosystemPanelFrameController, :show}
+      {:get, "/ecosystem-panel/frame", BarkparkWeb.EcosystemPanelFrameController, :show},
+      {:live, "/ecosystem-panel", Barkpark.Plugins.EcosystemPanel.PanelLive, :index}
     ]
   end
 end
