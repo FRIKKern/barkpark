@@ -761,6 +761,11 @@ config :barkpark, :dataset_bound_admin_reads, :observe
 # target-admin rule and the withholding of seats, tokens and secrets through
 # and records what `:enforce` would do; `:enforce` refuses or withholds. The
 # env var BARKPARK_IMPORT_CONFINEMENT=enforce|observe, read per import, wins.
+# In both modes a user-owned token, its sessions and a user seat travel only for
+# a user already seated in the existing target; the rest are withheld, and the
+# import receipt (`withheld_user_rows`), a log line and a
+# `workspace_import.confinement` audit row list rows per table and the user
+# ids. To carry them anyway, re-run the import as a listed operator.
 config :barkpark, :import_confinement, :observe
 
 import_config "#{config_env()}.exs"

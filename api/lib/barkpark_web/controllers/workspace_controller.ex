@@ -957,7 +957,7 @@ defmodule BarkparkWeb.WorkspaceController do
           })
           |> put_withheld(stats)
         )
-        |> tap(fn _ -> ImportConfinement.record_observed(stats, conn.assigns[:api_token]) end)
+        |> tap(fn _ -> ImportConfinement.record(stats, conn.assigns[:api_token]) end)
 
       {:error, {:blob_path_conflict, info}} ->
         blob_path_conflict(conn, info)
@@ -989,7 +989,7 @@ defmodule BarkparkWeb.WorkspaceController do
           })
           |> put_withheld(stats)
         )
-        |> tap(fn _ -> ImportConfinement.record_observed(stats, conn.assigns[:api_token]) end)
+        |> tap(fn _ -> ImportConfinement.record(stats, conn.assigns[:api_token]) end)
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
@@ -1403,8 +1403,8 @@ defmodule BarkparkWeb.WorkspaceController do
   # outside it (task-1a6cde75b0adae76, `WorkspaceBundle.ImportConfinement`).
   defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
 
-  defp put_withheld(receipt, %{withheld: withheld}), do: Map.put(receipt, :withheld, withheld)
-  defp put_withheld(receipt, _stats), do: receipt
+  defp put_withheld(receipt, stats),
+    do: Map.merge(receipt, Map.take(stats, [:withheld, :withheld_user_rows]))
 
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do

@@ -17,10 +17,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
   A row that breaks one refuses the whole import (`InvalidBundleError`, 422).
 
   E3 members (bare `dataset` slug keys) keep only rows under a slug this
-  workspace owns alone, and for `shares` its own `workspace_slug`. Rows that
-  name a user (`@user_rows`) are dropped from the staging table. Neither is a
-  refusal: those rows are simply not written, and the engine counts them as
-  withheld.
+  workspace owns alone, and for `shares` its own `workspace_slug`. User-bound
+  rows (`user_bound/2`) are dropped from the staging table unless their user is
+  already seated in the existing target. Neither is a refusal: those rows are
+  not written, and `take_user_rows/0` reports the user-bound ones.
 
   Classification comes from the live catalog, never from the manifest's own
   `kind` / `import_strategy` claims.
@@ -30,12 +30,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.{Catalog, InvalidBundleError}
 
-  # Rows that would let the bundle speak for a user outside it: a token that
-  # acts as its owner, a seat that skips the invitation step.
-  @user_rows %{
-    "api_tokens" => "t.owner_user_id IS NOT NULL",
-    "workspace_memberships" => "t.principal_type = 'user'"
-  }
+  @user_tables ~w(api_tokens token_sessions workspace_memberships)
+  @user_key {__MODULE__, :withheld_user_rows}
 
   # Boundary FKs into `chat_sessions`, a table no bundle carries.
   @session_columns %{
@@ -46,8 +42,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
 
   @copy_chunk_bytes 65_536
 
-  @doc "Tables whose user-naming rows are never written, with the row predicate."
-  def user_rows, do: @user_rows
+  @doc "Tables whose user-bound rows travel only for a user already seated in the target."
+  def user_tables, do: @user_tables
+
+  @doc "Start an import's report of withheld user-bound rows."
+  def reset_user_rows, do: Process.put(@user_key, %{})
+
+  @doc "The withheld user-bound rows, `%{table => %{rows: n, user_ids: [id]}}`, and clear them."
+  def take_user_rows, do: Process.delete(@user_key) || %{}
 
   @doc "Member tables whose `session_id` points at `chat_sessions`."
   def session_columns, do: @session_columns
@@ -100,7 +102,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
   # member-table check; values are a validated UUID literal. COPY data never
   # enters SQL.
   # sobelow_skip ["SQL.Query", "SQL.Stream"]
-  def import_member!(%{"name" => table} = entry, dump, mode, manifest, catalog) do
+  def import_member!(%{"name" => table} = entry, dump, mode, %{manifest: manifest} = state) do
+    catalog = state.catalog
     kind = Map.get(catalog.kinds, table)
     ws_id = ws_id!(manifest)
     cols = entry["columns"] || []
@@ -128,7 +131,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
           refuse_out_of_scope!(table, tmp, scoped, ws)
           refuse_foreign_session!(table, tmp, cols, ws)
           refuse_foreign_references!(table, tmp, Map.get(catalog.fks, table, []), catalog, ws)
-          drop_user_rows!(table, tmp, cols)
+          drop_user_rows!(table, tmp, state.seated)
           write_scoped!(table, col_list, cols, tmp, mode, scoped, ws)
           count(tmp)
 
@@ -242,15 +245,53 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
     end
   end
 
-  defp drop_user_rows!(table, tmp, cols) do
-    case Map.get(@user_rows, table) do
-      nil -> :ok
-      where -> if user_column(table) in cols, do: delete!(tmp, where)
-    end
+  # A row that would let the bundle speak for a user: a token that acts as its
+  # owner, a session of such a token, a seat that skips the invitation step.
+  # `seated` is the target's user seats, read from the database before the
+  # import; a new workspace has none. `{user id column, withhold-if}`.
+  defp user_bound("api_tokens", seated),
+    do:
+      {"t.owner_user_id",
+       "t.owner_user_id IS NOT NULL AND #{unseated("t.owner_user_id", seated)}"}
+
+  defp user_bound("workspace_memberships", seated),
+    do: {"t.principal_id", "t.principal_type = 'user' AND #{unseated("t.principal_id", seated)}"}
+
+  # A session travels only with a token already written that may travel.
+  defp user_bound("token_sessions", seated) do
+    {"NULL::uuid",
+     "NOT EXISTS (SELECT 1 FROM api_tokens a WHERE a.id = t.api_token_id AND " <>
+       "(a.owner_user_id IS NULL OR NOT #{unseated("a.owner_user_id", seated)}))"}
   end
 
-  defp user_column("api_tokens"), do: "owner_user_id"
-  defp user_column("workspace_memberships"), do: "principal_type"
+  defp unseated(col, seated),
+    do: "NOT COALESCE(#{col}::text = ANY(#{Catalog.text_array_literal(seated)}), false)"
+
+  defp drop_user_rows!(table, tmp, seated) do
+    if table in @user_tables, do: drop_bound!(table, tmp, seated)
+  end
+
+  # Identifiers and predicates come from user_bound/2; seat ids are database uuids.
+  # sobelow_skip ["SQL.Query"]
+  defp drop_bound!(table, tmp, seated) do
+    {user_col, where} = user_bound(table, seated)
+
+    %{rows: [[n, ids]]} =
+      Repo.query!(
+        "SELECT count(*), array_remove(array_agg(DISTINCT #{user_col}::text), NULL) " <>
+          "FROM #{qi(tmp)} t WHERE #{where}",
+        []
+      )
+
+    if n > 0 do
+      delete!(tmp, where)
+
+      Process.put(
+        @user_key,
+        Map.put(take_user_rows(), table, %{rows: n, user_ids: Enum.sort(ids)})
+      )
+    end
+  end
 
   # sobelow_skip ["SQL.Query"]
   defp delete!(tmp, where), do: Repo.query!("DELETE FROM #{qi(tmp)} t WHERE #{where}", [])

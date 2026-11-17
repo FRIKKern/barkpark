@@ -5,8 +5,8 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   `WorkspaceBundle.ImportConfinement`).
 
   In every mode: a new workspace lands in no organization, an existing one keeps
-  its own, every row stays in the workspace, and rows that name a user are not
-  written. Observe first (`BARKPARK_IMPORT_CONFINEMENT`, default observe): the
+  its own, and every row stays in the workspace (user-bound rows:
+  `WorkspaceImportUserRowsTest`). Observe first (`BARKPARK_IMPORT_CONFINEMENT`, default observe): the
   target-admin rule and the withholding of seats, tokens and secrets. A listed
   operator's import is unchanged.
   """
@@ -17,7 +17,6 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   alias Barkpark.Tenancy.Membership
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
-  alias Barkpark.AccountsFixtures
 
   import Ecto.Query
 
@@ -41,8 +40,7 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
 
   # Export a workspace (optionally placed in `org_id` first), then delete it so
   # the import lands in a clean target — the bundle still CARRIES the org id.
-  # `seated_user`, when given, holds a member seat in the source workspace.
-  defp source_bundle!(org_id, seated_user \\ nil) do
+  defp source_bundle!(org_id) do
     n = System.unique_integer([:positive])
     raw_src = "org-conf-source-#{n}"
     {:ok, src} = Auth.create_token(raw_src, "source owner", "test", ["read", "write", "admin"])
@@ -51,9 +49,6 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       Tenancy.create_workspace_with_owner(%{name: "Imported WS #{n}"}, verified(raw_src))
 
     if org_id, do: {:ok, _} = Tenancy.assign_workspace_to_organization(target, org_id)
-
-    if seated_user,
-      do: {:ok, _} = TenancyAuth.create_membership(target.id, seated_user.id, "member", "user")
 
     project = Tenancy.get_project(target.slug, "default")
     {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
@@ -152,7 +147,7 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   defp observed_rows(ws_id) do
     Repo.query!(
       "SELECT metadata FROM audit_events WHERE action = $1 AND workspace_id = $2::uuid",
-      ["workspace_import.confinement_observed", Ecto.UUID.dump!(ws_id)]
+      ["workspace_import.confinement", Ecto.UUID.dump!(ws_id)]
     ).rows
     |> List.flatten()
   end
@@ -376,23 +371,6 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       rows = Repo.all(from m in Membership, where: m.workspace_id == ^ws_id)
       assert Enum.map(rows, &{&1.principal_id, &1.role}) == [{op.id, "admin"}]
       assert observed_rows(ws_id) == []
-    end
-
-    test "every mode: a seat naming a USER is not written", %{conn: conn} do
-      user =
-        AccountsFixtures.register_user("seated-#{System.unique_integer([:positive])}@example.com")
-
-      %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil, user)
-      {raw_op, _op, _} = operator_token("user-seat")
-
-      resp = import_bundle(conn, raw_op, slug, bundle)
-      assert resp.status == 200
-      assert Jason.decode!(resp.resp_body)["withheld"]["workspace_memberships"] == 1
-
-      refute Repo.exists?(
-               from m in Membership,
-                 where: m.workspace_id == ^ws_id and m.principal_id == ^user.id
-             )
     end
   end
 end

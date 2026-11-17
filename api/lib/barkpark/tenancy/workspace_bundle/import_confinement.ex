@@ -15,8 +15,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       exists keeps its current `organization_id` and the other operator
       columns (`@operator_columns`). Joining an organization goes only through
       the guarded attach route.
-    * Every row stays in the bundle's workspace, and rows that name a user
-      outside it are not written (`ImportConfinement.Rows`).
+    * Every row stays in the bundle's workspace (`ImportConfinement.Rows`).
+    * User-bound rows (a user-owned token, its sessions, a user seat) travel
+      only for a user already seated in the existing target, read from the
+      database before the import. The rest are withheld, and the receipt, the
+      log line and the audit row list them: rows per table and the user ids.
 
   ## Observe first (`mode/0`)
 
@@ -26,7 +29,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   `:observe` (the default) lets the import through as before and records what
   `:enforce` would do: one log line and one audit row
-  (`workspace_import.confinement_observed`), after the import commits.
+  (`workspace_import.confinement`), after the import commits.
   `:enforce` refuses (422 `invalid_bundle`) or withholds.
   `BARKPARK_IMPORT_CONFINEMENT=enforce|observe` wins over
   `config :barkpark, :import_confinement`.
@@ -44,7 +47,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   # Columns an operator (or the instance) sets, never the tenant.
   @operator_columns ~w(organization_id quota suspended suspended_reason suspended_at expires_at tier archived_at)
 
-  @action "workspace_import.confinement_observed"
+  @action "workspace_import.confinement"
 
   @doc "Tables `:enforce` withholds from a confined import."
   def observe_tables, do: @observe_tables
@@ -94,12 +97,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       |> Enum.reject(&is_nil/1)
 
     if enforce? and issues != [], do: refuse_target!(hd(issues))
+    Rows.reset_user_rows()
 
     %{
       manifest: manifest,
       enforce?: enforce?,
       prior: prior,
       issues: issues,
+      seated: if(prior, do: seated_users(ws_id), else: []),
       catalog: Rows.catalog()
     }
   end
@@ -119,7 +124,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
         release!(dump)
 
       true ->
-        n = Rows.import_member!(entry, dump, mode, state.manifest, state.catalog)
+        n = Rows.import_member!(entry, dump, mode, state)
         release!(dump)
         n
     end
@@ -135,8 +140,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   @doc """
   Hook after the members land: put the operator columns back, and name the rows
-  the bundle carried that were not written (`:withheld`, only when there are
-  any) and what `:enforce` would have done (`:confinement_observed`).
+  the bundle carried that were not written (`:withheld`, and per user-bound
+  table `:withheld_user_rows`, only when there are any) and what `:enforce`
+  would have done (`:confinement_observed`).
   """
   def settle!(stats, nil), do: stats
 
@@ -158,8 +164,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
     observed = %{would_withhold: would_withhold, would_refuse: state.issues}
 
+    user_rows = Rows.take_user_rows()
+
     stats
     |> put_unless_empty(:withheld, withheld, withheld == %{})
+    |> put_unless_empty(:withheld_user_rows, user_rows, user_rows == %{})
     |> put_unless_empty(
       :confinement_observed,
       observed,
@@ -171,16 +180,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   defp put_unless_empty(map, key, value, false), do: Map.put(map, key, value)
 
   @doc """
-  After the import committed: one log line and one audit row for what
-  `:enforce` would have done. A no-op when there is nothing to report. Never
-  raises.
+  After the import committed: one log line and one audit row naming the
+  withheld user-bound rows and what `:enforce` would have done. A no-op when
+  there is nothing to report. Never raises.
   """
-  def record_observed(%{confinement_observed: seen, manifest: manifest}, principal) do
+  def record(%{manifest: manifest} = stats, principal)
+      when is_map_key(stats, :confinement_observed) or is_map_key(stats, :withheld_user_rows) do
     actor = principal && Map.get(principal, :id)
     ws_id = manifest["workspace_id"]
+    seen = Map.get(stats, :confinement_observed, %{would_withhold: %{}, would_refuse: []})
+    user_rows = Map.get(stats, :withheld_user_rows, %{})
 
     Logger.warning(
-      "workspace_import_confinement_observed actor=#{actor || "none"} workspace_id=#{ws_id} " <>
+      "workspace_import_confinement actor=#{actor || "none"} workspace_id=#{ws_id} " <>
+        "withheld_user_rows=#{inspect(user_rows)} " <>
         "would_withhold=#{inspect(seen.would_withhold)} would_refuse=#{inspect(seen.would_refuse)}"
     )
 
@@ -192,6 +205,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       actor_id: actor,
       workspace_id: ws_id,
       metadata: %{
+        "withheld_user_rows" => user_rows,
         "would_withhold" => seen.would_withhold,
         "would_refuse" => Enum.map(seen.would_refuse, &Map.new(&1, fn {k, v} -> {"#{k}", v} end))
       }
@@ -202,7 +216,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     error -> Logger.error("import confinement record failed: #{Exception.message(error)}")
   end
 
-  def record_observed(_stats, _principal), do: :ok
+  def record(_stats, _principal), do: :ok
 
   # ── Workspace row ───────────────────────────────────────────────────────────
 
@@ -237,6 +251,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       %{rows: [row]} -> Map.new(Enum.zip(@operator_columns, row))
       %{rows: []} -> nil
     end
+  end
+
+  defp seated_users(ws_id) do
+    Repo.query!(
+      "SELECT principal_id::text FROM workspace_memberships " <>
+        "WHERE workspace_id = $1::uuid AND principal_type = 'user'",
+      [Ecto.UUID.dump!(ws_id)]
+    ).rows
+    |> List.flatten()
   end
 
   # ── Target admin ────────────────────────────────────────────────────────────
