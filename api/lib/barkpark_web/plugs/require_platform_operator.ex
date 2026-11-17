@@ -142,6 +142,15 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     end
   end
 
+  @doc """
+  True only for a principal the allowlist NAMES. Unlike `permits?/1`, an unset
+  allowlist names nobody, so this is false for every caller then.
+  """
+  @spec listed?(term()) :: boolean()
+  def listed?(principal) do
+    allowlist() != %{emails: [], token_ids: []} and permits?(principal)
+  end
+
   defp operator_principal?(%Barkpark.Auth.ApiToken{} = token, emails, ids),
     do: operator?(token, emails, ids)
 
