@@ -73,6 +73,24 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  test "a refusal stored while a newer turn is open still cancels the answered ask",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-5"))
+    assert :delivered = ApprovalAnswer.settle(sid, "ap-5", "allowed", fn -> :ok end)
+
+    # The answer was sent, then the user's next message started run b before
+    # the host refused it: the refusal is superseded and never projected.
+    answer = lease!(ctx, "answer", :answer_approval)
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, %{"kind" => "turn_started", "turn_id" => "t-b"})
+    accept!(ctx, answer, 1, refused("ap-5", a.lease_id))
+
+    assert ask_meta(sid)["approval_status"] == "canceled"
+    assert_received {:chat_permission_resolved, "ap-5", :canceled}
+  end
+
   test "a delivered answer's plain ack leaves the ask answered", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
@@ -81,7 +99,13 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
 
     answer = lease!(ctx, "answer", :answer_approval)
 
-    accept!(ctx, answer, 1, %{"kind" => "control_completed", "operation" => "answer_approval"})
+    # The host's delivered ack carries no approval_id; one is added here so
+    # only the missing `refused` reason keeps the ask answered.
+    accept!(ctx, answer, 1, %{
+      "kind" => "control_completed",
+      "operation" => "answer_approval",
+      "approval_id" => "ap-3"
+    })
 
     assert ask_meta(sid)["approval_status"] == "allowed"
     refute_received {:chat_permission_resolved, "ap-3", :canceled}
