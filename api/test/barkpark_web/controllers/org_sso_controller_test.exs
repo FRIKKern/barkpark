@@ -73,6 +73,10 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
     {:ok, ws} = Tenancy.create_workspace(%{slug: uniq("sso-ws"), name: "SSO"})
     raw = uniq("op")
     {:ok, token} = Auth.create_token(raw, uniq("lbl"), "production", ~w(read write admin), ws.id)
+    # A listed operator: these tests set up new, empty organizations, which only
+    # an operator may change (task-e04a14e5834fb086; non-operators are in
+    # org_sso_controller_org_scope_test.exs).
+    Application.put_env(:barkpark, :operator_token_ids, [token.id])
     %{ws: ws, bearer: raw, token: token}
   end
 

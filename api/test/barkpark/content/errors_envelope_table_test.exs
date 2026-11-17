@@ -193,6 +193,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "versions_id_not_supported", 422, [:details]},
       {"idempotency_key_in_use", {:error, :idempotency_key_in_use}, "idempotency_key_in_use", 409,
        []},
+      {"idempotency_key_reused", {:error, :idempotency_key_reused}, "idempotency_key_reused", 422,
+       []},
       # THE VETO — deterministic, 409, and it must NOT move when the outage arm
       # below does.
       {"halted", {:error, {:halted, "tenant is over quota"}}, "halted", 409, []},

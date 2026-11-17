@@ -72,6 +72,10 @@ defmodule BarkparkWeb.ChatController do
 
   use BarkparkWeb, :controller
 
+  # The send's optional Idempotency-Key, bound to the request (task-88749c42544d7f09).
+  @send_key [scope: "chat_send", bind_request: true]
+  plug(BarkparkWeb.Plugs.Idempotency, @send_key when action == :create_message)
+
   require Logger
 
   alias Barkpark.ChatHosts
