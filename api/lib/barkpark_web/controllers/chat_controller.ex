@@ -361,14 +361,16 @@ defmodule BarkparkWeb.ChatController do
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
          {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
       # A registered host's lease is made under this key, so a send the server
-      # cannot stand behind can be found and ended (task-583b6031c13b28ac).
-      command_key = Ecto.UUID.generate()
+      # cannot stand behind can be found and ended (task-583b6031c13b28ac). The
+      # claimed Idempotency hash when there is one, so a resend meets the first
+      # lease instead of running the turn twice (task-3c949e2977c56597).
+      command_key = Barkpark.Idempotency.held_key() || Ecto.UUID.generate()
 
       # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send
       # derived `resume?` from the pre-turn message_count, so the append cannot
       # false-flip turn 1 into a resume.
       with :ok <- ensure_and_send(id, session, turn.content, command_key, conn),
-           :ok <- ChatUserTurn.persist_sent(session, content, turn.metadata, command_key) do
+           :ok <- ChatUserTurn.persist_sent_once(session, content, turn.metadata, command_key) do
         conn |> put_status(:accepted) |> json(%{accepted: true})
       else
         {:error, reason} -> send_failure_response(conn, reason)

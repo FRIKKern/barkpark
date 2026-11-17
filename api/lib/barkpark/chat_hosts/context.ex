@@ -7,6 +7,7 @@ defmodule Barkpark.ChatHosts do
 
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
   alias Barkpark.ChatHosts.EventText
+  alias Barkpark.ChatHosts.LeaseChain
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
@@ -380,21 +381,45 @@ defmodule Barkpark.ChatHosts do
     }
 
     result =
-      case %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert() do
+      case insert_lease(attrs) do
         {:ok, lease} ->
           {:ok, lease}
 
         {:error, changeset} ->
           if constraint_error?(changeset),
-            do: {:ok, Repo.get_by!(ExecutionLease, host_id: host_id, command_key: key)},
+            do: resend_lease(host_id, key, attrs),
             else: {:error, changeset}
       end
 
-    with {:ok, lease} <- result,
-         :ok <- enqueue(lease, command) do
-      {:ok, %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}}
+    case result do
+      # The key's turn is already this lease's: no second enqueue.
+      {:reuse, lease} ->
+        {:ok, lease_info(lease)}
+
+      {:ok, lease} ->
+        with :ok <- enqueue(lease, %{command | idempotency_key: lease.command_key}),
+             do: {:ok, lease_info(lease)}
+
+      {:error, _} = error ->
+        error
     end
   end
+
+  # A resend (task-3c949e2977c56597): the key already holds a lease. Its turn
+  # is that lease's, unless the server ended it as not sent; then the turn
+  # runs on the next link of the key (`Barkpark.ChatHosts.LeaseChain`).
+  defp resend_lease(host_id, key, attrs) do
+    case LeaseChain.resolve(host_id, key) do
+      {:reuse, lease} -> {:reuse, lease}
+      {:next, next_key} -> insert_lease(%{attrs | command_key: next_key})
+    end
+  end
+
+  defp insert_lease(attrs),
+    do: %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert()
+
+  defp lease_info(lease),
+    do: %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}
 
   # `Transport.enqueue/3` is a GenServer.call: a timeout exits AFTER the lease
   # row exists, and the call can still land in the queue later. The lease is
@@ -428,8 +453,10 @@ defmodule Barkpark.ChatHosts do
   @spec withdraw_turn(String.t(), String.t()) :: :ok | :error
   def withdraw_turn(session_id, command_key)
       when is_binary(session_id) and is_binary(command_key) do
-    ExecutionLease
-    |> where([l], l.session_id == ^session_id and l.command_key == ^command_key)
+    # Every link of the key: a resent turn may be leased as `<key>:N`.
+    command_key
+    |> LeaseChain.links_query()
+    |> where([l], l.session_id == ^session_id)
     |> end_server_turn(:turn_not_stored)
   end
 

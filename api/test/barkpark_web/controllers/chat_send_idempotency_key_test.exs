@@ -221,7 +221,9 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
     assert [%{source_markdown: "retry me"}] = StudioChat.list_messages(sid, :global)
   end
 
-  test "a keyed send costs two more queries than an unkeyed one; a replay runs no turn query",
+  # The claim, its completion, and the read for a row already stored under the
+  # key (`ChatUserTurn.persist_sent_once/4`, task-3c949e2977c56597).
+  test "a keyed send costs three more queries than an unkeyed one; a replay runs no turn query",
        %{host_id: host_id, raw: raw} do
     plain_sid = create_host_session!(raw, host_id)
     keyed_sid = create_host_session!(raw, host_id)
@@ -230,7 +232,7 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
     keyed = count_queries(fn -> send_message(raw, keyed_sid, %{content: "q"}, "key-q") end)
     replay = count_queries(fn -> send_message(raw, keyed_sid, %{content: "q"}, "key-q") end)
 
-    assert keyed == plain + 2
+    assert keyed == plain + 3
     assert replay < plain
   end
 
