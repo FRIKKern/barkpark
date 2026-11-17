@@ -971,6 +971,14 @@ defmodule PDS.Census do
     {:delete, "/v1/auth/invitations/:id", "BarkparkWeb.InvitationController", :decline, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/invitations/:id", "BarkparkWeb.MemberController", :cancel_invitation, :status_only_receipt},
     {:post, "/v1/auth/invitations/:id/accept", "BarkparkWeb.InvitationController", :accept, :status_only_receipt},
+    # Access requests (task-1b99ba8512bb758e): four NEW routed writes, rows
+    # proposed by `--routed-rows` and pasted verbatim. Each renders the row the
+    # context function returned behind a tagged `{:ok, _}` match — a status
+    # receipt, never an `ok: true` literal.
+    {:delete, "/v1/auth/access-requests/:id", "BarkparkWeb.AccessRequestController", :withdraw, :status_only_receipt},
+    {:post, "/v1/auth/access-requests", "BarkparkWeb.AccessRequestController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/access-requests/:id/approve", "BarkparkWeb.WorkspaceAccessRequestController", :approve, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/access-requests/:id/deny", "BarkparkWeb.WorkspaceAccessRequestController", :deny_request, :status_only_receipt},
     # The browser door to the same seat consent (task-5306379c9be40c89): rows
     # proposed by `--routed-rows` and pasted verbatim. Accept redirects into the
     # joined workspace behind the context function's `{:ok, _}`; decline

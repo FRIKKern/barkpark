@@ -79,9 +79,9 @@ defmodule BarkparkWeb.AccessRequestController do
   end
 
   defp throttle(conn, user_id) do
-    key = RateLimiter.scoped_key(conn, {:access_request, user_id})
+    opts = [capacity: @per_hour, refill_per_sec: @per_hour / @window_seconds]
 
-    case RateLimiter.check(key, capacity: @per_hour, refill_per_sec: @per_hour / @window_seconds) do
+    case RateLimiter.check(RateLimiter.scoped_key(conn, {:access_request, user_id}), opts) do
       :ok -> :ok
       :rate_limited -> {:error, :rate_limited}
     end
