@@ -660,7 +660,7 @@ defmodule Barkpark.StudioChat.Recorder do
     state =
       state.session_id
       |> Barkpark.ChatHosts.replay_unprojected_by_lease()
-      |> Enum.reduce(state, fn
+      |> Enum.reduce(Barkpark.StudioChat.Recorder.RestoredAsks.restore(state), fn
         {event_id, %Event{} = event, lease_id}, acc ->
           acc = project_host_event(acc, event, lease_id)
           Barkpark.ChatHosts.mark_projected(event_id)
