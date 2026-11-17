@@ -133,5 +133,39 @@ func TestTaskCreateDiscardFindingNoDraftChecksFirst(t *testing.T) {
 			t.Errorf("output %q: exit = %d, want exitAmbiguous\nstdout=%s\nstderr=%s", output, code, so.String(), se.String())
 		}
 		checkFirst(t, "output "+output, se.String(), "task-950")
+		// rev26733 wording: the publish was REFUSED and the discard found
+		// nothing, so the headline says that, not "WAS SENT and may have landed".
+		if !strings.Contains(se.String(), "the publish was refused, and no draft is left") {
+			t.Errorf("output %q: does not say the publish was refused and no draft is left:\n%s", output, se.String())
+		}
+		if strings.Contains(se.String(), "may have landed") {
+			t.Errorf("output %q: a refused publish is called may-have-landed:\n%s", output, se.String())
+		}
+	}
+}
+
+// task-0d38c8d05932db8f: a non-duplicate refusal whose discard GENUINELY fails
+// (500) leaves a real draft: residue discard_failed, exit 1, both shapes. Red
+// under a mutant that sends every non-duplicate discard failure to
+// publish_discard_found_nothing.
+func TestTaskCreateNonDuplicateRefusalWithDiscard500IsResidue(t *testing.T) {
+	wall := [2]string{"422", `{"error":{"code":"unknown_tag","message":"unknown tag"}}`}
+	for _, output := range []string{"json", ""} {
+		noResendSleep(t)
+		ts, _ := publishScriptDoorDiscard(t, [2]string{"500", fault500}, wall)
+		var so, se bytes.Buffer
+		w := &writer{stdout: &so, stderr: &se, output: output}
+		ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+		code := runTaskCreate(w, globals{yes: true}, ctx, createArgs("A refused publish whose discard failed", "--publish"))
+		if code != exitGeneric {
+			t.Errorf("output %q: exit = %d, want exitGeneric\nstdout=%s\nstderr=%s", output, code, so.String(), se.String())
+		}
+		got := se.String() + so.String()
+		if !strings.Contains(got, residueDiscardFailed) {
+			t.Errorf("output %q: residue %s not named:\nstdout=%s\nstderr=%s", output, residueDiscardFailed, so.String(), se.String())
+		}
+		if strings.Contains(got, ambiguityPublishDiscardFoundNothing) {
+			t.Errorf("output %q: a real leftover draft was reported as found-nothing", output)
+		}
 	}
 }

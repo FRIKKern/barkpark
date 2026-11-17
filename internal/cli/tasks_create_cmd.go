@@ -518,17 +518,21 @@ func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode stri
 }
 
 // renderDiscardFoundNothing is the answer when the publish was refused but the
-// follow-up discard found no draft: the row may be published (an earlier
-// attempt, or another writer), so it is ambiguous, exit 9, and the remedy
-// checks the row before it offers anything.
+// follow-up discard found no draft. The refusal is definite (only a named wall
+// or a first send reaches the discard), so the headline says "refused", not
+// "may have landed" (rev26733). The row's state is still unknown (another
+// writer may have published or deleted it), so it is exit 9 and the remedy
+// checks the row and offers no delete.
 func renderDiscardFoundNothing(out *writer, draftID, bareID, title, refusalCode string) int {
 	code := renderAmbiguousWrite(out, ambiguousWrite{
 		class: ambiguityPublishDiscardFoundNothing, leg: "publish", docID: bareID, title: title,
-		detail: fmt.Sprintf("the publish was refused (%s), and the follow-up discard found no draft %s", refusalCode, draftID),
+		headline: "the publish was refused, and no draft is left",
+		detail:   fmt.Sprintf("refusal %s; the follow-up discard found no draft %s", refusalCode, draftID),
 	})
-	for _, line := range maybePublishedRemedyLines(draftID, bareID) {
-		out.errf("  %s", line)
-	}
+	out.errf("  no draft %s is left. Check the row BEFORE anything else:", draftID)
+	out.errf("    bp task get %s", bareID)
+	out.errf("  if it shows published, another writer filed it: nothing to do.")
+	out.errf("  if it is not found, nothing was kept: re-file with the refusal fixed, e.g. bp task create --publish …")
 	return code
 }
 
