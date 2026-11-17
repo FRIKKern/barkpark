@@ -728,4 +728,18 @@ defmodule BarkparkWeb.ShareController do
     BarkparkWeb.Plugs.DatasetBoundAdminReads,
     [surface: "tokens"] when action in [:list_tokens]
   )
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write", own_token_param: "token_id"] when action in [:revoke_token]
+  )
+
+  # A public share is anonymous access to a scope the body names, any dataset of
+  # the workspace, so it is a workspace-level write too.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "shares_write"] when action in [:create, :delete, :publish_media]
+  )
 end
