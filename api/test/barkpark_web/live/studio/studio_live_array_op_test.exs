@@ -293,8 +293,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "add_row appends a row via path", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "doc[tags]"},
           socket
         )
@@ -304,8 +303,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "remove_row drops the indexed row", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "remove_row", "path" => "doc[tags]", "index" => "1"},
           socket
         )
@@ -315,8 +313,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "move_up swaps with the row above", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "move_up", "path" => "doc[tags]", "index" => "1"},
           socket
         )
@@ -326,8 +323,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "move_down swaps with the row below", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "move_down", "path" => "doc[tags]", "index" => "0"},
           socket
         )
@@ -337,15 +333,14 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "back-compat: `field`-only payload (no path) still works", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event("array_op", %{"action" => "add_row", "field" => "tags"}, socket)
+        array_op(%{"action" => "add_row", "field" => "tags"}, socket)
 
       assert new_socket.assigns.editor_form["tags"] == ["a", "b", "c", nil]
     end
 
     test "out-of-bounds remove → list unchanged", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "remove_row", "path" => "doc[tags]", "index" => "42"},
           socket
         )
@@ -355,8 +350,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "out-of-bounds move_up at idx 0 → list unchanged", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "move_up", "path" => "doc[tags]", "index" => "0"},
           socket
         )
@@ -366,8 +360,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "unknown field in path → no-op, no crash", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "doc[bogus]"},
           socket
         )
@@ -378,8 +371,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "malformed path → no-op", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "garbage"},
           socket
         )
@@ -390,8 +382,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
     test "back-compat: unknown action → list unchanged (passes through ArrayField fall-through)",
          %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "rotate_left", "path" => "doc[tags]"},
           socket
         )
@@ -463,8 +454,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "add_row into a yet-unset nested arrayOf works on first click", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "doc[publisher].imprints"},
           socket
         )
@@ -476,15 +466,13 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "add_row twice appends two rows under the same nested path", %{socket: socket} do
       {:noreply, after1} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "doc[publisher].imprints"},
           socket
         )
 
       {:noreply, after2} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{"action" => "add_row", "path" => "doc[publisher].imprints"},
           after1
         )
@@ -650,8 +638,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
 
     test "add_row at productSupplies[0].market.territory.countries appends nil", %{socket: socket} do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{
             "action" => "add_row",
             "path" => "doc[productSupplies][0].market.territory.countries"
@@ -672,8 +659,7 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
       socket: socket
     } do
       {:noreply, new_socket} =
-        StudioLive.handle_event(
-          "array_op",
+        array_op(
           %{
             "action" => "remove_row",
             "path" => "doc[productSupplies][0].market.territory.countries",
@@ -738,5 +724,13 @@ defmodule BarkparkWeb.Studio.StudioLiveArrayOpTest do
                  ["productSupplies", "market", "territory", "countries"]
                )
     end
+  end
+
+  # The event as the page's script sends it: named for the document the
+  # editor holds (`PostIdentity`). These sockets are built by hand and draw
+  # no page, so there is no form to read the mark from.
+  defp array_op(params, socket) do
+    mark = BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket)
+    StudioLive.handle_event("array_op", Map.put(params, "_bp_doc", mark), socket)
   end
 end

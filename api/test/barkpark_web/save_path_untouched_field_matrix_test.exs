@@ -443,7 +443,7 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
           %{"action" => unquote(action), "field" => field, "path" => "doc[#{field}]"}
           |> then(fn p -> if unquote(index), do: Map.put(p, "index", unquote(index)), else: p end)
 
-        render_click(view, "array_op", params)
+        BarkparkWeb.EditorPost.press(view, "array_op", params)
 
         doc = stored(type, doc_id)
 

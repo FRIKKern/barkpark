@@ -124,9 +124,10 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
       {view, html} = open!(conn, ws, proj, doc)
       assert html =~ ~s(data-slug-source="name")
 
-      view
-      |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
+      )
 
       expected = Barkpark.Tenancy.slugify("Lars Mytting")
       assert render(view) =~ expected
@@ -159,9 +160,10 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
 
       {view, _html} = open!(conn, ws, proj, doc)
 
-      view
-      |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
+      )
 
       assert stored(scope).content["slug"]["current"] == "kjaere-ase-ovrebo",
              "æ/å/ø must fold to ae/a/o, not collapse to hyphens (was kj-re-se-vreb)"

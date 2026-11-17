@@ -65,9 +65,10 @@ defmodule BarkparkWeb.Studio.StudioArrayRefRowSearchTest do
     do: Regex.scan(~r/id="(bp-aref-relatedBooks-[^"]+?)(?<!-h)"/, html, capture: :all_but_first)
 
   defp add_row(view) do
-    view
-    |> element(~s([phx-value-action="add_row"][phx-value-field="relatedBooks"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([phx-value-action="add_row"][phx-value-field="relatedBooks"]))
+    )
   end
 
   test "an empty row keeps its wrapper id when the form saves its empty value", %{view: view} do

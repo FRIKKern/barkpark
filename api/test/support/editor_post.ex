@@ -6,7 +6,9 @@ defmodule BarkparkWeb.EditorPost do
 
   The server writes nothing for a post without that name. A test that sends
   `autosave` or `save` by event name, to test something else about the save,
-  sends it through here.
+  sends it through here. So does a test that sends a press that writes the
+  document (`press/4`, `press_on/3`): in the browser the page's script puts
+  the form's mark on the pressed control (`bp-array-focus.js`).
 
   The name is read from the rendered page, never from the socket: a form
   that does not carry it, or an event built without it, must fail the test
@@ -57,6 +59,21 @@ defmodule BarkparkWeb.EditorPost do
   @doc "`save` sent as a click sends it."
   def click(view, params, marks \\ nil),
     do: render_click(view, "save", named(view, params, marks))
+
+  @doc """
+  An event that writes the open document without posting the form
+  (`array_op`, `slug-generate`, the old pickers' events), sent by name as
+  the page's script sends it: with the form's own mark on it.
+  """
+  def press(view, event, params \\ %{}, marks \\ nil) when is_binary(event),
+    do: render_click(view, event, Map.merge(doc(view, marks), params))
+
+  @doc "The same press on a control of the page: an `element/3` of `view`."
+  def press_on(view, %Phoenix.LiveViewTest.Element{} = control, marks \\ nil),
+    do: render_click(control, doc(view, marks))
+
+  # The form's mark alone: a press reads the form tag, not its last child.
+  defp doc(view, marks), do: Map.take(marks || marks(view), [PostIdentity.key()])
 
   defp unescape(value) do
     value

@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
     # B's title typing does not land; neither does the slug made from it.
     type_in(b, "excerpt", " FAIL")
     post_form(b, "title", %{"title" => "Fail title", "excerpt" => "First FAIL"})
-    render_click(b, "slug-generate", %{"field" => "slug"})
+    BarkparkWeb.EditorPost.press(b, "slug-generate", %{"field" => "slug"})
 
     type_in(a, "title", " A2")
     render(b)
