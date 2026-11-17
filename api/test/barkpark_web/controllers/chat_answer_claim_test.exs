@@ -46,8 +46,10 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
   end
 
   test "an answer to a pending question with no live runtime still records it and 204s" do
+    # Already on with_question's unboxed connection: a nested unboxed_run would
+    # check it in and roll this test's cleanup back (task-23b6ba92b28c809a).
     with_question(fn raw, sid ->
-      assert unboxed(fn -> answer(raw, sid) end).status == 204
+      assert answer(raw, sid).status == 204
       assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] == "allowed"
     end)
   end

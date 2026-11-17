@@ -48,10 +48,23 @@ defmodule Barkpark.LockWaiter do
     end
   end
 
-  @doc "Waits until `backend` is waiting on a lock in this database, or flunks."
+  @doc """
+  Waits until `backend` is waiting on a lock in this database, or flunks.
+
+  The check reads on a connection of its own, in a process of its own. A race
+  test calls this inside its own `unboxed_run`, and an `unboxed_run` in the
+  caller's process would check that connection in: the rest of the test then
+  ran in the sandbox, so its cleanup rolled back and its committed rows stayed
+  (task-23b6ba92b28c809a).
+  """
   @spec await_lock!(integer(), non_neg_integer()) :: :ok
   def await_lock!(backend, tries \\ 250) do
-    %{rows: [[waiting]]} = Sandbox.unboxed_run(Repo, fn -> Repo.query!(@waiting, [backend]) end)
+    waiting =
+      Task.async(fn ->
+        %{rows: [[n]]} = Sandbox.unboxed_run(Repo, fn -> Repo.query!(@waiting, [backend]) end)
+        n
+      end)
+      |> Task.await()
 
     cond do
       waiting == 1 ->
