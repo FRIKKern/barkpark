@@ -111,7 +111,9 @@ defmodule Barkpark.Idempotency do
     * `:mismatch` — the row was claimed under a different `scope`. A mount
       that binds the request into its scope gets this when one key is
       reused for a different request; caller returns 422
-      `idempotency_key_reused`. Never re-executes and never replays.
+      `idempotency_key_reused`. Never re-executes and never replays. (A row
+      stored before the mutate mounts were bound is the transition exception:
+      see `pre_binding_row?/2`.)
 
   A stale pending row (crashed reservation older than `pending_ttl_seconds`) is
   reclaimed in place and returns `:claimed`, but only under its own scope.
@@ -149,21 +151,40 @@ defmodule Barkpark.Idempotency do
         claim(hash, scope, DateTime.utc_now(), attempt + 1)
 
       # One key, two scopes: a request-bound mount saw the key reused for another
-      # request, or for a row stored under the pre-binding constant `"mutation"`.
-      %Key{scope: other} when other != scope ->
-        :mismatch
+      # request. A pre-binding mutate row is the one exception (below).
+      %Key{scope: other} = row when other != scope ->
+        if pre_binding_row?(other, scope),
+          do: resolve_row(row, hash, scope, now, attempt),
+          else: :mismatch
 
-      %Key{state: "completed"} = row ->
-        {:replay,
-         %{status: row.status_code, body: row.response_body, headers: row.response_headers || %{}}}
-
-      %Key{state: "pending", inserted_at: ts} ->
-        if stale?(ts, now), do: reclaim(hash, scope, now, attempt), else: :in_progress
-
-      _ ->
-        :in_progress
+      row ->
+        resolve_row(row, hash, scope, now, attempt)
     end
   end
+
+  defp resolve_row(%Key{state: "completed"} = row, _hash, _scope, _now, _attempt) do
+    {:replay,
+     %{status: row.status_code, body: row.response_body, headers: row.response_headers || %{}}}
+  end
+
+  defp resolve_row(%Key{state: "pending", inserted_at: ts}, hash, scope, now, attempt) do
+    if stale?(ts, now), do: reclaim(hash, scope, now, attempt), else: :in_progress
+  end
+
+  defp resolve_row(_row, _hash, _scope, _now, _attempt), do: :in_progress
+
+  # TRANSITION RULE, for the deploy that bound the mutate mounts to the request
+  # (task-c65741be368a3f14). Before it they stored the bare scope "mutation",
+  # with no fingerprint of the request. Such a row met by a bound mutate claim
+  # ("mutation:<digest>") is treated as its own: completed replays, pending is
+  # 409 or reclaimed. Refusing it 422 would tell a client whose write DID land
+  # that it was refused. The row carries no body to compare, so a pre-deploy
+  # key reused for a DIFFERENT body also replays, as every key did before the
+  # binding. No mount writes a bare "mutation" row any more, and rows are swept
+  # after ttl_seconds (24 h), so one day after that deploy this clause matches
+  # nothing and can be deleted.
+  defp pre_binding_row?("mutation", "mutation:" <> _digest), do: true
+  defp pre_binding_row?(_stored, _scope), do: false
 
   # Atomically take over a stale (crashed) pending reservation. The WHERE clause
   # re-checks state+age so only ONE concurrent reclaimer wins; a loser re-resolves.

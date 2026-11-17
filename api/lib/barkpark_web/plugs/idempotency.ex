@@ -30,9 +30,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
       every spelling that reaches one session reaches one key.
 
   Without the option the scope is the constant `:scope` string and the path is
-  the raw `request_path`. A key stored under that constant scope and retried on
-  a now-bound mount answers 422 `idempotency_key_reused` rather than replaying,
-  so a retry that straddles the deploy binding a mount fails closed.
+  the raw `request_path`. A mutate key stored under the bare `"mutation"` scope
+  before the mutate mounts were bound still replays for a bound retry, for the
+  24 h those rows live (`Barkpark.Idempotency`, `pre_binding_row?/2`).
   """
 
   import Plug.Conn
