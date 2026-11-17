@@ -1420,7 +1420,7 @@ defmodule Barkpark.StudioChat.Recorder do
             runtime_status_sent?: false
           })
           |> stable_start()
-          |> clear_pending_asks()
+          |> new_turn_asks()
           |> publish_activity(%{state: :working, line: "thinking…"})
         end
 
@@ -2095,6 +2095,12 @@ defmodule Barkpark.StudioChat.Recorder do
   defp track_pending_ask(state, _ask), do: state
 
   defp clear_pending_asks(state), do: %{state | pending_asks: MapSet.new()}
+
+  # A turn a lease split opened keeps the older lease's asks (TurnOwner).
+  defp new_turn_asks(%{runtime_keep_asks?: true} = state),
+    do: Map.put(state, :runtime_keep_asks?, false)
+
+  defp new_turn_asks(state), do: clear_pending_asks(state)
 
   # Store truth for the contested transition: `pending_approvals` is maintained
   # transactionally by append/resolve/cancel (`update_approval_status/3`,

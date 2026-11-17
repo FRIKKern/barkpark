@@ -17,7 +17,9 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
   text is stored as its own row, then:
 
     * a `turn_started` starts a fresh turn (`{:split, false}`: the turn is
-      closed, so the Recorder's `turn_started` arm opens a new one);
+      closed, so the Recorder's `turn_started` arm opens a new one). That new
+      turn keeps the pending asks (`runtime_keep_asks?`): the older lease is
+      still live and its ask still answerable (task-74193da64d459ab4);
     * a `text_delta` goes on in the same open turn for its lease
       (`{:split, true}`).
 
@@ -75,7 +77,12 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
 
         state
         |> settle.(state.runtime_text)
-        |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
+        |> Map.merge(%{
+          runtime_text: "",
+          runtime_break?: false,
+          runtime_turn_open?: open?,
+          runtime_keep_asks?: not open?
+        })
         |> adopt(event, lease_id)
     end
   end

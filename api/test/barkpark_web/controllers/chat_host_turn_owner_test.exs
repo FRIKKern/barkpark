@@ -149,6 +149,52 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     refute StudioChat.get_session(sid).status == "working"
   end
 
+  # task-74193da64d459ab4: the newer lease's turn_started cleared the older
+  # lease's pending ask from the Recorder. The ask row stayed answerable, but
+  # the sidebar showed "thinking…" while it waited.
+  test "a newer lease's turn keeps the older lease's pending ask, and the session needs you",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    accept!(ctx, old, 2, %{
+      "kind" => "approval_requested",
+      "approval_id" => "ap-1",
+      "tool_name" => "Bash",
+      "input" => %{"command" => "ls"},
+      "title" => "Run ls"
+    })
+
+    assert MapSet.size(:sys.get_state(Recorder.whereis(sid)).pending_asks) == 1
+    assert StudioChat.get_session(sid).agent_state == "blocked"
+
+    new = lease!(ctx, "new")
+    accept!(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+
+    assert MapSet.size(:sys.get_state(Recorder.whereis(sid)).pending_asks) == 1,
+           "the older lease's ask is still pending and answerable"
+
+    assert StudioChat.get_session(sid).agent_state == "blocked"
+  end
+
+  test "one lease's next turn still clears the asks of its finished turn", %{sid: sid} = ctx do
+    one = lease!(ctx, "one")
+    accept!(ctx, one, 1, %{"kind" => "turn_started"})
+
+    accept!(ctx, one, 2, %{
+      "kind" => "approval_requested",
+      "approval_id" => "ap-2",
+      "tool_name" => "Bash",
+      "input" => %{"command" => "ls"},
+      "title" => "Run ls"
+    })
+
+    accept!(ctx, one, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+    accept!(ctx, lease!(ctx, "two"), 1, %{"kind" => "turn_started"})
+
+    assert MapSet.size(:sys.get_state(Recorder.whereis(sid)).pending_asks) == 0
+  end
+
   # ── only the turn's own lease ends it (task-5d1f639852927c4e) ──────────
 
   # The superseded? race: the older close reaches the Recorder just after the
