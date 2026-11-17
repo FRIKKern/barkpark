@@ -598,14 +598,13 @@ defmodule Barkpark.ChatHosts do
   end
 
   # Before the poll answers, and not rescued: a poll whose stamp failed hands
-  # nothing out, so no host holds a lease the server thinks is untaken.
-  defp stamp_handed_out([]), do: :ok
+  # nothing out, so no host holds a lease the server thinks is untaken. The
+  # write's own result: `{stamped, nil}`.
+  defp stamp_handed_out([]), do: {0, nil}
 
   defp stamp_handed_out(lease_ids) do
     from(l in ExecutionLease, where: l.id in ^lease_ids and is_nil(l.handed_out_at))
     |> Repo.update_all(set: [handed_out_at: DateTime.utc_now()])
-
-    :ok
   end
 
   # The same checks, in the same order, as `Runtime.dispatch/4` for a
