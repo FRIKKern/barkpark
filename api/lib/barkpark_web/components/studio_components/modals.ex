@@ -1164,9 +1164,11 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_discard, :boolean, default: false
   attr :account_label, :string, default: nil
   attr :profile_error, :string, default: nil
+  attr :doc_mark, :string, default: nil, doc: "`PostIdentity.of/1` of the page"
 
   def studio_modals(assigns) do
     ~H"""
+    <BarkparkWeb.Studio.StudioLive.PostIdentity.holder doc={@doc_mark} />
     <.profile_modal
       show_profile={@show_profile}
       user_name={@user_name}

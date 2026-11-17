@@ -99,7 +99,7 @@ defmodule BarkparkWeb.Studio.StudioImageAltSubfieldTest do
   test "Classic: a missing required alt is shown under the image field on publish",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/altpub/altpub-1"))
-    html = render_click(view, "publish", %{})
+    html = BarkparkWeb.EditorPost.press(view, "publish", %{})
 
     assert html =~ "Alternativ tekst: Required"
   end

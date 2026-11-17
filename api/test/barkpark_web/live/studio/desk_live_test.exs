@@ -660,7 +660,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
       settle(view)
 
       view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Alpha to publish"}})
-      render_hook(view, "publish", %{})
+      BarkparkWeb.EditorPost.press(view, "publish", %{})
 
       {doc, draft?, published?} = Content.fetch_doc_with_draft(@type_name, a, @dataset)
       assert published?

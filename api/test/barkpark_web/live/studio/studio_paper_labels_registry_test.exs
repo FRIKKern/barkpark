@@ -100,7 +100,11 @@ defmodule BarkparkWeb.Studio.StudioPaperLabelsRegistryTest do
   end
 
   defp publish(view),
-    do: view |> element(~s(button[data-test-id="paper-publish"])) |> render_click()
+    do:
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(button[data-test-id="paper-publish"]))
+      )
 
   defp flash(view, kind), do: :sys.get_state(view.pid).socket.assigns.flash[kind]
 

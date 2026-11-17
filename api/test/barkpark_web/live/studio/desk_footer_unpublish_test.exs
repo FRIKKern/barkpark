@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     # The "…" stays beside it.
     assert has_element?(view, ~s(#{@footer} button[aria-label="Open document actions"]))
 
-    view |> element(@unpublish) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, @unpublish))
 
     # The press only asks.
     assert has_element?(view, ~s(#{@dialog} h2), "Unpublish document?")
@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
   test "the dialog's confirm unpublishes; Unpublish is then greyed out and the focus goes to the pane's actions",
        c do
     view = open(c, "#{c.type};#{c.id}?perspective=published")
-    view |> element(@unpublish) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, @unpublish))
 
     confirm = ~s(#{@dialog} button.danger[data-desk-confirm="unpublish"])
 
@@ -131,7 +131,7 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     assert js =~ "[[&quot;push&quot;,{&quot;event&quot;:&quot;confirm-unpublish&quot;}],"
     assert js =~ focus
 
-    view |> element(confirm, "Unpublish now") |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, confirm, "Unpublish now"))
 
     refute has_element?(view, @dialog)
     refute published?(c.type, c.id)
@@ -154,12 +154,13 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
 
     # Still offered, as the TanStack Studio's: only "nothing published" greys it out.
     refute has_element?(view, ~s(#{@unpublish}[disabled]))
-    view |> element(@unpublish) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, @unpublish))
     assert published?(c.type, c.id)
 
-    view
-    |> element(~s(#{@dialog} button[data-desk-confirm="unpublish"]), "Unpublish now")
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@dialog} button[data-desk-confirm="unpublish"]), "Unpublish now")
+    )
 
     refute published?(c.type, c.id)
     assert {:error, _} = Content.get_document(c.id, c.type, @dataset)
@@ -241,8 +242,8 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     assert has_element?(view, ~s(#{@publish}[disabled]))
     refute has_element?(view, ~s(#{@footer} [data-desk-unpublish]))
 
-    render_hook(view, "unpublish", %{})
-    render_hook(view, "confirm-unpublish", %{"disconnect" => "true"})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "confirm-unpublish", %{"disconnect" => "true"})
     refute has_element?(view, @dialog)
     assert published?(c.single, c.single)
   end
@@ -250,13 +251,17 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
   test "a hand-sent unpublish with another document's id only asks about the open one", c do
     view = open(c, "#{c.type};#{c.id}?perspective=published")
 
-    render_hook(view, "unpublish", %{"id" => c.other, "disconnect" => "true"})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{"id" => c.other, "disconnect" => "true"})
 
     assert has_element?(view, ~s(#{@dialog} p strong), "Here")
     assert published?(c.type, c.id)
     assert published?(c.type, c.other)
 
-    render_hook(view, "confirm-unpublish", %{"id" => c.other, "disconnect" => "TRUE"})
+    BarkparkWeb.EditorPost.press(view, "confirm-unpublish", %{
+      "id" => c.other,
+      "disconnect" => "TRUE"
+    })
+
     refute published?(c.type, c.id)
     assert published?(c.type, c.other)
   end

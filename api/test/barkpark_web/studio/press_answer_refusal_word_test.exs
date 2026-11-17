@@ -133,7 +133,9 @@ defmodule BarkparkWeb.Studio.PressAnswerRefusalWordTest do
 
       before = render(view)
 
-      render_click(view, "publish", %{})
+      # As the page's script sends it with no document on the page: an
+      # empty mark (`bp-array-focus.js`).
+      render_click(view, "publish", %{"_bp_doc" => ""})
 
       after_html = render(view)
 

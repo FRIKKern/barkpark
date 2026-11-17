@@ -210,7 +210,7 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
       # The draft was saved with the long bio — a warning never blocks a save.
       assert stored(scope).content["bio"] == "far longer than twelve characters"
 
-      view |> element(~s(button[phx-click="publish"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="publish"])))
       html = render(view)
       refute html =~ "Fix validation errors before publishing"
 
@@ -237,7 +237,7 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
       assert html =~ ~s(class="field-errors")
       assert html =~ "Does not match required format"
 
-      view |> element(~s(button[phx-click="publish"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="publish"])))
       assert render(view) =~ "Fix validation errors before publishing"
 
       {:ok, published} = Content.get_document("author-1", "author", @dataset, scope)

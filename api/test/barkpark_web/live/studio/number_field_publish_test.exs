@@ -39,7 +39,7 @@ defmodule BarkparkWeb.Studio.NumberFieldPublishTest do
     {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/notice/n1"))
     BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "N", "count" => "abc"}})
 
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
 
     assert html =~ "Fix validation errors before publishing"
     assert html =~ "Must be a number"
@@ -50,7 +50,7 @@ defmodule BarkparkWeb.Studio.NumberFieldPublishTest do
     {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/notice/n1"))
     BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "N", "count" => "7.5"}})
 
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
 
     refute html =~ "Must be a number"
     assert {:ok, published} = Content.get_document("n1", "notice", @dataset)

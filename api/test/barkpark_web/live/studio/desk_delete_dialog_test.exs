@@ -117,7 +117,7 @@ defmodule BarkparkWeb.Studio.DeskDeleteDialogTest do
 
   test "Delete on a referenced document: how many refer, and which, in ul.used-in", c do
     view = open(c, c.ada)
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(view, ~s(#{@dialog}[phx-hook="ModalFocus"]))
     assert has_element?(view, ~s(#{@dialog} h2), "Delete document?")
@@ -192,7 +192,7 @@ defmodule BarkparkWeb.Studio.DeskDeleteDialogTest do
           fn -> view |> element(~s(#{@dialog} button[aria-label="Close"])) |> render_click() end,
           fn -> view |> element(@dialog) |> render_keydown(%{"key" => "Escape"}) end
         ] do
-      render_hook(view, "delete-doc", %{})
+      BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
       assert has_element?(view, @dialog)
       close.()
       refute has_element?(view, @dialog)
@@ -203,19 +203,21 @@ defmodule BarkparkWeb.Studio.DeskDeleteDialogTest do
 
   test "a document nobody refers to: no list, and Delete document deletes it", c do
     view = open(c, c.lone)
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(view, ~s(#{@dialog} .delete-preview), "Lone Unreferenced")
     refute has_element?(view, ~s(#{@dialog} [role="status"]))
     refute has_element?(view, ~s(#{@dialog} ul.used-in))
     refute has_element?(view, ~s(#{@dialog} button), "Disconnect references and delete")
 
-    view
-    |> element(
-      ~s|#{@dialog} button.danger[phx-click="confirm-delete"]:not([phx-value-disconnect])|,
-      "Delete document"
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(
+        view,
+        ~s|#{@dialog} button.danger[phx-click="confirm-delete"]:not([phx-value-disconnect])|,
+        "Delete document"
+      )
     )
-    |> render_click()
 
     assert_patch(view, "#{c.base}/#{c.author}")
     refute has_element?(view, @dialog)
@@ -228,7 +230,7 @@ defmodule BarkparkWeb.Studio.DeskDeleteDialogTest do
     render_async(view, 5_000)
     assert poll(view, fn -> has_element?(view, "#editor-form") end)
 
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
     assert has_element?(
              view,

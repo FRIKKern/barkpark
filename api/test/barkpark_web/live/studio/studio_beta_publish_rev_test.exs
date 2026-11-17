@@ -35,9 +35,10 @@ defmodule BarkparkWeb.Studio.StudioBetaPublishRevTest do
   end
 
   defp publish(view) do
-    view
-    |> element(~s([data-test-id="studio-beta-doc-actions"] [phx-click="publish"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-test-id="studio-beta-doc-actions"] [phx-click="publish"]))
+    )
   end
 
   defp doc_key(html) do

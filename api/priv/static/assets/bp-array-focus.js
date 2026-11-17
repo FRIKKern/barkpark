@@ -379,11 +379,21 @@
 // read at the press, and LiveView sends it with the event as a
 // `phx-value-`. A press with no editor form on the page gets an empty mark
 // and is not written.
+//
+// task-176bd529276ff8b3: the document's actions are such presses too
+// (Publish, Unpublish, Delete, Discard draft, Duplicate, Restore, and the
+// confirm of each one's dialog). Their controls are outside the form, and
+// a sheet or a paper has no editor form, so the page carries the open
+// document's mark once more (`#bp-doc`), read when there is no form.
 (function () {
   "use strict";
 
   var MARK = "phx-value-_bp_doc";
-  var WRITES = ["array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image"];
+  var WRITES = [
+    "array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image",
+    "publish", "unpublish", "confirm-unpublish", "delete-doc", "confirm-delete", "discard-draft",
+    "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish"
+  ];
 
   // Whether a binding (an event name, or LiveView's JSON commands) sends one.
   function writes(binding) {
@@ -394,16 +404,23 @@
     return false;
   }
 
+  // The mark of the document the page shows now: the editor form's, else
+  // the page's own copy; empty with neither.
+  function mark() {
+    var form = document.getElementById("editor-form");
+    if (form) return form.getAttribute(MARK) || "";
+    var holder = document.getElementById("bp-doc");
+    return (holder && holder.getAttribute("data-bp-doc")) || "";
+  }
+
   function name(attr) {
     return function (e) {
       var from = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
       var el = from && from.closest ? from.closest("[" + attr + "]") : null;
       if (!el || !writes(el.getAttribute(attr))) return;
-      var form = document.getElementById("editor-form");
-      var doc = form ? form.getAttribute(MARK) : null;
-      // Always present, empty with no form: a press with no mark at all is
-      // how the server knows a page older than this script, and reloads it.
-      el.setAttribute(MARK, doc || "");
+      // Always present, empty with no document: a press with no mark at all
+      // is how the server knows a page older than this script, and reloads it.
+      el.setAttribute(MARK, mark());
     };
   }
 
@@ -411,4 +428,7 @@
   // the control's values and pushes the event.
   window.addEventListener("click", name("phx-click"), true);
   window.addEventListener("submit", name("phx-submit"), true);
+  // For a press a script makes later than the key that asked for it (the
+  // desk's Ctrl+Alt+P): it presses only while the page shows the same document.
+  window.BarkparkDocMark = mark;
 })();

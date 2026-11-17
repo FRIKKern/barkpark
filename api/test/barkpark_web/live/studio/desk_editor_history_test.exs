@@ -172,9 +172,9 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
       settle(view)
       assert editor_shows?(view, "title", "Post draft")
 
-      render_click(view, "discard-draft", %{})
+      BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
       assert has_element?(view, ~s([data-test-id="discard-draft-modal"]))
-      render_click(view, "confirm-discard", %{})
+      BarkparkWeb.EditorPost.press(view, "confirm-discard", %{})
 
       # The store is right...
       assert {:error, _} =
@@ -199,8 +199,8 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
       settle(view)
       assert editor_shows?(view, "bio", "Draft bio")
 
-      render_click(view, "discard-draft", %{})
-      render_click(view, "confirm-discard", %{})
+      BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
+      BarkparkWeb.EditorPost.press(view, "confirm-discard", %{})
       settle(view)
 
       %{proxy: {ref, topic, _}} = view
@@ -229,11 +229,13 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
       [rev | _] =
         Content.list_revisions(ctx.post, ctx.post_type, @dataset, limit: 30) |> Enum.reverse()
 
-      view
-      |> element(
-        ~s(#history-modal-dialog button[phx-click="restore-revision"][phx-value-id="#{rev.id}"])
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(
+          view,
+          ~s(#history-modal-dialog button[phx-click="restore-revision"][phx-value-id="#{rev.id}"])
+        )
       )
-      |> render_click()
 
       refute has_element?(view, "#history-modal-dialog")
       assert editor_shows?(view, "title", "Post published")

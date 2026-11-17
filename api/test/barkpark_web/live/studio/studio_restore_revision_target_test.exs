@@ -102,7 +102,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreRevisionTargetTest do
     assert :sys.get_state(view.pid).socket.assigns[:editor_doc],
            "fixture: the granted document must be open in the editor"
 
-    render_click(view, "restore-revision", %{"id" => to_string(ctx.other_old_rev.id)})
+    BarkparkWeb.EditorPost.press(view, "restore-revision", %{
+      "id" => to_string(ctx.other_old_rev.id)
+    })
 
     assert other_title(ctx.opts) == "OTHER-CURRENT",
            "restore-revision overwrote a document outside the open editor (and outside the grant): " <>
@@ -123,7 +125,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreRevisionTargetTest do
     {:ok, view, _} =
       live(conn, "/w/#{ctx.ws.slug}/p/#{ctx.proj.slug}/d/#{@dataset}/studio/post/other-post")
 
-    render_click(view, "restore-revision", %{"id" => to_string(ctx.other_old_rev.id)})
+    BarkparkWeb.EditorPost.press(view, "restore-revision", %{
+      "id" => to_string(ctx.other_old_rev.id)
+    })
 
     assert other_title(ctx.opts) == "OTHER-OLD"
   end
