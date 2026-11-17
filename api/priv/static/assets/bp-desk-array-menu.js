@@ -201,10 +201,16 @@
     return null;
   }
 
+  // An object item opens its dialog; a string row (ArrayStringRow) has none,
+  // and its input takes the caret, so what is typed next lands there.
   window.addEventListener("phx:desk:item-open", function (e) {
     var detail = e.detail || {};
     var row = rowAt(detail.path, detail.index);
-    if (row) open(row.querySelector(":scope > " + DIALOG));
+    if (!row) return;
+    var dialog = row.querySelector(":scope > " + DIALOG);
+    if (dialog) return open(dialog);
+    var input = row.querySelector(":scope > .dk-string-value :is(input, textarea):not([type=\"hidden\"])");
+    if (input) input.focus();
   });
 
   // ── The handle ────────────────────────────────────────────────────────

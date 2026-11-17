@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   alias BarkparkWeb.Components.Fields.{
     ArrayItemDialog,
     ArrayItemMenu,
+    ArrayStringRow,
     CodelistField,
     CompositeField,
     LocalizedTextField,
@@ -275,7 +276,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put(:ordered?, !!assigns.field.ordered)
       |> Map.put(:progress, checklist_progress(assigns.field, assigns[:value]))
 
-    assigns = Map.put(assigns, :desk_items?, desk_items?(assigns))
+    assigns =
+      assigns
+      |> Map.put(:desk_items?, desk_items?(assigns))
+      |> Map.put(:desk_strings?, desk_strings?(assigns))
+
+    assigns = Map.put(assigns, :desk_rows?, assigns.desk_items? or assigns.desk_strings?)
 
     assigns =
       Map.put(
@@ -288,18 +294,21 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"
               id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
               data-field-name={@field.name} data-ordered={@ordered? && "true"}
-              data-array-path={@desk_items? && @path} data-desk-items={@desk_items?}>
+              data-array-path={@desk_rows? && @path} data-desk-items={@desk_rows?}>
       <legend class="bp-field-title">
         <%= @title %><%= if @progress do %>
           <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= gettext("%{met}/%{total} met", met: @progress.met, total: @progress.total) %></span>
         <% end %>
       </legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
-      <ol class="bp-array-rows" id={@id_base} aria-describedby={@desk_items? && help_id(assigns)}>
+      <ol class="bp-array-rows" id={@id_base} aria-describedby={@desk_rows? && help_id(assigns)}>
         <%= for {row_value, idx} <- @rows do %>
-          <%= if @desk_items? do %>
+          <%= cond do %>
+          <% @desk_items? -> %>
             <%= desk_item(assigns, row_value, idx) %>
-          <% else %>
+          <% @desk_strings? -> %>
+            <%= desk_string(assigns, row_value, idx) %>
+          <% true -> %>
           <li class={"bp-array-row " <> if(composite_rows?(@field), do: "bp-array-row-item", else: "")} data-row-index={idx}>
             <div class="bp-array-row-body">
               <%= render_element(assigns, row_value, idx) %>
@@ -354,7 +363,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           <% end %>
         <% end %>
       </ol>
-      <ArrayItemDialog.help :if={@desk_items?} id={help_id(assigns)} />
+      <ArrayItemDialog.help :if={@desk_rows?} id={help_id(assigns)} />
       <%!-- In the desk the button is named "Add item", the name Sanity's
             Studio gives it (string-arrays J34); the "+" is decoration. An
             object item it adds opens in its dialog (`open`). --%>
@@ -640,6 +649,25 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     })
   end
 
+  # The desk's string row (`ArrayStringRow`): handle, input and menu. A
+  # string has no `_key`, so the row is named by its place.
+  defp desk_string(assigns, row_value, idx) do
+    ArrayStringRow.row(%{
+      stem: "#{assigns.id_base}[#{idx}]",
+      idx: idx,
+      count: length(assigns.rows),
+      field: assigns.field.name,
+      path: assigns.path,
+      readonly: assigns.readonly,
+      on_reorder: assigns.on_reorder,
+      target: assigns.target,
+      help_id: help_id(assigns),
+      body: render_element(assigns, row_value, idx),
+      errors: row_errors(assigns.errors, idx),
+      warnings: row_errors(assigns.warnings, idx)
+    })
+  end
+
   # Several item types in one object member (barkpark-studio decision 0005,
   # `post.links`): `options.typeField` names the select that says which type
   # an item is, `options.fieldsByType` the fields each type has. The desk's
@@ -702,6 +730,13 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     do: composite_rows?(field)
 
   defp desk_items?(_assigns), do: false
+
+  # The desk draws an array of strings (or texts) as the TanStack Studio's
+  # rows (`ArrayStringRow`), as its `StringArrayInput` does.
+  defp desk_strings?(%{id_base: base, field: field}) when is_binary(base),
+    do: subfield_attr(element_field(field), :type) in ["string", "text"]
+
+  defp desk_strings?(_assigns), do: false
 
   # task-7f47b7ad78b08048: whether a row is open is the person's, as Sanity's.
   # `open` is the row's state when it is first drawn (a new or empty row, one

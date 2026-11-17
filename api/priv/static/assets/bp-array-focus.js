@@ -18,6 +18,11 @@
 // whose buttons name the type. The patch closes the menu and the pressed
 // button is hidden, so focus fell to <body> (task-bc277388a704d276). Those
 // buttons count as Add, and the menu's summary is the field's Add control.
+//
+// On the desk an item's Remove is in its "…" menu (ArrayItemMenu), a popover
+// item, not a row button: the row and its menu went with the press, and
+// focus fell to <body>. Its menu items count as row buttons, and the desk's
+// "Add item..." menu button is the field's Add control.
 (function () {
   "use strict";
 
@@ -38,7 +43,7 @@
     });
   }
 
-  var PRESSABLE = "button.bp-array-btn, button.bp-array-add-member";
+  var PRESSABLE = 'button.bp-array-btn, button.bp-array-add-member, [role="menuitem"][phx-value-action]';
 
   var FIELD =
     'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), ' +
@@ -51,6 +56,10 @@
       if (el.matches && el.matches("details.bp-array-add-menu")) {
         var summary = el.querySelector("summary");
         if (summary) return summary;
+      }
+      if (el.matches && el.matches(".dk-add-item")) {
+        var add = el.querySelector(":scope > button");
+        if (add) return add;
       }
     }
     return null;

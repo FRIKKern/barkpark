@@ -16,7 +16,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemMenu do
   own `array_op` presses, with the same `field`, `path` and `index` as the
   old row buttons, so they carry the document's mark (`PostIdentity`) and
   are written by `Handlers.Fields.array_op/2` (`Handlers.ArrayItems` for
-  the new ones). `open` asks the server to open the new item's dialog.
+  the new ones). `open` asks the server to open the new item's dialog (a
+  string row's input takes the caret instead; a string's Duplicate opens
+  nothing, `opens_copy`).
 
   Copy writes nothing: it sends `desk-item-copy` and the server answers
   with the item as a clipboard item, as a field's Copy field is answered
@@ -38,6 +40,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemMenu do
   attr :readonly, :boolean, default: false
   attr :on_reorder, :string, default: "array_op"
   attr :target, :any, default: nil
+
+  attr :opens_copy, :boolean,
+    default: true,
+    doc: "whether Duplicate opens the copy (an object item's dialog); a string's copy does not"
 
   @doc "The item's \"…\" button and its menu."
   def menu(assigns) do
@@ -112,7 +118,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemMenu do
           phx-value-field={@field}
           phx-value-path={@path}
           phx-value-index={@index}
-          phx-value-open="item"
+          phx-value-open={@opens_copy && "item"}
           data-desk-item-action="duplicate"
         >{gettext("Duplicate")}</Menu.item>
         <Menu.item
