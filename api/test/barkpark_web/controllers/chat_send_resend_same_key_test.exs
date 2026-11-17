@@ -177,6 +177,40 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     assert length(leases(sid)) == 2, "the third send made a third lease"
   end
 
+  # Two resends both find link 1 not sent and both insert link 2. The loser
+  # meets the unique (host_id, command_key) and must take the winner's link as
+  # its own, not fail (task-432b4e6f55f9ae5b). The winner's insert is played
+  # from the loser's own read of link 1's close, the read just before its
+  # insert, so the race lands the same way on every run.
+  test "a resend that loses the race for the next link reuses the winner's link",
+       %{host_id: host_id, raw: raw} do
+    {sid, key, link1} = lose_next_link_race!(raw, host_id)
+
+    resend = send_message(raw, sid, "race", key)
+    assert resend.status == 202, resend.resp_body
+
+    keys = sid |> leases() |> Enum.map(& &1.command_key) |> Enum.sort()
+    assert keys == [link1.command_key, link1.command_key <> ":2"]
+  end
+
+  test "the loser of the next-link race is handed the winner's lease",
+       %{host_id: host_id, raw: raw} do
+    {sid, _key, link1} = lose_next_link_race!(raw, host_id)
+
+    command = %Barkpark.StudioChat.Runtime.Command{
+      operation: :send_turn,
+      provider: "claude",
+      session_id: sid,
+      idempotency_key: link1.command_key,
+      payload: %{content: "race"}
+    }
+
+    host = Repo.get!(RegisteredHost, host_id)
+    assert {:ok, %{lease_id: lease_id}} = ChatHosts.lease_and_enqueue(host, command, [])
+    winner = Repo.get_by!(ExecutionLease, command_key: link1.command_key <> ":2")
+    assert lease_id == winner.id, "the loser was handed a lease that is not the winner's link"
+  end
+
   # withdraw_turn must find the live link, not only the bare key: a resent turn
   # whose row cannot be stored is ended, never left for the host to run while
   # the client is told it was not sent.
@@ -375,6 +409,48 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     assert Process.whereis(@transport) == stub, "the resend called the host queue"
     disarm_transport_stub!(stub)
     assert length(leases(sid)) == 1, "the resend made a second link"
+  end
+
+  # Link 1 of a fresh key ends as not sent (the queue exits), and the next
+  # resend's insert of link 2 will lose to another writer.
+  defp lose_next_link_race!(raw, host_id) do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    exit_next_transport_call!()
+    capture_log(fn -> assert send_message(raw, sid, "race", key) |> json_response(503) end)
+    [link1] = leases(sid)
+    win_next_link_insert!(link1)
+    {sid, key, link1}
+  end
+
+  # Once, right after the next query that reads a lease's "not sent" close
+  # (`LeaseChain.not_sent?/1`), another writer inserts link 2 of `link1`'s key.
+  defp win_next_link_insert!(link1) do
+    fired = :atomics.new(1, [])
+    id = "ssk-race-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if meta[:source] == "chat_execution_events" and
+             String.contains?(meta[:query] || "", ~s("idempotency_key" = ANY)) and
+             :atomics.compare_exchange(fired, 1, 0, 1) == :ok do
+          attrs =
+            link1
+            |> Map.take([:host_id, :workspace_id, :session_id, :provider, :expires_at])
+            |> Map.merge(%{
+              command_key: link1.command_key <> ":2",
+              expires_at: DateTime.add(DateTime.utc_now(), 3600)
+            })
+
+          {:ok, _} = %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert()
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
   end
 
   defp age_pending_claims! do

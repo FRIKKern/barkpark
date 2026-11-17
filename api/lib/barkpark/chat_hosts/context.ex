@@ -410,10 +410,10 @@ defmodule Barkpark.ChatHosts do
   # A resend (task-3c949e2977c56597): the key already holds a lease. Its turn
   # is that lease's, unless the server ended it as not sent; then the turn
   # runs on the next link of the key (`Barkpark.ChatHosts.LeaseChain`).
-  defp resend_lease(host_id, key, attrs) do
+  defp resend_lease(host_id, key, attrs, tries \\ 3) do
     case LeaseChain.resolve(host_id, key) do
       {:reuse, lease} -> {:reuse, lease}
-      {:next, next_key} -> insert_lease(%{attrs | command_key: next_key})
+      {:next, next_key} -> insert_link(host_id, key, attrs, next_key, tries)
     end
   end
 
@@ -450,6 +450,23 @@ defmodule Barkpark.ChatHosts do
 
   defp lease_info(lease),
     do: %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}
+
+  # Two resends can both find link N not sent and both insert N+1. The loser
+  # meets the unique (host_id, command_key) and resolves again, which reuses
+  # the winner's live link instead of failing (task-432b4e6f55f9ae5b). Bounded:
+  # each try sees a newer link, and a key whose links keep ending as not sent
+  # gives the constraint error back after `tries`.
+  defp insert_link(host_id, key, attrs, next_key, tries) do
+    case insert_lease(%{attrs | command_key: next_key}) do
+      {:error, changeset} = error ->
+        if tries > 1 and constraint_error?(changeset),
+          do: resend_lease(host_id, key, attrs, tries - 1),
+          else: error
+
+      inserted ->
+        inserted
+    end
+  end
 
   # `Transport.enqueue/3` is a GenServer.call: a timeout exits AFTER the lease
   # row exists, and the call can still land in the queue later. The lease is

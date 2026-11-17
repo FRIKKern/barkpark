@@ -26,6 +26,7 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
 
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.LockWaiter
   alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Message, Session}
@@ -93,9 +94,9 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
     with_question(fn raw, sid ->
       start_supervised!({RecorderStub, sid})
       holder = hold(fn -> 1 = StudioChat.cancel_pending_approvals(sid) end)
-      request = Task.async(fn -> unboxed(fn -> answer(raw, sid) end) end)
+      {request, backend} = LockWaiter.start(fn -> answer(raw, sid) end)
 
-      await_lock_waiters(1)
+      LockWaiter.await_lock!(backend)
       release(holder)
 
       resp = Task.await(request, 10_000)
@@ -189,25 +190,4 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
   end
 
   defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
-
-  defp await_lock_waiters(n, tries \\ 250) do
-    %{rows: [[waiting]]} =
-      unboxed(fn ->
-        Repo.query!(
-          "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%chat_%'"
-        )
-      end)
-
-    cond do
-      waiting >= n ->
-        :ok
-
-      tries == 0 ->
-        flunk("only #{waiting} of #{n} writers reached the row lock")
-
-      true ->
-        Process.sleep(20)
-        await_lock_waiters(n, tries - 1)
-    end
-  end
 end
