@@ -146,13 +146,13 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// ONE KEY BASE PER INVOCATION, SPLIT PER LEG. Minted here — after every
 	// refusal that can be pronounced without a write, so a run that never sends
 	// never burns one. The publish follow-up derives its own key from the same
-	// base: the plug hashes (key, token, method, PATH) and NOT the body, and both
-	// legs POST the same path, so sharing one key would replay the create's
-	// response and the publish would silently never run (legKey says this at
-	// length, tasks_create_idempotency.go).
+	// base: the plug binds a key to the request (path AND body), and both legs
+	// POST the same path with different bodies, so sharing one key would have
+	// the publish refused 422 idempotency_key_reused and never run (legKey says
+	// this at length, tasks_create_idempotency.go).
 	idemBase := newIdempotencyKey()
 
-	httpStatus, respBody, _, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
+	httpStatus, respBody, attempts, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
 	if err != nil {
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
@@ -181,6 +181,15 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// is the same title search as the transport-error branch.
 			return renderAmbiguousWrite(out, ambiguousWrite{
 				class: ambiguityCreateServerFault, leg: "create", title: title,
+				detail: mutateErrorMessage(httpStatus, respBody),
+			})
+		}
+		// A resend refused over this leg's own key speaks about the KEY, not the
+		// task: an earlier attempt went out first and may have committed, so a
+		// "refused" here would send the person to re-file a duplicate.
+		if resendRefusedOwnKey(attempts, respBody) {
+			return renderAmbiguousWrite(out, ambiguousWrite{
+				class: ambiguityCreateResendKeyRefused, leg: "create", title: title,
 				detail: mutateErrorMessage(httpStatus, respBody),
 			})
 		}

@@ -740,4 +740,12 @@ defmodule BarkparkWeb.AppTokenController do
   # (line-cited anchors stay true); a controller plug runs before the action
   # wherever it is declared.
   plug(BarkparkWeb.Plugs.DatasetBoundAdminReads, [surface: "tokens"] when action in [:index])
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write", own_token_param: "id"]
+    when action in [:create, :delete, :delete_by_id]
+  )
 end
