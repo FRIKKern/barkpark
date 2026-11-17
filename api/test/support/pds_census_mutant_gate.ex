@@ -63,6 +63,14 @@ defmodule Barkpark.PdsCensusMutantGate do
   @skip_prefix "mutant arms skipped"
   @run_prefix "mutant arms run"
 
+  # HOW MANY ARMS RUN AT ONCE (task-6d4727b7cff1f2bd). Each full arm is a
+  # separate `elixir` VM walking all of `api/lib`, ~3.8 GB on the 16 GB GitHub
+  # runner: PR run 43984047522 (2 full arms) took free memory from 13.2 GB to
+  # 5.6 GB while the test BEAM held 1.1 GB. A push runs 4 full arms, ~15 GB at
+  # once, and two main runs (jobs 131571123236, 132725500094) lost their runner
+  # 26 s and 50 s into this setup. Two at a time keeps a push at the PR's peak.
+  @arm_concurrency 2
+
   @doc "The glob set the mutant arms are gated on, in the order it is printed."
   def input_globs, do: @input_globs
 
@@ -71,6 +79,22 @@ defmodule Barkpark.PdsCensusMutantGate do
 
   @doc "The literal prefix of a RUN line."
   def run_prefix, do: @run_prefix
+
+  @doc """
+  Run `arms` (`[{name, fun}]`) at most `:max_concurrency` (default 2) at a
+  time, each under `:timeout` ms (default 540_000), and return
+  `%{name => fun.()}`. A raising or overrunning arm takes the caller down, as
+  `Task.await/2` did.
+  """
+  def run_arms(arms, opts \\ []) do
+    arms
+    |> Task.async_stream(fn {name, fun} -> {name, fun.()} end,
+      max_concurrency: Keyword.get(opts, :max_concurrency, @arm_concurrency),
+      timeout: Keyword.get(opts, :timeout, 540_000),
+      ordered: true
+    )
+    |> Map.new(fn {:ok, pair} -> pair end)
+  end
 
   @doc """
   `{:run, line}` or `{:skip, line}`. The line is one line and is meant to be
