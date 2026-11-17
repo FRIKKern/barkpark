@@ -28,6 +28,29 @@ defmodule Barkpark.StudioChat.RecorderNulTextTest do
   @nul <<0>>
   @fffd "\uFFFD"
 
+  # A managed Codex runtime whose app-server answered thread/start with a thread
+  # id holding U+0000 (task-cde71b04cdc73529).
+  defmodule NulThreadCodex do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(_opts) do
+      {:ok,
+       %{
+         runtime: spawn(fn -> receive do: (:stop -> :ok) end),
+         provider_session_id: "thr" <> <<0>> <> "1"
+       }}
+    end
+
+    def resume(opts), do: start(opts)
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def readiness(_opts), do: %{ready?: true}
+    def capabilities, do: %{modes: [], models: [], efforts: []}
+    def close(%{runtime: pid}), do: send(pid, :stop) && :ok
+  end
+
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -152,6 +175,63 @@ defmodule Barkpark.StudioChat.RecorderNulTextTest do
     sent = Jason.decode!(line)
     assert get_in(sent, ["response", "response", "updatedInput", "content"]) == "a" <> @nul <> "b"
     ClaudeChat.close(session)
+  end
+
+  # task-cde71b04cdc73529: today Claude request ids are UUIDs, so this is the
+  # first id the sink and the CLI would disagree on. The sink gets U+FFFD; the
+  # answer names that id; the CLI gets back its own id and its own input.
+  test "an ask whose request_id holds U+0000 is answered by a plain allow with the CLI's own id" do
+    out = Path.join(System.tmp_dir!(), "nul-rid-#{System.unique_integer([:positive])}.ndjson")
+    on_exit(fn -> File.rm(out) end)
+
+    ask =
+      ~s({"type":"control_request","request_id":"r\\u00001","request":{"subtype":"can_use_tool",) <>
+        ~s("tool_name":"Write","input":{"file_path":"/tmp/x","content":"ok"}}})
+
+    script = ~s(printf '%s\\n' '#{ask}'; cat > #{out})
+    Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"sh", ["-c", script]})
+
+    {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+    sink_id = "r" <> @fffd <> "1"
+    assert_receive {:claude_chat_permission, %{request_id: ^sink_id}}, 5_000
+
+    ClaudeChat.respond_permission(session, sink_id, :allow)
+
+    line =
+      Enum.find_value(1..50, fn _ ->
+        Process.sleep(100)
+
+        File.exists?(out) &&
+          out |> File.read!() |> String.split("\n") |> Enum.find(&(&1 =~ "control_response"))
+      end)
+
+    assert line, "no control_response reached the CLI"
+    sent = Jason.decode!(line)
+    assert get_in(sent, ["response", "request_id"]) == "r" <> @nul <> "1"
+
+    assert get_in(sent, ["response", "response", "updatedInput"]) ==
+             %{"file_path" => "/tmp/x", "content" => "ok"}
+
+    ClaudeChat.close(session)
+  end
+
+  test "a Codex thread id holding U+0000 is stored with U+FFFD and the Recorder stays up" do
+    prev = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+    Application.put_env(:barkpark, :studio_chat_runtime_adapters, %{codex: NulThreadCodex})
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+    end)
+
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: ClaudeChat.cwd(), mode: "plan"})
+    {:ok, recorder} = Recorder.ensure(%{session_id: id, provider: "codex", mode: "plan"})
+    :sys.get_state(recorder)
+
+    assert Process.alive?(recorder)
+    assert StudioChat.get_session(id).provider_session_id == "thr" <> @fffd <> "1"
   end
 
   test "output a managed CLI sends today is stored exactly as sent", %{

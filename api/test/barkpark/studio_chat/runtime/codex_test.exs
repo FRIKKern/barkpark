@@ -208,8 +208,16 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     assert_receive {:studio_chat_runtime_event, %Event{kind: :text_delta, native: native}}
     assert get_in(native, ["params", "delta"]) == "a�b"
 
+    # task-cde71b04cdc73529: the fake's first approval id holds U+0000. The
+    # answer names it by the id the sink got; the reply carries the raw id.
+    assert_receive {:studio_chat_runtime_event,
+                    %Event{kind: :approval_requested, approval_id: "a�91"}}
+
+    assert :ok = Codex.answer_approval(runtime, "a�91", :allow)
+
     assert :ok = Codex.interrupt(runtime)
     assert File.read!(log) =~ ~s("turnId":"turn-\\u00001")
+    assert File.read!(log) =~ ~s({"id":"a\\u000091","result":)
     assert :ok = Codex.close(runtime)
   end
 
