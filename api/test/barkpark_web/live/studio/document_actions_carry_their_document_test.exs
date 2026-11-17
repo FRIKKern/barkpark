@@ -214,7 +214,6 @@ defmodule BarkparkWeb.Studio.DocumentActionsCarryTheirDocumentTest do
            %{desk: "[data-test-id=confirm-discard]", studio: "[data-test-id=confirm-discard]"}}
         ] do
       @opener opener
-      @confirm confirm
       @control control[surface]
 
       test "#{surface}: the dialog #{opener} opened in A is closed once the pane opens B, " <>
