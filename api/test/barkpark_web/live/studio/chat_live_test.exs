@@ -165,6 +165,19 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end)
   end
 
+  @argv_marker_env "BP_ARGV_ECHO_MARKER"
+
+  # Write-then-RENAME so read_marker/2 (which returns as soon as the file
+  # exists) can never observe a half-written argv. The argv has grown past one
+  # atomic pipe write (mcp flags + the system-prompt appendix), so a bare
+  # `> marker` raced the reader into truncated reads (seen: argv cut
+  # mid-appendix, --resume missing).
+  @argv_echo_script """
+  #!/bin/sh
+  printf '%s\\n' "$@" > "$#{@argv_marker_env}.tmp" && mv "$#{@argv_marker_env}.tmp" "$#{@argv_marker_env}"
+  cat
+  """
+
   # An argv-echo fake wired as the `:binary` (NOT the `:command` override, which
   # bypasses build_args and would make the flag assertion vacuous — D9). It keeps
   # the CLI's default_args and records its OWN argv (the real `build_args`
@@ -174,30 +187,32 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   defp enable_argv_echo_chat do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    prev_marker = System.get_env(@argv_marker_env)
 
-    suffix = System.unique_integer([:positive])
-    path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{suffix}.sh")
-    marker = Path.join(System.tmp_dir!(), "bp-argv-marker-#{suffix}.txt")
+    marker =
+      Path.join(System.tmp_dir!(), "bp-argv-marker-#{System.unique_integer([:positive])}.txt")
 
-    # Write-then-RENAME so read_marker/2 (which returns as soon as the file
-    # exists) can never observe a half-written argv. The argv has grown past
-    # one atomic pipe write (mcp flags + the system-prompt appendix), so a
-    # bare `> marker` raced the reader into truncated reads (seen: argv cut
-    # mid-appendix, --resume missing).
-    File.write!(path, """
-    #!/bin/sh
-    printf '%s\\n' "$@" > #{marker}.tmp && mv #{marker}.tmp #{marker}
-    cat
-    """)
+    # The spawned shell inherits the VM's environment, so this names the
+    # test's own marker for the shared fake. The module is async: false.
+    System.put_env(@argv_marker_env, marker)
 
-    File.chmod!(path, 0o755)
+    # The fake stands in for the host CLI, so its profile is pinned: with none
+    # set, a multi-tenant instance (any second workspace) runs chat sandboxed
+    # and the fake never runs (task-74ffcd7ebc02ac94).
+    Application.put_env(:barkpark, :claude_chat,
+      enabled: true,
+      binary: argv_echo_binary(),
+      execution_profile: :self_hosted
+    )
 
-    Application.put_env(:barkpark, :claude_chat, enabled: true, binary: path)
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->
-      File.rm(path)
       File.rm(marker)
+
+      if prev_marker,
+        do: System.put_env(@argv_marker_env, prev_marker),
+        else: System.delete_env(@argv_marker_env)
 
       if prev,
         do: Application.put_env(:barkpark, :claude_chat, prev),
@@ -207,6 +222,40 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end)
 
     marker
+  end
+
+  # ONE fake per script content, run once before any test counts on it. The
+  # first exec of a newly written executable is slow on some hosts: measured on
+  # a dev Mac, 1.2-2.2 s on the volume System.tmp_dir!/0 points at (~130 ms on
+  # the internal disk), and 12 ms for every later exec of the same file. A
+  # fresh fake per test paid that inside read_marker/2's 2 s budget, so the
+  # first spawn of a run failed with "argv marker was never written" whatever
+  # its argv (task-74ffcd7ebc02ac94).
+  defp argv_echo_binary do
+    key = {__MODULE__, :argv_echo_binary}
+
+    with nil <- :persistent_term.get(key, nil) do
+      hash = :crypto.hash(:sha256, @argv_echo_script) |> Base.encode16(case: :lower)
+      path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{binary_part(hash, 0, 12)}.sh")
+
+      unless File.read(path) == {:ok, @argv_echo_script} do
+        tmp = "#{path}.#{System.unique_integer([:positive])}"
+        File.write!(tmp, @argv_echo_script)
+        File.chmod!(tmp, 0o755)
+        File.rename!(tmp, path)
+      end
+
+      warm = path <> ".warm"
+
+      {_, 0} =
+        System.cmd("/bin/sh", ["-c", ~s(exec "$0" < /dev/null), path],
+          env: [{@argv_marker_env, warm}]
+        )
+
+      File.rm(warm)
+      :persistent_term.put(key, path)
+      path
+    end
   end
 
   # Readiness-probe seam (chat-task-hands, decision 4): config/test.exs pins
@@ -6924,6 +6973,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   describe "resume flag end-to-end (argv-echo :binary fake, D9)" do
     setup %{conn: conn} do
+      # task-74ffcd7ebc02ac94: a second workspace makes the instance
+      # multi-tenant, and with no explicit profile a multi-tenant instance runs
+      # chat sandboxed (`ClaudeChat.multi_tenant_default/1`). Any row another
+      # test left committed did that by chance and the fake never ran; here it
+      # is always so, and the fake is pinned to the host CLI it stands for.
+      Barkpark.TenancyFixtures.create_workspace!()
+      assert Barkpark.Tenancy.multi_tenant?()
       marker = enable_argv_echo_chat()
       {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token}), marker: marker}
     end
@@ -6936,7 +6992,6 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert session_pid(view) == nil
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "continue please"})
-
       # the fake binary recorded the argv the real build_args produced
       argv = read_marker(marker)
       assert argv =~ "--resume"
