@@ -14,7 +14,8 @@ defmodule Barkpark.ChatHosts.LeaseChain do
       the turn never ran, so the resend makes the next link and enqueues it;
     * anything else (still leased or running, run to completion, cancelled,
       expired with the outcome unknown): the turn is that link's. Nothing is
-      leased or enqueued again.
+      leased again; a link no host has started goes back on the in-memory
+      queue, which a restart empties (`ChatHosts.lease_and_enqueue/3`).
 
   An expired lease is not "not sent": a host may have taken it from the queue
   without posting an event, so running it again could run it twice. The

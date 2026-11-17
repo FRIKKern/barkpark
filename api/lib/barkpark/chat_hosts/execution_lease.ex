@@ -20,6 +20,9 @@ defmodule Barkpark.ChatHosts.ExecutionLease do
     field :status, :string, default: "leased"
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
+    # Server-written only, never cast: the first poll that handed this lease
+    # to a host (`ChatHosts.next_commands/1`).
+    field :handed_out_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec)
   end
 

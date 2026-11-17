@@ -392,9 +392,11 @@ defmodule Barkpark.ChatHosts do
       end
 
     case result do
-      # The key's turn is already this lease's: no second enqueue.
+      # The key's turn is already this lease's: no second lease. One no host
+      # has started goes back on the queue (`requeue_untaken/2`).
       {:reuse, lease} ->
-        {:ok, lease_info(lease)}
+        with :ok <- requeue_untaken(lease, %{command | idempotency_key: lease.command_key}),
+             do: {:ok, lease_info(lease)}
 
       {:ok, lease} ->
         with :ok <- enqueue(lease, %{command | idempotency_key: lease.command_key}),
@@ -414,6 +416,34 @@ defmodule Barkpark.ChatHosts do
       {:next, next_key} -> insert_lease(%{attrs | command_key: next_key})
     end
   end
+
+  # The queue is in memory, so a restart since the first send emptied it, and
+  # a reused lease no host was ever handed would never run
+  # (task-b1e2f61ca03df99b). Putting it back is safe: the queue is keyed by
+  # lease id, so a lease still queued stays one entry.
+  #
+  # Only a lease no poll ever handed out (`handed_out_at` NULL, stamped by
+  # `next_commands/1`). A host that was handed it may have run it and then
+  # forgotten it when the restarted server's listing went empty; a requeue
+  # would run it twice. Such a lease stays where it is, as before: stuck at
+  # worst, never run twice.
+  #
+  # An exit is NOT `enqueue/2`'s "not sent" close: the first send handed this
+  # lease to the queue, so ending it would let the next resend run it on a new
+  # link. The exit goes on, an unknown outcome, and the resend after it reuses
+  # the lease again.
+  defp requeue_untaken(
+         %ExecutionLease{
+           status: "leased",
+           last_cursor: 0,
+           revoked_at: nil,
+           handed_out_at: nil
+         } = lease,
+         command
+       ),
+       do: Transport.enqueue(lease.host_id, lease.id, command)
+
+  defp requeue_untaken(_lease, _command), do: :ok
 
   defp insert_lease(attrs),
     do: %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert()
@@ -527,34 +557,54 @@ defmodule Barkpark.ChatHosts do
   in the shared root, or drop a file). Such a lease is never handed out. The
   server ends its turn with the dispatch path's refusal as the reason, so the
   session leaves `working`, and the command leaves the queue.
+
+  Every lease handed out is stamped `handed_out_at` before the poll answers, in
+  one UPDATE for the leases not stamped yet (none on a poll that hands out only
+  stamped leases), so a same-key resend never requeues a lease a host may
+  have run (task-b1e2f61ca03df99b).
   """
   def next_commands(%RegisteredHost{} = host) do
-    host.id
-    |> Transport.commands()
-    |> Enum.flat_map(fn {lease_id, command} ->
-      case Repo.get(ExecutionLease, lease_id) do
-        %ExecutionLease{revoked_at: nil, status: status} = lease
-        when status not in ["completed", "cancelled"] ->
-          case servable(host, lease, command) do
-            :ok ->
-              [
-                %{
-                  lease_id: lease.id,
-                  epoch: lease.epoch,
-                  last_cursor: lease.last_cursor,
-                  command: command_to_map(command)
-                }
-              ]
+    handed =
+      host.id
+      |> Transport.commands()
+      |> Enum.flat_map(fn {lease_id, command} ->
+        case Repo.get(ExecutionLease, lease_id) do
+          %ExecutionLease{revoked_at: nil, status: status} = lease
+          when status not in ["completed", "cancelled"] ->
+            case servable(host, lease, command) do
+              :ok ->
+                [
+                  {lease,
+                   %{
+                     lease_id: lease.id,
+                     epoch: lease.epoch,
+                     last_cursor: lease.last_cursor,
+                     command: command_to_map(command)
+                   }}
+                ]
 
-            {:error, refusal} ->
-              end_unservable_turn(lease.id, refusal)
-              []
-          end
+              {:error, refusal} ->
+                end_unservable_turn(lease.id, refusal)
+                []
+            end
 
-        _ ->
-          []
-      end
-    end)
+          _ ->
+            []
+        end
+      end)
+
+    stamp_handed_out(for {%ExecutionLease{handed_out_at: nil} = l, _} <- handed, do: l.id)
+    Enum.map(handed, fn {_lease, entry} -> entry end)
+  end
+
+  # Before the poll answers, and not rescued: a poll whose stamp failed hands
+  # nothing out, so no host holds a lease the server thinks is untaken. The
+  # write's own result: `{stamped, nil}`.
+  defp stamp_handed_out([]), do: {0, nil}
+
+  defp stamp_handed_out(lease_ids) do
+    from(l in ExecutionLease, where: l.id in ^lease_ids and is_nil(l.handed_out_at))
+    |> Repo.update_all(set: [handed_out_at: DateTime.utc_now()])
   end
 
   # The same checks, in the same order, as `Runtime.dispatch/4` for a
