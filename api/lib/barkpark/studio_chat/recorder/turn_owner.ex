@@ -72,15 +72,21 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
         {:ignore, state}
 
       :same ->
-        adopt(state, event, lease_id)
+        state |> drop_stale_stop(event, lease_id) |> adopt(event, lease_id)
 
       {:split, open?} ->
-        persist.(state, %{event | kind: :turn_completed, terminal_state: nil})
+        # A Stop asked before the displacing lease existed was aimed at the
+        # split-off turn: it is that row's outcome, and it is spent here
+        # (task-e10a3e17759cdaab). A later Stop is the newer run's, and stays.
+        stopped? = stop_predates?(state, lease_id)
+
+        persist.(state, %{event | kind: :turn_completed, terminal_state: stopped? && :interrupted})
 
         state
         |> settle.(state.runtime_text)
         |> DisplacedAsks.cancel()
         |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
+        |> spend_stop(stopped?)
         |> adopt(event, lease_id)
     end
   end
@@ -120,6 +126,35 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
       lease_id in Map.get(state, :runtime_displaced, []) and
       Barkpark.ChatHosts.lease_live?(owner)
   end
+
+  # Was a Stop asked before `lease_id` was leased? The host routes a Stop by
+  # session to its latest run, so a Stop asked after a lease exists is that
+  # lease's. Reads the lease row only when a Stop is pending.
+  defp stop_predates?(state, lease_id) do
+    with true <- Map.get(state, :turn_interrupted?, false),
+         %DateTime{} = stop_at <- Map.get(state, :stop_at),
+         %DateTime{} = leased_at <- Barkpark.ChatHosts.lease_inserted_at(lease_id) do
+      DateTime.compare(stop_at, leased_at) == :lt
+    else
+      _ -> false
+    end
+  end
+
+  defp spend_stop(state, true), do: %{state | turn_interrupted?: false}
+  defp spend_stop(state, false), do: state
+
+  # A lease's new turn does not inherit a Stop asked before that lease
+  # existed: an earlier turn's, which its own close already reported.
+  # An event projected with no lease has nothing to order a Stop against.
+  defp drop_stale_stop(state, _event, nil), do: state
+
+  defp drop_stale_stop(state, %Event{kind: :turn_started}, lease_id) do
+    if Map.get(state, :runtime_turn_open?, false),
+      do: state,
+      else: spend_stop(state, stop_predates?(state, lease_id))
+  end
+
+  defp drop_stale_stop(state, _event, _lease_id), do: state
 
   # Only a lease's own turn takes the turn over: its turn_started or its text.
   # A Stop's lease is newer too but starts no turn, so its ack leaves the owner.

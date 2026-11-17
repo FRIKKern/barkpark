@@ -1149,6 +1149,23 @@ defmodule Barkpark.ChatHosts do
   end
 
   @doc """
+  When the lease `lease_id` was leased, or nil for anything that is not a UUID
+  string (nil included) or names no lease. The Recorder orders a Stop against it (`Recorder.TurnOwner`).
+  """
+  @spec lease_inserted_at(term()) :: DateTime.t() | nil
+  def lease_inserted_at(lease_id) when is_binary(lease_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, id} ->
+        ExecutionLease |> where([l], l.id == ^id) |> select([l], l.inserted_at) |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  def lease_inserted_at(_not_an_id), do: nil
+
+  @doc """
   The session's current live report fence, or nil (herd-s6). The Recorder's
   hand-back check calls this when its fence timer fires: a still-live lease
   (the host heartbeat extends `expires_at`) re-arms the suspension; nil means
