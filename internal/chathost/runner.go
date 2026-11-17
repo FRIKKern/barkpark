@@ -28,6 +28,9 @@ type Runner struct {
 	// means defaultTerminalTimeout. Each Runner holds its own, so a test that
 	// shortens it does not race a lease goroutine another test left running.
 	TerminalTimeout time.Duration
+	// FirstEventTimeout bounds the publish of a turn's first event, retries
+	// included. Zero means defaultFirstEventTimeout.
+	FirstEventTimeout time.Duration
 	// now is the clock the retry backoff reads. Nil means time.Now. A test
 	// sets it on its own Runner to hold the clock still.
 	now func() time.Time
@@ -239,15 +242,29 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		// it is sent. Taken, or refused for good (409, 422), the lease is done:
 		// re-posting a refused close every poll spends the write budget that
 		// started this. A refusal retrying can heal leaves it to the next poll.
+		//
+		// unconfirmed: the first event, when the first-event bound (below) cut
+		// its publish before the server answered. The server may hold it all
+		// the same (its answer was slow or lost), and then the close sent at its
+		// cursor is refused as cursor_conflict. So may the server's own close,
+		// when it withdrew the lease meanwhile (end_server_turn). Which one,
+		// closeAfterUnconfirmed asks.
+		var unconfirmed map[string]any
 		terminal := func(state string, err error) {
 			cancel()
 			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), r.terminalTimeout())
 			defer publishCancel()
-			perr := publish(publishCtx, map[string]any{
+			closing := map[string]any{
 				"kind":           "terminal",
 				"terminal_state": state,
 				"error":          map[string]any{"message": err.Error()},
-			})
+			}
+			perr := publish(publishCtx, closing)
+			if perr != nil && unconfirmed != nil && cursorConflict(perr) {
+				perr = r.closeAfterUnconfirmed(command.LeaseID, perr,
+					func() error { return publish(publishCtx, unconfirmed) },
+					func() error { return publish(publishCtx, closing) })
+			}
 			if perr != nil {
 				r.logf("lease %s: its %s terminal was not taken: %v", command.LeaseID, state, perr)
 			}
@@ -270,7 +287,30 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 			return
 		}
 
-		if err := r.Handler.Handle(ctx, command, func(event map[string]any) error { return publish(ctx, event) }); err != nil {
+		// Until the server takes a turn's first event, the provider keeps running
+		// on this computer while the server may still withdraw the lease and tell
+		// the person the message was not sent (task-53bbabed87944b89). So that
+		// publish gets FirstEventTimeout, not the 2 minute outage bound: past it,
+		// emit fails, the handler returns and the provider is killed. Once one
+		// event is taken, the general bound applies, as before. Control leases
+		// (steer, interrupt, ...) start no provider and keep the general bound.
+		turn := command.Command["operation"] == "send_turn"
+		emit := func(event map[string]any) error {
+			if !turn || cursor != command.LastCursor {
+				return publish(ctx, event)
+			}
+			bound := r.firstEventTimeout()
+			firstCtx, cancelFirst := context.WithTimeout(ctx, bound)
+			defer cancelFirst()
+			err := publish(firstCtx, event)
+			if err != nil && ctx.Err() == nil && firstCtx.Err() != nil {
+				unconfirmed = event
+				return fmt.Errorf("the server did not confirm the turn's first event within %s, so the provider was stopped: %w", bound, err)
+			}
+			return err
+		}
+
+		if err := r.Handler.Handle(ctx, command, emit); err != nil {
 			terminalState := "error"
 			if errors.Is(err, context.Canceled) {
 				terminalState = "interrupted"
