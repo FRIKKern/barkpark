@@ -768,11 +768,23 @@ func (c *Client) chatArchiveFlipRaw(id, verb string) (ChatSession, int, []byte, 
 
 // RespondChatApproval answers a pending permission request (204). decision is
 // the engine's decision string (e.g. "allow"/"deny"); requestID is the id the
-// permission event carried.
+// permission event carried. A 409 naming the ask's status is an
+// *AskSettledError (the ask is no longer pending, nothing was sent); any other
+// non-2xx is the usual humanAPIError.
 func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 	payload := map[string]string{"request_id": requestID, "decision": decision}
-	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK)
-	return err
+	// 409 is read here, not by chatSendRaw, which drops the body of a refusal.
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK, http.StatusConflict)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusConflict {
+		if settled := askSettled(status, body); settled != nil {
+			return settled
+		}
+		return humanAPIError(status, body)
+	}
+	return nil
 }
 
 // AnswerChatQuestion answers a pending AskUserQuestion card with the option
