@@ -98,12 +98,32 @@ defmodule Barkpark.StudioChat.ApprovalAnswerTest do
     assert status(sid) == "pending"
   end
 
+  # rev26731's P7 on #26895 (task-356fa57e2d23f543): a delivery slower than the
+  # claim TTL is taken over by a second answer; when the first then fails, its
+  # release drops only its own claim, so the takeover's stays and a third
+  # answer is not sent while the second is in flight.
+  test "a failed delivery whose claim was taken over leaves the newer claim", %{sid: sid} do
+    theirs = DateTime.utc_now() |> DateTime.add(1, :second) |> DateTime.to_iso8601()
+
+    assert {:error, :enqueue_failed} =
+             ApprovalAnswer.settle(sid, @rid, "allowed", fn ->
+               put_meta!(sid, %{"answer_claimed_at" => theirs})
+               {:error, :enqueue_failed}
+             end)
+
+    assert meta(sid)["answer_claimed_at"] == theirs, "the release dropped another answer's claim"
+    assert ApprovalAnswer.settle(sid, @rid, "denied", &delivered/0) == :noop
+    refute_received :delivered
+    assert status(sid) == "pending"
+  end
+
   defp delivered do
     send(self(), :delivered)
     :ok
   end
 
-  defp status(sid), do: StudioChat.get_needs_you_message(sid, @rid).metadata["approval_status"]
+  defp status(sid), do: meta(sid)["approval_status"]
+  defp meta(sid), do: StudioChat.get_needs_you_message(sid, @rid).metadata
 
   defp put_meta!(sid, extra) do
     row = StudioChat.get_needs_you_message(sid, @rid)
