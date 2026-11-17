@@ -12,7 +12,7 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
   The claim runs only when a runtime holds the session, so those tests stub one:
   a process holding the session's Recorder name, and a codex adapter that
   reports each delivery to the test. With no Recorder and no host holding the
-  turn (`ChatHosts.turn_held?/2`) the route cancels the question, as Studio does
+  turn (`ChatHosts.turn_held?/1`) the route cancels the question, as Studio does
   on reopen (D11, task-dc4980982da790c9): it answers 404, and the store never
   says "allowed" over an answer nothing received. A held turn with no Recorder,
   or a Recorder that does not answer, is a 503 instead

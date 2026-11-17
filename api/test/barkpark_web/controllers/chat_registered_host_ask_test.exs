@@ -294,12 +294,45 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
       assert ChatHosts.end_expired_turns() == 0
     end
 
-    test "a lease past the sweep's grace no longer holds the turn: both routes cancel the asks",
+    # rev26731 round 3, H4: the sweeper runs `end_expired_turns` only every few
+    # minutes, and `heartbeat/2` revives any `leased`/`running` lease until it
+    # does. Past the grace but not yet swept, the turn can still come back.
+    test "a lease past the grace that the sweep has not ended keeps the asks: 503, then a heartbeat and a send deliver each once",
          %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+
+      {:ok, _} = ChatHosts.heartbeat(host, %{"protocol_version" => 1})
+      assert ChatHosts.lease_live?(turn_lease)
+
+      send_resp =
+        json_conn(raw)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "back?"}))
+
+      assert send_resp.status == 202
+      assert_delivered_once(raw, host, sid)
+    end
+
+    test "a lease the sweep has ended no longer holds the turn: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
       asks!(host, sid)
       [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
       kill_recorder!(sid)
       expire!(turn_lease, -120)
+
+      # Past the grace, still held until the sweep ends it.
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.end_expired_turns() >= 1
+      refute ChatHosts.turn_held?(sid)
 
       assert approve(raw, sid, "ask-b1", "allow").status == 409
       assert answer(raw, sid, "ask-b1q").status == 404
@@ -418,6 +451,24 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
   # The Go host's approval_requested event for a Claude can_use_tool request,
   # posted on the send_turn lease at the next cursor.
   defp post_ask!(host, sid, approval_id, tool_name, input, title \\ nil) do
+    post_event!(host, sid, approval_id, %{
+      "kind" => "approval_requested",
+      "approval_id" => approval_id,
+      "tool_name" => tool_name,
+      "input" => input,
+      "title" => title
+    })
+  end
+
+  # The host's turn_started, which the Recorder records as the session
+  # `working`: the state `end_expired_turns/2` sweeps.
+  defp turn_started!(host, sid) do
+    post_event!(host, sid, "turn", %{"kind" => "turn_started"})
+    :sys.get_state(Recorder.whereis(sid))
+    assert StudioChat.get_session(sid).status == "working"
+  end
+
+  defp post_event!(host, sid, key, event) do
     assert [%{lease_id: lease_id, epoch: epoch, last_cursor: last}] =
              host_commands(host, sid, :send_turn)
 
@@ -428,14 +479,8 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
                lease_id: lease_id,
                epoch: epoch,
                cursor: cursor,
-               idempotency_key: "#{approval_id}-#{cursor}",
-               event: %{
-                 "kind" => "approval_requested",
-                 "approval_id" => approval_id,
-                 "tool_name" => tool_name,
-                 "input" => input,
-                 "title" => title
-               }
+               idempotency_key: "#{key}-#{cursor}",
+               event: event
              })
   end
 

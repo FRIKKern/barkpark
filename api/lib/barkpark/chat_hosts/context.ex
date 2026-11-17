@@ -1276,22 +1276,22 @@ defmodule Barkpark.ChatHosts do
   end
 
   @doc """
-  Whether a host still holds the session's turn: a `leased`/`running` lease, not
-  revoked, that `end_expired_turns/2` has not yet ended. That is a lease whose
-  `expires_at` is at most #{@expired_turn_grace}s past, the sweep's grace, inside
-  which the host's next heartbeat renews it. Wider than `live_report_fence/2`,
-  which stops at `expires_at`. An ask on such a turn can still be delivered,
-  so it is never canceled (task-dc4980982da790c9, rev26731 H3).
+  Whether a host still holds the session's turn: a `leased`/`running` lease that
+  is not revoked, whatever its `expires_at`. Only `end_expired_turns/2` decides
+  that a turn is over, by ending the lease. Until it does, `heartbeat/2` revives
+  any `leased`/`running` lease, and the sweep runs only every few minutes, so
+  any time cutoff here would call a turn over that can still come back.
+  Wider than `live_report_fence/2`, which stops at `expires_at`. An ask on a
+  held turn can still be delivered, so it is never canceled
+  (task-dc4980982da790c9, rev26731 H3/H4).
   """
-  @spec turn_held?(String.t(), DateTime.t()) :: boolean()
-  def turn_held?(session_id, now \\ DateTime.utc_now()) when is_binary(session_id) do
+  @spec turn_held?(String.t()) :: boolean()
+  def turn_held?(session_id) when is_binary(session_id) do
     case Ecto.UUID.cast(session_id) do
       {:ok, id} ->
-        cutoff = DateTime.add(now, -@expired_turn_grace)
-
         ExecutionLease
         |> where([l], l.session_id == ^id and l.status in ["leased", "running"])
-        |> where([l], is_nil(l.revoked_at) and l.expires_at >= ^cutoff)
+        |> where([l], is_nil(l.revoked_at))
         |> Repo.exists?()
 
       :error ->
