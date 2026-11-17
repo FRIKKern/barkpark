@@ -12,14 +12,20 @@ defmodule BarkparkWeb.LoginReturn do
 
     * it passes `BarkparkWeb.ReturnTo.safe_path/1`, both as written and
       percent-decoded (a browser reads `%2e` as `.`);
+    * it is at most 2048 bytes, so it cannot overflow the 4 KB session
+      cookie (a longer one is simply not stored; `/login` still renders);
     * it is not a sign-in or sign-out page (`/login…`, `/logout…`,
-      `/auth/…`), so a sign-in never lands back on a sign-in step;
+      `/auth/…`, in any case, with or without a `;…` or `.…` suffix), so a
+      sign-in never lands back on a sign-in step;
     * it was stored less than 15 minutes ago. Asking for a
       magic link restamps it, so it lasts as long as the link does.
 
-  Anything else lands on `/studio`. Every sign-in that mints a session
-  forgets the path, and sign-out clears the whole session, so the next
-  person on the same browser does not inherit it.
+  Anything else lands on `/studio`. Every door that mints a browser session
+  calls `forget/1` (SessionController, `BarkparkWeb.SessionIssuer.issue/3`
+  for passkey and JSON password, and the OIDC, SAML and social callbacks;
+  `LoginReturnToTicketTest` checks that every file storing a `user_session`
+  does), and sign-out clears the whole session, so the next person on
+  the same browser does not inherit it.
   """
 
   import Plug.Conn, only: [get_session: 2, put_session: 3, delete_session: 2]
@@ -28,6 +34,7 @@ defmodule BarkparkWeb.LoginReturn do
 
   @key "login_return_to"
   @ttl_seconds 15 * 60
+  @max_bytes 2048
   @default "/studio"
 
   @doc "Store `return_to` (from `GET /login`), or forget any stored path when it is unusable."
@@ -87,7 +94,8 @@ defmodule BarkparkWeb.LoginReturn do
   end
 
   defp usable(path) do
-    with safe when is_binary(safe) <- ReturnTo.safe_path(path),
+    with true <- is_binary(path) and byte_size(path) <= @max_bytes,
+         safe when is_binary(safe) <- ReturnTo.safe_path(path),
          {:ok, decoded} <- decode(safe),
          true <- ReturnTo.safe_path(decoded) == decoded,
          false <- sign_in_page?(decoded),
@@ -110,7 +118,12 @@ defmodule BarkparkWeb.LoginReturn do
       |> String.split("/", trim: true)
 
     Enum.any?(segments, &(&1 in [".", ".."])) or
-      match?([first | _] when first in ["login", "logout", "auth"], segments)
+      match?([first | _] when first in ["login", "logout", "auth"], Enum.map(segments, &stem/1))
+  end
+
+  # `LOGIN`, `login;x` and `login.html` all name the login page's stem.
+  defp stem(segment) do
+    segment |> String.downcase() |> String.split([";", "."], parts: 2) |> hd()
   end
 
   defp now, do: System.system_time(:second)

@@ -69,7 +69,11 @@ defmodule BarkparkWeb.LoginReturnToTicketTest do
           "/login?return_to=/studio",
           "/login/ticket/bplt_x",
           "/auth/magic/x",
-          "/%2e%2e/login"
+          "/%2e%2e/login",
+          "/LOGIN",
+          "/Login/ticket/x",
+          "/login;x",
+          "/login.html"
         ] do
       conn = login_page(bad) |> then_get("/login/ticket/#{ticket!()}")
       assert redirected_to(conn) == "/studio", "return_to #{inspect(bad)}"
@@ -105,6 +109,53 @@ defmodule BarkparkWeb.LoginReturnToTicketTest do
       |> get("/login/ticket/#{ticket!()}")
 
     assert redirected_to(conn) == "/studio"
+  end
+
+  test "a return_to too long for the session cookie is not stored; /login still renders" do
+    for n <- [3000, 8000] do
+      long = "/w/default/p/default/studio/" <> String.duplicate("a", n)
+      page = login_page(long)
+
+      assert html_response(page, 200)
+      refute get_session(page, LoginReturn.session_key())
+    end
+  end
+
+  test "a JSON password sign-in (the passkey door's issuer) spends the path" do
+    {:ok, _} =
+      Accounts.register_user(%{email: "json@return.example", password: "return-to-pass-123456"})
+
+    signed_in =
+      login_page(@panel)
+      |> recycle_scoped()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/auth/login",
+        Jason.encode!(%{email: "json@return.example", password: "return-to-pass-123456"})
+      )
+
+    assert signed_in.status == 201
+    refute get_session(signed_in, LoginReturn.session_key())
+
+    later = then_get(signed_in, "/login/ticket/#{ticket!("other@return.example")}")
+    assert redirected_to(later) == "/studio"
+  end
+
+  # Every door that mints a browser session must spend the stored path, or it
+  # survives one person's sign-in into the next. OIDC, SAML and social need an
+  # IdP to drive end to end, so this holds the line on the source instead.
+  test "every file that puts a user_session also forgets the stored path" do
+    minting =
+      Path.wildcard("lib/**/*.ex")
+      |> Enum.filter(&(File.read!(&1) =~ ~s|put_session("user_session"|))
+
+    assert "lib/barkpark_web/session_issuer.ex" in minting
+    assert length(minting) >= 5
+
+    for file <- minting do
+      assert File.read!(file) =~ "LoginReturn.forget(",
+             "#{file} mints a session without forgetting"
+    end
   end
 
   test "a used ticket sends the browser back to /login with the path kept" do
