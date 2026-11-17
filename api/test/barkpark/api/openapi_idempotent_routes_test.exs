@@ -39,6 +39,22 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   # and this list.
   @mounted_on [:scoped_mutate, :idempotent]
 
+  # Controllers that mount the plug themselves for one action, because
+  # router.ex may not grow (scripts/file-size-ratchet.py). Pinned the same way:
+  # a new controller mount is a PROMPT to add its template to
+  # `@idempotent_templates`.
+  @controllers_dir Path.expand("../../../lib/barkpark_web/controllers", __DIR__)
+  @controller_mounts ["chat_controller.ex"]
+
+  # Spec operations whose replay is driven in their own test file, because a
+  # 2xx needs more than a mutate body (a chat send needs a session and a
+  # runtime). Listed by path so a NEW advertised route cannot hide here.
+  @driven_elsewhere ["/v1/chat/sessions/{id}/messages"]
+  @chat_send_test Path.expand(
+                    "../../barkpark_web/controllers/chat_send_idempotency_key_test.exs",
+                    __DIR__
+                  )
+
   setup do
     {:ok, _} =
       Auth.create_token(
@@ -59,7 +75,8 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     ~r/^  pipeline :(\w+) do\n(.*?)^  end$/ms
     |> Regex.scan(source)
     |> Enum.filter(fn [_, _name, body] ->
-      String.contains?(body, "plug(BarkparkWeb.Plugs.Idempotency)")
+      # `)` or `,`: a mount WITH options (`scope:`, `bind_request:`) is a mount too.
+      Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, body)
     end)
     |> Enum.map(fn [_, name, _body] -> String.to_atom(name) end)
     |> Enum.sort()
@@ -91,14 +108,35 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
              "@mounted_on here."
   end
 
+  test "the dedup plug is mounted in exactly the controllers the spec was written against" do
+    mounted =
+      Path.wildcard(Path.join(@controllers_dir, "**/*.ex"))
+      |> Enum.filter(&Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, File.read!(&1)))
+      |> Enum.map(&Path.relative_to(&1, @controllers_dir))
+      |> Enum.sort()
+
+    assert mounted == Enum.sort(@controller_mounts),
+           "the set of controllers mounting BarkparkWeb.Plugs.Idempotency changed. Update " <>
+             "`@idempotent_templates` in lib/barkpark/api/openapi.ex, re-run " <>
+             "`mix barkpark.openapi`, and update @controller_mounts here."
+  end
+
   test "the spec declares the header on at least one operation" do
     refute Enum.empty?(spec_ops()),
            "no operation declares Idempotency-Key — the behavioural test below would pass " <>
              "over an empty list"
   end
 
+  test "an operation driven elsewhere is still advertised, and its test file exists" do
+    for path <- @driven_elsewhere do
+      assert {"POST", path} in spec_ops(), "#{path} is no longer advertised idempotent"
+    end
+
+    assert File.exists?(@chat_send_test), "#{@chat_send_test} is gone"
+  end
+
   test "EVERY operation the spec marks idempotent actually replays", ctx do
-    for {"POST", path} <- spec_ops() do
+    for {"POST", path} <- spec_ops(), path not in @driven_elsewhere do
       url =
         path
         |> String.replace("{workspace_slug}", ctx.ws.slug)

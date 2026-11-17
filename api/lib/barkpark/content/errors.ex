@@ -64,6 +64,8 @@ defmodule Barkpark.Content.Errors do
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>
       "Another request with this Idempotency-Key is still in flight — wait for it to finish, then retry to replay its result (or use a fresh key for a distinct operation).",
+    "idempotency_key_reused" =>
+      "This Idempotency-Key was first sent with a different request. Retry with the original request to get its answer, or use a fresh key for a new request.",
     "storage_unavailable" =>
       "Media storage could not be written (disk full, read-only mount, or permissions). Retry shortly; if it persists, check the server's media volume.",
     "payload_too_large" =>
@@ -1056,6 +1058,16 @@ defmodule Barkpark.Content.Errors do
           "(versions.<release>.<id>), which this server does not support",
       status: 422,
       details: %{id: raw_id}
+    }
+
+  # A request-bound Idempotency mount (the chat send) saw this key with another
+  # request (query string or body). 422: retrying the same request cannot succeed, and replaying the first
+  # answer would describe a request the client did not make.
+  defp build({:error, :idempotency_key_reused}),
+    do: %{
+      code: "idempotency_key_reused",
+      message: "this Idempotency-Key was already used with a different request",
+      status: 422
     }
 
   # Claim-first idempotency: a concurrent request already holds a fresh claim on

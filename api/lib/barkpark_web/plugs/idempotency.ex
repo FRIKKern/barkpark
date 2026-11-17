@@ -15,6 +15,22 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   First-time responses with status < 500 are cached; a 5xx or crashed request
   releases the claim so a retry can re-claim. Requires `RequireToken` to have
   assigned `:api_token` upstream.
+
+  `bind_request: true` (the chat send mount, in ChatController) binds the key
+  to the request the action will read, so the same key sent for another
+  request is refused 422 `idempotency_key_reused` instead of replaying an
+  answer to a request the client did not make:
+
+    * the claim's scope gains a SHA-256 of the params the action reads: query
+      string and body together, minus the path params (`conn.params` merges
+      all three, and a value in the query string must not escape the binding);
+    * the hashed path is the routed path: `path_info` joined (no trailing or
+      doubled slash) with each UUID segment in its cast, lower-case form, so
+      every spelling that reaches one session reaches one key.
+
+  Without the option the scope is the constant `:scope` string and the path is
+  the raw `request_path`, as before, so keys already stored for those mounts
+  keep matching.
   """
 
   import Plug.Conn
@@ -25,7 +41,52 @@ defmodule BarkparkWeb.Plugs.Idempotency do
 
   @methods ~w(POST PUT PATCH DELETE)
 
-  def init(opts), do: Keyword.put_new(opts, :scope, "mutation")
+  def init(opts) do
+    opts |> Keyword.put_new(:scope, "mutation") |> Keyword.put_new(:bind_request, false)
+  end
+
+  @doc """
+  The claim scope for a request-bound mount: `scope` plus a SHA-256 of `params`.
+  Map keys are sorted before hashing, so the key order a client happens to send
+  does not change the fingerprint. Maps are tagged, so a map and a list of
+  pairs never hash alike.
+  """
+  @spec bound_scope(String.t(), term()) :: String.t()
+  def bound_scope(scope, params) when is_binary(scope) do
+    digest =
+      params
+      |> canonical()
+      |> Jason.encode!()
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+
+    scope <> ":" <> digest
+  end
+
+  # Every map becomes `%{"m" => sorted pairs}` and nothing else becomes a map,
+  # so an encoded object always marks a map: the form is one-to-one.
+  defp canonical(%{__struct__: _} = struct), do: struct |> Map.from_struct() |> canonical()
+
+  defp canonical(%{} = map),
+    do: %{"m" => map |> Enum.map(fn {k, v} -> [to_string(k), canonical(v)] end) |> Enum.sort()}
+
+  defp canonical(list) when is_list(list), do: Enum.map(list, &canonical/1)
+  defp canonical(other), do: other
+
+  @doc """
+  The path a request-bound mount hashes: `path_info` joined, with each segment
+  that casts as a UUID in its cast (lower-case) form.
+  """
+  @spec bound_path([String.t()]) :: String.t()
+  def bound_path(path_info) when is_list(path_info) do
+    "/" <>
+      Enum.map_join(path_info, "/", fn segment ->
+        case Ecto.UUID.cast(segment) do
+          {:ok, uuid} -> uuid
+          :error -> segment
+        end
+      end)
+  end
 
   def call(conn, opts) do
     with true <- conn.method in @methods,
@@ -43,14 +104,26 @@ defmodule BarkparkWeb.Plugs.Idempotency do
         unauthorized(conn)
 
       token ->
-        scope = Keyword.fetch!(opts, :scope)
-        hash = Idempotency.hash_key(raw_key, token.id, conn.method, conn.request_path)
+        {scope, path} = claim_identity(conn, opts)
+        hash = Idempotency.hash_key(raw_key, token.id, conn.method, path)
 
         case Idempotency.claim(hash, scope) do
           :claimed -> register_complete(conn, hash, scope)
           {:replay, cached} -> replay(conn, cached)
-          :in_progress -> in_progress(conn)
+          :in_progress -> refuse(conn, :idempotency_key_in_use)
+          :mismatch -> refuse(conn, :idempotency_key_reused)
         end
+    end
+  end
+
+  defp claim_identity(conn, opts) do
+    scope = Keyword.fetch!(opts, :scope)
+
+    if opts[:bind_request] do
+      params = Map.drop(conn.params, Map.keys(conn.path_params))
+      {bound_scope(scope, params), bound_path(conn.path_info)}
+    else
+      {scope, conn.request_path}
     end
   end
 
@@ -58,11 +131,12 @@ defmodule BarkparkWeb.Plugs.Idempotency do
     BarkparkWeb.ErrorResponse.emit(conn, {:error, :unauthorized})
   end
 
-  # A concurrent request already holds a fresh claim on this key. Return 409 so
-  # the client retries (Stripe-style concurrent-request semantics) — the handler
-  # NEVER runs, so the mutation cannot double-apply.
-  defp in_progress(conn) do
-    env = Errors.to_envelope({:error, :idempotency_key_in_use}, conn)
+  # The handler NEVER runs on either refusal. `:idempotency_key_in_use` (409): a
+  # concurrent request holds a fresh claim on this key, so the client retries
+  # (Stripe-style). `:idempotency_key_reused` (422): the key was first used with
+  # a different request, so replaying that answer would describe another one.
+  defp refuse(conn, reason) do
+    env = Errors.to_envelope({:error, reason}, conn)
 
     conn
     |> put_status(env.status)
@@ -134,8 +208,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   # silently. `BarkparkWeb.Plugs.ResponseWarnings` fences its own before_send
   # hook on exactly this predicate, for exactly this reason.
   #
-  # NO SUCH ROUTE EXISTS TODAY: both Idempotency mounts are JSON mutate
-  # pipelines and every `send_chunked/2` in the tree is a GET/SSE action. This
+  # NO SUCH ROUTE EXISTS TODAY: every Idempotency mount (the mutate pipelines
+  # and the chat send) answers JSON with send_resp, and every `send_chunked/2`
+  # in the tree is a GET/SSE action. This
   # is a TRIPWIRE for the first streaming or file-sending mutate route: it
   # releases the claim (so the key is never wedged), reports, and then RAISES —
   # a loud 500 in test beats a silently poisoned key in prod. Idempotency is a
