@@ -153,6 +153,17 @@ defmodule BarkparkWeb.Studio.Desk.Refs do
     end
   end
 
+  @doc """
+  The title of each of the documents `ids` (published ids), as `resolve/4`
+  names a target: an id that cannot be read is its own title. One query.
+  """
+  @spec titles([String.t()], String.t(), keyword()) :: %{optional(String.t()) => String.t()}
+  def titles(ids, dataset, scope) do
+    found = lookup(ids, dataset, scope)
+    schemas = schemas(found, dataset, scope)
+    Map.new(ids, fn id -> {id, target(id, found[id], schemas).title} end)
+  end
+
   @doc "The type of the document `id`, whatever it is, or nil when it cannot be read."
   @spec type_of(String.t(), String.t(), keyword()) :: String.t() | nil
   def type_of(id, dataset, scope) do

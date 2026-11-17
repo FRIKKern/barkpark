@@ -15036,3 +15036,43 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Enter tag and press ENTER…"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Item actions"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item before"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item after"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Close dialog"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Move item %{n}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Drag to re-order"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "sortable"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
+msgstr ""

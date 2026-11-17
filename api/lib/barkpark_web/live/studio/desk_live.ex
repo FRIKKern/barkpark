@@ -51,6 +51,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
+  alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   defmodule NotFound do
@@ -332,6 +333,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-field-" <> _ = event, params, socket),
     do: FieldActions.handle_event(event, params, socket)
 
+  # An array item's Copy (`Handlers.ArrayItems`): it writes nothing.
+  def handle_event("desk-item-copy", params, socket),
+    do: ArrayItems.copy(params, socket)
+
   # A list's selection and its bulk publish and unpublish (`Bulk`). They are
   # the page's events, so the Studio's capability gate has passed them.
   def handle_event("bulk-" <> _ = event, params, socket),
@@ -495,6 +500,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-tags={BarkparkWeb.StaticAssets.path("bp-desk-tags.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
+      data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

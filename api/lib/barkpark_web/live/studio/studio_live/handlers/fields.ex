@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
+  alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -683,11 +684,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
       new_list =
         case action do
-          "add_row" -> add_row(current, field, params["member"], keyed_parent?(form, key_path))
-          "remove_row" -> ArrayField.remove_row(current, idx)
-          "move_up" -> ArrayField.move_up(current, idx)
-          "move_down" -> ArrayField.move_down(current, idx)
-          _ -> current
+          "add_row" ->
+            add_row(current, field, params["member"], keyed_parent?(form, key_path))
+
+          "remove_row" ->
+            ArrayField.remove_row(current, idx)
+
+          "move_up" ->
+            ArrayField.move_up(current, idx)
+
+          "move_down" ->
+            ArrayField.move_down(current, idx)
+
+          other ->
+            ArrayItems.apply_op(other, current, idx, field, params, keyed_parent?(form, key_path))
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)

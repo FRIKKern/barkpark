@@ -32,6 +32,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{
+    ArrayItemDialog,
+    ArrayItemMenu,
     CodelistField,
     CompositeField,
     LocalizedTextField,
@@ -70,6 +72,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # (for an array of options, the box of checkboxes) then carries
   # `id="links"`, the element Sanity's Studio names by the path. nil adds no id.
   attr :id_base, :string, default: nil
+  # The desk's titles of the documents the items point at, by id
+  # (`Desk.ItemRefs`): an item preview's reference reads as its title.
+  attr :ref_titles, :map, default: %{}
 
   # Several named member types (`field.of_types`, Sanity's page-builder
   # array, such as `page.landingPageSections`). Each row opens in the form of
@@ -270,18 +275,31 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put(:ordered?, !!assigns.field.ordered)
       |> Map.put(:progress, checklist_progress(assigns.field, assigns[:value]))
 
+    assigns = Map.put(assigns, :desk_items?, desk_items?(assigns))
+
+    assigns =
+      Map.put(
+        assigns,
+        :typing,
+        assigns.desk_items? && member_typing(element_field(assigns.field))
+      )
+
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"
               id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
-              data-field-name={@field.name} data-ordered={@ordered? && "true"}>
+              data-field-name={@field.name} data-ordered={@ordered? && "true"}
+              data-array-path={@desk_items? && @path} data-desk-items={@desk_items?}>
       <legend class="bp-field-title">
         <%= @title %><%= if @progress do %>
           <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= gettext("%{met}/%{total} met", met: @progress.met, total: @progress.total) %></span>
         <% end %>
       </legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
-      <ol class="bp-array-rows" id={@id_base}>
+      <ol class="bp-array-rows" id={@id_base} aria-describedby={@desk_items? && help_id(assigns)}>
         <%= for {row_value, idx} <- @rows do %>
+          <%= if @desk_items? do %>
+            <%= desk_item(assigns, row_value, idx) %>
+          <% else %>
           <li class={"bp-array-row " <> if(composite_rows?(@field), do: "bp-array-row-item", else: "")} data-row-index={idx}>
             <div class="bp-array-row-body">
               <%= render_element(assigns, row_value, idx) %>
@@ -333,11 +351,26 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               <span class="warning" role="note" data-warning-for-row={idx}><%= warn %></span>
             <% end %>
           </li>
+          <% end %>
         <% end %>
       </ol>
+      <ArrayItemDialog.help :if={@desk_items?} id={help_id(assigns)} />
       <%!-- In the desk the button is named "Add item", the name Sanity's
-            Studio gives it (string-arrays J34); the "+" is decoration. --%>
+            Studio gives it (string-arrays J34); the "+" is decoration. An
+            object item it adds opens in its dialog (`open`). --%>
+      <ArrayItemMenu.add_menu
+        :if={@typing}
+        id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}") <> "-add"}
+        types={@typing.types}
+        field={@field.name}
+        path={@path}
+        count={length(@rows)}
+        readonly={@readonly}
+        on_reorder={@on_reorder}
+        target={@target}
+      />
       <button
+        :if={!@typing}
         type="button"
         class="bp-array-btn bp-array-btn-add"
         phx-click={@on_reorder}
@@ -345,6 +378,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-action="add_row"
         phx-value-field={@field.name}
         phx-value-path={@path}
+        phx-value-open={@desk_items? && "item"}
         disabled={@readonly}
       ><%= if @id_base do %><span aria-hidden="true">+ </span><%= gettext("Add item") %><% else %>+ <%= gettext("Add") %><% end %></button>
     </fieldset>
@@ -426,27 +460,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               row_value,
               Map.get(assigns, :dup_keys, %{})
             ),
-          body:
-            CompositeField.composite_field(%{
-              field: item,
-              value: row_value || %{},
-              errors: row_subfield_errors(assigns.errors, idx),
-              warnings: row_subfield_errors(assigns.warnings, idx),
-              on_change: assigns.on_change,
-              plugin_name: assigns.plugin_name,
-              path: row_path,
-              readonly: assigns.readonly,
-              bare: true,
-              # Picker context for reference / image subfields inside the row
-              # (Gyldendal parity E1.6) — a scoped workspace's picker must
-              # search its own scope, not the flat default.
-              dataset: assigns[:dataset] || "production",
-              scope_prefix: assigns[:scope_prefix] || "",
-              api_token_raw: assigns[:api_token_raw] || "",
-              root: assigns[:root],
-              on_reorder: assigns[:on_reorder] || "array_op",
-              target: assigns[:target]
-            })
+          body: composite_row_body(assigns, item, row_value, idx)
         })
 
       # Gyldendal parity E1.6 (task-cd8e10ca44ccb932 criterion 1) — an image
@@ -574,6 +588,121 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end
   end
 
+  # An object row's fields: the composite drawn `bare`, the row drawing its
+  # frame. The old Studio's open-in-place row and the desk's item dialog
+  # draw the same fields under the same names.
+  defp composite_row_body(assigns, item, row_value, idx) do
+    CompositeField.composite_field(%{
+      field: item,
+      value: row_value || %{},
+      errors: row_subfield_errors(assigns.errors, idx),
+      warnings: row_subfield_errors(assigns.warnings, idx),
+      on_change: assigns.on_change,
+      plugin_name: assigns.plugin_name,
+      path: "#{assigns.path}[#{idx}]",
+      readonly: assigns.readonly,
+      bare: true,
+      # Picker context for reference / image subfields inside the row
+      # (Gyldendal parity E1.6) — a scoped workspace's picker must
+      # search its own scope, not the flat default.
+      dataset: assigns[:dataset] || "production",
+      scope_prefix: assigns[:scope_prefix] || "",
+      api_token_raw: assigns[:api_token_raw] || "",
+      root: assigns[:root],
+      on_reorder: assigns[:on_reorder] || "array_op",
+      target: assigns[:target]
+    })
+  end
+
+  # The desk's object row (`ArrayItemDialog`): its preview, menu and dialog.
+  defp desk_item(assigns, row_value, idx) do
+    item = element_field(assigns.field)
+    dupes = Map.get(assigns, :dup_keys, %{})
+
+    ArrayItemDialog.row(%{
+      stem: item_stem(assigns.id_base, row_value, idx, dupes),
+      row_id: item_row_id(assigns.field.name, assigns.path, idx, row_value, dupes),
+      idx: idx,
+      key: row_key(row_value),
+      count: length(assigns.rows),
+      field: assigns.field.name,
+      field_title: assigns.title,
+      path: assigns.path,
+      preview: item_preview(item, row_value, preview_ctx(assigns)),
+      finding: row_findings?(assigns, idx),
+      readonly: assigns.readonly,
+      on_reorder: assigns.on_reorder,
+      target: assigns.target,
+      help_id: help_id(assigns),
+      body: composite_row_body(assigns, typed_member(item, row_value), row_value, idx),
+      errors: row_errors(assigns.errors, idx),
+      warnings: row_errors(assigns.warnings, idx)
+    })
+  end
+
+  # Several item types in one object member (barkpark-studio decision 0005,
+  # `post.links`): `options.typeField` names the select that says which type
+  # an item is, `options.fieldsByType` the fields each type has. The desk's
+  # dialog shows an item's own type's fields, without the select, as the
+  # TanStack Studio does. A field it does not draw is not posted, and the
+  # save keeps its stored value (`Content.Forms`: a stored key the form
+  # never rendered is kept), so the item's type and any other field stay.
+  defp typed_member(item, row) do
+    with %{typeField: field, fieldsByType: by} <- member_typing(item),
+         kind when is_binary(kind) <- is_map(row) && row[field],
+         names when is_list(names) <- by[kind] do
+      fields = Map.get(item, :fields) || []
+
+      shown =
+        for n <- names, f = Enum.find(fields, &(subfield_attr(&1, :name) == n)), f != nil, do: f
+
+      Map.put(item, :fields, shown)
+    else
+      _ -> item
+    end
+  end
+
+  @doc false
+  # The member's typing, with the types the select lists, or nil.
+  def member_typing(item) do
+    raw = subfield_attr(item, :raw) || %{}
+    options = if is_map(raw["options"]), do: raw["options"], else: %{}
+    field = options["typeField"]
+    by = options["fieldsByType"]
+    select = Enum.find(Map.get(item, :fields) || [], &(subfield_attr(&1, :name) == field))
+
+    types =
+      select
+      |> subfield_attr(:options)
+      |> Barkpark.Content.SelectOptions.normalize()
+      |> Enum.map(&%{value: &1.value, title: &1.label})
+
+    if is_binary(field) and is_map(by) and types != [],
+      do: %{typeField: field, fieldsByType: by, types: types}
+  end
+
+  # Sanity's path of an item: by its `_key` when it has one of its own, else
+  # by its place.
+  defp item_stem(base, row, idx, dupes) do
+    case row_key(row) do
+      key when is_binary(key) and not is_map_key(dupes, key) -> ~s(#{base}[_key=="#{key}"])
+      _ -> "#{base}[#{idx}]"
+    end
+  end
+
+  defp row_key(%{"_key" => key}) when is_binary(key) and key != "", do: key
+  defp row_key(_row), do: nil
+
+  defp help_id(assigns),
+    do: "bp-array-" <> sanitize_id("#{assigns.field.name}#{assigns.path}") <> "-dnd-help"
+
+  # The desk draws an object array's rows as items (`ArrayItemDialog`); the
+  # old Studio, and an array of anything else, keeps its rows.
+  defp desk_items?(%{id_base: base, field: field}) when is_binary(base),
+    do: composite_rows?(field)
+
+  defp desk_items?(_assigns), do: false
+
   # task-7f47b7ad78b08048: whether a row is open is the person's, as Sanity's.
   # `open` is the row's state when it is first drawn (a new or empty row, one
   # with a finding); after that a patch leaves the browser's `open` alone
@@ -632,14 +761,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     subs = (Map.get(item, :fields) || []) |> Enum.reject(&is_nil/1)
 
     title =
-      pick(row, spec["title"]) ||
+      text(row, subs, spec["title"], ctx) ||
         first_text(row, subs) ||
         title_for(item) ||
         gettext("Item")
 
     %{
       title: title,
-      subtitle: pick(row, spec["subtitle"]),
+      subtitle: text(row, subs, spec["subtitle"], ctx),
       media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx),
       # task-835fe5219585ca80: the member type's icon (a named object type
       # carries its schema's), drawn when the row has no media; the document
@@ -647,6 +776,38 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       icon: BarkparkWeb.Icons.row_icon((subfield_attr(item, :raw) || %{})["icon"])
     }
   end
+
+  # A preview's title or subtitle as words. A reference subfield (a doc
+  # link's `target`) reads as its target's title when the desk has it
+  # (`ctx.ref_titles`), else as its id; any other value that is not text
+  # shows nothing.
+  defp text(row, subs, path, ctx) do
+    case pick(row, path) do
+      nil ->
+        nil
+
+      value ->
+        if reference_sub?(subs, path),
+          do: ref_title(value, Map.get(ctx, :ref_titles) || %{}),
+          else: if(is_binary(value), do: value)
+    end
+  end
+
+  defp reference_sub?(subs, path) when is_binary(path),
+    do:
+      Enum.any?(
+        subs,
+        &(subfield_attr(&1, :name) == path and subfield_attr(&1, :type) == "reference")
+      )
+
+  defp reference_sub?(_subs, _path), do: false
+
+  defp ref_title(%{"_ref" => id}, titles), do: ref_title(id, titles)
+
+  defp ref_title(id, titles) when is_binary(id),
+    do: Map.get(titles, Barkpark.Content.published_id(id)) || id
+
+  defp ref_title(_value, _titles), do: nil
 
   defp pick(_row, nil), do: nil
 
@@ -687,7 +848,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   # Where a Sanity image id is served from: the field's dataset and scope.
   defp preview_ctx(assigns),
-    do: %{dataset: assigns[:dataset] || "production", scope_prefix: assigns[:scope_prefix] || ""}
+    do: %{
+      dataset: assigns[:dataset] || "production",
+      scope_prefix: assigns[:scope_prefix] || "",
+      ref_titles: assigns[:ref_titles] || %{}
+    }
 
   # A picker value is a bare URL or a JSON/map {url, assetId, …}, or the
   # reference shape {asset: {_ref}} (task-7ea6f41cede5ee97).

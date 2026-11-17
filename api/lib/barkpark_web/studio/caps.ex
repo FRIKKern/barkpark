@@ -185,7 +185,10 @@ defmodule BarkparkWeb.Studio.Caps do
   # `paper-selection` (task-c522237b9f37de21) writes nothing persisted: it puts
   # the caret of someone who can read the open paper into this socket's own
   # presence meta, for the other sessions on that paper to draw.
-  @read_events ~w(airdrop-open airdrop-create paper-selection)
+  # `desk-item-copy` writes nothing either: it answers the browser with an
+  # item of the open document's array, read from this socket's own editor
+  # buffer (`Handlers.ArrayItems.copy/2`), for the clipboard.
+  @read_events ~w(airdrop-open airdrop-create paper-selection desk-item-copy)
 
   # Admin (tenant-control): the network-shares panel + per-item share popover,
   # plus STRUCTURAL mutation — schema-declared doc actions and bulk
