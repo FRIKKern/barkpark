@@ -154,7 +154,7 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 
 ## 8f. Prefs `/w/…/p/…/v1/prefs/:dataset/:key` [token]
 
-[Per-account JSON, atomic list ops](contracts/user-prefs.md).
+[Per-account JSON, atomic set and list ops](contracts/user-prefs.md).
 
 ## 9. Error Codes
 
