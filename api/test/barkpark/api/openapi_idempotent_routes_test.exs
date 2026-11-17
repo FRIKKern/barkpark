@@ -28,6 +28,7 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, TenancyFixtures}
+  alias Barkpark.Test.IdempotencyMounts
 
   @router_source Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
   @token "barkpark-test-openapi-idem"
@@ -69,17 +70,24 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     %{ws: ws, project: project}
   end
 
+  # Read from the router's AST by the shared reader, so a mount by alias, with
+  # or without options or parentheses, is a mount too.
   defp idempotent_pipelines do
-    source = File.read!(@router_source)
+    ast = @router_source |> File.read!() |> Code.string_to_quoted!()
+    aliases = IdempotencyMounts.aliases(ast)
 
-    ~r/^  pipeline :(\w+) do\n(.*?)^  end$/ms
-    |> Regex.scan(source)
-    |> Enum.filter(fn [_, _name, body] ->
-      # `)` or `,`: a mount WITH options (`scope:`, `bind_request:`) is a mount too.
-      Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, body)
-    end)
-    |> Enum.map(fn [_, name, _body] -> String.to_atom(name) end)
-    |> Enum.sort()
+    {_, names} =
+      Macro.prewalk(ast, [], fn
+        {:pipeline, _, [name, [do: body]]} = node, acc when is_atom(name) ->
+          if IdempotencyMounts.mounts(body, aliases) != [],
+            do: {node, [name | acc]},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.sort(names)
   end
 
   # {METHOD, openapi path} for every spec operation declaring the header.
@@ -94,10 +102,10 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     |> Enum.sort()
   end
 
-  test "the source regex still matches — otherwise the structural half is vacuous" do
+  test "the source scan still finds a mount — otherwise the structural half is vacuous" do
     refute Enum.empty?(idempotent_pipelines()),
            "no router pipeline mounts BarkparkWeb.Plugs.Idempotency — either the plug moved " <>
-             "or this test's regex stopped matching; both make the comparison below vacuous"
+             "or this test's scan stopped seeing it; both make the comparison below vacuous"
   end
 
   test "the dedup plug is mounted on exactly the pipelines the spec was written against" do
@@ -111,7 +119,9 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   test "the dedup plug is mounted in exactly the controllers the spec was written against" do
     mounted =
       Path.wildcard(Path.join(@controllers_dir, "**/*.ex"))
-      |> Enum.filter(&Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, File.read!(&1)))
+      |> Enum.filter(
+        &(IdempotencyMounts.mounts(&1 |> File.read!() |> Code.string_to_quoted!()) != [])
+      )
       |> Enum.map(&Path.relative_to(&1, @controllers_dir))
       |> Enum.sort()
 

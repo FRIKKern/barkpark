@@ -24,6 +24,11 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
       action: from each mounted action, follow the module's own local calls,
       and red if any of them reaches `send_chunked/2` or `send_file/3..5`.
 
+  Mounts and streaming calls are recognised by `Barkpark.Test.IdempotencyMounts`
+  (test/support), shared with the OpenAPI tripwire: a mount by full name or
+  through an alias, with or without options; a streaming call bare, piped,
+  captured or qualified (`Plug.Conn.send_chunked/2`).
+
   Only mutating verbs are scanned, because `Idempotency.call/2` returns the conn
   untouched for anything outside `POST/PUT/PATCH/DELETE`.
 
@@ -32,40 +37,30 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
   use ExUnit.Case, async: true
 
+  alias Barkpark.Test.IdempotencyMounts
+
   @router_source Path.join(__DIR__, "../../lib/barkpark_web/router.ex") |> Path.expand()
   @controllers_dir Path.join(__DIR__, "../../lib/barkpark_web/controllers") |> Path.expand()
   @mutating_verbs ~w(post put patch delete)a
-  @streaming_calls [:send_chunked, :send_file]
 
   # ── the scan ────────────────────────────────────────────────────────────
 
   defp idempotency_pipelines do
     {:ok, ast} = @router_source |> File.read!() |> Code.string_to_quoted()
+    aliases = IdempotencyMounts.aliases(ast)
 
     {_, acc} =
       Macro.prewalk(ast, [], fn
         {:pipeline, _, [name, [do: body]]} = node, acc when is_atom(name) ->
-          if mounts_idempotency?(body), do: {node, [name | acc]}, else: {node, acc}
+          if IdempotencyMounts.mounts(body, aliases) != [],
+            do: {node, [name | acc]},
+            else: {node, acc}
 
         node, acc ->
           {node, acc}
       end)
 
     MapSet.new(acc)
-  end
-
-  defp mounts_idempotency?(body) do
-    {_, found} =
-      Macro.prewalk(body, false, fn
-        {:plug, _, [{:__aliases__, _, segments} | _]} = node, _acc
-        when segments != [] ->
-          {node, List.last(segments) == :Idempotency and :Plugs in segments}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    found
   end
 
   # MODULE-level, deliberately. An action-body-only walk is structurally blind:
@@ -93,15 +88,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     end
   end
 
-  defp calls_streaming?(body) do
-    {_, found} =
-      Macro.prewalk(body, false, fn
-        {call, _, _} = node, _acc when call in @streaming_calls -> {node, true}
-        node, acc -> {node, acc}
-      end)
-
-    found
-  end
+  defp calls_streaming?(body), do: IdempotencyMounts.streams?(body)
 
   # ── controller-level mounts ─────────────────────────────────────────────
 
@@ -131,16 +118,9 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   end
 
   defp mounted_actions(ast) do
-    {_, acc} =
-      Macro.prewalk(ast, [], fn
-        {:plug, _, [{:__aliases__, _, segments} | rest]} = node, acc ->
-          if List.last(segments) == :Idempotency and :Plugs in segments,
-            do: {node, [guarded_actions(rest) | acc]},
-            else: {node, acc}
-
-        node, acc ->
-          {node, acc}
-      end)
+    acc =
+      for %{guard: guard} <- IdempotencyMounts.mounts(ast),
+          do: if(guard, do: guard_actions(guard), else: :all)
 
     cond do
       acc == [] -> []
@@ -148,9 +128,6 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
       true -> List.flatten(acc)
     end
   end
-
-  defp guarded_actions([{:when, _, [_opts, guard]}]), do: guard_actions(guard)
-  defp guarded_actions(_), do: :all
 
   defp guard_actions(guard) do
     {_, found} =
