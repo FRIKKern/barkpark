@@ -62,8 +62,10 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
   Studio's answer (`ChatLive.resolve_permission`), through `settle/4`, so a card
   a tab still shows as pending never delivers to an ask the store has canceled
   or answered (task-52de5429fbdcb68c). Studio ignores the delivery's result, as
-  it always has. `{:ok, status}` when delivered; `{:settled, stored}` with the
-  stored terminal status when not; `:noop` while another answer is in flight.
+  it always has. `{:ok, status}` when delivered and stored as `status`;
+  otherwise `{:settled, stored}` with the stored terminal status, so a cancel
+  that commits during the send shows as canceled (task-a759f535f818d2cb); and
+  `:noop` while another answer is in flight.
   An ask with no stored row (no store session, or a lost Recorder write) is
   delivered as before, so its card never goes dead.
   """
@@ -72,9 +74,11 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
   def resolve(session_id, request_id, status, deliver) do
     with true <- is_binary(session_id),
          %Message{} <- StudioChat.get_needs_you_message(session_id, request_id) do
-      case settle(session_id, request_id, status, fn -> {:ok, deliver.()} end) do
-        :delivered -> {:ok, status}
-        _not_delivered -> stored(session_id, request_id)
+      sent = settle(session_id, request_id, status, fn -> {:ok, deliver.()} end)
+
+      case {sent, stored(session_id, request_id)} do
+        {:delivered, {:settled, ^status}} -> {:ok, status}
+        {_, stored} -> stored
       end
     else
       _ ->
