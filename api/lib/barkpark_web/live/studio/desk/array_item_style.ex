@@ -11,6 +11,9 @@ defmodule BarkparkWeb.Studio.Desk.ArrayItemStyle do
       handle (25 x 33, its dots muted), the preview (a 33 px tile with the
       item's image or its type's icon, the title in 500 and the subtitle
       muted, each on one line) and the 25 px "…".
+    * A string row (`ArrayStringRow`) is the handle, the value's input and
+      the "…": 5 px round its 35 px input, which ends 12 px before the
+      "…", and the box 5 px in all round.
     * A row being moved is ringed in the selected blue and lifted.
     * The menu opens beside its "…", as wide as its items.
     * The dialog is 640 px wide at most and 597 px tall at least, 9 px
@@ -28,12 +31,18 @@ defmodule BarkparkWeb.Studio.Desk.ArrayItemStyle do
     .dk .dk-edit fieldset[data-desk-items] > ol.bp-array-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 5px 5px 3px; list-style: none; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--dk-border); }
     .dk .dk-edit fieldset[data-desk-items] > ol.bp-array-rows:empty { display: none; }
     .dk .dk-edit .dk-array-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; padding: 5px; border: 0; border-radius: 3px; background: var(--dk-bg); }
+    .dk .dk-edit fieldset[data-desk-items] > ol.bp-array-rows:has(> .dk-string-row) { padding: 5px; }
+    .dk .dk-edit .dk-string-value { flex: 1; min-width: 0; margin-right: 8px; }
+    .dk .dk-edit .dk-string-value > :is(input, textarea, pre) { box-sizing: border-box; width: 100%; margin: 0; }
+    .dk .dk-edit .dk-string-value > input.bp-input { height: auto; min-height: 35px; padding: 6px 12px; border: 0; border-radius: 3px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--dk-line); color: var(--dk-input-fg); font-size: 15px; line-height: 23px; }
+    .dk .dk-edit .dk-string-value > input.bp-input:hover:not(:focus, :disabled, [readonly]) { box-shadow: inset 0 0 0 1px var(--dk-input-hover-ring); }
+    .dk .dk-edit .dk-string-value > input.bp-input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
     .dk .dk-edit .dk-array-row[data-moving] { position: relative; z-index: 1; box-shadow: 0 0 0 1px var(--dk-selected), var(--dk-popover-shadow); }
     .dk .dk-edit .dk-array-row > :is(.error, .warning) { flex: 1 0 100%; padding: 0 8px; }
     .dk .dk-edit .dk-array-row .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
     .dk .dk-edit .dk-array-row .icon-btn:hover:not(:disabled) { background: var(--dk-icon-btn-hover); }
     .dk .dk-edit .dk-array-row .icon-btn:disabled { cursor: default; opacity: 0.5; }
-    .dk .dk-edit .dk-drag-handle { height: 33px; cursor: grab; touch-action: none; }
+    .dk .dk-edit .dk-array-row > .dk-drag-handle { height: 33px; cursor: grab; touch-action: none; }
     .dk .dk-edit .dk-drag-handle[aria-pressed="true"] { cursor: grabbing; color: var(--dk-selected); }
     .dk .dk-edit .dk-item-preview { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 0; border-radius: 3px; background: none; color: var(--dk-fg); font: inherit; text-align: left; cursor: pointer; }
     .dk .dk-edit .dk-item-preview:hover { background: var(--dk-card-hover); }

@@ -70,22 +70,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemDialog do
       data-row-finding={@finding}
       data-item-path={@stem}
     >
-      <button
-        type="button"
-        class="icon-btn dk-drag-handle"
-        aria-roledescription={gettext("sortable")}
-        aria-label={gettext("Move item %{n}", n: @idx + 1)}
-        aria-describedby={@help_id}
-        aria-pressed="false"
-        data-tip={gettext("Drag to re-order")}
-        disabled={@readonly or @count < 2}
-        phx-mounted={JS.ignore_attributes(["aria-pressed"])}
-        data-desk-item-handle
-        data-move-event={@on_reorder}
-        data-move-field={@field}
-        data-move-path={@path}
-        data-move-index={@idx}
-      ><BarkparkWeb.Icons.desk_icon name="drag-handle" size={21} /></button>
+      <.handle
+        idx={@idx}
+        count={@count}
+        field={@field}
+        path={@path}
+        readonly={@readonly}
+        on_reorder={@on_reorder}
+        help_id={@help_id}
+      />
       <button type="button" class="dk-item-preview" aria-haspopup="dialog" data-desk-item-open={@dialog_id}>
         <span :if={@preview.media} class="media has-image" aria-hidden="true">
           <img src={@preview.media} alt="" loading="lazy" />
@@ -132,6 +125,39 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemDialog do
       <span :for={err <- @errors} class="error" data-error-for-row={@idx}>{err}</span>
       <span :for={warn <- @warnings} class="warning" role="note" data-warning-for-row={@idx}>{warn}</span>
     </li>
+    """
+  end
+
+  attr :idx, :integer, required: true
+  attr :count, :integer, required: true, doc: "how many items the array has"
+  attr :field, :string, required: true
+  attr :path, :string, required: true
+  attr :readonly, :boolean, default: false
+  attr :on_reorder, :string, default: "array_op"
+  attr :help_id, :string, required: true
+
+  @doc """
+  An item's drag handle, as Sanity's (25 x 33, "Move item 2"). It is the
+  same for an object item and a string row (`ArrayStringRow`).
+  """
+  def handle(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class="icon-btn dk-drag-handle"
+      aria-roledescription={gettext("sortable")}
+      aria-label={gettext("Move item %{n}", n: @idx + 1)}
+      aria-describedby={@help_id}
+      aria-pressed="false"
+      data-tip={gettext("Drag to re-order")}
+      disabled={@readonly or @count < 2}
+      phx-mounted={JS.ignore_attributes(["aria-pressed"])}
+      data-desk-item-handle
+      data-move-event={@on_reorder}
+      data-move-field={@field}
+      data-move-path={@path}
+      data-move-index={@idx}
+    ><BarkparkWeb.Icons.desk_icon name="drag-handle" size={21} /></button>
     """
   end
 
