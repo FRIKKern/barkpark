@@ -175,6 +175,26 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert_received {:chat_permission_resolved, _request_id, :canceled}
   end
 
+  # The other split shape (rev26735): the newer lease's first event is text,
+  # with no turn_started before it.
+  test "the newer lease's text (no turn_started) cancels the displaced lease's pending ask",
+       %{sid: sid} = ctx do
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, ask("ap-3"))
+    assert ask_status(sid) == "pending"
+
+    new = lease!(ctx, "new")
+    accept!(ctx, new, 1, %{"kind" => "text_delta", "delta" => "Newer."})
+
+    assert ask_status(sid) == "canceled", "no card may invite an answer the older run cannot get"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).agent_state == "working"
+    assert MapSet.size(:sys.get_state(Recorder.whereis(sid)).pending_asks) == 0
+    assert_received {:chat_permission_resolved, _request_id, :canceled}
+  end
+
   test "an ask stays pending while its own lease's turn goes on", %{sid: sid} = ctx do
     one = lease!(ctx, "one")
     accept!(ctx, one, 1, %{"kind" => "turn_started"})
