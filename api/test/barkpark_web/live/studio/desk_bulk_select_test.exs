@@ -106,7 +106,7 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
   end
 
   defp pane_id(view) do
-    [_, id] = Regex.run(~r/<section id="([^"]+)"[^>]*data-pane-index="1"/, render(view))
+    [_, id] = Regex.run(~r/<section[^>]* id="(desk-pane-1-[^"]+)"/, render(view))
     id
   end
 

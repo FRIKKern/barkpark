@@ -57,7 +57,13 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
   @doc "The bar under a list with ticked rows."
   def bar(assigns) do
     ~H"""
-    <div class="bulk-bar" role="region" aria-label={gettext("Bulk actions")} data-bulk-bar={@pane}>
+    <div
+      class="bulk-bar"
+      role="region"
+      aria-label={gettext("Bulk actions")}
+      data-bulk-bar={@pane}
+      tabindex="-1"
+    >
       <span class="bulk-count" role="status">{status(@running, @at, @count)}</span>
       <button
         type="button"
@@ -126,6 +132,7 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
     .dk .bulk-bar > .btn-text:disabled, .dk .bulk-actions > .btn:disabled { color: var(--dk-placeholder); cursor: default; }
     .dk .bulk-actions > .publish { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 0; font: inherit; font-size: 13px; font-weight: 500; padding: 4px 12px; border: 0; border-radius: 3px; background: var(--dk-publish-bg); box-shadow: none; color: var(--dk-publish-fg); cursor: pointer; }
     .dk .bulk-actions > .publish:disabled { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); cursor: default; }
+    .dk .bulk-bar:focus { outline: none; }
     .dk .bulk-bar button:focus-visible, .dk .bulk-check input:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 2px; }
     @media (max-width: 768px) and (pointer: coarse) { .dk .bulk-bar button { min-height: 44px; } }
     """

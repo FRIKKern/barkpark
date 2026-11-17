@@ -12,8 +12,9 @@
 //   - A tick shows what the server holds. A box the editor pressed keeps its
 //     own state through a patch, so after each patch every box is set from
 //     its `checked` attribute.
-//   - When selecting ends, the bar and the ticks go. If the focus was on one
-//     of them it would fall to the page: it goes to the list's "List
+//   - The focus never falls to the page. A bar button greyed out while its
+//     action runs hands it to the bar; when selecting ends, the bar and the
+//     ticks go, and a focus that was on one of them goes to the list's "List
 //     options", which starts selecting again.
 //   - The summary ("Published 2 of 3") is a toast on the page's body
 //     (`desk:bulk-toast`), up 8 s as TanStack's.
@@ -93,13 +94,20 @@
     }
   }
 
-  // Selecting ended in `pane`: a focus left on nothing, or on a tick that is
-  // out of reach now, goes to the list's "List options".
+  // An action started from the bar greys the bar's buttons out, and a greyed
+  // button drops the focus onto the page: the bar itself takes it. Selecting
+  // ended in `pane`: a focus left on nothing, or on a tick that is out of
+  // reach now, goes to the list's "List options".
   function onBulk(e) {
     var detail = e.detail || {};
     sync();
-    if (detail.active || !detail.pane) return;
+    if (!detail.pane) return;
     var at = doc.activeElement;
+    if (detail.active) {
+      var bar = at && at.disabled && at.closest ? at.closest(".bulk-bar") : null;
+      if (bar && bar.getAttribute("data-bulk-bar") === detail.pane) bar.focus({ preventScroll: true });
+      return;
+    }
     var lost = !at || at === doc.body || !at.isConnected || (at.closest && at.closest("[inert]"));
     if (!lost) return;
     var button = doc.getElementById(detail.pane + "-menu-button");

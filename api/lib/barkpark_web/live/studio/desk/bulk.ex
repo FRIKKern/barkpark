@@ -58,6 +58,9 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   # The Studio's cap (`Handlers.Bulk`), and the TanStack Studio's MAX_SELECTED.
   @max 500
 
+  # A running action says how far it is this often, at most.
+  @tell_ms 250
+
   @doc "The most documents one selection holds."
   def max_selected, do: @max
 
@@ -275,11 +278,17 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
     work =
       PaneComponent.in_locale(fn ->
         with :ok <- disconnect(cut, dataset, cut_opts) do
-          done =
-            for {id, at} <- Enum.with_index(ids, 1) do
-              tell.(at)
-              outcome(action, write(action, id, type, dataset, opts))
-            end
+          # How far it is, a few times a second at most: each word redraws the list.
+          {done, _told} =
+            ids
+            |> Enum.with_index(1)
+            |> Enum.map_reduce(nil, fn {id, at}, told ->
+              now = System.monotonic_time(:millisecond)
+              due? = is_nil(told) or now - told >= @tell_ms
+              if due?, do: tell.(at)
+              result = write(action, id, type, dataset, opts)
+              {outcome(action, result), if(due?, do: now, else: told)}
+            end)
 
           {action, done ++ List.duplicate(:skipped, rest)}
         end
