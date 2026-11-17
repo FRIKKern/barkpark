@@ -160,6 +160,8 @@ scripts/elixir-impacted-tests.sh
 scripts/elixir-impacted-tests.test.sh
 scripts/elixir-test-partition.sh
 scripts/elixir-test-partition.test.sh
+scripts/ci-test-watchdog.sh
+scripts/ci-test-watchdog.test.sh
 scripts/elixir-test-weights.tsv
 scripts/elixir-main-red-attribution.sh
 scripts/elixir-main-red-attribution.test.sh

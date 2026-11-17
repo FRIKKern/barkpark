@@ -50,6 +50,11 @@ type Runner struct {
 	// the server took it (task-522b05a5c537bebd). Such a listing starts nothing;
 	// the next poll decides. An entry goes with the lease's mark.
 	ended map[string]time.Time
+	// held: every lease whose run has started here and not yet ended, close
+	// included. Each heartbeat lists them, and the server stops renewing a
+	// running lease left off (task-e8a91dd731695004). Unlike active, a lease
+	// stays here while its close is still being sent after a cancel.
+	held map[string]struct{}
 }
 
 type leaseMark int
@@ -77,6 +82,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.active = make(map[string]activeCommand)
 	r.seen = make(map[string]leaseMark)
 	r.ended = make(map[string]time.Time)
+	r.held = make(map[string]struct{})
 
 	poll := time.NewTicker(r.PollInterval)
 	heartbeat := time.NewTicker(r.HeartbeatInterval)
@@ -90,7 +96,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// cancelAll then stops the active commands.
 	beat := &outage{name: "heartbeat"}
 	polling := &outage{name: "poll"}
-	sendHeartbeat := func() error { return r.Client.Heartbeat(ctx, r.Capabilities) }
+	sendHeartbeat := func() error { return r.Client.Heartbeat(ctx, r.Capabilities, r.heldLeases()) }
 	fetchCommands := func() error {
 		sentAt := time.Now()
 		commands, err := r.Client.Commands(ctx)
@@ -213,12 +219,16 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 	if r.seen != nil {
 		r.seen[command.LeaseID] = leaseStarted
 	}
+	if r.held != nil {
+		r.held[command.LeaseID] = struct{}{}
+	}
 	r.mu.Unlock()
 
 	go func() {
 		defer func() {
 			r.mu.Lock()
 			delete(r.active, command.LeaseID)
+			delete(r.held, command.LeaseID)
 			if r.ended != nil {
 				r.ended[command.LeaseID] = time.Now()
 			}
@@ -321,6 +331,18 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		}
 		r.markDone(command.LeaseID)
 	}()
+}
+
+// heldLeases is the heartbeat's list of held leases, sorted.
+func (r *Runner) heldLeases() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	held := make([]string, 0, len(r.held))
+	for leaseID := range r.held {
+		held = append(held, leaseID)
+	}
+	slices.Sort(held)
+	return held
 }
 
 func (r *Runner) markDone(leaseID string) {

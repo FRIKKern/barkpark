@@ -221,10 +221,12 @@ defmodule Barkpark.ChatHosts do
     |> case do
       {:ok, updated} ->
         from(l in ExecutionLease,
+          as: :lease,
           where:
             l.host_id == ^host.id and is_nil(l.revoked_at) and
               l.status in ["leased", "running", "disconnected"]
         )
+        |> kept_by_host(held_leases(attrs), now)
         |> Repo.update_all(set: [expires_at: DateTime.add(now, @lease_ttl), updated_at: now])
 
         {:ok, public_host(updated)}
@@ -232,6 +234,49 @@ defmodule Barkpark.ChatHosts do
       error ->
         error
     end
+  end
+
+  # The leases a host says its process still runs (`held_leases`,
+  # task-e8a91dd731695004). A host that gave up on a lease (its close refused
+  # for good, or an outage that outlasted its retries) leaves it off, and a
+  # `running` lease left off is not renewed: `end_expired_turns/2` then closes
+  # it as it closes a silent host's, with its typed close. Otherwise every
+  # heartbeat renewed it and its session stayed `working` until the host
+  # restarted. A host that sends no list, or not a list, renews as before.
+  #
+  # A list can be older than a lease: a heartbeat in flight while the host took
+  # it, or one the server answers after a newer one. The Go host gives up on a
+  # request after 30 s, so a lease that took an event within @lease_ttl s is
+  # renewed though the list leaves it off. A `leased` lease (not started) is
+  # renewed as before: the host may not have it yet.
+  defp held_leases(attrs) do
+    case value(attrs, :held_leases) do
+      ids when is_list(ids) -> Enum.flat_map(ids, &lease_uuid/1)
+      _ -> nil
+    end
+  end
+
+  defp lease_uuid(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> [uuid]
+      :error -> []
+    end
+  end
+
+  defp lease_uuid(_id), do: []
+
+  defp kept_by_host(query, nil, _now), do: query
+
+  defp kept_by_host(query, held, now) do
+    since = DateTime.add(now, -@lease_ttl)
+
+    recent =
+      from(e in ExecutionEvent,
+        where: e.lease_id == parent_as(:lease).id and e.inserted_at > ^since,
+        select: 1
+      )
+
+    where(query, [lease: l], l.status != "running" or l.id in ^held or exists(recent))
   end
 
   def list_hosts(workspace_id) when is_binary(workspace_id) do

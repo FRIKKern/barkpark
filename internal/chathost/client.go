@@ -98,10 +98,18 @@ func (c *Client) Enroll(ctx context.Context, token string, roots []string, capab
 	return result, err
 }
 
-func (c *Client) Heartbeat(ctx context.Context, capabilities map[string]any) error {
+// Heartbeat says the host is up and lists the leases it still holds: the
+// server renews only those of its running leases, so one this process gave up
+// on is closed by the server's expiry sweep (task-e8a91dd731695004). An empty
+// list is sent as [], meaning none; a server older than the key ignores it.
+func (c *Client) Heartbeat(ctx context.Context, capabilities map[string]any, held []string) error {
+	if held == nil {
+		held = []string{}
+	}
 	return c.do(ctx, http.MethodPost, "/v1/chat-host/heartbeat", true, map[string]any{
 		"protocol_version": 1,
 		"capabilities":     capabilities,
+		"held_leases":      held,
 	}, nil)
 }
 

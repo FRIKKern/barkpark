@@ -45,7 +45,7 @@ func TestClientAuthenticatedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.Credential = result.Credential
-	if err := client.Heartbeat(context.Background(), map[string]any{}); err != nil {
+	if err := client.Heartbeat(context.Background(), map[string]any{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	commands, err := client.Commands(context.Background())
@@ -67,14 +67,14 @@ func TestClientTreatsUnauthorizedAsRevocation(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{BaseURL: server.URL, Credential: "revoked", HTTPClient: server.Client(), AllowInsecureLoopback: true}
-	if err := client.Heartbeat(context.Background(), nil); !errors.Is(err, ErrRevoked) {
+	if err := client.Heartbeat(context.Background(), nil, nil); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("got %v want ErrRevoked", err)
 	}
 }
 
 func TestClientRejectsPlaintextRemoteServer(t *testing.T) {
 	client := &Client{BaseURL: "http://example.test", Credential: "secret"}
-	if err := client.Heartbeat(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "must use https") {
+	if err := client.Heartbeat(context.Background(), nil, nil); err == nil || !strings.Contains(err.Error(), "must use https") {
 		t.Fatalf("expected TLS validation error, got %v", err)
 	}
 }
