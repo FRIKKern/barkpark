@@ -117,9 +117,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "delete of a referenced doc opens the guard listing where it is used", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.ada)}")
 
-    view
-    |> element(~s{[data-pane-editing] button[phx-click="delete-doc"]:not([role="menuitem"])})
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s{[data-pane-editing] button[phx-click="delete-doc"]:not([role="menuitem"])})
+    )
 
     # The desk's own dialog (`Desk.DeleteDialog`), not the Studio's modal.
     dialog = ~s([data-pane-editing] [role="dialog"][data-desk-dialog="delete"])
@@ -137,11 +138,12 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "deleting a doc deep in a chain lands on the chain without it", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.lone)}")
 
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
-    view
-    |> element(~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
+    )
 
     landed = assert_patch(view, 2_000)
     assert landed == "#{c.base}/#{c.post};#{c.one}"
@@ -152,11 +154,12 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "deleting a doc opened from its list lands on the list, without its row", c do
     view = open(c.conn, "#{c.base}/#{c.author};#{c.lone}")
 
-    render_hook(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
 
-    view
-    |> element(~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-desk-dialog="delete"] button[data-desk-confirm="delete"]))
+    )
 
     landed = assert_patch(view, 2_000)
     assert String.starts_with?(landed, c.base <> "/")
@@ -177,9 +180,10 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "unpublishing a referenced doc opens the guard listing its referencers", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.ada)}")
 
-    view
-    |> element(~s{[data-pane-editing] button[phx-click="unpublish"]:not([role="menuitem"])})
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s{[data-pane-editing] button[phx-click="unpublish"]:not([role="menuitem"])})
+    )
 
     # The desk's own dialog (`Desk.UnpublishDialog`), not the Studio's modal.
     dialog = ~s([data-pane-editing] [role="dialog"][data-desk-dialog="unpublish"])
@@ -200,7 +204,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
   test "duplicating a doc deep in a chain opens the copy in that chain", c do
     view = open(c.conn, "#{c.base}/#{deep(c, c.lone)}")
 
-    render_hook(view, "duplicate-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
     landed = assert_patch(view, 2_000)
 

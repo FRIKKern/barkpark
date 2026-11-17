@@ -106,10 +106,10 @@ defmodule BarkparkWeb.Studio.DisconnectGrantTargetTest do
     conn = grantee_conn(conn, ws, proj, %{type: @type_name, doc_id: "q8-target"})
     view = open!(conn, ws, proj, "q8-target")
 
-    html = render_click(view, "delete-doc", %{})
+    html = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
     assert html =~ "Referrer", "read reach: the modal must list the referencer"
 
-    html = render_click(view, "confirm-delete", %{"disconnect" => "true"})
+    html = BarkparkWeb.EditorPost.press(view, "confirm-delete", %{"disconnect" => "true"})
 
     assert stored("q8-ref", scope).content["related"] == "q8-target",
            "the referencer is outside the write grant; its reference must stay"
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.Studio.DisconnectGrantTargetTest do
     # Sent directly: the event needs only the open document, and a client can
     # send it without the guard modal (whose edge-based preview may be empty
     # before the projector runs).
-    html = render_click(view, "confirm-unpublish", %{"disconnect" => "true"})
+    html = BarkparkWeb.EditorPost.press(view, "confirm-unpublish", %{"disconnect" => "true"})
 
     assert stored("q8-ref", scope).content["related"] == "q8-target"
     assert stored("q8-target", scope), "the published target must still be there"
@@ -139,8 +139,8 @@ defmodule BarkparkWeb.Studio.DisconnectGrantTargetTest do
     conn = grantee_conn(conn, ws, proj, %{type: @type_name})
     view = open!(conn, ws, proj, "q8-target")
 
-    _ = render_click(view, "delete-doc", %{})
-    _ = render_click(view, "confirm-delete", %{"disconnect" => "true"})
+    _ = BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+    _ = BarkparkWeb.EditorPost.press(view, "confirm-delete", %{"disconnect" => "true"})
 
     refute Map.has_key?(stored("q8-ref", scope).content, "related")
     refute stored("q8-target", scope)

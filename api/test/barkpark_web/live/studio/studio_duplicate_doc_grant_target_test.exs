@@ -83,7 +83,7 @@ defmodule BarkparkWeb.Studio.StudioDuplicateDocGrantTargetTest do
     view = open_granted(Plug.Test.init_test_session(ctx.conn, %{"user_session" => raw}), ctx)
 
     before = post_count(ctx.opts)
-    render_click(view, "duplicate-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
     assert post_count(ctx.opts) == before,
            "a doc-scoped write grant created a new document through duplicate-doc"
@@ -104,7 +104,7 @@ defmodule BarkparkWeb.Studio.StudioDuplicateDocGrantTargetTest do
     view = open_granted(Plug.Test.init_test_session(ctx.conn, %{"user_session" => raw}), ctx)
 
     before = post_count(ctx.opts)
-    render_click(view, "duplicate-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
     assert post_count(ctx.opts) == before + 1
   end

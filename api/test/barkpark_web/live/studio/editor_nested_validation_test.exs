@@ -156,7 +156,7 @@ defmodule BarkparkWeb.Studio.EditorNestedValidationTest do
     assert html =~ ~s(data-test-id="validation-warnings")
     assert html =~ "1 warning"
 
-    view |> element(~s(button[phx-click="publish"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="publish"])))
     html = render(view)
     refute html =~ "Fix validation errors before publishing"
     assert published(scope).content["seo"]["description"] == @long
@@ -180,7 +180,7 @@ defmodule BarkparkWeb.Studio.EditorNestedValidationTest do
     refute html =~ ~s(class="field-errors")
     refute html =~ ~s(data-test-id="validation-warnings")
 
-    view |> element(~s(button[phx-click="publish"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="publish"])))
     assert render(view) =~ "Fix validation errors before publishing"
     assert hd(published(scope).content["banners"])["title"] == "Crime from the North"
   end

@@ -52,6 +52,21 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   for, and reloads a page whose script is too old to name its presses. The pickers finish their write in a message the page sends itself;
   `own/2` and `own?/2` keep that message to the document it was built in.
 
+  ## Document actions
+
+  Publish, Unpublish, Delete, Discard draft, Duplicate, a revision's Restore
+  and the confirm of each one's dialog are such presses too
+  (task-176bd529276ff8b3): Delete pressed in A must not delete B. Their
+  controls sit outside the form (the header, the desk's menu and footer, a
+  dialog), and a sheet or a paper has no editor form at all, so the page
+  carries the same value once more, on `holder/1`, for the script to read
+  when there is no form.
+
+  A dialog one of them opened belongs to the document it was opened for:
+  `leave/2` closes it when the editor comes to hold another document, so a
+  confirm is always pressed in, and named for, the document the dialog asked
+  about.
+
   The name only narrows. What a socket may write is asked where it always
   was (`Shared.do_autosave/3`); an event that names the open document gets
   nothing it would not have had.
@@ -71,6 +86,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   Both keys sit beside `_target` and `_bp_seen`, outside `doc`, so they are
   never read as a field: not stored, not coerced, not in the form buffer.
   """
+
+  use Phoenix.Component
 
   require Logger
 
@@ -144,6 +161,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
     end
   end
 
+  @doc "`pressed/3` for a handler that takes the socket alone."
+  def pressed_in(params, socket, fun) when is_function(fun, 1),
+    do: pressed(params, socket, fn _params, socket -> fun.(socket) end)
+
   # The address is the one the Studio's chrome keeps for every page it
   # draws. A socket without one (built by hand) is left as it is.
   defp reload(socket) do
@@ -151,6 +172,40 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
       "/" <> _ = path -> Phoenix.LiveView.redirect(socket, to: path)
       _ -> socket
     end
+  end
+
+  @doc """
+  The dialogs a document action opened (delete, discard, unpublish,
+  history), closed when the editor holds another document than `was`
+  (`of/1` before the change), or none.
+  """
+  def leave(socket, was) do
+    if of(socket) === was, do: socket, else: close_dialogs(socket)
+  end
+
+  @doc "Those dialogs, closed."
+  def close_dialogs(socket) do
+    Phoenix.Component.assign(socket,
+      show_delete: false,
+      delete_refs: [],
+      show_discard: false,
+      show_unpublish_guard: false,
+      unpublish_refs: [],
+      show_history: false,
+      revisions: []
+    )
+  end
+
+  attr :doc, :string, default: nil
+
+  @doc """
+  The page's copy of the open document's value, for a press on a page with
+  no editor form (`bp-array-focus.js`). Absent with no document.
+  """
+  def holder(assigns) do
+    ~H"""
+    <span :if={@doc} id="bp-doc" hidden data-bp-doc={@doc}></span>
+    """
   end
 
   @doc """

@@ -128,9 +128,10 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
       |> render_click()
 
       # The desk asks first, also when nobody refers to the document.
-      view
-      |> element(~s([data-desk-dialog="unpublish"] button[data-desk-confirm="unpublish"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s([data-desk-dialog="unpublish"] button[data-desk-confirm="unpublish"]))
+      )
 
       assert flash?(view, "Unpublished")
       assert badge?(view, "draft")
@@ -149,7 +150,7 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
       assert title_shown?(view, "Life draft")
       assert offered?(view, "Discard draft")
 
-      render_click(view, "discard-draft", %{})
+      BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
       assert has_element?(view, ~s([data-test-id="discard-draft-modal"]))
       render_click(view, "close-discard", %{})
       refute has_element?(view, ~s([data-test-id="discard-draft-modal"]))
@@ -170,8 +171,8 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
 
       view = open(ctx)
       assert title_shown?(view, "Life draft")
-      render_click(view, "discard-draft", %{})
-      render_click(view, "confirm-discard", %{})
+      BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
+      BarkparkWeb.EditorPost.press(view, "confirm-discard", %{})
       settle(view)
 
       %{proxy: {ref, topic, _}} = view

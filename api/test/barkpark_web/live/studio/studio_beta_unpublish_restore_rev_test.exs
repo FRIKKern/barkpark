@@ -67,9 +67,10 @@ defmodule BarkparkWeb.Studio.StudioBetaUnpublishRestoreRevTest do
     view = open_beta(conn)
     before = current("unpubrev-1").rev
 
-    view
-    |> element(~s([data-test-id="studio-beta-doc-actions"] [phx-click="unpublish"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-test-id="studio-beta-doc-actions"] [phx-click="unpublish"]))
+    )
 
     rev = :sys.get_state(view.pid).socket.assigns.editor_doc.rev
     refute rev == before
@@ -107,7 +108,7 @@ defmodule BarkparkWeb.Studio.StudioBetaUnpublishRestoreRevTest do
       end)
 
     view = open_beta(conn)
-    render_click(view, "restore-revision", %{"id" => rev_id})
+    BarkparkWeb.EditorPost.press(view, "restore-revision", %{"id" => rev_id})
 
     %{rev: rev} = current("drafts.unpubrev-1")
 

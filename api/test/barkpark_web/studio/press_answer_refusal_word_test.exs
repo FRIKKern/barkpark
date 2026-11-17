@@ -133,7 +133,7 @@ defmodule BarkparkWeb.Studio.PressAnswerRefusalWordTest do
 
       before = render(view)
 
-      render_click(view, "publish", %{})
+      BarkparkWeb.EditorPost.press(view, "publish", %{})
 
       after_html = render(view)
 
