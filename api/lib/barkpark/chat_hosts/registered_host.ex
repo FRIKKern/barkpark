@@ -5,6 +5,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   import Ecto.Changeset
 
   alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.NulText
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -137,11 +138,20 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     end)
   end
 
+  # jsonb refuses U+0000 (22P05): a version or operations item holding it was a
+  # 500 on enroll, heartbeat and the owner's issue (task-214ecfd6ffe27b56).
   defp validate_capabilities(changeset) do
     validate_change(changeset, :capabilities, fn :capabilities, value ->
-      if safe_capabilities?(value),
-        do: [],
-        else: [capabilities: "must contain only non-secret readiness metadata"]
+      cond do
+        NulText.check(value) != :ok ->
+          [capabilities: "must not contain a NUL character (U+0000)"]
+
+        safe_capabilities?(value) ->
+          []
+
+        true ->
+          [capabilities: "must contain only non-secret readiness metadata"]
+      end
     end)
   end
 

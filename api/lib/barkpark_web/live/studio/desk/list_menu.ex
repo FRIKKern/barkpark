@@ -41,6 +41,11 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
   attr(:named, :list, default: [], doc: "the type's `desk.sortOrderings` (`%{name, title}`)")
   attr(:myself, :any, required: true)
 
+  attr(:selecting, :any,
+    default: nil,
+    doc: "nil where rows cannot be ticked; else whether the list is selecting (`Bulk`)"
+  )
+
   def menu(assigns) do
     # No pick reads in the default order: its item carries the check, and
     # "Default sort" says it is already in use, as the TanStack Studio's.
@@ -91,6 +96,20 @@ defmodule BarkparkWeb.Studio.Desk.ListMenu do
         menu_id={@menu_id}
         myself={@myself}
       />
+      <%!-- B03: the ticks show once selecting starts here, as the TanStack
+            Studio's; the item is the page's event (`Bulk`). --%>
+      <Menu.separator :if={is_boolean(@selecting)} />
+      <Menu.item
+        :if={is_boolean(@selecting)}
+        role="menuitemradio"
+        aria-checked={to_string(@selecting)}
+        class="menu-item"
+        phx-click="bulk-select"
+        phx-value-pane={@id}
+        phx-value-on={to_string(!@selecting)}
+        popovertarget={@menu_id}
+        popovertargetaction="hide"
+      >{if @selecting, do: gettext("Stop selecting"), else: gettext("Select documents")}</Menu.item>
     </div>
     """
   end

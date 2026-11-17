@@ -91,24 +91,39 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
   # opens: the handler has just read the edge index for the same document,
   # so the database is there.
   defp read(%{editor_doc: %{doc_id: doc_id}, dataset: dataset} = assigns)
-       when is_binary(dataset) do
-    scope = Map.fetch!(assigns, :scope)
-
-    rows =
-      for ref <- IncomingRefs.referrers(doc_id, dataset, assigns) do
-        %{
-          id: Content.published_id(ref.from_doc_id),
-          type: ref.type,
-          title: ref[:title],
-          field: ref[:via_field]
-        }
-      end
-
-    kinds = Map.new(Enum.uniq_by(rows, & &1.type), &{&1.type, kind(&1.type, dataset, scope)})
-    Enum.map(rows, &Map.put(&1, :kind, kinds[&1.type]))
-  end
+       when is_binary(dataset),
+       do: assigns |> then(&rows_for([doc_id], &1)) |> Map.get(doc_id, [])
 
   defp read(_assigns), do: []
+
+  @doc """
+  The rows of each of `ids`, by id: who refers to it. The bulk unpublish
+  dialog (`Bulk`) asks for every ticked document at once; each type's title
+  is read once for all of them.
+  """
+  @spec rows_for([String.t()], map()) :: %{String.t() => [row()]}
+  def rows_for(ids, %{dataset: dataset} = assigns) when is_list(ids) and is_binary(dataset) do
+    scope = Map.fetch!(assigns, :scope)
+
+    found =
+      for id <- ids, into: %{} do
+        rows =
+          for ref <- IncomingRefs.referrers(id, dataset, assigns) do
+            %{
+              id: Content.published_id(ref.from_doc_id),
+              type: ref.type,
+              title: ref[:title],
+              field: ref[:via_field]
+            }
+          end
+
+        {id, rows}
+      end
+
+    types = found |> Map.values() |> List.flatten() |> Enum.map(& &1.type) |> Enum.uniq()
+    kinds = Map.new(types, &{&1, kind(&1, dataset, scope)})
+    Map.new(found, fn {id, rows} -> {id, Enum.map(rows, &Map.put(&1, :kind, kinds[&1.type]))} end)
+  end
 
   defp kind(type, dataset, scope) do
     case Content.get_schema(type, dataset, scope) do

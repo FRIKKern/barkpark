@@ -8,6 +8,8 @@ defmodule Barkpark.UserPrefs.UserPref do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Barkpark.StudioChat.NulText
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -36,9 +38,26 @@ defmodule Barkpark.UserPrefs.UserPref do
     |> validate_length(:key, max: @max_key_length)
     |> validate_length(:dataset, max: 200)
     |> validate_value_size()
+    |> validate_no_nul()
     |> unique_constraint([:user_id, :workspace_id, :dataset, :key],
       name: :user_prefs_user_workspace_dataset_key_idx
     )
+  end
+
+  @doc """
+  False when `dataset` or `key` holds U+0000: no row can be stored under it
+  (`changeset/2` refuses it), and a query naming it would raise (22021).
+  """
+  def storable_name?(dataset, key), do: NulText.check([dataset, key]) == :ok
+
+  # Postgres refuses U+0000 in text (22021) and jsonb (22P05): in a key,
+  # dataset or anywhere in the value it raised, a 500 (task-001a70d85eaa9b3c).
+  defp validate_no_nul(changeset) do
+    Enum.reduce([:dataset, :key, :value], changeset, fn field, changeset ->
+      if NulText.check(get_change(changeset, field)) == :ok,
+        do: changeset,
+        else: add_error(changeset, field, "must not contain a NUL character (U+0000)")
+    end)
   end
 
   defp validate_value_size(changeset) do

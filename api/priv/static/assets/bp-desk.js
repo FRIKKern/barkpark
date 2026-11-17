@@ -724,6 +724,8 @@
       fieldScript();
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
+      // A list's selection (bp-desk-bulk.js): the modified clicks, Escape, the toast.
+      deskScript("data-desk-bulk", window.BarkparkDeskBulk);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.
@@ -1123,7 +1125,8 @@
         if (!row || !root.contains(row) || e.metaKey || e.ctrlKey || e.altKey) return;
         var pane = paneOf(root, row);
         if (!pane) return;
-        if (e.key === "Tab") return leaveList(e, pane);
+        // A list that is selecting is no single Tab stop: Tab walks its ticks.
+        if (e.key === "Tab") return row.closest(".list-rows[data-selecting]") ? undefined : leaveList(e, pane);
         var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
         if (step === undefined || e.shiftKey) return;
         var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
@@ -1233,7 +1236,7 @@
         });
         var at = all.indexOf(from);
         var next = at < 0 ? null : all[at + (e.shiftKey ? -1 : 1)];
-        if (!next || !next.matches(ROW) || !root.contains(next)) return;
+        if (!next || !next.matches(ROW) || !root.contains(next) || next.closest(".list-rows[data-selecting]")) return;
         var pane = next.closest("[data-pane-index]");
         var to = pane && (pane.querySelector(ROW + ".selected") || pane.querySelector(ROW));
         if (!to || to === next) return;

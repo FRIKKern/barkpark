@@ -12,8 +12,10 @@ defmodule Barkpark.ChatHosts.EventText do
   So every U+0000 in every string the event carries (map keys, values, list
   items, at any depth) is stored as U+FFFD, the Unicode replacement character:
   the reader sees that a character was there and could not be kept, and no
-  other byte changes. The same event always maps to the same payload, so a
-  host's retry at the same cursor is still a duplicate.
+  other byte changes. One consequence: two map keys that differ only by
+  U+0000 against U+FFFD become one key, and only one of their values is kept.
+  The same event always maps to the same payload, so a host's retry at the
+  same cursor is still a duplicate.
   """
 
   @replacement "�"
