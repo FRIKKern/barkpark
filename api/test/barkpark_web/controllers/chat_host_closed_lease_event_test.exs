@@ -240,6 +240,81 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
     assert ChatHosts.replay_unprojected(sid) == []
   end
 
+  # Only a newer turn that is still open supersedes: once it has closed (here it
+  # failed at once), the older turn is the one the session shows again, and its
+  # reply is stored (review of #26812, case T4).
+  test "an older lease's reply is stored when the newer turn already closed", %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    new = lease!(ctx, "new")
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+
+    assert {:ok, :accepted} = event(ctx, new, 2, @dead_close)
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Older reply."})
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert ["Older reply."] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    refute StudioChat.get_session(sid).status == "exited"
+  end
+
+  # A newer lease supersedes from its `turn_started`, not from its first event:
+  # the host posts `session_started` (claude `system/init`, codex
+  # `thread/started`) before the turn starts.
+  test "a newer lease that has only started its provider session does not stop the older reply",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    new = lease!(ctx, "new")
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 1, %{"kind" => "session_started", "provider_session_id" => "p-new"})
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Older reply."})
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert ["Older reply."] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+  end
+
+  # A newer turn supersedes only in its own session: a turn in another session
+  # of the same workspace, on the same host, leaves this one's reply alone.
+  test "a newer turn in another session of the workspace does not stop this session's reply",
+       %{sid: sid} = ctx do
+    other = other_session(ctx)
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    elsewhere = lease!(other, "elsewhere")
+
+    assert {:ok, :accepted} =
+             event(other, elsewhere, 1, %{"kind" => "turn_started", "turn_id" => "t-elsewhere"})
+
+    assert {:ok, :accepted} = event(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Mine."})
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert ["Mine."] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    refute StudioChat.get_session(sid).status == "working"
+    assert StudioChat.get_session(other.sid).status == "working"
+  end
+
   # A codex app-server `error` that will retry, as the Go host forwards it
   # (the notification's params as `error`).
   @retrying %{
@@ -379,6 +454,27 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
 
     {:ok, _recorder} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
     %{host: host, credential: enrolled.credential, sid: sid, provider: provider}
+  end
+
+  # A second session in the same workspace, run by the same host, with its own
+  # live Recorder.
+  defp other_session(%{host: host, provider: provider} = ctx) do
+    sid = Ecto.UUID.generate()
+
+    {:ok, _} =
+      StudioChat.create_session(
+        %{
+          id: sid,
+          mode: "plan",
+          provider: provider,
+          execution_target: "registered_host",
+          execution_host_id: host.id
+        },
+        host.workspace_id
+      )
+
+    {:ok, _recorder} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+    %{ctx | sid: sid}
   end
 
   defp capabilities do
