@@ -10,21 +10,21 @@ LiveViews read `session["api_token_session"]`
 
 ## Tenancy — token ↔ workspace
 
-The principal is the API token; each binds to one **workspace** (tenancy boundary;
+The principal is the API token, bound to one **workspace** (tenancy boundary;
 `docs/api-v1.md` §1a) by two facts that must agree:
 
 - `api_tokens.workspace_id`: the token's workspace.
 - a `workspace_memberships` row: its membership.
 
 Requests carry both in the path
-(`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
-**before** any permission check: slug unresolved → `404 not_found`; resolved, no
+(`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is checked
+**before** permissions: slug unresolved → `404 not_found`; resolved, no
 seat → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). A token bound to a
-`dataset` (`dataset_bound`) gets `403 dataset_not_bound` elsewhere, on
-workspace/project create, playground, import. Admin reads/writes (audit,
+`dataset` (`dataset_bound`; old `bp` mints: re-mint) gets `403 dataset_not_bound`
+elsewhere, on workspace/project create, playground, import. Admin reads/writes (audit,
 export, seats, grants, shares, tokens, chat hosts, secrets, workspace
 delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 `:dataset_bound_admin_reads` `:enforce`.
@@ -57,8 +57,8 @@ machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` (`AssignDefaultScope` stamps *Default*):
-every tenant's admin gets `200` on the wrong tenant. The mirror (gate on
-membership, act instance-wide) is the same. A flat admin route pins the
+every tenant's admin gets `200` on the wrong tenant. So is the mirror (gate
+on membership, act instance-wide). A flat admin route pins the
 GLOBAL tier (`SecretController.resolve_scope/1` → `:global`, never the assign);
 acting per-workspace needs a slug-resolving route proving `workspace_admin?/2`.
 
@@ -67,7 +67,7 @@ resolves it to `:global`, stamping `owner_workspace_id = NULL`
 (`ChatTokenController`).
 
 **Tier 0: instance operator** (`RequirePlatformOperator`): `admin` plus an
-env allowlist; see [instance-operator-tier.md](contracts/instance-operator-tier.md).
+env allowlist; [instance-operator-tier.md](contracts/instance-operator-tier.md).
 
 ## Minting `write`/`admin`
 
