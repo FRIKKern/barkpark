@@ -97,11 +97,16 @@ type ambiguousWrite struct {
 // checkCommand is the ONE command the operator should run next. An id beats a
 // search every time, so it is preferred whenever this process actually received
 // one.
+//
+// The search names the drafts perspective: a row an ambiguous create may have
+// landed is a DRAFT (the publish never ran), and search reads published rows
+// by default, so a bare search answers "not found" for exactly that row
+// (task-e897b05667403f28).
 func (a ambiguousWrite) checkCommand() string {
 	if id := strings.TrimPrefix(a.docID, "drafts."); id != "" {
 		return "bp task get " + id
 	}
-	return fmt.Sprintf("bp search query %q", a.title)
+	return fmt.Sprintf("bp search query %q --perspective drafts", a.title)
 }
 
 // renderAmbiguousWrite is the single seam every ambiguous `bp task create`
