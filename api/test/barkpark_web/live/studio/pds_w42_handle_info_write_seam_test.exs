@@ -295,6 +295,11 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # `{:desk_doc_titles, …}` writes nothing: a pane tells its page the titles
     # its read named, so a frame drawn before a document is read is named by
     # its title, not its id (task-e35222e32d3e3b88).
+    # `{:desk_bulk_pick, …}` writes nothing: a desk list pane tells its page
+    # which rows a tick or a Shift-click names, and the page keeps that
+    # selection in its assigns. The publish and unpublish of a selection are
+    # the page's own `bulk-publish` / `bulk-unpublish` events, which pass the
+    # socket gate at the admin tier (task-4224c3aa5a788cd9).
     # `{:desk_edit, …}` is the desk slice asking itself to load the Studio's
     # editor for the last document, one message after the pane's frame went
     # out; the writes that follow are the Studio's own guarded handlers
@@ -310,6 +315,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_pick,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
+               {"live/studio/desk/bulk.ex", "{:desk_bulk_pick,"},
                {"live/studio/desk/pane_component.ex", "{:desk_doc_titles,"},
                {"live/studio/desk/pane_component.ex", "{:desk_list_sort,"},
                {"live/studio/desk/pane_component.ex", "{:desk_pane_failed,"},

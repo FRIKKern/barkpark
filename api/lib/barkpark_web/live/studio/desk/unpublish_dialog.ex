@@ -97,6 +97,114 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
     """
   end
 
+  attr :id, :string, required: true
+  attr :pane, :string, required: true, doc: "the list pane whose ticked rows are asked about"
+
+  attr :docs, :list,
+    required: true,
+    doc: "the ticked documents that are published: `%{id, title, rows}`, `rows` who refers to it"
+
+  attr :base, :string, required: true
+
+  attr :checking, :boolean,
+    default: false,
+    doc: "who refers is still being read: the dialog says so and its buttons wait"
+
+  attr :busy, :boolean,
+    default: false,
+    doc: "the unpublish it started is running: its buttons wait, Cancel puts it away"
+
+  @doc """
+  The same dialog for a list's ticked rows (B03, `Bulk`): "Unpublish 2
+  documents?", and one section per document that others refer to. Its
+  buttons send the page's `bulk-unpublish` with `confirm`; nothing here
+  unpublishes.
+  """
+  def many(assigns) do
+    assigns =
+      assign(assigns,
+        used: Enum.filter(assigns.docs, &(&1.rows != [])),
+        many?: length(assigns.docs) > 1
+      )
+
+    ~H"""
+    <DocDialog.frame
+      id={@id}
+      name="bulk-unpublish"
+      title={
+        if @many?,
+          do: gettext("Unpublish %{n} documents?", n: length(@docs)),
+          else: gettext("Unpublish document?")
+      }
+      close="bulk-unpublish-close"
+    >
+      <p :if={@checking} class="muted" role="status">
+        {gettext("Looking for documents that refer to them…")}
+      </p>
+      <p :if={!@checking and (@used == [] or !@many?)}>
+        <%= if @many? do %>
+          {gettext("They will no longer be live. Each one stays as a draft you can publish again.")}
+        <% else %>
+          <.sure title={hd(@docs).title} />
+        <% end %>
+      </p>
+      <section
+        :for={doc <- @used}
+        class="unpublish-used"
+        aria-label={gettext("Referring to %{title}", title: doc.title)}
+      >
+        <p class="warning" role="status">{DocDialog.refers(length(doc.rows), doc.title)}</p>
+        <p>
+          {gettext(
+            "You may not be able to unpublish “%{title}” because the following documents refer to it:",
+            title: doc.title
+          )}
+        </p>
+        <DocDialog.used_in rows={doc.rows} base={@base} field />
+        <p>
+          {gettext(
+            "If you unpublish this document, documents that refer to it will no longer be able to access it."
+          )}
+        </p>
+      </section>
+      <:actions>
+        <button
+          type="button"
+          class="dk-dialog-btn btn"
+          phx-click="bulk-unpublish-close"
+          data-modal-focus
+        >
+          {gettext("Cancel")}
+        </button>
+        <button
+          :if={@used != []}
+          type="button"
+          class="dk-dialog-btn btn"
+          phx-click="bulk-unpublish"
+          phx-value-pane={@pane}
+          phx-value-confirm="true"
+          phx-value-disconnect="true"
+          data-desk-confirm="disconnect-unpublish"
+          disabled={@checking or @busy}
+        >
+          {gettext("Disconnect references and unpublish")}
+        </button>
+        <button
+          type="button"
+          class="dk-dialog-btn btn danger"
+          phx-click="bulk-unpublish"
+          phx-value-pane={@pane}
+          phx-value-confirm="true"
+          data-desk-confirm="unpublish"
+          disabled={@checking or @busy}
+        >
+          {if @used != [], do: gettext("Unpublish anyway"), else: gettext("Unpublish now")}
+        </button>
+      </:actions>
+    </DocDialog.frame>
+    """
+  end
+
   # The Studio's `confirm-unpublish`, and the focus to the pane's document
   # actions, as the TanStack Studio's (`PublishedFooter`): the footer's
   # Unpublish, when it opened the dialog, is greyed out once the document is

@@ -149,7 +149,9 @@ defmodule BarkparkWeb.Studio.DeskListMenuTest do
              "Sort by Rating, highest",
              "Sort by Last Edited",
              "Sort by Created",
-             "Default sort"
+             "Default sort",
+             # B03: after the sorts, as the TanStack Studio's menu (`Bulk`).
+             "Select documents"
            ]
 
     # A type that declares no orderings: its title field.
