@@ -1605,8 +1605,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
       # map (question answers); a deny drops it. Pruned either way so the map
       # never grows unbounded across a long session.
-      # The answer names the ask by the id its sink got (U+FFFD for U+0000);
-      # the CLI gets back the id it sent, so it can match its own request.
+      # Keyed by the sink's id (U+FFFD for U+0000); the CLI gets back its own id.
       {ask, pending_asks} = Map.pop(state.pending_asks, request_id)
       original = ask && ask.input
       wire_id = if ask, do: ask.request_id, else: request_id

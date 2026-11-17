@@ -1571,10 +1571,9 @@ defmodule Barkpark.StudioChat.Recorder do
   defp maybe_capture_event_provider_session_id(session_id, provider_session_id)
        when is_binary(provider_session_id) and provider_session_id != "" do
     # A runtime's own id (a Codex thread id) comes back raw; the store refuses U+0000.
-    case StudioChat.set_provider_session_id(
-           session_id,
-           EventText.replace_nul(provider_session_id)
-         ) do
+    provider_session_id = EventText.replace_nul(provider_session_id)
+
+    case StudioChat.set_provider_session_id(session_id, provider_session_id) do
       {:ok, _session} ->
         :ok
 
