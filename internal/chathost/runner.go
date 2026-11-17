@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 )
@@ -245,11 +243,13 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 		// re-posting a refused close every poll spends the write budget that
 		// started this. A refusal retrying can heal leaves it to the next poll.
 		//
-		// firstUnconfirmed: the first-event bound (below) cut event 1's publish
-		// before the server answered it. The server may still have taken it:
-		// its answer was slow or lost. Then cursor 1 holds event 1, the close
-		// sent there is refused as cursor_conflict, and it goes at cursor 2.
-		firstUnconfirmed := false
+		// unconfirmed: the first event, when the first-event bound (below) cut
+		// its publish before the server answered. The server may hold it all
+		// the same (its answer was slow or lost), and then the close sent at its
+		// cursor is refused as cursor_conflict. So may the server's own close,
+		// when it withdrew the lease meanwhile (end_server_turn). Which one,
+		// closeAfterUnconfirmed asks.
+		var unconfirmed map[string]any
 		terminal := func(state string, err error) {
 			cancel()
 			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), r.terminalTimeout())
@@ -260,10 +260,10 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 				"error":          map[string]any{"message": err.Error()},
 			}
 			perr := publish(publishCtx, closing)
-			if perr != nil && firstUnconfirmed && cursorConflict(perr) {
-				r.logf("lease %s: the server holds the turn's first event after all; closing after it", command.LeaseID)
-				cursor++
-				perr = publish(publishCtx, closing)
+			if perr != nil && unconfirmed != nil && cursorConflict(perr) {
+				perr = r.closeAfterUnconfirmed(command.LeaseID, perr,
+					func() error { return publish(publishCtx, unconfirmed) },
+					func() error { return publish(publishCtx, closing) })
 			}
 			if perr != nil {
 				r.logf("lease %s: its %s terminal was not taken: %v", command.LeaseID, state, perr)
@@ -304,7 +304,7 @@ func (r *Runner) startListed(parent context.Context, command RemoteCommand, poll
 			defer cancelFirst()
 			err := publish(firstCtx, event)
 			if err != nil && ctx.Err() == nil && firstCtx.Err() != nil {
-				firstUnconfirmed = true
+				unconfirmed = event
 				return fmt.Errorf("the server did not confirm the turn's first event within %s, so the provider was stopped: %w", bound, err)
 			}
 			return err
@@ -353,39 +353,6 @@ const maxPublishOutage = 2 * time.Minute
 // Bound on the terminal publish after the run has ended, unless the Runner
 // sets TerminalTimeout.
 const defaultTerminalTimeout = 30 * time.Second
-
-// Bound on publishing a turn's first event, unless the Runner sets
-// FirstEventTimeout. Long enough to outlast a short blip (with the default
-// 1 s PollInterval: attempts at about 0, 1, 3 and 7 s), short enough that the
-// provider is stopped before it gets far into a turn the server may never
-// count as sent.
-const defaultFirstEventTimeout = 10 * time.Second
-
-func (r *Runner) firstEventTimeout() time.Duration {
-	if r.FirstEventTimeout > 0 {
-		return r.FirstEventTimeout
-	}
-	return defaultFirstEventTimeout
-}
-
-// FirstEventTimeoutFromEnv reads BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT (a Go
-// duration) for Runner.FirstEventTimeout. Unset or not a positive duration, it
-// returns zero: the 10 s default.
-func FirstEventTimeoutFromEnv(getenv func(string) string) time.Duration {
-	timeout, err := time.ParseDuration(strings.TrimSpace(getenv("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT")))
-	if err != nil || timeout <= 0 {
-		return 0
-	}
-	return timeout
-}
-
-// cursorConflict reports whether the server refused an event because its
-// cursor already holds a different one (ChatHosts.reconcile_event/4, answered
-// 422 ":cursor_conflict").
-func cursorConflict(err error) bool {
-	var status *StatusError
-	return errors.As(err, &status) && status.Code == http.StatusUnprocessableEntity && strings.Contains(status.Body, "cursor_conflict")
-}
 
 func (r *Runner) terminalTimeout() time.Duration {
 	if r.TerminalTimeout > 0 {

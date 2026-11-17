@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -37,6 +38,12 @@ type leaseServer struct {
 	firstEventDeadline time.Duration
 	// transport, when set, wraps the HTTP transport of the Runner's client.
 	transport func(http.RoundTripper) http.RoundTripper
+	// log, when set, is the Runner's log (else a fresh buffer).
+	log io.Writer
+	// runFor bounds the Runner's run (zero: 5 s). A test that starts a
+	// provider process sets more: on a loaded machine its start alone can
+	// take seconds.
+	runFor time.Duration
 	// refuseKind: answer every event of this kind with that status.
 	refuseKind map[string]int
 	// onEvent, when set, sees the kind of every event POST, taken or not.
@@ -191,11 +198,15 @@ func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handle
 	if server.transport != nil {
 		httpClient = &http.Client{Transport: server.transport(httpClient.Transport)}
 	}
+	var log io.Writer = &syncBuffer{}
+	if server.log != nil {
+		log = server.log
+	}
 	runner := Runner{
 		Client:            &Client{BaseURL: ts.URL, Credential: "host-secret", HTTPClient: httpClient, AllowInsecureLoopback: true},
 		Handler:           handler,
 		PollInterval:      time.Millisecond,
-		Log:               &syncBuffer{},
+		Log:               log,
 		TerminalTimeout:   server.closeDeadline,
 		FirstEventTimeout: server.firstEventDeadline,
 	}
@@ -203,7 +214,11 @@ func startRunnerOn(t *testing.T, front http.Handler, server *leaseServer, handle
 	if local, ok := handler.(*LocalHandler); ok && local.Status == nil {
 		local.Status = runner.Client
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	runFor := 5 * time.Second
+	if server.runFor > 0 {
+		runFor = server.runFor
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), runFor)
 	result := make(chan error, 1)
 	go func() { result <- runner.Run(ctx) }()
 	return ctx, func() {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,13 +19,15 @@ import (
 //   - slow: the 2xx is held until the turn's close arrives (3 s backstop), as
 //     when the server's Recorder call after the commit is slow;
 //   - lost: the answer is a 503 (the 2xx was lost on the way), and every later
-//     post of session_started is refused with 503.
+//     post of session_started is refused with 503 until the close arrives
+//     (stillFailing: for good).
 //
 // Either way the first-event bound cuts the publish while the server holds
 // event 1, so a close sent at cursor 1 is refused as cursor_conflict.
 type takenFirstServer struct {
-	inner *leaseServer
-	lost  bool
+	inner        *leaseServer
+	lost         bool
+	stillFailing bool
 
 	mu         sync.Mutex
 	firstPosts int
@@ -108,7 +111,7 @@ func (s *takenFirstServer) handler(t *testing.T) http.Handler {
 				w.WriteHeader(taken.Code)
 				_, _ = w.Write(taken.Body.Bytes())
 				return
-			case s.lost:
+			case s.lost && (s.stillFailing || !isClosed(s.closeSeen)):
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -136,6 +139,10 @@ func runTakenFirst(t *testing.T, server *takenFirstServer) {
 	server.taken = make(chan struct{})
 	server.inner.firstEventDeadline = 100 * time.Millisecond
 	server.inner.closeDeadline = 2 * time.Second
+	if server.stillFailing {
+		// Event 1 sent again meets 503s for the whole close deadline.
+		server.inner.closeDeadline = 300 * time.Millisecond
+	}
 	server.inner.transport = func(base http.RoundTripper) http.RoundTripper {
 		return deliverTransport{base: base, taken: server.taken}
 	}
@@ -168,9 +175,26 @@ func TestRunnerClosesATurnWhoseFirstEventWasTakenButAnsweredTooLate(t *testing.T
 }
 
 // The server took event 1, its 2xx was lost, and every retry meets a 503 until
-// the bound.
+// the bound. Sent again after the refused close, event 1 is answered as a
+// duplicate: it is the host's, so the close goes at cursor 2.
 func TestRunnerClosesATurnWhoseFirstEventWasTakenThenRefusedUntilTheBound(t *testing.T) {
 	runTakenFirst(t, &takenFirstServer{inner: &leaseServer{}, lost: true})
+}
+
+// As above, but event 1 sent again meets 503s too, so the host cannot tell
+// whose event holds cursor 1. It does not guess: the next poll lists the lease
+// at last_cursor 1 and the host closes it there, at cursor 2.
+func TestRunnerLeavesAnUnresolvedFirstEventToTheNextListing(t *testing.T) {
+	runTakenFirst(t, &takenFirstServer{inner: &leaseServer{}, lost: true, stillFailing: true})
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // controlHandler answers a control lease with its one event.
@@ -216,19 +240,39 @@ func TestRunnerControlLeaseRidesOutAnOutagePastTheFirstEventBound(t *testing.T) 
 	}
 }
 
+// The setting takes a Go duration of at least 1 s, and says in one log line
+// whether it was used or ignored. Unset, it is silent.
 func TestFirstEventTimeoutFromEnv(t *testing.T) {
-	for value, want := range map[string]time.Duration{
-		"": 0, "250ms": 250 * time.Millisecond, " 30s ": 30 * time.Second,
-		"0": 0, "-1s": 0, "ten seconds": 0,
+	for value, want := range map[string]struct {
+		bound time.Duration
+		log   string
+	}{
+		"":            {0, ""},
+		" 30s ":       {30 * time.Second, "the first-event bound is 30s"},
+		"1s":          {time.Second, "the first-event bound is 1s"},
+		"999ms":       {0, "ignored"},
+		"1ns":         {0, "ignored"},
+		"0":           {0, "ignored"},
+		"-1s":         {0, "ignored"},
+		"10":          {0, "ignored"},
+		"ten seconds": {0, "ignored"},
 	} {
+		log := &syncBuffer{}
 		got := FirstEventTimeoutFromEnv(func(name string) string {
 			if name == "BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT" {
 				return value
 			}
 			return ""
-		})
-		if got != want {
-			t.Errorf("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT=%q: %v; want %v", value, got, want)
+		}, log)
+		if got != want.bound {
+			t.Errorf("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT=%q: %v; want %v", value, got, want.bound)
+		}
+		lines := strings.Count(log.String(), "\n")
+		switch {
+		case want.log == "" && lines != 0:
+			t.Errorf("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT=%q logged %q; want nothing", value, log.String())
+		case want.log != "" && (lines != 1 || !strings.Contains(log.String(), want.log)):
+			t.Errorf("BARKPARK_CHAT_HOST_FIRST_EVENT_TIMEOUT=%q logged %q; want one line saying %q", value, log.String(), want.log)
 		}
 	}
 	if got := (&Runner{}).firstEventTimeout(); got != 10*time.Second {

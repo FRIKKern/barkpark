@@ -34,6 +34,7 @@ func TestRunnerStopsTheProviderWhenATurnsFirstEventIsNeverTaken(t *testing.T) {
 		refuseKind:         map[string]int{"session_started": http.StatusServiceUnavailable},
 		firstEventDeadline: 100 * time.Millisecond,
 		closeDeadline:      2 * time.Second,
+		runFor:             20 * time.Second,
 	}
 	ctx, stop := startRunner(t, server, NewLocalHandler([]string{root}))
 	defer stop()
@@ -49,8 +50,8 @@ func TestRunnerStopsTheProviderWhenATurnsFirstEventIsNeverTaken(t *testing.T) {
 		server.mu.Lock()
 		posts := server.posts
 		server.mu.Unlock()
-		t.Fatalf("4 s into a 503 on the turn's first event (bound %v) the turn was still open after %d event POSTs: the provider was left running, and let on, its tool ran=%v",
-			server.firstEventDeadline, posts, ran)
+		t.Fatalf("%v into a 503 on the turn's first event (bound %v) the turn was still open after %d event POSTs: the provider was left running, and let on, its tool ran=%v",
+			server.runFor-time.Second, server.firstEventDeadline, posts, ran)
 	}
 	// The close goes out only after Handle returned, and Handle returns only
 	// after the provider was killed and waited for.
@@ -83,6 +84,7 @@ func TestRunnerRetriesALaterEventPastTheFirstEventBound(t *testing.T) {
 	server := &leaseServer{
 		command:            firstEventTurn(t, root),
 		firstEventDeadline: bound,
+		runFor:             20 * time.Second,
 		// Called with server.mu held.
 		refuse: func(cursor uint64) int {
 			if cursor != 2 {

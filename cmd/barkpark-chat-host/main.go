@@ -72,7 +72,7 @@ func newRunner(state chathost.State) *chathost.Runner {
 	handler.StatusLabel = chathost.StatusLabelerFromEnv(os.Getenv)
 	handler.Status = client
 	return &chathost.Runner{Client: client, Handler: handler, Capabilities: capabilities(),
-		FirstEventTimeout: chathost.FirstEventTimeoutFromEnv(os.Getenv)}
+		FirstEventTimeout: chathost.FirstEventTimeoutFromEnv(os.Getenv, os.Stderr)}
 }
 
 func capabilities() map[string]any {
