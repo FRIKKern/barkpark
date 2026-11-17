@@ -253,7 +253,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// from clearing. It is NAMED instead — renderOrphanedDraftRemedy prints the
 		// `drafts.` id, the consequence, and both exits.
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, _, pErr := sendMutationsIdempotent(sendTaskMutations, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
+		pStatus, pBody, pAttempts, pErr := sendMutationsIdempotent(sendTaskMutations, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
 			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
 			// may have LANDED and only the response was lost, so discarding here
@@ -279,6 +279,29 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 					title: title, detail: mutateErrorMessage(pStatus, pBody),
 				})
 				renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
+				return code
+			}
+			// A resend refused over this leg's own key speaks about the KEY:
+			// an earlier publish attempt went out first and may have committed,
+			// so the draft is KEPT and named, never discarded as refused.
+			if resendRefusedOwnKey(pAttempts, pBody) {
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishResendKeyRefused, leg: "publish", docID: bareID,
+					title: title, detail: mutateErrorMessage(pStatus, pBody),
+				})
+				renderTaskCreateResidue(out, residuePublishResendKeyRefused, draftID, bareID)
+				return code
+			}
+			// Any other 4xx on a RESEND is not a definite refusal either: the
+			// earlier attempt may have published and removed the draft, so the
+			// resend answers not_found. Kept, checked first, never discarded.
+			// A 4xx on the FIRST send is still the refusal handled below.
+			if pAttempts >= 2 {
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishResendRefused, leg: "publish", docID: bareID,
+					title: title, detail: mutateErrorMessage(pStatus, pBody),
+				})
+				renderTaskCreateResidue(out, residuePublishResendRefused, draftID, bareID)
 				return code
 			}
 			// UNDER -o json/yaml THE REFUSAL IS THE ANSWER, and it goes to
@@ -371,6 +394,16 @@ const (
 	// residuePublishResultUnreadable: the publish answered 2xx but echoed no
 	// record, so whether a published twin exists is unknown.
 	residuePublishResultUnreadable = "publish_result_unreadable"
+	// residuePublishResendKeyRefused: a RESEND of the publish was refused over
+	// the leg's own Idempotency-Key (422 idempotency_key_reused, or 409
+	// idempotency_key_in_use after every resend). An earlier attempt may have
+	// published; discarding could destroy the draft twin of a row on the board.
+	residuePublishResendKeyRefused = "publish_resend_key_refused"
+	// residuePublishResendRefused: a RESEND of the publish was refused with
+	// any other 4xx (not_found, duplicate_of, …). An earlier attempt may have
+	// committed: a landed publish removes the draft, so the resend answers
+	// not_found. Not a definite refusal, so nothing is discarded.
+	residuePublishResendRefused = "publish_resend_refused"
 	// residueDiscardFailed: the publish was definitively refused and the discard
 	// that would have cleaned up was itself refused or unreachable.
 	residueDiscardFailed = "discard_failed"
@@ -383,6 +416,8 @@ var taskCreateResidueClasses = map[string]string{
 	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
 	residueDiscardFailed:               "the publish was refused and the follow-up discard could not be performed",
+	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published (a landed publish removes the draft the resend asks for)",
 }
 
 // renderTaskCreateResidue names the residue class on stderr and then prints the
@@ -396,7 +431,15 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 		why = "unclassified"
 	}
 	out.errf("  residue[%s]: the draft was NOT discarded — %s.", class, why)
-	renderOrphanedDraftRemedy(out, draftID, bareID)
+	if class == residueDiscardFailed {
+		// The publish was definitively refused: the row IS a draft only.
+		renderOrphanedDraftRemedy(out, draftID, bareID)
+		return
+	}
+	// Every other residue class is a publish that may have landed.
+	for _, line := range maybePublishedRemedyLines(draftID, bareID) {
+		out.errf("  %s", line)
+	}
 }
 
 // discardCreatedTaskDraft removes the draft this run just created, after the
