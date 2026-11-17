@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
 
   alias Barkpark.ChatHosts
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.BoundAdminWrite
 
   @impl true
   def mount(_params, _session, socket) do
@@ -35,10 +36,20 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
     {:noreply, assign(socket, hosts: hosts)}
   end
 
+  # Both writes follow the dataset-bound admin write rule (`BoundAdminWrite`):
+  # a bound admin token is refused in `:enforce` and recorded in `:observe`.
   @impl true
-  def handle_event("enroll", %{"host" => params}, socket) do
+  def handle_event(event, params, socket) when event in ["enroll", "revoke"] do
+    if BoundAdminWrite.refused?(socket.assigns[:api_token]),
+      do: {:noreply, BoundAdminWrite.refuse(socket)},
+      else: write(event, params, socket)
+  end
+
+  defp write("enroll", %{"host" => params}, socket) do
     with {:ok, workspace} <- authorize(socket, :enroll),
          {:ok, result} <- ChatHosts.issue_enrollment(workspace.id, params) do
+      observe(socket, "enroll", workspace)
+
       {:noreply,
        socket
        |> assign(enrollment: result.enrollment_token)
@@ -60,12 +71,13 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
     end
   end
 
-  def handle_event("revoke", %{"id" => id}, socket) do
+  defp write("revoke", %{"id" => id}, socket) do
     case authorize(socket, :revoke) do
       {:ok, workspace} ->
         socket =
           case ChatHosts.revoke(workspace.id, id) do
             {:ok, _host} ->
+              observe(socket, "revoke", workspace)
               socket
 
             {:error, :not_found} ->
@@ -81,6 +93,15 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
         {:noreply, deny(socket)}
     end
   end
+
+  defp observe(socket, event, workspace),
+    do:
+      BoundAdminWrite.observe(
+        socket.assigns[:api_token],
+        "tokens_write",
+        "live ChatHostsLive.#{event}",
+        workspace.id
+      )
 
   defp authorize(socket, action) do
     workspace = socket.assigns[:current_workspace]
