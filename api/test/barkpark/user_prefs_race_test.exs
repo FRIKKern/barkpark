@@ -8,11 +8,14 @@ defmodule Barkpark.UserPrefsRaceTest do
 
   A holder connection takes the row first (locks it, or inserts it and
   leaves the insert uncommitted), so every op under test is provably
-  waiting on it before the holder acts and commits.
+  waiting on it before the holder acts and commits. Each op runs through
+  `Barkpark.LockWaiter`, and the wait checks that op's own backend in this
+  database (task-f12c42bbdaaeb965), so a lock waiter in another worktree's
+  test database cannot release the holder early.
   """
   use Barkpark.DataCase, async: false
 
-  alias Barkpark.{Accounts, Tenancy, UserPrefs}
+  alias Barkpark.{Accounts, LockWaiter, Tenancy, UserPrefs}
   alias Barkpark.UserPrefs.UserPref
 
   @dataset "prefs_race"
@@ -22,12 +25,12 @@ defmodule Barkpark.UserPrefsRaceTest do
     with_user(fn user, ws ->
       {:ok, pref} = UserPrefs.put(user.id, ws.id, @dataset, @key, %{"ids" => ["old"]})
       holder = hold(lock_row(pref), fn -> :ok end)
-      pushers = for id <- ["a", "b"], do: push_front_async(user, ws, id)
+      pushers = start(for id <- ["a", "b"], do: fn -> push_front(user, ws, id) end)
 
-      await_lock_waiters(2)
+      await_locks(pushers)
       release(holder)
 
-      assert [{:ok, _}, {:ok, _}] = Enum.map(pushers, &Task.await(&1, 10_000))
+      assert [{:ok, _}, {:ok, _}] = await_all(pushers)
       ids = UserPrefs.get(user.id, ws.id, @dataset, @key)["ids"]
       assert Enum.sort(ids) == ["a", "b", "old"]
       assert List.last(ids) == "old"
@@ -37,12 +40,12 @@ defmodule Barkpark.UserPrefsRaceTest do
   test "two first writes to an unset key both land" do
     with_user(fn user, ws ->
       holder = hold(fn -> UserPrefs.put(user.id, ws.id, @dataset, @key, %{}) end, fn -> :ok end)
-      pushers = for id <- ["a", "b"], do: push_front_async(user, ws, id)
+      pushers = start(for id <- ["a", "b"], do: fn -> push_front(user, ws, id) end)
 
-      await_lock_waiters(2)
+      await_locks(pushers)
       release(holder)
 
-      assert [{:ok, _}, {:ok, _}] = Enum.map(pushers, &Task.await(&1, 10_000))
+      assert [{:ok, _}, {:ok, _}] = await_all(pushers)
       assert Enum.sort(UserPrefs.get(user.id, ws.id, @dataset, @key)["ids"]) == ["a", "b"]
     end)
   end
@@ -56,12 +59,12 @@ defmodule Barkpark.UserPrefsRaceTest do
           Repo.delete_all(from p in UserPref, where: p.id == ^pref.id)
         end)
 
-      pusher = push_front_async(user, ws, "a")
+      pusher = start([fn -> push_front(user, ws, "a") end])
 
-      await_lock_waiters(1)
+      await_locks(pusher)
       release(holder)
 
-      assert {:ok, %{"ids" => ["a"]}} = Task.await(pusher, 10_000)
+      assert [{:ok, %{"ids" => ["a"]}}] = await_all(pusher)
       assert UserPrefs.get(user.id, ws.id, @dataset, @key) == %{"ids" => ["a"]}
     end)
   end
@@ -75,18 +78,18 @@ defmodule Barkpark.UserPrefsRaceTest do
       holder = hold(lock_row(pref), fn -> :ok end)
 
       setters =
-        for {field, item} <- [{"name", "renamed"}, {"session_id", "s1"}] do
-          Task.async(fn ->
-            unboxed(fn ->
+        start(
+          for {field, item} <- [{"name", "renamed"}, {"session_id", "s1"}] do
+            fn ->
               UserPrefs.apply_list_op(user.id, ws.id, @dataset, @key, {:set, field, item, nil})
-            end)
-          end)
-        end
+            end
+          end
+        )
 
-      await_lock_waiters(2)
+      await_locks(setters)
       release(holder)
 
-      assert [{:ok, _}, {:ok, _}] = Enum.map(setters, &Task.await(&1, 10_000))
+      assert [{:ok, _}, {:ok, _}] = await_all(setters)
 
       assert UserPrefs.get(user.id, ws.id, @dataset, @key) ==
                %{"name" => "renamed", "session_id" => "s1", "host" => "h"}
@@ -103,18 +106,18 @@ defmodule Barkpark.UserPrefsRaceTest do
       holder = hold(lock_row(pref), fn -> :ok end)
 
       putters =
-        for name <- ["a", "b"] do
-          Task.async(fn ->
-            unboxed(fn ->
+        start(
+          for name <- ["a", "b"] do
+            fn ->
               UserPrefs.put_if_match(user.id, ws.id, @dataset, @key, %{"name" => name}, [tag])
-            end)
-          end)
-        end
+            end
+          end
+        )
 
-      await_lock_waiters(2)
+      await_locks(putters)
       release(holder)
 
-      results = Enum.map(putters, &Task.await(&1, 10_000))
+      results = await_all(putters)
       assert [{:ok, written}] = Enum.filter(results, &match?({:ok, _}, &1))
 
       assert [{:error, {:precondition_failed, actual}}] =
@@ -138,19 +141,17 @@ defmodule Barkpark.UserPrefsRaceTest do
         )
 
       creators =
-        for name <- ["a", "b"] do
-          Task.async(fn ->
-            unboxed(fn ->
-              UserPrefs.put_if_absent(user.id, ws.id, @dataset, @key, %{"name" => name})
-            end)
-          end)
-        end
+        start(
+          for name <- ["a", "b"] do
+            fn -> UserPrefs.put_if_absent(user.id, ws.id, @dataset, @key, %{"name" => name}) end
+          end
+        )
 
-      await_lock_waiters(2)
+      await_locks(creators)
       send(holder.pid, :release)
       assert {:error, :undo} = Task.await(holder, 10_000)
 
-      results = Enum.map(creators, &Task.await(&1, 10_000))
+      results = await_all(creators)
       assert [{:ok, written}] = Enum.filter(results, &match?({:ok, _}, &1))
 
       assert [{:error, {:precondition_failed, actual}}] =
@@ -214,32 +215,17 @@ defmodule Barkpark.UserPrefsRaceTest do
     assert {:ok, :ok} = Task.await(holder, 10_000)
   end
 
-  defp push_front_async(user, ws, id) do
-    Task.async(fn ->
-      unboxed(fn ->
-        UserPrefs.apply_list_op(user.id, ws.id, @dataset, @key, {:push_front, "ids", id, 20})
-      end)
-    end)
-  end
+  defp push_front(user, ws, id),
+    do: UserPrefs.apply_list_op(user.id, ws.id, @dataset, @key, {:push_front, "ids", id, 20})
 
   defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
 
-  defp await_lock_waiters(n, tries \\ 250) do
-    %{rows: [[waiting]]} =
-      Repo.query!(
-        "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%user_prefs%'"
-      )
+  # Each op on its own connection, reporting its backend; every one of them
+  # must be waiting on the holder's lock before the holder lets go.
+  defp start(funs), do: Enum.map(funs, &LockWaiter.start/1)
 
-    cond do
-      waiting >= n ->
-        :ok
+  defp await_locks(ops),
+    do: Enum.each(ops, fn {_task, backend} -> LockWaiter.await_lock!(backend) end)
 
-      tries == 0 ->
-        flunk("only #{waiting} of #{n} ops reached the row lock")
-
-      true ->
-        Process.sleep(20)
-        await_lock_waiters(n, tries - 1)
-    end
-  end
+  defp await_all(ops), do: Enum.map(ops, fn {task, _backend} -> Task.await(task, 10_000) end)
 end
