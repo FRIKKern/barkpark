@@ -193,6 +193,57 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
     end
   end
 
+  # task-035d3495dae536cf: the route delivered an answer to the host before it
+  # read the stored ask, so an answer to an ask the server had canceled (a newer
+  # lease's turn, a teardown) reached the newer run as an unknown approval.
+  describe "POST /v1/chat/sessions/:id/approval on a registered-host ask" do
+    test "an answer to a canceled ask is a 409 naming the status and leases nothing",
+         %{raw: raw, sid: sid, host: host} do
+      post_ask!(host, sid, "ask-c1", "Write", %{"file_path" => "/tmp/c.txt"})
+      assert_receive {:claude_chat_permission, _}, 1_000
+      assert [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      assert {:ok, _} = StudioChat.update_approval_status(sid, "ask-c1", "canceled")
+
+      for decision <- ["allow", "deny"] do
+        resp = approve(raw, sid, "ask-c1", decision)
+        assert resp.status == 409, "#{decision} answered #{resp.status}: #{resp.resp_body}"
+        error = Jason.decode!(resp.resp_body)["error"]
+        assert error["code"] == "conflict"
+        assert error["details"] == %{"approval_status" => "canceled"}
+      end
+
+      assert host_commands(host, sid, :answer_approval) == []
+      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
+      assert ChatHosts.lease_live?(turn_lease), "the running turn's lease is untouched"
+    end
+
+    test "a pending ask is answered once; a repeat, an opposite or an unknown answer stays a 204 and leases nothing",
+         %{raw: raw, sid: sid, host: host} do
+      post_ask!(host, sid, "ask-a1", "Write", %{"file_path" => "/tmp/a.txt"})
+      assert_receive {:claude_chat_permission, _}, 1_000
+
+      assert approve(raw, sid, "ask-a1", "allow").status == 204
+      assert [%{command: command}] = host_commands(host, sid, :answer_approval)
+      assert command.approval_id == "ask-a1"
+
+      for {request_id, decision} <- [{"ask-a1", "allow"}, {"ask-a1", "deny"}, {"nope", "allow"}] do
+        resp = approve(raw, sid, request_id, decision)
+        assert resp.status == 204, "#{request_id}/#{decision} answered #{resp.status}"
+      end
+
+      assert [_only_the_first] = host_commands(host, sid, :answer_approval)
+      assert [%{metadata: %{"approval_status" => "allowed"}}] = rows(sid, "approval")
+    end
+  end
+
+  defp approve(raw, sid, request_id, decision) do
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions/#{sid}/approval",
+      Jason.encode!(%{request_id: request_id, decision: decision})
+    )
+  end
+
   # A registered-host session with a live Recorder (holding a RemoteRef) and one
   # leased send_turn, reached through the same HTTP calls a client makes.
   defp start_host_turn(raw, host_id) do
