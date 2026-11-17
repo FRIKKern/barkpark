@@ -28,6 +28,39 @@ defmodule Barkpark.Idempotency do
   real mutation, short enough to recover a crashed one) via an atomic
   `UPDATE ... WHERE state='pending' AND inserted_at < cutoff`, so a dead
   reservation is retryable.
+
+  ## A write that committed and then answered a fault
+
+  A 5xx releases the claim so the retry runs, because most 5xx come before
+  any write. But a write can COMMIT and still answer a fault: a connection
+  lost at commit (503), or a raise after the transaction returned (500).
+  Releasing then lets the retry run the write a second time
+  (task-717c91a6e9b6758b). So the plug HOLDS its claimed hash in the request
+  process (`hold/1`), and the mutate door hands `mark_committed/0` to the
+  batch as its `:in_transaction` hook, which the batch runs as the last
+  statement inside its own transaction: the row becomes `"committed"`
+  if and only if the write committed. `release/1` deletes only `"pending"`
+  rows, so a committed row survives the 5xx, which is then recorded and
+  replayed (`settle_fault/5`). A committed row with no recorded answer (the
+  process died before before_send) is never reclaimed: it answers
+  `:in_progress` until it is swept.
+
+  Limits, by design:
+
+    * The held key lives in the request process's dictionary. A write run in
+      ANOTHER process (a Task, a GenServer call) does not see it,
+      `mark_committed/0` is a no-op there, and a 5xx after that write
+      releases the key as before.
+    * Only the mutate door marks today: `Content` knows nothing about
+      this module, and an in-process `Content.apply_mutations/3` with no hook
+      marks nothing, whatever key is held. The other doors behind the plug
+      (document and field ops, disconnect, the chat send) release on 5xx as
+      before.
+    * Dry runs and batches that roll back never mark: the mark is skipped
+      for a dry run and rolls back with any refused batch.
+    * The held key belongs to one request. Bandit serves a keep-alive
+      connection's requests in one process, so the endpoint forgets it when a
+      request starts and the plug forgets it in before_send.
   """
 
   import Ecto.Query
@@ -40,6 +73,93 @@ defmodule Barkpark.Idempotency do
   @default_pending_ttl_seconds 60
   # Upper bound on rows one `sweep_batch/1` statement removes.
   @default_sweep_batch_limit 5_000
+
+  @held_key :barkpark_idempotency_held_key
+
+  @doc "Hold `hash` for this request process: the claim a write here may mark committed."
+  @spec hold(String.t()) :: :ok
+  def hold(hash) when is_binary(hash) do
+    Process.put(@held_key, hash)
+    :ok
+  end
+
+  @doc "Forget the held key. Run at every request start and in the plug's before_send."
+  @spec forget_held_key() :: :ok
+  def forget_held_key do
+    Process.delete(@held_key)
+    :ok
+  end
+
+  @doc """
+  The hash this request process claimed, or nil. The chat send leases its turn
+  under it, so a resend meets the first lease (task-3c949e2977c56597).
+  """
+  def held_key, do: Process.get(@held_key)
+
+  @doc """
+  Mark the held key's pending row `"committed"`. Call it as the LAST statement
+  inside the write's own transaction, so the mark commits or rolls back with
+  the write. `:none` when this process holds no key (no Idempotency-Key, or a
+  write running in another process) or the row is not pending.
+  """
+  @spec mark_committed() :: :marked | :none
+  def mark_committed do
+    case Process.get(@held_key) do
+      nil ->
+        :none
+
+      hash ->
+        query = from(k in Key, where: k.key_hash == ^hash and k.state == "pending")
+
+        case Repo.update_all(query, set: [state: "committed"]) do
+          {1, _} ->
+            :telemetry.execute([:barkpark, :idempotency, :marked_committed], %{count: 1}, %{
+              key_hash: hash
+            })
+
+            :marked
+
+          {_, _} ->
+            :none
+        end
+    end
+  end
+
+  @doc """
+  Settle a claim whose request answered 5xx (or nothing): a committed row
+  records that answer, to be replayed; a pending row is released, so the retry
+  runs. Returns `:recorded` when a committed row took the answer, else
+  `:released`. With no answer (`status` nil) a committed row is left as it
+  is: never released, never reclaimed.
+  """
+  def settle_fault(hash, scope, status, body, headers) do
+    committed = from(k in Key, where: k.key_hash == ^hash and k.state == "committed")
+
+    recorded =
+      if is_integer(status) do
+        Repo.update_all(committed,
+          set: [
+            state: "completed",
+            scope: scope,
+            status_code: status,
+            response_body: body,
+            response_headers: headers_to_map(headers),
+            inserted_at: DateTime.utc_now()
+          ]
+        )
+      else
+        {0, nil}
+      end
+
+    case recorded do
+      {1, _} ->
+        :recorded
+
+      _ ->
+        release(hash)
+        :released
+    end
+  end
 
   def hash_key(raw_key, token_id, method, path) do
     material = "#{raw_key}|#{token_id}|#{method}|#{path}"
@@ -111,7 +231,9 @@ defmodule Barkpark.Idempotency do
     * `:mismatch` — the row was claimed under a different `scope`. A mount
       that binds the request into its scope gets this when one key is
       reused for a different request; caller returns 422
-      `idempotency_key_reused`. Never re-executes and never replays.
+      `idempotency_key_reused`. Never re-executes and never replays. (A row
+      stored before the mutate mounts were bound is the transition exception:
+      see `pre_binding_row?/2`.)
 
   A stale pending row (crashed reservation older than `pending_ttl_seconds`) is
   reclaimed in place and returns `:claimed`, but only under its own scope.
@@ -148,22 +270,46 @@ defmodule Barkpark.Idempotency do
         # Swept between our failed insert and this read — retry the whole claim.
         claim(hash, scope, DateTime.utc_now(), attempt + 1)
 
-      # One key, two scopes: the request-bound chat send reused a key for
-      # another request. A constant-scope mount (`"mutation"`) never reaches this clause.
-      %Key{scope: other} when other != scope ->
-        :mismatch
+      # One key, two scopes: a request-bound mount saw the key reused for another
+      # request. A pre-binding mutate row is the one exception (below).
+      %Key{scope: other} = row when other != scope ->
+        if pre_binding_row?(other, scope),
+          do: resolve_row(row, hash, scope, now, attempt),
+          else: :mismatch
 
-      %Key{state: "completed"} = row ->
-        {:replay,
-         %{status: row.status_code, body: row.response_body, headers: row.response_headers || %{}}}
-
-      %Key{state: "pending", inserted_at: ts} ->
-        if stale?(ts, now), do: reclaim(hash, scope, now, attempt), else: :in_progress
-
-      _ ->
-        :in_progress
+      row ->
+        resolve_row(row, hash, scope, now, attempt)
     end
   end
+
+  defp resolve_row(%Key{state: "completed"} = row, _hash, _scope, _now, _attempt) do
+    {:replay,
+     %{status: row.status_code, body: row.response_body, headers: row.response_headers || %{}}}
+  end
+
+  # The write committed but no answer was recorded (the request process died
+  # before before_send). Never reclaimed: running it again is the duplicate
+  # this state exists to stop. It answers 409 until the sweep removes it.
+  defp resolve_row(%Key{state: "committed"}, _hash, _scope, _now, _attempt), do: :in_progress
+
+  defp resolve_row(%Key{state: "pending", inserted_at: ts}, hash, scope, now, attempt) do
+    if stale?(ts, now), do: reclaim(hash, scope, now, attempt), else: :in_progress
+  end
+
+  defp resolve_row(_row, _hash, _scope, _now, _attempt), do: :in_progress
+
+  # TRANSITION RULE, for the deploy that bound the mutate mounts to the request
+  # (task-c65741be368a3f14). Before it they stored the bare scope "mutation",
+  # with no fingerprint of the request. Such a row met by a bound mutate claim
+  # ("mutation:<digest>") is treated as its own: completed replays, pending is
+  # 409 or reclaimed. Refusing it 422 would tell a client whose write DID land
+  # that it was refused. The row carries no body to compare, so a pre-deploy
+  # key reused for a DIFFERENT body also replays, as every key did before the
+  # binding. No mount writes a bare "mutation" row any more, and rows are swept
+  # after ttl_seconds (24 h), so one day after that deploy this clause matches
+  # nothing and can be deleted.
+  defp pre_binding_row?("mutation", "mutation:" <> _digest), do: true
+  defp pre_binding_row?(_stored, _scope), do: false
 
   # Atomically take over a stale (crashed) pending reservation. The WHERE clause
   # re-checks state+age so only ONE concurrent reclaimer wins; a loser re-resolves.

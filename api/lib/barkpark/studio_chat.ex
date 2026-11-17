@@ -781,14 +781,16 @@ defmodule Barkpark.StudioChat do
   so this SETS, OVERWRITES, and CLEARS (`nil`). The Barkpark Chat Session row is
   the durable owner of the binding the next one-shot turn resumes. NEVER stores a
   transcript — only the opaque sandbox id. Returns `{:ok, session}`,
-  `{:error, changeset}` (a blank string trips the non-empty DB check), or
-  `{:error, :not_found}`.
+  `{:error, changeset}` (a blank string trips the non-empty DB check),
+  `{:error, :not_found}`, or `{:error, :nul_character}`: the shim gets the stored
+  id back, so an id holding U+0000 is refused, never stored changed.
   """
   @spec set_cloud_sandbox_id(String.t(), String.t() | nil) ::
-          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :nul_character}
   def set_cloud_sandbox_id(session_id, cloud_sandbox_id)
       when is_binary(cloud_sandbox_id) or is_nil(cloud_sandbox_id) do
-    with %Session{} = session <- get_session(session_id) do
+    with :ok <- NulText.check(cloud_sandbox_id),
+         %Session{} = session <- get_session(session_id) do
       session
       |> Ecto.Changeset.change(cloud_sandbox_id: cloud_sandbox_id)
       |> Ecto.Changeset.check_constraint(:cloud_sandbox_id,
@@ -797,6 +799,7 @@ defmodule Barkpark.StudioChat do
       )
       |> Repo.update()
     else
+      {:error, :nul_character} = refused -> refused
       nil -> {:error, :not_found}
     end
   end
@@ -2342,23 +2345,27 @@ defmodule Barkpark.StudioChat do
   session's denormalised `pending_approvals` (guarded ≥ 0) in the same
   transaction.
 
+  `extra` merges into the row's metadata (a cancel's `"cancel_reason"`).
   Returns `{:ok, %Message{}}`, `{:error, :not_found}` (no such pending/known
   approval), or `{:error, :bad_status}` for an unknown terminal state.
   """
-  @spec update_approval_status(String.t(), String.t(), String.t()) ::
+  @spec update_approval_status(String.t(), String.t(), String.t(), map()) ::
           {:ok, Message.t()} | {:error, :not_found | :bad_status}
-  def update_approval_status(_session_id, _request_id, status)
+  def update_approval_status(session_id, request_id, status, extra \\ %{})
+
+  def update_approval_status(_session_id, _request_id, status, _extra)
       when status not in @approval_terminal,
       do: {:error, :bad_status}
 
-  def update_approval_status(session_id, request_id, status) do
+  def update_approval_status(session_id, request_id, status, extra) do
     Repo.transaction(fn ->
       case find_pending_approval(session_id, request_id) do
         nil ->
           Repo.rollback(:not_found)
 
         %Message{} = message ->
-          meta = Map.put(message.metadata || %{}, "approval_status", status)
+          meta =
+            (message.metadata || %{}) |> Map.merge(extra) |> Map.put("approval_status", status)
 
           {:ok, updated} =
             message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
@@ -2377,9 +2384,8 @@ defmodule Barkpark.StudioChat do
   @doc """
   Force-cancel EVERY still-pending approval for a session — the shared teardown
   path (a port crash / a reopen with no live control channel) can never deliver
-  a decision, so a dangling ask is `canceled`, honestly, not left hanging. Flips
-  each pending row's `metadata.approval_status` to `"canceled"` and zeroes the
-  session's `pending_approvals`. Returns the number of approvals canceled.
+  a decision, so a dangling ask is `canceled`, honestly. The read locks each row, so an
+  answer that commits first stands, and the count drops by the asks canceled (returned).
   """
   @spec cancel_pending_approvals(String.t()) :: non_neg_integer()
   def cancel_pending_approvals(session_id) do
@@ -2388,6 +2394,7 @@ defmodule Barkpark.StudioChat do
         Message
         |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
         |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+        |> lock("FOR UPDATE")
         |> Repo.all()
 
       Enum.each(pending, fn message ->
@@ -2395,11 +2402,11 @@ defmodule Barkpark.StudioChat do
         message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
       end)
 
-      Session
-      |> where([s], s.id == ^session_id)
-      |> Repo.update_all(set: [pending_approvals: 0, updated_at: DateTime.utc_now()])
-
-      length(pending)
+      n = length(pending)
+      left = dynamic([s], fragment("GREATEST(? - ?, 0)", s.pending_approvals, ^n))
+      set = [pending_approvals: left, updated_at: DateTime.utc_now()]
+      Repo.update_all(from(s in Session, where: s.id == ^session_id, update: [set: ^set]), [])
+      n
     end)
     |> case do
       {:ok, count} -> count

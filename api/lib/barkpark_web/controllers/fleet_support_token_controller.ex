@@ -221,4 +221,11 @@ defmodule BarkparkWeb.FleetSupportTokenController do
     conn
     |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write", own_token_param: "token_id"] when action in [:create, :delete]
+  )
 end

@@ -101,6 +101,29 @@ defmodule Barkpark.StudioChat.RecorderStoreNulTest do
     assert rail["a"]["row"]["description"] == "Build" <> @fffd
   end
 
+  # task-0e898004d1d9fcb1: the model name is a modelUsage key.
+  test "a result frame whose modelUsage key holds U+0000 stores the model with U+FFFD",
+       %{sid: sid, recorder: recorder} do
+    frame(recorder, result("claude-x" <> @nul, 1000))
+
+    assert Process.alive?(recorder)
+    session = StudioChat.get_session(sid)
+    assert session.model == "claude-x" <> @fffd
+    assert session.context_window == 1000
+  end
+
+  # task-0e898004d1d9fcb1: the shim gets the stored id back on the next turn, so
+  # an id holding U+0000 is refused, never stored changed; the binding stays.
+  test "a bp_sandbox id holding U+0000 is refused and the stored binding is kept",
+       %{sid: sid, recorder: recorder} do
+    frame(recorder, sandbox("sbx_kept"))
+    frame(recorder, sandbox("sbx_" <> @nul))
+
+    assert Process.alive?(recorder)
+    assert StudioChat.get_session(sid).cloud_sandbox_id == "sbx_kept"
+    assert {:error, :nul_character} = StudioChat.set_cloud_sandbox_id(sid, "sbx_" <> @nul)
+  end
+
   test "store calls without U+0000 keep their bytes", %{sid: sid, recorder: recorder} do
     text = "plain, emoji 🐕‍🦺 שלום, tab\there, " <> <<1>> <> ", the literal \\u0000"
 
@@ -114,9 +137,29 @@ defmodule Barkpark.StudioChat.RecorderStoreNulTest do
       })
     )
 
+    frame(recorder, result(text, 2000))
+    frame(recorder, sandbox(text))
+
     assert row(sid, "toolu_p").metadata["output"] == text
-    assert StudioChat.get_session(sid).rail_snapshot["p"]["row"]["description"] == text
+    session = StudioChat.get_session(sid)
+    assert session.rail_snapshot["p"]["row"]["description"] == text
+    assert session.model == text
+    assert session.cloud_sandbox_id == text
   end
+
+  defp result(model, window) do
+    {:claude_chat_event,
+     %{
+       "type" => "result",
+       "subtype" => "success",
+       "usage" => %{"input_tokens" => 1, "output_tokens" => 1},
+       "modelUsage" => %{model => %{"contextWindow" => window}}
+     }}
+  end
+
+  defp sandbox(id),
+    do:
+      {:claude_chat_event, %{"type" => "bp_sandbox", "subtype" => "created", "sandbox_id" => id}}
 
   defp tool_use(id, name, input) do
     {:claude_chat_event,

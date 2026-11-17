@@ -67,10 +67,12 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError
+  alias Barkpark.Tenancy.WorkspaceBundle.ImportConfinement
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
   alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.Plugs.RequirePlatformOperator
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -942,7 +944,8 @@ defmodule BarkparkWeb.WorkspaceController do
   defp clean_import(conn, path, receipt) do
     case WorkspaceBundle.import_bundle_file(path,
            grant_admin_to: operator_grant(conn),
-           expected_root_slug: expected_root_slug(conn)
+           expected_root_slug: expected_root_slug(conn),
+           confine: confine?(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -952,7 +955,9 @@ defmodule BarkparkWeb.WorkspaceController do
             total_rows: stats.total_rows,
             provenance: stamp_provenance(stats.manifest)
           })
+          |> put_withheld(stats)
         )
+        |> tap(fn _ -> ImportConfinement.record(stats, conn.assigns[:api_token]) end)
 
       {:error, {:blob_path_conflict, info}} ->
         blob_path_conflict(conn, info)
@@ -970,7 +975,8 @@ defmodule BarkparkWeb.WorkspaceController do
     case WorkspaceBundle.import_bundle_file(path,
            mode: :merge,
            grant_admin_to: operator_grant(conn),
-           expected_root_slug: expected_root_slug(conn)
+           expected_root_slug: expected_root_slug(conn),
+           confine: confine?(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -981,7 +987,9 @@ defmodule BarkparkWeb.WorkspaceController do
             mode: "merge",
             provenance: stamp_provenance(stats.manifest)
           })
+          |> put_withheld(stats)
         )
+        |> tap(fn _ -> ImportConfinement.record(stats, conn.assigns[:api_token]) end)
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
@@ -1390,6 +1398,15 @@ defmodule BarkparkWeb.WorkspaceController do
   # capability:` markers and credo disable-for-next-line alike. This paragraph
   # deliberately does not spell the annotation token literally, so it cannot be
   # mistaken for one by a scanner or miscounted by a census grep.
+  # A caller the operator allowlist does not NAME imports confined to the
+  # bundle's own workspace: no organization, no row outside it, no user-bound
+  # row for someone not already seated there (task-1a6cde75b0adae76,
+  # `WorkspaceBundle.ImportConfinement`).
+  defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
+
+  defp put_withheld(receipt, stats),
+    do: Map.merge(receipt, Map.take(stats, [:withheld, :withheld_columns, :withheld_user_rows]))
+
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do
       %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
@@ -1748,5 +1765,12 @@ defmodule BarkparkWeb.WorkspaceController do
   plug(
     BarkparkWeb.Plugs.DatasetBoundAdminReads,
     [surface: "workspace_export"] when action in [:export]
+  )
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "workspace_write"] when action in [:delete, :archive, :restore]
   )
 end

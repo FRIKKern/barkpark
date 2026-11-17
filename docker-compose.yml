@@ -146,6 +146,10 @@ services:
       # the default: log + audit row) or `enforce` (403). Read per request in
       # BarkparkWeb.Plugs.DatasetBoundAdminReads.
       - BARKPARK_DATASET_BOUND_ADMIN_READS
+      # Workspace bundle import by a caller the operator allowlist does not name:
+      # `observe` (unset, the default: log + audit row) or `enforce` (refuse or
+      # withhold). Read per import in WorkspaceBundle.ImportConfinement.
+      - BARKPARK_IMPORT_CONFINEMENT
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       # Unset = the Barkpark Cloud list (barkpark.cloud, www, *.vercel.app). Set,

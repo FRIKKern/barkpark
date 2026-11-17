@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.AgentTaskJoin
+  alias Barkpark.StudioChat.ApprovalAnswer
   alias Barkpark.StudioChat.ManagedSessionTarget
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
@@ -1469,18 +1470,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
   end
 
+  # Another lease's event split the open turn: its text is now its own stored
+  # row, so it is its own live reply too (Recorder.TurnOwner, task-f0d668d89e21f5f8).
+  def handle_info({:chat_turn_split, _session_id}, socket),
+    do: {:noreply, socket |> commit_streaming() |> assign(streaming: nil)}
+
   def handle_info(
         {:studio_chat_runtime_event, %Runtime.Event{kind: :turn_completed} = event},
         socket
       ) do
-    socket =
-      case socket.assigns.streaming do
-        %{text: text} when is_binary(text) and text != "" ->
-          append_message(socket, :assistant, text)
-
-        _ ->
-          socket
-      end
+    socket = commit_streaming(socket)
 
     line =
       case event.terminal_state do
@@ -6823,29 +6822,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
             &1.approval_status == :pending)
       )
 
-    # A co-viewing tab holds a pid it never spawned: gate the allow itself.
-    with true <- pending? and socket.assigns.session != nil,
-         :ok <- ChatHostGate.authorize(socket.assigns, decision) do
-      Runtime.answer_approval(
-        socket.assigns.provider,
-        socket.assigns.session,
-        request_id,
-        decision
-      )
+    status = if match?({:deny, _}, decision), do: :denied, else: :allowed
+    %{session: session, store_session_id: store_id} = socket.assigns
 
-      status =
-        case decision do
-          {:deny, _} -> :denied
-          _ -> :allowed
-        end
+    deliver = fn ->
+      Runtime.answer_approval(socket.assigns.provider, session, request_id, decision)
+    end
 
+    # A co-viewing tab holds a pid it never spawned: gate the allow itself. The
+    # store decides last: a card this tab still shows pending, for an ask the
+    # store canceled or answered, delivers nothing and shows the stored status.
+    # A delivery persists the decision (D11) and drops the pending count.
+    with true <- pending? and session != nil,
+         :ok <- ChatHostGate.authorize(socket.assigns, decision),
+         {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, to_string(status), deliver) do
       messages = flip_card(socket.assigns.messages, request_id, status)
-
-      # Persist the decision (D11) and drop the pending count so the sidebar
-      # "needs you" pill clears on the next sidebar refresh.
-      if store_id = socket.assigns[:store_session_id],
-        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
-
       broadcast_resolution(socket, request_id, status)
 
       # D49: an APPROVED ExitPlanMode plan grows up into a real published Paper.
@@ -6860,8 +6851,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
       |> clear_question_form(request_id)
       |> refresh_sessions()
     else
-      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
-      _ -> socket
+      {:settled, now} ->
+        flipped = flip_card(socket.assigns.messages, request_id, String.to_existing_atom(now))
+        socket |> assign_messages(flipped) |> clear_question_form(request_id)
+
+      {:error, reason} ->
+        append_message(socket, :system, spawn_error_text(reason))
+
+      _ ->
+        socket
     end
   end
 
@@ -7199,6 +7197,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # web-only and it has three non-streaming callers.
   defp advance_streaming(state, delta),
     do: StreamTail.advance(state, delta, &render_paper_html/1)
+
+  # The streaming bubble's text becomes a live assistant message (the caller
+  # clears `streaming`).
+  defp commit_streaming(%{assigns: %{streaming: %{text: text}}} = socket)
+       when is_binary(text) and text != "",
+       do: append_message(socket, :assistant, text)
+
+  defp commit_streaming(socket), do: socket
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
   # paper reader uses. The renderer escapes all text at walk time, so the

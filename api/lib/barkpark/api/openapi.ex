@@ -216,7 +216,7 @@ defmodule Barkpark.Api.OpenApi do
   # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
   # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
   # (router.ex), and the chat send, via a `plug ... when action ==
-  # :create_message` in ChatController, which also binds the request.
+  # :create_message` in ChatController. Every mount binds the request.
   # Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
@@ -231,7 +231,7 @@ defmodule Barkpark.Api.OpenApi do
 
   # Templates whose mount binds the request (query and body) into the key
   # (`bind_request: true`), so the spec also states the 422.
-  @request_bound_templates ["/v1/chat/sessions/:id/messages"]
+  @request_bound_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
 
   defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
     # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
@@ -271,9 +271,21 @@ defmodule Barkpark.Api.OpenApi do
       do:
         " On this route the key is also bound to the request (query string and " <>
           "body): the same key with a different request is refused 422 " <>
-          "`idempotency_key_reused`, and a " <>
-          "5xx answer is not remembered, so its retry runs.",
+          "`idempotency_key_reused`, and a " <> fault_note(template),
       else: ""
+  end
+
+  # Only the mutate batch marks its key committed (Barkpark.Idempotency).
+  defp fault_note(template) do
+    if String.ends_with?(template, "/v1/data/mutate/:dataset"),
+      do:
+        "5xx answer is not remembered, so its retry runs, unless the write had " <>
+          "already committed: then that 5xx carries `Idempotency-Committed: true`, " <>
+          "is replayed with it, and nothing runs twice. If the server stopped after " <>
+          "the commit and before any answer, the key answers 409 " <>
+          "`idempotency_key_in_use` until it expires (24h): the write landed, so " <>
+          "read it back rather than retrying under a new key.",
+      else: "5xx answer is not remembered, so its retry runs."
   end
 
   defp path_placeholders(template) do

@@ -185,6 +185,10 @@ defmodule Barkpark.Tenancy.Members do
   through the workspace's organization (`bind_sso_grants/2`). The user can
   still accept it by hand.
 
+  `consented: true` seats a confirmed account at once even with an `actor:`:
+  the user asked for the seat (an approved access request,
+  `Tenancy.AccessRequests.approve/4`). The role ceiling still applies.
+
   Refuses `{:error, :already_member}` rather than silently re-roling an
   existing seat — changing a role is `update_role/3`, and an "add" that quietly
   overwrote a role would be a privilege change disguised as a no-op.
@@ -217,7 +221,12 @@ defmodule Barkpark.Tenancy.Members do
   # an UNCONFIRMED account (reclaimed first: nobody proved that email, so
   # there is no owner whose consent the seat could bypass) are seated
   # directly, as before. Internal callers (no actor) keep direct seating.
-  defp invite?(%User{confirmed_at: %{}}, opts), do: not is_nil(opts[:actor])
+  # `consented: true` (an approved access request, `Tenancy.AccessRequests`):
+  # the user asked for this seat, so it is seated now; the actor's role
+  # ceiling still applies.
+  defp invite?(%User{confirmed_at: %{}}, opts),
+    do: not is_nil(opts[:actor]) and opts[:consented] != true
+
   defp invite?(_existing, _opts), do: false
 
   # An unconfirmed account answers `{:reclaimed, row}` so the door can tell

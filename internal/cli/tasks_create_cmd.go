@@ -25,7 +25,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 
 	"github.com/FRIKKern/barkpark/internal/apierr"
@@ -146,13 +145,13 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// ONE KEY BASE PER INVOCATION, SPLIT PER LEG. Minted here — after every
 	// refusal that can be pronounced without a write, so a run that never sends
 	// never burns one. The publish follow-up derives its own key from the same
-	// base: the plug hashes (key, token, method, PATH) and NOT the body, and both
-	// legs POST the same path, so sharing one key would replay the create's
-	// response and the publish would silently never run (legKey says this at
-	// length, tasks_create_idempotency.go).
+	// base: the plug binds a key to the request (path AND body), and both legs
+	// POST the same path with different bodies, so sharing one key would have
+	// the publish refused 422 idempotency_key_reused and never run (legKey says
+	// this at length, tasks_create_idempotency.go).
 	idemBase := newIdempotencyKey()
 
-	httpStatus, respBody, _, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
+	httpStatus, respBody, attempts, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
 	if err != nil {
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
@@ -181,6 +180,15 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// is the same title search as the transport-error branch.
 			return renderAmbiguousWrite(out, ambiguousWrite{
 				class: ambiguityCreateServerFault, leg: "create", title: title,
+				detail: mutateErrorMessage(httpStatus, respBody),
+			})
+		}
+		// A resend refused over this leg's own key speaks about the KEY, not the
+		// task: an earlier attempt went out first and may have committed, so a
+		// "refused" here would send the person to re-file a duplicate.
+		if resendRefusedOwnKey(attempts, respBody) {
+			return renderAmbiguousWrite(out, ambiguousWrite{
+				class: ambiguityCreateResendKeyRefused, leg: "create", title: title,
 				detail: mutateErrorMessage(httpStatus, respBody),
 			})
 		}
@@ -244,82 +252,114 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// from clearing. It is NAMED instead — renderOrphanedDraftRemedy prints the
 		// `drafts.` id, the consequence, and both exits.
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, _, pErr := sendMutationsIdempotent(sendTaskMutations, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
-		if pErr != nil {
-			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
-			// may have LANDED and only the response was lost, so discarding here
-			// could throw away the draft twin of a row that is already on the
-			// board. The class is named instead (see taskCreateResidueClasses).
-			//
-			// Unlike the create leg, this one KNOWS the id — the create response
-			// named it seconds ago — so the caller gets `bp task get <id>` rather
-			// than a title search.
-			code := renderAmbiguousWrite(out, ambiguousWrite{
-				class: residuePublishAmbiguousTransport, leg: "publish", docID: bareID,
-				title: title, detail: pErr.Error(),
-			})
-			renderTaskCreateResidue(out, residuePublishAmbiguousTransport, draftID, bareID)
-			return code
-		}
-		if pStatus < 200 || pStatus >= 300 {
-			if pStatus >= 500 {
-				// Same ambiguity as the create path's 5xx arm: a server fault can
-				// hide a publish that committed before the failure. Not discarded.
+		pStatus, pBody, pHeader, pAttempts, pErr := sendMutationsIdempotentFull(sendTaskMutationsFull, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
+		if pErr == nil && committedFault(pStatus, pHeader) {
+			// The server says the publish COMMITTED and only its answer was a
+			// fault (tasks_create_committed_fault.go): the task is published.
+			record = renderCommittedPublishNote(out, bareID, pStatus, pBody)
+		} else {
+			if pErr != nil {
+				// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
+				// may have LANDED and only the response was lost, so discarding here
+				// could throw away the draft twin of a row that is already on the
+				// board. The class is named instead (see taskCreateResidueClasses).
+				//
+				// Unlike the create leg, this one KNOWS the id — the create response
+				// named it seconds ago — so the caller gets `bp task get <id>` rather
+				// than a title search.
 				code := renderAmbiguousWrite(out, ambiguousWrite{
-					class: residuePublishAmbiguousServerFault, leg: "publish", docID: bareID,
-					title: title, detail: mutateErrorMessage(pStatus, pBody),
+					class: residuePublishAmbiguousTransport, leg: "publish", docID: bareID,
+					title: title, detail: pErr.Error(),
 				})
-				renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
+				renderTaskCreateResidue(out, residuePublishAmbiguousTransport, draftID, bareID)
 				return code
 			}
-			// UNDER -o json/yaml THE REFUSAL IS THE ANSWER, and it goes to
-			// STDOUT as one envelope. The human arm below prints the refusal,
-			// the duplicate resume, and then the discard's own outcome as
-			// separate stderr blocks; a machine caller cannot be handed three
-			// documents (json.load reads the FIRST value and stops), so the
-			// discard runs QUIETLY first and its outcome rides inside the one
-			// envelope's details as draft_discarded/discard_error. Exit code is
-			// unchanged: exitGeneric, exactly what discardCreatedTaskDraft
-			// returns on every one of its arms.
-			if code, machine := renderCreatePublishRefusalEnvelope(out, ctx, pStatus, pBody, draftID, bareID); machine {
+			if pStatus < 200 || pStatus >= 300 {
+				if pStatus >= 500 {
+					// Same ambiguity as the create path's 5xx arm: a server fault can
+					// hide a publish that committed before the failure. Not discarded.
+					code := renderAmbiguousWrite(out, ambiguousWrite{
+						class: residuePublishAmbiguousServerFault, leg: "publish", docID: bareID,
+						title: title, detail: mutateErrorMessage(pStatus, pBody),
+					})
+					renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
+					return code
+				}
+				// A resend refused over this leg's own key speaks about the KEY:
+				// an earlier publish attempt went out first and may have committed,
+				// so the draft is KEPT and named, never discarded as refused.
+				if resendRefusedOwnKey(pAttempts, pBody) {
+					code := renderAmbiguousWrite(out, ambiguousWrite{
+						class: residuePublishResendKeyRefused, leg: "publish", docID: bareID,
+						title: title, detail: mutateErrorMessage(pStatus, pBody),
+					})
+					renderTaskCreateResidue(out, residuePublishResendKeyRefused, draftID, bareID)
+					return code
+				}
+				// A 4xx on a RESEND is not a definite refusal unless its code is a
+				// named wall (publishWallCodes): the server reads the draft before
+				// any wall, so only those prove no earlier attempt published, and
+				// they fall through to the refusal below with their own code and
+				// resume block. Anything else (not_found, 402, a code this binary
+				// does not know) is kept, checked first, never discarded. A 4xx on
+				// the FIRST send is always the refusal below.
+				if resendMayHaveLanded(pAttempts, pStatus, pBody) {
+					code := renderAmbiguousWrite(out, ambiguousWrite{
+						class: residuePublishResendRefused, leg: "publish", docID: bareID,
+						title: title, detail: mutateErrorMessage(pStatus, pBody),
+					})
+					renderTaskCreateResidue(out, residuePublishResendRefused, draftID, bareID)
+					return code
+				}
+				// UNDER -o json/yaml THE REFUSAL IS THE ANSWER, and it goes to
+				// STDOUT as one envelope. The human arm below prints the refusal,
+				// the duplicate resume, and then the discard's own outcome as
+				// separate stderr blocks; a machine caller cannot be handed three
+				// documents (json.load reads the FIRST value and stops), so the
+				// discard runs QUIETLY first and its outcome rides inside the one
+				// envelope's details as draft_discarded/discard_error. Exit code is
+				// unchanged: exitGeneric, exactly what discardCreatedTaskDraft
+				// returns on every one of its arms.
+				if code, machine := renderCreatePublishRefusalEnvelope(out, ctx, pStatus, pBody, draftID, bareID, title); machine {
+					return code
+				}
+				out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
+				// A duplicate_of refusal on the PUBLISH leg names the incumbent, and
+				// after an ambiguous earlier attempt that incumbent is the caller's
+				// own row. Say so before the draft is discarded below, so the exit is
+				// a resume instruction and not a dead end.
+				renderDuplicateResume(out, incumbentTaskID(pBody))
+				// A 4xx IS a refusal: the server evaluated the wall (duplicate_of,
+				// invalid_epic_paper_quality, dedup_unavailable, a rule this binary
+				// predates) and committed nothing. The draft this run created seconds
+				// ago is therefore the WHOLE row — no published twin exists — so it is
+				// discarded in the same run rather than left as a phantom the caller
+				// must be talked through disposing of. This is `bp doc discard-draft`
+				// on a never-published document, i.e. the guard's --delete-unpublished
+				// semantics (discard_draft_guard.go): here the absence of a twin is not
+				// probed but KNOWN, because this process created the draft.
+				return discardCreatedTaskDraft(out, ctx, draftID, bareID, title, publishRefusalCode(pBody))
+			}
+			// PDS wave 48: "published" used to be asserted here off the 2xx alone.
+			// It is now read off the record the publish mutation returned, so a
+			// publish that did not produce a published twin cannot print one.
+			published, pok := firstMutationRecord(pBody)
+			if !pok {
+				// The last of the six ambiguous arms, and the subtlest: a 2xx with no
+				// record. It already said the right sentence — it just said it on
+				// stderr only, at the same exit code as a definite refusal.
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishResultUnreadable, leg: "publish", docID: bareID,
+					title: title, detail: "the publish response carried no result",
+				})
+				renderTaskCreateResidue(out, residuePublishResultUnreadable, draftID, bareID)
 				return code
 			}
-			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
-			// A duplicate_of refusal on the PUBLISH leg names the incumbent, and
-			// after an ambiguous earlier attempt that incumbent is the caller's
-			// own row. Say so before the draft is discarded below, so the exit is
-			// a resume instruction and not a dead end.
-			renderDuplicateResume(out, incumbentTaskID(pBody))
-			// A 4xx IS a refusal: the server evaluated the wall (duplicate_of,
-			// invalid_epic_paper_quality, dedup_unavailable, a rule this binary
-			// predates) and committed nothing. The draft this run created seconds
-			// ago is therefore the WHOLE row — no published twin exists — so it is
-			// discarded in the same run rather than left as a phantom the caller
-			// must be talked through disposing of. This is `bp doc discard-draft`
-			// on a never-published document, i.e. the guard's --delete-unpublished
-			// semantics (discard_draft_guard.go): here the absence of a twin is not
-			// probed but KNOWN, because this process created the draft.
-			return discardCreatedTaskDraft(out, ctx, draftID, bareID, publishRefusalCode(pBody))
+			record = published
+			// The publish mutation re-runs the same before_save gate, so it can raise
+			// the same advisory again; dedupeMutateWarnings keeps one copy of each.
+			warnings = append(warnings, mutateWarnings(pBody)...)
 		}
-		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
-		// It is now read off the record the publish mutation returned, so a
-		// publish that did not produce a published twin cannot print one.
-		published, pok := firstMutationRecord(pBody)
-		if !pok {
-			// The last of the six ambiguous arms, and the subtlest: a 2xx with no
-			// record. It already said the right sentence — it just said it on
-			// stderr only, at the same exit code as a definite refusal.
-			code := renderAmbiguousWrite(out, ambiguousWrite{
-				class: residuePublishResultUnreadable, leg: "publish", docID: bareID,
-				title: title, detail: "the publish response carried no result",
-			})
-			renderTaskCreateResidue(out, residuePublishResultUnreadable, draftID, bareID)
-			return code
-		}
-		record = published
-		// The publish mutation re-runs the same before_save gate, so it can raise
-		// the same advisory again; dedupeMutateWarnings keeps one copy of each.
-		warnings = append(warnings, mutateWarnings(pBody)...)
 	}
 
 	if !publish {
@@ -362,6 +402,16 @@ const (
 	// residuePublishResultUnreadable: the publish answered 2xx but echoed no
 	// record, so whether a published twin exists is unknown.
 	residuePublishResultUnreadable = "publish_result_unreadable"
+	// residuePublishResendKeyRefused: a RESEND of the publish was refused over
+	// the leg's own Idempotency-Key (422 idempotency_key_reused, or 409
+	// idempotency_key_in_use after every resend). An earlier attempt may have
+	// published; discarding could destroy the draft twin of a row on the board.
+	residuePublishResendKeyRefused = "publish_resend_key_refused"
+	// residuePublishResendRefused: a RESEND of the publish was refused with
+	// any other 4xx (not_found, duplicate_of, …). An earlier attempt may have
+	// committed: a landed publish removes the draft, so the resend answers
+	// not_found. Not a definite refusal, so nothing is discarded.
+	residuePublishResendRefused = "publish_resend_refused"
 	// residueDiscardFailed: the publish was definitively refused and the discard
 	// that would have cleaned up was itself refused or unreachable.
 	residueDiscardFailed = "discard_failed"
@@ -374,6 +424,8 @@ var taskCreateResidueClasses = map[string]string{
 	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
 	residueDiscardFailed:               "the publish was refused and the follow-up discard could not be performed",
+	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published (a landed publish removes the draft the resend asks for)",
 }
 
 // renderTaskCreateResidue names the residue class on stderr and then prints the
@@ -387,7 +439,15 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 		why = "unclassified"
 	}
 	out.errf("  residue[%s]: the draft was NOT discarded — %s.", class, why)
-	renderOrphanedDraftRemedy(out, draftID, bareID)
+	if class == residueDiscardFailed {
+		// The publish was definitively refused: the row IS a draft only.
+		renderOrphanedDraftRemedy(out, draftID, bareID)
+		return
+	}
+	// Every other residue class is a publish that may have landed.
+	for _, line := range maybePublishedRemedyLines(draftID, bareID) {
+		out.errf("  %s", line)
+	}
 }
 
 // discardCreatedTaskDraft removes the draft this run just created, after the
@@ -403,8 +463,11 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 // Returns the process exit code: non-zero either way (the create --publish did
 // not do what was asked), but the two paths differ in what is left on the
 // server, and both say which.
-func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, refusalCode string) int {
-	why, byServer := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, title, refusalCode string) int {
+	why, byServer, foundNothing := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+	if foundNothing {
+		return renderDiscardFoundNothing(out, draftID, bareID, title, refusalCode)
+	}
 	if why != "" {
 		out.errf("  %s", why)
 		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
@@ -437,18 +500,45 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID,
 // discard failure after a duplicate_of. A duplicate_of refusal on a CLAIMED
 // draft keeps the draft server-side; the discard then finds it, so that path
 // never reaches the exemption.
-func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool) {
+//
+// FOUND NOTHING (#26871 review). After any OTHER refusal, a discard answering
+// not_found proves there is no draft, so "DRAFT ONLY" would be false: the third
+// return is true, and the caller says the publish may have landed and to check
+// the row first.
+func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool, bool) {
 	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
 	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
+	notFound := status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found"
 	switch {
 	case err != nil:
-		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false
-	case refusalCode == "duplicate_of" && status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found":
-		return "", true
+		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false, false
+	case refusalCode == "duplicate_of" && notFound:
+		return "", true, false
+	case notFound:
+		return "", false, true
 	case status < 200 || status >= 300:
-		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false
+		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false, false
 	}
-	return "", false
+	return "", false, false
+}
+
+// renderDiscardFoundNothing is the answer when the publish was refused but the
+// follow-up discard found no draft. The refusal is definite (only a named wall
+// or a first send reaches the discard), so the headline says "refused", not
+// "may have landed" (rev26733). The row's state is still unknown (another
+// writer may have published or deleted it), so it is exit 9 and the remedy
+// checks the row and offers no delete.
+func renderDiscardFoundNothing(out *writer, draftID, bareID, title, refusalCode string) int {
+	code := renderAmbiguousWrite(out, ambiguousWrite{
+		class: ambiguityPublishDiscardFoundNothing, leg: "publish", docID: bareID, title: title,
+		headline: "the publish was refused, and no draft is left",
+		detail:   fmt.Sprintf("refusal %s; the follow-up discard found no draft %s", refusalCode, draftID),
+	})
+	out.errf("  no draft %s is left. Check the row BEFORE anything else:", draftID)
+	out.errf("    bp task get %s", bareID)
+	out.errf("  if it shows published, another writer filed it: nothing to do.")
+	out.errf("  if it is not found, nothing was kept: re-file with the refusal fixed, e.g. bp task create --publish …")
+	return code
 }
 
 // publishRefusalCode is the server's error.code on a refused publish ("" when
@@ -472,12 +562,15 @@ func publishRefusalCode(body []byte) string {
 //
 // The second return says whether the machine shape was taken at all; false means
 // the caller must print its human block, unchanged.
-func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, status int, body []byte, draftID, bareID string) (int, bool) {
+func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, status int, body []byte, draftID, bareID, title string) (int, bool) {
 	if out.output != "json" && out.output != "yaml" {
 		return 0, false
 	}
 	ae := classifyError(status, body)
-	discardErr, _ := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
+	discardErr, _, foundNothing := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
+	if foundNothing {
+		return renderDiscardFoundNothing(out, draftID, bareID, title, publishRefusalCode(body)), true
+	}
 
 	payload := map[string]any{
 		"draft_id":        draftID,
@@ -952,19 +1045,8 @@ func taskCriterionTexts(value any) []any {
 var sendCreateTaskMutations keyedMutationSender = sendTaskMutations
 
 func sendTaskMutations(ctx manifest.Context, mutations []map[string]any, idempotencyKey string) (int, []byte, error) {
-	endpoint := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/data/mutate/"+ctx.Dataset)
-	body, err := json.Marshal(map[string]any{"mutations": mutations})
-	if err != nil {
-		return 0, nil, err
-	}
-	headers := map[string]string{"Content-Type": "application/json"}
-	if ctx.Token != "" {
-		headers["Authorization"] = "Bearer " + ctx.Token
-	}
-	if idempotencyKey != "" {
-		headers[idempotencyHeader] = idempotencyKey
-	}
-	return doRequest("POST", endpoint, headers, body)
+	status, body, _, err := sendTaskMutationsFull(ctx, mutations, idempotencyKey)
+	return status, body, err
 }
 
 // firstMutationID pulls the first result id out of a raw mutate response

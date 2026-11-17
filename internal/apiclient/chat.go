@@ -768,11 +768,23 @@ func (c *Client) chatArchiveFlipRaw(id, verb string) (ChatSession, int, []byte, 
 
 // RespondChatApproval answers a pending permission request (204). decision is
 // the engine's decision string (e.g. "allow"/"deny"); requestID is the id the
-// permission event carried.
+// permission event carried. A 409 naming the ask's status is an
+// *AskSettledError (the ask is no longer pending, nothing was sent); any other
+// non-2xx is the usual humanAPIError.
 func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 	payload := map[string]string{"request_id": requestID, "decision": decision}
-	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK)
-	return err
+	// 409 is read here, not by chatSendRaw, which drops the body of a refusal.
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK, http.StatusConflict)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusConflict {
+		if settled := askSettled(status, body); settled != nil {
+			return settled
+		}
+		return humanAPIError(status, body)
+	}
+	return nil
 }
 
 // AnswerChatQuestion answers a pending AskUserQuestion card with the option
@@ -785,10 +797,23 @@ func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 // it (charter D22 intact, ct-bl-question-updatedinput). A 404 means the question
 // is gone or already answered — an answer is never idempotent the way an
 // allow/deny is, so the caller must NOT retry it blindly.
+//
+// That 404 is an *AskSettledError with an empty Status: the route's not-found
+// oracle does not say whether the question was answered, canceled, or never
+// this session's, so the caller reloads rather than guesses.
 func (c *Client) AnswerChatQuestion(id, requestID string, answers map[string]any) error {
 	payload := map[string]any{"request_id": requestID, "answers": answers}
-	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK)
-	return err
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK, http.StatusNotFound)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotFound {
+		if gone := questionGone(body); gone != nil {
+			return gone
+		}
+		return humanAPIError(status, body)
+	}
+	return nil
 }
 
 // ChatEvents opens the session's SSE stream and dispatches each frame to

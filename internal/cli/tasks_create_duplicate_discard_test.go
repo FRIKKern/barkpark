@@ -116,10 +116,11 @@ func TestCreatePublishDuplicateDraftAlreadyDiscardedByServerIsNotResidue(t *test
 	}
 }
 
-// A GENUINE DISCARD FAILURE IS STILL RESIDUE. Two arms, each in both shapes:
-// the refusal was duplicate_of but the discard failed for another reason (500),
-// and the discard 404'd after a refusal that is NOT duplicate_of (no server-side
-// discard happened, so a 404 is not the known already-gone answer).
+// A GENUINE DISCARD FAILURE IS STILL RESIDUE, in both shapes: the refusal was
+// duplicate_of but the discard failed for another reason (500). A discard that
+// 404s after any OTHER refusal is no longer residue: it proves there is no
+// draft, so it is ambiguous and checks first (#26871 review), pinned by
+// TestTaskCreateDiscardFindingNoDraftChecksFirst.
 func TestCreatePublishGenuineDiscardFailureIsStillResidue(t *testing.T) {
 	arms := []struct {
 		name          string
@@ -130,7 +131,6 @@ func TestCreatePublishGenuineDiscardFailureIsStillResidue(t *testing.T) {
 	}{
 		{"duplicate_of then 500", http.StatusConflict, dupRefusalBody,
 			http.StatusInternalServerError, `{"error":{"code":"internal_error","message":"boom"}}`},
-		{"non-duplicate then 404", http.StatusUnprocessableEntity, wallUnknownTagPublishBody, 0, ""},
 	}
 	for _, arm := range arms {
 		for _, shape := range []string{"json", ""} {

@@ -3040,6 +3040,50 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # ── Access requests, admin's side (task-1b99ba8512bb758e) ──
+      core_cmd(
+        "workspace.access-request-ls",
+        "workspace",
+        "access-request-ls",
+        "Pending access requests: who asked for a seat here, their note and when.",
+        "GET",
+        "/v1/access-requests",
+        "scoped_admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.access-request-approve",
+        "workspace",
+        "access-request-approve",
+        "Approve an access request: the asker is seated with the role (only an owner grants owner).",
+        "POST",
+        "/v1/access-requests/:id/approve",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Access request id.")],
+        flags: [
+          flag("role", "string", "owner | admin | member | contributor (or a custom role).",
+            default: "member"
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.access-request-deny",
+        "workspace",
+        "access-request-deny",
+        "Deny an access request. No seat is made; the asker sees denied.",
+        "POST",
+        "/v1/access-requests/:id/deny",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Access request id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "workspace.member-role",
         "workspace",
@@ -4343,6 +4387,44 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/invitations/:id",
         "read",
         args: [arg("id", true, "string", "Invitation id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      # ── Access requests, asker's side (task-1b99ba8512bb758e) ──
+      # A login session or a token the user owns, like `access claim`.
+      core_cmd(
+        "auth.access-request-create",
+        "auth",
+        "access-request-create",
+        "Ask a workspace's admins for a seat. The answer is the same whether the workspace exists or not.",
+        "POST",
+        "/v1/auth/access-requests",
+        "read",
+        args: [arg("workspace", true, "string", "Workspace slug.")],
+        flags: [flag("note", "string", "A note for the admins (at most 500 characters).")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "auth.access-request-ls",
+        "auth",
+        "access-request-ls",
+        "Your access requests: the workspace slug you asked for and its status.",
+        "GET",
+        "/v1/auth/access-requests",
+        "read",
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "auth.access-request-withdraw",
+        "auth",
+        "access-request-withdraw",
+        "Withdraw one of your pending access requests.",
+        "DELETE",
+        "/v1/auth/access-requests/:id",
+        "read",
+        args: [arg("id", true, "string", "Access request id.")],
         writes: true,
         default_output: "minimal"
       ),

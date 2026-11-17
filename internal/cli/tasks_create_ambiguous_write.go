@@ -57,19 +57,32 @@ const (
 	// ambiguityCreateResultUnreadable: the CREATE answered 2xx and echoed no
 	// usable id. The row is on the server; this process cannot name it.
 	ambiguityCreateResultUnreadable = "create_result_unreadable"
+	// ambiguityCreateResendKeyRefused: a RESEND of the create was refused over
+	// the leg's own Idempotency-Key (422 idempotency_key_reused, or 409
+	// idempotency_key_in_use after every resend). An earlier attempt of this
+	// invocation went out first, so it may have committed (task-f98d2eb6ff29781c).
+	ambiguityCreateResendKeyRefused = "create_resend_key_refused"
 )
 
 // taskCreateAmbiguityClasses maps each class to the sentence that says what is
 // unknown. Closed set, iterated by TestTaskCreateAmbiguityClassesAreEnumerated
 // so a future arm cannot be added without a name and a why.
 var taskCreateAmbiguityClasses = map[string]string{
-	ambiguityCreateAnswerLost:          "the create request was sent and no response came back — it may have committed",
-	ambiguityCreateServerFault:         "the create answered a server fault, which can hide a write that committed before the failure",
-	ambiguityCreateResultUnreadable:    "the create answered 2xx but echoed no id — the row exists and this process cannot name it",
-	residuePublishAmbiguousTransport:   "the publish request was sent and no response came back — it may have committed",
-	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
-	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
+	ambiguityCreateAnswerLost:           "the create request was sent and no response came back — it may have committed",
+	ambiguityCreateServerFault:          "the create answered a server fault, which can hide a write that committed before the failure",
+	ambiguityCreateResultUnreadable:     "the create answered 2xx but echoed no id — the row exists and this process cannot name it",
+	ambiguityCreateResendKeyRefused:     "a resend of the create was refused over its own Idempotency-Key, after an earlier attempt that may have committed",
+	residuePublishAmbiguousTransport:    "the publish request was sent and no response came back — it may have committed",
+	residuePublishAmbiguousServerFault:  "the publish answered a server fault, which can hide a write that committed before the failure",
+	residuePublishResultUnreadable:      "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
+	residuePublishResendKeyRefused:      "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:         "a resend of the publish was refused, after an earlier attempt that may have published",
+	ambiguityPublishDiscardFoundNothing: "the publish was refused, and the follow-up discard found no draft: another writer may have published or deleted it",
 }
+
+// ambiguityPublishDiscardFoundNothing: the publish was refused and the discard
+// answered not_found. No draft is left, so this is not a residue class.
+const ambiguityPublishDiscardFoundNothing = "publish_discard_found_nothing"
 
 // ambiguousWrite is one ambiguous outcome, fully described.
 type ambiguousWrite struct {
@@ -86,16 +99,25 @@ type ambiguousWrite struct {
 	// leg names which request was in flight ("create" / "publish"), for the
 	// human line.
 	leg string
+	// headline replaces "the <leg> request WAS SENT and may have landed" when
+	// that sentence is false, e.g. a publish that was REFUSED and whose discard
+	// then found no draft.
+	headline string
 }
 
 // checkCommand is the ONE command the operator should run next. An id beats a
 // search every time, so it is preferred whenever this process actually received
 // one.
+//
+// The search names the drafts perspective: a row an ambiguous create may have
+// landed is a DRAFT (the publish never ran), and search reads published rows
+// by default, so a bare search answers "not found" for exactly that row
+// (task-e897b05667403f28).
 func (a ambiguousWrite) checkCommand() string {
 	if id := strings.TrimPrefix(a.docID, "drafts."); id != "" {
 		return "bp task get " + id
 	}
-	return fmt.Sprintf("bp search query %q", a.title)
+	return fmt.Sprintf("bp search query %q --perspective drafts", a.title)
 }
 
 // renderAmbiguousWrite is the single seam every ambiguous `bp task create`
@@ -115,6 +137,9 @@ func renderAmbiguousWrite(out *writer, a ambiguousWrite) int {
 	check := a.checkCommand()
 
 	msg := fmt.Sprintf("task create: the %s request WAS SENT and may have landed — %s", leg, why)
+	if a.headline != "" {
+		msg = "task create: " + a.headline
+	}
 
 	// stderr, unconditionally. The stdout envelope below is the machine
 	// channel; this is the one a person reads, and a write that may have

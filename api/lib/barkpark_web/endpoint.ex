@@ -200,6 +200,8 @@ defmodule BarkparkWeb.Endpoint do
 
   defp reset_request_memo(conn, _opts) do
     Barkpark.Content.WriteScope.begin_request()
+    # And no Idempotency claim held by the previous request on this process.
+    Barkpark.Idempotency.forget_held_key()
     conn
   end
 
