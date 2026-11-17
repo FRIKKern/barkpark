@@ -68,16 +68,21 @@ const (
 // unknown. Closed set, iterated by TestTaskCreateAmbiguityClassesAreEnumerated
 // so a future arm cannot be added without a name and a why.
 var taskCreateAmbiguityClasses = map[string]string{
-	ambiguityCreateAnswerLost:          "the create request was sent and no response came back — it may have committed",
-	ambiguityCreateServerFault:         "the create answered a server fault, which can hide a write that committed before the failure",
-	ambiguityCreateResultUnreadable:    "the create answered 2xx but echoed no id — the row exists and this process cannot name it",
-	ambiguityCreateResendKeyRefused:    "a resend of the create was refused over its own Idempotency-Key, after an earlier attempt that may have committed",
-	residuePublishAmbiguousTransport:   "the publish request was sent and no response came back — it may have committed",
-	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
-	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
-	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
-	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published",
+	ambiguityCreateAnswerLost:           "the create request was sent and no response came back — it may have committed",
+	ambiguityCreateServerFault:          "the create answered a server fault, which can hide a write that committed before the failure",
+	ambiguityCreateResultUnreadable:     "the create answered 2xx but echoed no id — the row exists and this process cannot name it",
+	ambiguityCreateResendKeyRefused:     "a resend of the create was refused over its own Idempotency-Key, after an earlier attempt that may have committed",
+	residuePublishAmbiguousTransport:    "the publish request was sent and no response came back — it may have committed",
+	residuePublishAmbiguousServerFault:  "the publish answered a server fault, which can hide a write that committed before the failure",
+	residuePublishResultUnreadable:      "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
+	residuePublishResendKeyRefused:      "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:         "a resend of the publish was refused, after an earlier attempt that may have published",
+	ambiguityPublishDiscardFoundNothing: "the publish was refused, but the follow-up discard found no draft, so the row may be published",
 }
+
+// ambiguityPublishDiscardFoundNothing: the publish was refused and the discard
+// answered not_found. No draft is left, so this is not a residue class.
+const ambiguityPublishDiscardFoundNothing = "publish_discard_found_nothing"
 
 // ambiguousWrite is one ambiguous outcome, fully described.
 type ambiguousWrite struct {
