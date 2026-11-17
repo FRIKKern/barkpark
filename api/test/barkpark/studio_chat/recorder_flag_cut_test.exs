@@ -67,6 +67,46 @@ defmodule Barkpark.StudioChat.RecorderFlagCutTest do
              String.duplicate("a", keep - 4)
   end
 
+  # Review of #26947: the grapheme cut can fall a whole grapheme short of the
+  # budget, so the capped text no longer re-capped to itself and later deltas
+  # were stored after the marker, with a second marker. The cap now freezes.
+  test "after the cap, later deltas are not stored: one marker, at the tail",
+       %{sid: sid, recorder: recorder} do
+    first = "hello " <> "x" <> String.duplicate("\u{0301}", 300)
+
+    frame(recorder, runtime(sid, :turn_started))
+
+    for delta <- [first | List.duplicate("more text ", 30)] do
+      frame(recorder, %{runtime(sid, :text_delta) | native: %{"params" => %{"delta" => delta}}})
+    end
+
+    frame(recorder, runtime(sid, :turn_completed))
+
+    row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "assistant"))
+    assert String.ends_with?(row.source_markdown, @marker)
+    assert length(String.split(row.source_markdown, @marker)) == 2
+    refute row.source_markdown =~ "more text"
+  end
+
+  test "a flag cut short of the budget still freezes with one whole marker",
+       %{sid: sid, recorder: recorder} do
+    keep = @cap_bytes - byte_size(@marker)
+
+    frame(recorder, runtime(sid, :turn_started))
+
+    for delta <- [
+          String.duplicate("a", keep - 4) <> "🇳🇴" <> String.duplicate("c", 60)
+          | List.duplicate("b", 12)
+        ] do
+      frame(recorder, %{runtime(sid, :text_delta) | native: %{"params" => %{"delta" => delta}}})
+    end
+
+    frame(recorder, runtime(sid, :turn_completed))
+
+    row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "assistant"))
+    assert row.source_markdown == String.duplicate("a", keep - 4) <> @marker
+  end
+
   defp runtime(sid, kind),
     do: %Event{kind: kind, provider: "codex", session_id: sid}
 

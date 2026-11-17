@@ -60,6 +60,33 @@ defmodule Barkpark.ByteCutTest do
     assert ByteCut.prefix("ab" <> <<0xFF>> <> "cdef", 4) == "ab"
   end
 
+  # Review of #26947: the boundary check segmented the raw rest of the text,
+  # and Erlang's segmenter raises on an emoji followed by a bad byte.
+  test "an emoji right before a bad byte is cut, not raised on" do
+    assert ByteCut.prefix("🐕" <> <<0xFF>> <> "x", 2) == ""
+    assert ByteCut.prefix("a🏴" <> <<0xFF>> <> "bc", 5) == "a🏴"
+    assert ByteCut.prefix("🏴" <> <<0xFF>>, 4) == "🏴"
+  end
+
+  test "seeded fuzz with bad bytes: never raises, never over the budget, always a valid prefix" do
+    pool = ["a", "b", " ", "\r", "\n", "é", @mark, "🐕", "\u{200D}", "🇳", "🇴", "🏴", "\u{E0067}"]
+    pool = pool ++ ["\u{E007F}", "中", <<0xFF>>, <<0xC3>>]
+    :rand.seed(:exsss, {7, 11, 13})
+
+    for _ <- 1..3_000 do
+      text = Enum.map_join(1..:rand.uniform(12), fn _ -> Enum.random(pool) end)
+      max = :rand.uniform(byte_size(text) + 1) - 1
+      cut = ByteCut.prefix(text, max)
+
+      if byte_size(text) > max do
+        assert byte_size(cut) <= max, inspect({text, max})
+        assert String.valid?(cut), inspect({text, max})
+      end
+
+      assert String.starts_with?(text, cut), inspect({text, max})
+    end
+  end
+
   test "every cut of mixed text ends on a grapheme boundary of the whole text" do
     text =
       "a🇳🇴b" <>

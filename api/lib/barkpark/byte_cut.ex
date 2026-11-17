@@ -33,11 +33,20 @@ defmodule Barkpark.ByteCut do
     last = last_grapheme_start(whole, anchor(whole, byte_size(whole) - 1))
     kept = byte_size(whole) - last
 
-    case String.next_grapheme_size(binary_part(text, last, byte_size(text) - last)) do
+    case String.next_grapheme_size(look_ahead(text, last, kept)) do
       {^kept, _rest} -> whole
       _cut_inside when last > 0 -> binary_part(whole, 0, last)
       _oversized -> drop_flag(whole)
     end
+  end
+
+  # The text from `last` through one codepoint past the cut, valid UTF-8 only.
+  # Whether the cut is a boundary depends on nothing after that codepoint, so
+  # a giant final grapheme is not read in full. A bad byte ends the window,
+  # which is a boundary too (the segmenter raises on some bad bytes).
+  defp look_ahead(text, last, kept) do
+    size = min(kept + 4, byte_size(text) - last)
+    valid_prefix(binary_part(text, last, size))
   end
 
   defp valid_prefix(bytes) do
