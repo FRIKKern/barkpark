@@ -81,11 +81,11 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
       :caller,
     "barkpark_web/live/studio/studio_live/handlers/delete.ex delete_open_doc/3 → delete_document" =>
       :caller,
-    # The desk's bulk bar (task-4224c3aa5a788cd9): `run/6` builds its opts
+    # The desk's bulk bar (task-4224c3aa5a788cd9): `work/6` builds its opts
     # from the page's socket (`Shared.hook_opts/1`), `write/5` passes them on.
-    "barkpark_web/live/studio/desk/bulk.ex run/6 → write" => :caller,
-    "barkpark_web/live/studio/desk/bulk.ex write/5 → publish_document" => :caller,
-    "barkpark_web/live/studio/desk/bulk.ex write/5 → unpublish_document" => :caller,
+    "barkpark_web/live/studio/desk/bulk_run.ex work/6 → write" => :caller,
+    "barkpark_web/live/studio/desk/bulk_run.ex write/5 → publish_document" => :caller,
+    "barkpark_web/live/studio/desk/bulk_run.ex write/5 → unpublish_document" => :caller,
     "barkpark_web/live/studio/studio_live/handlers/doc.ex publish_open_doc/1 → publish_document" =>
       :caller,
     "barkpark_web/live/studio/studio_live/handlers/doc.ex publish_tag_under_name/4 → publish_document" =>

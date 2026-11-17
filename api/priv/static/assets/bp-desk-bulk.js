@@ -113,8 +113,9 @@
     }
   }
 
-  // An action started from the bar greys the bar's buttons out, and a greyed
-  // button drops the focus onto the page: the bar itself takes it. Selecting
+  // An action greys the bar's buttons out and takes the unpublish dialog
+  // away, and either drops the focus onto the page: the bar itself takes it
+  // for as long as the action runs. Selecting
   // ended in `pane`: a focus left on nothing, or on a tick that is out of
   // reach now, goes to the list's "List options".
   function onBulk(e) {
@@ -122,12 +123,17 @@
     sync();
     if (!detail.pane) return;
     var at = doc.activeElement;
-    if (detail.active) {
-      var bar = at && at.disabled && at.closest ? at.closest(".bulk-bar") : null;
-      if (bar && bar.getAttribute("data-bulk-bar") === detail.pane) bar.focus({ preventScroll: true });
+    var lost = !at || at === doc.body || !at.isConnected || at.disabled || (at.closest && at.closest("[inert]"));
+    if (detail.running) {
+      // Publish's own button is greyed out; the unpublish dialog is gone,
+      // and the button it gives the focus back to is greyed out too.
+      var bars = doc.querySelectorAll(".bulk-bar");
+      for (var i = 0; lost && i < bars.length; i++) {
+        if (bars[i].getAttribute("data-bulk-bar") === detail.pane) bars[i].focus({ preventScroll: true });
+      }
       return;
     }
-    var lost = !at || at === doc.body || !at.isConnected || (at.closest && at.closest("[inert]"));
+    if (detail.active) return;
     if (!lost) return;
     var button = doc.getElementById(detail.pane + "-menu-button");
     if (button) button.focus({ preventScroll: true });

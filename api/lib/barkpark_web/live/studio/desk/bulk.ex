@@ -8,7 +8,9 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   ## State
 
   The page (`DeskLive`) holds every list's selection in `desk_bulk`, by the
-  pane's id: `%{type, selecting, ids, set, last, running}`. `ids` are the
+  pane's id: `%{type, scope, selecting, ids, set, last, running}`. `scope` is
+  the dataset, workspace and project it was ticked in: a selection is drawn
+  and acted on there only, and a patch to another dataset ends it. `ids` are the
   ticked documents in the order they were ticked, never more than
   `max_selected/0`. A pane gets its own entry as its `bulk` assign. A pane
   that leaves the page takes its selection with it (`follow/2`).
@@ -39,6 +41,9 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   `Content.publish_document/4` or `Content.unpublish_document/4` on its own,
   so one refusal never stops the rest. An unpublish writes only the
   documents the dialog named: the ones that were published when it opened.
+  When an action starts, what is stored of each ticked document is read
+  again (`stored/2`): one with nothing to do is left alone, one that is gone
+  is said to have failed.
 
   The work runs in a task (`start_async`), so the page stays live; the task
   tells the pane how far it is. One summary says what happened
@@ -48,33 +53,61 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   use Gettext, backend: BarkparkWeb.Gettext
 
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [push_event: 3, send_update: 3, start_async: 3]
+  import Phoenix.LiveView, only: [push_event: 3, start_async: 3]
 
-  alias Barkpark.Content
+  alias BarkparkWeb.Studio.Desk.BulkRun
   alias BarkparkWeb.Studio.Desk.DocDialog
-  alias BarkparkWeb.Studio.Desk.PaneComponent
-  alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.Desk.EditorHost
 
   # The Studio's cap (`Handlers.Bulk`), and the TanStack Studio's MAX_SELECTED.
   @max 500
-
-  # A running action says how far it is this often, at most.
-  @tell_ms 250
 
   @doc "The most documents one selection holds."
   def max_selected, do: @max
 
   @doc "The page's assigns, with nothing selected."
-  def init(socket), do: socket |> assign(:desk_bulk, %{}) |> assign(:desk_bulk_confirm, nil)
+  def init(socket) do
+    socket
+    |> assign(:desk_bulk, %{})
+    |> assign(:desk_bulk_confirm, nil)
+    |> assign(:desk_bulk_scope, nil)
+  end
 
-  @doc "The URL changed: a selection lives as long as its pane is on the page."
+  @doc """
+  The URL changed. A selection lives as long as its pane is on the page, and
+  only in the dataset and scope it was ticked in: a patch to another dataset
+  (the same pane id, the same document ids) ends every selection, so
+  nothing ticked in one dataset is ever written in another. Called once the
+  page holds the new dataset and scope.
+  """
   def follow(socket, views) do
-    ids = MapSet.new(views, & &1.id)
-    bulk = Map.filter(socket.assigns.desk_bulk, fn {pane, _} -> MapSet.member?(ids, pane) end)
-    confirm = socket.assigns.desk_bulk_confirm
-    confirm = if confirm && MapSet.member?(ids, confirm.pane), do: confirm
+    scope = scope_key(socket)
 
-    socket |> assign(:desk_bulk, bulk) |> assign(:desk_bulk_confirm, confirm)
+    if socket.assigns.desk_bulk_scope == scope do
+      ids = MapSet.new(views, & &1.id)
+      bulk = Map.filter(socket.assigns.desk_bulk, fn {pane, _} -> MapSet.member?(ids, pane) end)
+      confirm = socket.assigns.desk_bulk_confirm
+      confirm = if confirm && MapSet.member?(ids, confirm.pane), do: confirm
+
+      socket |> assign(:desk_bulk, bulk) |> assign(:desk_bulk_confirm, confirm)
+    else
+      socket
+      |> assign(:desk_bulk, %{})
+      |> assign(:desk_bulk_confirm, nil)
+      |> assign(:desk_bulk_scope, scope)
+    end
+  end
+
+  # Where a selection belongs: the dataset, and the workspace and project.
+  defp scope_key(%{assigns: assigns}),
+    do: {assigns[:dataset], Keyword.take(assigns[:scope] || [], [:workspace_id, :project_id])}
+
+  @doc "A pane's selection, for its `bulk` assign: only one ticked in the page's dataset and scope."
+  def of(%{desk_bulk: bulk, desk_bulk_scope: scope}, pane) do
+    case bulk[pane] do
+      %{scope: ^scope} = state -> state
+      _ -> nil
+    end
   end
 
   @doc """
@@ -199,8 +232,22 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
 
   def handle_event("bulk-publish", %{"pane" => pane}, socket) do
     case ready(socket, pane) do
-      nil -> {:noreply, socket}
-      state -> {:noreply, run(socket, pane, state, :publish, state.ids, [])}
+      nil ->
+        {:noreply, socket}
+
+      state ->
+        stored = BulkRun.stored(socket, state)
+
+        plan =
+          for id <- state.ids do
+            case stored[id] do
+              {true, _published?} -> {id, :write}
+              {false, true} -> {id, :skipped}
+              _gone -> {id, :gone}
+            end
+          end
+
+        {:noreply, run(socket, pane, state, :publish, plan, [])}
     end
   end
 
@@ -215,9 +262,20 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
         {:noreply, assign(socket, :desk_bulk_confirm, nil)}
 
       state ->
-        named = Enum.map(confirm.docs, & &1.id)
-        # Only what the dialog named, and only while it is still ticked.
-        live = Enum.filter(named, &MapSet.member?(state.set, &1))
+        named = MapSet.new(confirm.docs, & &1.id)
+        stored = BulkRun.stored(socket, state)
+
+        # Only what the dialog named, and only what is still published.
+        plan =
+          for id <- state.ids do
+            case stored[id] do
+              {_draft?, true} -> {id, if(MapSet.member?(named, id), do: :write, else: :skipped)}
+              {true, false} -> {id, :skipped}
+              _gone -> {id, :gone}
+            end
+          end
+
+        live = for {id, :write} <- plan, do: id
 
         cut =
           if params["disconnect"] == "true",
@@ -225,7 +283,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
             else: []
 
         socket = assign(socket, :desk_bulk_confirm, nil)
-        {:noreply, run(socket, pane, state, :unpublish, live, cut)}
+        {:noreply, run(socket, pane, state, :unpublish, plan, cut)}
     end
   end
 
@@ -246,12 +304,15 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   # (its buttons wait). None published: nothing to ask and nothing to write.
   defp ask(socket, pane, state) do
     %{dataset: dataset, scope: scope} = socket.assigns
-    live = Content.resolvable_doc_ids(state.ids, state.type, dataset, scope)
-    ids = Enum.filter(state.ids, &MapSet.member?(live, &1))
+    stored = BulkRun.stored(socket, state)
+    ids = for id <- state.ids, match?({_draft?, true}, stored[id]), do: id
 
     if ids == [] do
-      skipped = List.duplicate(:skipped, length(state.ids))
-      socket |> toast(summary(:unpublish, skipped)) |> stop(pane)
+      left =
+        for id <- state.ids,
+            do: if(stored[id] == {true, false}, do: :skipped, else: BulkRun.gone())
+
+      socket |> toast(BulkRun.summary(:unpublish, left)) |> stop(pane)
     else
       titles = socket.assigns.doc_titles
       docs = for id <- ids, do: %{id: id, title: titles[id] || id, rows: []}
@@ -263,77 +324,17 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
     end
   end
 
-  # The ticked documents go one at a time, in a task. `ids` are the ones to
-  # write; every other ticked document is counted as left alone.
-  defp run(socket, pane, state, action, ids, cut) do
-    dataset = socket.assigns.dataset
-    type = state.type
-    opts = Shared.hook_opts(socket)
-    cut_opts = Shared.disconnect_opts(socket)
-    page = self()
-    total = length(state.ids)
-    rest = total - length(ids)
-    tell = fn at -> send_update(page, PaneComponent, id: pane, bulk_at: at) end
-
-    work =
-      PaneComponent.in_locale(fn ->
-        with :ok <- disconnect(cut, dataset, cut_opts) do
-          # How far it is, a few times a second at most: each word redraws the list.
-          {done, _told} =
-            ids
-            |> Enum.with_index(1)
-            |> Enum.map_reduce(nil, fn {id, at}, told ->
-              now = System.monotonic_time(:millisecond)
-              due? = is_nil(told) or now - told >= @tell_ms
-              if due?, do: tell.(at)
-              result = write(action, id, type, dataset, opts)
-              {outcome(action, result), if(due?, do: now, else: told)}
-            end)
-
-          {action, done ++ List.duplicate(:skipped, rest)}
-        end
-      end)
+  # The run is a task, so the page stays live; the bar says it is running.
+  defp run(socket, pane, state, action, plan, cut) do
+    work = BulkRun.work(socket, pane, state, action, plan, cut)
 
     socket
-    |> put(pane, %{state | running: %{action: action, n: total}})
+    |> put(pane, %{state | running: %{action: action, n: length(plan)}})
     |> start_async({:desk_bulk, {:run, pane}}, work)
   end
 
-  defp write(:publish, id, type, dataset, opts),
-    do: Content.publish_document(id, type, dataset, opts)
-
-  defp write(:unpublish, id, type, dataset, opts),
-    do: Content.unpublish_document(id, type, dataset, opts)
-
-  # The references go first, as the single dialog's: a refusal there stops
-  # before anything is unpublished.
-  defp disconnect(ids, dataset, opts) do
-    Enum.reduce_while(ids, :ok, fn id, :ok ->
-      case Content.disconnect_references(id, dataset, opts) do
-        {:error, {:outside_write_grant, denied}} ->
-          {:halt, {:refused, Shared.outside_grant_disconnect_message(denied, "unpublished")}}
-
-        _ ->
-          {:cont, :ok}
-      end
-    end)
-  end
-
-  defp outcome(_action, {:ok, _doc}), do: :done
-  # Nothing to do: a publish with no draft, an unpublish of one not published.
-  defp outcome(_action, {:error, :not_found}), do: :skipped
-
-  defp outcome(:publish, {:error, {wall, details}})
-       when wall in [:label_spine, :unknown_tag, :duplicate_of],
-       do: {:walled, Shared.format_wall_details(details)}
-
-  defp outcome(_action, {:error, reason}), do: {:failed, reason(reason)}
-  defp outcome(_action, _other), do: {:failed, reason(nil)}
-
-  defp reason({:halted, why}) when is_binary(why), do: why
-  defp reason(:publish_not_permitted), do: gettext("Your role cannot publish here")
-  defp reason(why) when is_binary(why), do: why
-  defp reason(_why), do: gettext("Barkpark refused the change")
+  @doc "The summary of an action (`BulkRun.summary/2`)."
+  defdelegate summary(action, outcomes), to: BulkRun
 
   @doc "A task is back: who refers to the dialog's documents, or what an action did."
   def handle_async({:refs, pane}, {:ok, %{} = used}, socket) do
@@ -365,8 +366,11 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   end
 
   # One summary, and the selection ends.
-  def handle_async({:run, pane}, {:ok, {action, outcomes}}, socket) when is_list(outcomes),
-    do: {:noreply, socket |> toast(summary(action, outcomes)) |> stop(pane)}
+  def handle_async({:run, pane}, {:ok, {action, outcomes, written}}, socket)
+      when is_list(outcomes) do
+    {:noreply,
+     socket |> toast(BulkRun.summary(action, outcomes)) |> stop(pane) |> reread(written)}
+  end
 
   # Refused before anything was unpublished: the ticks stay.
   def handle_async({:run, pane}, {:ok, {:refused, why}}, socket),
@@ -379,60 +383,23 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
      |> idle(pane)}
   end
 
+  # The document open in the editor was one of them: the editor reads it
+  # again, as after its own Publish. Its frames came from the task, so the
+  # Studio took them for someone else's save. Unsaved typing is left alone.
+  defp reread(%{assigns: %{editing: {_dataset, _type, id}} = assigns} = socket, written) do
+    if id in written and assigns[:editor_dirty] != true,
+      do: EditorHost.reread(socket),
+      else: socket
+  end
+
+  defp reread(socket, _written), do: socket
+
   defp idle(socket, pane) do
-    case socket.assigns.desk_bulk[pane] do
+    case of(socket.assigns, pane) do
       %{} = state -> put(socket, pane, %{state | running: nil})
       nil -> socket
     end
   end
-
-  @doc """
-  What a bulk action did, in the TanStack Studio's words (`bulkSummary`):
-  "Published 2 of 3", then what was left alone and why.
-  """
-  @spec summary(:publish | :unpublish, [term()]) :: %{
-          tone: String.t(),
-          title: String.t(),
-          description: String.t() | nil
-        }
-  def summary(action, outcomes) do
-    total = length(outcomes)
-    done = Enum.count(outcomes, &(&1 == :done))
-    skipped = Enum.count(outcomes, &(&1 == :skipped))
-    walls = for {:walled, why} <- outcomes, do: why
-    fails = for {:failed, why} <- outcomes, do: why
-
-    title =
-      case action do
-        :publish -> gettext("Published %{done} of %{total}", done: done, total: total)
-        :unpublish -> gettext("Unpublished %{done} of %{total}", done: done, total: total)
-      end
-
-    parts = [
-      skipped > 0 && left_alone(action, skipped),
-      walls != [] &&
-        gettext("%{n} blocked by the publish wall — %{reason}",
-          n: length(walls),
-          reason: hd(walls)
-        ),
-      fails != [] && gettext("%{n} failed: %{reason}", n: length(fails), reason: hd(fails))
-    ]
-
-    %{
-      tone: if(walls != [] or fails != [], do: "critical", else: "positive"),
-      title: title,
-      description:
-        case Enum.filter(parts, & &1) do
-          [] -> nil
-          said -> Enum.join(said, " ")
-        end
-    }
-  end
-
-  defp left_alone(:publish, n), do: gettext("%{n} had no changes to publish.", n: n)
-
-  defp left_alone(:unpublish, n),
-    do: ngettext("%{n} was not published.", "%{n} were not published.", n, n: n)
 
   # ── state ──────────────────────────────────────────────────────────────────
 
@@ -446,9 +413,10 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   defp view(_socket, _pane), do: nil
 
   defp state(socket, view) do
-    socket.assigns.desk_bulk[view.id] ||
+    of(socket.assigns, view.id) ||
       %{
         type: view.pane.type,
+        scope: scope_key(socket),
         selecting: false,
         ids: [],
         set: MapSet.new(),
@@ -460,7 +428,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   # A pane's selection that an action may start on: ticked, and none running.
   defp ready(socket, pane) do
     with %{} <- view(socket, pane),
-         %{ids: [_ | _], running: nil} = state <- socket.assigns.desk_bulk[pane] do
+         %{ids: [_ | _], running: nil} = state <- of(socket.assigns, pane) do
       state
     else
       _ -> nil
@@ -470,7 +438,11 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   defp put(socket, pane, state) do
     socket
     |> assign(:desk_bulk, Map.put(socket.assigns.desk_bulk, pane, state))
-    |> push_event("desk:bulk", %{pane: pane, active: active?(state)})
+    |> push_event("desk:bulk", %{
+      pane: pane,
+      active: active?(state),
+      running: state.running != nil
+    })
   end
 
   # Selecting ends: no ticks, no bar, no dialog.
@@ -481,7 +453,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
     socket
     |> assign(:desk_bulk, Map.delete(socket.assigns.desk_bulk, pane))
     |> assign(:desk_bulk_confirm, confirm)
-    |> push_event("desk:bulk", %{pane: pane, active: false})
+    |> push_event("desk:bulk", %{pane: pane, active: false, running: false})
   end
 
   defp toast(socket, %{tone: tone, title: title, description: description}),

@@ -452,6 +452,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
 
+  @doc """
+  The open document was written by this page's own bulk action (`Bulk`): the
+  editor reads what is stored now, as after its own Publish. With no
+  document in the editor, nothing.
+  """
+  def reread(%{assigns: %{editing: {_dataset, _type, _id}, desk_nav: [_ | _]}} = socket),
+    do: socket |> reload(:reload) |> settle(:settled)
+
+  def reread(socket), do: socket
+
   # The Studio loads the document again, as its own patch would have; the
   # flash its handler put stays. From the path the desk handed over, not the
   # one asked for, so the Studio's `nav_path` stays `desk_nav` and the next

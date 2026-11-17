@@ -178,9 +178,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # Focus mode is for the panes it was turned on over (`FocusMode`).
     socket = FocusMode.follow(socket, splat)
 
-    # A list's selection lives as long as its pane (`Bulk`).
-    socket = Bulk.follow(socket, views)
-
     socket =
       socket
       |> LiveRefresh.subscribe(dataset)
@@ -197,6 +194,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         titles: titles,
         page_title: titles[last.id] || kept_title(socket.assigns, last) || last.title
       )
+
+    # A list's selection lives as long as its pane, in its dataset (`Bulk`).
+    socket = Bulk.follow(socket, views)
 
     # The lists' first pages: read in the first render, handed to the
     # connected mount (ruling R12).
@@ -526,7 +526,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         sorts={menu(@desk, view).sorts}
         default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
-        bulk={@desk_bulk[view.id]}
+        bulk={Bulk.of(assigns, view.id)}
         bulk_confirm={@desk_bulk_confirm && @desk_bulk_confirm.pane == view.id && @desk_bulk_confirm}
       />
       <% end %>

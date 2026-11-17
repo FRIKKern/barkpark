@@ -15016,3 +15016,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Could not check which documents refer to them. Retry before unpublishing."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
+#, elixir-autogen, elixir-format
+msgid "The document is no longer there"
+msgstr ""

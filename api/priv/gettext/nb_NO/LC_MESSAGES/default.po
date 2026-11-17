@@ -15021,3 +15021,8 @@ msgstr "Ser etter dokumenter som refererer til dem…"
 #, elixir-autogen, elixir-format
 msgid "Could not check which documents refer to them. Retry before unpublishing."
 msgstr "Kunne ikke sjekke hvilke dokumenter som refererer til dem. Prøv igjen før du avpubliserer."
+
+#: lib/barkpark_web/live/studio/desk/bulk_run.ex
+#, elixir-autogen, elixir-format
+msgid "The document is no longer there"
+msgstr "Dokumentet finnes ikke lenger"

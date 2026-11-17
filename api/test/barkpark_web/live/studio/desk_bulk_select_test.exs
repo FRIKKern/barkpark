@@ -102,7 +102,7 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
     {:ok, view, _html} = live(conn, "#{base}/#{note}")
     render_async(view, 5_000)
 
-    {:ok, view: view, note: note, ids: ids, pane: pane_id(view)}
+    {:ok, view: view, note: note, ids: ids, pane: pane_id(view), conn: conn, base: base}
   end
 
   defp pane_id(view) do
@@ -273,6 +273,99 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
     render_click(c.view, "bulk-publish", %{})
     assert state(c, b) == {true, true}
     assert state(c, d) == {true, true}
+  end
+
+  test "a selection ends with its dataset: nothing ticked in one is written in another", c do
+    [a | _] = c.ids
+    other = "bsother#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => c.note,
+          "title" => "Bulk notes",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        other
+      )
+
+    # The same id in the other dataset, as a draft there.
+    {:ok, _} = Content.create_document(c.note, %{"doc_id" => a, "title" => "Other"}, other)
+
+    select(c)
+    tick(c, a)
+    assert has_element?(c.view, ~s(#{@bar} [role="status"]), "1 selected")
+
+    render_patch(
+      c.view,
+      String.replace(c.base, "/d/#{@dataset}/", "/d/#{other}/") <> "/#{c.note}"
+    )
+
+    render_async(c.view, 5_000)
+
+    refute has_element?(c.view, @bar)
+    refute has_element?(c.view, ~s(#{@list} .list-rows[data-selecting]))
+    render_click(c.view, "bulk-publish", %{"pane" => c.pane})
+    refute_push_event(c.view, "desk:bulk-toast", %{}, 300)
+
+    assert {%{}, true, false} = Content.fetch_doc_with_draft(c.note, a, other)
+  end
+
+  test "a ticked document deleted meanwhile is said to have failed, not to have had no changes",
+       c do
+    [_a, b, c3, _d] = c.ids
+    select(c)
+    for id <- [b, c3], do: tick(c, id)
+
+    {:ok, _} = Content.delete_document(c3, c.note, @dataset)
+
+    c.view |> element(~s(#{@bar} button.publish)) |> render_click()
+
+    assert_push_event(
+      c.view,
+      "desk:bulk-toast",
+      %{
+        tone: "critical",
+        title: "Published 1 of 2",
+        description: "1 failed: The document is no longer there"
+      },
+      5_000
+    )
+  end
+
+  test "a run says it is running, so the browser keeps the focus on the bar", c do
+    [_a, b | _] = c.ids
+    select(c)
+    tick(c, b)
+    c.view |> element(~s(#{@bar} button), "Unpublish selected") |> render_click()
+    render_async(c.view, 5_000)
+    c.view |> element(~s(#{@dialog} button.danger)) |> render_click()
+
+    pane = c.pane
+    assert_push_event(c.view, "desk:bulk", %{pane: ^pane, active: true, running: true}, 2_000)
+    assert_push_event(c.view, "desk:bulk", %{pane: ^pane, active: false, running: false}, 5_000)
+  end
+
+  test "the editor of a bulk-published document follows it: published, nothing left to publish",
+       c do
+    [_a, b | _] = c.ids
+    {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.note};#{b}")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
+    c = %{c | view: view, pane: pane_id(view)}
+    refute has_element?(view, "[data-pane-editing] button[data-desk-publish][disabled]")
+
+    select(c)
+    tick(c, b)
+    view |> element(~s(#{@bar} button.publish)) |> render_click()
+    assert_push_event(view, "desk:bulk-toast", %{title: "Published 1 of 1"}, 5_000)
+
+    assert eventually(fn ->
+             has_element?(view, "[data-pane-editing] button[data-desk-publish][disabled]")
+           end)
+
+    refute render(view) =~ "Updated by another user"
   end
 
   test "the summary, in the TanStack Studio's words" do
