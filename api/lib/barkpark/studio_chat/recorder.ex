@@ -24,10 +24,9 @@ defmodule Barkpark.StudioChat.Recorder do
 
   alias Barkpark.Content.Broadcast
   alias Barkpark.Plugins.Enablement
-  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
+  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat, StudioChat.Recorder.DisplacedAsks}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
-  alias Barkpark.StudioChat.Recorder.DisplacedAsks
   alias Barkpark.StudioChat.{Recorder.TurnOwner, RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
   alias Barkpark.StudioChat.TaskLedgerScope
@@ -714,18 +713,12 @@ defmodule Barkpark.StudioChat.Recorder do
     # abandon them rather than claim a settle we cannot prove (D61).
     state = stable_start(state)
     broadcast(state, msg)
-    # The turn settled — nothing can still be waiting on an ask from it (D56h) —
-    # and its fold stamp is spent: the next turn mints its own start and Stop
+    # The turn settled — its asks still pending are canceled (D56h, DisplacedAsks)
+    # — and its fold stamp is spent: the next turn mints its own start and Stop
     # flag, so a stamp can never be written twice off one turn's facts.
     state = %{state | turn_started_at: nil, turn_interrupted?: false}
-
-    # An ask still pending is canceled in the store, not only dropped here
-    # (task-6b2fede385c12f8d).
-    {:noreply,
-     state
-     |> publish_activity(%{state: :idle, line: nil})
-     |> DisplacedAsks.cancel_ended()
-     |> touch()}
+    state = DisplacedAsks.cancel_ended(publish_activity(state, %{state: :idle, line: nil}))
+    {:noreply, touch(state)}
   end
 
   # The extended-thinking pulse (charter D41). The wire never carries thinking
