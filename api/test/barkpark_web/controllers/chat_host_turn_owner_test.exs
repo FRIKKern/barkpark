@@ -302,6 +302,65 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).agent_state == "blocked"
   end
 
+  # ── a turn's end cancels only its own run's asks (task-6b2fede385c12f8d) ─
+
+  # rev26735 on #26941: the person sends again while run A waits on an ask;
+  # the host refuses send_turn B ("already has an active turn"), and B's close
+  # is its first event. B never owned the turn, and A's run is alive, so A's
+  # ask must stay pending and answerable.
+  test "a refused newer send_turn's close leaves the live run's ask pending", %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-live"))
+    b = lease!(ctx, "b")
+
+    accept!(ctx, b, 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    assert ask_status(sid) == "pending"
+    assert ask_meta(sid)["cancel_reason"] == nil
+    assert StudioChat.get_session(sid).pending_approvals == 1
+  end
+
+  test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-own"))
+    accept!(ctx, a, 3, @dead_close)
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
+  # The owner's lease is gone (expired), so its own close will not come: a
+  # close from another lease ends the turn and its asks with it.
+  test "a close while the asking run's lease is no longer live cancels its ask",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-gone"))
+    expire!(a)
+    b = lease!(ctx, "b")
+    accept!(ctx, b, 1, @no_active_turn)
+
+    assert ask_status(sid) == "canceled"
+  end
+
+  # A close projected without a lease names no other run: it is the turn's
+  # own end (the managed path), even while the owner's lease is live.
+  test "a close projected without a lease cancels the open turn's ask", %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-nolease"))
+    project(sid, %{lease_id: nil}, :turn_completed, terminal_state: :completed)
+
+    assert ask_status(sid) == "canceled"
+  end
+
   # ── only the turn's own lease ends it (task-5d1f639852927c4e) ──────────
 
   # The superseded? race: the older close reaches the Recorder just after the

@@ -24,7 +24,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   alias Barkpark.Content.Broadcast
   alias Barkpark.Plugins.Enablement
-  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
+  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat, StudioChat.Recorder.DisplacedAsks}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{Recorder.TurnOwner, RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
@@ -713,13 +713,12 @@ defmodule Barkpark.StudioChat.Recorder do
     # abandon them rather than claim a settle we cannot prove (D61).
     state = stable_start(state)
     broadcast(state, msg)
-    # The turn settled — nothing can still be waiting on an ask from it (D56h) —
-    # and its fold stamp is spent: the next turn mints its own start and Stop
+    # The turn settled — its asks still pending are canceled (D56h, DisplacedAsks)
+    # — and its fold stamp is spent: the next turn mints its own start and Stop
     # flag, so a stamp can never be written twice off one turn's facts.
     state = %{state | turn_started_at: nil, turn_interrupted?: false}
-
-    {:noreply,
-     state |> clear_pending_asks() |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+    state = DisplacedAsks.cancel_ended(publish_activity(state, %{state: :idle, line: nil}))
+    {:noreply, touch(state)}
   end
 
   # The extended-thinking pulse (charter D41). The wire never carries thinking
@@ -1450,8 +1449,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
         %{state | runtime_text: ""}
         |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
-        |> clear_pending_asks()
         |> publish_activity(%{state: :idle, line: nil})
+        |> DisplacedAsks.cancel_ended()
 
       :control_completed ->
         state
@@ -1479,7 +1478,7 @@ defmodule Barkpark.StudioChat.Recorder do
         |> Map.merge(%{runtime_text: "", runtime_turn_open?: false, runtime_break?: false})
         |> stable_settle(state.runtime_text)
         |> publish_activity(%{state: :offline, line: nil})
-        |> clear_pending_asks()
+        |> DisplacedAsks.cancel_ended()
 
       _ ->
         state

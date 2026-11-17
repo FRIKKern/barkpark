@@ -72,7 +72,10 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
         {:ignore, state}
 
       :same ->
-        state |> drop_stale_stop(event, lease_id) |> adopt(event, lease_id)
+        state
+        |> drop_stale_stop(event, lease_id)
+        |> adopt(event, lease_id)
+        |> mark_asks_closer(event, lease_id)
 
       {:split, open?} ->
         # A Stop asked before the displacing lease existed was aimed at the
@@ -126,6 +129,26 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
       lease_id in Map.get(state, :runtime_displaced, []) and
       Barkpark.ChatHosts.lease_live?(owner)
   end
+
+  # May this terminal event cancel the open turn's pending asks in the store
+  # (`DisplacedAsks.cancel_ended/1`, task-6b2fede385c12f8d)? Only the close of
+  # the run that asked them: no lease (a managed run), the owner's own lease,
+  # no owner yet, or an owner whose lease is no longer live. A newer
+  # send_turn the host refused ("already has an active turn") never owned the
+  # turn: its close still ends the Recorder's turn, as before, but the owner's
+  # run is alive and waiting, so its asks stay pending and answerable
+  # (rev26735 on #26941). The row read comes last.
+  defp mark_asks_closer(state, %Event{kind: kind}, lease_id) when kind in @terminal_kinds do
+    owner = Map.get(state, :runtime_lease)
+
+    closer? =
+      is_nil(lease_id) or not is_binary(owner) or owner == lease_id or
+        not Barkpark.ChatHosts.lease_live?(owner)
+
+    Map.put(state, :asks_closer?, closer?)
+  end
+
+  defp mark_asks_closer(state, _event, _lease_id), do: state
 
   # Was a Stop asked before `lease_id` was leased? The host routes a Stop by
   # session to its latest run, so a Stop asked after a lease exists is that
