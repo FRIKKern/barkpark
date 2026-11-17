@@ -458,7 +458,7 @@ defmodule BarkparkWeb.ChatController do
           details = %{"approval_status" => now}
           ErrorResponse.emit_custom(conn, 409, "conflict", message, details, @ask_hint)
 
-        # The delivery failed or exited after the flip; the ask is pending again.
+        # The delivery failed or exited; the claim is dropped, the ask stays pending.
         {:error, _undelivered} ->
           message = "the answer did not reach the agent; the ask is pending, so send it again"
           ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", message)
@@ -468,8 +468,8 @@ defmodule BarkparkWeb.ChatController do
           # up into a published Paper, whichever surface clicked Allow. The seam
           # is the ONE owner (the LiveView delegates to it too), reads the
           # server-held plan itself, is idempotent by slug, and is fire-and-forget:
-          # the 204 never waits on it, and a non-plan / denied / blank-plan ask is
-          # a documented no-op.
+          # the 204 never waits on it, and an ask not stored as allowed, a non-plan
+          # or a blank plan is a documented no-op.
           if deliver, do: PlanPapers.publish_approved_plan(id, request_id, decision)
           send_resp(conn, :no_content, "")
       end

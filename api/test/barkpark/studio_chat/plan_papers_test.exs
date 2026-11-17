@@ -175,6 +175,8 @@ defmodule Barkpark.StudioChat.PlanPapersTest do
     test "an allow on a plan row publishes, stamps the SHARED row, and broadcasts" do
       sid = chat_session!()
       :ok = seed_ask!(sid, "r-ok", "plan", %{"plan" => "# Ship it\n\nDo the work."})
+      # Every caller stores the answer before it publishes (task-47dc8a4767b2a9bf).
+      {:ok, _} = StudioChat.update_approval_status(sid, "r-ok", "allowed")
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
 
       assert :ok == PlanPapers.publish_approved_plan(sid, "r-ok", :allow)
@@ -264,6 +266,7 @@ defmodule Barkpark.StudioChat.PlanPapersTest do
     test "a REPEATED allow converges on ONE Paper — no duplicate row" do
       sid = chat_session!()
       :ok = seed_ask!(sid, "r-twice", "plan", %{"plan" => "# Ship it\n\nDo the work."})
+      {:ok, _} = StudioChat.update_approval_status(sid, "r-twice", "allowed")
       slug = PlanPapers.slug_for(sid, "r-twice")
 
       :ok = PlanPapers.publish_approved_plan(sid, "r-twice", :allow)

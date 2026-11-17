@@ -2122,6 +2122,35 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert StudioChat.get_needs_you_message(sid, "deny-plan").metadata["paper_id"] == nil
     end
 
+    # task-47dc8a4767b2a9bf: the second answer is a 204 no-op on the stored
+    # "denied", and the route published the plan anyway.
+    test "a denied plan answered allow later publishes nothing", %{admin: a1, sid: sid} do
+      pending_plan(sid, "deny-then-allow")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      assert answer(a1, sid, "deny-then-allow", "deny") |> response(204)
+      assert answer(a1, sid, "deny-then-allow", "allow") |> response(204)
+
+      refute_receive {:plan_paper, "deny-then-allow", _}, 1_000
+      assert Content.get_paper(PlanPapers.slug_for(sid, "deny-then-allow"), @dataset) == nil
+
+      assert StudioChat.get_needs_you_message(sid, "deny-then-allow").metadata["approval_status"] ==
+               "denied"
+    end
+
+    test "the publish seam reads the stored status: an allow on a denied or canceled plan publishes nothing",
+         %{sid: sid} do
+      for {rid, stored} <- [{"seam-denied", "denied"}, {"seam-canceled", "canceled"}] do
+        pending_plan(sid, rid)
+        {:ok, _} = StudioChat.update_approval_status(sid, rid, stored)
+        assert :ok == PlanPapers.publish_approved_plan(sid, rid, :allow)
+      end
+
+      settle()
+      assert all_plan_paper_ids() == []
+    end
+
     test "an allow on an ordinary tool approval publishes nothing", %{admin: a1, sid: sid} do
       pending_approval(sid, "appr-nopaper")
       {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})

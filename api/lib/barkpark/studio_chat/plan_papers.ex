@@ -49,6 +49,9 @@ defmodule Barkpark.StudioChat.PlanPapers do
     * a needs-you row that is not a `plan` (an ordinary tool approval, an
       AskUserQuestion) — only ExitPlanMode rows have a document to grow into;
     * a `request_id` with no persisted needs-you row (a replayed/unknown ask);
+    * a plan row not stored as `allowed`: the store, not the caller's decision,
+      has the last word, so a plan denied or canceled first and answered allow
+      later stays unpublished (task-47dc8a4767b2a9bf);
     * a plan row whose `metadata.input["plan"]` is absent or not a binary — the
       transport is provider-neutral (D36) and a provider that shapes its
       ExitPlanMode ask differently must degrade to "no Paper", never to a crash
@@ -68,7 +71,8 @@ defmodule Barkpark.StudioChat.PlanPapers do
   def publish_approved_plan(session_id, request_id, decision)
       when is_binary(session_id) and is_binary(request_id) do
     with true <- allow?(decision),
-         %{role: "plan"} = row <- StudioChat.get_needs_you_message(session_id, request_id),
+         %{role: "plan", metadata: %{"approval_status" => "allowed"}} = row <-
+           StudioChat.get_needs_you_message(session_id, request_id),
          markdown when is_binary(markdown) <- plan_markdown(row.metadata),
          false <- String.trim(markdown) == "" do
       Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
