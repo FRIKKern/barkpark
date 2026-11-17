@@ -100,7 +100,7 @@ func capabilities() map[string]any {
 		}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {
-				metadata["version"] = strings.TrimSpace(string(output))
+				metadata["version"] = providerVersion(output)
 			}
 			var authOutput []byte
 			var authErr error
@@ -118,6 +118,15 @@ func capabilities() map[string]any {
 		"chat_runtime":     map[string]any{"protocol": "bidirectional-v2"},
 		"providers":        providers,
 	}
+}
+
+// providerVersion is a CLI's --version output as the host reports it: trimmed,
+// with U+0000 stored as U+FFFD, as the server's EventText stores it. Since
+// #26735 the server refuses capabilities holding U+0000 with a 422 the host
+// takes as final, so one NUL here would stop the host from enrolling and from
+// running (task-060e49b6007abbab).
+func providerVersion(output []byte) string {
+	return strings.ReplaceAll(strings.TrimSpace(string(output)), "\x00", "�")
 }
 
 // authReady reports whether a provider CLI holds a usable credential, from the
