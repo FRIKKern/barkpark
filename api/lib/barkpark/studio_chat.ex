@@ -781,14 +781,16 @@ defmodule Barkpark.StudioChat do
   so this SETS, OVERWRITES, and CLEARS (`nil`). The Barkpark Chat Session row is
   the durable owner of the binding the next one-shot turn resumes. NEVER stores a
   transcript — only the opaque sandbox id. Returns `{:ok, session}`,
-  `{:error, changeset}` (a blank string trips the non-empty DB check), or
-  `{:error, :not_found}`.
+  `{:error, changeset}` (a blank string trips the non-empty DB check),
+  `{:error, :not_found}`, or `{:error, :nul_character}`: the shim gets the stored
+  id back, so an id holding U+0000 is refused, never stored changed.
   """
   @spec set_cloud_sandbox_id(String.t(), String.t() | nil) ::
-          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :nul_character}
   def set_cloud_sandbox_id(session_id, cloud_sandbox_id)
       when is_binary(cloud_sandbox_id) or is_nil(cloud_sandbox_id) do
-    with %Session{} = session <- get_session(session_id) do
+    with :ok <- NulText.check(cloud_sandbox_id),
+         %Session{} = session <- get_session(session_id) do
       session
       |> Ecto.Changeset.change(cloud_sandbox_id: cloud_sandbox_id)
       |> Ecto.Changeset.check_constraint(:cloud_sandbox_id,
