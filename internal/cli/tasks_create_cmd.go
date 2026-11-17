@@ -292,11 +292,14 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 				renderTaskCreateResidue(out, residuePublishResendKeyRefused, draftID, bareID)
 				return code
 			}
-			// Any other 4xx on a RESEND is not a definite refusal either: the
-			// earlier attempt may have published and removed the draft, so the
-			// resend answers not_found. Kept, checked first, never discarded.
-			// A 4xx on the FIRST send is still the refusal handled below.
-			if pAttempts >= 2 {
+			// A not_found or a pre-handler refusal on a RESEND is not a definite
+			// refusal either: the earlier attempt may have published and removed
+			// the draft. Kept, checked first, never discarded. A WALL refusal
+			// (duplicate_of, the quality wall) on a resend IS definite: the
+			// server reads the draft before any wall, so it falls through to the
+			// refusal below with its own code and resume block. A 4xx on the
+			// FIRST send is always that refusal.
+			if resendMayHaveLanded(pAttempts, pStatus, pBody) {
 				code := renderAmbiguousWrite(out, ambiguousWrite{
 					class: residuePublishResendRefused, leg: "publish", docID: bareID,
 					title: title, detail: mutateErrorMessage(pStatus, pBody),

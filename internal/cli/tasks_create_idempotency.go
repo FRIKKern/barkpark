@@ -158,6 +158,23 @@ func resendRefusedOwnKey(attempts int, body []byte) bool {
 	return ok && (env.Code == idempotencyReusedCode || env.Code == idempotencyInUseCode)
 }
 
+// resendMayHaveLanded is the publish leg's test for a 4xx on a RESEND that
+// does not prove the earlier attempt failed: not_found (a landed publish
+// removed the draft) and the refusals made before the handler runs (401, 403,
+// 429), which never looked at the row. Any other 4xx came from a wall that
+// runs AFTER the server read the draft, so the draft was still there: no
+// earlier attempt published (task-9fe039cf44a67b2d).
+func resendMayHaveLanded(attempts, status int, body []byte) bool {
+	if attempts < 2 {
+		return false
+	}
+	switch status {
+	case 401, 403, 404, 429:
+		return true
+	}
+	return publishRefusalCode(body) == "not_found"
+}
+
 // resendableMutateOutcome answers "should this leg be sent again?" for one
 // attempt.
 //
