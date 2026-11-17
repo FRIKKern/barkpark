@@ -24,7 +24,7 @@ defmodule Barkpark.ChatHosts.HeldLeasesTest do
   import Ecto.Query
 
   alias Barkpark.ChatHosts
-  alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease}
+  alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost}
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Runtime.Command
   alias Barkpark.StudioChat.Session
@@ -105,6 +105,32 @@ defmodule Barkpark.ChatHosts.HeldLeasesTest do
     expire!(lease_id, -100)
 
     assert {:ok, _} = ChatHosts.heartbeat(host, %{"held_leases" => ["not-a-uuid", 7]})
+    refute expired?(lease_id)
+  end
+
+  # task-bbb32ae64e56c1e0: a list past 1,000 ids is refused whole. Nothing is
+  # renewed and last_seen_at does not move, as for any refused heartbeat.
+  test "a list of more than 1,000 ids is refused and renews nothing" do
+    %{host: host, lease_id: lease_id} = running_turn()
+    quiet!(lease_id, -120)
+    expire!(lease_id, -100)
+    seen = Repo.get!(RegisteredHost, host.id).last_seen_at
+
+    held = [lease_id | for(_ <- 1..1_000, do: Ecto.UUID.generate())]
+    assert {:error, changeset} = ChatHosts.heartbeat(host, %{"held_leases" => held})
+    assert %{held_leases: ["has more than 1000 ids"]} = errors_on(changeset)
+
+    assert expired?(lease_id)
+    assert Repo.get!(RegisteredHost, host.id).last_seen_at == seen
+  end
+
+  test "a list of exactly 1,000 ids is taken" do
+    %{host: host, lease_id: lease_id} = running_turn()
+    quiet!(lease_id, -120)
+    expire!(lease_id, -100)
+
+    held = [lease_id | for(_ <- 1..999, do: Ecto.UUID.generate())]
+    assert {:ok, _} = ChatHosts.heartbeat(host, %{"held_leases" => held})
     refute expired?(lease_id)
   end
 
