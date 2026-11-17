@@ -50,8 +50,7 @@
     }
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(function () {
-      el.textContent = "";
-      if (el.hidePopover && el.matches(":popover-open")) el.hidePopover();
+      el.remove();
     }, TOAST_MS);
   }
 

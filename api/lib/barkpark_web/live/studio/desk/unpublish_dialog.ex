@@ -106,6 +106,10 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
 
   attr :base, :string, required: true
 
+  attr :checking, :boolean,
+    default: false,
+    doc: "who refers is still being read: the dialog says so and its buttons wait"
+
   @doc """
   The same dialog for a list's ticked rows (B03, `Bulk`): "Unpublish 2
   documents?", and one section per document that others refer to. Its
@@ -130,7 +134,10 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
       }
       close="bulk-unpublish-close"
     >
-      <p :if={@used == [] or !@many?}>
+      <p :if={@checking} class="muted" role="status">
+        {gettext("Looking for documents that refer to them…")}
+      </p>
+      <p :if={!@checking and (@used == [] or !@many?)}>
         <%= if @many? do %>
           {gettext("They will no longer be live. Each one stays as a draft you can publish again.")}
         <% else %>
@@ -174,6 +181,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
           phx-value-confirm="true"
           phx-value-disconnect="true"
           data-desk-confirm="disconnect-unpublish"
+          disabled={@checking}
         >
           {gettext("Disconnect references and unpublish")}
         </button>
@@ -184,6 +192,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
           phx-value-pane={@pane}
           phx-value-confirm="true"
           data-desk-confirm="unpublish"
+          disabled={@checking}
         >
           {if @used != [], do: gettext("Unpublish anyway"), else: gettext("Unpublish now")}
         </button>

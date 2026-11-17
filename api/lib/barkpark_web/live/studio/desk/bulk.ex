@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
     * `bulk-select` starts or stops selecting; `bulk-clear` stops it.
     * `bulk-publish` publishes the ticked documents.
     * `bulk-unpublish` opens the dialog. Sent again with `confirm` while that
-      dialog is open, it unpublishes; with `disconnect` too, it first takes
+      dialog is open and has read who refers, it unpublishes; with `disconnect` too, it first takes
       the references out of the documents that hold them.
     * `bulk-unpublish-close` puts the dialog away.
 
@@ -154,7 +154,10 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
 
       length(state.ids) >= @max ->
         socket
-        |> toast("caution", gettext("Selection limit reached (%{max})", max: @max))
+        |> toast(
+          "caution",
+          gettext("Selection limit reached (%{max_selected})", max_selected: @max)
+        )
         |> put(pane, %{state | last: id})
 
       true ->
@@ -202,7 +205,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   def handle_event(
         "bulk-unpublish",
         %{"pane" => pane, "confirm" => "true"} = params,
-        %{assigns: %{desk_bulk_confirm: %{pane: pane} = confirm}} = socket
+        %{assigns: %{desk_bulk_confirm: %{pane: pane, checking: false} = confirm}} = socket
       ) do
     case ready(socket, pane) do
       nil ->
@@ -235,8 +238,9 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
 
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
-  # The dialog: which of the ticked documents are published (one read), and
-  # who refers to each. None published: nothing to ask and nothing to write.
+  # The dialog: which of the ticked documents are published (one read), then
+  # who refers to each, read in a task while the dialog says it is looking
+  # (its buttons wait). None published: nothing to ask and nothing to write.
   defp ask(socket, pane, state) do
     %{dataset: dataset, scope: scope} = socket.assigns
     live = Content.resolvable_doc_ids(state.ids, state.type, dataset, scope)
@@ -246,10 +250,13 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
       skipped = List.duplicate(:skipped, length(state.ids))
       socket |> toast(summary(:unpublish, skipped)) |> stop(pane)
     else
-      used = DocDialog.rows_for(ids, socket.assigns)
       titles = socket.assigns.doc_titles
-      docs = for id <- ids, do: %{id: id, title: titles[id] || id, rows: Map.get(used, id, [])}
-      assign(socket, :desk_bulk_confirm, %{pane: pane, docs: docs})
+      docs = for id <- ids, do: %{id: id, title: titles[id] || id, rows: []}
+      reader = %{dataset: dataset, scope: scope}
+
+      socket
+      |> assign(:desk_bulk_confirm, %{pane: pane, docs: docs, checking: true})
+      |> start_async({:desk_bulk, {:refs, pane}}, fn -> DocDialog.rows_for(ids, reader) end)
     end
   end
 
@@ -280,7 +287,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
 
     socket
     |> put(pane, %{state | running: %{action: action, n: total}})
-    |> start_async({:desk_bulk, pane}, work)
+    |> start_async({:desk_bulk, {:run, pane}}, work)
   end
 
   defp write(:publish, id, type, dataset, opts),
@@ -319,15 +326,44 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   defp reason(why) when is_binary(why), do: why
   defp reason(_why), do: gettext("Barkpark refused the change")
 
-  @doc "The task is back: one summary, and the selection ends."
-  def handle_async(pane, {:ok, {action, outcomes}}, socket) when is_list(outcomes),
+  @doc "A task is back: who refers to the dialog's documents, or what an action did."
+  def handle_async({:refs, pane}, {:ok, %{} = used}, socket) do
+    case socket.assigns.desk_bulk_confirm do
+      %{pane: ^pane, checking: true} = confirm ->
+        docs = Enum.map(confirm.docs, &%{&1 | rows: Map.get(used, &1.id, [])})
+        {:noreply, assign(socket, :desk_bulk_confirm, %{confirm | docs: docs, checking: false})}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # Who refers could not be read: nothing is unpublished unseen.
+  def handle_async({:refs, pane}, _failed, socket) do
+    case socket.assigns.desk_bulk_confirm do
+      %{pane: ^pane} ->
+        {:noreply,
+         socket
+         |> assign(:desk_bulk_confirm, nil)
+         |> toast(
+           "critical",
+           gettext("Could not check which documents refer to them. Retry before unpublishing.")
+         )}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # One summary, and the selection ends.
+  def handle_async({:run, pane}, {:ok, {action, outcomes}}, socket) when is_list(outcomes),
     do: {:noreply, socket |> toast(summary(action, outcomes)) |> stop(pane)}
 
   # Refused before anything was unpublished: the ticks stay.
-  def handle_async(pane, {:ok, {:refused, why}}, socket),
+  def handle_async({:run, pane}, {:ok, {:refused, why}}, socket),
     do: {:noreply, socket |> toast("critical", why) |> idle(pane)}
 
-  def handle_async(pane, _crashed, socket) do
+  def handle_async({:run, pane}, _crashed, socket) do
     {:noreply,
      socket
      |> toast("critical", gettext("The bulk action stopped before it finished"))

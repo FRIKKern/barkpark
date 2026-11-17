@@ -376,8 +376,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
 
   # A bulk publish or unpublish is back (`Bulk`).
-  def handle_async({:desk_bulk, pane}, result, socket),
-    do: Bulk.handle_async(pane, result, socket)
+  def handle_async({:desk_bulk, task}, result, socket),
+    do: Bulk.handle_async(task, result, socket)
 
   defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms

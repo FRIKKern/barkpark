@@ -212,6 +212,11 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
 
     assert has_element?(c.view, ~s(#{@dialog} h2), "Unpublish 2 documents?")
     assert has_element?(c.view, ~s(#{@dialog} button[data-modal-focus]), "Cancel")
+    # Who refers is read in a task; a confirm sent before it lands does nothing.
+    render_click(c.view, "bulk-unpublish", %{"pane" => c.pane, "confirm" => "true"})
+    assert state(c, a) == {false, true}
+    render_async(c.view, 5_000)
+    refute has_element?(c.view, ~s(#{@dialog} button[disabled]))
     # One section for the note a post refers to.
     assert has_element?(c.view, ~s(#{@dialog} section[aria-label="Referring to Note 2 edited"]))
     assert has_element?(c.view, ~s(#{@dialog} section [role="status"]), "1 document refers to")
@@ -227,6 +232,7 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
     assert has_element?(c.view, ~s(#{@bar} [role="status"]), "2 selected")
 
     c.view |> element(~s(#{@bar} button), "Unpublish selected") |> render_click()
+    render_async(c.view, 5_000)
     c.view |> element(~s(#{@dialog} button.danger)) |> render_click()
 
     assert_push_event(c.view, "desk:bulk-toast", %{title: "Unpublished 2 of 2"}, 5_000)

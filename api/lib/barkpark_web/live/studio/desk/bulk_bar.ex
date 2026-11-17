@@ -93,6 +93,7 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
         id={"#{@pane}-bulk-unpublish"}
         pane={@pane}
         docs={@confirm.docs}
+        checking={@confirm.checking}
         base={@base}
       />
     </div>
@@ -111,7 +112,7 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
   def css do
     """
     .dk .bulk-row { position: relative; }
-    .dk .bulk-check { position: absolute; z-index: 1; left: 3px; top: calc(50% - 24px); width: 44px; height: 44px; display: grid; place-items: center; opacity: 0; pointer-events: none; cursor: pointer; }
+    .dk .bulk-check { position: absolute; z-index: 1; left: 3px; top: calc(50% - 22px); width: 44px; height: 44px; display: grid; place-items: center; opacity: 0; pointer-events: none; cursor: pointer; }
     .dk .bulk-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--dk-publish-bg); cursor: pointer; }
     .dk .list-rows[data-selecting] .bulk-check, .dk .bulk-row:has(.bulk-check :focus-visible) .bulk-check { opacity: 1; pointer-events: auto; }
     .dk .list-rows[data-selecting] .bulk-row .dk-media, .dk .bulk-row:has(.bulk-check :focus-visible) .dk-media { visibility: hidden; }

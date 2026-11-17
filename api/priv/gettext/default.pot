@@ -14919,3 +14919,100 @@ msgid "1 validation error"
 msgid_plural "%{count} validation errors"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Select documents"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/list_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Stop selecting"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk_bar.ex
+#, elixir-autogen, elixir-format
+msgid "Select %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk_bar.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} selected"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk_bar.ex
+#, elixir-autogen, elixir-format
+msgid "Publishing %{at} of %{n}…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk_bar.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublishing %{at} of %{n}…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "Your role cannot publish here"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "Barkpark refused the change"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "The bulk action stopped before it finished"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "Published %{done} of %{total}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{done} of %{total}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} blocked by the publish wall — %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} had no changes to publish."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublish %{n} documents?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "They will no longer be live. Each one stays as a draft you can publish again."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} was not published."
+msgid_plural "%{n} were not published."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/unpublish_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Looking for documents that refer to them…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/bulk.ex
+#, elixir-autogen, elixir-format
+msgid "Could not check which documents refer to them. Retry before unpublishing."
+msgstr ""
