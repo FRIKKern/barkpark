@@ -68,7 +68,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 3334 api/lib/barkpark_web/layouts/bulldocs.html.heex
 3252 cloud/priv/static/__preview__/breakpoint-sweep.mjs
 3229 internal/agent/report.go
-3022 api/lib/barkpark/studio_chat.ex
+3026 api/lib/barkpark/studio_chat.ex
 2991 cloud/priv/static/__preview__/seal-predicate.mjs
 2945 tooling/grip/screen.mjs
 2944 scripts/required-checks-verify.sh
