@@ -417,6 +417,7 @@ func TestTaskCreateAmbiguityClassesAreEnumerated(t *testing.T) {
 		ambiguityCreateAnswerLost,
 		ambiguityCreateServerFault,
 		ambiguityCreateResultUnreadable,
+		ambiguityCreateResendKeyRefused,
 		residuePublishAmbiguousTransport,
 		residuePublishAmbiguousServerFault,
 		residuePublishResultUnreadable,
@@ -426,8 +427,8 @@ func TestTaskCreateAmbiguityClassesAreEnumerated(t *testing.T) {
 			t.Errorf("ambiguity class %q carries no explanation", class)
 		}
 	}
-	if len(taskCreateAmbiguityClasses) != 6 {
-		t.Errorf("taskCreateAmbiguityClasses has %d entries, want 6 — a new arm needs a name and a why", len(taskCreateAmbiguityClasses))
+	if len(taskCreateAmbiguityClasses) != 7 {
+		t.Errorf("taskCreateAmbiguityClasses has %d entries, want 7 — a new arm needs a name and a why", len(taskCreateAmbiguityClasses))
 	}
 }
 
