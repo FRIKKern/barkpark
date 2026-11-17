@@ -93,3 +93,45 @@ func TestTaskCreatePublishResendStillAmbiguousForNotFoundAndPreHandlerRefusals(t
 		}
 	}
 }
+
+// #26871 review: the definite set is CLOSED. On a resend only the named wall
+// codes are definite; 402, an unknown code, anything else may have landed.
+func TestTaskCreatePublishResendOutsideTheWallListMayHaveLanded(t *testing.T) {
+	for _, step := range [][2]string{
+		{"402", `{"error":{"code":"quota_exceeded","message":"quota exceeded"}}`},
+		{"422", `{"error":{"code":"a_rule_this_binary_predates","message":"refused"}}`},
+	} {
+		code, so, se, kinds := runScriptedPublish(t, [2]string{"500", fault500}, step)
+		if code != exitAmbiguous {
+			t.Errorf("%s: exit = %d, want exitAmbiguous\nstdout=%s\nstderr=%s", step[1], code, so, se)
+		}
+		if sentDiscard(kinds) {
+			t.Errorf("%s: discarded the draft of a publish that may have landed: %v", step[1], kinds)
+		}
+		checkFirst(t, step[1], se, "task-950")
+	}
+}
+
+// Any attempt: a discard that answers not_found proves there is no draft, so
+// the row is not DRAFT ONLY. The publish may have landed: check first, exit 9.
+func TestTaskCreateDiscardFindingNoDraftChecksFirst(t *testing.T) {
+	notFoundDiscard := [2]string{"404", notFound404}
+	quota := [2]string{"402", `{"error":{"code":"quota_exceeded","message":"quota exceeded"}}`}
+	wall := [2]string{"422", `{"error":{"code":"unknown_tag","message":"unknown tag"}}`}
+	for _, c := range []struct {
+		output  string
+		refusal [2]string
+	}{{"json", quota}, {"", quota}, {"json", wall}, {"", wall}} {
+		output := c.output
+		noResendSleep(t)
+		ts, _ := publishScriptDoorDiscard(t, notFoundDiscard, c.refusal)
+		var so, se bytes.Buffer
+		w := &writer{stdout: &so, stderr: &se, output: output}
+		ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+		code := runTaskCreate(w, globals{yes: true}, ctx, createArgs("A refused publish whose discard found nothing", "--publish"))
+		if code != exitAmbiguous {
+			t.Errorf("output %q: exit = %d, want exitAmbiguous\nstdout=%s\nstderr=%s", output, code, so.String(), se.String())
+		}
+		checkFirst(t, "output "+output, se.String(), "task-950")
+	}
+}

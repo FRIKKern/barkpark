@@ -22,6 +22,13 @@ import (
 // scripted (status, body) (the last repeats), and records every mutation kind.
 func publishScriptDoor(t *testing.T, script ...[2]string) (*httptest.Server, func() []string) {
 	t.Helper()
+	return publishScriptDoorDiscard(t, [2]string{"200", `{"results":[{"id":"drafts.task-950","operation":"discardDraft"}]}`}, script...)
+}
+
+// publishScriptDoorDiscard is publishScriptDoor with the discardDraft answer
+// scripted too.
+func publishScriptDoorDiscard(t *testing.T, discard [2]string, script ...[2]string) (*httptest.Server, func() []string) {
+	t.Helper()
 	var mu sync.Mutex
 	var kinds []string
 	publishes := 0
@@ -54,11 +61,12 @@ func publishScriptDoor(t *testing.T, script ...[2]string) (*httptest.Server, fun
 			_, _ = rw.Write([]byte(`{"results":[{"id":"drafts.task-950","document":{"_id":"drafts.task-950","_draft":true}}]}`))
 		case "publish":
 			step := script[min(n, len(script))-1]
-			status := map[string]int{"500": 500, "401": 401, "403": 403, "404": 404, "409": 409, "422": 422, "429": 429}[step[0]]
+			status := scriptStatus[step[0]]
 			rw.WriteHeader(status)
 			_, _ = rw.Write([]byte(step[1]))
 		default:
-			_, _ = rw.Write([]byte(`{"results":[{"id":"drafts.task-950","operation":"discardDraft"}]}`))
+			rw.WriteHeader(scriptStatus[discard[0]])
+			_, _ = rw.Write([]byte(discard[1]))
 		}
 	}))
 	t.Cleanup(ts.Close)
@@ -68,6 +76,8 @@ func publishScriptDoor(t *testing.T, script ...[2]string) (*httptest.Server, fun
 		return append([]string(nil), kinds...)
 	}
 }
+
+var scriptStatus = map[string]int{"200": 200, "500": 500, "401": 401, "402": 402, "403": 403, "404": 404, "409": 409, "422": 422, "429": 429}
 
 func runScriptedPublish(t *testing.T, script ...[2]string) (int, string, string, []string) {
 	t.Helper()

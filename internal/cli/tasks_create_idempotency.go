@@ -158,21 +158,25 @@ func resendRefusedOwnKey(attempts int, body []byte) bool {
 	return ok && (env.Code == idempotencyReusedCode || env.Code == idempotencyInUseCode)
 }
 
-// resendMayHaveLanded is the publish leg's test for a 4xx on a RESEND that
-// does not prove the earlier attempt failed: not_found (a landed publish
-// removed the draft) and the refusals made before the handler runs (401, 403,
-// 429), which never looked at the row. Any other 4xx came from a wall that
-// runs AFTER the server read the draft, so the draft was still there: no
-// earlier attempt published (task-9fe039cf44a67b2d).
+// publishWallCodes is the CLOSED list of publish refusals that prove the draft
+// was still there: the server reads the draft first (not_found when a landed
+// publish removed it) and runs these walls after that read
+// (task-9fe039cf44a67b2d). Closed on purpose: a code missing here costs a
+// "check first" message; a code wrongly here costs a discard, and the delete
+// line, after a publish that landed.
+var publishWallCodes = map[string]bool{
+	"duplicate_of":               true,
+	"invalid_epic_paper_quality": true,
+	"label_spine":                true,
+	"unknown_tag":                true,
+}
+
+// resendMayHaveLanded is the publish leg's test for a 4xx on a RESEND: true
+// unless the code is a named wall. not_found, a pre-handler refusal (401, 402,
+// 403, 429), and any code this binary does not know may hide an earlier
+// attempt that published.
 func resendMayHaveLanded(attempts, status int, body []byte) bool {
-	if attempts < 2 {
-		return false
-	}
-	switch status {
-	case 401, 403, 404, 429:
-		return true
-	}
-	return publishRefusalCode(body) == "not_found"
+	return attempts >= 2 && !publishWallCodes[publishRefusalCode(body)]
 }
 
 // resendableMutateOutcome answers "should this leg be sent again?" for one
