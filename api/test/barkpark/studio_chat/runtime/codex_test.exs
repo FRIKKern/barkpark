@@ -189,8 +189,10 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
   # task-75c44878c20cec3f: a managed app-server's text holding U+0000 reaches
   # the Recorder as U+FFFD, as a registered host's events do (ChatHosts.EventText).
-  test "a delta holding U+0000 arrives with U+FFFD in its place" do
-    {binary, args, _log} = fake_app_server(:nul_delta)
+  # What goes back to the app-server keeps its own bytes: the fake's turn id
+  # holds U+0000, and the interrupt must name that turn, not a U+FFFD copy.
+  test "a delta holding U+0000 arrives with U+FFFD in its place; ids sent back stay raw" do
+    {binary, args, log} = fake_app_server(:nul_delta)
 
     assert {:ok, runtime} =
              Codex.start(%{
@@ -205,6 +207,9 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     assert :ok = Codex.send_turn(runtime, "hello")
     assert_receive {:studio_chat_runtime_event, %Event{kind: :text_delta, native: native}}
     assert get_in(native, ["params", "delta"]) == "a�b"
+
+    assert :ok = Codex.interrupt(runtime)
+    assert File.read!(log) =~ ~s("turnId":"turn-\\u00001")
     assert :ok = Codex.close(runtime)
   end
 

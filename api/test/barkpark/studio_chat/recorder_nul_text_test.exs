@@ -10,9 +10,11 @@ defmodule Barkpark.StudioChat.RecorderNulTextTest do
   AskUserQuestion ask, `POST /answer` answered 404 (no pending question), so
   bp and TUI clients could not answer it.
 
-  The managed CLI's decoded lines and every row the Recorder stores now get
-  U+FFFD in place of U+0000, through the same `ChatHosts.EventText` the host
-  event intake uses.
+  What the managed CLI sends to its sink, and every row the Recorder stores,
+  now get U+FFFD in place of U+0000, through the same `ChatHosts.EventText`
+  the host event intake uses. What goes back to the CLI does not: a plain
+  allow echoes the tool input byte for byte (review of #26731), so the bytes a
+  tool writes never depend on the permission mode.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -115,12 +117,41 @@ defmodule Barkpark.StudioChat.RecorderNulTextTest do
     assert conn.status == 204, "answer answered #{conn.status}: #{conn.resp_body}"
   end
 
-  test "the managed CLI's decoded line carries U+FFFD in place of U+0000" do
-    line = ~s({"type":"assistant","message":{"content":[{"type":"text","text":"a\\u0000b"}]}}\n)
+  test "the managed CLI's sink gets U+FFFD, and a plain allow echoes the CLI's own bytes" do
+    out = Path.join(System.tmp_dir!(), "nul-echo-#{System.unique_integer([:positive])}.ndjson")
+    on_exit(fn -> File.rm(out) end)
 
-    assert {[event], ""} = ClaudeChat.parse_chunk("", line)
-    assert [%{"text" => text}] = event["message"]["content"]
-    assert text == "a" <> @fffd <> "b"
+    reply = ~s({"type":"assistant","message":{"content":[{"type":"text","text":"a\\u0000b"}]}})
+
+    ask =
+      ~s({"type":"control_request","request_id":"req-n","request":{"subtype":"can_use_tool",) <>
+        ~s("tool_name":"Write","input":{"file_path":"/tmp/x","content":"a\\u0000b"}}})
+
+    script = ~s(printf '%s\\n' '#{reply}' '#{ask}'; cat > #{out})
+    Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"sh", ["-c", script]})
+
+    {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+
+    assert_receive {:claude_chat_event, %{"type" => "assistant"} = event}, 5_000
+    assert [%{"text" => "a" <> @fffd <> "b"}] = event["message"]["content"]
+
+    assert_receive {:claude_chat_permission, %{request_id: "req-n", input: input}}, 5_000
+    assert input["content"] == "a" <> @fffd <> "b"
+
+    ClaudeChat.respond_permission(session, "req-n", :allow)
+
+    line =
+      Enum.find_value(1..50, fn _ ->
+        Process.sleep(100)
+
+        File.exists?(out) &&
+          out |> File.read!() |> String.split("\n") |> Enum.find(&(&1 =~ "req-n"))
+      end)
+
+    assert line, "no control_response reached the CLI"
+    sent = Jason.decode!(line)
+    assert get_in(sent, ["response", "response", "updatedInput", "content"]) == "a" <> @nul <> "b"
+    ClaudeChat.close(session)
   end
 
   test "output a managed CLI sends today is stored exactly as sent", %{

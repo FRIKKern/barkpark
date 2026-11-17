@@ -313,10 +313,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   defp consume_line(line, state) do
     case Jason.decode(line) do
-      # U+0000 is stored as U+FFFD, as a registered host's events are
-      # (ChatHosts.EventText, task-75c44878c20cec3f).
       {:ok, message} ->
-        consume_message(Barkpark.ChatHosts.EventText.replace_nul(message), state)
+        consume_message(message, state)
 
       {:error, _reason} ->
         state
@@ -443,8 +441,13 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp send_error(port, id, error), do: send_json(port, %{"id" => id, "error" => error})
   defp send_json(port, message), do: Port.command(port, Jason.encode!(message) <> "\n")
 
+  # The sink stores what it gets, and the store refuses U+0000, so the sink
+  # gets U+FFFD in its place, as a registered host's events do
+  # (ChatHosts.EventText, task-75c44878c20cec3f). Only the sink: the ids this
+  # session keeps and sends back to the app-server stay as it sent them.
   defp emit(state, event) do
-    event = %{event | sequence: state.sequence + 1}
+    sinkable = struct(event, Barkpark.ChatHosts.EventText.replace_nul(Map.from_struct(event)))
+    event = %{sinkable | sequence: state.sequence + 1}
 
     case state.sink do
       pid when is_pid(pid) and is_reference(state.runtime_ingress_token) ->

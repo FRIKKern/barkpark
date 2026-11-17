@@ -88,7 +88,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2613 internal/cli/cloud_status_cmd.go
 2599 scripts/pds-crown-launch.sh
 2573 scripts/elixir-path-escape-check.sh
-2567 api/lib/barkpark/studio_chat/provider/claude.ex
+2572 api/lib/barkpark/studio_chat/provider/claude.ex
 2562 api/lib/barkpark/tenancy.ex
 2557 api/lib/barkpark/auth.ex
 2543 api/lib/barkpark/studio_chat/recorder.ex
