@@ -25,10 +25,12 @@ package cli
 //
 // THE SERVER HALF IS ALREADY LIVE (PR #16070, ea4fc7bc51): the mutate door is
 // behind the :idempotent plug (api/lib/barkpark_web/plugs/idempotency.ex, wired
-// at router.ex:2451). The key is CLAIMED before the handler runs and hashed over
-// (raw_key, token_id, method, request_path); a completed request under a key
-// replays its recorded response byte-identically with `Idempotency-Replay:
-// true`; a concurrent one answers 409 idempotency_key_in_use without running the
+// with `bind_request: true`). The key is CLAIMED before the handler runs and is
+// bound to the whole request: (raw_key, token_id, method, path), plus a SHA-256
+// of the query string and body. The same key with another body answers 422
+// idempotency_key_reused; a completed request under a key replays its recorded
+// response byte-identically with `Idempotency-Replay: true`; a concurrent one
+// answers 409 idempotency_key_in_use without running the
 // handler; a 5xx or a crash RELEASES the claim so a retry re-runs. That is
 // exactly the safety precondition tasks_write_retry buys with a per-verb
 // read-back — and create is the ONE ledger write with no server-assigned id to
@@ -85,15 +87,18 @@ func newIdempotencyKey() string {
 
 // legKey derives the key for ONE leg of one invocation.
 //
-// WHY PER-LEG AND NOT ONE KEY FOR THE WHOLE INVOCATION. The plug hashes
-// (raw_key, token_id, method, request_path) and NOTHING FROM THE BODY —
-// plugs/idempotency.ex, `Idempotency.hash_key/4` and the moduledoc's key row). Both legs of `bp task create --publish` POST
-// the SAME path (/v1/data/mutate/<dataset>); only the mutation in the body
-// differs. So one key across both legs would make the publish request REPLAY the
-// create's cached response, byte for byte, with `Idempotency-Replay: true` — the
-// publish handler would never run, and bp would print a receipt for a row that
-// is still an unclaimable `drafts.` twin. The replay is silent by design; nothing
-// in the response body would say the publish had been skipped.
+// WHY PER-LEG AND NOT ONE KEY FOR THE WHOLE INVOCATION. Both legs of `bp task
+// create --publish` POST the SAME path (/v1/data/mutate/<dataset>); only the
+// mutation in the body differs. The plug binds the key to the body
+// (plugs/idempotency.ex, `bind_request: true`), so one key across both legs
+// would have the publish leg refused 422 idempotency_key_reused, and the publish
+// would never run. Before that binding the same reuse was worse: the publish
+// REPLAYED the create's cached response with `Idempotency-Replay: true`, and bp
+// printed a receipt for a row that was still an unclaimable `drafts.` twin.
+//
+// A resend of one leg must therefore carry the same body: sendMutationsIdempotent
+// sends one mutations slice on every attempt (the server sorts map keys before
+// hashing, so key order never counts).
 //
 // Suffixing one random base is preferred over minting two independent randoms
 // because it keeps the invocation VISIBLE on the wire: the two keys share a
