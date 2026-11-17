@@ -285,6 +285,24 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     assert length(StudioChat.list_messages(sid, :global)) == 1
   end
 
+  # A host that was handed the lease may have run it, then forgotten it when
+  # the restarted server's listing went empty (rev26739 on #26901). The resend
+  # must leave it off the queue: stuck at worst, never run twice.
+  test "a resend after a restart leaves a lease a host was handed off the queue",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "handed", key).status == 202
+    host = Repo.get!(RegisteredHost, host_id)
+    assert length(send_turns(host, sid)) == 1, "the host's poll was not handed the lease"
+    restart_transport!()
+
+    reopen_completed_claims!()
+    assert send_message(raw, sid, "handed", key).status == 202
+    assert send_turns(host, sid) == [], "a lease a host was handed went back on the queue"
+    assert length(leases(sid)) == 1, "the resend made a second lease"
+  end
+
   # A host may hold the lease the first send queued, so a requeue that exits
   # must not end it as "not sent": the next resend would run it on link :2.
   test "a requeue that exits leaves the lease live, and the next resend queues it",
