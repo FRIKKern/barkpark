@@ -790,15 +790,14 @@ defmodule Barkpark.ChatHosts do
   # lease the server withdrew ended the session's NEWER turn. The refusal is
   # `:stale_fence` (409, final for the host); nothing is written or projected.
   # A cursor at or below `last_cursor` still reaches `reconcile_event/4`, so a
-  # retry of a taken event stays a duplicate. Two closing kinds are not the
-  # end of a turn, so a lease whose last event is one of them takes the next
-  # event as before: `error` (codex app-server forwards a retrying error as
-  # `error` and the turn goes on, internal/chathost/local_handler.go) and
+  # retry of a taken event stays a duplicate. (A codex `error` that will retry
+  # leaves the lease running, `status_for/1`, so it takes the turn's events.)
+  # Two closing kinds still take the next event: `error` (one that will not
+  # retry is followed by the host's terminal when the app-server exits, "exited
+  # before turn completion", internal/chathost/local_handler.go) and
   # `control_completed` (a Stop's ack, followed by the turn's own close). Only
   # a `completed` lease pays the read. Even those are refused once the session
-  # has a newer lease (task-1eefeeb52ed19e73): a codex `error` that will not
-  # retry is followed by the host's terminal when the app-server exits ("exited
-  # before turn completion", local_handler.go), a person can send again in that
+  # has a newer lease (task-1eefeeb52ed19e73): a person can send again in that
   # gap, and the Recorder would end the newer turn. (After a Claude result the
   # host sends no terminal: `runClaude` returns nil once it saw one.)
   @continuing_kinds ["error", "control_completed"]
@@ -1148,13 +1147,24 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  # A codex error that will retry is not the turn's end, for the lease as for
+  # the Recorder (task-7d3afdffa1fd4473): the lease stays running, so the
+  # heartbeat renews it, the expiry sweep ends it if the host dies, and the
+  # turn's own close after a Stop is taken.
+  defp status_for(%{"kind" => "error"} = event) do
+    retrying = %Barkpark.StudioChat.Runtime.Event{kind: :error, error: event["error"]}
+
+    if Barkpark.StudioChat.Runtime.Event.retrying_error?(retrying),
+      do: "running",
+      else: "completed"
+  end
+
   defp status_for(%{"kind" => kind})
        when kind in [
               "terminal",
               "completed",
               "turn_completed",
               "control_completed",
-              "error",
               "process_failed",
               "protocol_error"
             ],

@@ -533,6 +533,32 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
              RuntimeUsage.reduce(identity(ctx, "retry-turn"))
   end
 
+  test "a managed codex turn whose app-server dies after a retrying error still ends", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    context = %{session_id: ctx.session_id, thread_id: "provider-thread-1", turn_id: "t-1"}
+
+    retrying =
+      Runtime.Codex.Protocol.normalize(
+        %{"method" => "error", "params" => %{"error" => %{}, "willRetry" => true}},
+        Map.put(context, :sequence, 1)
+      )
+
+    project(recorder, lifecycle(ctx.session_id, "t-1", :turn_started))
+    project(recorder, retrying)
+    assert StudioChat.get_session(ctx.session_id).status == "working"
+
+    # The managed Session emits this on the port's exit status (codex/session.ex).
+    project(recorder, Runtime.Codex.Protocol.process_failed(Map.put(context, :sequence, 2), 17))
+    assert StudioChat.get_session(ctx.session_id).status == "exited"
+  end
+
   test "Recorder keeps an unavailable first-turn baseline typed missing", ctx do
     {:ok, recorder} =
       Recorder.ensure(%{
