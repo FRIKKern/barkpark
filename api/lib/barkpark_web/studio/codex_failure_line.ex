@@ -52,7 +52,9 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
 
   defp detail(_), do: ""
 
-  defp text(value) when is_binary(value), do: String.trim(value)
+  # A host's reason is unscrubbed; cut it as the managed adapter does
+  # (codex/protocol.ex scrub_text/1), so a 1 MB message is not a 1 MB line.
+  defp text(value) when is_binary(value), do: value |> String.trim() |> String.slice(0, 2_000)
   defp text(value) when is_integer(value), do: Integer.to_string(value)
   defp text(_), do: ""
 end
