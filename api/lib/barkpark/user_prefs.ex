@@ -55,24 +55,29 @@ defmodule Barkpark.UserPrefs do
     )
   end
 
-  @type list_op :: {:push_front | :add | :remove, String.t(), term(), pos_integer() | nil}
+  @type list_op ::
+          {:push_front | :add | :remove | :set, String.t(), term(), pos_integer() | nil}
 
   @doc """
-  Edit the list at `value[field]` in one transaction under a row lock, so
-  two tabs or devices editing the same key both land. A missing row or
-  field is an empty list; the rest of `value` is kept. Answers the new
-  `value`.
+  Edit `value[field]` in one transaction under a row lock, so two tabs,
+  devices or servers editing the same key both land. A missing row is
+  created (except by `:remove`); the rest of `value` is kept. Answers the
+  new `value`.
 
+    * `:set` — make `item` the value of top-level `field`, whatever it held
+      (task-e016c981d677f3aa). The way to change one field of an object
+      without a read-change-PUT that can lose a concurrent change.
     * `:push_front` — move `item` to the front, drop its other copies, keep
       the first `max` (all when `nil`).
     * `:add` — append `item` unless present.
     * `:remove` — drop every copy of `item`. On an absent key or field it
       writes nothing (`{:ok, nil}` for an absent key).
 
-  Applying an op twice in a row gives the result of applying it once.
-  `{:error, :not_a_list}` when `value[field]` holds anything else;
-  `{:error, changeset}` for an over-long key or dataset or past the size cap.
-  None of these write.
+  A list op treats a missing field as an empty list. Applying an op twice
+  in a row gives the result of applying it once.
+  `{:error, :not_a_list}` when a list op's `value[field]` holds anything
+  else; `{:error, changeset}` for an over-long key or dataset or past the
+  size cap. None of these write.
   """
   @spec apply_list_op(binary(), binary(), String.t(), String.t(), list_op()) ::
           {:ok, map() | nil} | {:error, :not_a_list | Ecto.Changeset.t()}
@@ -119,21 +124,24 @@ defmodule Barkpark.UserPrefs do
 
   defp change(nil, _op, _field, _item, _max), do: {:ok, nil}
 
+  defp change(pref, :set, field, item, _max), do: write_field(pref, field, item)
+
   defp change(pref, op, field, item, max) do
     with {:ok, list} <- list_at(pref.value, field) do
       case edit(op, list, item, max) do
-        [] when not is_map_key(pref.value, field) ->
-          {:ok, pref.value}
-
-        edited ->
-          pref
-          |> UserPref.changeset(%{value: Map.put(pref.value, field, edited)})
-          |> Repo.update()
-          |> case do
-            {:ok, pref} -> {:ok, pref.value}
-            error -> error
-          end
+        [] when not is_map_key(pref.value, field) -> {:ok, pref.value}
+        edited -> write_field(pref, field, edited)
       end
+    end
+  end
+
+  defp write_field(pref, field, item) do
+    pref
+    |> UserPref.changeset(%{value: Map.put(pref.value, field, item)})
+    |> Repo.update()
+    |> case do
+      {:ok, pref} -> {:ok, pref.value}
+      error -> error
     end
   end
 
