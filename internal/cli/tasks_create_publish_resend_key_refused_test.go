@@ -54,7 +54,7 @@ func publishScriptDoor(t *testing.T, script ...[2]string) (*httptest.Server, fun
 			_, _ = rw.Write([]byte(`{"results":[{"id":"drafts.task-950","document":{"_id":"drafts.task-950","_draft":true}}]}`))
 		case "publish":
 			step := script[min(n, len(script))-1]
-			status := map[string]int{"500": 500, "409": 409, "422": 422}[step[0]]
+			status := map[string]int{"500": 500, "404": 404, "409": 409, "422": 422}[step[0]]
 			rw.WriteHeader(status)
 			_, _ = rw.Write([]byte(step[1]))
 		default:

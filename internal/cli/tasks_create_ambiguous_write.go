@@ -76,6 +76,7 @@ var taskCreateAmbiguityClasses = map[string]string{
 	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
 	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published",
 }
 
 // ambiguousWrite is one ambiguous outcome, fully described.

@@ -292,6 +292,18 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 				renderTaskCreateResidue(out, residuePublishResendKeyRefused, draftID, bareID)
 				return code
 			}
+			// Any other 4xx on a RESEND is not a definite refusal either: the
+			// earlier attempt may have published and removed the draft, so the
+			// resend answers not_found. Kept, checked first, never discarded.
+			// A 4xx on the FIRST send is still the refusal handled below.
+			if pAttempts >= 2 {
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishResendRefused, leg: "publish", docID: bareID,
+					title: title, detail: mutateErrorMessage(pStatus, pBody),
+				})
+				renderTaskCreateResidue(out, residuePublishResendRefused, draftID, bareID)
+				return code
+			}
 			// UNDER -o json/yaml THE REFUSAL IS THE ANSWER, and it goes to
 			// STDOUT as one envelope. The human arm below prints the refusal,
 			// the duplicate resume, and then the discard's own outcome as
@@ -387,6 +399,11 @@ const (
 	// idempotency_key_in_use after every resend). An earlier attempt may have
 	// published; discarding could destroy the draft twin of a row on the board.
 	residuePublishResendKeyRefused = "publish_resend_key_refused"
+	// residuePublishResendRefused: a RESEND of the publish was refused with
+	// any other 4xx (not_found, duplicate_of, …). An earlier attempt may have
+	// committed: a landed publish removes the draft, so the resend answers
+	// not_found. Not a definite refusal, so nothing is discarded.
+	residuePublishResendRefused = "publish_resend_refused"
 	// residueDiscardFailed: the publish was definitively refused and the discard
 	// that would have cleaned up was itself refused or unreachable.
 	residueDiscardFailed = "discard_failed"
@@ -400,6 +417,7 @@ var taskCreateResidueClasses = map[string]string{
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
 	residueDiscardFailed:               "the publish was refused and the follow-up discard could not be performed",
 	residuePublishResendKeyRefused:     "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
+	residuePublishResendRefused:        "a resend of the publish was refused, after an earlier attempt that may have published (a landed publish removes the draft the resend asks for)",
 }
 
 // renderTaskCreateResidue names the residue class on stderr and then prints the
