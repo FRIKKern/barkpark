@@ -27,6 +27,7 @@ type leaseServer struct {
 	kinds     []string
 	refuse    func(cursor uint64) int // non-zero: answer this attempt with that status
 	posts     int                     // event POSTs received
+	polls     int                     // command polls received
 	// staleListings: polls that still list the lease after it completed, as a
 	// poll answered just before the last event landed does.
 	staleListings int
@@ -61,6 +62,7 @@ func (s *leaseServer) handler(t *testing.T) http.Handler {
 		case "/v1/chat-host/heartbeat":
 			_, _ = w.Write([]byte(`{"host":{"id":"host-1"}}`))
 		case "/v1/chat-host/commands":
+			s.polls++
 			command := s.command
 			if command == "" {
 				command = `{"provider":"claude","operation":"send_turn","session_id":"session-1"}`
@@ -347,18 +349,44 @@ func TestRunnerNeverRunsALeaseTwiceEvenWhenNoEventWasTaken(t *testing.T) {
 // A close the server refuses for good (409: the lease expired) is sent once.
 // Sent again on every poll, each try spends the write budget that started the
 // incident and logs two lines.
+//
+// Ordered, not timed (task-fce5b14c7674d2d4): the test waits for the Runner's
+// line that the close was not taken, then for 50 more polls, each listing the
+// lease again. A close sent again goes out on the first poll after its lease
+// goroutine ended, so by then it would have been posted.
 func TestRunnerDoesNotRepeatACloseTheServerRefusedForGood(t *testing.T) {
-	server := &leaseServer{lastCursor: 4, refuse: func(uint64) int { return http.StatusConflict }}
+	log := &lineSignal{want: "terminal was not taken", seen: make(chan struct{})}
+	server := &leaseServer{lastCursor: 4, refuse: func(uint64) int { return http.StatusConflict }, log: log}
 	handler := &turnHandler{}
-	_, stop := startRunner(t, server, handler)
-	time.Sleep(150 * time.Millisecond)
-	stop()
+	ctx, stop := startRunner(t, server, handler)
+	defer stop()
+
+	select {
+	case <-log.seen:
+	case <-ctx.Done():
+		t.Fatalf("the close was never refused:\n%s", log.String())
+	}
+	server.mu.Lock()
+	until := server.polls + 50
+	server.mu.Unlock()
+	for ctx.Err() == nil {
+		server.mu.Lock()
+		polls := server.polls
+		server.mu.Unlock()
+		if polls >= until {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the Runner stopped polling before 50 polls after the refusal")
+	}
 
 	server.mu.Lock()
 	posts := server.posts
 	server.mu.Unlock()
 	if posts != 1 {
-		t.Fatalf("close POSTs=%d want 1", posts)
+		t.Fatalf("close POSTs=%d want 1, 50 polls after the refusal", posts)
 	}
 	if got := handler.runs.Load(); got != 0 {
 		t.Fatalf("provider runs=%d want 0", got)
