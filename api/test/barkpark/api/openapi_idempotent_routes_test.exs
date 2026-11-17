@@ -49,10 +49,11 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   # Spec operations whose replay is driven in their own test file, because a
   # 2xx needs more than a mutate body (a chat send needs a session and a
   # runtime). Listed by path so a NEW advertised route cannot hide here.
-  @driven_elsewhere %{
-    "/v1/chat/sessions/{id}/messages" =>
-      "test/barkpark_web/controllers/chat_send_idempotency_key_test.exs"
-  }
+  @driven_elsewhere ["/v1/chat/sessions/{id}/messages"]
+  @chat_send_test Path.expand(
+                    "../../barkpark_web/controllers/chat_send_idempotency_key_test.exs",
+                    __DIR__
+                  )
 
   setup do
     {:ok, _} =
@@ -127,14 +128,15 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   end
 
   test "an operation driven elsewhere is still advertised, and its test file exists" do
-    for {path, file} <- @driven_elsewhere do
+    for path <- @driven_elsewhere do
       assert {"POST", path} in spec_ops(), "#{path} is no longer advertised idempotent"
-      assert File.exists?(Path.expand("../../../" <> file, __DIR__)), "#{file} is gone"
     end
+
+    assert File.exists?(@chat_send_test), "#{@chat_send_test} is gone"
   end
 
   test "EVERY operation the spec marks idempotent actually replays", ctx do
-    for {"POST", path} <- spec_ops(), not Map.has_key?(@driven_elsewhere, path) do
+    for {"POST", path} <- spec_ops(), path not in @driven_elsewhere do
       url =
         path
         |> String.replace("{workspace_slug}", ctx.ws.slug)
