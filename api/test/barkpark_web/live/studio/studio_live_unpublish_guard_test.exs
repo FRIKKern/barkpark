@@ -69,7 +69,7 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ug-target"))
 
-      html = render_click(view, "unpublish", %{})
+      html = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
       refute html =~ ~s(data-test-id="unpublish-guard-modal"),
              "expected NO guard modal when the doc has no inbound referencers"
@@ -113,7 +113,7 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ug-target"))
 
-      html = render_click(view, "unpublish", %{})
+      html = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
       assert html =~ ~s(data-test-id="unpublish-guard-modal"),
              "expected the blast-radius guard modal when an inbound referencer exists"
@@ -132,8 +132,8 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ug-target"))
 
-      _ = render_click(view, "unpublish", %{})
-      _ = render_click(view, "confirm-unpublish", %{})
+      _ = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
+      _ = BarkparkWeb.EditorPost.press(view, "confirm-unpublish", %{})
 
       fetched = Content.get_document("ug-target", @schema_name, @dataset)
 
@@ -145,7 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ug-target"))
 
-      _ = render_click(view, "unpublish", %{})
+      _ = BarkparkWeb.EditorPost.press(view, "unpublish", %{})
       html = render_click(view, "close-unpublish-guard", %{})
 
       refute html =~ ~s(data-test-id="unpublish-guard-modal")

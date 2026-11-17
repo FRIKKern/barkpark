@@ -58,8 +58,8 @@ defmodule BarkparkWeb.Studio.StudioLiveFlashLocaleTest do
     {:ok, view, _html} =
       live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/note/flash-note")
 
-    render_click(view, "delete-doc", %{})
-    render_click(view, "confirm-delete", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
     render(view)
   end
 

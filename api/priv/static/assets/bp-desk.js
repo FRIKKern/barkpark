@@ -1744,8 +1744,13 @@
         var at = root.ownerDocument.activeElement;
         if (at && at.form && pane.contains(at)) at.dispatchEvent(new root.ownerDocument.defaultView.FocusEvent("blur"));
         if (item()) return item().click();
+        // The wait ends when the pane comes to show another document: the
+        // key asked for this one (`BarkparkDocMark`, bp-array-focus.js).
+        var win = root.ownerDocument.defaultView;
+        var doc = win.BarkparkDocMark && win.BarkparkDocMark();
         var tries = 0;
         var later = function () {
+          if (win.BarkparkDocMark && win.BarkparkDocMark() !== doc) return;
           var form = editForm();
           var busy = hook._typed || (form && form.hasAttribute("data-phx-ref-loading"));
           if (!busy && item()) return item().click();

@@ -52,11 +52,13 @@ def main():
                 if args.scenario == "stall_turn":
                     time.sleep(2)
                     continue
-                send({"id": message["id"], "result": {"turn": {"id": "turn-1"}}})
+                turn_id = "turn-\x001" if args.scenario == "nul_delta" else "turn-1"
+                send({"id": message["id"], "result": {"turn": {"id": turn_id}}})
                 send({"method": "turn/started", "params": {
-                    "threadId": "thread-1", "turn": {"id": "turn-1", "items": [], "status": "inProgress"}}})
+                    "threadId": "thread-1", "turn": {"id": turn_id, "items": [], "status": "inProgress"}}})
                 send({"method": "item/agentMessage/delta", "params": {
-                    "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1", "delta": "hello"}})
+                    "threadId": "thread-1", "turnId": turn_id, "itemId": "item-1",
+                    "delta": "a\x00b" if args.scenario == "nul_delta" else "hello"}})
                 approvals = [
                     (91, "item/commandExecution/requestApproval", "cmd-1", {"command": "printf ok"}),
                     (92, "item/fileChange/requestApproval", "patch-1", {}),

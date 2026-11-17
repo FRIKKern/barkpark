@@ -61,11 +61,12 @@ defmodule BarkparkWeb.Studio.StudioBetaDiscardRefreshTest do
   end
 
   defp discard(view) do
-    view
-    |> element(~s([data-test-id="studio-beta-doc-actions"] [phx-click="discard-draft"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-test-id="studio-beta-doc-actions"] [phx-click="discard-draft"]))
+    )
 
-    view |> element(~s(button[phx-click="confirm-discard"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="confirm-discard"])))
   end
 
   test "Beta discard pushes the published blocks with the published revision", %{conn: conn} do
@@ -89,8 +90,8 @@ defmodule BarkparkWeb.Studio.StudioBetaDiscardRefreshTest do
 
   test "Classic discard pushes no block updates", %{conn: conn} do
     {:ok, view, _} = live(conn, scoped_studio(@path))
-    view |> element(~s([phx-click="discard-draft"])) |> render_click()
-    view |> element(~s(button[phx-click="confirm-discard"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s([phx-click="discard-draft"])))
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s(button[phx-click="confirm-discard"])))
 
     assert {:error, :not_found} =
              Content.get_document("drafts.discardrev-1", "discardrev", @dataset)

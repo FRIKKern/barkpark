@@ -128,7 +128,7 @@ defmodule BarkparkWeb.Studio.StudioSheetHistoryRestoreTest do
     assert old, "fixture: a revision holding A1 = old exists"
 
     render_click(view, "show-history", %{})
-    render_click(view, "restore-revision", %{"id" => old.id})
+    BarkparkWeb.EditorPost.press(view, "restore-revision", %{"id" => old.id})
 
     # The session persists again (the debounce, forced): the restore holds.
     assert :ok = Session.flush("hist-restore", @dataset, nil)

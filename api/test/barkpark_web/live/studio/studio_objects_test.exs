@@ -400,7 +400,7 @@ defmodule BarkparkWeb.Studio.StudioObjectsTest do
       |> render_change(%{"_target" => ["doc[__object].quote"]})
 
       view |> form("#bp-object-dialog-form-c3d0c0de0006") |> render_submit()
-      render_click(view, "publish", %{})
+      BarkparkWeb.EditorPost.press(view, "publish", %{})
 
       refute render(view) =~ "Fix validation errors before publishing"
       {:ok, doc} = Content.get_document(@article, "article", @dataset, scope)

@@ -50,6 +50,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.StudioLive.Handlers.Fields
   alias BarkparkWeb.Studio.StudioLive.Handlers.Scope
   alias BarkparkWeb.Studio.StudioLive.Paths
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias Phoenix.LiveView.JS
 
   @doc """
@@ -112,16 +113,21 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     end
   end
 
-  # No document is handed to the Studio: no path, no reference links.
-  defp put_away(socket),
-    do:
-      assign(socket,
-        active_refs: [],
-        desk_ref_ids: nil,
-        desk_nav: nil,
-        edit_failed: false,
-        desk_incoming: nil
-      )
+  # No document is handed to the Studio: no path, no reference links. A
+  # dialog one of the document's actions opened goes with the document: the
+  # Studio still holds it, and would show the dialog again over the next.
+  defp put_away(socket) do
+    socket
+    |> assign(
+      active_refs: [],
+      desk_ref_ids: nil,
+      desk_nav: nil,
+      edit_failed: false,
+      desk_incoming: nil
+    )
+    |> PostIdentity.close_dialogs()
+    |> DocDialog.follow()
+  end
 
   @doc """
   Loads the pending document into the Studio's editor.

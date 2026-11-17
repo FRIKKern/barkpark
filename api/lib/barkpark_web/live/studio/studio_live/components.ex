@@ -2224,7 +2224,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         show_delete={@show_delete}
         delete_refs={@delete_refs}
         editor_doc={@editor_doc}
-        show_discard={@show_discard}
+        show_discard={@show_discard} doc_mark={BarkparkWeb.Studio.StudioLive.PostIdentity.of(%{assigns: assigns})}
       />
 
       <%!-- Unpublish blast-radius guard modal (Phase 5, gap #5). Lists the
