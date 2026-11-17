@@ -2,13 +2,17 @@
 // (`BarkparkWeb.Components.Fields.TagsField`), as the TanStack Studio's
 // TagsInput (barkpark-studio app/src/components/ArrayInputs.tsx).
 //
-// ENTER. In a tags input, Enter adds what is typed. The text, trimmed, is
-// put on the field's add button (`data-tags-add`) as its value and the
-// button is pressed, so the add is an `array_op` press that carries the
-// document's mark like any other (bp-array-focus.js names it in the capture
-// phase, before LiveView reads the button). The input is emptied at once,
-// so the next tag can be typed while the server answers; presses reach the
-// server in the order they were made, so tags typed fast all land, in order.
+// ENTER. In a tags input, Enter adds what is typed: an `array_op`
+// `add_tag` press with the text, trimmed, as its value, named for the
+// document the page shows (`BarkparkDocMark`, bp-array-focus.js), as every
+// press that writes. The field's hidden add button (`data-tags-add`) says
+// which array. Each Enter is its own push through the desk's hook
+// (`bpPush`, bp-desk.js): LiveView drops a click on a button whose last
+// press is still unanswered, so a second Enter pressed on the button was
+// lost. Without the desk the button is pressed, its value the text. The
+// input is emptied at once, so the next tag can be typed while the server
+// answers; pushes reach the server in the order they were made, so tags
+// typed fast all land, in order.
 //
 // The Enter that commits an IME's word (Japanese, Chinese, Korean) is the
 // IME's, not ours: it adds nothing, and the word stays in the input until
@@ -39,8 +43,21 @@
     var box = input.closest(BOX);
     var add = box && box.querySelector("button[data-tags-add]");
     if (!add) return;
-    add.setAttribute("phx-value-value", text);
-    add.click();
+    var desk = input.closest("[data-desk-tags]");
+    if (desk && typeof desk.bpPush === "function" && window.BarkparkDocMark) {
+      desk.bpPush(add.getAttribute("phx-click"), {
+        action: add.getAttribute("phx-value-action"),
+        field: add.getAttribute("phx-value-field"),
+        path: add.getAttribute("phx-value-path"),
+        value: text,
+        _bp_doc: window.BarkparkDocMark()
+      });
+    } else {
+      // LiveView sends a pressed button's own value as `value`.
+      add.value = text;
+      add.click();
+      add.value = "";
+    }
     input.value = "";
   }
 

@@ -119,7 +119,7 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
 
   defp chips(view) do
     html = view |> element(~s(#{@form} .field [data-field-name="tags"] .tags-box)) |> render()
-    for [_, t] <- Regex.scan(~r/<span class="tag">([^<]*)<button/, html), do: t
+    for [_, t] <- Regex.scan(~r/<span id="[^"]*" class="tag">([^<]*)<button/, html), do: t
   end
 
   # Enter in the input: the page's script puts the typed text on the field's

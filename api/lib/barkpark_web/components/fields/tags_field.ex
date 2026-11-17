@@ -104,7 +104,7 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
       <label class="bp-field-title" for={@id_base}><%= @title %></label>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
       <div class="tags-box" data-tags-box>
-        <span :for={{tag, i} <- Enum.with_index(@tags)} class="tag"><%= tag %><button
+        <span :for={{tag, i, id} <- chips(@tags, @dom_id)} id={id} class="tag"><%= tag %><button
             type="button"
             aria-label={gettext("Remove %{tag}", tag: tag)}
             disabled={@readonly}
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
             phx-value-field={@field.name}
             phx-value-path={@path}
             phx-value-index={i}
-            phx-value-value={tag}
+            value={tag}
           ><svg width="1em" height="1em" viewBox="0 0 25 25" fill="none" aria-hidden="true"><path d="M18 7L7 18M7 7L18 18" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /></svg></button></span>
         <input
           id={@id_base}
@@ -139,6 +139,26 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
       </div>
     </div>
     """
+  end
+
+  # Each chip keyed by its tag (and which of that tag it is), not its place:
+  # after a remove the next chip keeps its own button. Drawn by place,
+  # the removed chip's button, still waiting for its answer, became the next
+  # tag's, and LiveView drops a click on such a button.
+  defp chips(tags, dom_id) do
+    {chips, _seen} =
+      tags
+      |> Enum.with_index()
+      |> Enum.map_reduce(%{}, fn {tag, i}, seen ->
+        n = Map.get(seen, tag, 0)
+
+        hash =
+          :crypto.hash(:sha256, tag) |> Base.url_encode64(padding: false) |> binary_part(0, 12)
+
+        {{tag, i, "#{dom_id}-tag-#{hash}-#{n}"}, Map.put(seen, tag, n + 1)}
+      end)
+
+    chips
   end
 
   defp display(v) when is_binary(v), do: v
