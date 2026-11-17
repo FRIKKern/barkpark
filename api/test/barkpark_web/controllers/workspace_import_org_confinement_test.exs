@@ -95,7 +95,10 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
     body =
       dumps[table]
       |> String.split("\n", trim: true)
-      |> Enum.map_join("", &((&1 |> String.split("\t") |> List.replace_at(i, value) |> Enum.join("\t")) <> "\n"))
+      |> Enum.map_join(
+        "",
+        &((&1 |> String.split("\t") |> List.replace_at(i, value) |> Enum.join("\t")) <> "\n")
+      )
 
     repack(manifest, Map.put(dumps, table, body))
   end

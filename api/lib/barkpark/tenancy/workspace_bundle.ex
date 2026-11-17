@@ -275,11 +275,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @type stats :: %{
-          optional(:withheld) => %{optional(String.t()) => non_neg_integer()},
-          required(:tables) => %{optional(String.t()) => non_neg_integer()},
-          required(:total_rows) => non_neg_integer(),
-          required(:manifest) => map(),
-          required(:attempts) => pos_integer()
+          tables: %{optional(String.t()) => non_neg_integer()},
+          total_rows: non_neg_integer(),
+          manifest: map(),
+          attempts: pos_integer()
         }
 
   @doc """
@@ -537,7 +536,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       grant: grant_admin_to!(opts),
       expected_root_slug: expected_root_slug!(opts),
       into_dataset: DatasetRemap.target!(Keyword.get(opts, :into_dataset)),
-      confine: confine!(opts)
+      confine: ImportConfinement.flag!(opts)
     }
 
     if ctx.into_dataset do
@@ -553,15 +552,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
 
     ctx
-  end
-
-  # `:confine` — true when the caller is not a listed instance operator: the
-  # import then follows `ImportConfinement` (task-1a6cde75b0adae76).
-  defp confine!(opts) do
-    case Keyword.get(opts, :confine, false) do
-      flag when is_boolean(flag) -> flag
-      other -> raise ArgumentError, "invalid :confine #{inspect(other)} (expected a boolean)"
-    end
   end
 
   # THE CALLER'S STATED TARGET (task-b8218812cee2e4cc). The engine cannot derive
@@ -790,13 +780,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # assert_root_slug_not_vacant_reserved!/2.
         vacant_reserved = vacant_reserved_slugs()
         assert_root_slug_not_vacant_reserved!(manifest, vacant_reserved)
-
-        # A non-operator's import (task-1a6cde75b0adae76): refuse an existing
-        # target the importer does not administer, BEFORE the adopt delete, and
-        # read the catalog while every member FK still exists.
-        confined =
-          if ctx.confine,
-            do: {ImportConfinement.preflight!(manifest, mode, ctx.grant), ImportConfinement.catalog()}
+        # Non-operator import: before the adopt delete and the FK drop.
+        confined = ImportConfinement.begin!(ctx.confine, manifest, mode, ctx.grant)
 
         # PDS-D9 pre-flight runs FIRST among the import's own writes, before
         # any trigger/constraint DDL, so the empty-shell delete's FK cascades
@@ -836,21 +821,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
         stats =
           manifest["tables"]
-          |> Enum.reduce({%{}, 0, %{}}, fn entry, {acc, total, withheld} ->
-            {n, held} =
-              import_entry(entry, Map.get(dumps, entry["name"], ""), mode, manifest, confined)
+          |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
+            n =
+              ImportConfinement.import!(confined, entry, dumps, mode, manifest, &import_member/3)
 
             # ROW-COPY TIME, deliberately: see
             # assert_no_foreign_blob_path_collision!/3 for why a push-time
             # refusal reproduces the very state it is meant to prevent.
             assert_no_foreign_blob_path_collision!(entry["name"], n, manifest)
-            {Map.put(acc, entry["name"], n), total + n, Map.merge(withheld, held)}
+            {Map.put(acc, entry["name"], n), total + n}
           end)
-          |> then(fn {tables, total, withheld} ->
+          |> then(fn {tables, total} ->
             # The manifest rides back out so the caller can stamp pull
             # provenance without unpacking (and re-inflating) the tar twice.
-            stats = %{tables: tables, total_rows: total, manifest: manifest}
-            if confined, do: Map.put(stats, :withheld, withheld), else: stats
+            %{tables: tables, total_rows: total, manifest: manifest}
           end)
 
         with_ddl_lock_timeout(:restore_member_fks, fn ->
@@ -858,7 +842,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           restore_member_fks!(member_fks)
         end)
 
-        stats = settle_confined!(stats, manifest, confined)
+        stats = ImportConfinement.settle!(confined, stats, manifest)
 
         # The manifest's declared root slug is a CLAIM; the workspaces COPY
         # member carries the actual slug. Re-read the seats that were vacant at
@@ -2594,21 +2578,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # sobelow_skip ["Traversal.FileModule"]
   defp release_member({:file, path}), do: File.rm(path)
   defp release_member(dump) when is_binary(dump), do: :ok
-
-  defp import_entry(entry, dump, mode, _manifest, nil), do: {import_member(entry, dump, mode), %{}}
-
-  defp import_entry(entry, dump, mode, manifest, {_prior, catalog}) do
-    result = ImportConfinement.import_member!(entry, dump, mode, manifest, catalog)
-    release_member(dump)
-    result
-  end
-
-  defp settle_confined!(stats, _manifest, nil), do: stats
-
-  defp settle_confined!(stats, manifest, {prior, _catalog}) do
-    ImportConfinement.settle_workspace_row!(manifest, prior)
-    stats
-  end
 
   defp import_member(%{"row_count" => 0}, dump, _mode) do
     release_member(dump)

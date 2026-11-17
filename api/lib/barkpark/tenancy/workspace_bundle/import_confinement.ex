@@ -70,6 +70,53 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   @doc "Member tables whose `session_id` points at `chat_sessions`."
   def session_columns, do: @session_columns
 
+  @doc "The engine's `:confine` option: true when the caller is not a listed operator."
+  def flag!(opts) do
+    case Keyword.get(opts, :confine, false) do
+      flag when is_boolean(flag) -> flag
+      other -> raise ArgumentError, "invalid :confine #{inspect(other)} (expected a boolean)"
+    end
+  end
+
+  @doc """
+  The engine's hook before any write: `nil` for an unconfined import, else the
+  state the other hooks take. Reads the catalog while every member FK exists.
+  """
+  def begin!(false, _manifest, _mode, _grant), do: nil
+  def begin!(true, manifest, mode, grant), do: {preflight!(manifest, mode, grant), catalog()}
+
+  @doc "The engine's per-member hook. Unconfined, it calls the engine's own `import_member/3`."
+  def import!(nil, entry, dumps, mode, _manifest, import_member),
+    do: import_member.(entry, Map.get(dumps, entry["name"], ""), mode)
+
+  # `path` is the engine's own extraction path, as in `release_member/1`.
+  # sobelow_skip ["Traversal.FileModule"]
+  def import!({_prior, catalog}, entry, dumps, mode, manifest, _import_member) do
+    dump = Map.get(dumps, entry["name"], "")
+    n = import_member!(entry, dump, mode, manifest, catalog)
+    with {:file, path} <- dump, do: File.rm(path)
+    n
+  end
+
+  @doc """
+  The engine's hook after the members landed: put the operator columns back and
+  name, per table, the rows the bundle carried that were not written.
+  """
+  def settle!(nil, stats, _manifest), do: stats
+
+  def settle!({prior, catalog}, stats, manifest) do
+    settle_workspace_row!(manifest, prior)
+
+    withheld =
+      for %{"name" => t, "row_count" => n} <- manifest["tables"] || [],
+          t in @withheld_tables or Map.get(catalog.kinds, t) == :e3,
+          is_integer(n) and n > Map.get(stats.tables, t, 0),
+          into: %{},
+          do: {t, n - Map.get(stats.tables, t, 0)}
+
+    Map.put(stats, :withheld, withheld)
+  end
+
   @doc """
   Before any write. Refuses a confined import into an existing workspace the
   importer does not administer, and returns what `settle_workspace_row!/2`
@@ -100,14 +147,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     end
   end
 
-  @doc "Import one member under the confined rules. Returns rows written plus withheld."
+  @doc "Import one member under the confined rules. Returns the rows written."
   def import_member!(%{"name" => table} = entry, dump, mode, manifest, catalog) do
     cond do
       table in @withheld_tables ->
-        {0, %{table => entry["row_count"] || 0}}
+        0
 
       entry["row_count"] == 0 ->
-        {0, %{}}
+        0
 
       true ->
         import_checked!(table, entry, dump, mode, manifest, catalog)
@@ -160,6 +207,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   After every member landed: put the operator columns back. A new workspace
   lands in no organization; an existing one keeps what it had.
   """
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   def settle_workspace_row!(manifest, nil) do
     Repo.query!("UPDATE workspaces SET organization_id = NULL WHERE id = $1::uuid", [
       Ecto.UUID.dump!(cast_ws_id!(manifest))
@@ -168,6 +218,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     :ok
   end
 
+  # `sets` is built from the fixed @operator_columns list; values are bind params.
+  # sobelow_skip ["SQL.Query"]
   def settle_workspace_row!(manifest, prior) when is_map(prior) do
     sets = Enum.map_join(Enum.with_index(@operator_columns, 2), ", ", &set_clause/1)
     values = Enum.map(@operator_columns, &Map.fetch!(prior, &1))
@@ -182,6 +234,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   # ── Staging + checks ────────────────────────────────────────────────────────
 
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query", "SQL.Stream"]
   defp import_checked!(table, entry, dump, mode, manifest, catalog) do
     kind = Map.get(catalog.kinds, table)
     ws_id = cast_ws_id!(manifest)
@@ -199,26 +254,26 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
     ws = Catalog.uuid_literal!(ws_id)
 
-    {written, withheld} =
+    written =
       case kind do
         :e3 ->
           kept = keep_own_e3_rows!(table, tmp, manifest)
           insert!(table, col_list, tmp, "ON CONFLICT DO NOTHING")
-          {kept, %{table => (entry["row_count"] || 0) - kept}}
+          kept
 
         scoped when scoped in [:root, :e1, :e2] ->
           refuse_out_of_scope!(table, tmp, scoped, ws)
           refuse_foreign_session!(table, tmp, cols, ws)
           refuse_foreign_references!(table, tmp, Map.get(catalog.fks, table, []), catalog, ws)
           write_scoped!(table, col_list, cols, tmp, mode, scoped, ws)
-          {count(tmp), %{}}
+          count(tmp)
 
         nil ->
           refuse!(table, "is not a member table of a workspace bundle on this instance")
       end
 
     Repo.query!("DROP TABLE #{qi(tmp)}", [])
-    {written, Map.reject(withheld, fn {_t, n} -> n == 0 end)}
+    written
   end
 
   defp write_scoped!(table, col_list, _cols, tmp, :clean, _kind, _ws),
@@ -237,6 +292,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     insert!(table, col_list, tmp, "ON CONFLICT (#{Enum.map_join(keys, ", ", &qi/1)}) #{action}")
   end
 
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   defp insert!(table, col_list, tmp, suffix) do
     Repo.query!(
       "INSERT INTO #{qi(table)} (#{col_list}) SELECT #{col_list} FROM #{qi(tmp)} #{suffix}",
@@ -330,14 +388,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   # E3 rows keep only this workspace's own dataset slugs; the rest are deleted
   # from the staging table, so they are never written.
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   defp keep_own_e3_rows!(table, tmp, manifest) do
     ws_id = cast_ws_id!(manifest)
     own = Catalog.text_array_literal(WorkspaceBundle.dataset_slugs_for(ws_id))
 
     slug_guard =
       case Map.get(Catalog.e3_dataset_workspace_slug_column(), table) do
-        nil -> ""
-        col -> " OR t.#{qi(col)} IS DISTINCT FROM #{Catalog.text_literal(manifest_slug!(manifest))}"
+        nil ->
+          ""
+
+        col ->
+          " OR t.#{qi(col)} IS DISTINCT FROM #{Catalog.text_literal(manifest_slug!(manifest))}"
       end
 
     Repo.query!(
@@ -348,6 +412,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     count(tmp)
   end
 
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   defp refuse_if!(table, sql, what) do
     case Repo.query!(sql, []).rows do
       [[0]] -> :ok
@@ -364,13 +431,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   end
 
   @copy_chunk_bytes 65_536
+  # `path` is the engine's own extraction path (Archive.unpack_to_dir/2), never request input.
+  # sobelow_skip ["Traversal.FileModule"]
   defp copy_source({:file, path}), do: File.stream!(path, @copy_chunk_bytes)
   defp copy_source(dump) when is_binary(dump), do: [dump]
 
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   defp count(tmp), do: Repo.query!("SELECT count(*) FROM #{qi(tmp)}", []).rows |> hd() |> hd()
 
   # ── Workspace row ───────────────────────────────────────────────────────────
 
+  # Identifiers are qi/1-quoted catalog or manifest names behind the member-table
+  # check; values are a validated UUID literal or bind params. COPY data never enters SQL.
+  # sobelow_skip ["SQL.Query"]
   defp read_operator_columns(ws_id) do
     cols = Enum.map_join(@operator_columns, ", ", &qi/1)
 

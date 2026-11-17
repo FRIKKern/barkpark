@@ -1693,7 +1693,12 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
 
       raw_admin = "ws-slug-conflict-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+      {:ok, admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # A LISTED operator: a non-operator import is confined and withholds
+      # seats (task-1a6cde75b0adae76); this pins the operator path.
+      Application.put_env(:barkpark, :operator_token_ids, [admin.id])
+      on_exit(fn -> Application.delete_env(:barkpark, :operator_token_ids) end)
 
       # SOURCE workspace, exported, then deleted — its slug becomes vacant.
       {:ok, source} =

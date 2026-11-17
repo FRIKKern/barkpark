@@ -58,7 +58,12 @@ defmodule BarkparkWeb.WorkspaceImportExpectedRootSlugTest do
     refute Tenancy.get_default_workspace()
 
     raw = "ws-expected-slug-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "ws admin", "test", ["read", "write", "admin"])
+    {:ok, token} = Auth.create_token(raw, "ws admin", "test", ["read", "write", "admin"])
+
+    # A LISTED operator: a non-operator import is confined and withholds
+    # seats (task-1a6cde75b0adae76); this pins the operator path.
+    Application.put_env(:barkpark, :operator_token_ids, [token.id])
+    on_exit(fn -> Application.delete_env(:barkpark, :operator_token_ids) end)
 
     {:ok, raw: raw}
   end
