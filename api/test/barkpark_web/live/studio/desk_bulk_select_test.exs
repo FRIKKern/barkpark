@@ -334,17 +334,26 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
     )
   end
 
-  test "a run says it is running, so the browser keeps the focus on the bar", c do
+  test "an unpublish run keeps its dialog, buttons greyed out and Cancel to hold the focus", c do
     [_a, b | _] = c.ids
     select(c)
     tick(c, b)
     c.view |> element(~s(#{@bar} button), "Unpublish selected") |> render_click()
     render_async(c.view, 5_000)
-    c.view |> element(~s(#{@dialog} button.danger)) |> render_click()
+
+    # The answer to the confirm: the dialog is still there (the button that
+    # was pressed is greyed out, Cancel is not), and the bar says it runs.
+    html = c.view |> element(~s(#{@dialog} button.danger)) |> render_click()
+    dialog = html |> LazyHTML.from_fragment() |> LazyHTML.query(@dialog)
+    assert Enum.count(dialog) == 1
+    assert Enum.count(LazyHTML.query(dialog, "button.danger[disabled]")) == 1
+    assert Enum.count(LazyHTML.query(dialog, "button[data-modal-focus]:not([disabled])")) == 1
 
     pane = c.pane
     assert_push_event(c.view, "desk:bulk", %{pane: ^pane, active: true, running: true}, 2_000)
     assert_push_event(c.view, "desk:bulk", %{pane: ^pane, active: false, running: false}, 5_000)
+    assert_push_event(c.view, "desk:bulk-toast", %{title: "Unpublished 1 of 1"}, 5_000)
+    refute has_element?(c.view, @dialog)
   end
 
   test "the editor of a bulk-published document follows it: published, nothing left to publish",

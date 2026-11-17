@@ -255,7 +255,8 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
   def handle_event(
         "bulk-unpublish",
         %{"pane" => pane, "confirm" => "true"} = params,
-        %{assigns: %{desk_bulk_confirm: %{pane: pane, checking: false} = confirm}} = socket
+        %{assigns: %{desk_bulk_confirm: %{pane: pane, checking: false, busy: false} = confirm}} =
+          socket
       ) do
     case ready(socket, pane) do
       nil ->
@@ -282,7 +283,9 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
             do: for(%{id: id, rows: [_ | _]} <- confirm.docs, id in live, do: id),
             else: []
 
-        socket = assign(socket, :desk_bulk_confirm, nil)
+        # The dialog stays while the run runs, its buttons greyed out and the
+        # focus on its Cancel, as the TanStack Studio's; the summary ends both.
+        socket = assign(socket, :desk_bulk_confirm, %{confirm | busy: true})
         {:noreply, run(socket, pane, state, :unpublish, plan, cut)}
     end
   end
@@ -294,8 +297,18 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
     end
   end
 
-  def handle_event("bulk-unpublish-close", _params, socket),
-    do: {:noreply, assign(socket, :desk_bulk_confirm, nil)}
+  # Put away while its run goes on, the dialog gives the focus back to a
+  # greyed-out "Unpublish selected": the browser hears the run is still on,
+  # and the bar takes the focus.
+  def handle_event("bulk-unpublish-close", _params, socket) do
+    confirm = socket.assigns.desk_bulk_confirm
+    socket = assign(socket, :desk_bulk_confirm, nil)
+
+    case confirm && of(socket.assigns, confirm.pane) do
+      %{running: %{}} = state -> {:noreply, put(socket, confirm.pane, state)}
+      _ -> {:noreply, socket}
+    end
+  end
 
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
@@ -319,7 +332,7 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
       reader = %{dataset: dataset, scope: scope}
 
       socket
-      |> assign(:desk_bulk_confirm, %{pane: pane, docs: docs, checking: true})
+      |> assign(:desk_bulk_confirm, %{pane: pane, docs: docs, checking: true, busy: false})
       |> start_async({:desk_bulk, {:refs, pane}}, fn -> DocDialog.rows_for(ids, reader) end)
     end
   end
@@ -374,13 +387,22 @@ defmodule BarkparkWeb.Studio.Desk.Bulk do
 
   # Refused before anything was unpublished: the ticks stay.
   def handle_async({:run, pane}, {:ok, {:refused, why}}, socket),
-    do: {:noreply, socket |> toast("critical", why) |> idle(pane)}
+    do: {:noreply, socket |> toast("critical", why) |> unbusy(pane) |> idle(pane)}
 
   def handle_async({:run, pane}, _crashed, socket) do
     {:noreply,
      socket
      |> toast("critical", gettext("The bulk action stopped before it finished"))
+     |> unbusy(pane)
      |> idle(pane)}
+  end
+
+  # The dialog's buttons wake again when its run stopped short.
+  defp unbusy(socket, pane) do
+    case socket.assigns.desk_bulk_confirm do
+      %{pane: ^pane} = confirm -> assign(socket, :desk_bulk_confirm, %{confirm | busy: false})
+      _ -> socket
+    end
   end
 
   # The document open in the editor was one of them: the editor reads it

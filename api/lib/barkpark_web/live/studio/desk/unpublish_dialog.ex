@@ -110,6 +110,10 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
     default: false,
     doc: "who refers is still being read: the dialog says so and its buttons wait"
 
+  attr :busy, :boolean,
+    default: false,
+    doc: "the unpublish it started is running: its buttons wait, Cancel puts it away"
+
   @doc """
   The same dialog for a list's ticked rows (B03, `Bulk`): "Unpublish 2
   documents?", and one section per document that others refer to. Its
@@ -181,7 +185,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
           phx-value-confirm="true"
           phx-value-disconnect="true"
           data-desk-confirm="disconnect-unpublish"
-          disabled={@checking}
+          disabled={@checking or @busy}
         >
           {gettext("Disconnect references and unpublish")}
         </button>
@@ -192,7 +196,7 @@ defmodule BarkparkWeb.Studio.Desk.UnpublishDialog do
           phx-value-pane={@pane}
           phx-value-confirm="true"
           data-desk-confirm="unpublish"
-          disabled={@checking}
+          disabled={@checking or @busy}
         >
           {if @used != [], do: gettext("Unpublish anyway"), else: gettext("Unpublish now")}
         </button>

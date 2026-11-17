@@ -13,7 +13,8 @@
 //     own state through a patch, so after each patch every box is set from
 //     its `checked` attribute.
 //   - The focus never falls to the page. A bar button greyed out while its
-//     action runs hands it to the bar; when selecting ends, the bar and the
+//     action runs hands it to the bar; the unpublish dialog stays open while
+//     its run goes on, the focus on its Cancel; when selecting ends, the bar and the
 //     ticks go, and a focus that was on one of them goes to the list's "List
 //     options", which starts selecting again.
 //   - The summary ("Published 2 of 3") is a toast on the page's body
@@ -73,10 +74,20 @@
     for (var i = 0; i < ticks.length; i++) ticks[i].removeAttribute("inert");
   }
 
+  // The unpublish dialog's own buttons grey out while their run goes on: the
+  // focus goes to its Cancel first, as the TanStack Studio's.
+  function cancelOf(el) {
+    var dialog = el && el.closest ? el.closest('[data-desk-dialog="bulk-unpublish"]') : null;
+    return dialog ? dialog.querySelector("[data-modal-focus]") : null;
+  }
+
   // A modified click on a row, not on its tick: the tick is pressed for it.
   function onClick(e) {
     var start = e.target && e.target.closest ? e.target.closest('.dk-list-menu [phx-click="bulk-select"][phx-value-on="true"]') : null;
     if (start) return startNow(start);
+    var go = e.target && e.target.closest ? e.target.closest('[data-desk-dialog="bulk-unpublish"] button[phx-value-confirm="true"]') : null;
+    var cancel = go && !go.disabled && cancelOf(go);
+    if (cancel) return cancel.focus({ preventScroll: true });
     if (!(e.metaKey || e.ctrlKey || e.shiftKey) || e.button !== 0) return;
     var target = e.target;
     var row = target && target.closest ? target.closest(".dk .bulk-row") : null;
@@ -113,9 +124,9 @@
     }
   }
 
-  // An action greys the bar's buttons out and takes the unpublish dialog
-  // away, and either drops the focus onto the page: the bar itself takes it
-  // for as long as the action runs. Selecting
+  // An action greys the bar's buttons out, and a greyed-out button drops the
+  // focus onto the page. While it runs, a focus lost goes to the unpublish
+  // dialog's Cancel when the dialog is open, else to the bar. Selecting
   // ended in `pane`: a focus left on nothing, or on a tick that is out of
   // reach now, goes to the list's "List options".
   function onBulk(e) {
@@ -125,11 +136,11 @@
     var at = doc.activeElement;
     var lost = !at || at === doc.body || !at.isConnected || at.disabled || (at.closest && at.closest("[inert]"));
     if (detail.running) {
-      // Publish's own button is greyed out; the unpublish dialog is gone,
-      // and the button it gives the focus back to is greyed out too.
       var bars = doc.querySelectorAll(".bulk-bar");
       for (var i = 0; lost && i < bars.length; i++) {
-        if (bars[i].getAttribute("data-bulk-bar") === detail.pane) bars[i].focus({ preventScroll: true });
+        if (bars[i].getAttribute("data-bulk-bar") !== detail.pane) continue;
+        var cancel = bars[i].querySelector('[data-desk-dialog="bulk-unpublish"] [data-modal-focus]');
+        (cancel || bars[i]).focus({ preventScroll: true });
       }
       return;
     }

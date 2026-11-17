@@ -96,6 +96,7 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
         pane={@pane}
         docs={@confirm.docs}
         checking={@confirm.checking}
+        busy={@confirm.busy}
         base={@base}
       />
     </div>
