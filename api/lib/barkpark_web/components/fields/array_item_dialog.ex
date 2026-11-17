@@ -52,8 +52,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayItemDialog do
 
   @doc "One object item: handle, preview, menu and its dialog."
   def row(assigns) do
+    # `ArrayField` calls this with a plain map, as it calls its own rows.
     assigns =
-      assign(assigns,
+      assigns
+      |> Map.put_new(:__changed__, nil)
+      |> assign(
         dialog_id: assigns.row_id <> "-dialog",
         label: "#{assigns.field_title} / #{assigns.preview.title}"
       )

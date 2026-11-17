@@ -26,7 +26,12 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
       "title" => "Sanity docs",
       "url" => "https://www.sanity.io/docs"
     },
-    %{"_key" => "l2", "kind" => "docLink", "title" => "Related post", "target" => "aitems-target"}
+    %{
+      "_key" => "l2",
+      "kind" => "docLink",
+      "title" => "Related post",
+      "target" => %{"_ref" => "aitems-target", "_type" => "reference"}
+    }
   ]
 
   setup %{conn: conn} do
@@ -254,9 +259,10 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
 
     EditorPost.press_on(view, element(view, add))
     {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
-    assert [%{"_key" => key}] = doc.content["cards"]
+    assert [_added] = doc.content["cards"]
     assert_push_event(view, "desk:item-open", %{path: "doc[cards]", index: 0})
-    assert has_element?(view, ~s(#{@form} li[data-item-path='cards[_key=="#{key}"]'] > dialog))
+    # An item with no `_key` of its own is named by its place, as Sanity's.
+    assert has_element?(view, ~s(#{@form} li[data-item-path="cards[0]"] > dialog))
   end
 
   test "an add pressed in another document is not written", c do
@@ -335,8 +341,11 @@ defmodule BarkparkWeb.Studio.DeskArrayItemsTest do
     view = desk(c)
 
     view
-    |> form(@form, %{"doc" => %{"links" => %{"0" => %{"title" => "Sanity docs v2"}}}})
-    |> render_change(%{"_target" => ["doc", "links", "0", "title"]})
+    |> form(@form)
+    |> render_change(%{
+      "doc[links][0].title" => "Sanity docs v2",
+      "_target" => ["doc[links][0].title"]
+    })
 
     assert [l1, l2] = links(c)
     assert l1 == Map.put(hd(@links), "title", "Sanity docs v2")
