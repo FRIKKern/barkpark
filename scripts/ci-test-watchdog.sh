@@ -21,9 +21,15 @@
 # fires it is 124 whatever the command would have said.
 #
 # QUIET BUDGET. The longest silent gap in 12 green Test jobs (runs 43899277994,
-# 43905150406, 43925383633, 43930455030; all 3 partitions) is 149 s
-# (pds_elixir_census_test shelling a whole-lib walk). The default --quiet 300 is
-# twice that.
+# 43905150406, 43925383633, 43930455030; all 3 partitions) was 149 s:
+# PdsElixirCensusTest's setup_all, all arms at once. Its arms now run two at a
+# time and print a line as each one finishes (PdsCensusMutantGate.run_arms/2),
+# so a gap is at most one arm. The default --quiet 600 leaves room for a slow
+# runner and a growing api/lib; a real hang still costs 10 min, not 50.
+#
+# MEMORY FLOOR. --min-mem-mb 700 is far under a healthy run's low point: with
+# two arms at a time, MemAvailable stays above ~5.6 GB on the 16 GB runner
+# (PR run 43984047522, the same two full walks a push now peaks at).
 #
 # usage: ci-test-watchdog.sh [--quiet S] [--every S] [--min-mem-mb N]
 #                            [--min-disk-mb N] [--out DIR] -- CMD [ARG...]
@@ -32,7 +38,7 @@
 
 set -uo pipefail
 
-quiet=300 every=30 min_mem=700 min_disk=1024 out="${RUNNER_TEMP:-/tmp}/test-watchdog"
+quiet=600 every=30 min_mem=700 min_disk=1024 out="${RUNNER_TEMP:-/tmp}/test-watchdog"
 while [ $# -gt 0 ]; do
   case "$1" in
     --quiet) quiet="$2"; shift 2 ;;
@@ -50,7 +56,10 @@ mkdir -p "$out" || exit 2
 log="$out/output.log" report="$out/watchdog.txt" fifo="$out/.fifo.$$"
 : >"$log"
 rm -f "$fifo" && mkfifo "$fifo" || exit 2
-export ERL_CRASH_DUMP="$out/erl_crash.dump" ERL_CRASH_DUMP_SECONDS=120
+# The dump is capped at 500 MB (it goes into a 14-day artifact). Child BEAMs
+# (census arms, test subprocesses) inherit these too; a crashing child writes
+# the same file, which is fine: any dump beats none.
+export ERL_CRASH_DUMP="$out/erl_crash.dump" ERL_CRASH_DUMP_SECONDS=120 ERL_CRASH_DUMP_BYTES=500000000
 
 say() { echo "[test-watchdog] $*"; }
 
@@ -109,23 +118,31 @@ summarize_dump() {
 }
 
 fire() {
-  local reason="$1" beam
+  local reason="$1" beam pids p
+  # Snapshot the tree NOW: once the BEAM exits, its port children are
+  # reparented to init and `tree` can no longer find them.
+  pids="$(tree)"
+  beam="$(beam_pid)"
+  # Freeze everything but the BEAM before the dump: a census arm VM (~3.8 GB)
+  # must not keep growing while the BEAM writes, and the frozen state is the
+  # state the dump describes.
+  for p in $pids; do [ "$p" = "$beam" ] || kill -STOP "$p" 2>/dev/null; done
   {
     say "FIRED: $reason (at +$(($(date +%s) - start))s). Dumping the BEAM and failing this step."
     echo "-- free / df / load"
     free -m 2>/dev/null; df -h 2>/dev/null; uptime
     echo "-- OS processes under the test command (pid ppid rss etime command)"
-    ps -o pid,ppid,rss,etime,args -p "$(tree | paste -sd, -)" 2>/dev/null | cut -c1-220
+    ps -o pid,ppid,rss,etime,args -p "$(echo "$pids" | paste -sd, -)" 2>/dev/null | cut -c1-220
     echo "-- top OS processes by RSS"
     ps -eo pid,ppid,rss,etime,args --sort=-rss 2>/dev/null | head -12 | cut -c1-220
   } >"$report" 2>&1
-  beam="$(beam_pid)"
   if [ -n "$beam" ]; then
     kill -USR1 "$beam" 2>/dev/null
     for _ in $(seq 1 150); do kill -0 "$beam" 2>/dev/null || break; sleep 1; done
   fi
-  # shellcheck disable=SC2046 # one pid per word
-  kill -9 $(tree) 2>/dev/null
+  # The saved list, plus anything still under `pid` (nothing frozen can fork).
+  # shellcheck disable=SC2046,SC2086 # one pid per word
+  kill -9 $pids $(tree) 2>/dev/null
   if [ -s "$ERL_CRASH_DUMP" ]; then
     { echo "-- erl_crash.dump summary ($ERL_CRASH_DUMP)"; summarize_dump "$ERL_CRASH_DUMP"; } >>"$report" 2>&1
   else
@@ -133,6 +150,29 @@ fire() {
   fi
   cat "$report"
 }
+
+# A SIGTERM or SIGINT to the watchdog alone must not leave the test command
+# running unsupervised (a bash child ignores SIGINT under `&`): pass TERM to
+# the whole tree, give it 10 s, then SIGKILL what is left.
+# shellcheck disable=SC2329 # invoked by the traps below
+on_signal() {
+  local pids p q
+  pids="$(tree)"
+  # shellcheck disable=SC2086 # one pid per word
+  kill -TERM $pids 2>/dev/null
+  for _ in $(seq 1 10); do
+    p=""; for q in $pids; do kill -0 "$q" 2>/dev/null && p=1; done
+    [ -n "$p" ] || break
+    sleep 1
+  done
+  # shellcheck disable=SC2086 # one pid per word
+  kill -9 $pids "$teepid" 2>/dev/null
+  rm -f "$fifo"
+  say "got SIG$1; stopped the test command's tree"
+  exit "$2"
+}
+trap 'on_signal TERM 143' TERM
+trap 'on_signal INT 130' INT
 
 start=$(date +%s) last_size=0 last_change=$start next_line=$((start + every)) fired=""
 while kill -0 "$pid" 2>/dev/null; do

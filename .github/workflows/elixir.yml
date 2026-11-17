@@ -2157,7 +2157,7 @@ jobs:
           # 5 since 2026-11-12 ("The hosted runner lost communication with the
           # server", ~50 min, no dump). The watchdog prints one health line every
           # 30 s (free memory, swap, disk, load, BEAM RSS), and if the output is
-          # silent for 300 s (green max: 149 s) or memory/disk run out, it dumps
+          # silent for 600 s (green max: 149 s) or memory/disk run out, it dumps
           # the BEAM, prints the top processes, and fails with 124. It never
           # changes the exit code of a run it did not stop.
           bash ../scripts/ci-test-watchdog.sh --out "$RUNNER_TEMP/test-watchdog" -- \

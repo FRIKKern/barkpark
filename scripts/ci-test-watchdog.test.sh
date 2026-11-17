@@ -9,8 +9,10 @@
 #   * a silent BEAM leaves an erl_crash.dump and a summary naming it   (4)
 #   * the memory floor can fire (Linux only: it reads /proc/meminfo)   (5)
 #   * a copy with the quiet check cut out must NOT fire               (6)
+#   * on fire, the BEAM's own OS children are killed, not orphaned     (7)
+#   * SIGTERM / SIGINT to the watchdog reach the test command          (8, 9)
 #
-# Case 6 stops case 3 passing vacuously. Runs in ~20 s, in a temp dir.
+# Case 6 stops case 3 passing vacuously. Runs in ~30 s, in a temp dir.
 
 set -uo pipefail
 
@@ -83,6 +85,57 @@ else
   if [ "$rc" -eq 0 ] && ! grep -q FIRED "$tmp/6.out"; then ok "with the quiet check cut out, case 3 no longer fires (the check is what fires)"
   else bad "case 6: the gutted copy still fired (rc=$rc)"; fi
 fi
+
+# Processes left behind by a case: `alive <pattern>` prints their pids (and the
+# harness then kills those, by number).
+alive() { pgrep -f -- "$1" 2>/dev/null | tr '\n' ' '; }
+mark=$((7000 + RANDOM % 900))
+
+# 7. On fire, the BEAM's own children die too. They are reparented to init the
+# moment the BEAM exits, so a tree taken after the dump misses them (review of
+# #26696, B2). In CI these are the census arm VMs, ~3.8 GB each.
+if command -v elixir >/dev/null 2>&1; then
+  probe="Port.open({:spawn, \"sleep $((mark + 1))\"}, []); spawn(fn -> System.cmd(\"sleep\", [\"$((mark + 2))\"]) end); spawn(fn -> System.cmd(\"elixir\", [\"-e\", \"Process.sleep(:infinity)\", \"wdmark$mark\"]) end); Process.sleep(500); File.write!(System.fetch_env!(\"READY\"), \"\"); Process.sleep(:infinity)"
+  # shellcheck disable=SC2016 # $0 and $READY expand in the inner bash
+  run 7 "$DOG" --quiet 3 --out "$tmp/d7" -- env READY="$tmp/ready7" bash -c \
+    'elixir -e "$0" & until [ -f "$READY" ]; do echo booting; sleep 0.5; done; wait' "$probe"
+  sleep 1
+  left="$(alive "sleep $((mark + 1))")$(alive "sleep $((mark + 2))")$(alive "wdmark$mark")"
+  if [ "$rc" -eq 124 ] && [ -s "$tmp/d7/erl_crash.dump" ] && [ -z "${left// /}" ]; then
+    ok "on fire, the BEAM's Port, System.cmd and child-VM processes are gone too"
+  else
+    bad "case 7: rc=$rc, still alive: ${left:-none}"; sed 's/^/       /' "$tmp/7.out" | tail -20
+    # shellcheck disable=SC2086 # one pid per word
+    kill -9 $left 2>/dev/null
+  fi
+elif [ -n "${CI:-}" ]; then bad "case 7: no elixir on PATH in CI"
+else echo "  skip — case 7 (no elixir on PATH)"; fi
+
+# 8, 9. A SIGTERM or SIGINT to the watchdog alone reaches the test command
+# (review of #26696, M1). `set -m` so the background watchdog does not start
+# with SIGINT ignored, which no trap can undo; in CI it runs in the foreground.
+sig_case() { # sig_case <case> <SIG> <want rc> <sleep secs>
+  local c="$1" sig="$2" want="$3" secs="$4" dog
+  set -m
+  bash "$DOG" --out "$tmp/d$c" -- bash -c "trap '' INT; echo up; sleep $secs; echo late" >"$tmp/$c.out" 2>&1 &
+  dog=$!
+  set +m
+  for _ in $(seq 1 50); do grep -q up "$tmp/$c.out" && break; sleep 0.2; done
+  kill -"$sig" "$dog"
+  wait "$dog"
+  rc=$?
+  sleep 1
+  left="$(alive "sleep $secs")"
+  if [ "$rc" -eq "$want" ] && [ -z "${left// /}" ]; then
+    ok "SIG$sig to the watchdog alone stops the test command too (rc $rc)"
+  else
+    bad "case $c: SIG$sig gave rc=$rc (want $want), still alive: ${left:-none}"
+    # shellcheck disable=SC2086 # one pid per word
+    kill -9 $left 2>/dev/null
+  fi
+}
+sig_case 8 TERM 143 $((mark + 3))
+sig_case 9 INT 130 $((mark + 4))
 
 echo "ci-test-watchdog.test.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
