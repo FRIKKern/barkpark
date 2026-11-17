@@ -224,38 +224,34 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     marker
   end
 
-  # ONE fake per script content, run once before any test counts on it. The
+  # ONE fake per script content, run once before the test counts on it. The
   # first exec of a newly written executable is slow on some hosts: measured on
   # a dev Mac, 1.2-2.2 s on the volume System.tmp_dir!/0 points at (~130 ms on
   # the internal disk), and 12 ms for every later exec of the same file. A
   # fresh fake per test paid that inside read_marker/2's 2 s budget, so the
   # first spawn of a run failed with "argv marker was never written" whatever
-  # its argv (task-74ffcd7ebc02ac94).
+  # its argv (task-74ffcd7ebc02ac94). The file is named by its content, so it
+  # is written once and every later test only pays the warm-up exec.
   defp argv_echo_binary do
-    key = {__MODULE__, :argv_echo_binary}
+    hash = :crypto.hash(:sha256, @argv_echo_script) |> Base.encode16(case: :lower)
+    path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{binary_part(hash, 0, 12)}.sh")
 
-    with nil <- :persistent_term.get(key, nil) do
-      hash = :crypto.hash(:sha256, @argv_echo_script) |> Base.encode16(case: :lower)
-      path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{binary_part(hash, 0, 12)}.sh")
-
-      unless File.read(path) == {:ok, @argv_echo_script} do
-        tmp = "#{path}.#{System.unique_integer([:positive])}"
-        File.write!(tmp, @argv_echo_script)
-        File.chmod!(tmp, 0o755)
-        File.rename!(tmp, path)
-      end
-
-      warm = path <> ".warm"
-
-      {_, 0} =
-        System.cmd("/bin/sh", ["-c", ~s(exec "$0" < /dev/null), path],
-          env: [{@argv_marker_env, warm}]
-        )
-
-      File.rm(warm)
-      :persistent_term.put(key, path)
-      path
+    unless File.read(path) == {:ok, @argv_echo_script} do
+      tmp = "#{path}.#{System.unique_integer([:positive])}"
+      File.write!(tmp, @argv_echo_script)
+      File.chmod!(tmp, 0o755)
+      File.rename!(tmp, path)
     end
+
+    warm = "#{path}.warm-#{System.pid()}-#{System.unique_integer([:positive])}"
+
+    {_, 0} =
+      System.cmd("/bin/sh", ["-c", ~s(exec "$0" < /dev/null), path],
+        env: [{@argv_marker_env, warm}]
+      )
+
+    File.rm(warm)
+    path
   end
 
   # Readiness-probe seam (chat-task-hands, decision 4): config/test.exs pins
