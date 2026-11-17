@@ -456,6 +456,11 @@ defmodule BarkparkWeb.ChatController do
           details = %{"approval_status" => now}
           ErrorResponse.emit_custom(conn, 409, "conflict", message, details, @ask_hint)
 
+        # The delivery failed or exited after the flip; the ask is pending again.
+        {:error, _undelivered} ->
+          message = "the answer did not reach the agent; the ask is pending, so send it again"
+          ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", message)
+
         _delivered_or_noop ->
           # studio-chat D49 (ct-bl-plan-paper-parity): an ALLOWED plan row grows
           # up into a published Paper, whichever surface clicked Allow. The seam
