@@ -1405,7 +1405,7 @@ defmodule BarkparkWeb.WorkspaceController do
   defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
 
   defp put_withheld(receipt, stats),
-    do: Map.merge(receipt, Map.take(stats, [:withheld, :withheld_user_rows]))
+    do: Map.merge(receipt, Map.take(stats, [:withheld, :withheld_columns, :withheld_user_rows]))
 
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do

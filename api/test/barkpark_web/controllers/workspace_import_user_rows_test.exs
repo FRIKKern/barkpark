@@ -11,6 +11,7 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
   alias Barkpark.{AccountsFixtures, Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
 
   import Ecto.Query
 
@@ -167,21 +168,89 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
            }
   end
 
-  test "an importer who does not administer the target gets no seated exception" do
-    Application.put_env(:barkpark, :allow_bundle_import, true)
-    on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+  # Aim a bundle at `target`: its root row dropped, only `keep` members kept,
+  # every workspace_id rewritten to the target's.
+  defp aim_at(bundle, target, keep) do
+    {manifest, dumps} = Archive.unpack(bundle)
 
+    {tables, dumps} =
+      Enum.map_reduce(manifest["tables"], dumps, fn %{"name" => t} = e, acc ->
+        if t in keep do
+          {e, Map.put(acc, t, set_workspace_id(Map.get(acc, t, ""), e["columns"], target.id))}
+        else
+          {Map.put(e, "row_count", 0), Map.put(acc, t, "")}
+        end
+      end)
+
+    manifest = %{manifest | "tables" => tables, "workspace_id" => target.id}
+    repack(%{manifest | "workspace_slug" => target.slug}, dumps)
+  end
+
+  defp set_workspace_id(body, columns, ws_id) do
+    i = Enum.find_index(columns, &(&1 == "workspace_id"))
+
+    body
+    |> String.split("\n", trim: true)
+    |> Enum.map_join(
+      &((&1 |> String.split("\t") |> List.replace_at(i, ws_id) |> Enum.join("\t")) <> "\n")
+    )
+  end
+
+  defp repack(manifest, dumps) do
+    dir = Archive.spill_dir()
+
+    files =
+      Map.new(dumps, fn {table, body} ->
+        spill = Archive.spill_path(dir, table)
+        File.write!(spill, body)
+        {table, spill}
+      end)
+
+    path = Archive.pack(manifest, files, dir: dir)
+
+    try do
+      File.read!(path)
+    after
+      File.rm(path)
+    end
+  end
+
+  defp fingerprint(ws_id) do
+    Repo.query!(
+      """
+      SELECT md5(concat_ws('|',
+        (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM api_tokens t WHERE workspace_id = $1),
+        (SELECT string_agg(m::text, ',' ORDER BY m::text) FROM workspace_memberships m WHERE workspace_id = $1),
+        (SELECT string_agg(d::text, ',' ORDER BY d::text) FROM documents d WHERE workspace_id = $1),
+        (SELECT string_agg(w::text, ',' ORDER BY w::text) FROM workspaces w WHERE id = $1)))
+      """,
+      [Ecto.UUID.dump!(ws_id)]
+    ).rows
+    |> hd()
+    |> hd()
+  end
+
+  test "a non-admin's import over a real workspace refuses 422 and changes nothing" do
     owner = user!("victim-owner")
-    ws = workspace!("not-mine")
-    {:ok, _} = TenancyAuth.create_membership(ws.id, owner.id, "owner", "user")
-    owner_pat = user_token!(ws, owner)
-    {:ok, bundle} = WorkspaceBundle.export(ws.id)
-    Repo.query!("DELETE FROM api_tokens WHERE id = $1::uuid", [Ecto.UUID.dump!(owner_pat.id)])
+    victim = workspace!("victim")
+    {:ok, _} = TenancyAuth.create_membership(victim.id, owner.id, "owner", "user")
+
+    src = workspace!("src")
+    pat = user_token!(src, owner)
+    bundle = export_and_delete!(src)
+    Repo.query!("DELETE FROM api_tokens WHERE id = $1::uuid", [Ecto.UUID.dump!(pat.id)])
+    crafted = aim_at(bundle, victim, ~w(api_tokens workspace_memberships))
     {raw, _} = importer("not-admin")
+    before = fingerprint(victim.id)
 
-    receipt = import!(raw, ws.slug, bundle, "?mode=merge")
+    resp =
+      scoped_conn()
+      |> authed(raw)
+      |> put_req_header("content-type", "application/x-tar")
+      |> post("/api/workspaces/#{victim.slug}/import", crafted)
 
-    refute token_exists?(owner_pat.id)
-    assert receipt["withheld_user_rows"]["api_tokens"] == %{"rows" => 1, "user_ids" => [owner.id]}
+    assert resp.status == 422, resp.resp_body
+    assert fingerprint(victim.id) == before
+    refute token_exists?(pat.id)
   end
 end

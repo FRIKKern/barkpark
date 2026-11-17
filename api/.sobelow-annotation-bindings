@@ -167,6 +167,7 @@ lib/barkpark/tenancy/workspace_bundle/archive.ex	open_scratch_dir!
 lib/barkpark/tenancy/workspace_bundle/archive.ex	pack
 lib/barkpark/tenancy/workspace_bundle/archive.ex	spill_dir
 lib/barkpark/tenancy/workspace_bundle/archive.ex	unpack_to_dir
+lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	carried_columns
 lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	read_operator_columns
 lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	release!
 lib/barkpark/tenancy/workspace_bundle/import_confinement.ex	settle_workspace_row!

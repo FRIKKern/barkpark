@@ -13,7 +13,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
     * Merge: an `ON CONFLICT` key never names another workspace's row.
     * `session_id` (into `chat_sessions`, which no bundle carries) never names
       another workspace's session.
-    * A `webhooks` row carries no audit subscription (`audit_categories`,
+    * No row names an organization (any FK into `organizations`), and a
+      `webhooks` row carries no audit subscription (`audit_categories`,
       `audit_actions`, `organization_id`): as on the HTTP route
       (`WebhookController`), that is not a tenant feature.
 
@@ -69,12 +70,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
       |> Map.merge(Map.new(Catalog.live_e3(Repo), &{&1, :e3}))
       |> Map.put(Catalog.root_table(), :root)
 
+    all = member_fks()
+
     fks =
-      Enum.filter(member_fks(), fn fk ->
+      Enum.filter(all, fn fk ->
         Map.has_key?(kinds, fk.child) and Map.get(kinds, fk.parent) in [:root, :e1, :e2]
       end)
 
-    %{kinds: kinds, fks: Enum.group_by(fks, & &1.child)}
+    org_fks =
+      Enum.filter(all, &(&1.parent == "organizations" and Map.get(kinds, &1.child) in [:e1, :e2]))
+
+    %{
+      kinds: kinds,
+      fks: Enum.group_by(fks, & &1.child),
+      org_fks: Enum.group_by(org_fks, & &1.child)
+    }
   end
 
   @doc "Every foreign key in the public schema, as child/parent table and column lists."
@@ -133,6 +143,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
         scoped when scoped in [:root, :e1, :e2] ->
           refuse_out_of_scope!(table, tmp, scoped, ws)
           refuse_foreign_session!(table, tmp, cols, ws)
+          refuse_org_references!(table, tmp, Map.get(catalog.org_fks, table, []))
           refuse_audit_subscription!(table, tmp)
           refuse_foreign_references!(table, tmp, Map.get(catalog.fks, table, []), catalog, ws)
           drop_user_rows!(table, tmp, state.seated)
@@ -272,6 +283,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
 
   defp unseated(col, seated),
     do: "NOT COALESCE(#{col}::text = ANY(#{Catalog.text_array_literal(seated)}), false)"
+
+  # Only the root row may name an organization, and the engine settles that.
+  defp refuse_org_references!(table, tmp, fks) do
+    Enum.each(fks, fn %{cols: cols} ->
+      set = Enum.map_join(cols, " OR ", &"t.#{qi(&1)} IS NOT NULL")
+      sql = "SELECT count(*) FROM #{qi(tmp)} t WHERE #{set}"
+      refuse_if!(table, sql, "#{Enum.join(cols, ", ")} -> organizations")
+    end)
+  end
 
   defp refuse_audit_subscription!(table, tmp) do
     if table == "webhooks" do

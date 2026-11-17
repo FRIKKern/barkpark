@@ -11,22 +11,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   ## In every mode
 
-    * A NEW workspace lands in no organization. A workspace that already
-      exists keeps its current `organization_id` and the other operator
-      columns (`@operator_columns`). Joining an organization goes only through
-      the guarded attach route.
-    * Every row stays in the bundle's workspace (`ImportConfinement.Rows`),
-      and a `webhooks` row carries no audit subscription.
+    * Importing over an EXISTING workspace (the bundle's `workspace_id`)
+      needs the importer to administer it, else 422 and nothing changes.
+    * A NEW workspace lands in no organization. An existing workspace keeps
+      its current `organization_id` and the other operator columns
+      (`@operator_columns`). Joining an organization goes only through the
+      guarded attach route.
+    * Every row stays in the bundle's workspace (`ImportConfinement.Rows`):
+      no member row names an organization, and a `webhooks` row carries no
+      audit subscription.
     * User-bound rows (a user-owned token, its sessions, a user seat) travel
       only for a user already seated in the existing target, read from the
-      database before the import, and only when the importer administers it. The rest are withheld, and the receipt, the
-      log line and the audit row list them: rows per table and the user ids.
+      database before the import. The rest are withheld, and the receipt,
+      the log line and the audit row list them: rows per table and user ids.
 
   ## Observe first (`mode/0`)
 
-    * The importer must already administer an existing target, or the
-      same-slug shell a merge would replace.
+    * A merge that would replace a same-slug SHELL (the engine's PDS-D9
+      `empty_shell?/1`: another id, 0 documents, 0 media_files) needs the
+      importer to administer the shell.
     * Seats, tokens and secrets (`@observe_tables`) are withheld.
+    * A NEW workspace does not take `@new_columns` (quota, tier, expiry,
+      suspension) from the bundle: `:enforce` resets them to their defaults
+      and lists them in `withheld_columns`.
 
   `:observe` (the default) lets the import through as before and records what
   `:enforce` would do: one log line and one audit row
@@ -47,6 +54,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   # Columns an operator (or the instance) sets, never the tenant.
   @operator_columns ~w(organization_id quota suspended suspended_reason suspended_at expires_at tier archived_at)
+
+  # Operator columns a NEW workspace takes from the bundle only in `:observe`.
+  # Their defaults are NULL, and `false` for `suspended`.
+  @new_columns ~w(quota tier expires_at suspended suspended_reason suspended_at)
 
   @action "workspace_import.confinement"
 
@@ -90,7 +101,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     ws_id = Rows.ws_id!(manifest)
     prior = read_operator_columns(ws_id)
     target_issue = prior && admin_issue(grant, ws_id, "import into")
-    issues = Enum.reject([shell_issue(manifest, ws_id, mode, grant), target_issue], &is_nil/1)
+    if target_issue, do: refuse_target!(target_issue)
+    issues = Enum.reject([shell_issue(manifest, ws_id, mode, grant)], &is_nil/1)
 
     if enforce? and issues != [], do: refuse_target!(hd(issues))
     Rows.reset_user_rows()
@@ -100,7 +112,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       enforce?: enforce?,
       prior: prior,
       issues: issues,
-      # Seats count only for an importer who administers the existing target.
+      # An existing target got here only through its admin (refused above).
       seated: if(prior && is_nil(target_issue), do: seated_users(ws_id), else: []),
       catalog: Rows.catalog()
     }
@@ -144,7 +156,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   def settle!(stats, nil), do: stats
 
   def settle!(stats, state) do
-    settle_workspace_row!(state.manifest, state.prior)
+    carried = settle_workspace_row!(state)
     landed = stats.tables
 
     withheld =
@@ -159,17 +171,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
           into: %{},
           do: {t, Map.get(landed, t)}
 
-    observed = %{would_withhold: would_withhold, would_refuse: state.issues}
+    {reset, would_reset} = if state.enforce?, do: {carried, []}, else: {[], carried}
+
+    observed = %{
+      would_withhold: would_withhold,
+      would_refuse: state.issues,
+      would_reset: would_reset
+    }
 
     user_rows = Rows.take_user_rows()
 
     stats
     |> put_unless_empty(:withheld, withheld, withheld == %{})
+    |> put_unless_empty(:withheld_columns, %{"workspaces" => reset}, reset == [])
     |> put_unless_empty(:withheld_user_rows, user_rows, user_rows == %{})
     |> put_unless_empty(
       :confinement_observed,
       observed,
-      would_withhold == %{} and state.issues == []
+      would_withhold == %{} and state.issues == [] and would_reset == []
     )
   end
 
@@ -182,16 +201,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   there is nothing to report. Never raises.
   """
   def record(%{manifest: manifest} = stats, principal)
-      when is_map_key(stats, :confinement_observed) or is_map_key(stats, :withheld_user_rows) do
+      when is_map_key(stats, :confinement_observed) or is_map_key(stats, :withheld_user_rows) or
+             is_map_key(stats, :withheld_columns) do
     actor = principal && Map.get(principal, :id)
     ws_id = manifest["workspace_id"]
-    seen = Map.get(stats, :confinement_observed, %{would_withhold: %{}, would_refuse: []})
+    none = %{would_withhold: %{}, would_refuse: [], would_reset: []}
+    seen = Map.get(stats, :confinement_observed, none)
     user_rows = Map.get(stats, :withheld_user_rows, %{})
+    columns = Map.get(stats, :withheld_columns, %{})
 
     Logger.warning(
       "workspace_import_confinement actor=#{actor || "none"} workspace_id=#{ws_id} " <>
-        "withheld_user_rows=#{inspect(user_rows)} " <>
-        "would_withhold=#{inspect(seen.would_withhold)} would_refuse=#{inspect(seen.would_refuse)}"
+        "withheld_user_rows=#{inspect(user_rows)} withheld_columns=#{inspect(columns)} " <>
+        "would_withhold=#{inspect(seen.would_withhold)} would_refuse=#{inspect(seen.would_refuse)} " <>
+        "would_reset=#{inspect(seen.would_reset)}"
     )
 
     Barkpark.Audit.emit(%{
@@ -203,7 +226,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       workspace_id: ws_id,
       metadata: %{
         "withheld_user_rows" => user_rows,
+        "withheld_columns" => columns,
         "would_withhold" => seen.would_withhold,
+        "would_reset" => seen.would_reset,
         "would_refuse" => Enum.map(seen.would_refuse, &Map.new(&1, fn {k, v} -> {"#{k}", v} end))
       }
     })
@@ -217,25 +242,52 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   # ── Workspace row ───────────────────────────────────────────────────────────
 
-  # A new workspace (`prior` nil) lands in no organization; an existing one
-  # keeps what it had. `sets` comes from the fixed @operator_columns list;
-  # values are bind params.
+  # A new workspace (`prior` nil) lands in no organization, and in `:enforce`
+  # its `@new_columns` go back to their defaults; an existing one keeps what it
+  # had. Returns the `@new_columns` a new workspace's row carried. Column
+  # names come from the fixed lists; values are bind params.
   # sobelow_skip ["SQL.Query"]
-  defp settle_workspace_row!(manifest, prior) do
+  defp settle_workspace_row!(%{manifest: manifest, prior: prior, enforce?: enforce?}) do
+    ws = Ecto.UUID.dump!(Rows.ws_id!(manifest))
+    carried = if prior, do: [], else: carried_columns(ws)
+
     {cols, values} =
-      if prior,
-        do: {@operator_columns, Enum.map(@operator_columns, &prior[&1])},
-        else: {["organization_id"], [nil]}
+      cond do
+        prior ->
+          {@operator_columns, Enum.map(@operator_columns, &prior[&1])}
+
+        enforce? ->
+          {["organization_id" | carried], [nil | Enum.map(carried, &default_of/1)]}
+
+        true ->
+          {["organization_id"], [nil]}
+      end
 
     sets =
       cols
       |> Enum.with_index(2)
       |> Enum.map_join(", ", fn {col, i} -> "#{Rows.qi(col)} = $#{i}" end)
 
-    Repo.query!(
-      "UPDATE workspaces SET #{sets} WHERE id = $1::uuid",
-      [Ecto.UUID.dump!(Rows.ws_id!(manifest)) | values]
-    )
+    Repo.query!("UPDATE workspaces SET #{sets} WHERE id = $1::uuid", [ws | values])
+    carried
+  end
+
+  defp default_of("suspended"), do: false
+  defp default_of(_col), do: nil
+
+  # The `@new_columns` holding something other than their default.
+  # sobelow_skip ["SQL.Query"]
+  defp carried_columns(ws) do
+    tests =
+      Enum.map_join(@new_columns, ", ", fn
+        "suspended" -> "COALESCE(suspended, false)"
+        col -> "#{Rows.qi(col)} IS NOT NULL"
+      end)
+
+    case Repo.query!("SELECT #{tests} FROM workspaces WHERE id = $1::uuid", [ws]).rows do
+      [row] -> for {col, true} <- Enum.zip(@new_columns, row), do: col
+      [] -> []
+    end
   end
 
   # sobelow_skip ["SQL.Query"]

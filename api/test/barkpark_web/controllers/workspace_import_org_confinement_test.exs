@@ -4,11 +4,12 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   stays inside the bundle's own workspace (task-1a6cde75b0adae76,
   `WorkspaceBundle.ImportConfinement`).
 
-  In every mode: a new workspace lands in no organization, an existing one keeps
-  its own, and every row stays in the workspace (user-bound rows:
-  `WorkspaceImportUserRowsTest`). Observe first (`BARKPARK_IMPORT_CONFINEMENT`, default observe): the
-  target-admin rule and the withholding of seats, tokens and secrets. A listed
-  operator's import is unchanged.
+  In every mode: importing over an existing workspace needs its admin, a new
+  workspace lands in no organization, an existing one keeps its own, and every
+  row stays in the workspace (user-bound rows: `WorkspaceImportUserRowsTest`).
+  Observe first (`BARKPARK_IMPORT_CONFINEMENT`, default observe): the shell-admin
+  rule, the withholding of seats, tokens and secrets, and a new workspace's
+  quota/tier/expiry/suspension. A listed operator's import is unchanged.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -215,6 +216,46 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert Tenancy.workspaces_for_organization(org.id) |> Enum.map(& &1.id) == [real_ws.id]
       assert set_auth_methods(raw_victim, org).status == 200
     end
+
+    test "observe: a new workspace keeps the bundle's quota and tier, and they are recorded",
+         %{conn: conn} do
+      %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
+
+      bundle =
+        bundle
+        |> rewrite_column("workspaces", "quota", "5")
+        |> rewrite_column("workspaces", "tier", "team")
+
+      {raw_op, _op, _} = operator_token("carried-observe")
+
+      resp = import_bundle(conn, raw_op, slug, bundle)
+      assert resp.status == 200
+      refute Map.has_key?(Jason.decode!(resp.resp_body), "withheld_columns")
+      assert %{quota: 5, tier: "team"} = Tenancy.get_workspace_by_slug(slug)
+      assert [%{"would_reset" => ["quota", "tier"]}] = observed_rows(ws_id)
+    end
+
+    test "enforce: a new workspace's quota and tier go back to defaults and are listed",
+         %{conn: conn} do
+      enforce!()
+      %{bundle: bundle, ws_slug: slug} = source_bundle!(nil)
+
+      bundle =
+        bundle
+        |> rewrite_column("workspaces", "quota", "5")
+        |> rewrite_column("workspaces", "tier", "team")
+
+      {raw_op, _op, _} = operator_token("carried-enforce")
+
+      resp = import_bundle(conn, raw_op, slug, bundle)
+      assert resp.status == 200
+
+      assert Jason.decode!(resp.resp_body)["withheld_columns"] == %{
+               "workspaces" => ["quota", "tier"]
+             }
+
+      assert %{quota: nil, tier: nil} = Tenancy.get_workspace_by_slug(slug)
+    end
   end
 
   describe "an existing workspace keeps its own org" do
@@ -261,17 +302,7 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert org_of(ws.id) == nil
     end
 
-    test "observe: a non-admin's merge into an existing workspace goes through, keeps its org, and is recorded" do
-      {raw_op, _op, _} = operator_token("non-admin-observe")
-      {ws, bundle} = resident!(nil, org!("bundle-org"), resident = org!("resident-org"))
-
-      assert merge_import(raw_op, ws.slug, bundle).status == 200
-      assert org_of(ws.id) == resident.id
-      assert [%{"would_refuse" => [%{"verb" => "import into"}]}] = observed_rows(ws.id)
-    end
-
-    test "enforce: a merge into an existing workspace the importer does not administer is refused 422" do
-      enforce!()
+    test "default: a merge into an existing workspace the importer does not administer is refused 422" do
       {raw_op, _op, _} = operator_token("non-admin")
       {ws, bundle} = resident!(nil, org!("bundle-org"), resident = org!("resident-org"))
 
@@ -339,10 +370,9 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       refute Tenancy.get_workspace_by_slug(slug)
     end
 
-    test "a webhook carrying an audit subscription refuses 422", %{conn: conn} do
-      org = org!("audited-org")
+    # A bundle whose one `webhooks` row subscribes to the audit stream.
+    defp webhook_bundle!(categories, org_id) do
       %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
-      {raw_op, _op, _} = operator_token("rows-webhook")
       {manifest, dumps} = Archive.unpack(bundle)
 
       cols =
@@ -350,7 +380,8 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
 
       row =
         [Ecto.UUID.generate(), ws_id, "h", "https://example.invalid/h", "production", "{}"] ++
-          ["{}", "s", "t", "{access}", "{}", org.id, "2026-11-17 00:00:00", "2026-11-17 00:00:00"]
+          ["{}", "s", "t", categories, "{}", org_id || "\\N"] ++
+          ["2026-11-17 00:00:00", "2026-11-17 00:00:00"]
 
       tables =
         Enum.map(manifest["tables"], fn
@@ -358,14 +389,27 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
           e -> e
         end)
 
-      crafted =
-        repack(
-          %{manifest | "tables" => tables},
-          Map.put(dumps, "webhooks", Enum.join(row, "\t") <> "\n")
-        )
+      dumps = Map.put(dumps, "webhooks", Enum.join(row, "\t") <> "\n")
+      {repack(%{manifest | "tables" => tables}, dumps), slug}
+    end
+
+    test "default: an instance-wide audit webhook refuses 422", %{conn: conn} do
+      org = org!("audited-org")
+      {crafted, slug} = webhook_bundle!("{access,auth}", nil)
+      {raw_op, _op, _} = operator_token("rows-webhook")
 
       assert import_bundle(conn, raw_op, slug, crafted).status == 422
       assert Barkpark.Webhooks.audit_webhooks_for("access", "anything", org.id) == []
+      refute Tenancy.get_workspace_by_slug(slug)
+    end
+
+    test "enforce: a webhook naming an organization refuses 422", %{conn: conn} do
+      enforce!()
+      org = org!("audited-org")
+      {crafted, slug} = webhook_bundle!("{}", org.id)
+      {raw_op, _op, _} = operator_token("rows-webhook-org")
+
+      assert import_bundle(conn, raw_op, slug, crafted).status == 422
       refute Tenancy.get_workspace_by_slug(slug)
     end
   end
