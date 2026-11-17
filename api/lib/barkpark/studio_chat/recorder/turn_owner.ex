@@ -25,6 +25,12 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
   event when there is none yet): a Stop's lease is newer too but starts no
   turn, so its ack leaves the stopped turn's owner in place.
 
+  A terminal event (`turn_completed`, or an `error`, `process_failed` or
+  `protocol_error` that will not retry) from a lease that is not the owner is
+  `:ignore`d (task-5d1f639852927c4e): `ChatHosts` reads whether a newer turn
+  has started before that turn's `turn_started` commits, so an older close can
+  reach the Recorder just after the newer turn began and end it.
+
   Anything else is `:same`. An event with no lease (a managed runtime, or a
   caller that passes `nil`) is always `:same` and changes no owner, so the
   managed path is the path it was. One lease's own repeated `turn_started`
@@ -34,19 +40,23 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
   alias Barkpark.StudioChat.Runtime.Event
 
   @doc """
-  Applies `boundary/3` to the Recorder's state, then makes `lease_id` the
-  owner. `persist` stores the open text as a reply row and `settle` settles the
+  Applies `boundary/3` to the Recorder's state and moves the owner; an ignored
+  event comes back as `{:ignore, state}`, for the Recorder not to take it.
+  `persist` stores the open text as a reply row and `settle` settles the
   live document against it (the Recorder's `persist_runtime_text/2` and
   `stable_settle/2`).
   """
   @type persist :: (map(), Event.t() -> term())
   @type settle :: (map(), String.t() -> map())
 
-  @spec take(map(), Event.t(), String.t() | nil, persist(), settle()) :: map()
+  @spec take(map(), Event.t(), String.t() | nil, persist(), settle()) :: map() | {:ignore, map()}
   def take(state, %Event{} = event, lease_id, persist, settle) do
     case boundary(state, event, lease_id) do
+      :ignore ->
+        {:ignore, state}
+
       :same ->
-        state
+        adopt(state, event, lease_id)
 
       {:split, open?} ->
         persist.(state, %{event | kind: :turn_completed, terminal_state: nil})
@@ -54,12 +64,22 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
         state
         |> settle.(state.runtime_text)
         |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
+        |> adopt(event, lease_id)
     end
-    |> adopt(event, lease_id)
   end
 
-  @spec boundary(map(), Event.t(), String.t() | nil) :: :same | {:split, boolean()}
+  @terminal_kinds [:turn_completed, :error, :process_failed, :protocol_error]
+
+  @spec boundary(map(), Event.t(), String.t() | nil) :: :same | :ignore | {:split, boolean()}
   def boundary(_state, _event, nil), do: :same
+
+  def boundary(state, %Event{kind: kind} = event, lease_id) when kind in @terminal_kinds do
+    owner = Map.get(state, :runtime_lease)
+
+    if is_binary(owner) and owner != lease_id and not Event.retrying_error?(event),
+      do: :ignore,
+      else: :same
+  end
 
   def boundary(state, %Event{kind: kind}, lease_id) when kind in [:turn_started, :text_delta] do
     owner = Map.get(state, :runtime_lease)
