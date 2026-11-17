@@ -69,10 +69,11 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       key = unique("k")
       fault!(:after_commit, RuntimeError, "boom after commit")
 
-      {status, _headers, _body} =
+      {status, headers, _body} =
         assert_error_sent(500, fn -> post_keyed(key, create_body(title)) end)
 
       assert status == 500
+      assert {"idempotency-committed", "true"} in headers
       assert rows_titled(title) == 1
       clear_fault!()
 
@@ -81,6 +82,8 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       assert rows_titled(title) == 1, "the resend ran the batch again"
       assert resend.status == 500
       assert get_resp_header(resend, "idempotency-replay") == ["true"]
+      # task-dbee0d3a56ab4459: the replayed fault says the write landed.
+      assert get_resp_header(resend, "idempotency-committed") == ["true"]
       assert key_state(token, key) == {"completed", 500}
     end
 
@@ -91,6 +94,7 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
 
       first = ExUnit.CaptureLog.with_log(fn -> post_keyed(key, create_body(title)) end) |> elem(0)
       assert first.status == 503
+      assert get_resp_header(first, "idempotency-committed") == ["true"]
       assert rows_titled(title) == 1
       clear_fault!()
 
@@ -99,6 +103,7 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       assert rows_titled(title) == 1, "the resend ran the batch again"
       assert resend.status == 503
       assert get_resp_header(resend, "idempotency-replay") == ["true"]
+      assert get_resp_header(resend, "idempotency-committed") == ["true"]
     end
   end
 
@@ -123,6 +128,7 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       refute resend.resp_body =~ "not_found", "the resend ran the publish again"
       assert resend.status == 500
       assert get_resp_header(resend, "idempotency-replay") == ["true"]
+      assert get_resp_header(resend, "idempotency-committed") == ["true"]
       assert Repo.aggregate(from(d in Document, where: d.doc_id == ^id), :count) == 1
     end
   end
@@ -136,6 +142,8 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
 
       first = ExUnit.CaptureLog.with_log(fn -> post_keyed(key, create_body(title)) end) |> elem(0)
       assert first.status == 503
+      # Nothing committed: the fault must not claim it did.
+      assert get_resp_header(first, "idempotency-committed") == []
       assert rows_titled(title) == 0
       assert key_state(token, key) == nil
       clear_fault!()

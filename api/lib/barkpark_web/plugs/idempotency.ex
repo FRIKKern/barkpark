@@ -15,7 +15,8 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   First-time responses with status < 500 are cached; a 5xx or crashed request
   releases the claim so a retry can re-claim, unless the write already
   committed (`Barkpark.Idempotency`, "A write that committed and then answered
-  a fault"): then the 5xx is cached and replayed. Requires `RequireToken` to have
+  a fault"): then the 5xx is cached and replayed, and it and every replay carry
+  `Idempotency-Committed: true`. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
   `bind_request: true` (every mount today: the chat send in ChatController and
@@ -186,27 +187,39 @@ defmodule BarkparkWeb.Plugs.Idempotency do
 
         sent.state != :set ->
           refuse_bodyless_send(hash, sent)
+          sent
 
         sent.status < 500 ->
           body = IO.iodata_to_binary(sent.resp_body || "")
           headers = sent.resp_headers || []
           cache_response(hash, scope, sent.status, body, headers)
+          sent
 
         true ->
           settle_fault(hash, scope, sent)
       end
-
-      sent
     end)
   end
 
+  @committed_header "idempotency-committed"
+
   # A 5xx (or no answer): released so the retry runs, unless the write
-  # committed, in which case the answer is recorded and replayed.
+  # committed, in which case the answer is recorded and replayed. A recorded
+  # fault says so: `Idempotency-Committed: true` on this answer AND on every
+  # replay (the header is stored with it), so a client knows the write landed
+  # even though the answer is an error (task-dbee0d3a56ab4459).
   defp settle_fault(hash, scope, sent) do
     body = IO.iodata_to_binary(sent.resp_body || "")
-    Idempotency.settle_fault(hash, scope, sent.status, body, sent.resp_headers || [])
+    headers = [{@committed_header, "true"} | sent.resp_headers || []]
+
+    case Idempotency.settle_fault(hash, scope, sent.status, body, headers) do
+      :recorded -> put_resp_header(sent, @committed_header, "true")
+      :released -> sent
+    end
   rescue
-    error -> emit_store_error(hash, error)
+    error ->
+      emit_store_error(hash, error)
+      sent
   end
 
   # THE `:set` ALLOWLIST — an idempotency receipt is only meaningful when the
