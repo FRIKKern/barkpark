@@ -148,8 +148,8 @@ defmodule Barkpark.Idempotency do
         # Swept between our failed insert and this read — retry the whole claim.
         claim(hash, scope, DateTime.utc_now(), attempt + 1)
 
-      # One key, two scopes: the request-bound chat send reused a key for
-      # another request. A constant-scope mount (`"mutation"`) never reaches this clause.
+      # One key, two scopes: a request-bound mount saw the key reused for another
+      # request, or for a row stored under the pre-binding constant `"mutation"`.
       %Key{scope: other} when other != scope ->
         :mismatch
 

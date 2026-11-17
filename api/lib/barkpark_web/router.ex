@@ -580,7 +580,7 @@ defmodule BarkparkWeb.Router do
     # `meter: :media` here (that would double-count against the span).
     plug(BarkparkWeb.Plugs.RequireWithinQuota)
     plug(BarkparkWeb.Plugs.RequireWritePermission)
-    plug(BarkparkWeb.Plugs.Idempotency)
+    plug(BarkparkWeb.Plugs.Idempotency, bind_request: true)
   end
 
   # Media writes (upload/update/delete) — mirrors [:scoped_api, :media_mutate]
@@ -1339,7 +1339,7 @@ defmodule BarkparkWeb.Router do
   end
 
   pipeline :idempotent do
-    plug(BarkparkWeb.Plugs.Idempotency)
+    plug(BarkparkWeb.Plugs.Idempotency, bind_request: true)
   end
 
   # Write-gate: rejects tokens lacking "write"/"admin" with 403 before the

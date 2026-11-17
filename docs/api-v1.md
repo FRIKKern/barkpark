@@ -78,9 +78,9 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`: runs, rolls back, answers `results`. `"restore":true`: no initial values or derived title. Non-boolean → `400`. `"visibility":"async"`/`deferred` answers at commit, edges follow. Unknown keys → `mutate.unknown_key` warning.
 
-**Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
+**Write gate.** Needs `write` (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
-**`Idempotency-Key`** (optional; chat send too). A repeat only replays the first response; concurrent: `409 idempotency_key_in_use`. Token+path, 24h.
+**`Idempotency-Key`** (optional; chat send too): exact repeat replays, else `422 idempotency_key_reused`; concurrent `409 idempotency_key_in_use`. Per token, 24h.
 
 ### Mutation kinds
 
