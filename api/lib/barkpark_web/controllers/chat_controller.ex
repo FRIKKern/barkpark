@@ -85,6 +85,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.StudioChat
 
   alias Barkpark.StudioChat.{
+    ApprovalAnswer,
     Attachments,
     FleetHub,
     HostExecution,
@@ -361,14 +362,16 @@ defmodule BarkparkWeb.ChatController do
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
          {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
       # A registered host's lease is made under this key, so a send the server
-      # cannot stand behind can be found and ended (task-583b6031c13b28ac).
-      command_key = Ecto.UUID.generate()
+      # cannot stand behind can be found and ended (task-583b6031c13b28ac). The
+      # claimed Idempotency hash when there is one, so a resend meets the first
+      # lease instead of running the turn twice (task-3c949e2977c56597).
+      command_key = Barkpark.Idempotency.held_key() || Ecto.UUID.generate()
 
       # Persist the user's OWN turn (D140) AFTER dispatch: ensure_and_send
       # derived `resume?` from the pre-turn message_count, so the append cannot
       # false-flip turn 1 into a resume.
       with :ok <- ensure_and_send(id, session, turn.content, command_key, conn),
-           :ok <- ChatUserTurn.persist_sent(session, content, turn.metadata, command_key) do
+           :ok <- ChatUserTurn.persist_sent_once(session, content, turn.metadata, command_key) do
         conn |> put_status(:accepted) |> json(%{accepted: true})
       else
         {:error, reason} -> send_failure_response(conn, reason)
@@ -413,11 +416,15 @@ defmodule BarkparkWeb.ChatController do
 
   # ── POST /v1/chat/sessions/:id/approval ────────────────────────────────────
 
+  @ask_hint "This ask is no longer pending. Reload the session to see its current state."
+
   @doc """
   Answer a pending approval → 204. `{request_id, decision:"allow"|"deny"}`. Never
   a caller-supplied `updatedInput` (D22): `allow` echoes the server-held original
   ask, `deny` carries a fixed server message. A no-op (204) when no runtime holds
-  the ask.
+  the ask, or when the ask is already answered or unknown. A canceled ask is a 409
+  `conflict` with `details.approval_status`; nothing reaches the runtime
+  (`ApprovalAnswer`, task-035d3495dae536cf).
   """
   def approval(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -430,45 +437,42 @@ defmodule BarkparkWeb.ChatController do
              do: HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
              else: :ok
            ) do
-      with recorder when is_pid(recorder) <- Recorder.whereis(id),
-           {:ok, session} <- Recorder.session_pid(recorder) do
-        # Soft-match the delivery (D31 seal). For the claude provider answer_approval
-        # is a GenServer.cast → always :ok, but approval/2 is provider-neutral: codex
-        # returns {:error, :unknown_approval} on the double-answer race and
-        # {:error, {:app_server_exit, _}} on a dead app-server, and a RemoteRef host
-        # can leak its own {:error, _} tail. A non-:ok return means the ask is already
-        # gone upstream — that must NOT MatchError → 500 where claude cleanly 204s, so
-        # we still flip our own status and 204, mirroring the update_approval_status
-        # {:error, :not_found} → :ok idempotency just below.
-        _ = Runtime.answer_approval(stored.provider, session, request_id, decision)
+      status = if decision == :allow, do: "allowed", else: "denied"
 
-        status =
-          case decision do
-            :allow -> "allowed"
-            {:deny, _message} -> "denied"
-          end
-
-        case StudioChat.update_approval_status(id, request_id, status) do
-          {:ok, _message} -> :ok
-          {:error, :not_found} -> :ok
+      # nil with no live runtime: the ask is then only checked, never flipped.
+      # Soft-match the delivery (D31 seal): codex returns {:error, :unknown_approval}
+      # on the double-answer race and {:error, {:app_server_exit, _}} on a dead
+      # app-server, and a RemoteRef host can leak its own {:error, _} tail. A
+      # non-:ok return means the ask is gone upstream; never a MatchError → 500.
+      deliver =
+        with recorder when is_pid(recorder) <- Recorder.whereis(id),
+             {:ok, session} <- Recorder.session_pid(recorder) do
+          fn -> Runtime.answer_approval(stored.provider, session, request_id, decision) end
+        else
+          _ -> nil
         end
 
-        # studio-chat D49, adopted into this transport (ct-bl-plan-paper-parity):
-        # an ALLOWED plan row grows up into a published Paper. Before this, the
-        # projection was a Studio-LiveView-only defp, so a TUI-origin allow flipped
-        # the card on BOTH surfaces (update_approval_status is role-agnostic) but
-        # left the Paper — and its "→ published as Paper" link — un-created: a
-        # colleague watching in Studio saw the same approved plan with a different
-        # durable artifact depending on WHO clicked Allow. The seam is the ONE owner
-        # (the LiveView delegates to it too), it reads the server-held plan markdown
-        # itself, and it is idempotent by slug, so a re-allow updates one Paper and
-        # never mints a second. Fire-and-forget inside: the 204 below never waits on
-        # it and never fails because of it, and every non-plan / denied / blank-plan
-        # ask is a documented no-op.
-        PlanPapers.publish_approved_plan(id, request_id, decision)
-      end
+      case ApprovalAnswer.settle(id, request_id, status, deliver) do
+        {:refused, now} ->
+          message = "approval #{request_id} is #{now}; the answer was not sent"
+          details = %{"approval_status" => now}
+          ErrorResponse.emit_custom(conn, 409, "conflict", message, details, @ask_hint)
 
-      send_resp(conn, :no_content, "")
+        # The delivery failed or exited; the claim is dropped, the ask stays pending.
+        {:error, _undelivered} ->
+          message = "the answer did not reach the agent; the ask is pending, so send it again"
+          ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", message)
+
+        _delivered_or_noop ->
+          # studio-chat D49 (ct-bl-plan-paper-parity): an ALLOWED plan row grows
+          # up into a published Paper, whichever surface clicked Allow. The seam
+          # is the ONE owner (the LiveView delegates to it too), reads the
+          # server-held plan itself, is idempotent by slug, and is fire-and-forget:
+          # the 204 never waits on it, and an ask not stored as allowed, a non-plan
+          # or a blank plan is a documented no-op.
+          if deliver, do: PlanPapers.publish_approved_plan(id, request_id, decision)
+          send_resp(conn, :no_content, "")
+      end
     else
       nil -> not_found(conn)
       {:error, :host_execution_not_permitted} -> host_refused(conn)
@@ -478,6 +482,7 @@ defmodule BarkparkWeb.ChatController do
 
   # ── POST /v1/chat/sessions/:id/answer ──────────────────────────────────────
 
+  @unsent "the answer did not reach the agent; the question is pending, so send it again"
   @doc """
   Answer an AskUserQuestion row with the option(s) the human actually picked →
   204. Body `{request_id, answers}`, where `answers` maps a QUESTION STRING the
@@ -501,13 +506,11 @@ defmodule BarkparkWeb.ChatController do
   `host_execution_not_permitted` for a principal that is not an instance
   principal (`HostExecutionGate.authorize_turn/2`).
 
-  Past that gate, the 404 leg is the rest of the authorization and it is ONE oracle: a missing
-  session, another tenant's session (`fetch_scoped`), a request_id that names an
-  approval or plan row rather than a question, and a question already answered
-  (stale / double answer) are all indistinguishable `nil`s. A second POST
-  therefore cannot re-deliver a decision to the runtime — unlike `/approval`'s
-  idempotent 204, an `/answer` replay is honestly a 404, because "the answer you
-  are sending" is not the same request twice.
+  Past that gate, the 404 leg is the rest of the authorization, ONE oracle: a
+  missing session, another tenant's (`fetch_scoped`), a request_id naming an
+  approval or plan row, and a question already answered are indistinguishable
+  `nil`s, so a replay is a 404 and is never re-sent. A send that fails or exits
+  is a 503 `runtime_unavailable`, and the question stays pending for a resend.
   """
   def answer(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -522,20 +525,21 @@ defmodule BarkparkWeb.ChatController do
          {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
       updated = QuestionAnswer.updated_input(server_input, answers)
 
-      with recorder when is_pid(recorder) <- Recorder.whereis(id),
-           {:ok, session} <- Recorder.session_pid(recorder) do
-        # Soft-matched for the same reason approval/2 soft-matches (D32 seal): a
-        # non-:ok return means the ask is already gone upstream, which must not
-        # MatchError -> 500 where the claude cast path cleanly 204s.
-        _ = Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+      # Claimed first (task-52de5429fbdcb68c); no live runtime still records it and 204s.
+      deliver = fn ->
+        with recorder when is_pid(recorder) <- Recorder.whereis(id),
+             {:ok, session} <- Recorder.session_pid(recorder) do
+          Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+        else
+          _no_runtime -> :ok
+        end
       end
 
-      case StudioChat.update_approval_status(id, request_id, "allowed") do
-        {:ok, _message} -> :ok
-        {:error, :not_found} -> :ok
+      case ApprovalAnswer.settle(id, request_id, "allowed", deliver) do
+        :delivered -> send_resp(conn, :no_content, "")
+        {:error, _} -> ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", @unsent)
+        _not_pending -> not_found(conn)
       end
-
-      send_resp(conn, :no_content, "")
     else
       nil -> not_found(conn)
       {:error, :host_execution_not_permitted} -> host_refused(conn)

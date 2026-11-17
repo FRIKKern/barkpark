@@ -7,6 +7,7 @@ defmodule Barkpark.ChatHosts do
 
   alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
   alias Barkpark.ChatHosts.EventText
+  alias Barkpark.ChatHosts.LeaseChain
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{BotFolder, TurnAttachments}
 
@@ -217,14 +218,17 @@ defmodule Barkpark.ChatHosts do
 
     host
     |> RegisteredHost.heartbeat_changeset(params)
+    |> held_leases_capped(attrs)
     |> Repo.update()
     |> case do
       {:ok, updated} ->
         from(l in ExecutionLease,
+          as: :lease,
           where:
             l.host_id == ^host.id and is_nil(l.revoked_at) and
               l.status in ["leased", "running", "disconnected"]
         )
+        |> kept_by_host(held_leases(attrs), now)
         |> Repo.update_all(set: [expires_at: DateTime.add(now, @lease_ttl), updated_at: now])
 
         {:ok, public_host(updated)}
@@ -232,6 +236,66 @@ defmodule Barkpark.ChatHosts do
       error ->
         error
     end
+  end
+
+  # The leases a host says its process still runs (`held_leases`,
+  # task-e8a91dd731695004). A host that gave up on a lease (its close refused
+  # for good, or an outage that outlasted its retries) leaves it off, and a
+  # `running` lease left off is not renewed: `end_expired_turns/2` then closes
+  # it as it closes a silent host's, with its typed close. Otherwise every
+  # heartbeat renewed it and its session stayed `working` until the host
+  # restarted. A host that sends no list, or not a list, renews as before.
+  #
+  # A list can be older than a lease: a heartbeat in flight while the host took
+  # it, or one the server answers after a newer one. The Go host gives up on a
+  # request after 30 s, so a lease that took an event within @lease_ttl s is
+  # renewed though the list leaves it off. A `leased` lease (not started) is
+  # renewed as before: the host may not have it yet.
+  #
+  # A list past @max_held_leases ids is refused whole (422, nothing renewed or
+  # stored; task-bbb32ae64e56c1e0), so a heartbeat's cost does not grow with
+  # what a host sends. The Go host leaves a longer list out (client.go
+  # MaxHeldLeases).
+  @max_held_leases 1_000
+  defp held_leases_capped(changeset, attrs) do
+    with ids when is_list(ids) <- value(attrs, :held_leases),
+         true <- Enum.count_until(ids, @max_held_leases + 1) > @max_held_leases do
+      Ecto.Changeset.add_error(changeset, :held_leases, "has more than %{count} ids",
+        count: @max_held_leases
+      )
+    else
+      _ -> changeset
+    end
+  end
+
+  defp held_leases(attrs) do
+    case value(attrs, :held_leases) do
+      ids when is_list(ids) -> Enum.flat_map(ids, &lease_uuid/1)
+      _ -> nil
+    end
+  end
+
+  defp lease_uuid(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> [uuid]
+      :error -> []
+    end
+  end
+
+  defp lease_uuid(_id), do: []
+
+  defp kept_by_host(query, nil, _now), do: query
+
+  defp kept_by_host(query, held, now) do
+    since = DateTime.add(now, -@lease_ttl)
+
+    recent =
+      from(e in ExecutionEvent,
+        where: e.lease_id == parent_as(:lease).id and e.inserted_at > ^since,
+        select: 1
+      )
+
+    where(query, [lease: l], l.status != "running" or l.id in ^held or exists(recent))
   end
 
   def list_hosts(workspace_id) when is_binary(workspace_id) do
@@ -317,19 +381,90 @@ defmodule Barkpark.ChatHosts do
     }
 
     result =
-      case %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert() do
+      case insert_lease(attrs) do
         {:ok, lease} ->
           {:ok, lease}
 
         {:error, changeset} ->
           if constraint_error?(changeset),
-            do: {:ok, Repo.get_by!(ExecutionLease, host_id: host_id, command_key: key)},
+            do: resend_lease(host_id, key, attrs),
             else: {:error, changeset}
       end
 
-    with {:ok, lease} <- result,
-         :ok <- enqueue(lease, command) do
-      {:ok, %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}}
+    case result do
+      # The key's turn is already this lease's: no second lease. One no host
+      # has started goes back on the queue (`requeue_untaken/2`).
+      {:reuse, lease} ->
+        with :ok <- requeue_untaken(lease, %{command | idempotency_key: lease.command_key}),
+             do: {:ok, lease_info(lease)}
+
+      {:ok, lease} ->
+        with :ok <- enqueue(lease, %{command | idempotency_key: lease.command_key}),
+             do: {:ok, lease_info(lease)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # A resend (task-3c949e2977c56597): the key already holds a lease. Its turn
+  # is that lease's, unless the server ended it as not sent; then the turn
+  # runs on the next link of the key (`Barkpark.ChatHosts.LeaseChain`).
+  defp resend_lease(host_id, key, attrs, tries \\ 3) do
+    case LeaseChain.resolve(host_id, key) do
+      {:reuse, lease} -> {:reuse, lease}
+      {:next, next_key} -> insert_link(host_id, key, attrs, next_key, tries)
+    end
+  end
+
+  # The queue is in memory, so a restart since the first send emptied it, and
+  # a reused lease no host was ever handed would never run
+  # (task-b1e2f61ca03df99b). Putting it back is safe: the queue is keyed by
+  # lease id, so a lease still queued stays one entry.
+  #
+  # Only a lease no poll ever handed out (`handed_out_at` NULL, stamped by
+  # `next_commands/1`). A host that was handed it may have run it and then
+  # forgotten it when the restarted server's listing went empty; a requeue
+  # would run it twice. Such a lease stays where it is, as before: stuck at
+  # worst, never run twice.
+  #
+  # An exit is NOT `enqueue/2`'s "not sent" close: the first send handed this
+  # lease to the queue, so ending it would let the next resend run it on a new
+  # link. The exit goes on, an unknown outcome, and the resend after it reuses
+  # the lease again.
+  defp requeue_untaken(
+         %ExecutionLease{
+           status: "leased",
+           last_cursor: 0,
+           revoked_at: nil,
+           handed_out_at: nil
+         } = lease,
+         command
+       ),
+       do: Transport.enqueue(lease.host_id, lease.id, command)
+
+  defp requeue_untaken(_lease, _command), do: :ok
+
+  defp insert_lease(attrs),
+    do: %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert()
+
+  defp lease_info(lease),
+    do: %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}
+
+  # Two resends can both find link N not sent and both insert N+1. The loser
+  # meets the unique (host_id, command_key) and resolves again, which reuses
+  # the winner's live link instead of failing (task-432b4e6f55f9ae5b). Bounded:
+  # each try sees a newer link, and a key whose links keep ending as not sent
+  # gives the constraint error back after `tries`.
+  defp insert_link(host_id, key, attrs, next_key, tries) do
+    case insert_lease(%{attrs | command_key: next_key}) do
+      {:error, changeset} = error ->
+        if tries > 1 and constraint_error?(changeset),
+          do: resend_lease(host_id, key, attrs, tries - 1),
+          else: error
+
+      inserted ->
+        inserted
     end
   end
 
@@ -365,8 +500,10 @@ defmodule Barkpark.ChatHosts do
   @spec withdraw_turn(String.t(), String.t()) :: :ok | :error
   def withdraw_turn(session_id, command_key)
       when is_binary(session_id) and is_binary(command_key) do
-    ExecutionLease
-    |> where([l], l.session_id == ^session_id and l.command_key == ^command_key)
+    # Every link of the key: a resent turn may be leased as `<key>:N`.
+    command_key
+    |> LeaseChain.links_query()
+    |> where([l], l.session_id == ^session_id)
     |> end_server_turn(:turn_not_stored)
   end
 
@@ -437,34 +574,54 @@ defmodule Barkpark.ChatHosts do
   in the shared root, or drop a file). Such a lease is never handed out. The
   server ends its turn with the dispatch path's refusal as the reason, so the
   session leaves `working`, and the command leaves the queue.
+
+  Every lease handed out is stamped `handed_out_at` before the poll answers, in
+  one UPDATE for the leases not stamped yet (none on a poll that hands out only
+  stamped leases), so a same-key resend never requeues a lease a host may
+  have run (task-b1e2f61ca03df99b).
   """
   def next_commands(%RegisteredHost{} = host) do
-    host.id
-    |> Transport.commands()
-    |> Enum.flat_map(fn {lease_id, command} ->
-      case Repo.get(ExecutionLease, lease_id) do
-        %ExecutionLease{revoked_at: nil, status: status} = lease
-        when status not in ["completed", "cancelled"] ->
-          case servable(host, lease, command) do
-            :ok ->
-              [
-                %{
-                  lease_id: lease.id,
-                  epoch: lease.epoch,
-                  last_cursor: lease.last_cursor,
-                  command: command_to_map(command)
-                }
-              ]
+    handed =
+      host.id
+      |> Transport.commands()
+      |> Enum.flat_map(fn {lease_id, command} ->
+        case Repo.get(ExecutionLease, lease_id) do
+          %ExecutionLease{revoked_at: nil, status: status} = lease
+          when status not in ["completed", "cancelled"] ->
+            case servable(host, lease, command) do
+              :ok ->
+                [
+                  {lease,
+                   %{
+                     lease_id: lease.id,
+                     epoch: lease.epoch,
+                     last_cursor: lease.last_cursor,
+                     command: command_to_map(command)
+                   }}
+                ]
 
-            {:error, refusal} ->
-              end_unservable_turn(lease.id, refusal)
-              []
-          end
+              {:error, refusal} ->
+                end_unservable_turn(lease.id, refusal)
+                []
+            end
 
-        _ ->
-          []
-      end
-    end)
+          _ ->
+            []
+        end
+      end)
+
+    stamp_handed_out(for {%ExecutionLease{handed_out_at: nil} = l, _} <- handed, do: l.id)
+    Enum.map(handed, fn {_lease, entry} -> entry end)
+  end
+
+  # Before the poll answers, and not rescued: a poll whose stamp failed hands
+  # nothing out, so no host holds a lease the server thinks is untaken. The
+  # write's own result: `{stamped, nil}`.
+  defp stamp_handed_out([]), do: {0, nil}
+
+  defp stamp_handed_out(lease_ids) do
+    from(l in ExecutionLease, where: l.id in ^lease_ids and is_nil(l.handed_out_at))
+    |> Repo.update_all(set: [handed_out_at: DateTime.utc_now()])
   end
 
   # The same checks, in the same order, as `Runtime.dispatch/4` for a
@@ -535,7 +692,7 @@ defmodule Barkpark.ChatHosts do
       case validate_fence(lease, host, epoch) do
         :ok ->
           if takes_new_event?(lease, cursor),
-            do: reconcile_event(lease, cursor, key, event),
+            do: lease |> reconcile_event(cursor, key, event) |> unless_superseded(),
             else: Repo.rollback(:stale_fence)
 
         # The host's close comes after its lease expired. The fence still
@@ -554,6 +711,9 @@ defmodule Barkpark.ChatHosts do
     |> case do
       {:ok, {:accepted, execution_event, lease}} ->
         project_event(execution_event, lease)
+        {:ok, :accepted}
+
+      {:ok, :superseded} ->
         {:ok, :accepted}
 
       {:ok, {:ended, execution_event, lease}} ->
@@ -837,6 +997,41 @@ defmodule Barkpark.ChatHosts do
 
   defp takes_new_event?(_lease, _cursor), do: true
 
+  # An event a lease takes while a newer lease of its session has a turn open
+  # (it took a `turn_started` and is still `leased`/`running`) is stored but
+  # never projected or broadcast (task-5831f8e55c7649dd). The older lease can
+  # still be running: another host, or a Go host older than #24702 (which does
+  # not refuse a second turn), starts the newer turn. The Recorder cannot tell
+  # leases apart, so the older text would land in the newer reply and the older
+  # close would end the newer turn. Taking the event keeps the older host's
+  # turn and lease closing as they would.
+  #
+  # The test is a newer turn that is still open, not a newer lease: a Stop's
+  # lease is newer too, and the turn it stops must still end; and once the
+  # newer turn has closed, the older one is the session's again and its reply
+  # is stored (chat_host_closed_lease_event_test.exs). It does not cover older
+  # text taken BEFORE the newer turn_started: that was projected when it came,
+  # and the Recorder still joins it to the newer reply.
+  defp unless_superseded({:accepted, execution_event, lease} = accepted) do
+    if superseded?(lease) do
+      mark_projected(execution_event.id)
+      :superseded
+    else
+      accepted
+    end
+  end
+
+  defp unless_superseded(other), do: other
+
+  defp superseded?(%ExecutionLease{} = lease) do
+    ExecutionEvent
+    |> join(:inner, [e], l in ExecutionLease, on: l.id == e.lease_id)
+    |> where([e, l], l.workspace_id == ^lease.workspace_id and l.session_id == ^lease.session_id)
+    |> where([e, l], l.inserted_at > ^lease.inserted_at and e.kind == "turn_started")
+    |> where([e, l], l.status in ["leased", "running"])
+    |> Repo.exists?()
+  end
+
   # On the (workspace_id, session_id) index.
   defp newer_lease?(%ExecutionLease{} = lease) do
     ExecutionLease
@@ -1027,6 +1222,42 @@ defmodule Barkpark.ChatHosts do
   end
 
   def live_lease_for_host(_host, _lease_id, _now), do: nil
+
+  @doc """
+  Is the lease `lease_id` still live: `leased` or `running`, not revoked, not
+  past its expiry? False for an id that is not a UUID or names no lease. The
+  Recorder asks before it ignores another lease's close (`Recorder.TurnOwner`).
+  """
+  @spec lease_live?(String.t(), DateTime.t()) :: boolean()
+  def lease_live?(lease_id, now \\ DateTime.utc_now()) when is_binary(lease_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, id} ->
+        ExecutionLease
+        |> where([l], l.id == ^id and l.status in ["leased", "running"])
+        |> where([l], is_nil(l.revoked_at) and l.expires_at > ^now)
+        |> Repo.exists?()
+
+      :error ->
+        false
+    end
+  end
+
+  @doc """
+  When the lease `lease_id` was leased, or nil for anything that is not a UUID
+  string (nil included) or names no lease. The Recorder orders a Stop against it (`Recorder.TurnOwner`).
+  """
+  @spec lease_inserted_at(term()) :: DateTime.t() | nil
+  def lease_inserted_at(lease_id) when is_binary(lease_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, id} ->
+        ExecutionLease |> where([l], l.id == ^id) |> select([l], l.inserted_at) |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  def lease_inserted_at(_not_an_id), do: nil
 
   @doc """
   The session's current live report fence, or nil (herd-s6). The Recorder's
@@ -1288,6 +1519,17 @@ defmodule Barkpark.ChatHosts do
 
   @doc false
   def replay_unprojected(session_id) when is_binary(session_id) do
+    session_id
+    |> replay_unprojected_by_lease()
+    |> Enum.map(fn {event_id, normalized, _lease_id} -> {event_id, normalized} end)
+  end
+
+  @doc """
+  The session's unprojected events as `{event_id, event, lease_id}`. The lease
+  id rides beside the event, never in it (`Runtime.Event` goes on the wire), so
+  the Recorder can tell two leases' turns apart (task-b0cbddc9d0f2e2aa).
+  """
+  def replay_unprojected_by_lease(session_id) when is_binary(session_id) do
     ExecutionEvent
     |> join(:inner, [e], l in ExecutionLease, on: l.id == e.lease_id)
     |> where([e, l], l.session_id == ^session_id and is_nil(e.projected_at))
@@ -1296,7 +1538,7 @@ defmodule Barkpark.ChatHosts do
     |> Repo.all()
     |> Enum.map(fn {event, lease} ->
       normalized = broadcast_event(lease, event.cursor, event.idempotency_key, event.payload)
-      {event.id, normalized}
+      {event.id, normalized, lease.id}
     end)
   end
 
@@ -1324,7 +1566,7 @@ defmodule Barkpark.ChatHosts do
 
     case {normalized, Barkpark.StudioChat.Recorder.whereis(lease.session_id)} do
       {%Barkpark.StudioChat.Runtime.Event{} = event, recorder} when is_pid(recorder) ->
-        case GenServer.call(recorder, {:project_runtime_event, event}) do
+        case GenServer.call(recorder, {:project_runtime_event, event, lease.id}) do
           :ok ->
             execution_event
             |> Ecto.Changeset.change(projected_at: DateTime.utc_now())

@@ -68,7 +68,8 @@ def main():
                     params = {"threadId": "thread-1", "turnId": "turn-1", "itemId": item_id,
                               "startedAtMs": request_id}
                     params.update(extra)
-                    send({"id": request_id, "method": approval_method, "params": params})
+                    wire_id = "a\x0091" if args.scenario == "nul_delta" and request_id == 91 else request_id
+                    send({"id": wire_id, "method": approval_method, "params": params})
             elif method == "turn/steer":
                 send({"id": message["id"], "result": {}})
             elif method == "turn/interrupt":

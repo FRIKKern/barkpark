@@ -179,7 +179,7 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
 
   defp fake_recorder(parent) do
     receive do
-      {:"$gen_call", from, {:project_runtime_event, event}} ->
+      {:"$gen_call", from, {:project_runtime_event, event, _lease_id}} ->
         send(parent, {:studio_chat_runtime_event, event})
         GenServer.reply(from, :ok)
         fake_recorder(parent)

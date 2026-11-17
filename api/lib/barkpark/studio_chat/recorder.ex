@@ -24,10 +24,10 @@ defmodule Barkpark.StudioChat.Recorder do
 
   alias Barkpark.Content.Broadcast
   alias Barkpark.Plugins.Enablement
-  alias Barkpark.{CycleFleet, StudioChat}
+  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat, StudioChat.Recorder.DisplacedAsks}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
-  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
+  alias Barkpark.StudioChat.{Recorder.TurnOwner, RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
   alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
@@ -576,8 +576,8 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
-  def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
-    state = ingest_runtime_event(state, event, false)
+  def handle_call({:project_runtime_event, %Event{} = event, lease_id}, _from, state) do
+    state = project_host_event(state, event, lease_id)
     {:reply, :ok, touch(state)}
   end
 
@@ -628,9 +628,9 @@ defmodule Barkpark.StudioChat.Recorder do
   # a duplicate Stop, or one that lands after the result frame already consumed
   # the flag, sets a boolean that the next `system/init` clears.
   @impl true
-  def handle_cast(:interrupt_requested, state) do
-    {:noreply, %{state | turn_interrupted?: true}}
-  end
+  # The time orders a Stop against a host lease (Recorder.TurnOwner).
+  def handle_cast(:interrupt_requested, state),
+    do: {:noreply, Map.put(%{state | turn_interrupted?: true}, :stop_at, DateTime.utc_now())}
 
   def handle_cast({:reported_state, _agent_state, %DateTime{} = expires_at}, state) do
     if state.reported_fence_timer, do: Process.cancel_timer(state.reported_fence_timer)
@@ -659,10 +659,10 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info(:replay_registered_host_events, state) do
     state =
       state.session_id
-      |> Barkpark.ChatHosts.replay_unprojected()
+      |> Barkpark.ChatHosts.replay_unprojected_by_lease()
       |> Enum.reduce(state, fn
-        {event_id, %Event{} = event}, acc ->
-          acc = ingest_runtime_event(acc, event, false)
+        {event_id, %Event{} = event, lease_id}, acc ->
+          acc = project_host_event(acc, event, lease_id)
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
 
@@ -713,13 +713,12 @@ defmodule Barkpark.StudioChat.Recorder do
     # abandon them rather than claim a settle we cannot prove (D61).
     state = stable_start(state)
     broadcast(state, msg)
-    # The turn settled — nothing can still be waiting on an ask from it (D56h) —
-    # and its fold stamp is spent: the next turn mints its own start and Stop
+    # The turn settled — its asks still pending are canceled (D56h, DisplacedAsks)
+    # — and its fold stamp is spent: the next turn mints its own start and Stop
     # flag, so a stamp can never be written twice off one turn's facts.
     state = %{state | turn_started_at: nil, turn_interrupted?: false}
-
-    {:noreply,
-     state |> clear_pending_asks() |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+    state = DisplacedAsks.cancel_ended(publish_activity(state, %{state: :idle, line: nil}))
+    {:noreply, touch(state)}
   end
 
   # The extended-thinking pulse (charter D41). The wire never carries thinking
@@ -1164,7 +1163,7 @@ defmodule Barkpark.StudioChat.Recorder do
           # Only a TOP-LEVEL TodoWrite is the turn's living checklist (D39) —
           # a sub-agent's todo list must never hijack the main turn's card, so
           # a child frame's TodoWrite persists as a plain (indented) tool row.
-          persist_todo_block(st, name, block)
+          persist_todo_block(st, name, EventText.replace_nul(block))
         else
           persist(
             st.session_id,
@@ -1356,6 +1355,8 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp record_result(session_id, ev) do
+    ev = EventText.replace_nul(ev)
+
     StudioChat.record_result_metrics(session_id, %{
       input_tokens: get_in(ev, ["usage", "input_tokens"]),
       output_tokens: get_in(ev, ["usage", "output_tokens"]),
@@ -1448,8 +1449,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
         %{state | runtime_text: ""}
         |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
-        |> clear_pending_asks()
         |> publish_activity(%{state: :idle, line: nil})
+        |> DisplacedAsks.cancel_ended()
 
       :control_completed ->
         state
@@ -1477,7 +1478,7 @@ defmodule Barkpark.StudioChat.Recorder do
         |> Map.merge(%{runtime_text: "", runtime_turn_open?: false, runtime_break?: false})
         |> stable_settle(state.runtime_text)
         |> publish_activity(%{state: :offline, line: nil})
-        |> clear_pending_asks()
+        |> DisplacedAsks.cancel_ended()
 
       _ ->
         state
@@ -1570,6 +1571,9 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp maybe_capture_event_provider_session_id(session_id, provider_session_id)
        when is_binary(provider_session_id) and provider_session_id != "" do
+    # A runtime's own id (a Codex thread id) comes back raw; the store refuses U+0000.
+    provider_session_id = EventText.replace_nul(provider_session_id)
+
     case StudioChat.set_provider_session_id(session_id, provider_session_id) do
       {:ok, _session} ->
         :ok
@@ -1664,6 +1668,15 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_runtime_text(_state, _event), do: :ok
+
+  # Two leases' replies are never one row, and only the turn's own lease ends
+  # it (TurnOwner, task-b0cbddc9d0f2e2aa, task-5d1f639852927c4e).
+  defp project_host_event(state, event, lease_id) do
+    case TurnOwner.take(state, event, lease_id, &persist_split/2, &stable_settle/2) do
+      {:ignore, state} -> state
+      state -> ingest_runtime_event(state, event, false)
+    end
+  end
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
   # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the
@@ -1816,6 +1829,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # Merge a lifecycle patch onto the spawn row (never clobbering its input, D45).
   defp stamp_task(session_id, tool_use_id, patch) do
+    [tool_use_id, patch] = EventText.replace_nul([tool_use_id, patch])
+
     case StudioChat.merge_tool_metadata(session_id, tool_use_id, patch) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to stamp task metadata: #{inspect(reason)}")
@@ -1920,7 +1935,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_rail(session_id, rail) do
-    case StudioChat.set_rail_snapshot(session_id, rail) do
+    case StudioChat.set_rail_snapshot(session_id, EventText.replace_nul(rail)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist rail: #{inspect(reason)}")
 
@@ -1930,7 +1945,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist(session_id, attrs, kind) do
-    case StudioChat.append_message(session_id, Barkpark.ChatHosts.EventText.replace_nul(attrs)) do
+    case StudioChat.append_message(session_id, EventText.replace_nul(attrs)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist #{kind}: #{inspect(reason)}")
 
@@ -2450,6 +2465,14 @@ defmodule Barkpark.StudioChat.Recorder do
     Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(state.session_id), msg)
   end
 
+  # A lease split stored the open text as its own row (TurnOwner): live viewers
+  # commit their bubble on `{:chat_turn_split, id}` (task-f0d668d89e21f5f8). Not
+  # a turn_completed, which SSE clients read as the turn ending.
+  defp persist_split(state, event) do
+    persist_runtime_text(state, event)
+    broadcast(state, {:chat_turn_split, state.session_id})
+  end
+
   defp touch(state), do: %{state | timer: arm_idle(state.timer)}
 
   defp arm_idle(old) do
@@ -2469,7 +2492,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # would leave the replayed row falsely neutral); a plain empty result is still
   # ignored, exactly as before.
   defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
-    content
+    EventText.replace_nul(content)
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
     |> Enum.map(fn b ->
       # `result_text/1` answers nil for a contentless block — normalize to ""

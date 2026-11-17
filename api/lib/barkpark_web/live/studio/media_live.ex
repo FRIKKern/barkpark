@@ -138,6 +138,11 @@ defmodule BarkparkWeb.Studio.MediaLive do
   @impl true
   def handle_event("publish_scope_media", _params, socket) do
     cond do
+      # The dataset-bound admin write rule (`BoundAdminWrite`), as on
+      # `POST /v1/shares/media`.
+      BarkparkWeb.Studio.BoundAdminWrite.refused?(socket.assigns[:api_token]) ->
+        {:noreply, BarkparkWeb.Studio.BoundAdminWrite.refuse(socket)}
+
       # Asked LIVE, not read from the mount-time `shares_admin?` assign: a
       # scope admin demoted after mount kept the power to publish this scope's
       # media anonymously until the socket reconnected (task-a0d8bdd7b5a518cc).
@@ -155,6 +160,13 @@ defmodule BarkparkWeb.Studio.MediaLive do
       true ->
         case Sharing.publish_media(scope_string(socket)) do
           {:ok, _share} ->
+            BarkparkWeb.Studio.BoundAdminWrite.observe(
+              socket.assigns[:api_token],
+              "shares_write",
+              "live MediaLive.publish_scope_media",
+              id_of(socket.assigns[:current_workspace])
+            )
+
             {:noreply,
              socket
              |> assign_visibility_notice()
@@ -214,4 +226,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   defp slug_of(%{slug: slug}) when is_binary(slug), do: slug
   defp slug_of(_other), do: nil
+
+  defp id_of(%{id: id}), do: id
+  defp id_of(_other), do: nil
 end

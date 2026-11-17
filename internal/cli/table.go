@@ -100,6 +100,9 @@ var listEnvelopeKeys = []string{
 	"revisions", "workspaces", "projects", "schemas", "webhooks", "plugins",
 	"shares", "secrets", "tickets", "keys", "tags",
 	"members", "tokens", "grants", "deliveries",
+	// The two access-request lists (auth.access-request-ls,
+	// workspace.access-request-ls), task-1b99ba8512bb758e.
+	"access_requests",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known

@@ -417,17 +417,21 @@ func TestTaskCreateAmbiguityClassesAreEnumerated(t *testing.T) {
 		ambiguityCreateAnswerLost,
 		ambiguityCreateServerFault,
 		ambiguityCreateResultUnreadable,
+		ambiguityCreateResendKeyRefused,
 		residuePublishAmbiguousTransport,
 		residuePublishAmbiguousServerFault,
 		residuePublishResultUnreadable,
+		residuePublishResendKeyRefused,
+		residuePublishResendRefused,
+		ambiguityPublishDiscardFoundNothing,
 	} {
 		why, ok := taskCreateAmbiguityClasses[class]
 		if !ok || strings.TrimSpace(why) == "" {
 			t.Errorf("ambiguity class %q carries no explanation", class)
 		}
 	}
-	if len(taskCreateAmbiguityClasses) != 6 {
-		t.Errorf("taskCreateAmbiguityClasses has %d entries, want 6 — a new arm needs a name and a why", len(taskCreateAmbiguityClasses))
+	if len(taskCreateAmbiguityClasses) != 10 {
+		t.Errorf("taskCreateAmbiguityClasses has %d entries, want 10 — a new arm needs a name and a why", len(taskCreateAmbiguityClasses))
 	}
 }
 

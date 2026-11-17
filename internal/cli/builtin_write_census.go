@@ -352,12 +352,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 	},
 	// ---- task create -----------------------------------------------------
 	{
-		File: "internal/cli/tasks_create_cmd.go", Func: "sendTaskMutations", Sites: 1,
+		File: "internal/cli/tasks_create_committed_fault.go", Func: "sendTaskMutationsFull", Sites: 1,
 		Endpoint: "POST /v1/data/mutate/:dataset (create, then publish)", Class: machineRendered,
 		Disposition: dispCannotLie,
 		Why: "the caller renders nothing without firstMutationRecord, which REQUIRES a server-generated id out of " +
 			"`results[0].id` — `task create: server returned no id` — and the publish arm repeats it on its own " +
-			"response (`the publish response carried no result`).",
+			"response (`the publish response carried no result`). The one exception is a publish 5xx the server " +
+			"marks `Idempotency-Committed: true`: the id is the one the create already returned, and the receipt " +
+			"says published because the server says the publish committed (task-dbee0d3a56ab4459).",
 	},
 	// ---- task next -------------------------------------------------------
 	{

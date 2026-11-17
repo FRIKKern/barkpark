@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.AgentTaskJoin
+  alias Barkpark.StudioChat.ApprovalAnswer
   alias Barkpark.StudioChat.ManagedSessionTarget
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
@@ -51,7 +52,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer}
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer, CodexFailureLine}
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -1469,18 +1470,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
   end
 
+  # Another lease's event split the open turn: its text is now its own stored
+  # row, so it is its own live reply too (Recorder.TurnOwner, task-f0d668d89e21f5f8).
+  def handle_info({:chat_turn_split, _session_id}, socket),
+    do: {:noreply, socket |> commit_streaming() |> assign(streaming: nil)}
+
   def handle_info(
         {:studio_chat_runtime_event, %Runtime.Event{kind: :turn_completed} = event},
         socket
       ) do
-    socket =
-      case socket.assigns.streaming do
-        %{text: text} when is_binary(text) and text != "" ->
-          append_message(socket, :assistant, text)
-
-        _ ->
-          socket
-      end
+    socket = commit_streaming(socket)
 
     line =
       case event.terminal_state do
@@ -1518,15 +1517,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # map with the reason. Without a clause they fell to the bare %Runtime.Event{}
   # catch-all below and rendered NOTHING — a hard failure left the transcript
   # silent (recorder.ex records these kinds; only this LiveView surface was dark).
-  # Surface the reason as an honest :system line. Purely additive: the turn
-  # lifecycle (status/streaming) is left to the terminal turn_completed / DOWN
-  # paths, so a mid-stream malformed line does not falsely settle the turn.
+  # Surface the reason as an honest :system line (CodexFailureLine; a retrying
+  # error says so). Purely additive: the turn lifecycle (status/streaming) is
+  # left to the terminal turn_completed / DOWN paths, so a mid-stream malformed
+  # line does not falsely settle the turn.
   def handle_info(
-        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, error: error}},
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind} = event},
         socket
       )
       when kind in [:protocol_error, :error, :process_failed] do
-    {:noreply, append_message(socket, :system, codex_failure_line(kind, error))}
+    {:noreply, append_message(socket, :system, CodexFailureLine.line(event))}
   end
 
   def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
@@ -6395,48 +6395,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp replay_init(_), do: nil
 
-  # Honest failure copy for a codex runtime failure event (protocol_error /
-  # error / process_failed). Names the failure class, then the scrubbed reason
-  # from protocol.ex's `error` map (message/detail, with the machine code in
-  # parens) when one is present.
-  defp codex_failure_line(kind, error) do
-    label =
-      case kind do
-        :process_failed -> "The codex process exited unexpectedly"
-        :protocol_error -> "The codex stream hit a protocol error"
-        _ -> "The codex turn ended with an error"
-      end
-
-    case codex_error_detail(error) do
-      "" -> label <> "."
-      detail -> label <> " — " <> detail <> "."
-    end
-  end
-
-  defp codex_error_detail(error) when is_map(error) do
-    reason =
-      [error["message"], error["detail"]]
-      |> Enum.map(&codex_error_text/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-      |> Enum.join(" — ")
-
-    code = codex_error_text(error["code"])
-
-    cond do
-      reason != "" and code != "" -> reason <> " (" <> code <> ")"
-      reason != "" -> reason
-      code != "" -> code
-      true -> ""
-    end
-  end
-
-  defp codex_error_detail(_), do: ""
-
-  defp codex_error_text(value) when is_binary(value), do: String.trim(value)
-  defp codex_error_text(value) when is_integer(value), do: Integer.to_string(value)
-  defp codex_error_text(_), do: ""
-
   # The store refuses U+0000 (NulText, task-820afe5940d0e6e0): say so plainly.
   defp nul_note(socket, what),
     do: append_message(socket, :system, "⚠ #{what} can't contain a NUL character (U+0000).")
@@ -6864,29 +6822,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
             &1.approval_status == :pending)
       )
 
-    # A co-viewing tab holds a pid it never spawned: gate the allow itself.
-    with true <- pending? and socket.assigns.session != nil,
-         :ok <- ChatHostGate.authorize(socket.assigns, decision) do
-      Runtime.answer_approval(
-        socket.assigns.provider,
-        socket.assigns.session,
-        request_id,
-        decision
-      )
+    status = if match?({:deny, _}, decision), do: :denied, else: :allowed
+    %{session: session, store_session_id: store_id} = socket.assigns
 
-      status =
-        case decision do
-          {:deny, _} -> :denied
-          _ -> :allowed
-        end
+    deliver = fn ->
+      Runtime.answer_approval(socket.assigns.provider, session, request_id, decision)
+    end
 
+    # A co-viewing tab holds a pid it never spawned: gate the allow itself. The
+    # store decides last: a card this tab still shows pending, for an ask the
+    # store canceled or answered, delivers nothing and shows the stored status.
+    # A delivery persists the decision (D11) and drops the pending count.
+    with true <- pending? and session != nil,
+         :ok <- ChatHostGate.authorize(socket.assigns, decision),
+         {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, to_string(status), deliver) do
       messages = flip_card(socket.assigns.messages, request_id, status)
-
-      # Persist the decision (D11) and drop the pending count so the sidebar
-      # "needs you" pill clears on the next sidebar refresh.
-      if store_id = socket.assigns[:store_session_id],
-        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
-
       broadcast_resolution(socket, request_id, status)
 
       # D49: an APPROVED ExitPlanMode plan grows up into a real published Paper.
@@ -6901,8 +6851,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
       |> clear_question_form(request_id)
       |> refresh_sessions()
     else
-      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
-      _ -> socket
+      {:settled, now} ->
+        flipped = flip_card(socket.assigns.messages, request_id, String.to_existing_atom(now))
+        socket |> assign_messages(flipped) |> clear_question_form(request_id)
+
+      {:error, reason} ->
+        append_message(socket, :system, spawn_error_text(reason))
+
+      _ ->
+        socket
     end
   end
 
@@ -7240,6 +7197,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # web-only and it has three non-streaming callers.
   defp advance_streaming(state, delta),
     do: StreamTail.advance(state, delta, &render_paper_html/1)
+
+  # The streaming bubble's text becomes a live assistant message (the caller
+  # clears `streaming`).
+  defp commit_streaming(%{assigns: %{streaming: %{text: text}}} = socket)
+       when is_binary(text) and text != "",
+       do: append_message(socket, :assistant, text)
+
+  defp commit_streaming(socket), do: socket
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
   # paper reader uses. The renderer escapes all text at walk time, so the

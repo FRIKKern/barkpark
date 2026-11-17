@@ -580,7 +580,7 @@ defmodule BarkparkWeb.Router do
     # `meter: :media` here (that would double-count against the span).
     plug(BarkparkWeb.Plugs.RequireWithinQuota)
     plug(BarkparkWeb.Plugs.RequireWritePermission)
-    plug(BarkparkWeb.Plugs.Idempotency)
+    plug(BarkparkWeb.Plugs.Idempotency, bind_request: true)
   end
 
   # Media writes (upload/update/delete) — mirrors [:scoped_api, :media_mutate]
@@ -1339,7 +1339,7 @@ defmodule BarkparkWeb.Router do
   end
 
   pipeline :idempotent do
-    plug(BarkparkWeb.Plugs.Idempotency)
+    plug(BarkparkWeb.Plugs.Idempotency, bind_request: true)
   end
 
   # Write-gate: rejects tokens lacking "write"/"admin" with 403 before the
@@ -2525,6 +2525,17 @@ defmodule BarkparkWeb.Router do
     post("/webauthn/step-up", WebauthnController, :step_up)
     get("/webauthn/credentials", WebauthnController, :index)
     delete("/webauthn/credentials/:id", WebauthnController, :delete)
+  end
+
+  # Access requests, the asker's side (task-1b99ba8512bb758e): a user with no
+  # seat asks for one. `:access_principal` like `bp access claim`: a login
+  # session or a token the user owns (AccessRequestController says why).
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:user_auth, :access_principal])
+
+    post("/access-requests", AccessRequestController, :create)
+    get("/access-requests", AccessRequestController, :index)
+    delete("/access-requests/:id", AccessRequestController, :withdraw)
   end
 
   # ── Public status page + machine-readable status ────────────────────────
@@ -4175,6 +4186,10 @@ defmodule BarkparkWeb.Router do
     # Seat consent (owner ruling #7): an existing account is invited, not seated.
     get("/v1/invitations", MemberController, :invitations)
     delete("/v1/invitations/:id", MemberController, :cancel_invitation)
+    # Access requests, the admin's side (task-1b99ba8512bb758e).
+    get("/v1/access-requests", WorkspaceAccessRequestController, :index)
+    post("/v1/access-requests/:id/approve", WorkspaceAccessRequestController, :approve)
+    post("/v1/access-requests/:id/deny", WorkspaceAccessRequestController, :deny_request)
 
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.

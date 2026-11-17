@@ -47,6 +47,9 @@ type activeLocalSession struct {
 	provider string
 	stdin    io.WriteCloser
 	cmd      *exec.Cmd
+	// leaseID: the send_turn lease this run serves; its asks are answered
+	// only under it (answer_lease.go).
+	leaseID string
 
 	mu        sync.Mutex
 	threadID  string
@@ -66,6 +69,14 @@ type approvalRequest struct {
 	id     any
 	method string
 	input  map[string]any
+}
+
+// approvalKey is the id the server answers with: Barkpark stores U+FFFD for
+// U+0000 (ChatHosts.EventText), so an approval is kept under that form, and
+// approvalRequest.id keeps the provider's own id for the reply
+// (task-98e736d8d75285f0).
+func approvalKey(id any) string {
+	return strings.ReplaceAll(fmt.Sprint(id), "\x00", "\uFFFD")
 }
 
 func NewLocalHandler(approvedRoots []string) *LocalHandler {
@@ -178,6 +189,11 @@ func (h *LocalHandler) handleControl(ctx context.Context, sessionID, operation s
 	if session == nil {
 		return fmt.Errorf("registered-host session %q has no active turn", sessionID)
 	}
+	if operation == "answer_approval" {
+		if refused := refusedAnswer(session, remote.Command); refused != nil {
+			return emit(refused)
+		}
+	}
 	if err := session.control(ctx, operation, remote.Command); err != nil {
 		return err
 	}
@@ -246,6 +262,7 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 	waited := false
 	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("claude", cmd, stdin)
+	session.leaseID = remote.LeaseID
 	if err := h.register(sessionID, session); err != nil {
 		return err
 	}
@@ -357,6 +374,7 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	waited := false
 	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("codex", cmd, stdin)
+	session.leaseID = remote.LeaseID
 	if err := h.register(sessionID, session); err != nil {
 		return err
 	}
@@ -691,7 +709,7 @@ func (s *activeLocalSession) controlClaude(ctx context.Context, operation string
 		return s.write(map[string]any{
 			"type": "control_response",
 			"response": map[string]any{
-				"subtype": "success", "request_id": approvalID,
+				"subtype": "success", "request_id": approval.id,
 				"response": claudeApprovalDecision(payload["decision"], approval.input),
 			},
 		})
@@ -790,7 +808,7 @@ func (s *activeLocalSession) claudeMessage(message map[string]any) []map[string]
 	if message["type"] == "control_request" {
 		request, _ := message["request"].(map[string]any)
 		if request["subtype"] == "can_use_tool" {
-			id := fmt.Sprint(message["request_id"])
+			id := approvalKey(message["request_id"])
 			input, _ := request["input"].(map[string]any)
 			s.mu.Lock()
 			s.approvals[id] = approvalRequest{id: message["request_id"], method: "can_use_tool", input: input}
@@ -837,7 +855,7 @@ func (s *activeLocalSession) codexMessage(message map[string]any) (map[string]an
 	}
 
 	if isCodexApprovalMethod(method) {
-		id := fmt.Sprint(message["id"])
+		id := approvalKey(message["id"])
 		s.mu.Lock()
 		s.approvals[id] = approvalRequest{id: message["id"], method: method, input: params}
 		s.mu.Unlock()

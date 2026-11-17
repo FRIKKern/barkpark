@@ -230,6 +230,32 @@ defmodule BarkparkWeb.ChatHostDeclaredValuesTest do
       assert row.protocol_version == 1
     end
 
+    # task-bbb32ae64e56c1e0: held_leases is capped at 1,000 ids.
+    test "a held_leases list of more than 1,000 ids answers 422 on held_leases and changes nothing",
+         %{conn: conn} do
+      {id, credential} = enrolled()
+      before = stored(id)
+      held = for _ <- 1..1_001, do: Ecto.UUID.generate()
+
+      resp = heartbeat(conn, credential, %{"protocol_version" => 1, "held_leases" => held})
+
+      assert %{"error" => %{"code" => "unprocessable", "fields" => fields}} =
+               json_response(resp, 422)
+
+      assert fields == %{"held_leases" => ["has more than 1000 ids"]}
+      assert stored(id) == before
+    end
+
+    test "a held_leases list of 1,000 ids answers 200", %{conn: conn} do
+      {_id, credential} = enrolled()
+      held = for _ <- 1..1_000, do: Ecto.UUID.generate()
+
+      assert json_response(
+               heartbeat(conn, credential, %{"protocol_version" => 1, "held_leases" => held}),
+               200
+             )
+    end
+
     test "the int4 maximum is still a protocol_version", %{conn: conn} do
       {id, credential} = enrolled()
 

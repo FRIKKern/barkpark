@@ -17,7 +17,7 @@ defmodule BarkparkWeb.MutateController do
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
       opts =
         [source: :api, dry_run: dry_run, visibility: visibility, restore: restore] ++
-          exact_ids(conn) ++ scope
+          exact_ids(conn) ++ scope ++ [in_transaction: &Barkpark.Idempotency.mark_committed/0]
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch

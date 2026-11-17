@@ -98,11 +98,32 @@ func (c *Client) Enroll(ctx context.Context, token string, roots []string, capab
 	return result, err
 }
 
-func (c *Client) Heartbeat(ctx context.Context, capabilities map[string]any) error {
-	return c.do(ctx, http.MethodPost, "/v1/chat-host/heartbeat", true, map[string]any{
+// MaxHeldLeases is the most lease ids a heartbeat's held_leases may list: the
+// server refuses a longer list with 422 (task-bbb32ae64e56c1e0).
+const MaxHeldLeases = 1000
+
+// Heartbeat says the host is up and lists the leases it still holds: the
+// server renews only those of its running leases, so one this process gave up
+// on is closed by the server's expiry sweep (task-e8a91dd731695004). An empty
+// list is sent as [], meaning none; a server older than the key ignores it.
+//
+// Past MaxHeldLeases the list is left out, not cut: the server then renews
+// every live lease, as for a host that sends no list, where a cut list would
+// let leases this process still runs expire. A host running that many turns
+// is not one we expect.
+func (c *Client) Heartbeat(ctx context.Context, capabilities map[string]any, held []string) error {
+	if held == nil {
+		held = []string{}
+	}
+	body := map[string]any{
 		"protocol_version": 1,
 		"capabilities":     capabilities,
-	}, nil)
+		"held_leases":      held,
+	}
+	if len(held) > MaxHeldLeases {
+		delete(body, "held_leases")
+	}
+	return c.do(ctx, http.MethodPost, "/v1/chat-host/heartbeat", true, body, nil)
 }
 
 func (c *Client) Commands(ctx context.Context) ([]RemoteCommand, error) {

@@ -36,7 +36,9 @@ defmodule Barkpark.UserPrefs do
   @doc """
   Upsert one named value. `value` must be a JSON-encodable map (the
   changeset enforces the size cap); an invalid value or an over-length
-  key/dataset returns `{:error, changeset}` and writes nothing.
+  key/dataset returns `{:error, changeset}` and writes nothing. The answered
+  pref holds the value as stored: Postgres rewrites some numbers (1e20 comes
+  back as 100000000000000000000), and `etag/1` must hash what a read answers.
   """
   @spec put(binary(), binary(), String.t(), String.t(), map()) ::
           {:ok, UserPref.t()} | {:error, Ecto.Changeset.t()}
@@ -53,9 +55,127 @@ defmodule Barkpark.UserPrefs do
     |> UserPref.changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace, [:value, :updated_at]},
-      conflict_target: [:user_id, :workspace_id, :dataset, :key]
+      conflict_target: [:user_id, :workspace_id, :dataset, :key],
+      returning: [:value]
     )
   end
+
+  @doc """
+  Replace the whole value only if the stored one is still the one a tag in
+  `tags` names (task-f88365602c49be57), so a PUT that lands late cannot undo
+  a newer change. The compare and the write run under the row lock PATCH
+  takes. `"*"` names any stored value. An unset key matches no tag, so it is
+  refused and stays unset.
+
+  `{:error, {:precondition_failed, actual}}` (the stored value's tag, `nil`
+  when unset) on a mismatch and `{:error, changeset}` for a value or name
+  `put/5` refuses. Neither writes.
+  """
+  @spec put_if_match(binary(), binary(), String.t(), String.t(), map(), [String.t()]) ::
+          {:ok, UserPref.t()}
+          | {:error, {:precondition_failed, String.t() | nil} | Ecto.Changeset.t()}
+  def put_if_match(user_id, workspace_id, dataset, key, value, tags)
+      when is_map(value) and is_list(tags) do
+    scope = %{user_id: user_id, workspace_id: workspace_id, dataset: dataset, key: key}
+    changeset = UserPref.changeset(%UserPref{}, Map.put(scope, :value, value))
+
+    if changeset.valid?,
+      do: Repo.transaction(fn -> replace_if_match(scope, value, tags) end),
+      else: {:error, changeset}
+  end
+
+  defp replace_if_match(scope, value, tags) do
+    pref = locked_pref(scope)
+    actual = pref && etag(pref.value)
+
+    with true <- ("*" in tags and actual != nil) or actual in tags,
+         {:ok, pref} <-
+           pref |> UserPref.changeset(%{value: value}) |> Repo.update(returning: [:value]) do
+      pref
+    else
+      false -> Repo.rollback({:precondition_failed, actual})
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  @doc """
+  Create the value only if the key is unset (`If-None-Match: *`,
+  task-c1f9452e1b8216ee), so a create cannot overwrite a value another writer
+  made in between; `If-Match` cannot say "unset", since no tag names it.
+
+  The compare and the write are one statement: `INSERT … ON CONFLICT DO
+  NOTHING` on the key's unique index. A set key inserts nothing; of two creates
+  at once, the second waits on the first's insert, then inserts nothing; a
+  create waiting on a DELETE inserts once the DELETE commits. No separate
+  locked read is needed, as it is for If-Match, which compares a value.
+
+  `{:error, {:precondition_failed, actual}}` (the stored value's tag, read
+  after the refused insert; `nil` if it was deleted in between) when the key
+  is set, and `{:error, changeset}` for a value or name `put/5` refuses.
+  Neither writes. The answered pref holds the value as stored.
+  """
+  @spec put_if_absent(binary(), binary(), String.t(), String.t(), map()) ::
+          {:ok, UserPref.t()}
+          | {:error, {:precondition_failed, String.t() | nil} | Ecto.Changeset.t()}
+  def put_if_absent(user_id, workspace_id, dataset, key, value) when is_map(value) do
+    scope = %{user_id: user_id, workspace_id: workspace_id, dataset: dataset, key: key}
+    changeset = UserPref.changeset(%UserPref{}, Map.put(scope, :value, value))
+
+    if changeset.valid?, do: create_if_absent(scope, value), else: {:error, changeset}
+  end
+
+  defp create_if_absent(scope, value) do
+    case insert_unless_present(scope, value) do
+      {1, [pref]} -> {:ok, pref}
+      {0, []} -> {:error, {:precondition_failed, scope |> stored_pref() |> tag_of()}}
+    end
+  end
+
+  defp insert_unless_present(scope, value) do
+    now = DateTime.utc_now()
+    row = Map.merge(scope, %{value: value, inserted_at: now, updated_at: now})
+
+    Repo.insert_all(UserPref, [row],
+      on_conflict: :nothing,
+      conflict_target: [:user_id, :workspace_id, :dataset, :key],
+      returning: [:value]
+    )
+  end
+
+  defp stored_pref(scope), do: Repo.one(scope_query(scope))
+  defp tag_of(pref), do: pref && etag(pref.value)
+
+  defp scope_query(scope) do
+    from p in UserPref,
+      where:
+        p.user_id == ^scope.user_id and p.workspace_id == ^scope.workspace_id and
+          p.dataset == ^scope.dataset and p.key == ^scope.key
+  end
+
+  defp locked_pref(scope), do: scope |> scope_query() |> lock("FOR UPDATE") |> Repo.one()
+
+  @doc """
+  A stored value's tag, as the `ETag` header carries it: a quoted hash of its
+  JSON with every object's keys sorted, so one value has one tag on any
+  server and whatever wrote it. `nil` for an unset key.
+  """
+  @spec etag(map() | nil) :: String.t() | nil
+  def etag(nil), do: nil
+
+  def etag(value) when is_map(value) do
+    digest = :crypto.hash(:sha256, Jason.encode_to_iodata!(canonical(value)))
+    ~s("#{Base.encode16(binary_part(digest, 0, 16), case: :lower)}")
+  end
+
+  defp canonical(map) when is_map(map) do
+    map
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, item} -> {key, canonical(item)} end)
+    |> Jason.OrderedObject.new()
+  end
+
+  defp canonical(list) when is_list(list), do: Enum.map(list, &canonical/1)
+  defp canonical(other), do: other
 
   @type list_op ::
           {:push_front | :add | :remove | :set, String.t(), term(), pos_integer() | nil}
@@ -64,7 +184,7 @@ defmodule Barkpark.UserPrefs do
   Edit `value[field]` in one transaction under a row lock, so two tabs,
   devices or servers editing the same key both land. A missing row is
   created (except by `:remove`); the rest of `value` is kept. Answers the
-  new `value`.
+  new `value` as stored (see `put/5`).
 
     * `:set` — make `item` the value of top-level `field`, whatever it held
       (task-e016c981d677f3aa). The way to change one field of an object
@@ -147,7 +267,7 @@ defmodule Barkpark.UserPrefs do
   defp write_field(pref, field, item) do
     pref
     |> UserPref.changeset(%{value: Map.put(pref.value, field, item)})
-    |> Repo.update()
+    |> Repo.update(returning: [:value])
     |> case do
       {:ok, pref} -> {:ok, pref.value}
       error -> error
