@@ -392,9 +392,11 @@ defmodule Barkpark.ChatHosts do
       end
 
     case result do
-      # The key's turn is already this lease's: no second enqueue.
+      # The key's turn is already this lease's: no second lease. One no host
+      # has started goes back on the queue (`requeue_untaken/2`).
       {:reuse, lease} ->
-        {:ok, lease_info(lease)}
+        with :ok <- requeue_untaken(lease, %{command | idempotency_key: lease.command_key}),
+             do: {:ok, lease_info(lease)}
 
       {:ok, lease} ->
         with :ok <- enqueue(lease, %{command | idempotency_key: lease.command_key}),
@@ -414,6 +416,21 @@ defmodule Barkpark.ChatHosts do
       {:next, next_key} -> insert_lease(%{attrs | command_key: next_key})
     end
   end
+
+  # The queue is in memory, so a restart since the first send emptied it, and
+  # a reused lease no host has started would never run (task-b1e2f61ca03df99b).
+  # Putting it back is safe: the queue is keyed by lease id, so a lease still
+  # queued stays one entry. An exit is NOT `enqueue/2`'s "not sent" close: the
+  # first send handed this lease to the queue and a host may hold it, so ending
+  # it would let the next resend run it on a new link. The exit goes on, an
+  # unknown outcome, and the resend after it reuses the lease again.
+  defp requeue_untaken(
+         %ExecutionLease{status: "leased", last_cursor: 0, revoked_at: nil} = lease,
+         command
+       ),
+       do: Transport.enqueue(lease.host_id, lease.id, command)
+
+  defp requeue_untaken(_lease, _command), do: :ok
 
   defp insert_lease(attrs),
     do: %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert()
