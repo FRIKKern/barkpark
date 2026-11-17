@@ -1,18 +1,12 @@
 defmodule Barkpark.StudioChat.RecorderTurnOwnerTest do
   @moduledoc """
-  Only the turn's own lease ends it (task-5d1f639852927c4e).
+  Only the turn's own lease ends it (task-5d1f639852927c4e): what stays.
 
-  The named failure mode: `ChatHosts` decides whether an older lease's event is
-  superseded by reading whether a newer lease took a `turn_started`, before
-  that `turn_started` commits. The older close can therefore reach the
-  Recorder just after the newer turn began (a few ms; two turns at once), and
-  the Recorder, which could not tell leases apart, ended the newer turn: the
-  session left `working` and the newer reply's first text had no turn.
-
-  Each projected host event names its lease (`Recorder.TurnOwner`): a terminal
-  event from a lease that is not the turn's owner is not taken. What stays: the
-  owner's own close ends the turn, and a projection with no lease (a managed
-  runtime) ends it as it always did.
+  The owner's own close ends the turn, and a projection with no lease (a
+  managed runtime) ends it as it always did. These project straight to the
+  Recorder with made-up lease ids. The cases where a close is ignored or taken
+  from another lease read the owner's lease row, so they live with real leases
+  in `test/barkpark_web/controllers/chat_host_turn_owner_test.exs`.
   """
   use Barkpark.DataCase, async: false
 
@@ -23,7 +17,6 @@ defmodule Barkpark.StudioChat.RecorderTurnOwnerTest do
   alias Barkpark.StudioChat.Runtime.Event
 
   @older "11111111-1111-4111-8111-111111111111"
-  @newer "22222222-2222-4222-8222-222222222222"
 
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
@@ -49,30 +42,6 @@ defmodule Barkpark.StudioChat.RecorderTurnOwnerTest do
     {:ok, _} = StudioChat.create_session(%{id: sid, mode: "plan"})
     {:ok, recorder} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
     %{sid: sid, recorder: recorder}
-  end
-
-  test "an older lease's close projected after the newer turn_started does not end the newer turn",
-       %{sid: sid, recorder: recorder} do
-    project(recorder, sid, @older, :turn_started)
-    project(recorder, sid, @newer, :turn_started)
-    project(recorder, sid, @older, :turn_completed, terminal_state: :completed)
-
-    assert StudioChat.get_session(sid).status == "working"
-
-    project(recorder, sid, @newer, :text_delta, native: %{"params" => %{"delta" => "Newer."}})
-    project(recorder, sid, @newer, :turn_completed, terminal_state: :completed)
-
-    assert replies(sid) == ["Newer."]
-    assert StudioChat.get_session(sid).status == "active"
-  end
-
-  test "an older lease's final error projected after the newer turn_started does not end it",
-       %{sid: sid, recorder: recorder} do
-    project(recorder, sid, @older, :turn_started)
-    project(recorder, sid, @newer, :turn_started)
-    project(recorder, sid, @older, :error, terminal_state: :failed, error: %{"message" => "gone"})
-
-    assert StudioChat.get_session(sid).status == "working"
   end
 
   test "the turn's own lease still ends it", %{sid: sid, recorder: recorder} do

@@ -1112,6 +1112,25 @@ defmodule Barkpark.ChatHosts do
   def live_lease_for_host(_host, _lease_id, _now), do: nil
 
   @doc """
+  Is the lease `lease_id` still live: `leased` or `running`, not revoked, not
+  past its expiry? False for an id that is not a UUID or names no lease. The
+  Recorder asks before it ignores another lease's close (`Recorder.TurnOwner`).
+  """
+  @spec lease_live?(String.t(), DateTime.t()) :: boolean()
+  def lease_live?(lease_id, now \\ DateTime.utc_now()) when is_binary(lease_id) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, id} ->
+        ExecutionLease
+        |> where([l], l.id == ^id and l.status in ["leased", "running"])
+        |> where([l], is_nil(l.revoked_at) and l.expires_at > ^now)
+        |> Repo.exists?()
+
+      :error ->
+        false
+    end
+  end
+
+  @doc """
   The session's current live report fence, or nil (herd-s6). The Recorder's
   hand-back check calls this when its fence timer fires: a still-live lease
   (the host heartbeat extends `expires_at`) re-arms the suspension; nil means
