@@ -27,7 +27,7 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
-  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
+  alias Barkpark.StudioChat.{Recorder.TurnOwner, RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
   alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
@@ -576,8 +576,11 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
-  def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
-    state = ingest_runtime_event(state, event, false)
+  def handle_call({:project_runtime_event, %Event{} = event}, from, state),
+    do: handle_call({:project_runtime_event, event, nil}, from, state)
+
+  def handle_call({:project_runtime_event, %Event{} = event, lease_id}, _from, state) do
+    state = state |> lease_boundary(event, lease_id) |> ingest_runtime_event(event, false)
     {:reply, :ok, touch(state)}
   end
 
@@ -659,10 +662,10 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info(:replay_registered_host_events, state) do
     state =
       state.session_id
-      |> Barkpark.ChatHosts.replay_unprojected()
+      |> Barkpark.ChatHosts.replay_unprojected_by_lease()
       |> Enum.reduce(state, fn
-        {event_id, %Event{} = event}, acc ->
-          acc = ingest_runtime_event(acc, event, false)
+        {event_id, %Event{} = event, lease_id}, acc ->
+          acc = acc |> lease_boundary(event, lease_id) |> ingest_runtime_event(event, false)
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
 
@@ -1669,6 +1672,24 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_runtime_text(_state, _event), do: :ok
+
+  # A host event from a lease other than the open turn's owner (TurnOwner): the
+  # open turn's text is stored as its own row first, so two leases' replies are
+  # never one row (task-b0cbddc9d0f2e2aa).
+  defp lease_boundary(state, event, lease_id) do
+    case TurnOwner.boundary(state, event, lease_id) do
+      :same ->
+        state
+
+      {:split, open?} ->
+        persist_runtime_text(state, %{event | kind: :turn_completed, terminal_state: nil})
+
+        state
+        |> stable_settle(state.runtime_text)
+        |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
+    end
+    |> TurnOwner.adopt(lease_id)
+  end
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
   # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the
