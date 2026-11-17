@@ -872,10 +872,10 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
-			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v%s", draftID, pErr, orphanedDraftRemedyText(draftID, bareID)))
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v%s", draftID, pErr, mcpPublishFailureRemedy(pStatus, pErr, draftID, bareID)))
 		}
 		if pStatus < 200 || pStatus >= 300 {
-			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s%s", draftID, mutateErrorMessage(pStatus, pBody), orphanedDraftRemedyText(draftID, bareID)))
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s%s", draftID, mutateErrorMessage(pStatus, pBody), mcpPublishFailureRemedy(pStatus, nil, draftID, bareID)))
 		}
 		docStatus = "published"
 		warnBody = pBody

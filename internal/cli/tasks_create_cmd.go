@@ -413,7 +413,15 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 		why = "unclassified"
 	}
 	out.errf("  residue[%s]: the draft was NOT discarded — %s.", class, why)
-	renderOrphanedDraftRemedy(out, draftID, bareID)
+	if class == residueDiscardFailed {
+		// The publish was definitively refused: the row IS a draft only.
+		renderOrphanedDraftRemedy(out, draftID, bareID)
+		return
+	}
+	// Every other residue class is a publish that may have landed.
+	for _, line := range maybePublishedRemedyLines(draftID, bareID) {
+		out.errf("  %s", line)
+	}
 }
 
 // discardCreatedTaskDraft removes the draft this run just created, after the
