@@ -1114,6 +1114,39 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       assert walk(frames).outcome == :settled
     end
 
+    # The error arm stores the turn's text, then clears it (task-a326a7a270909052).
+    # The settle must compare against the text it stored, never the cleared ""
+    # (task-84dde11cfd9e3331): settle(seg, "") ends the stream degraded.
+    test "a turn ended by an error settles its stream against the text it stored",
+         %{recorder: recorder, sid: sid} do
+      send_frame(recorder, {:studio_chat_runtime_event, %Event{kind: :turn_started}})
+      chunks = ["## Before\n", "\nfirst para\n", "\nsecond para\n\n"]
+
+      for chunk <- chunks do
+        send_frame(
+          recorder,
+          {:studio_chat_runtime_event,
+           %Event{kind: :text_delta, native: %{"params" => %{"delta" => chunk}}}}
+        )
+      end
+
+      send_frame(
+        recorder,
+        {:studio_chat_runtime_event, %Event{kind: :error, terminal_state: :failed}}
+      )
+
+      frames = collect_stable()
+      assert stables(frames) != [], "the codex lane emitted no segments"
+      assert reasons(frames) == ["settled"]
+      assert walk(frames).outcome == :settled
+
+      assert [Enum.join(chunks)] ==
+               sid
+               |> StudioChat.list_messages(:global)
+               |> Enum.filter(&(&1.role == "assistant"))
+               |> Enum.map(& &1.source_markdown)
+    end
+
     test "FRAME ORDER on BOTH lanes: the raw bytes precede the stable frame that covers them",
          %{recorder: recorder, sid: sid} do
       # The defect this pins was real and user-visible: the runtime lane derived

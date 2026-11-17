@@ -249,10 +249,17 @@ defmodule Barkpark.ChatHosts do
   # `h.workspace_id == ^nil` comparison, which Ecto REFUSES ("comparing … with
   # nil is forbidden as it is unsafe") — crashing `resolve/2` and 500-ing every
   # registered-host send. Fail closed instead: no scope ⇒ no host (host_not_found).
+  # A host id is typed by a caller (the DELETE path, the Studio revoke button), so
+  # one that is not a UUID is no host too, not a CastError (task-34f964e9d66f48e4).
   def get_host(workspace_id, host_id) when is_binary(workspace_id) and is_binary(host_id) do
-    RegisteredHost
-    |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
-    |> Repo.one()
+    with {:ok, workspace_id} <- Ecto.UUID.cast(workspace_id),
+         {:ok, host_id} <- Ecto.UUID.cast(host_id) do
+      RegisteredHost
+      |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
+      |> Repo.one()
+    else
+      :error -> nil
+    end
   end
 
   def get_host(_workspace_id, _host_id), do: nil
@@ -512,7 +519,16 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  # `lease_id` comes from the host's request body: one that is not a UUID (or is
+  # missing) matches no lease, so it is the fence's `:lease_not_found`.
   defp accept_fenced_event(host, lease_id, epoch, cursor, key, event) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, lease_id} -> accept_cast_event(host, lease_id, epoch, cursor, key, event)
+      :error -> {:error, :lease_not_found}
+    end
+  end
+
+  defp accept_cast_event(host, lease_id, epoch, cursor, key, event) do
     Repo.transaction(fn ->
       lease = ExecutionLease |> where([l], l.id == ^lease_id) |> lock("FOR UPDATE") |> Repo.one()
 
@@ -790,15 +806,16 @@ defmodule Barkpark.ChatHosts do
   # lease the server withdrew ended the session's NEWER turn. The refusal is
   # `:stale_fence` (409, final for the host); nothing is written or projected.
   # A cursor at or below `last_cursor` still reaches `reconcile_event/4`, so a
-  # retry of a taken event stays a duplicate. Two closing kinds are not the
-  # end of a turn, so a lease whose last event is one of them takes the next
-  # event as before: `error` (codex app-server forwards a retrying error as
-  # `error` and the turn goes on, internal/chathost/local_handler.go) and
+  # retry of a taken event stays a duplicate. (A codex `error` that will retry
+  # leaves the lease running, `status_for/1`, so it takes the turn's events.)
+  # Two closing kinds still take the next event: `error` (one that will not
+  # retry is followed by the host's terminal when the app-server exits, "exited
+  # before turn completion", internal/chathost/local_handler.go) and
   # `control_completed` (a Stop's ack, followed by the turn's own close). Only
   # a `completed` lease pays the read. Even those are refused once the session
-  # has a newer lease (task-1eefeeb52ed19e73): Claude's `error` result is
-  # followed by the host's terminal when the provider exits, a person can send
-  # again in that gap, and the Recorder would end the newer turn.
+  # has a newer lease (task-1eefeeb52ed19e73): a person can send again in that
+  # gap, and the Recorder would end the newer turn. (After a Claude result the
+  # host sends no terminal: `runClaude` returns nil once it saw one.)
   @continuing_kinds ["error", "control_completed"]
   defp takes_new_event?(%ExecutionLease{status: "cancelled", last_cursor: current}, cursor)
        when is_integer(cursor) and cursor > current,
@@ -1086,8 +1103,16 @@ defmodule Barkpark.ChatHosts do
   # (non-revoked, unexpired, leased/running); when none exists, fall back to the
   # latest leased/running row regardless of expiry/revocation so
   # `validate_fence/3` can distinguish `:lease_expired` from `:stale_fence`
-  # instead of collapsing every failure into `:lease_not_found`.
+  # instead of collapsing every failure into `:lease_not_found`. The session id
+  # is the route's `:id`: one that is not a UUID has no lease.
   defp report_fence_lease(session_id, now) do
+    case Ecto.UUID.cast(session_id) do
+      {:ok, session_id} -> report_fence_lease_cast(session_id, now)
+      :error -> nil
+    end
+  end
+
+  defp report_fence_lease_cast(session_id, now) do
     base =
       ExecutionLease
       |> where([l], l.session_id == ^session_id)
@@ -1146,13 +1171,24 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  # A codex error that will retry is not the turn's end, for the lease as for
+  # the Recorder (task-7d3afdffa1fd4473): the lease stays running, so the
+  # heartbeat renews it, the expiry sweep ends it if the host dies, and the
+  # turn's own close after a Stop is taken.
+  defp status_for(%{"kind" => "error"} = event) do
+    retrying = %Barkpark.StudioChat.Runtime.Event{kind: :error, error: event["error"]}
+
+    if Barkpark.StudioChat.Runtime.Event.retrying_error?(retrying),
+      do: "running",
+      else: "completed"
+  end
+
   defp status_for(%{"kind" => kind})
        when kind in [
               "terminal",
               "completed",
               "turn_completed",
               "control_completed",
-              "error",
               "process_failed",
               "protocol_error"
             ],

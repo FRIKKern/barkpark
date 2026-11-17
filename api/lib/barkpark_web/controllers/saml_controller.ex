@@ -87,6 +87,8 @@ defmodule BarkparkWeb.SamlController do
                 ]
             )
 
+          # Any sign-in spends a path /login kept for the Cloud ticket or magic link.
+          conn = BarkparkWeb.LoginReturn.forget(conn)
           conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
 
           # studio-user-login: a BROWSER posting the IdP's auto-submit form
