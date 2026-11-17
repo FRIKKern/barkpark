@@ -218,6 +218,23 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       Idempotency.forget_held_key()
     end
 
+    # The mark is atomic with the data: the hook runs INSIDE the batch
+    # transaction, so a hook that raises rolls the batch back. Run after commit,
+    # it would leave the row and a key that was never marked.
+    test "a raising in_transaction hook rolls the batch back: nothing is written" do
+      title = unique("hook-raises")
+      batch = [%{"create" => %{"_type" => "post", "title" => title}}]
+
+      assert_raise RuntimeError, "x", fn ->
+        Barkpark.Content.apply_mutations(batch, @dataset,
+          workspace_id: TenancyFixtures.default_workspace_id!(),
+          in_transaction: fn -> raise "x" end
+        )
+      end
+
+      assert rows_titled(title) == 0, "the hook ran outside the transaction"
+    end
+
     test "with no key held, mark_committed is a no-op" do
       Idempotency.forget_held_key()
       assert Idempotency.mark_committed() == :none
