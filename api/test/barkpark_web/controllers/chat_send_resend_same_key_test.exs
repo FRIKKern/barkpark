@@ -98,13 +98,7 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     sid = create_host_session!(raw, host_id)
     key = "ssk-#{System.unique_integer([:positive])}"
     assert send_message(raw, sid, "stored", key).status == 202
-
-    Repo.query!("""
-    UPDATE idempotency_keys
-    SET state = 'pending', status_code = NULL, response_body = NULL,
-        inserted_at = inserted_at - interval '1 hour'
-    WHERE state = 'completed'
-    """)
+    reopen_completed_claims!()
 
     assert send_message(raw, sid, "stored", key).status == 202
     host = Repo.get!(RegisteredHost, host_id)
@@ -222,6 +216,59 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     assert length(leases(sid)) == 2
   end
 
+  # "Not sent" is a closed list of the server's own closes. A lease closed at
+  # cursor 1 any other way may have been taken by the host, so a resend must
+  # neither make link :2 nor call the queue.
+  test "a resend after the host closed the lease at cursor 1 runs nothing",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "hosted", key).status == 202
+    host = Repo.get!(RegisteredHost, host_id)
+    [lease] = leases(sid)
+
+    assert {:ok, :accepted} =
+             ChatHosts.accept_event(host, %{
+               lease_id: lease.id,
+               epoch: lease.epoch,
+               cursor: 1,
+               idempotency_key: "host-close-1",
+               event: %{"kind" => "terminal", "terminal_state" => "failed"}
+             })
+
+    assert %{status: "completed", last_cursor: 1} = Repo.get!(ExecutionLease, lease.id)
+    assert_resend_runs_nothing!(raw, sid, "hosted", key)
+  end
+
+  test "a resend after the server expired the lease at cursor 1 runs nothing",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "expired", key).status == 202
+    [lease] = leases(sid)
+
+    {1, _} =
+      from(l in ExecutionLease, where: l.id == ^lease.id)
+      |> Repo.update_all(set: [expires_at: DateTime.add(DateTime.utc_now(), -3600)])
+
+    {1, _} =
+      from(s in StudioChat.Session, where: s.id == ^sid)
+      |> Repo.update_all(set: [status: "working"])
+
+    assert ChatHosts.end_expired_turns(DateTime.utc_now(), ~U[2000-01-01 00:00:00Z]) >= 1
+    assert %{status: "completed", last_cursor: 1} = Repo.get!(ExecutionLease, lease.id)
+
+    assert Repo.exists?(
+             from(e in Barkpark.ChatHosts.ExecutionEvent,
+               where:
+                 e.lease_id == ^lease.id and e.cursor == 1 and
+                   e.idempotency_key == "server:lease_expired"
+             )
+           )
+
+    assert_resend_runs_nothing!(raw, sid, "expired", key)
+  end
+
   test "a send with no key is unchanged: one lease, one enqueue", %{host_id: host_id, raw: raw} do
     sid = create_host_session!(raw, host_id)
     assert send_message(raw, sid, "plain", nil).status == 202
@@ -246,6 +293,31 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     Repo.query!(
       "CREATE TRIGGER #{name} BEFORE INSERT ON #{table} FOR EACH ROW EXECUTE FUNCTION #{name}()"
     )
+  end
+
+  # The first send's request died before its answer was recorded: its
+  # completed claim goes back to a stale pending one, so the resend reaches the
+  # controller instead of replaying the stored 202.
+  defp reopen_completed_claims! do
+    Repo.query!("""
+    UPDATE idempotency_keys
+    SET state = 'pending', status_code = NULL, response_body = NULL,
+        inserted_at = inserted_at - interval '1 hour'
+    WHERE state = 'completed'
+    """)
+  end
+
+  # A same-key resend of a turn the host may have taken: 202, no new link,
+  # and the host queue (armed to exit) is never called.
+  defp assert_resend_runs_nothing!(raw, sid, content, key) do
+    reopen_completed_claims!()
+    stub = exit_next_transport_call!()
+    resend = send_message(raw, sid, content, key)
+
+    assert resend.status == 202, resend.resp_body
+    assert Process.whereis(@transport) == stub, "the resend called the host queue"
+    disarm_transport_stub!(stub)
+    assert length(leases(sid)) == 1, "the resend made a second link"
   end
 
   defp age_pending_claims! do
