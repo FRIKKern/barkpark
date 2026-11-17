@@ -482,6 +482,7 @@ defmodule BarkparkWeb.ChatController do
 
   # ── POST /v1/chat/sessions/:id/answer ──────────────────────────────────────
 
+  @unsent "the answer did not reach the agent; the question is pending, so send it again"
   @doc """
   Answer an AskUserQuestion row with the option(s) the human actually picked →
   204. Body `{request_id, answers}`, where `answers` maps a QUESTION STRING the
@@ -505,13 +506,11 @@ defmodule BarkparkWeb.ChatController do
   `host_execution_not_permitted` for a principal that is not an instance
   principal (`HostExecutionGate.authorize_turn/2`).
 
-  Past that gate, the 404 leg is the rest of the authorization and it is ONE oracle: a missing
-  session, another tenant's session (`fetch_scoped`), a request_id that names an
-  approval or plan row rather than a question, and a question already answered
-  (stale / double answer) are all indistinguishable `nil`s. A second POST
-  therefore cannot re-deliver a decision to the runtime — unlike `/approval`'s
-  idempotent 204, an `/answer` replay is honestly a 404, because "the answer you
-  are sending" is not the same request twice.
+  Past that gate, the 404 leg is the rest of the authorization, ONE oracle: a
+  missing session, another tenant's (`fetch_scoped`), a request_id naming an
+  approval or plan row, and a question already answered are indistinguishable
+  `nil`s, so a replay is a 404 and is never re-sent. A send that fails or exits
+  is a 503 `runtime_unavailable`, and the question stays pending for a resend.
   """
   def answer(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
@@ -526,18 +525,19 @@ defmodule BarkparkWeb.ChatController do
          {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
       updated = QuestionAnswer.updated_input(server_input, answers)
 
-      # Claimed before it is sent (task-52de5429fbdcb68c): an ask settled since the read
-      # above is a 404, never sent. Soft-matched (D32): no runtime or any return 204s.
+      # Claimed first (task-52de5429fbdcb68c); no live runtime still records it and 204s.
       deliver = fn ->
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
-             {:ok, session} <- Recorder.session_pid(recorder),
-             do: Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
-
-        :sent
+             {:ok, session} <- Recorder.session_pid(recorder) do
+          Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+        else
+          _no_runtime -> :ok
+        end
       end
 
       case ApprovalAnswer.settle(id, request_id, "allowed", deliver) do
         :delivered -> send_resp(conn, :no_content, "")
+        {:error, _} -> ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", @unsent)
         _not_pending -> not_found(conn)
       end
     else

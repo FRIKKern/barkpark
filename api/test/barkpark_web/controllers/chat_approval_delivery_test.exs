@@ -138,6 +138,57 @@ defmodule BarkparkWeb.ChatApprovalDeliveryTest do
     assert approval_status(sid) == "allowed"
   end
 
+  # task-2300a8d1ccb6a4d2 (rev26731 on #26910): /answer claims through the same
+  # ApprovalAnswer, but recorded a failed send as delivered (204) and turned an
+  # exiting one into a 404 while the question was still pending.
+  for first <- [:error, :exit] do
+    test "an /answer whose delivery #{if first == :error, do: "fails", else: "exits"} is a 503, the question stays pending and unclaimed, and a resend delivers once",
+         %{raw: raw, sid: sid} do
+      question!(sid)
+      script!([unquote(first), :ok])
+
+      resp = answer(raw, sid)
+      assert resp.status == 503, "the failed delivery answered #{resp.status}: #{resp.resp_body}"
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "runtime_unavailable"
+      refute_received {:delivered, _}
+      assert question_meta(sid)["approval_status"] == "pending"
+      refute Map.has_key?(question_meta(sid), "answer_claimed_at"), "the claim was not dropped"
+
+      assert answer(raw, sid).status == 204
+      assert_received {:delivered, "q-1"}
+      refute_received {:delivered, _}
+      assert question_meta(sid)["approval_status"] == "allowed"
+    end
+  end
+
+  defp question!(sid) do
+    {:ok, _} =
+      StudioChat.append_message(sid, %{
+        role: "question",
+        source_markdown: "AskUserQuestion",
+        metadata: %{
+          "request_id" => "q-1",
+          "tool_name" => "AskUserQuestion",
+          "input" => %{
+            "questions" => [%{"question" => "Which color?", "options" => [%{"label" => "Blue"}]}]
+          },
+          "approval_status" => "pending"
+        }
+      })
+  end
+
+  defp question_meta(sid), do: StudioChat.get_needs_you_message(sid, "q-1").metadata
+
+  defp answer(raw, sid) do
+    scoped_conn()
+    |> put_req_header("authorization", "Bearer #{raw}")
+    |> put_req_header("content-type", "application/json")
+    |> post(
+      "/v1/chat/sessions/#{sid}/answer",
+      Jason.encode!(%{request_id: "q-1", answers: %{"Which color?" => "Blue"}})
+    )
+  end
+
   defp script!(steps) do
     {:ok, script} = Agent.start_link(fn -> steps end)
     Application.put_env(:barkpark, :chat_approval_delivery_script, script)
