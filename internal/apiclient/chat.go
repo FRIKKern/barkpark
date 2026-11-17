@@ -797,10 +797,23 @@ func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 // it (charter D22 intact, ct-bl-question-updatedinput). A 404 means the question
 // is gone or already answered — an answer is never idempotent the way an
 // allow/deny is, so the caller must NOT retry it blindly.
+//
+// That 404 is an *AskSettledError with an empty Status: the route's not-found
+// oracle does not say whether the question was answered, canceled, or never
+// this session's, so the caller reloads rather than guesses.
 func (c *Client) AnswerChatQuestion(id, requestID string, answers map[string]any) error {
 	payload := map[string]any{"request_id": requestID, "answers": answers}
-	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK)
-	return err
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK, http.StatusNotFound)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotFound {
+		if gone := questionGone(body); gone != nil {
+			return gone
+		}
+		return humanAPIError(status, body)
+	}
+	return nil
 }
 
 // ChatEvents opens the session's SSE stream and dispatches each frame to

@@ -15,8 +15,13 @@ func settledAskStatus(err error) (string, bool) {
 // askSettledNotice says, in plain words, what happened to an ask the answer
 // came too late for. Nothing was sent in either case.
 func askSettledNotice(status string) string {
-	if status == "canceled" {
+	switch status {
+	case "canceled":
 		return "this ask was canceled before your answer reached it, so your answer was not sent"
+	case "":
+		// The /answer 404 does not say what happened to the question.
+		return "this question is no longer waiting for an answer, so your answer was not sent"
+	default:
+		return "this ask was already answered (" + status + "), so your answer was not sent"
 	}
-	return "this ask was already answered (" + status + "), so your answer was not sent"
 }
