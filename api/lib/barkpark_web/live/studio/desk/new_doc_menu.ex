@@ -151,7 +151,6 @@ defmodule BarkparkWeb.Studio.Desk.NewDocMenu do
       role="dialog"
       aria-labelledby={"#{@picker}-title"}
       class="dk-menu dk-new-doc"
-      style="position-anchor: --dk-new-doc; inset: auto; top: anchor(bottom); left: anchor(left); margin: 4px 0 0"
     >
       <header class="dk-new-doc-head">
         <h2 id={"#{@picker}-title"}>{gettext("Create new document")}</h2>
