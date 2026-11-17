@@ -722,6 +722,8 @@
         return deskScript("data-desk-field-actions", window.BarkparkDeskFieldActions);
       };
       fieldScript();
+      // A tags field's Enter (bp-desk-tags.js).
+      deskScript("data-desk-tags", window.BarkparkDeskTags);
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
       // A list's selection (bp-desk-bulk.js): the modified clicks, Escape, the toast.
