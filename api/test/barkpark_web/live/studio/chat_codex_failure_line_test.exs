@@ -66,8 +66,18 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
     }
 
     html = line(view, host_error)
-    assert html =~ "The codex turn hit an error and is retrying"
+    assert html =~ "The codex turn hit an error and is retrying — Reconnecting... 1/5."
     refute html =~ "ended with an error"
+  end
+
+  # task-1ea3bfbe6d47e2bb: a host's reason sits under error["error"].
+  test "a registered host's codex error that will not retry names its reason", %{view: view} do
+    host_error = %Event{
+      kind: :error,
+      error: %{"error" => %{"message" => "boom"}, "willRetry" => false}
+    }
+
+    assert line(view, host_error) =~ "The codex turn ended with an error — boom."
   end
 
   test "a codex error that will not retry still says the turn ended", %{view: view} do
