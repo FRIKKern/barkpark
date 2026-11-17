@@ -26,7 +26,16 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     * a call into ANOTHER project module (qualified by full name or through an
       alias, or bare to a name an `import`ed module defines) is followed ONE
       level: the called function and that module's own local calls from it.
-      A helper's own calls into a third module are not followed.
+      An import's `only:`/`except:` is respected, and a variable is never a
+      call.
+
+  Known greens, a streaming call this scan does not see:
+
+    * a helper's own call into a third module (one level only);
+    * `apply/3`, or any call whose module or function is a runtime value;
+    * a `defdelegate` in a helper: its target is not followed;
+    * a function a `use` injects (`use BarkparkWeb, :controller`): only what
+      the file itself writes is read.
 
   Mounts and streaming calls are recognised by `Barkpark.Test.IdempotencyMounts`
   (test/support), shared with the OpenAPI tripwire: a mount by full name or
@@ -209,22 +218,37 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     |> Map.new()
   end
 
+  # `{module, admits?}` per `import`: `admits?.(name)` is whether the import
+  # brings `name` in, after its `only:` or `except:` list.
   defp imports(ast, aliases) do
     {_, found} =
       Macro.prewalk(ast, [], fn
-        {:import, _, [{:__aliases__, _, segments} | _]} = node, acc ->
-          {node, [IdempotencyMounts.module(segments, aliases) | acc]}
+        {:import, _, [{:__aliases__, _, segments} | opts]} = node, acc ->
+          case IdempotencyMounts.module(segments, aliases) do
+            nil -> {node, acc}
+            module -> {node, [{module, import_filter(opts)} | acc]}
+          end
 
         node, acc ->
           {node, acc}
       end)
 
-    Enum.uniq(found)
+    found
   end
 
-  # `{module, name}` per qualified call or capture, and per bare call (or
-  # capture) of a non-local name, once for each imported module. Arity is
-  # ignored, so a same-named clause of another arity counts (fails closed).
+  defp import_filter([opts]) when is_list(opts) do
+    case {Keyword.get(opts, :only), Keyword.get(opts, :except)} do
+      {only, _} when is_list(only) -> &Keyword.has_key?(only, &1)
+      {_, except} when is_list(except) -> &(not Keyword.has_key?(except, &1))
+      _ -> fn _name -> true end
+    end
+  end
+
+  defp import_filter(_opts), do: fn _name -> true end
+
+  # `{module, name}` per qualified call or capture, and per bare CALL or
+  # capture (never a variable) of a non-local name an import brings in.
+  # Arity is ignored, so a same-named clause of another arity counts.
   defp helper_calls(body, aliases, imports, defs) do
     {_, found} =
       Macro.prewalk(body, [], fn
@@ -232,16 +256,24 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
         when is_atom(name) and is_list(args) ->
           {node, [{IdempotencyMounts.module(segments, aliases), name} | acc]}
 
-        {name, _, args} = node, acc when is_atom(name) and (is_list(args) or is_nil(args)) ->
-          if Map.has_key?(defs, name),
-            do: {node, acc},
-            else: {node, Enum.map(imports, &{&1, name}) ++ acc}
+        {:&, _, [{:/, _, [{name, _, ctx}, arity]}]} = node, acc
+        when is_atom(name) and is_atom(ctx) and is_integer(arity) ->
+          {node, imported(name, imports, defs) ++ acc}
+
+        {name, _, args} = node, acc when is_atom(name) and is_list(args) ->
+          {node, imported(name, imports, defs) ++ acc}
 
         node, acc ->
           {node, acc}
       end)
 
     found
+  end
+
+  defp imported(name, imports, defs) do
+    if Map.has_key?(defs, name),
+      do: [],
+      else: for({module, admits?} <- imports, admits?.(name), do: {module, name})
   end
 
   # The source AST of a module compiled from a file in this project (not deps,
@@ -468,6 +500,56 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
     refute action_streams?(ast, :create_message),
            "only the CALLED helper function counts; the module's other functions do not"
+  end
+
+  # A false red on someone else's PR: an `import ..., only:` that leaves the
+  # streaming function out, and a VARIABLE named like it, are not calls into it.
+  @tag :tmp_dir
+  test "MUTANT: an import's only:/except: and a same-named variable stay green",
+       %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantOnlyHelper")
+
+    for {prelude, call} <- [
+          {"import #{inspect(helper)}, only: [harmless: 1]", "reply = harmless(conn)\nreply"},
+          {"import #{inspect(helper)}, except: [reply: 1]", "reply(conn)"},
+          {"import #{inspect(helper)}", "reply = harmless(conn)\nreply"}
+        ] do
+      refute action_streams?(chat_controller_with(prelude, call), :create_message),
+             "wrongly red: #{prelude} / #{call}"
+    end
+
+    assert action_streams?(
+             chat_controller_with("import #{inspect(helper)}, only: [reply: 1]", "reply(conn)"),
+             :create_message
+           ),
+           "only: that names the streaming function still reaches it"
+
+    assert action_streams?(
+             chat_controller_with("import #{inspect(helper)}", "f = &reply/1\nf.(conn)"),
+             :create_message
+           ),
+           "a capture of an imported streaming function still reaches it"
+  end
+
+  # `alias __MODULE__.Inner` resolves to no module the scan can name: it is
+  # skipped, never a crash that reds an unrelated PR.
+  @tag :tmp_dir
+  test "a controller that aliases __MODULE__.Inner scans without crashing", %{tmp_dir: dir} do
+    path = Path.join(dir, "mutant_inner_alias_controller.ex")
+
+    File.write!(path, """
+    defmodule Barkpark.Test.MutantInnerAliasController do
+      defmodule Inner do
+        def go(conn), do: conn
+      end
+
+      alias __MODULE__.Inner
+      def create(conn, _params), do: Inner.go(conn)
+    end
+    """)
+
+    Code.compile_file(path)
+    refute streaming_module?(Barkpark.Test.MutantInnerAliasController)
   end
 
   @tag :tmp_dir
