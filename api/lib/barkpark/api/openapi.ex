@@ -216,7 +216,7 @@ defmodule Barkpark.Api.OpenApi do
   # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
   # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
   # (router.ex), and the chat send, via a `plug ... when action ==
-  # :create_message` in ChatController, which also binds the request body.
+  # :create_message` in ChatController, which also binds the request.
   # Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
@@ -229,9 +229,9 @@ defmodule Barkpark.Api.OpenApi do
   # router.ex and reds on either drift.
   @idempotent_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
 
-  # Templates whose mount binds the request body into the key
-  # (`bind_body: true`), so the spec also states the 422.
-  @body_bound_templates ["/v1/chat/sessions/:id/messages"]
+  # Templates whose mount binds the request (query and body) into the key
+  # (`bind_request: true`), so the spec also states the 422.
+  @request_bound_templates ["/v1/chat/sessions/:id/messages"]
 
   defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
     # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
@@ -255,7 +255,7 @@ defmodule Barkpark.Api.OpenApi do
               "collide on one key, and they expire after 24h. Generate ONE key per " <>
               "logical operation and reuse it across that operation's retries — a fresh " <>
               "key per attempt is exactly the double-write this header prevents." <>
-              body_bound_note(template),
+              request_bound_note(template),
           "schema" => %{"type" => "string"}
         }
       ]
@@ -266,11 +266,12 @@ defmodule Barkpark.Api.OpenApi do
 
   defp idempotency_param(_template, _method), do: []
 
-  defp body_bound_note(template) do
-    if Enum.any?(@body_bound_templates, &String.ends_with?(template, &1)),
+  defp request_bound_note(template) do
+    if Enum.any?(@request_bound_templates, &String.ends_with?(template, &1)),
       do:
-        " On this route the key is also bound to the request body: the same key " <>
-          "with a different body is refused 422 `idempotency_key_reused`, and a " <>
+        " On this route the key is also bound to the request (query string and " <>
+          "body): the same key with a different request is refused 422 " <>
+          "`idempotency_key_reused`, and a " <>
           "5xx answer is not remembered, so its retry runs.",
       else: ""
   end

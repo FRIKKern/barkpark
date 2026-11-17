@@ -16,7 +16,13 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     * the Idempotency-mounting pipelines are read out of `router.ex`'s AST, so a
       THIRD mount joins the scan automatically;
     * the routes are read out of `BarkparkWeb.Router.routes/0`;
-    * the streaming actions are read out of each controller's own AST.
+    * the streaming actions are read out of each controller's own AST;
+    * a controller that mounts the plug itself for some actions
+      (`plug ... when action == :x`, as ChatController does for the chat send,
+      because router.ex may not grow) is read out of the controllers' AST too.
+      Such a module may stream in OTHER actions, so the check there is per
+      action: from each mounted action, follow the module's own local calls,
+      and red if any of them reaches `send_chunked/2` or `send_file/3..5`.
 
   Only mutating verbs are scanned, because `Idempotency.call/2` returns the conn
   untouched for anything outside `POST/PUT/PATCH/DELETE`.
@@ -27,6 +33,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   use ExUnit.Case, async: true
 
   @router_source Path.join(__DIR__, "../../lib/barkpark_web/router.ex") |> Path.expand()
+  @controllers_dir Path.join(__DIR__, "../../lib/barkpark_web/controllers") |> Path.expand()
   @mutating_verbs ~w(post put patch delete)a
   @streaming_calls [:send_chunked, :send_file]
 
@@ -96,7 +103,161 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     found
   end
 
+  # ── controller-level mounts ─────────────────────────────────────────────
+
+  # `{module, actions, ast}` for every controller whose own body mounts the
+  # plug. `actions` is `:all` for an unguarded mount, else the actions named in
+  # its `when action == :x` / `when action in [...]` guard.
+  defp controller_mounts do
+    for path <- Path.wildcard(Path.join(@controllers_dir, "**/*.ex")),
+        {:ok, ast} = path |> File.read!() |> Code.string_to_quoted(),
+        actions = mounted_actions(ast),
+        actions != [] do
+      {module_name(ast), actions, ast}
+    end
+  end
+
+  defp module_name(ast) do
+    {_, name} =
+      Macro.prewalk(ast, nil, fn
+        {:defmodule, _, [{:__aliases__, _, segments} | _]} = node, nil ->
+          {node, Module.concat(segments)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    name
+  end
+
+  defp mounted_actions(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:plug, _, [{:__aliases__, _, segments} | rest]} = node, acc ->
+          if List.last(segments) == :Idempotency and :Plugs in segments,
+            do: {node, [guarded_actions(rest) | acc]},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    cond do
+      acc == [] -> []
+      :all in acc -> :all
+      true -> List.flatten(acc)
+    end
+  end
+
+  defp guarded_actions([{:when, _, [_opts, guard]}]), do: guard_actions(guard)
+  defp guarded_actions(_), do: :all
+
+  defp guard_actions(guard) do
+    {_, found} =
+      Macro.prewalk(guard, [], fn
+        {:==, _, [{:action, _, _}, action]} = node, acc when is_atom(action) ->
+          {node, [action | acc]}
+
+        {:in, _, [{:action, _, _}, actions]} = node, acc when is_list(actions) ->
+          {node, actions ++ acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  # Does `action` reach a streaming call through the module's own functions?
+  # Local calls only: a helper in ANOTHER module is not followed.
+  defp action_streams?(ast, action) do
+    defs = local_defs(ast)
+    reaches_streaming?([action], defs, MapSet.new())
+  end
+
+  defp reaches_streaming?([], _defs, _seen), do: false
+
+  defp reaches_streaming?([name | rest], defs, seen) do
+    if MapSet.member?(seen, name) do
+      reaches_streaming?(rest, defs, seen)
+    else
+      bodies = Map.get(defs, name, [])
+
+      Enum.any?(bodies, &calls_streaming?/1) or
+        reaches_streaming?(
+          Enum.flat_map(bodies, &local_calls(&1, defs)) ++ rest,
+          defs,
+          MapSet.put(seen, name)
+        )
+    end
+  end
+
+  defp local_defs(ast) do
+    {_, defs} =
+      Macro.prewalk(ast, %{}, fn
+        {kind, _, [head, body]} = node, acc when kind in [:def, :defp] ->
+          {node, Map.update(acc, def_name(head), [body], &[body | &1])}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    defs
+  end
+
+  defp def_name({:when, _, [head | _]}), do: def_name(head)
+  defp def_name({name, _, _}), do: name
+
+  # A call `name(...)`, or a capture `&name/n` (whose AST holds `{name, _, nil}`).
+  defp local_calls(body, defs) do
+    {_, calls} =
+      Macro.prewalk(body, [], fn
+        {name, _, args} = node, acc when is_atom(name) and (is_list(args) or is_nil(args)) ->
+          if Map.has_key?(defs, name), do: {node, [name | acc]}, else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    calls
+  end
+
+  # Mutating routes whose controller mounts the plug for that action.
+  defp controller_covered_routes do
+    mounts = controller_mounts()
+
+    for route <- BarkparkWeb.Router.__routes__(),
+        route.verb in @mutating_verbs and is_atom(route.plug_opts),
+        {module, actions, ast} <- mounts,
+        route.plug == module,
+        actions == :all or route.plug_opts in actions do
+      {route.verb, route.path, module, route.plug_opts, ast}
+    end
+  end
+
   # ── positive controls: prove the scan can SEE ───────────────────────────
+
+  test "CONTROL: the controller scan finds ChatController's mount for the chat send" do
+    assert Enum.any?(controller_mounts(), fn {module, actions, _} ->
+             module == BarkparkWeb.ChatController and actions == [:create_message]
+           end),
+           "the controller scan lost sight of ChatController's Idempotency mount. Found: " <>
+             inspect(Enum.map(controller_mounts(), fn {m, a, _} -> {m, a} end))
+
+    assert Enum.any?(controller_covered_routes(), fn {verb, _path, _m, action, _} ->
+             verb == :post and action == :create_message
+           end),
+           "POST /v1/chat/sessions/:id/messages is not in the controller-covered set"
+  end
+
+  test "CONTROL: the per-action walk sees ChatController's SSE action stream, not the send" do
+    {_, _, ast} = Enum.find(controller_mounts(), &(elem(&1, 0) == BarkparkWeb.ChatController))
+
+    assert action_streams?(ast, :events),
+           "ChatController.events/2 streams over SSE; a walk that cannot see it measures nothing"
+
+    refute action_streams?(ast, :create_message)
+  end
 
   test "CONTROL: the router scan finds the two known Idempotency pipelines" do
     pipelines = idempotency_pipelines()
@@ -147,6 +308,12 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     offenders =
       covered_mutating_routes()
       |> Enum.filter(fn {_verb, _path, module, _action} -> streaming_module?(module) end)
+
+    offenders =
+      offenders ++
+        for {verb, path, module, action, ast} <- controller_covered_routes(),
+            action_streams?(ast, action),
+            do: {verb, path, module, action}
 
     assert offenders == [],
            """

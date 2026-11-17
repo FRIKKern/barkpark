@@ -109,8 +109,8 @@ defmodule Barkpark.Idempotency do
     * `:in_progress` — a FRESH pending row is held by a concurrent request;
       caller returns 409 `idempotency_key_in_use`. Never re-executes.
     * `:mismatch` — the row was claimed under a different `scope`. A mount
-      that binds the request body into its scope gets this when one key is
-      reused for a different body; caller returns 422
+      that binds the request into its scope gets this when one key is
+      reused for a different request; caller returns 422
       `idempotency_key_reused`. Never re-executes and never replays.
 
   A stale pending row (crashed reservation older than `pending_ttl_seconds`) is
@@ -148,8 +148,8 @@ defmodule Barkpark.Idempotency do
         # Swept between our failed insert and this read — retry the whole claim.
         claim(hash, scope, DateTime.utc_now(), attempt + 1)
 
-      # One key, two scopes: the body-bound chat send reused a key for another
-      # body. A constant-scope mount (`"mutation"`) never reaches this clause.
+      # One key, two scopes: the request-bound chat send reused a key for
+      # another request. A constant-scope mount (`"mutation"`) never reaches this clause.
       %Key{scope: other} when other != scope ->
         :mismatch
 

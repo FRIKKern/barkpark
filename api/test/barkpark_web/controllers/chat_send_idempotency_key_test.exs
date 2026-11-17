@@ -9,8 +9,10 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
     * a repeat of the same key, for the same session, from the same token, with
       the same body, answers what the first answered (`Idempotency-Replay:
       true`) and dispatches nothing: one lease, one host turn, one user row;
-    * the same key with a different body is refused 422
-      `idempotency_key_reused`, and nothing is dispatched;
+    * the same key with a different request (body or query string) is
+      refused 422 `idempotency_key_reused`, and nothing is dispatched;
+    * every spelling of the session's path (upper-case id, trailing slash)
+      reaches the same key;
     * another token, or another session, never reaches the key;
     * a retry while the first is still being answered gets 409
       `idempotency_key_in_use`;
@@ -98,6 +100,50 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
     assert [%{command: %{payload: %{content: "first"}}}] = send_turns(host, sid)
     assert [_] = leases(sid)
     assert [%{source_markdown: "first"}] = StudioChat.list_messages(sid, :global)
+  end
+
+  # create_message reads query and body params together, so content sent in the
+  # query string must be bound as well, or a reused key drops the new message.
+  test "the same key with other content in the query string is refused",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    path = "/v1/chat/sessions/#{sid}/messages"
+    assert keyed_post(raw, path <> "?content=AAA", "key-query") |> json_response(202)
+
+    body = keyed_post(raw, path <> "?content=BBB", "key-query") |> json_response(422)
+    assert body["error"]["code"] == "idempotency_key_reused"
+
+    assert [_] = leases(sid)
+    assert [%{source_markdown: "AAA"}] = StudioChat.list_messages(sid, :global)
+  end
+
+  test "every spelling of the session's path reaches the same key",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    first = keyed_post(raw, "/v1/chat/sessions/#{sid}/messages", "key-path", %{content: "p"})
+    assert json_response(first, 202)
+
+    for path <- [
+          "/v1/chat/sessions/#{String.upcase(sid)}/messages",
+          "/v1/chat/sessions/#{sid}/messages/"
+        ] do
+      again = keyed_post(raw, path, "key-path", %{content: "p"})
+      assert again.status == 202, "#{path}: #{again.status} #{again.resp_body}"
+      assert get_resp_header(again, "idempotency-replay") == ["true"], path
+    end
+
+    assert [_] = leases(sid)
+    assert [_] = StudioChat.list_messages(sid, :global)
+  end
+
+  test "a map and a list of pairs never share a fingerprint" do
+    as_map = %{"a" => %{"b" => 1, "c" => 2}}
+    as_pairs = %{"a" => [["b", 1], ["c", 2]]}
+
+    refute IdempotencyPlug.bound_scope("s", as_map) == IdempotencyPlug.bound_scope("s", as_pairs)
+
+    assert IdempotencyPlug.bound_scope("s", %{"x" => 1, "y" => 2}) ==
+             IdempotencyPlug.bound_scope("s", %{"y" => 2, "x" => 1})
   end
 
   test "another token sending the same key and body is a new send",
@@ -271,6 +317,13 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
     conn = json_conn(raw)
     conn = if key, do: put_req_header(conn, "idempotency-key", key), else: conn
     post(conn, "/v1/chat/sessions/#{sid}/messages", Jason.encode!(body))
+  end
+
+  defp keyed_post(raw, path, key, body \\ %{}) do
+    raw
+    |> json_conn()
+    |> put_req_header("idempotency-key", key)
+    |> post(path, Jason.encode!(body))
   end
 
   defp send_turns(host, sid) do

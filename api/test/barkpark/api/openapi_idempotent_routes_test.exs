@@ -75,7 +75,7 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     ~r/^  pipeline :(\w+) do\n(.*?)^  end$/ms
     |> Regex.scan(source)
     |> Enum.filter(fn [_, _name, body] ->
-      # `)` or `,`: a mount WITH options (`scope:`, `bind_body:`) is a mount too.
+      # `)` or `,`: a mount WITH options (`scope:`, `bind_request:`) is a mount too.
       Regex.match?(~r/plug\(BarkparkWeb\.Plugs\.Idempotency[,)]/, body)
     end)
     |> Enum.map(fn [_, name, _body] -> String.to_atom(name) end)

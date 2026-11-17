@@ -16,11 +16,21 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   releases the claim so a retry can re-claim. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
-  `bind_body: true` (the chat send mount, in ChatController) adds a fingerprint of the parsed
-  request body to the claim's scope, so the same key sent with a different
-  body is refused 422 `idempotency_key_reused` instead of replaying an answer
-  to a request the client did not make. Without the option the scope is the
-  constant `:scope` string, as before.
+  `bind_request: true` (the chat send mount, in ChatController) binds the key
+  to the request the action will read, so the same key sent for another
+  request is refused 422 `idempotency_key_reused` instead of replaying an
+  answer to a request the client did not make:
+
+    * the claim's scope gains a SHA-256 of the params the action reads: query
+      string and body together, minus the path params (`conn.params` merges
+      all three, and a value in the query string must not escape the binding);
+    * the hashed path is the routed path: `path_info` joined (no trailing or
+      doubled slash) with each UUID segment in its cast, lower-case form, so
+      every spelling that reaches one session reaches one key.
+
+  Without the option the scope is the constant `:scope` string and the path is
+  the raw `request_path`, as before, so keys already stored for those mounts
+  keep matching.
   """
 
   import Plug.Conn
@@ -32,18 +42,19 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   @methods ~w(POST PUT PATCH DELETE)
 
   def init(opts) do
-    opts |> Keyword.put_new(:scope, "mutation") |> Keyword.put_new(:bind_body, false)
+    opts |> Keyword.put_new(:scope, "mutation") |> Keyword.put_new(:bind_request, false)
   end
 
   @doc """
-  The claim scope for a body-bound mount: `scope` plus a SHA-256 of the parsed
-  body. Map keys are sorted before hashing, so the key order a client happens
-  to send does not change the fingerprint.
+  The claim scope for a request-bound mount: `scope` plus a SHA-256 of `params`.
+  Map keys are sorted before hashing, so the key order a client happens to send
+  does not change the fingerprint. Maps are tagged, so a map and a list of
+  pairs never hash alike.
   """
   @spec bound_scope(String.t(), term()) :: String.t()
-  def bound_scope(scope, body_params) when is_binary(scope) do
+  def bound_scope(scope, params) when is_binary(scope) do
     digest =
-      body_params
+      params
       |> canonical()
       |> Jason.encode!()
       |> then(&:crypto.hash(:sha256, &1))
@@ -52,13 +63,30 @@ defmodule BarkparkWeb.Plugs.Idempotency do
     scope <> ":" <> digest
   end
 
+  # Every map becomes `%{"m" => sorted pairs}` and nothing else becomes a map,
+  # so an encoded object always marks a map: the form is one-to-one.
   defp canonical(%{__struct__: _} = struct), do: struct |> Map.from_struct() |> canonical()
 
   defp canonical(%{} = map),
-    do: map |> Enum.map(fn {k, v} -> [to_string(k), canonical(v)] end) |> Enum.sort()
+    do: %{"m" => map |> Enum.map(fn {k, v} -> [to_string(k), canonical(v)] end) |> Enum.sort()}
 
   defp canonical(list) when is_list(list), do: Enum.map(list, &canonical/1)
   defp canonical(other), do: other
+
+  @doc """
+  The path a request-bound mount hashes: `path_info` joined, with each segment
+  that casts as a UUID in its cast (lower-case) form.
+  """
+  @spec bound_path([String.t()]) :: String.t()
+  def bound_path(path_info) when is_list(path_info) do
+    "/" <>
+      Enum.map_join(path_info, "/", fn segment ->
+        case Ecto.UUID.cast(segment) do
+          {:ok, uuid} -> uuid
+          :error -> segment
+        end
+      end)
+  end
 
   def call(conn, opts) do
     with true <- conn.method in @methods,
@@ -76,8 +104,8 @@ defmodule BarkparkWeb.Plugs.Idempotency do
         unauthorized(conn)
 
       token ->
-        scope = claim_scope(conn, opts)
-        hash = Idempotency.hash_key(raw_key, token.id, conn.method, conn.request_path)
+        {scope, path} = claim_identity(conn, opts)
+        hash = Idempotency.hash_key(raw_key, token.id, conn.method, path)
 
         case Idempotency.claim(hash, scope) do
           :claimed -> register_complete(conn, hash, scope)
@@ -88,9 +116,15 @@ defmodule BarkparkWeb.Plugs.Idempotency do
     end
   end
 
-  defp claim_scope(conn, opts) do
+  defp claim_identity(conn, opts) do
     scope = Keyword.fetch!(opts, :scope)
-    if opts[:bind_body], do: bound_scope(scope, conn.body_params), else: scope
+
+    if opts[:bind_request] do
+      params = Map.drop(conn.params, Map.keys(conn.path_params))
+      {bound_scope(scope, params), bound_path(conn.path_info)}
+    else
+      {scope, conn.request_path}
+    end
   end
 
   defp unauthorized(conn) do
@@ -100,7 +134,7 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   # The handler NEVER runs on either refusal. `:idempotency_key_in_use` (409): a
   # concurrent request holds a fresh claim on this key, so the client retries
   # (Stripe-style). `:idempotency_key_reused` (422): the key was first used with
-  # a different body, so replaying that answer would describe another request.
+  # a different request, so replaying that answer would describe another one.
   defp refuse(conn, reason) do
     env = Errors.to_envelope({:error, reason}, conn)
 
