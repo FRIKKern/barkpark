@@ -53,6 +53,7 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     "lib/barkpark/plugins/forms/web/submission_controller.ex",
     "lib/barkpark/quiz/spawn_budget.ex",
     "lib/barkpark_web/channels/user_socket.ex",
+    "lib/barkpark_web/controllers/access_request_controller.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
     "lib/barkpark_web/live_meter.ex",

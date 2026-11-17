@@ -66,6 +66,7 @@ defmodule Barkpark.RateLimiter do
   #   Plugs.AuthWriteRateLimit             N / (N/3600)         = 3600s
   #   Forms SubmissionController (per IP)  20 / (20/3600)       = 3600s
   #   Forms SubmissionController (per site) 300 / (300/3600)    = 3600s
+  #   AccessRequestController (per user)   5 / (5/3600)          = 3600s
   #
   # HOW THE OLD 300_000 (5 min) WENT WRONG, because the shape repeats: it was
   # written when Plugs.RateLimit was the ONLY caller, and its comment said so —
