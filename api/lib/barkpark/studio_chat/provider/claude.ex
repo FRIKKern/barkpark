@@ -1605,8 +1605,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
       # map (question answers); a deny drops it. Pruned either way so the map
       # never grows unbounded across a long session.
+      # Keyed by the sink's id (U+FFFD for U+0000); the CLI gets back its own id.
       {ask, pending_asks} = Map.pop(state.pending_asks, request_id)
       original = ask && ask.input
+      wire_id = if ask, do: ask.request_id, else: request_id
 
       payload =
         case decision do
@@ -1625,7 +1627,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
           "type" => "control_response",
           "response" => %{
             "subtype" => "success",
-            "request_id" => request_id,
+            "request_id" => wire_id,
             "response" => payload
           }
         }) <> "\n"
@@ -2460,7 +2462,8 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # `updatedInput` (charter D32) — the answer seam never reconstructs it
       # from an untrusted round-trip. The tool_name rides along so the answer
       # seam can recognize an allowed ExitPlanMode (the plan-approve fact).
-      put_in(state.pending_asks[request_id], %{
+      put_in(state.pending_asks[sinkable(request_id)], %{
+        request_id: request_id,
         input: input,
         tool_name: Map.get(request, "tool_name", "tool")
       })
