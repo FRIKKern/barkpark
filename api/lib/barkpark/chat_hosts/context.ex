@@ -249,10 +249,17 @@ defmodule Barkpark.ChatHosts do
   # `h.workspace_id == ^nil` comparison, which Ecto REFUSES ("comparing … with
   # nil is forbidden as it is unsafe") — crashing `resolve/2` and 500-ing every
   # registered-host send. Fail closed instead: no scope ⇒ no host (host_not_found).
+  # A host id is typed by a caller (the DELETE path, the Studio revoke button), so
+  # one that is not a UUID is no host too, not a CastError (task-34f964e9d66f48e4).
   def get_host(workspace_id, host_id) when is_binary(workspace_id) and is_binary(host_id) do
-    RegisteredHost
-    |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
-    |> Repo.one()
+    with {:ok, workspace_id} <- Ecto.UUID.cast(workspace_id),
+         {:ok, host_id} <- Ecto.UUID.cast(host_id) do
+      RegisteredHost
+      |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
+      |> Repo.one()
+    else
+      :error -> nil
+    end
   end
 
   def get_host(_workspace_id, _host_id), do: nil
@@ -512,7 +519,16 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  # `lease_id` comes from the host's request body: one that is not a UUID (or is
+  # missing) matches no lease, so it is the fence's `:lease_not_found`.
   defp accept_fenced_event(host, lease_id, epoch, cursor, key, event) do
+    case Ecto.UUID.cast(lease_id) do
+      {:ok, lease_id} -> accept_cast_event(host, lease_id, epoch, cursor, key, event)
+      :error -> {:error, :lease_not_found}
+    end
+  end
+
+  defp accept_cast_event(host, lease_id, epoch, cursor, key, event) do
     Repo.transaction(fn ->
       lease = ExecutionLease |> where([l], l.id == ^lease_id) |> lock("FOR UPDATE") |> Repo.one()
 
@@ -1086,8 +1102,16 @@ defmodule Barkpark.ChatHosts do
   # (non-revoked, unexpired, leased/running); when none exists, fall back to the
   # latest leased/running row regardless of expiry/revocation so
   # `validate_fence/3` can distinguish `:lease_expired` from `:stale_fence`
-  # instead of collapsing every failure into `:lease_not_found`.
+  # instead of collapsing every failure into `:lease_not_found`. The session id
+  # is the route's `:id`: one that is not a UUID has no lease.
   defp report_fence_lease(session_id, now) do
+    case Ecto.UUID.cast(session_id) do
+      {:ok, session_id} -> report_fence_lease_cast(session_id, now)
+      :error -> nil
+    end
+  end
+
+  defp report_fence_lease_cast(session_id, now) do
     base =
       ExecutionLease
       |> where([l], l.session_id == ^session_id)
