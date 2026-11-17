@@ -14902,3 +14902,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "There are validation errors that need to be fixed before this document can be published"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Does not match \"%{pattern}\"-pattern"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Publishing is blocked."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "1 validation error"
+msgid_plural "%{count} validation errors"
+msgstr[0] ""
+msgstr[1] ""

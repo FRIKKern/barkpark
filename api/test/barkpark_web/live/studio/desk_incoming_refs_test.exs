@@ -202,12 +202,18 @@ defmodule BarkparkWeb.Studio.DeskIncomingRefsTest do
   end
 
   test "another inspector's name in the URL does not open this one", c do
-    view = open(c, "#{c.author};#{c.ada},inspect=sanity%2Fstructure%2Fvalidation")
+    view = open(c, "#{c.author};#{c.ada},inspect=sanity%2Fcomments")
 
     refute has_element?(view, @panel)
-    assert has_element?(view, ~s([data-pane-editing] aside[data-inspect="validation"][hidden]))
+    assert has_element?(view, ~s([data-pane-editing] aside[data-inspect="comments"][hidden]))
     # The desk does not draw that one, and says so.
     assert has_element?(view, "[data-pane-editing] [data-desk-left-out]")
+
+    # Validation is drawn (`ValidationPanel`): not this panel, and no note.
+    view = open(c, "#{c.author};#{c.ada},inspect=sanity%2Fstructure%2Fvalidation")
+    refute has_element?(view, @panel)
+    assert has_element?(view, ~s([data-pane-editing] aside[aria-label="Validation"]))
+    refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
   end
 
   test "the open inspector is not said to be left out; a revision beside it still is", c do

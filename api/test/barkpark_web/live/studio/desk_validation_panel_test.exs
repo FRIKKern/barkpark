@@ -57,6 +57,13 @@ defmodule BarkparkWeb.Studio.DeskValidationPanelTest do
               "validation" => %{"max" => 10, "level" => "warning"}
             },
             %{
+              "name" => "code",
+              "title" => "Code",
+              "type" => "string",
+              "group" => "content",
+              "validation" => %{"pattern" => "^[a-z]+$"}
+            },
+            %{
               "name" => "rating",
               "title" => "Rating",
               "type" => "number",
@@ -223,6 +230,75 @@ defmodule BarkparkWeb.Studio.DeskValidationPanelTest do
 
     assert view |> element(problem) |> render() |> text() ==
              "Links / External link / URL Required"
+  end
+
+  test "an array item's problem: the press names the row and replaces the URL", c do
+    links = [%{"_key" => "l0", "kind" => "externalLink", "url" => "x"}, %{"_key" => "l1"}]
+    view = open(c, draft(c, "row", %{"links" => links}), ",#{@inspect_param}")
+
+    press =
+      view
+      |> element(~s|#{@panel} button.problem[data-desk-problem='links[_key=="l1"].url']|)
+      |> render()
+
+    # The row by its index (the form's rows carry `data-row-index`).
+    assert press =~ ~s(&quot;item&quot;:&quot;1&quot;)
+    assert press =~ ~s(&quot;replace&quot;:true)
+
+    # A field outside an array pushes, and names no row.
+    plain = open(c, draft(c, "plain", %{"rating" => 9}), ",#{@inspect_param}")
+    press = plain |> element(~s(#{@panel} button.problem[data-desk-problem="rating"])) |> render()
+    assert press =~ ~s(&quot;replace&quot;:false)
+    assert press =~ ~s(&quot;item&quot;:null)
+  end
+
+  test "the close hands the focus to the browser, which never leaves it on the body", c do
+    view = open(c, draft(c, "close", %{"rating" => 9}), ",#{@inspect_param}")
+
+    close = view |> element(~s(#{@panel} button[data-desk-validation-close])) |> render()
+    assert close =~ "desk:validation-close"
+    # Not a focus on the header button: it is gone when no problem is left.
+    refute close =~ ~s(&quot;focus&quot;)
+
+    js = File.read!(Application.app_dir(:barkpark, "priv/static/assets/bp-desk-validation.js"))
+    assert js =~ ~s("desk:validation-close")
+    assert js =~ ~s([id$='-actions-button'])
+    # A closed array row is opened, and nothing hidden is asked to focus.
+    assert js =~ "details.bp-array-item"
+    assert js =~ "getClientRects"
+    # Under 600 px the jump closes the panel first.
+    assert js =~ "(max-width: 599px)"
+  end
+
+  test "a screen reader hears the errors: how many, the first, that Publish is blocked", c do
+    status = ~s(#{@pane} span.sr-only[role="status"][phx-update="ignore"])
+    said = fn view -> view |> element(status) |> render() end
+
+    view = open(c, draft(c, "heard", %{"rating" => 9, "limit" => 50}))
+    html = said.(view)
+
+    assert html =~
+             ~s(data-desk-validation-status="2 validation errors. Rating: Must be lower than or equal to 5. Publishing is blocked.")
+
+    # Opening a document says nothing: the words are no text of the page
+    # (the specs find a problem by its text), the browser writes them in
+    # when they change.
+    assert text(html) == ""
+
+    clean = open(c, draft(c, "quiet", %{"rating" => 3}))
+    assert said.(clean) =~ ~s(data-desk-validation-status="No validation errors")
+
+    js = File.read!(Application.app_dir(:barkpark, "priv/static/assets/bp-desk-validation.js"))
+    assert js =~ ~s(attributeFilter: ["data-desk-validation-status"])
+  end
+
+  test "a pattern rule with no message of its own names its pattern, as TanStack's", c do
+    view = open(c, draft(c, "pattern", %{"code" => "ABC"}), ",#{@inspect_param}")
+
+    assert view
+           |> element(~s(#{@panel} button.problem[data-desk-problem="code"]))
+           |> render()
+           |> text() == "Code Does not match &quot;/^[a-z]+$/&quot;-pattern"
   end
 
   test "an error greys Publish out and says why; a warning does not", c do

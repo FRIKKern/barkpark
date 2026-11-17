@@ -576,6 +576,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <%!-- Sanity's Validation button, where TanStack has it: after Share,
               and only while there is a problem to show or its panel is open. --%>
         <ValidationPanel.button_sheet />
+        <ValidationPanel.status
+          :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
+          id={"#{@view.id}-validation-status"}
+          problems={@desk_problems}
+        />
         <ValidationPanel.button
           id={"#{@view.id}-validation-button"}
           problems={@desk_problems}

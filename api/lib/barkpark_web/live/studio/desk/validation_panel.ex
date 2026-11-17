@@ -43,17 +43,15 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
           parents: [String.t()],
           message: String.t(),
           level: String.t(),
-          group: String.t() | nil
+          group: String.t() | nil,
+          item: String.t() | nil
         }
 
   @doc "Whether `pane` asks for this inspector."
   def open?(%{kind: :doc, inspect: "validation"}), do: true
   def open?(_pane), do: false
 
-  @doc """
-  The open document's problems in the form's order, a field's errors before
-  its warnings. None without a document or a schema.
-  """
+  @doc "The open document's problems in the form's order, a field's errors first."
   @spec problems(map()) :: [problem()]
   def problems(%{editor_doc: %{} = doc, editor_schema: %{} = schema}) do
     content = Map.get(doc, :content) || %{}
@@ -83,15 +81,17 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
 
   defp problem(finding, level, fields, content) do
     segments = finding.path |> to_string() |> String.split("/", trim: true)
-    {path, title, parents} = place(segments, fields, content, "", nil, [])
+    {path, title, parents, leaf} = place(segments, fields, content, "", nil, [], nil)
     first = Enum.find(fields, &(&1["name"] == List.first(segments)))
 
     %{
       path: path,
       title: title || List.first(segments) || "",
       parents: parents,
-      message: words(finding),
+      message: words(finding, leaf, level),
       level: level,
+      # The row of the array the field sits in, by index, for the jump.
+      item: Enum.find_value(segments, &(match?({_, ""}, Integer.parse(&1)) && &1)),
       group: group(first)
     }
   end
@@ -103,9 +103,10 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   # Walks a finding's path ("/links/0/url") down the schema and the stored
   # value. Answers the field's id in the form, its title, and the titles of
   # what it sits in: an array, the item's kind, an object.
-  defp place([], _fields, _value, path, title, parents), do: {path, title, Enum.reverse(parents)}
+  defp place([], _fields, _value, path, title, parents, leaf),
+    do: {path, title, Enum.reverse(parents), leaf}
 
-  defp place([seg | rest], fields, value, path, title, parents) do
+  defp place([seg | rest], fields, value, path, title, parents, _leaf) do
     field = Enum.find(List.wrap(fields), &(is_map(&1) and &1["name"] == seg))
     here = if path == "", do: seg, else: path <> "." <> seg
     parents = if title, do: [title | parents], else: parents
@@ -117,7 +118,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
         item(Integer.parse(index), more, field, list, here, name, parents)
 
       _ ->
-        place(rest, field && field["fields"], inner, here, name, parents)
+        place(rest, field && field["fields"], inner, here, name, parents, field)
     end
   end
 
@@ -135,15 +136,16 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
 
     case rest do
       [] ->
-        {at, name, Enum.reverse(parents)}
+        {at, name, Enum.reverse(parents), field}
 
       _ ->
-        place(rest, member_fields, row, at, nil, Enum.reject([kind, name], &is_nil/1) ++ parents)
+        up = Enum.reject([kind, name], &is_nil/1) ++ parents
+        place(rest, member_fields, row, at, nil, up, nil)
     end
   end
 
   defp item(_not_an_index, rest, field, list, here, name, parents),
-    do: place(rest, field && field["fields"], list, here, name, parents)
+    do: place(rest, field && field["fields"], list, here, name, parents, field)
 
   # The fields of an item and the title of its kind: one composite whose
   # `typeField` names the kind, or the member the item's `_type` names.
@@ -171,6 +173,18 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   defp member(_of, _row), do: {nil, nil}
 
   # The TanStack Studio's sentence for a finding's code.
+  # A pattern rule with no message of its own names its pattern.
+  defp words(finding, leaf, level) do
+    with %{code: :pattern_mismatch} <- finding,
+         level = if(level == "error", do: :error, else: :warning),
+         %{"pattern" => pattern} when is_binary(pattern) <-
+           Validation.rules_at(is_map(leaf) && leaf["validation"], level) do
+      gettext("Does not match \"%{pattern}\"-pattern", pattern: "/#{pattern}/")
+    else
+      _ -> words(finding)
+    end
+  end
+
   defp words(%{code: :required}), do: gettext("Required")
 
   defp words(%{code: :number_too_large, params: %{max: max}}),
@@ -209,7 +223,36 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
     end
   end
 
-  attr :id, :string, required: true, doc: "the button's id (`<pane>-validation-button`)"
+  attr :id, :string, required: true
+  attr :problems, :list, required: true
+
+  @doc """
+  What a screen reader hears when the errors change, in TanStack's words:
+  how many, the first one, that Publish is blocked. Opening says nothing.
+  """
+  def status(assigns) do
+    errors = Enum.filter(assigns.problems, &(&1.level == "error"))
+
+    said =
+      case errors do
+        [first | _] ->
+          count = ngettext("1 validation error", "%{count} validation errors", length(errors))
+          "#{count}. #{first.title}: #{first.message}. " <> gettext("Publishing is blocked.")
+
+        [] ->
+          gettext("No validation errors")
+      end
+
+    assigns = assign(assigns, :said, said)
+
+    # Empty when the document opens, as TanStack's: `bp-desk-validation.js`
+    # writes the words in when they change.
+    ~H"""
+    <span id={@id} class="sr-only" role="status" phx-update="ignore" data-desk-validation-status={@said}></span>
+    """
+  end
+
+  attr :id, :string, required: true
   attr :problems, :list, required: true
   attr :pane, :map, required: true
   attr :chain, :list, required: true
@@ -285,7 +328,9 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
           assigns.chain
           |> patch(assigns.index, %{inspect: nil}, assigns.base, assigns.perspective)
           |> JS.patch()
-          |> JS.focus(to: ~s([id="#{assigns.button}"]))
+          # Where the focus goes is the browser's: the header button may be
+          # gone once the panel is (`bp-desk-validation.js`).
+          |> JS.dispatch("desk:validation-close", detail: %{button: assigns.button})
       )
 
     ~H"""
@@ -306,6 +351,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
           phx-click={@close}
           phx-keydown={@close}
           phx-key="escape"
+          data-desk-validation-close
         >
           <BarkparkWeb.Icons.desk_icon name="close" size={21} />
         </button>
@@ -351,7 +397,10 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
         do: JS.push("select-group", value: %{group: problem.group || ""}),
         else: %JS{}
 
-    js |> JS.patch(to) |> JS.dispatch("desk:goto-field", detail: %{path: problem.path})
+    # A field inside an array item replaces the URL, as TanStack's.
+    js
+    |> JS.patch(to, replace: problem.item != nil)
+    |> JS.dispatch("desk:goto-field", detail: %{path: problem.path, item: problem.item})
   end
 
   defp patch(chain, index, params, base, perspective),
