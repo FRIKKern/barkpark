@@ -220,7 +220,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
       with %AccessRequest{} = row <- lock_pending(workspace_id, id),
            %User{email: email} = user <- Repo.get(User, row.user_id),
            {:ok, member} <- seat(workspace_id, email, role, actor),
-           :ok <- drop_invitation(row),
+           {:ok, _} <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", role, actor),
            :ok <- audit("access_request_approved", row, user, actor, %{"role" => role}) do
         %{access_request: admin_row(row, email, nil), member: member}
@@ -275,8 +275,10 @@ defmodule Barkpark.Tenancy.AccessRequests do
   # A pending invitation for the same seat is spent once the user is seated
   # (accepting it would only answer `:already_member`); the roster drops it.
   defp drop_invitation(%AccessRequest{workspace_id: ws, user_id: uid}) do
-    Repo.delete_all(from i in Invitation, where: i.workspace_id == ^ws and i.user_id == ^uid)
-    :ok
+    {deleted, _} =
+      Repo.delete_all(from i in Invitation, where: i.workspace_id == ^ws and i.user_id == ^uid)
+
+    {:ok, deleted}
   end
 
   defp decide(row, status, role, actor) do
