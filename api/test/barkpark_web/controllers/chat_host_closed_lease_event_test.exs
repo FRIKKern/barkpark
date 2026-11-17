@@ -22,7 +22,10 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
       event: codex app-server forwards a retrying error as kind `error` and
       the turn goes on (internal/chathost/local_handler.go, codexMessage).
       So does one closed by `control_completed`, a Stop's ack followed by the
-      turn's own close (recorder_host_interrupt_test.exs).
+      turn's own close (recorder_host_interrupt_test.exs). Either one is
+      refused once the session has a newer lease (task-1eefeeb52ed19e73):
+      Claude's `error` result is followed by the host's terminal after the
+      provider exits, and a person can send again in that gap.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -167,6 +170,63 @@ defmodule BarkparkWeb.ChatHostClosedLeaseEventTest do
 
     assert Repo.get!(ExecutionLease, lease.lease_id).last_cursor == 4
     refute StudioChat.get_session(sid).status == "working"
+  end
+
+  test "a host terminal after an error-closed lease is refused once a newer lease exists, and the session stays working",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    # Claude's error result; the provider has not exited yet.
+    failed = %{"kind" => "error", "terminal_state" => "failed", "error" => %{"is_error" => true}}
+    assert {:ok, :accepted} = event(ctx, old, 2, failed)
+
+    new = lease!(ctx, "new")
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+
+    assert StudioChat.get_session(sid).status == "working"
+    old_before = rows(old.lease_id)
+    new_before = rows(new.lease_id)
+
+    # The provider exits non-zero: the host's terminal follows its error.
+    assert {:error, :stale_fence} = event(ctx, old, 3, @dead_close)
+
+    assert rows(old.lease_id) == old_before, "the old lease takes no event"
+    assert rows(new.lease_id) == new_before
+    assert StudioChat.get_session(sid).status == "working", "the newer turn is not ended"
+    assert ChatHosts.replay_unprojected(sid) == []
+  end
+
+  test "a codex turn's close after a retrying error is refused once a newer lease exists",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+
+    assert {:ok, :accepted} =
+             event(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+
+    retrying = %{
+      "kind" => "error",
+      "error" => %{"willRetry" => true, "message" => "Reconnecting"}
+    }
+
+    assert {:ok, :accepted} = event(ctx, old, 2, retrying)
+
+    new = lease!(ctx, "new")
+
+    assert {:ok, :accepted} =
+             event(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+
+    old_before = rows(old.lease_id)
+
+    assert {:error, :stale_fence} =
+             event(ctx, old, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert rows(old.lease_id) == old_before
+    assert StudioChat.get_session(sid).status == "working"
   end
 
   # ── helpers ─────────────────────────────────────────────────────────────────
