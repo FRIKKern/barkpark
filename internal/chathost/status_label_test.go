@@ -594,7 +594,7 @@ func TestClaudeStatusLabelerReapsItsChildWhenTheCallEnds(t *testing.T) {
 		t.Fatalf("err = %v; want the call ended by its context once the helper ran, not by the %v backstop", err, labelBackstop)
 	}
 	pid, _ := strconv.Atoi(string(raw))
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+	if err := signalZero(pid); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("kill(%d, 0) = %v; want ESRCH: the side call's child was not reaped", pid, err)
 	}
 }
