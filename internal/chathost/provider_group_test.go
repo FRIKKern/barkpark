@@ -273,3 +273,18 @@ func TestTheFirstEventBoundEndsTheProvidersChild(t *testing.T) {
 	}
 	assertChildEnded(t, dir)
 }
+
+// A close that comes after the provider exited and was reaped finds no one
+// left in its group. That is a provider already done, not an error: close
+// returns nil (task-565de949dd1aa32f).
+func TestClosingASessionWhoseProviderAlreadyExitedSucceeds(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "exit 0")
+	ownProcessGroup(cmd)
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	session := &activeLocalSession{cmd: cmd}
+	if err := session.close(); err != nil {
+		t.Fatalf("close after the provider was reaped = %v; want nil", err)
+	}
+}
