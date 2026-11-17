@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   (`bp-array-focus.js`) reads the form's attribute at the moment of the
   press and puts it on the pressed control, so LiveView sends it with the
   event. `pressed/3` runs the handler only for an event `ours?/2` holds
-  for. The pickers finish their write in a message the page sends itself;
+  for, and reloads a page whose script is too old to name its presses. The pickers finish their write in a message the page sends itself;
   `own/2` and `own?/2` keep that message to the document it was built in.
 
   The name only narrows. What a socket may write is asked where it always
@@ -126,12 +126,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
 
   @doc """
   Runs `fun` for an event pressed in the document the editor holds now,
-  with the name taken off its params. For any other event nothing happens.
+  with the name taken off its params. An event that names another document
+  or none (an empty name) does nothing.
+
+  An event with no name key at all comes from a page whose script is older
+  than this rule (a tab left open across a deploy): the current script
+  always sends the key, empty when the page has no editor form. Nothing is
+  written and the page is sent to its own address with a full page load, so
+  it gets the current script and its next press is named.
   """
   def pressed(params, socket, fun) when is_function(fun, 2) do
-    if ours?(params, socket),
-      do: fun.(Map.drop(params, [@key, @end_key]), socket),
-      else: {:noreply, socket}
+    cond do
+      not is_map(params) -> {:noreply, socket}
+      not is_map_key(params, @key) -> {:noreply, reload(socket)}
+      ours?(params, socket) -> fun.(Map.drop(params, [@key, @end_key]), socket)
+      true -> {:noreply, socket}
+    end
+  end
+
+  # The address is the one the Studio's chrome keeps for every page it
+  # draws. A socket without one (built by hand) is left as it is.
+  defp reload(socket) do
+    case socket.assigns[:current_path] do
+      "/" <> _ = path -> Phoenix.LiveView.redirect(socket, to: path)
+      _ -> socket
+    end
   end
 
   @doc """

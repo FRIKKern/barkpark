@@ -377,8 +377,8 @@
 // form. The server writes one only into the document it was pressed in
 // (`PostIdentity`), so the pressed control is given the form's own mark,
 // read at the press, and LiveView sends it with the event as a
-// `phx-value-`. A press with no editor form on the page gets no mark and
-// is not written.
+// `phx-value-`. A press with no editor form on the page gets an empty mark
+// and is not written.
 (function () {
   "use strict";
 
@@ -401,8 +401,9 @@
       if (!el || !writes(el.getAttribute(attr))) return;
       var form = document.getElementById("editor-form");
       var doc = form ? form.getAttribute(MARK) : null;
-      if (doc) el.setAttribute(MARK, doc);
-      else el.removeAttribute(MARK);
+      // Always present, empty with no form: a press with no mark at all is
+      // how the server knows a page older than this script, and reloads it.
+      el.setAttribute(MARK, doc || "");
     };
   }
 

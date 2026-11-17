@@ -197,21 +197,35 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
         assert fields_of(stored(c, c.a)) == fields_of(untouched(c, 1))
       end
 
-      test "#{surface}: #{label} with no document named, or a made-up one, changes nothing", c do
+      test "#{surface}: #{label} that names another document, or a made-up one, changes nothing",
+           c do
         {_label, event, params, _change} = Enum.at(presses(c), @index)
         {view, _sel} = open(c, @surface, c.a)
 
         for mark <- [
-              %{},
               %{"_bp_doc" => c.a},
               %{"_bp_doc" => ""},
               %{"_bp_doc" => [@dataset, c.type, c.a]},
               %{"_bp_doc" => PostIdentity.value(@dataset, c.type, c.b)},
               %{"_bp_doc" => PostIdentity.value("other", c.type, c.a)}
             ] do
-          render_click(view, event, Map.merge(params, mark))
+          # Not a reload either: the page stays.
+          assert is_binary(render_click(view, event, Map.merge(params, mark)))
           settle(view)
+
+          # Asked after each press: two moves put a list back as it was.
+          assert fields_of(stored(c, c.a)) == fields_of(untouched(c, 1))
         end
+      end
+
+      # A page whose script is older than the rule sends no mark at all.
+      test "#{surface}: #{label} with no mark at all writes nothing and reloads the page", c do
+        {_label, event, params, _change} = Enum.at(presses(c), @index)
+        {view, _sel} = open(c, @surface, c.a)
+        {url, _sel} = Map.fetch!(c, @surface)
+
+        assert {:error, {:redirect, %{to: to}}} = render_click(view, event, params)
+        assert URI.decode(to) == URI.decode(url.(c.a))
 
         assert fields_of(stored(c, c.a)) == fields_of(untouched(c, 1))
       end
@@ -290,7 +304,9 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
                end)
     end
 
-    assert {:noreply, socket} ==
-             PostIdentity.pressed(%{"field" => "tags"}, socket, fn _, _ -> flunk("ran") end)
+    for none <- [%{"field" => "tags"}, %{"field" => "tags", "_bp_doc" => ""}] do
+      assert {:noreply, socket} ==
+               PostIdentity.pressed(none, socket, fn _, _ -> flunk("ran") end)
+    end
   end
 end

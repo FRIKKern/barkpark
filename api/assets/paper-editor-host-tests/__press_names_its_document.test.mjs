@@ -81,12 +81,21 @@ check("the mark is the form's at the press: the same control pressed in the next
   assert.equal(press("add"), B);
 });
 
-check("with no editor form on the page a press carries no mark, not the last one", () => {
+check("with no editor form on the page a press carries an empty mark: never the last one, never none", () => {
   mount(A);
   assert.equal(press("pick"), A);
   document.getElementById("editor-form").remove();
-  assert.equal(press("pick"), null);
-  assert.equal(submit("upload-form"), null);
+  assert.equal(press("pick"), "");
+  assert.equal(submit("upload-form"), "");
+});
+
+check("a control drawn after the page loaded, in the form or in a component outside it, is named too", () => {
+  mount(A);
+  const form = document.getElementById("editor-form");
+  form.insertAdjacentHTML("beforeend", `<ol><li><button id="late" type="button" phx-click="array_op" phx-target="3" phx-value-action="remove_row">x</button></li></ol>`);
+  document.body.insertAdjacentHTML("beforeend", `<div data-phx-component="7"><div id="late-pick" phx-click="select-media" phx-target="7"><img id="late-img"></div></div>`);
+  assert.equal(press("late"), A);
+  assert.equal(press("late-img"), A);
 });
 
 check("a press or a submit that is not one of these is left as it is", () => {
