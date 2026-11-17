@@ -39,7 +39,10 @@ defmodule BarkparkWeb.Plugs.RequireOrgAdmin do
   @hint "Only an admin of every workspace in the organization can change it. " <>
           "Moving a workspace also needs admin of every workspace in the organization " <>
           "it leaves, or of the workspace itself when it is in none. An organization " <>
-          "with no workspace needs a token on BARKPARK_OPERATOR_TOKEN_IDS."
+          "with no workspace needs a token on BARKPARK_OPERATOR_TOKEN_IDS. Setting the " <>
+          "operator allowlist closes these routes, and every other route behind it, " <>
+          "to any admin not on it, including an admin of every workspace in the " <>
+          "organization."
 
   def init(opts), do: opts
 

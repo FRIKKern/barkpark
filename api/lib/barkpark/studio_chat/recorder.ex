@@ -1356,6 +1356,8 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp record_result(session_id, ev) do
+    ev = EventText.replace_nul(ev)
+
     StudioChat.record_result_metrics(session_id, %{
       input_tokens: get_in(ev, ["usage", "input_tokens"]),
       output_tokens: get_in(ev, ["usage", "output_tokens"]),
