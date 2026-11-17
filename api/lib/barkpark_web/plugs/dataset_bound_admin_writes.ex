@@ -4,7 +4,8 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   seating, re-roling and removing members, inviting and withdrawing
   invitations, minting, revoking and rotating tokens, setting and deleting run
   secrets (flat and scoped), the email form of a login ticket and the Cloud
-  seat repairs (deprovision, seat restore).
+  seat repairs (deprovision, seat restore), and deleting, archiving,
+  restoring or reinstating a whole workspace.
 
   The twin of `BarkparkWeb.Plugs.DatasetBoundAdminReads`, on the same
   predicate (`DatasetBoundAdminReads.bound_admin?/1`: a token minted with an
@@ -21,7 +22,8 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
       before the action runs, so nothing changes.
 
   Exempt in both modes, and not recorded: a bound token revoking ITSELF
-  (`own_token_param:` names the path param that holds the target token id).
+  (`own_token_param:` names the path param that holds the target token id;
+  only revoke routes pass it, never rotate).
   Barkpark Cloud's admin-token rotation revokes the old token with the old
   token; refusing that would leave a box half rotated.
 
@@ -63,7 +65,7 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
       not applies?(conn, opts.only_with) -> conn
       own_token?(conn, token, opts.own) -> conn
       DatasetBoundAdminReads.mode() == :enforce -> refuse(conn)
-      true -> Plug.Conn.register_before_send(conn, &after_write(&1, token, opts.surface))
+      true -> observe(conn, token, opts.surface)
     end
   end
 
@@ -82,30 +84,45 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   defp own_token?(_conn, _token, nil), do: false
   defp own_token?(conn, %{id: id}, param), do: conn.path_params[param] == id
 
+  # The workspace is named before the action runs: a deleted workspace can no
+  # longer be looked up by its slug afterwards.
+  defp observe(conn, token, surface) do
+    ws_id = workspace_id(conn, token)
+    Plug.Conn.register_before_send(conn, &after_write(&1, token, surface, ws_id))
+  end
+
   # Only a write that answered: a refusal changed nothing.
-  defp after_write(%Plug.Conn{status: status} = conn, token, surface)
+  defp after_write(%Plug.Conn{status: status} = conn, token, surface, ws_id)
        when status in 200..299 do
-    record(token.id, surface, route(conn), workspace_id(conn, token))
+    record(token.id, surface, route(conn), ws_id)
     conn
   end
 
-  defp after_write(conn, _token, _surface), do: conn
+  defp after_write(conn, _token, _surface, _ws_id), do: conn
 
   defp route(conn) do
     controller = conn.private |> Map.get(:phoenix_controller) |> inspect()
     "#{conn.method} #{controller}.#{Map.get(conn.private, :phoenix_action)}"
   end
 
-  # A `/w/:ws/p/:proj` route resolved its workspace; a flat route records the
-  # token's own.
-  defp workspace_id(%Plug.Conn{path_params: %{"project_slug" => _}} = conn, _token) do
-    case conn.assigns[:current_workspace] do
-      %{id: id} -> id
-      _ -> nil
-    end
-  end
+  # A `/w/:ws/p/:proj` route resolved its workspace. A flat route that names a
+  # workspace slug (delete, archive, restore, reinstate) did not: its
+  # `current_workspace` is the stamped Default, so the slug is looked up.
+  # Otherwise: the token's own.
+  defp workspace_id(%Plug.Conn{path_params: %{"project_slug" => _}} = conn, _token),
+    do: id_of(conn.assigns[:current_workspace])
+
+  defp workspace_id(%Plug.Conn{path_params: %{"workspace_slug" => slug}}, _token)
+       when is_binary(slug),
+       do: id_of(Barkpark.Tenancy.get_workspace_by_slug(slug))
+
+  defp workspace_id(%Plug.Conn{path_params: %{"slug" => slug}}, _token) when is_binary(slug),
+    do: id_of(Barkpark.Tenancy.get_workspace_by_slug(slug))
 
   defp workspace_id(_conn, token), do: token.workspace_id
+
+  defp id_of(%{id: id}), do: id
+  defp id_of(_), do: nil
 
   defp record(token_id, surface, route, workspace_id) do
     Logger.warning(

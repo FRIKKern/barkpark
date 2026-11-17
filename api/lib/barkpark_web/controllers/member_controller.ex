@@ -729,6 +729,11 @@ defmodule BarkparkWeb.MemberController do
 
   plug(
     BarkparkWeb.Plugs.DatasetBoundAdminWrites,
-    [surface: "tokens_write", own_token_param: "id"] when action in [:revoke_token, :rotate_token]
+    [surface: "tokens_write", own_token_param: "id"] when action in [:revoke_token]
+  )
+
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write"] when action in [:rotate_token]
   )
 end

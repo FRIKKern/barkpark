@@ -97,7 +97,11 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     "set a scoped secret",
     "delete a scoped secret",
     "set a flat secret",
-    "delete a flat secret"
+    "delete a flat secret",
+    # Last, in this order: the unbound control runs them on one workspace.
+    "archive the workspace",
+    "restore the workspace",
+    "delete the workspace"
   ]
 
   defp write(ctx, "seat a member") do
@@ -184,6 +188,31 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
 
     {:flat, "secrets_write", 200,
      {:delete, "/v1/secrets/BW_DEL_GLOBAL", %{}, fn -> is_nil(Secrets.get("BW_DEL_GLOBAL")) end}}
+  end
+
+  defp write(ctx, "archive the workspace") do
+    {:ws, "workspace_write", 200,
+     {:post, "/api/workspaces/#{ctx.ws.slug}/archive", %{}, fn -> archived?(ctx.ws) end}}
+  end
+
+  defp write(ctx, "restore the workspace") do
+    unless archived?(ctx.ws), do: {:ok, _} = Tenancy.archive_workspace(ctx.ws)
+
+    {:ws, "workspace_write", 200,
+     {:post, "/api/workspaces/#{ctx.ws.slug}/restore", %{}, fn -> not archived?(ctx.ws) end}}
+  end
+
+  defp write(ctx, "delete the workspace") do
+    {:ws, "workspace_write", 200,
+     {:delete, "/api/workspaces/#{ctx.ws.slug}", %{},
+      fn -> is_nil(Tenancy.get_workspace_by_slug(ctx.ws.slug)) end}}
+  end
+
+  defp archived?(ws) do
+    case Repo.get(Tenancy.Workspace, ws.id) do
+      %{archived_at: at} -> not is_nil(at)
+      nil -> false
+    end
   end
 
   defp raw_for(ctx, :ws, :bound), do: ctx.bound
@@ -283,6 +312,46 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     conn = send_as(ctx.bound.raw, :post, "/v1/auth/login-tickets", %{})
     assert conn.status == 201, conn.resp_body
     assert records() == []
+  end
+
+  defp rotate_self(ctx) do
+    send_as(ctx.bound.raw, :post, ctx.base <> "/v1/tokens/" <> ctx.bound.id <> "/rotate", %{})
+  end
+
+  test "enforce: a bound admin token may not rotate itself", ctx do
+    enforce!()
+    before = token_count()
+    conn = rotate_self(ctx)
+    assert conn.status == 403, conn.resp_body
+    assert Jason.decode!(conn.resp_body)["error"]["reason"] == "dataset_not_bound"
+    assert token_count() == before
+    assert records() == []
+  end
+
+  test "observe: a bound admin token rotating itself goes through and is recorded", ctx do
+    before = token_count()
+    conn = rotate_self(ctx)
+    assert conn.status == 201, conn.resp_body
+    assert token_count() == before + 1
+    assert [%{actor_id: id, metadata: %{"surface" => "tokens_write"}}] = records()
+    assert id == ctx.bound.id
+  end
+
+  test "a successor minted or rotated by a bound token keeps the binding", ctx do
+    minted =
+      send_as(ctx.bound.raw, :post, ctx.base <> "/v1/tokens/elevated", %{
+        label: "successor",
+        permissions: ["read", "write", "admin"]
+      })
+      |> json_response(201)
+
+    rotated = rotate_self(ctx) |> json_response(201)
+
+    for %{"id" => id} <- [minted, rotated] do
+      token = Repo.get!(ApiToken, id)
+      assert token.dataset_bound == true
+      assert token.dataset == "production"
+    end
   end
 
   for mode <- [:observe, :enforce] do
