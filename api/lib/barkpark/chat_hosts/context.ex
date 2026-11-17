@@ -535,7 +535,7 @@ defmodule Barkpark.ChatHosts do
       case validate_fence(lease, host, epoch) do
         :ok ->
           if takes_new_event?(lease, cursor),
-            do: reconcile_event(lease, cursor, key, event),
+            do: lease |> reconcile_event(cursor, key, event) |> unless_superseded(),
             else: Repo.rollback(:stale_fence)
 
         # The host's close comes after its lease expired. The fence still
@@ -554,6 +554,9 @@ defmodule Barkpark.ChatHosts do
     |> case do
       {:ok, {:accepted, execution_event, lease}} ->
         project_event(execution_event, lease)
+        {:ok, :accepted}
+
+      {:ok, :superseded} ->
         {:ok, :accepted}
 
       {:ok, {:ended, execution_event, lease}} ->
@@ -836,6 +839,41 @@ defmodule Barkpark.ChatHosts do
   end
 
   defp takes_new_event?(_lease, _cursor), do: true
+
+  # An event a lease takes while a newer lease of its session has a turn open
+  # (it took a `turn_started` and is still `leased`/`running`) is stored but
+  # never projected or broadcast (task-5831f8e55c7649dd). The older lease can
+  # still be running: another host, or a Go host older than #24702 (which does
+  # not refuse a second turn), starts the newer turn. The Recorder cannot tell
+  # leases apart, so the older text would land in the newer reply and the older
+  # close would end the newer turn. Taking the event keeps the older host's
+  # turn and lease closing as they would.
+  #
+  # The test is a newer turn that is still open, not a newer lease: a Stop's
+  # lease is newer too, and the turn it stops must still end; and once the
+  # newer turn has closed, the older one is the session's again and its reply
+  # is stored (chat_host_closed_lease_event_test.exs). It does not cover older
+  # text taken BEFORE the newer turn_started: that was projected when it came,
+  # and the Recorder still joins it to the newer reply.
+  defp unless_superseded({:accepted, execution_event, lease} = accepted) do
+    if superseded?(lease) do
+      mark_projected(execution_event.id)
+      :superseded
+    else
+      accepted
+    end
+  end
+
+  defp unless_superseded(other), do: other
+
+  defp superseded?(%ExecutionLease{} = lease) do
+    ExecutionEvent
+    |> join(:inner, [e], l in ExecutionLease, on: l.id == e.lease_id)
+    |> where([e, l], l.workspace_id == ^lease.workspace_id and l.session_id == ^lease.session_id)
+    |> where([e, l], l.inserted_at > ^lease.inserted_at and e.kind == "turn_started")
+    |> where([e, l], l.status in ["leased", "running"])
+    |> Repo.exists?()
+  end
 
   # On the (workspace_id, session_id) index.
   defp newer_lease?(%ExecutionLease{} = lease) do

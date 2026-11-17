@@ -216,7 +216,7 @@ defmodule Barkpark.Api.OpenApi do
   # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
   # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
   # (router.ex), and the chat send, via a `plug ... when action ==
-  # :create_message` in ChatController, which also binds the request.
+  # :create_message` in ChatController. Every mount binds the request.
   # Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
@@ -231,7 +231,7 @@ defmodule Barkpark.Api.OpenApi do
 
   # Templates whose mount binds the request (query and body) into the key
   # (`bind_request: true`), so the spec also states the 422.
-  @request_bound_templates ["/v1/chat/sessions/:id/messages"]
+  @request_bound_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
 
   defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
     # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
