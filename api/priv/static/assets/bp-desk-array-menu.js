@@ -99,18 +99,29 @@
     if (first) first.focus();
   }
 
-  function close(dialog) {
-    if (dialog && dialog.open) dialog.close();
+  function toPreview(dialog) {
+    var preview = previewOf(dialog);
+    if (preview && preview.isConnected) preview.focus();
   }
 
-  // Every way a dialog closes ends here: the focus goes back to its preview.
+  // The focus goes back to the preview at once: the dialog's `close` event
+  // comes a task later, after the person (or a script) may have moved on.
+  function close(dialog) {
+    if (!dialog || !dialog.open) return;
+    dialog.close();
+    toPreview(dialog);
+  }
+
+  // A dialog closed some other way: its preview takes the focus only when
+  // nothing has taken it since.
   doc.addEventListener(
     "close",
     function (e) {
       var dialog = e.target;
       if (!dialog || !dialog.matches || !dialog.matches(DIALOG)) return;
-      var preview = previewOf(dialog);
-      if (preview && preview.isConnected) preview.focus();
+      var at = doc.activeElement;
+      if (at && at !== doc.body && !dialog.contains(at)) return;
+      toPreview(dialog);
     },
     true
   );
