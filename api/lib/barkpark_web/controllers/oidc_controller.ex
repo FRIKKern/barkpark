@@ -406,6 +406,8 @@ defmodule BarkparkWeb.OidcController do
 
   defp signed_in(conn, token, user) do
     path = conn.private[:sso_return_path]
+    # Any sign-in spends a path /login kept for the Cloud ticket or magic link.
+    conn = BarkparkWeb.LoginReturn.forget(conn)
     conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
 
     # studio-user-login: a browser completing the code flow

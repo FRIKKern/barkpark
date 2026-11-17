@@ -187,6 +187,40 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     assert :ok = Codex.close(runtime)
   end
 
+  # task-75c44878c20cec3f: a managed app-server's text holding U+0000 reaches
+  # the Recorder as U+FFFD, as a registered host's events do (ChatHosts.EventText).
+  # What goes back to the app-server keeps its own bytes: the fake's turn id
+  # holds U+0000, and the interrupt must name that turn, not a U+FFFD copy.
+  test "a delta holding U+0000 arrives with U+FFFD in its place; ids sent back stay raw" do
+    {binary, args, log} = fake_app_server(:nul_delta)
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: binary,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               cwd: "/tmp",
+               timeout_ms: :infinity
+             })
+
+    assert :ok = Codex.send_turn(runtime, "hello")
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :text_delta, native: native}}
+    assert get_in(native, ["params", "delta"]) == "a�b"
+
+    # task-cde71b04cdc73529: the fake's first approval id holds U+0000. The
+    # answer names it by the id the sink got; the reply carries the raw id.
+    assert_receive {:studio_chat_runtime_event,
+                    %Event{kind: :approval_requested, approval_id: "a�91"}}
+
+    assert :ok = Codex.answer_approval(runtime, "a�91", :allow)
+
+    assert :ok = Codex.interrupt(runtime)
+    assert File.read!(log) =~ ~s("turnId":"turn-\\u00001")
+    assert File.read!(log) =~ ~s({"id":"a\\u000091","result":)
+    assert :ok = Codex.close(runtime)
+  end
+
   test "request timeout and process death fail closed without hanging" do
     {malformed, malformed_args, _log} = fake_app_server(:malformed)
 

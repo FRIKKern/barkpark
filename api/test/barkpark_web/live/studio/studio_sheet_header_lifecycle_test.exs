@@ -127,7 +127,9 @@ defmodule BarkparkWeb.Studio.StudioSheetHeaderLifecycleTest do
     refute Map.has_key?(cells(stored("drafts.hdr-publish")), "A1"),
            "the 60 s debounce should have kept A1 out of the store before Publish"
 
-    html = view |> element(~s([data-test-id="sheet-publish"])) |> render_click()
+    html =
+      BarkparkWeb.EditorPost.press_on(view, element(view, ~s([data-test-id="sheet-publish"])))
+
     assert html =~ "Published sheets are public"
 
     published = stored("hdr-publish")
@@ -145,7 +147,10 @@ defmodule BarkparkWeb.Studio.StudioSheetHeaderLifecycleTest do
     create_sheet!("hdr-unpub")
     {view, target, _html} = open!(conn, "hdr-unpub")
     type_cell!(target, "A1", "42")
-    html = view |> element(~s([data-test-id="sheet-publish"])) |> render_click()
+
+    html =
+      BarkparkWeb.EditorPost.press_on(view, element(view, ~s([data-test-id="sheet-publish"])))
+
     assert html =~ ~s(data-test-id="sheet-unpublish")
     refute html =~ ~s(data-test-id="sheet-publish")
 
@@ -154,7 +159,9 @@ defmodule BarkparkWeb.Studio.StudioSheetHeaderLifecycleTest do
     refute Map.has_key?(cells(stored("hdr-unpub")), "B1"),
            "the 60 s debounce should have kept B1 in the session before Unpublish"
 
-    html = view |> element(~s([data-test-id="sheet-unpublish"])) |> render_click()
+    html =
+      BarkparkWeb.EditorPost.press_on(view, element(view, ~s([data-test-id="sheet-unpublish"])))
+
     assert html =~ ~s(data-test-id="sheet-publish")
 
     assert stored("hdr-unpub") == nil, "Unpublish should remove the published row"
@@ -224,8 +231,8 @@ defmodule BarkparkWeb.Studio.StudioSheetHeaderLifecycleTest do
     type_cell!(target, "A1", "7")
     assert Session.whereis("hdr-delete", @dataset, nil)
 
-    view |> element(~s([data-test-id="sheet-delete"])) |> render_click()
-    html = render_click(view, "confirm-delete", %{})
+    BarkparkWeb.EditorPost.press_on(view, element(view, ~s([data-test-id="sheet-delete"])))
+    html = BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
     assert html =~ "Deleted “Untitled sheet”."
 
     refute Session.whereis("hdr-delete", @dataset, nil),

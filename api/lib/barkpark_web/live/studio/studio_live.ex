@@ -610,53 +610,55 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("show-history", _params, socket), do: History.show_history(socket)
   def handle_event("close-history", _params, socket), do: History.close_history(socket)
 
+  # A document action is run for the document it was pressed in
+  # (`PostIdentity.pressed/3`), and so is the confirm of its dialog: the
+  # ones below, down to `duplicate-doc`, and `paper-publish`.
   def handle_event("restore-revision", params, socket),
-    do: History.restore_revision(params, socket)
+    do: PostIdentity.pressed(params, socket, &History.restore_revision/2)
 
   def handle_event("show-profile", _params, socket), do: History.show_profile(socket)
   def handle_event("close-profile", _params, socket), do: History.close_profile(socket)
   def handle_event("preview-profile", params, socket), do: History.preview_profile(params, socket)
   def handle_event("save-profile", params, socket), do: History.save_profile(params, socket)
 
-  def handle_event("delete-doc", _params, socket) do
-    if DocActions.action_offered?(socket, "delete-doc"),
-      do: Delete.delete_doc(socket),
-      else: {:noreply, socket}
-  end
+  def handle_event("delete-doc", params, socket),
+    do: PostIdentity.pressed_in(params, socket, offered("delete-doc", &Delete.delete_doc/1))
 
   def handle_event("close-delete", _params, socket), do: Delete.close_delete(socket)
 
   def handle_event("confirm-delete", params, socket) do
-    if DocActions.action_offered?(socket, "delete-doc"),
-      do: Delete.confirm_delete(params, socket),
-      else: {:noreply, socket}
+    PostIdentity.pressed(params, socket, fn params, socket ->
+      offered("delete-doc", &Delete.confirm_delete(params, &1)).(socket)
+    end)
   end
 
-  def handle_event("discard-draft", _params, socket), do: Discard.discard_draft(socket)
+  def handle_event("discard-draft", params, socket),
+    do: PostIdentity.pressed_in(params, socket, &Discard.discard_draft/1)
+
   def handle_event("close-discard", _params, socket), do: Discard.close_discard(socket)
-  def handle_event("confirm-discard", _params, socket), do: Discard.confirm_discard(socket)
 
-  def handle_event("publish", _params, socket), do: Doc.publish(socket)
+  def handle_event("confirm-discard", params, socket),
+    do: PostIdentity.pressed_in(params, socket, &Discard.confirm_discard/1)
 
-  def handle_event("unpublish", _params, socket) do
-    if DocActions.action_offered?(socket, "unpublish"),
-      do: Doc.unpublish(socket),
-      else: {:noreply, socket}
+  def handle_event("publish", params, socket),
+    do: PostIdentity.pressed_in(params, socket, fn socket -> Doc.publish(socket) end)
+
+  def handle_event("unpublish", params, socket) do
+    run = offered("unpublish", fn socket -> Doc.unpublish(socket) end)
+    PostIdentity.pressed_in(params, socket, run)
   end
 
   def handle_event("close-unpublish-guard", _params, socket),
     do: Doc.close_unpublish_guard(socket)
 
   def handle_event("confirm-unpublish", params, socket) do
-    if DocActions.action_offered?(socket, "unpublish"),
-      do: Doc.confirm_unpublish(params, socket),
-      else: {:noreply, socket}
+    PostIdentity.pressed(params, socket, fn params, socket ->
+      offered("unpublish", &Doc.confirm_unpublish(params, &1)).(socket)
+    end)
   end
 
-  def handle_event("duplicate-doc", _params, socket) do
-    if DocActions.action_offered?(socket, "duplicate-doc"),
-      do: Doc.duplicate_doc(socket),
-      else: {:noreply, socket}
+  def handle_event("duplicate-doc", params, socket) do
+    PostIdentity.pressed_in(params, socket, offered("duplicate-doc", &Doc.duplicate_doc/1))
   end
 
   def handle_event("shares-open", params, socket), do: Shares.shares_open(params, socket)
@@ -750,7 +752,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("sidebar-label-add", params, socket),
     do: Paper.sidebar_label_add(params, socket)
 
-  def handle_event("paper-publish", _params, socket), do: Paper.paper_publish(socket)
+  def handle_event("paper-publish", params, socket),
+    do: PostIdentity.pressed_in(params, socket, fn socket -> Paper.paper_publish(socket) end)
 
   def handle_event("backlinks-refresh", _params, socket), do: Paper.backlinks_refresh(socket)
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
@@ -879,6 +882,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # assigns straight through.
   @impl true
   def render(assigns), do: studio_live_shell(assigns)
+
+  # `fun`, run only for an action the Studio offers on the open document.
+  defp offered(action, fun) do
+    fn socket ->
+      if DocActions.action_offered?(socket, action), do: fun.(socket), else: {:noreply, socket}
+    end
+  end
 
   # The word each type in scope reads as in Studio copy — its plugin word or
   # schema title (task-a3bedc86f8a6a517, the task-7b0c9b8ae4ac6f79 ruling).

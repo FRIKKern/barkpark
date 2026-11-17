@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
   test "a referenced document: the count in role=status, who refers in ul.used-in, three buttons",
        c do
     view = open(c, c.ada)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
     assert has_element?(view, ~s(#{@dialog}[phx-hook="ModalFocus"] h2), "Unpublish document?")
     assert has_element?(view, ~s(#{@dialog} p strong), "Ada Referenced")
@@ -179,9 +179,12 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
 
   test "Unpublish anyway unpublishes and leaves the references as they are", c do
     view = open(c, c.ada)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
-    view |> element(~s(#{@dialog} button.danger), "Unpublish anyway") |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@dialog} button.danger), "Unpublish anyway")
+    )
 
     refute has_element?(view, @dialog)
     refute published?(c, c.ada)
@@ -191,15 +194,17 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
 
   test "Disconnect references and unpublish takes the references out, only on that press", c do
     view = open(c, c.ada)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
     assert author_of(c, "unp-post-1-#{c.n}")["_ref"] == c.ada
 
-    view
-    |> element(
-      ~s(#{@dialog} button[phx-value-disconnect="true"]),
-      "Disconnect references and unpublish"
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(
+        view,
+        ~s(#{@dialog} button[phx-value-disconnect="true"]),
+        "Disconnect references and unpublish"
+      )
     )
-    |> render_click()
 
     refute has_element?(view, @dialog)
     refute published?(c, c.ada)
@@ -209,7 +214,7 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
 
   test "a document nobody refers to is asked about too: Unpublish now, or Cancel", c do
     view = open(c, c.lone)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
     # Nothing happened yet.
     assert published?(c, c.lone)
@@ -223,8 +228,12 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
     refute has_element?(view, @dialog)
     assert published?(c, c.lone)
 
-    render_hook(view, "unpublish", %{})
-    view |> element(~s(#{@dialog} button.danger), "Unpublish now") |> render_click()
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
+
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@dialog} button.danger), "Unpublish now")
+    )
 
     refute has_element?(view, @dialog)
     refute published?(c, c.lone)
@@ -233,7 +242,7 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
   # Controls: the handler is shared with the old Studio.
   test "the old Studio unpublishes a document nobody refers to without asking", c do
     view = open_studio(c, c.lone)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
     refute has_element?(view, "[role=dialog]")
     refute published?(c, c.lone)
@@ -241,7 +250,7 @@ defmodule BarkparkWeb.Studio.DeskUnpublishDialogTest do
 
   test "the old Studio keeps its own guard modal and words", c do
     view = open_studio(c, c.ada)
-    render_hook(view, "unpublish", %{})
+    BarkparkWeb.EditorPost.press(view, "unpublish", %{})
 
     guard =
       ~s(#unpublish-guard-dialog.delete-modal[role="dialog"][data-test-id="unpublish-guard-modal"])

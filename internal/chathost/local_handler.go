@@ -239,11 +239,12 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, files
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = providerWaitDelay(h.WaitDelay)
+	ownProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	waited := false
-	defer reapUnlessWaited(cmd, &waited)
+	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("claude", cmd, stdin)
 	if err := h.register(sessionID, session); err != nil {
 		return err
@@ -349,11 +350,12 @@ func (h *LocalHandler) runCodex(ctx context.Context, cwd, content string, remote
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = providerWaitDelay(h.WaitDelay)
+	ownProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	waited := false
-	defer reapUnlessWaited(cmd, &waited)
+	defer endProvider(cmd, &waited)
 	session := newActiveLocalSession("codex", cmd, stdin)
 	if err := h.register(sessionID, session); err != nil {
 		return err
@@ -476,15 +478,18 @@ func providerWaitDelay(own time.Duration) time.Duration {
 	return defaultProviderWaitDelay
 }
 
-// reapUnlessWaited kills and waits for a provider that a turn left without
-// waiting for (an emit error, a decode error, a failed request). Without the
-// Wait the child stays a zombie and its pipes stay open until the host exits
+// endProvider runs when a turn returns, on every path. It kills what is left
+// of the provider's process group: a tool or shell command the provider
+// started, and the provider itself when the turn left it running (an emit
+// error, a decode error, a failed request, a cancel); task-00d0c5e8ff5dc5d1.
+// A provider the turn did not wait for is then waited for: without the Wait
+// it stays a zombie and its pipes stay open until the host exits
 // (task-248ddc24af006c04).
-func reapUnlessWaited(cmd *exec.Cmd, waited *bool) {
+func endProvider(cmd *exec.Cmd, waited *bool) {
+	_ = killProviderGroup(cmd)
 	if *waited {
 		return
 	}
-	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
 }
 
@@ -768,7 +773,7 @@ func (s *activeLocalSession) close() error {
 		_ = stdin.Close()
 	}
 	if cmd != nil && cmd.Process != nil {
-		if err := cmd.Process.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
+		if err := killProviderGroup(cmd); err != nil && !errors.Is(err, os.ErrProcessDone) && !strings.Contains(err.Error(), "process already finished") {
 			return err
 		}
 	}

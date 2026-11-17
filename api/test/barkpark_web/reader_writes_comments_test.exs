@@ -321,7 +321,7 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
       assert d.content["state"] == "resolved"
       assert d.content["message"] == "original"
 
-      render_click(view, "publish")
+      BarkparkWeb.EditorPost.press(view, "publish")
       assert published(id).content["state"] == "resolved"
       assert published(id).content["message"] == "original"
     end
@@ -355,7 +355,7 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
       assert json_response(add_comment(v1, id, "mine"), 200)
       view = studio(v1, @comment, id)
 
-      render_click(view, "confirm-delete")
+      BarkparkWeb.EditorPost.press(view, "confirm-delete")
       assert published(id).content["message"] == "mine"
     end
   end

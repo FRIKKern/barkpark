@@ -50,6 +50,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.StudioLive.Handlers.Fields
   alias BarkparkWeb.Studio.StudioLive.Handlers.Scope
   alias BarkparkWeb.Studio.StudioLive.Paths
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias Phoenix.LiveView.JS
 
   @doc """
@@ -112,16 +113,21 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     end
   end
 
-  # No document is handed to the Studio: no path, no reference links.
-  defp put_away(socket),
-    do:
-      assign(socket,
-        active_refs: [],
-        desk_ref_ids: nil,
-        desk_nav: nil,
-        edit_failed: false,
-        desk_incoming: nil
-      )
+  # No document is handed to the Studio: no path, no reference links. A
+  # dialog one of the document's actions opened goes with the document: the
+  # Studio still holds it, and would show the dialog again over the next.
+  defp put_away(socket) do
+    socket
+    |> assign(
+      active_refs: [],
+      desk_ref_ids: nil,
+      desk_nav: nil,
+      edit_failed: false,
+      desk_incoming: nil
+    )
+    |> PostIdentity.close_dialogs()
+    |> DocDialog.follow()
+  end
 
   @doc """
   Loads the pending document into the Studio's editor.
@@ -451,6 +457,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp route(socket, _asked, _how), do: socket
 
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
+
+  @doc """
+  The open document was written by this page's own bulk action (`Bulk`): the
+  editor reads what is stored now, as after its own Publish. The writes came
+  from the action's task, so the Studio took their frames for another
+  user's save; they were this tab's, and the footer stops saying so. With no
+  document in the editor, nothing.
+  """
+  def reread(%{assigns: %{editing: {_dataset, _type, _id}, desk_nav: [_ | _]}} = socket) do
+    socket = socket |> reload(:reload) |> settle(:settled)
+
+    if socket.assigns[:save_status] == "Updated by another user",
+      do: assign(socket, :save_status, ""),
+      else: socket
+  end
+
+  def reread(socket), do: socket
 
   # The Studio loads the document again, as its own patch would have; the
   # flash its handler put stays. From the path the desk handed over, not the

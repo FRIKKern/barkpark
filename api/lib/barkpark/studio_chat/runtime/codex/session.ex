@@ -335,7 +335,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     state = emit(state, Protocol.normalize(message, context(state)))
 
     if Protocol.approval_method?(method) do
-      approval_id = to_string(id)
+      # Keyed by the id the sink got (U+FFFD for U+0000); the reply carries `id` as sent.
+      approval_id = Barkpark.ChatHosts.EventText.replace_nul(to_string(id))
       put_in(state, [:approvals, approval_id], %{request_id: id, method: method})
     else
       state
@@ -441,8 +442,13 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp send_error(port, id, error), do: send_json(port, %{"id" => id, "error" => error})
   defp send_json(port, message), do: Port.command(port, Jason.encode!(message) <> "\n")
 
+  # The sink stores what it gets, and the store refuses U+0000, so the sink
+  # gets U+FFFD in its place, as a registered host's events do
+  # (ChatHosts.EventText, task-75c44878c20cec3f). Only the sink: the ids this
+  # session keeps and sends back to the app-server stay as it sent them.
   defp emit(state, event) do
-    event = %{event | sequence: state.sequence + 1}
+    sinkable = struct(event, Barkpark.ChatHosts.EventText.replace_nul(Map.from_struct(event)))
+    event = %{sinkable | sequence: state.sequence + 1}
 
     case state.sink do
       pid when is_pid(pid) and is_reference(state.runtime_ingress_token) ->

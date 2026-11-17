@@ -268,7 +268,7 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       conn = init_test_session(conn, %{"api_token" => raw})
       {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
 
-      html = render_click(view, "publish")
+      html = BarkparkWeb.EditorPost.press(view, "publish")
 
       assert html =~ "cannot publish"
       refute published?(id)
@@ -284,7 +284,7 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
 
       assert BarkparkWeb.Studio.Caps.classify("confirm-unpublish") == :publish
-      html = render_click(view, "confirm-unpublish")
+      html = BarkparkWeb.EditorPost.press(view, "confirm-unpublish")
       assert html =~ "cannot publish"
       assert published?(id)
     end
@@ -325,7 +325,7 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       conn = init_test_session(conn, %{"api_token" => raw})
       {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
 
-      render_click(view, "publish")
+      BarkparkWeb.EditorPost.press(view, "publish")
       assert published?(id)
     end
   end

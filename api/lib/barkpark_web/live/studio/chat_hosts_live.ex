@@ -63,7 +63,18 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
   def handle_event("revoke", %{"id" => id}, socket) do
     case authorize(socket, :revoke) do
       {:ok, workspace} ->
-        _ = ChatHosts.revoke(workspace.id, id)
+        socket =
+          case ChatHosts.revoke(workspace.id, id) do
+            {:ok, _host} ->
+              socket
+
+            {:error, :not_found} ->
+              put_flash(socket, :error, "That machine is not enrolled in this workspace.")
+
+            {:error, _} ->
+              put_flash(socket, :error, "Could not revoke that machine.")
+          end
+
         {:noreply, assign(socket, hosts: ChatHosts.list_hosts(workspace.id))}
 
       {:error, :forbidden} ->

@@ -49,8 +49,8 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteFocusTest do
     index = Enum.find_index(ids, &(Content.published_id(&1) == "focus-b"))
     assert is_integer(index), "precondition: the list pane shows the open document"
 
-    render_click(view, "delete-doc", %{})
-    render_click(view, "confirm-delete", %{})
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+    BarkparkWeb.EditorPost.press(view, "confirm-delete", %{})
 
     assert_push_event(view, "bp:focus-after-delete", %{
       type: @schema_name,

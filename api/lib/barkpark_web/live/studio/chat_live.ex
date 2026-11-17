@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer}
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer, CodexFailureLine}
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -500,11 +500,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Keep the server-bound composer draft in step with what the user types
   # (charter D24). Without this, `value={@composer_draft}` would fight the DOM:
   # a restore-on-failure could never be SEEN and a clear-on-send could never
-  # stick. Enter still submits via the form's `phx-submit="send"`.
+  # stick. Enter still submits via the form's `phx-submit="send"`. A NUL draft is
+  # noted once per change to NUL in a session, not per key (task-75c44878c20cec3f).
   def handle_event("composer-change", %{"message" => text}, socket) do
-    if String.contains?(text, <<0>>),
-      do: {:noreply, nul_note(socket, "A draft")},
-      else: {:noreply, assign(socket, composer_draft: text)}
+    nul = String.contains?(text, <<0>>) and {:nul, socket.assigns.store_session_id}
+
+    cond do
+      !nul -> {:noreply, assign(socket, composer_draft: text, composer_nul: false)}
+      nul == socket.assigns[:composer_nul] -> {:noreply, socket}
+      true -> {:noreply, socket |> nul_note("A draft") |> assign(composer_nul: nul)}
+    end
   end
 
   # Two-phase send (charter D24). PHASE 1 is instant and pure UI: echo the user
@@ -1513,15 +1518,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # map with the reason. Without a clause they fell to the bare %Runtime.Event{}
   # catch-all below and rendered NOTHING — a hard failure left the transcript
   # silent (recorder.ex records these kinds; only this LiveView surface was dark).
-  # Surface the reason as an honest :system line. Purely additive: the turn
-  # lifecycle (status/streaming) is left to the terminal turn_completed / DOWN
-  # paths, so a mid-stream malformed line does not falsely settle the turn.
+  # Surface the reason as an honest :system line (CodexFailureLine; a retrying
+  # error says so). Purely additive: the turn lifecycle (status/streaming) is
+  # left to the terminal turn_completed / DOWN paths, so a mid-stream malformed
+  # line does not falsely settle the turn.
   def handle_info(
-        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, error: error}},
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind} = event},
         socket
       )
       when kind in [:protocol_error, :error, :process_failed] do
-    {:noreply, append_message(socket, :system, codex_failure_line(kind, error))}
+    {:noreply, append_message(socket, :system, CodexFailureLine.line(event))}
   end
 
   def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
@@ -6389,48 +6395,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     do: %{model: model, session_id: nil, permission_mode: nil}
 
   defp replay_init(_), do: nil
-
-  # Honest failure copy for a codex runtime failure event (protocol_error /
-  # error / process_failed). Names the failure class, then the scrubbed reason
-  # from protocol.ex's `error` map (message/detail, with the machine code in
-  # parens) when one is present.
-  defp codex_failure_line(kind, error) do
-    label =
-      case kind do
-        :process_failed -> "The codex process exited unexpectedly"
-        :protocol_error -> "The codex stream hit a protocol error"
-        _ -> "The codex turn ended with an error"
-      end
-
-    case codex_error_detail(error) do
-      "" -> label <> "."
-      detail -> label <> " — " <> detail <> "."
-    end
-  end
-
-  defp codex_error_detail(error) when is_map(error) do
-    reason =
-      [error["message"], error["detail"]]
-      |> Enum.map(&codex_error_text/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-      |> Enum.join(" — ")
-
-    code = codex_error_text(error["code"])
-
-    cond do
-      reason != "" and code != "" -> reason <> " (" <> code <> ")"
-      reason != "" -> reason
-      code != "" -> code
-      true -> ""
-    end
-  end
-
-  defp codex_error_detail(_), do: ""
-
-  defp codex_error_text(value) when is_binary(value), do: String.trim(value)
-  defp codex_error_text(value) when is_integer(value), do: Integer.to_string(value)
-  defp codex_error_text(_), do: ""
 
   # The store refuses U+0000 (NulText, task-820afe5940d0e6e0): say so plainly.
   defp nul_note(socket, what),

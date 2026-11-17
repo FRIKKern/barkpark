@@ -99,6 +99,9 @@ defmodule BarkparkWeb.SocialController do
                 {:ok, token} =
                   Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
 
+                # Any sign-in spends a path /login kept for the Cloud ticket or magic link.
+                conn = BarkparkWeb.LoginReturn.forget(conn)
+
                 conn
                 |> configure_session(renew: true)
                 |> put_session("user_session", token)

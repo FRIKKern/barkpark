@@ -105,7 +105,10 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
     count = fn -> length(Content.list_documents(c.type, @dataset, perspective: :drafts)) end
     before = count.()
 
-    view |> element(~s(#{@menu} [data-desk-doc-action="duplicate-doc"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@menu} [data-desk-doc-action="duplicate-doc"]))
+    )
 
     assert eventually(fn -> count.() == before + 1 end), "no copy was made"
   end
@@ -149,7 +152,10 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
     count = fn -> length(Content.list_documents(c.type, @dataset, perspective: :drafts)) end
     before = count.()
 
-    view |> element(~s(#{@footer_menu} [data-desk-doc-action="duplicate-doc"])) |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@footer_menu} [data-desk-doc-action="duplicate-doc"]))
+    )
 
     assert eventually(fn -> count.() == before + 1 end), "no copy was made"
   end
@@ -181,12 +187,19 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
     test "Discard draft asks first, then the published version is back", c do
       view = open(c, c.type, c.id)
 
-      view |> element(~s(#{@menu} [data-desk-doc-action="discard-draft"])) |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s(#{@menu} [data-desk-doc-action="discard-draft"]))
+      )
+
       assert has_element?(view, "#discard-modal-dialog[role=dialog]")
       # Asked, not done.
       assert {:ok, %{}} = Content.get_document("drafts." <> c.id, c.type, @dataset)
 
-      view |> element("#discard-modal-dialog [data-test-id=confirm-discard]") |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, "#discard-modal-dialog [data-test-id=confirm-discard]")
+      )
 
       assert poll(view, fn ->
                match?({:error, _}, Content.get_document("drafts." <> c.id, c.type, @dataset))

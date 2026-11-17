@@ -75,9 +75,10 @@ defmodule BarkparkWeb.Studio.StudioBetaDocActionsTest do
     {view, _html} = open_beta(conn)
     assert {:error, :not_found} = Content.get_document("betaact-1", "betaact", @dataset)
 
-    view
-    |> element(~s([data-test-id="studio-beta-doc-actions"] [phx-click="publish"]))
-    |> render_click()
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s([data-test-id="studio-beta-doc-actions"] [phx-click="publish"]))
+    )
 
     assert {:ok, published} = Content.get_document("betaact-1", "betaact", @dataset)
     assert published.title == "Fjellet"

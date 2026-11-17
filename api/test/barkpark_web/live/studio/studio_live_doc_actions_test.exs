@@ -92,7 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
       pre_count = length(Content.list_documents("post", @dataset))
 
       # Fire the duplicate event; the LV redirects to the new doc.
-      _html = render_click(view, "duplicate-doc", %{})
+      _html = BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
       post_count = length(Content.list_documents("post", @dataset))
       assert post_count == pre_count + 1

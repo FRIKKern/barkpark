@@ -8,7 +8,9 @@ defmodule BarkparkWeb.EditorPost do
   `autosave` or `save` by event name, to test something else about the save,
   sends it through here. So does a test that sends a press that writes the
   document (`press/4`, `press_on/3`): in the browser the page's script puts
-  the form's mark on the pressed control (`bp-array-focus.js`).
+  the form's mark on the pressed control (`bp-array-focus.js`). The
+  document's actions (Publish, Delete, a dialog's confirm) are such presses
+  too (task-176bd529276ff8b3).
 
   The name is read from the rendered page, never from the socket: a form
   that does not carry it, or an event built without it, must fail the test
@@ -72,8 +74,26 @@ defmodule BarkparkWeb.EditorPost do
   def press_on(view, %Phoenix.LiveViewTest.Element{} = control, marks \\ nil),
     do: render_click(control, doc(view, marks))
 
+  @doc """
+  The mark a press on `view`'s page carries, as the page's script reads it:
+  the editor form's, else the page's own copy (`#bp-doc`: a sheet or a paper
+  has no editor form). Raises when the page has neither.
+  """
+  def mark(view) do
+    html = render(view)
+
+    with nil <- Regex.run(~r/<form\b[^>]*\sid="editor-form"[^>]*>/, html),
+         [_, attr] <- Regex.run(~r/<span\b[^>]*\sid="bp-doc"[^>]*\sdata-bp-doc="([^"]*)"/, html) do
+      %{PostIdentity.key() => unescape(attr)}
+    else
+      [_form] -> Map.take(marks(view), [PostIdentity.key()])
+      nil -> raise ArgumentError, "the page names no open document (#editor-form or #bp-doc)"
+    end
+  end
+
   # The form's mark alone: a press reads the form tag, not its last child.
-  defp doc(view, marks), do: Map.take(marks || marks(view), [PostIdentity.key()])
+  defp doc(_view, %{} = marks), do: Map.take(marks, [PostIdentity.key()])
+  defp doc(view, nil), do: mark(view)
 
   defp unescape(value) do
     value

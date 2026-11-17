@@ -1605,8 +1605,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
       # map (question answers); a deny drops it. Pruned either way so the map
       # never grows unbounded across a long session.
+      # Keyed by the sink's id (U+FFFD for U+0000); the CLI gets back its own id.
       {ask, pending_asks} = Map.pop(state.pending_asks, request_id)
       original = ask && ask.input
+      wire_id = if ask, do: ask.request_id, else: request_id
 
       payload =
         case decision do
@@ -1625,7 +1627,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
           "type" => "control_response",
           "response" => %{
             "subtype" => "success",
-            "request_id" => request_id,
+            "request_id" => wire_id,
             "response" => payload
           }
         }) <> "\n"
@@ -2447,20 +2449,21 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       send(
         state.sink,
         {:claude_chat_permission,
-         %{
+         sinkable(%{
            request_id: request_id,
            tool_name: Map.get(request, "tool_name", "tool"),
            input: input,
            title: Map.get(request, "title"),
            decision_reason: Map.get(request, "decision_reason")
-         }}
+         })}
       )
 
       # Remember the ask's input so a plain `:allow` can echo it as
       # `updatedInput` (charter D32) — the answer seam never reconstructs it
       # from an untrusted round-trip. The tool_name rides along so the answer
       # seam can recognize an allowed ExitPlanMode (the plan-approve fact).
-      put_in(state.pending_asks[request_id], %{
+      put_in(state.pending_asks[sinkable(request_id)], %{
+        request_id: request_id,
         input: input,
         tool_name: Map.get(request, "tool_name", "tool")
       })
@@ -2500,13 +2503,14 @@ defmodule Barkpark.StudioChat.Provider.Claude do
 
       case pop_pending(state, request_id) do
         {nil, state} ->
-          send(state.sink, {:claude_chat_event, event})
+          send(state.sink, {:claude_chat_event, sinkable(event)})
           state
 
         {kind, state} ->
           send(
             state.sink,
-            {:claude_chat_control, kind, request_id, Map.get(response, "response") || %{}}
+            {:claude_chat_control, kind, request_id,
+             sinkable(Map.get(response, "response") || %{})}
           )
 
           state
@@ -2514,9 +2518,13 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     end
 
     defp dispatch_event(event, state) do
-      send(state.sink, {:claude_chat_event, event})
+      send(state.sink, {:claude_chat_event, sinkable(event)})
       state
     end
+
+    # The sink gets U+FFFD for U+0000, which the store refuses (task-75c44878c20cec3f);
+    # `pending_asks` keeps the raw input, so a plain allow echoes the CLI's own bytes.
+    defp sinkable(value), do: Barkpark.ChatHosts.EventText.replace_nul(value)
 
     # A plain string is the text-only default shape (wrap as ONE text block —
     # unchanged w1–w2 behavior); a caller-assembled content-block list (text +

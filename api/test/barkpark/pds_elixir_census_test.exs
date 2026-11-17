@@ -264,7 +264,7 @@ defmodule Barkpark.PdsElixirCensusTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    # rc/out for every arm, gathered in parallel. `plain` and `unknown_flag` run
+    # rc/out for every arm, gathered two at a time. `plain` and `unknown_flag` run
     # the committed census; `classification` and `baseline` each run a one-token
     # mutant written outside the tree and executed FROM THE ROOT (`cd: root` is
     # load-bearing — the corpus glob is CWD-relative and a tmp-dir mutant
@@ -309,11 +309,10 @@ defmodule Barkpark.PdsElixirCensusTest do
 
     arms = if gate_decision == :skip, do: always, else: always ++ mutants
 
-    results =
-      arms
-      |> Enum.map(fn {name, fun} -> {name, Task.async(fun)} end)
-      |> Enum.map(fn {name, task} -> {name, Task.await(task, 540_000)} end)
-      |> Map.new()
+    # Two arms at a time, never all of them: each full arm is a VM of its own
+    # holding ~3.8 GB on CI, and four at once took a 16 GB runner down
+    # (task-6d4727b7cff1f2bd; the measurements are on PdsCensusMutantGate).
+    results = Barkpark.PdsCensusMutantGate.run_arms(arms)
 
     {
       :ok,
