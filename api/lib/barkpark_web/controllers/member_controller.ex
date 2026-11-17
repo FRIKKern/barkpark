@@ -719,4 +719,16 @@ defmodule BarkparkWeb.MemberController do
   )
 
   plug(BarkparkWeb.Plugs.DatasetBoundAdminReads, [surface: "tokens"] when action in [:tokens])
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "members_write"] when action in [:create, :update, :delete, :cancel_invitation]
+  )
+
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write", own_token_param: "id"] when action in [:revoke_token, :rotate_token]
+  )
 end

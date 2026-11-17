@@ -67,4 +67,11 @@ defmodule BarkparkWeb.CloudUserController do
       do: conn,
       else: conn |> ErrorResponse.emit({:error, :not_found}) |> halt()
   end
+
+  # A dataset-bound admin token on a workspace-level write: observed or refused
+  # (`DatasetBoundAdminWrites`). Declared at the end so no line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "members_write"] when action in [:deprovision]
+  )
 end
