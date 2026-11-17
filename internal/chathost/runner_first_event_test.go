@@ -56,7 +56,7 @@ func TestRunnerStopsTheProviderWhenATurnsFirstEventIsNeverTaken(t *testing.T) {
 	// The close goes out only after Handle returned, and Handle returns only
 	// after the provider was killed and waited for.
 	pid := readHelperPid(t, dir)
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+	if err := signalZero(pid); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("the provider (pid %d) is still alive after the turn was closed: kill -0 = %v", pid, err)
 	}
 	if _, kinds := server.snapshot(); fmt.Sprint(kinds) != "[terminal]" {
