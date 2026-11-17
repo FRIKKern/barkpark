@@ -1847,7 +1847,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert StudioChat.get_session(sid).pending_approvals == 1
     end
 
-    test "a missing or terminal request is a 204 no-op after runtime delivery", %{
+    test "a missing or terminal request is a 204 no-op that reaches no runtime", %{
       admin: a1,
       sid: sid
     } do
