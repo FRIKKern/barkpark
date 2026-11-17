@@ -129,6 +129,37 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
              "The codex turn ended with an error — " <> String.duplicate("x", 2_000) <> " — why."
   end
 
+  # task-7f8aa746427ee0ea (rev26731 on #26862): the byte cut ended the line on a
+  # dangling " —", a stray space or a zero-width joiner before the period.
+  test "a cut that lands on the separator drops it" do
+    dogs = String.duplicate("🐕", 1_999)
+    reason = %{"message" => dogs, "detail" => "why"}
+
+    assert failure_line(reason) == "The codex turn ended with an error — " <> dogs <> "."
+  end
+
+  test "a cut that lands on the space after a long message drops it" do
+    marks = "x" <> String.duplicate("́", 4_000)
+    line = failure_line(%{"message" => marks, "detail" => "why"})
+
+    refute line =~ ~r/[\s\x{200D}]\.\z/u, "the line ends on a stray space"
+    assert String.ends_with?(line, "́.")
+  end
+
+  test "a piece cut after a zero-width joiner drops the joiner" do
+    # 8,000 bytes end right after the joiner of dog, joiner, vest.
+    message = "x" <> String.duplicate("́", 3_996) <> "🐕‍🦺"
+    line = failure_line(%{"message" => message})
+
+    refute line =~ ~r/\x{200D}\.\z/u, "the line ends on a dangling joiner"
+    assert String.ends_with?(line, "🐕.")
+  end
+
+  test "an uncut reason that ends in a dash keeps it" do
+    assert failure_line(%{"message" => "failed —"}) ==
+             "The codex turn ended with an error — failed —."
+  end
+
   test "the other failure kinds keep their lines", %{view: view} do
     assert line(view, %Event{kind: :process_failed, error: %{"code" => "process_exit"}}) =~
              "The codex process exited unexpectedly — process_exit."
@@ -148,6 +179,11 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
       },
       %{session_id: "s", thread_id: "th-1", turn_id: "t-1", sequence: 1}
     )
+  end
+
+  defp failure_line(reason) do
+    event = %Event{kind: :error, error: %{"error" => reason, "willRetry" => false}}
+    BarkparkWeb.Studio.CodexFailureLine.line(event)
   end
 
   defp line(view, event) do

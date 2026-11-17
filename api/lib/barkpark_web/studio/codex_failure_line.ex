@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
 
     # Each piece is cut, and what they make together is cut to the same bytes,
     # so three long pieces are not three times the cut (task-ed920e5459df0ab5).
-    case error |> detail() |> Protocol.cut_bytes() do
+    case error |> detail() |> cut(&Protocol.cut_bytes/1) do
       "" -> label <> "."
       detail -> label <> " — " <> detail <> "."
     end
@@ -58,7 +58,17 @@ defmodule BarkparkWeb.Studio.CodexFailureLine do
   # A host's reason is unscrubbed; cut it as the managed adapter does
   # (Protocol.cut_text/1: 2,000 graphemes and 8,000 bytes), so a 1 MB message
   # is not a 1 MB line.
-  defp text(value) when is_binary(value), do: value |> String.trim() |> Protocol.cut_text()
+  defp text(value) when is_binary(value), do: value |> String.trim() |> cut(&Protocol.cut_text/1)
   defp text(value) when is_integer(value), do: Integer.to_string(value)
   defp text(_), do: ""
+
+  # A cut can end inside a joint: on part of the " — " or " (" between pieces,
+  # on a space, or after a zero-width joiner. That dangling tail is dropped, and
+  # only when the cut took something (task-7f8aa746427ee0ea).
+  defp cut(text, cut_fun) do
+    case cut_fun.(text) do
+      ^text -> text
+      shorter -> String.replace(shorter, ~r/[\s\x{200D}—(]+\z/u, "")
+    end
+  end
 end
