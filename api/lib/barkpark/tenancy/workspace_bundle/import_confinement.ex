@@ -27,9 +27,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
 
   ## Observe first (`mode/0`)
 
-    * A merge that would replace a same-slug SHELL (the engine's PDS-D9
-      `empty_shell?/1`: another id, 0 documents, 0 media_files) needs the
-      importer to administer the shell.
+    * A merge that would replace an ownerless same-slug SHELL (the engine's
+      PDS-D9 `empty_shell?/1`: another id, 0 documents, 0 media_files; and
+      no seat or token) needs the importer to administer the shell. A shell
+      with any seat or token needs its admin in every mode.
     * Seats, tokens and secrets (`@observe_tables`) are withheld.
     * A NEW workspace does not take `@new_columns` (quota, tier, expiry,
       suspension) from the bundle: `:enforce` resets them to their defaults
@@ -314,16 +315,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
   # ── Target admin ────────────────────────────────────────────────────────────
 
   # Merge only: a same-slug workspace under another id is the shell the
-  # engine's PDS-D9 adopt branch would delete and replace.
+  # engine's PDS-D9 adopt branch would delete and replace. One with any seat
+  # or token is somebody's workspace: replacing it needs its admin in every
+  # mode. Only an ownerless shell (what `ensure_default_scope` seeds) stays
+  # observe-first.
   defp shell_issue(_manifest, _ws_id, :clean, _grant), do: nil
 
   defp shell_issue(manifest, ws_id, :merge, grant) do
     case Repo.query!(
-           "SELECT id::text FROM workspaces WHERE slug = $1 AND id <> $2::uuid",
+           "SELECT id::text, EXISTS (SELECT 1 FROM workspace_memberships m WHERE m.workspace_id = w.id) " <>
+             "OR EXISTS (SELECT 1 FROM api_tokens a WHERE a.workspace_id = w.id) " <>
+             "FROM workspaces w WHERE w.slug = $1 AND w.id <> $2::uuid",
            [manifest["workspace_slug"], Ecto.UUID.dump!(ws_id)]
          ).rows do
-      [[shell_id]] -> admin_issue(grant, shell_id, "replace")
-      [] -> nil
+      [[shell_id, owned?]] ->
+        issue = admin_issue(grant, shell_id, "replace")
+        if issue && owned?, do: refuse_target!(issue), else: issue
+
+      [] ->
+        nil
     end
   end
 

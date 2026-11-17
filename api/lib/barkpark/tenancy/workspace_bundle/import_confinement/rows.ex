@@ -78,7 +78,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
       end)
 
     org_fks =
-      Enum.filter(all, &(&1.parent == "organizations" and Map.get(kinds, &1.child) in [:e1, :e2]))
+      Enum.filter(
+        all,
+        &(&1.parent == "organizations" and Map.get(kinds, &1.child) in [:e1, :e2, :e3])
+      )
 
     %{
       kinds: kinds,
@@ -136,6 +139,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
     written =
       case kind do
         :e3 ->
+          refuse_org_references!(table, tmp, Map.get(catalog.org_fks, table, []))
           keep_own_e3_rows!(table, tmp, manifest)
           insert!(table, col_list, tmp, "ON CONFLICT DO NOTHING")
           count(tmp)

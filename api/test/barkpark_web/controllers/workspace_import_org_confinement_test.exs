@@ -320,6 +320,28 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert Tenancy.get_workspace_by_slug(slug).id == shell.id
     end
 
+    test "default: a merge may not replace a same-slug workspace with seats or tokens" do
+      %{bundle: bundle, ws_slug: slug} = source_bundle!(nil)
+      {raw_op, _op, _} = operator_token("shell-owned")
+      {:ok, victim} = Tenancy.create_workspace(%{slug: slug, name: "Owned #{slug}"})
+      owner = Barkpark.AccountsFixtures.register_user("owner-#{slug}@example.com")
+      {:ok, _} = TenancyAuth.create_membership(victim.id, owner.id, "owner", "user")
+      {:ok, _} = Auth.create_token("owned-#{slug}", "t", "test", ["read"], victim.id)
+
+      fingerprint = fn ->
+        Repo.query!(
+          "SELECT md5(concat_ws('|', (SELECT string_agg(w::text, ',') FROM workspaces w WHERE id = $1), " <>
+            "(SELECT string_agg(m::text, ',' ORDER BY m::text) FROM workspace_memberships m WHERE workspace_id = $1), " <>
+            "(SELECT string_agg(a::text, ',' ORDER BY a::text) FROM api_tokens a WHERE workspace_id = $1)))",
+          [Ecto.UUID.dump!(victim.id)]
+        ).rows
+      end
+
+      before = fingerprint.()
+      assert merge_import(raw_op, slug, bundle).status == 422
+      assert fingerprint.() == before
+    end
+
     test "observe: replacing an empty same-slug shell goes through and is recorded" do
       %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
       {raw_op, _op, _} = operator_token("shell-observe")
