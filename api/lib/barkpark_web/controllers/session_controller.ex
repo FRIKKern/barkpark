@@ -18,6 +18,7 @@ defmodule BarkparkWeb.SessionController do
 
   alias Barkpark.Accounts.NotificationWithhold
   alias Barkpark.Sso.LoginOptions
+  alias BarkparkWeb.LoginReturn
   alias BarkparkWeb.SessionIssuer
 
   @default_return_to "/studio"
@@ -26,7 +27,12 @@ defmodule BarkparkWeb.SessionController do
 
   def new(conn, params) do
     return_to = sanitize_return_to(params["return_to"])
-    render(conn, :new, new_assigns(return_to))
+
+    # The Cloud ticket and the magic link come back on a new request with no
+    # form, so they read return_to from the session (BarkparkWeb.LoginReturn).
+    conn
+    |> LoginReturn.remember(params["return_to"])
+    |> render(:new, new_assigns(return_to))
   end
 
   # The sign-in pages have no workspace of their own. Their language, in order
@@ -63,6 +69,7 @@ defmodule BarkparkWeb.SessionController do
          nil <- SessionIssuer.policy_refusal(conn, token_owner(api_token), "api_token"),
          {:ok, session_id} <- Barkpark.Auth.create_token_session(trimmed, api_token) do
       conn
+      |> LoginReturn.forget()
       |> configure_session(renew: true)
       |> put_session("api_token_session", session_id)
       |> put_flash(:info, gettext("Signed in."))
@@ -159,8 +166,9 @@ defmodule BarkparkWeb.SessionController do
   `GET /login/ticket/:ticket` — atomically consumes the ticket (single-use +
   60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), mints a
   `Barkpark.Auth.TokenSession` for the bound RAW api_token exactly like
-  `create/2` does for a pasted token, and redirects to `/studio`. One click,
-  no paste, works from a fresh browser.
+  `create/2` does for a pasted token, and redirects to the path `/login`
+  stored in the session (`BarkparkWeb.LoginReturn`), else `/studio`. One
+  click, no paste, works from a fresh browser.
 
   Consuming on GET is the magic-link tradeoff: mitigated by single-use + short
   TTL + `Cache-Control: no-store` (no proxy/history reuse) + `Referrer-Policy:
@@ -187,11 +195,14 @@ defmodule BarkparkWeb.SessionController do
           {:ok, token} =
             Barkpark.Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
 
+          return_to = LoginReturn.path(conn)
+
           conn
+          |> LoginReturn.forget()
           |> configure_session(renew: true)
           |> put_session("user_session", token)
           |> put_flash(:info, gettext("Signed in."))
-          |> redirect(to: @default_return_to)
+          |> redirect(to: return_to)
         end
 
       {:ok, raw_api_token} when is_binary(raw_api_token) ->
@@ -199,11 +210,14 @@ defmodule BarkparkWeb.SessionController do
              nil <- SessionIssuer.policy_refusal(conn, token_owner(api_token), "api_token") do
           {:ok, session_id} = Barkpark.Auth.create_token_session(raw_api_token, api_token)
 
+          return_to = LoginReturn.path(conn)
+
           conn
+          |> LoginReturn.forget()
           |> configure_session(renew: true)
           |> put_session("api_token_session", session_id)
           |> put_flash(:info, gettext("Signed in."))
-          |> redirect(to: @default_return_to)
+          |> redirect(to: return_to)
         else
           %Plug.Conn{} = refused ->
             refused
@@ -211,13 +225,13 @@ defmodule BarkparkWeb.SessionController do
           {:error, :unauthorized} ->
             conn
             |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
-            |> redirect(to: "/login")
+            |> redirect(to: LoginReturn.login_path(conn))
         end
 
       {:error, :invalid} ->
         conn
         |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
-        |> redirect(to: "/login")
+        |> redirect(to: LoginReturn.login_path(conn))
     end
   end
 
@@ -374,7 +388,10 @@ defmodule BarkparkWeb.SessionController do
         )
     end
 
-    render(conn, :magic_request, page_title: gettext("Sign-in link"), sent: true)
+    # The link lasts 15 minutes from now; so does the stored return_to.
+    conn
+    |> LoginReturn.refresh()
+    |> render(:magic_request, page_title: gettext("Sign-in link"), sent: true)
   end
 
   def magic_request(conn, _params), do: redirect(conn, to: "/login/magic")
@@ -393,7 +410,7 @@ defmodule BarkparkWeb.SessionController do
 
     case Barkpark.Accounts.consume_login_token(token) do
       {:ok, user} ->
-        complete_sign_in(conn, user, @default_return_to, "magic_link")
+        complete_sign_in(conn, user, LoginReturn.path(conn), "magic_link")
 
       :error ->
         conn
@@ -601,6 +618,7 @@ defmodule BarkparkWeb.SessionController do
       )
 
     conn
+    |> LoginReturn.forget()
     |> configure_session(renew: true)
     |> put_session("user_session", token)
     |> put_flash(:info, gettext("Signed in."))
