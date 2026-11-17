@@ -4,6 +4,9 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
   and remove a member, withdraw an invitation, revoke, rotate and mint a token,
   set and delete a run secret (scoped and flat).
 
+  Also: revoke another principal's access grant, create and remove a public
+  share (any dataset of the workspace).
+
   `:observe` (the default) lets each write through and records one audit row.
   `:enforce` refuses with 403 `dataset_not_bound` and changes nothing. A bound
   token revoking itself passes in both modes; an unbound admin token on the
@@ -17,7 +20,7 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
   import Ecto.Query
   import ExUnit.CaptureLog
 
-  alias Barkpark.{Auth, Repo, Secrets, Tenancy}
+  alias Barkpark.{Access, Auth, Repo, Secrets, Sharing, Tenancy}
   alias Barkpark.Accounts
   alias Barkpark.AccountsFixtures
   alias Barkpark.Audit.Event
@@ -35,12 +38,14 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     ws = TenancyFixtures.create_workspace!()
     proj = TenancyFixtures.create_project!(ws, "default")
     {:ok, _} = Tenancy.get_or_create_dataset(proj, "production")
+    {:ok, _} = Tenancy.get_or_create_dataset(proj, "staging")
 
     previous = Application.get_env(:barkpark, :dataset_bound_admin_reads)
     on_exit(fn -> Application.put_env(:barkpark, :dataset_bound_admin_reads, previous) end)
 
     {:ok,
      ws: ws,
+     proj: proj,
      base: "/w/#{ws.slug}/p/default",
      bound: token!(ws.id, dataset_bound: true),
      unbound: token!(ws.id, []),
@@ -98,6 +103,10 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     "delete a scoped secret",
     "set a flat secret",
     "delete a flat secret",
+    "revoke a staging grant",
+    "revoke a workspace-wide grant",
+    "create a public share",
+    "remove a public share",
     # Last, in this order: the unbound control runs them on one workspace.
     "archive the workspace",
     "restore the workspace",
@@ -190,6 +199,25 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
      {:delete, "/v1/secrets/BW_DEL_GLOBAL", %{}, fn -> is_nil(Secrets.get("BW_DEL_GLOBAL")) end}}
   end
 
+  defp write(ctx, "revoke a staging grant"),
+    do: revoke_grant(ctx, %{"project_id" => ctx.proj.id, "dataset" => "staging"})
+
+  defp write(ctx, "revoke a workspace-wide grant"), do: revoke_grant(ctx, %{})
+
+  defp write(ctx, "create a public share") do
+    {:ws, "shares_write", 201,
+     {:post, "/v1/shares", %{scope: "#{ctx.ws.slug}/default/staging", surfaces: "docs"},
+      fn -> Sharing.shared?(ctx.ws.slug, "default", "staging", :docs) end}}
+  end
+
+  defp write(ctx, "remove a public share") do
+    {:ok, _} = Sharing.add_share("#{ctx.ws.slug}/default/staging:docs:read")
+
+    {:ws, "shares_write", 200,
+     {:delete, "/v1/shares", %{scope: "#{ctx.ws.slug}/default/staging"},
+      fn -> not Sharing.shared?(ctx.ws.slug, "default", "staging", :docs) end}}
+  end
+
   defp write(ctx, "archive the workspace") do
     {:ws, "workspace_write", 200,
      {:post, "/api/workspaces/#{ctx.ws.slug}/archive", %{}, fn -> archived?(ctx.ws) end}}
@@ -206,6 +234,26 @@ defmodule BarkparkWeb.DatasetBoundAdminWritesTest do
     {:ws, "workspace_write", 200,
      {:delete, "/api/workspaces/#{ctx.ws.slug}", %{},
       fn -> is_nil(Tenancy.get_workspace_by_slug(ctx.ws.slug)) end}}
+  end
+
+  # A grant someone else (the unbound admin) minted, to another account.
+  defp revoke_grant(ctx, scope) do
+    {:ok, %{grant: grant}} =
+      Access.mint(
+        Repo.get!(ApiToken, ctx.unbound.id),
+        Map.merge(
+          %{
+            "workspace_id" => ctx.ws.id,
+            "grantee_email" => email(),
+            "capabilities" => ["read"]
+          },
+          scope
+        )
+      )
+
+    {:ws, "members_write", 200,
+     {:delete, "/v1/access/" <> grant.id, %{},
+      fn -> not is_nil(Access.get_grant(grant.id).revoked_at) end}}
   end
 
   defp archived?(ws) do

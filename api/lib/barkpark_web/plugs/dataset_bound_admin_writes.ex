@@ -4,8 +4,9 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   seating, re-roling and removing members, inviting and withdrawing
   invitations, minting, revoking and rotating tokens, setting and deleting run
   secrets (flat and scoped), the email form of a login ticket and the Cloud
-  seat repairs (deprovision, seat restore), and deleting, archiving,
-  restoring or reinstating a whole workspace.
+  seat repairs (deprovision, seat restore), revoking an access grant,
+  enrolling and revoking a chat host, creating and removing a public share,
+  and deleting, archiving, restoring or reinstating a whole workspace.
 
   The twin of `BarkparkWeb.Plugs.DatasetBoundAdminReads`, on the same
   predicate (`DatasetBoundAdminReads.bound_admin?/1`: a token minted with an
@@ -41,8 +42,8 @@ defmodule BarkparkWeb.Plugs.DatasetBoundAdminWrites do
   alias BarkparkWeb.Plugs.DatasetBoundAdminReads
 
   @action "bound_token.admin_write"
-  @message "this token is bound to one dataset and cannot change workspace members, tokens or secrets"
-  @hint "Members, invitations, tokens and secrets belong to the whole workspace. Use a token minted without `dataset` (`bp token create --permissions admin` with no -d), or your account. `GET /v1/auth/token` shows the binding. Write and admin tokens minted by bp before 2026-11-13 are bound to production: mint a new one."
+  @message "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
+  @hint "Members, grants, shares, tokens and secrets belong to the whole workspace. Use a token minted without `dataset` (`bp token create --permissions admin` with no -d), or your account. `GET /v1/auth/token` shows the binding. Write and admin tokens minted by bp before 2026-11-13 are bound to production: mint a new one."
 
   @doc "The audit action an observed write is recorded under."
   def action, do: @action
