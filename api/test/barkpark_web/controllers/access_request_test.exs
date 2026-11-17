@@ -17,8 +17,10 @@ defmodule BarkparkWeb.AccessRequestTest do
   import Ecto.Query
 
   alias Barkpark.{Accounts, Auth, Repo}
+  alias Barkpark.Accounts.Privacy
   alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.AccessRequest
+  alias Barkpark.Tenancy.AccessRequests
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Members
 
@@ -266,5 +268,106 @@ defmodule BarkparkWeb.AccessRequestTest do
 
     assert json_response(ask(unconfirmed, ctx.ws.slug), 403)["error"]["code"] ==
              "email_unconfirmed"
+  end
+
+  test "erase deletes the user's requests: the admin no longer sees the note, approve seats nobody",
+       ctx do
+    id =
+      json_response(ask(ctx.asker, ctx.ws.slug, "I am Jane Doe, 555-1234"), 202)[
+        "access_request"
+      ]["id"]
+
+    {:ok, summary} = Privacy.erase_subject(Repo.get!(Accounts.User, ctx.asker.user.id))
+    assert summary.access_requests_deleted == 1
+    assert Repo.get(AccessRequest, id) == nil
+
+    assert json_response(as(ctx.admin) |> get("#{ctx.base}/access-requests"), 200)[
+             "access_requests"
+           ] == []
+
+    assert json_response(approve(ctx.admin, ctx.base, id, "member"), 404)
+    assert role_in(ctx.ws, ctx.asker.user) == nil
+  end
+
+  test "withdraw leaves a decided request alone, even one decided between its read and its delete",
+       ctx do
+    approved = json_response(ask(ctx.asker, ctx.ws.slug), 202)["access_request"]["id"]
+    json_response(approve(ctx.admin, ctx.base, approved, "member"), 200)
+
+    denied = json_response(ask(user!(), ctx.ws.slug), 202)["access_request"]["id"]
+    denier = Repo.get!(AccessRequest, denied).user_id
+    json_response(deny(ctx.admin, ctx.base, denied), 200)
+
+    assert json_response(
+             as(ctx.asker.session) |> delete("/v1/auth/access-requests/#{approved}"),
+             404
+           )
+
+    assert AccessRequests.withdraw(denier, denied) == {:error, :not_found}
+    assert request_row(approved).status == "approved"
+    assert request_row(denied).status == "denied"
+
+    # The race: an approve commits while withdraw runs. Simulated by deciding
+    # the row as soon as withdraw's FIRST statement on the table returns (in
+    # this process only). Whatever the order, withdraw must not answer
+    # "withdrawn" for a row an approve had already decided.
+    raced = json_response(ask(ctx.asker, "raced-#{ctx.ws.slug}"), 202)["access_request"]["id"]
+    handler = "ar-withdraw-race-#{System.unique_integer([:positive])}"
+    me = self()
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:barkpark, :repo, :query],
+        fn _event, _measure, meta, _ ->
+          if self() == me and meta[:source] == "workspace_access_requests" and
+               Process.get(:ar_decided) == nil do
+            Process.put(:ar_decided, 0)
+
+            {n, _} =
+              Repo.update_all(
+                from(r in AccessRequest, where: r.id == ^raced and r.status == "pending"),
+                set: [status: "approved", decided_at: DateTime.utc_now()]
+              )
+
+            Process.put(:ar_decided, n)
+          end
+        end,
+        nil
+      )
+
+    result =
+      try do
+        AccessRequests.withdraw(ctx.asker.user.id, raced)
+      after
+        :telemetry.detach(handler)
+      end
+
+    case result do
+      {:ok, _} ->
+        assert Process.get(:ar_decided) == 0,
+               "withdraw deleted a request an approve had already decided"
+
+      {:error, :not_found} ->
+        assert request_row(raced).status == "approved"
+    end
+  end
+
+  test "approve deletes the user's pending invitation to the same workspace", ctx do
+    id = json_response(ask(ctx.asker, ctx.ws.slug), 202)["access_request"]["id"]
+
+    invite =
+      as(ctx.admin)
+      |> post(
+        "#{ctx.base}/members",
+        Jason.encode!(%{email: ctx.asker.user.email, role: "contributor"})
+      )
+
+    assert invite.status == 202
+    assert [_] = Members.list_invitations(ctx.ws.id)
+
+    json_response(approve(ctx.admin, ctx.base, id, "member"), 200)
+    assert role_in(ctx.ws, ctx.asker.user) == "member"
+    assert Members.list_invitations(ctx.ws.id) == []
   end
 end

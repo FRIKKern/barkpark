@@ -21,7 +21,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
   applies: only an owner grants `owner`) and `consented: true` (the user asked,
   so no invitation round trip). The request is locked, the seat created, the
   request marked approved and one `membership` audit row written in one
-  transaction; any failure rolls all of it back.
+  transaction; any failure rolls all of it back. A pending invitation for the
+  same seat is deleted in that transaction too.
 
   ## Limits
 
@@ -38,6 +39,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.AccessRequest
+  alias Barkpark.Tenancy.Invitation
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Members
   alias Barkpark.Tenancy.Membership
@@ -159,10 +161,17 @@ defmodule Barkpark.Tenancy.AccessRequests do
   """
   @spec withdraw(binary(), binary()) :: {:ok, own_row()} | {:error, :not_found}
   def withdraw(user_id, id) do
+    # One statement: the status is checked by the DELETE itself, so an approve
+    # or deny that commits first leaves nothing for it to match.
     with uuid when is_binary(uuid) <- Repo.uuid_or_nil(id),
-         %AccessRequest{user_id: ^user_id, status: "pending"} = row <-
-           Repo.get(AccessRequest, uuid),
-         {:ok, row} <- Repo.delete(row) do
+         uid when is_binary(uid) <- Repo.uuid_or_nil(user_id),
+         {1, [row]} <-
+           Repo.delete_all(
+             from(r in AccessRequest,
+               where: r.id == ^uuid and r.user_id == ^uid and r.status == "pending",
+               select: r
+             )
+           ) do
       {:ok, own_row(row)}
     else
       _ -> {:error, :not_found}
@@ -211,6 +220,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
       with %AccessRequest{} = row <- lock_pending(workspace_id, id),
            %User{email: email} = user <- Repo.get(User, row.user_id),
            {:ok, member} <- seat(workspace_id, email, role, actor),
+           :ok <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", role, actor),
            :ok <- audit("access_request_approved", row, user, actor, %{"role" => role}) do
         %{access_request: admin_row(row, email, nil), member: member}
@@ -260,6 +270,13 @@ defmodule Barkpark.Tenancy.AccessRequests do
       {:ok, member} -> {:ok, member}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # A pending invitation for the same seat is spent once the user is seated
+  # (accepting it would only answer `:already_member`); the roster drops it.
+  defp drop_invitation(%AccessRequest{workspace_id: ws, user_id: uid}) do
+    Repo.delete_all(from i in Invitation, where: i.workspace_id == ^ws and i.user_id == ^uid)
+    :ok
   end
 
   defp decide(row, status, role, actor) do
