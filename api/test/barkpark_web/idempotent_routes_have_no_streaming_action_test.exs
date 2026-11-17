@@ -22,7 +22,20 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
       because router.ex may not grow) is read out of the controllers' AST too.
       Such a module may stream in OTHER actions, so the check there is per
       action: from each mounted action, follow the module's own local calls,
-      and red if any of them reaches `send_chunked/2` or `send_file/3..5`.
+      and red if any of them reaches `send_chunked/2` or `send_file/3..5`;
+    * a call into ANOTHER project module (qualified by full name or through an
+      alias, or bare to a name an `import`ed module defines) is followed ONE
+      level: the called function and that module's own local calls from it.
+      An import's `only:`/`except:` is respected, and a variable is never a
+      call.
+
+  Known greens, a streaming call this scan does not see:
+
+    * a helper's own call into a third module (one level only);
+    * `apply/3`, or any call whose module or function is a runtime value;
+    * a `defdelegate` in a helper: its target is not followed;
+    * a function a `use` injects (`use BarkparkWeb, :controller`): only what
+      the file itself writes is read.
 
   Mounts and streaming calls are recognised by `Barkpark.Test.IdempotencyMounts`
   (test/support), shared with the OpenAPI tripwire: a mount by full name or
@@ -42,6 +55,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   @router_source Path.join(__DIR__, "../../lib/barkpark_web/router.ex") |> Path.expand()
   @controllers_dir Path.join(__DIR__, "../../lib/barkpark_web/controllers") |> Path.expand()
   @mutating_verbs ~w(post put patch delete)a
+  @api_root Path.expand("../..", __DIR__)
 
   # ── the scan ────────────────────────────────────────────────────────────
 
@@ -81,7 +95,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
         with true <- File.exists?(path),
              {:ok, ast} <- path |> File.read!() |> Code.string_to_quoted() do
-          calls_streaming?(ast)
+          calls_streaming?(ast) or helpers_stream?([ast], ast, local_defs(ast))
         else
           _ -> false
         end
@@ -145,28 +159,144 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     found
   end
 
-  # Does `action` reach a streaming call through the module's own functions?
-  # Local calls only: a helper in ANOTHER module is not followed.
+  # Does `action` reach a streaming call through the module's own functions,
+  # or through a helper module one of them calls?
   defp action_streams?(ast, action) do
     defs = local_defs(ast)
-    reaches_streaming?([action], defs, MapSet.new())
+    bodies = reached_bodies([action], defs)
+    Enum.any?(bodies, &calls_streaming?/1) or helpers_stream?(bodies, ast, defs)
   end
 
-  defp reaches_streaming?([], _defs, _seen), do: false
+  # The bodies of `names` and of every local function they reach.
+  defp reached_bodies(names, defs) do
+    names
+    |> reached(defs, MapSet.new())
+    |> Enum.flat_map(&Map.fetch!(defs, &1))
+  end
 
-  defp reaches_streaming?([name | rest], defs, seen) do
-    if MapSet.member?(seen, name) do
-      reaches_streaming?(rest, defs, seen)
+  defp reached([], _defs, seen), do: seen
+
+  defp reached([name | rest], defs, seen) do
+    if MapSet.member?(seen, name) or not Map.has_key?(defs, name) do
+      reached(rest, defs, seen)
     else
-      bodies = Map.get(defs, name, [])
-
-      Enum.any?(bodies, &calls_streaming?/1) or
-        reaches_streaming?(
-          Enum.flat_map(bodies, &local_calls(&1, defs)) ++ rest,
-          defs,
-          MapSet.put(seen, name)
-        )
+      bodies = Map.fetch!(defs, name)
+      reached(Enum.flat_map(bodies, &local_calls(&1, defs)) ++ rest, defs, MapSet.put(seen, name))
     end
+  end
+
+  # ── one level into helper modules ───────────────────────────────────────
+
+  # Does any call in `bodies` into another project module reach a streaming
+  # call there? `ast` is the caller's whole file (for its aliases and imports),
+  # `defs` its local functions (a bare call to one of those is not an import).
+  defp helpers_stream?(bodies, ast, defs) do
+    bodies
+    |> helper_targets(ast, defs)
+    |> Enum.any?(fn {_module, {helper_ast, names}} ->
+      helper_ast
+      |> local_defs()
+      |> then(&reached_bodies(names, &1))
+      |> Enum.any?(&calls_streaming?/1)
+    end)
+  end
+
+  # `%{module => {its source AST, the names called in it}}`, project modules only.
+  defp helper_targets(bodies, ast, defs) do
+    aliases = IdempotencyMounts.aliases(ast)
+    imports = imports(ast, aliases)
+
+    bodies
+    |> Enum.flat_map(&helper_calls(&1, aliases, imports, defs))
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.flat_map(fn {module, names} ->
+      case project_ast(module) do
+        nil -> []
+        helper_ast -> [{module, {helper_ast, names}}]
+      end
+    end)
+    |> Map.new()
+  end
+
+  # `{module, admits?}` per `import`: `admits?.(name)` is whether the import
+  # brings `name` in, after its `only:` or `except:` list.
+  defp imports(ast, aliases) do
+    {_, found} =
+      Macro.prewalk(ast, [], fn
+        {:import, _, [{:__aliases__, _, segments} | opts]} = node, acc ->
+          case IdempotencyMounts.module(segments, aliases) do
+            nil -> {node, acc}
+            module -> {node, [{module, import_filter(opts)} | acc]}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  defp import_filter([opts]) when is_list(opts) do
+    case {Keyword.get(opts, :only), Keyword.get(opts, :except)} do
+      {only, _} when is_list(only) -> &Keyword.has_key?(only, &1)
+      {_, except} when is_list(except) -> &(not Keyword.has_key?(except, &1))
+      _ -> fn _name -> true end
+    end
+  end
+
+  defp import_filter(_opts), do: fn _name -> true end
+
+  # `{module, name}` per qualified call or capture, and per bare CALL or
+  # capture (never a variable) of a non-local name an import brings in.
+  # Arity is ignored, so a same-named clause of another arity counts.
+  defp helper_calls(body, aliases, imports, defs) do
+    {_, found} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [{:__aliases__, _, segments}, name]}, _, args} = node, acc
+        when is_atom(name) and is_list(args) ->
+          {node, [{IdempotencyMounts.module(segments, aliases), name} | acc]}
+
+        {:&, _, [{:/, _, [{name, _, ctx}, arity]}]} = node, acc
+        when is_atom(name) and is_atom(ctx) and is_integer(arity) ->
+          {node, imported(name, imports, defs) ++ acc}
+
+        {name, _, args} = node, acc when is_atom(name) and is_list(args) ->
+          {node, imported(name, imports, defs) ++ acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  defp imported(name, imports, defs) do
+    if Map.has_key?(defs, name),
+      do: [],
+      else: for({module, admits?} <- imports, admits?.(name), do: {module, name})
+  end
+
+  # The source AST of a module compiled from a file in this project (not deps,
+  # not Elixir or OTP), else nil.
+  defp project_ast(nil), do: nil
+
+  defp project_ast(module) do
+    with true <- Code.ensure_loaded?(module),
+         source when not is_nil(source) <- module.module_info(:compile)[:source],
+         path = to_string(source),
+         true <- project_source?(path),
+         {:ok, ast} <- path |> File.read!() |> Code.string_to_quoted() do
+      ast
+    else
+      _ -> nil
+    end
+  end
+
+  defp project_source?(path) do
+    relative = Path.relative_to(path, @api_root)
+
+    relative != path and File.exists?(path) and
+      not String.starts_with?(relative, ["deps/", "_build/"])
   end
 
   defp local_defs(ast) do
@@ -277,6 +407,177 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
            end),
            "expected POST /v1/data/mutate/:dataset to be in the covered set. " <>
              "Got: #{inspect(covered)}"
+  end
+
+  # ── one level into helper modules (task-a98630688d97c311) ───────────────
+  #
+  # A MUTANT helper, compiled from a file under the test's tmp_dir so its
+  # `module_info(:compile)[:source]` is a real project path. `reply/1` streams
+  # through a private function; `harmless/1` does not.
+  defp compile_mutant_helper!(dir, name) do
+    path = Path.join(dir, "#{name}.ex")
+
+    File.write!(path, """
+    defmodule Barkpark.Test.#{name} do
+      import Plug.Conn
+      def reply(conn), do: open_stream(conn)
+      def harmless(conn), do: conn
+      defp open_stream(conn), do: send_chunked(conn, 200)
+    end
+    """)
+
+    Code.compile_file(path)
+    Module.concat([Barkpark.Test, name])
+  end
+
+  # ChatController's real AST, with `call` put in front of `create_message/2`'s
+  # body (and `prelude`, an alias or import, inside the module). Both are
+  # source text, parsed, so their AST has the shape a real file gives.
+  defp chat_controller_with(prelude, call) do
+    {_, _, ast} = Enum.find(controller_mounts(), &(elem(&1, 0) == BarkparkWeb.ChatController))
+    prelude = Code.string_to_quoted!(prelude)
+    call = Code.string_to_quoted!(call)
+
+    Macro.prewalk(ast, fn
+      {:def, meta, [{:create_message, _, _} = head, [do: body]]} ->
+        {:def, meta, [head, [do: {:__block__, [], [prelude, call, body]}]]}
+
+      node ->
+        node
+    end)
+  end
+
+  test "CONTROL: the helper walk reads create_message's real project helpers, not stdlib" do
+    {_, _, ast} = Enum.find(controller_mounts(), &(elem(&1, 0) == BarkparkWeb.ChatController))
+    defs = local_defs(ast)
+    targets = [:create_message] |> reached_bodies(defs) |> helper_targets(ast, defs)
+
+    assert Map.has_key?(targets, BarkparkWeb.ChatUserTurn),
+           "create_message calls ChatUserTurn.resolve/…; a walk that cannot read it " <>
+             "passes every helper vacuously. Read: #{inspect(Map.keys(targets))}"
+
+    refute Map.has_key?(targets, Map)
+    refute Map.has_key?(targets, Ecto.UUID)
+  end
+
+  @tag :tmp_dir
+  test "MUTANT: create_message calling an ALIASED helper that streams reds", %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantAliasedStreamHelper")
+
+    ast =
+      chat_controller_with(
+        "alias #{inspect(helper)}",
+        "MutantAliasedStreamHelper.reply(conn)"
+      )
+
+    assert action_streams?(ast, :create_message),
+           "create_message reaches send_chunked/2 through #{inspect(helper)}.reply/1; " <>
+             "a walk that stops at the module boundary passes it"
+  end
+
+  @tag :tmp_dir
+  test "MUTANT: create_message calling an IMPORTED helper that streams reds", %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantImportedStreamHelper")
+
+    ast =
+      chat_controller_with(
+        "import #{inspect(helper)}",
+        "conn |> reply()"
+      )
+
+    assert action_streams?(ast, :create_message)
+  end
+
+  @tag :tmp_dir
+  test "MUTANT: a helper function that does not stream stays green", %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantHarmlessHelper")
+
+    ast =
+      chat_controller_with(
+        "alias #{inspect(helper)}",
+        "&MutantHarmlessHelper.harmless/1"
+      )
+
+    refute action_streams?(ast, :create_message),
+           "only the CALLED helper function counts; the module's other functions do not"
+  end
+
+  # A false red on someone else's PR: an `import ..., only:` that leaves the
+  # streaming function out, and a VARIABLE named like it, are not calls into it.
+  @tag :tmp_dir
+  test "MUTANT: an import's only:/except: and a same-named variable stay green",
+       %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantOnlyHelper")
+
+    for {prelude, call} <- [
+          {"import #{inspect(helper)}, only: [harmless: 1]", "reply = harmless(conn)\nreply"},
+          {"import #{inspect(helper)}, except: [reply: 1]", "reply(conn)"},
+          {"import #{inspect(helper)}", "reply = harmless(conn)\nreply"}
+        ] do
+      refute action_streams?(chat_controller_with(prelude, call), :create_message),
+             "wrongly red: #{prelude} / #{call}"
+    end
+
+    assert action_streams?(
+             chat_controller_with("import #{inspect(helper)}, only: [reply: 1]", "reply(conn)"),
+             :create_message
+           ),
+           "only: that names the streaming function still reaches it"
+
+    assert action_streams?(
+             chat_controller_with("import #{inspect(helper)}", "f = &reply/1\nf.(conn)"),
+             :create_message
+           ),
+           "a capture of an imported streaming function still reaches it"
+  end
+
+  # `alias __MODULE__.Inner` resolves to no module the scan can name: it is
+  # skipped, never a crash that reds an unrelated PR.
+  @tag :tmp_dir
+  test "a controller that aliases __MODULE__.Inner scans without crashing", %{tmp_dir: dir} do
+    path = Path.join(dir, "mutant_inner_alias_controller.ex")
+
+    File.write!(path, """
+    defmodule Barkpark.Test.MutantInnerAliasController do
+      defmodule Inner do
+        def go(conn), do: conn
+      end
+
+      alias __MODULE__.Inner
+      def create(conn, _params), do: Inner.go(conn)
+    end
+    """)
+
+    Code.compile_file(path)
+    refute streaming_module?(Barkpark.Test.MutantInnerAliasController)
+  end
+
+  @tag :tmp_dir
+  test "MUTANT: a router-mounted controller calling a streaming helper reds", %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantRouterStreamHelper")
+    # One file each: streaming_module?/1 reads the module's whole source file.
+    for {file, source} <- [
+          {"mutant_router_controller.ex",
+           """
+           defmodule Barkpark.Test.MutantRouterController do
+             alias #{inspect(helper)}, as: Out
+             def create(conn, _params), do: Out.reply(conn)
+           end
+           """},
+          {"mutant_router_harmless_controller.ex",
+           """
+           defmodule Barkpark.Test.MutantRouterHarmlessController do
+             def create(conn, _params), do: #{inspect(helper)}.harmless(conn)
+           end
+           """}
+        ] do
+      path = Path.join(dir, file)
+      File.write!(path, source)
+      Code.compile_file(path)
+    end
+
+    assert streaming_module?(Barkpark.Test.MutantRouterController)
+    refute streaming_module?(Barkpark.Test.MutantRouterHarmlessController)
   end
 
   # ── the assertion ───────────────────────────────────────────────────────

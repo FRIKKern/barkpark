@@ -73,4 +73,19 @@ defmodule Barkpark.Test.IdempotencyMountsTest do
       refute streams?("conn |> Plug.Conn.send_resp(200, body)")
     end
   end
+
+  describe "module/2" do
+    test "a name through an alias, or by full name" do
+      aliases = IdempotencyMounts.aliases(Code.string_to_quoted!("alias Barkpark.Media"))
+      assert IdempotencyMounts.module([:Media, :Blob], aliases) == Barkpark.Media.Blob
+      assert IdempotencyMounts.module([:Plug, :Conn], aliases) == Plug.Conn
+    end
+
+    # A crash here reds every PR whose controller writes `alias __MODULE__.X`.
+    test "an alias built from __MODULE__ resolves to nil, not a crash" do
+      aliases = IdempotencyMounts.aliases(quote(do: alias(__MODULE__.Inner)))
+      assert IdempotencyMounts.module([:Inner], aliases) == nil
+      assert IdempotencyMounts.module([{:__MODULE__, [], nil}, :Inner], %{}) == nil
+    end
+  end
 end
