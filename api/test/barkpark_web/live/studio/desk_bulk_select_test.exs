@@ -137,6 +137,11 @@ defmodule BarkparkWeb.Studio.DeskBulkSelectTest do
     refute has_element?(c.view, ~s(#{@list} .list-rows[data-selecting]))
     refute has_element?(c.view, @bar)
 
+    # "Create new" sits before "List options" from the first render (hidden
+    # until the read allows it), so the read never moves the menu's button.
+    assert render(c.view) =~
+             ~r/class="dk-create-new[^>]*>.*?<\/button>\s*<button[^>]*class="dk-list-options/s
+
     c.view |> element(item) |> render_click()
 
     assert has_element?(c.view, ~s(#{item}[aria-checked="true"]), "Stop selecting")
