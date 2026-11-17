@@ -612,6 +612,7 @@ func TestTaskCreateResidueSetIsEnumerated(t *testing.T) {
 		residuePublishAmbiguousServerFault,
 		residuePublishResultUnreadable,
 		residueDiscardFailed,
+		residuePublishResendKeyRefused,
 	}
 	if len(taskCreateResidueClasses) != len(declared) {
 		t.Fatalf("residue map has %d entries, %d are declared — a class was added without a name or a why",
