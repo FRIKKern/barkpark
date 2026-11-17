@@ -24,7 +24,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   alias Barkpark.Content.Broadcast
   alias Barkpark.Plugins.Enablement
-  alias Barkpark.{CycleFleet, StudioChat}
+  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
@@ -1164,7 +1164,7 @@ defmodule Barkpark.StudioChat.Recorder do
           # Only a TOP-LEVEL TodoWrite is the turn's living checklist (D39) —
           # a sub-agent's todo list must never hijack the main turn's card, so
           # a child frame's TodoWrite persists as a plain (indented) tool row.
-          persist_todo_block(st, name, block)
+          persist_todo_block(st, name, EventText.replace_nul(block))
         else
           persist(
             st.session_id,
@@ -1812,6 +1812,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # Merge a lifecycle patch onto the spawn row (never clobbering its input, D45).
   defp stamp_task(session_id, tool_use_id, patch) do
+    [tool_use_id, patch] = EventText.replace_nul([tool_use_id, patch])
+
     case StudioChat.merge_tool_metadata(session_id, tool_use_id, patch) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to stamp task metadata: #{inspect(reason)}")
@@ -1916,7 +1918,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_rail(session_id, rail) do
-    case StudioChat.set_rail_snapshot(session_id, rail) do
+    case StudioChat.set_rail_snapshot(session_id, EventText.replace_nul(rail)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist rail: #{inspect(reason)}")
 
@@ -1926,7 +1928,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist(session_id, attrs, kind) do
-    case StudioChat.append_message(session_id, Barkpark.ChatHosts.EventText.replace_nul(attrs)) do
+    case StudioChat.append_message(session_id, EventText.replace_nul(attrs)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist #{kind}: #{inspect(reason)}")
 
@@ -2465,7 +2467,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # would leave the replayed row falsely neutral); a plain empty result is still
   # ignored, exactly as before.
   defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
-    content
+    EventText.replace_nul(content)
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
     |> Enum.map(fn b ->
       # `result_text/1` answers nil for a contentless block — normalize to ""
