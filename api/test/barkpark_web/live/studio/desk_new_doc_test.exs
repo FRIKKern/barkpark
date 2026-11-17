@@ -199,6 +199,13 @@ defmodule BarkparkWeb.Studio.DeskNewDocTest do
       EditorPost.change(view, %{"doc" => %{"title" => "", "featured" => "false"}})
       assert rows(c.post) == before
 
+      # Its actions have nothing to act on: Publish, Duplicate and Delete store nothing.
+      for event <- ~w(publish duplicate-doc delete-doc) do
+        EditorPost.press(view, event)
+        settle(view)
+        assert rows(c.post) == before, "#{event} stored #{inspect(rows(c.post) -- before)}"
+      end
+
       # Leaving it costs nothing.
       render_patch(view, "#{c.base}/#{c.post}")
       settle(view)
@@ -258,6 +265,20 @@ defmodule BarkparkWeb.Studio.DeskNewDocTest do
       again = open(c.conn, landed)
       assert poll(again, fn -> editing?(again) end)
       assert render(again) =~ "Alan Turing"
+      assert {nil, _, _} = Content.fetch_doc_with_draft(c.post, id, @dataset)
+    end
+
+    test "its first edit is held to the document quota, as Create new is", c do
+      view = open(c.conn, "#{c.base}/#{c.post}")
+      before = rows(c.post)
+      id = c.post |> then(&create(view, &1, &1)) |> id_of()
+
+      ws = Tenancy.get_default_workspace()
+      {:ok, _} = Barkpark.Tenancy.Quota.set_quota(ws, Barkpark.Tenancy.Quota.usage(ws.id))
+
+      html = EditorPost.change(view, %{"doc" => %{"title" => "Over quota"}})
+      assert html =~ "reached its document quota"
+      assert rows(c.post) == before
       assert {nil, _, _} = Content.fetch_doc_with_draft(c.post, id, @dataset)
     end
 

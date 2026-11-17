@@ -330,10 +330,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         {:noreply, Discarded.drop(socket)}
 
       true ->
-        params
-        |> Fields.autosave_built(written(socket, "autosave"))
-        |> Scope.settle_group()
-        |> ours()
+        case NewDoc.room(socket) do
+          :cont ->
+            params
+            |> Fields.autosave_built(written(socket, "autosave"))
+            |> Scope.settle_group()
+            |> ours()
+
+          {:halt, socket} ->
+            {:noreply, socket}
+        end
     end
   end
 
@@ -663,6 +669,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               else:
                 assigns
                 |> DocMenu.items()
+                |> NewDoc.offered(assigns)
                 |> DocMenu.with_incoming(
                   IncomingRefs.menu_item(
                     @chain,
@@ -873,7 +880,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             actions behind its own "…" ("Open document actions"),
             `Desk.DocFooter`. It is the pane's last child, so its coming and
             going moves nothing. --%>
-      <% items = if @edit_failed or gone?(assigns), do: [], else: DocMenu.items(assigns) %>
+      <% items = if @edit_failed or gone?(assigns), do: [], else: NewDoc.offered(DocMenu.items(assigns), assigns) %>
       <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}

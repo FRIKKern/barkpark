@@ -41,6 +41,10 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave)
 
+  # The document's actions: none acts on a document not stored yet.
+  @actions ~w(publish unpublish discard-draft duplicate-doc delete-doc confirm-delete
+              schema_action restore-revision)
+
   @type choice :: %{id: String.t(), title: String.t(), type: String.t(), value: map()}
 
   @doc """
@@ -176,6 +180,9 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
       not unborn?(socket.assigns) ->
         :cont
 
+      event in @actions ->
+        {:halt, socket}
+
       event in @form_writes and not edits?(params, socket.assigns) ->
         {:halt, socket}
 
@@ -183,11 +190,26 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
         :cont
 
       true ->
-        case QuotaGate.check(workspace_id(socket.assigns), 1) do
-          :ok -> :cont
-          {:error, message} -> {:halt, put_flash(socket, :error, message)}
-        end
+        room(socket)
     end
+  end
+
+  @doc """
+  Before a write the page builds itself (Paste field): the new document's
+  first write stores it, so it needs room for one more document.
+  """
+  def room(socket) do
+    with true <- unborn?(socket.assigns),
+         {:error, message} <- QuotaGate.check(workspace_id(socket.assigns), 1) do
+      {:halt, put_flash(socket, :error, message)}
+    else
+      _ -> :cont
+    end
+  end
+
+  @doc "The document's menu items: none of its actions before it is stored."
+  def offered(items, assigns) do
+    if unborn?(assigns), do: Enum.reject(items, &(&1[:event] in @actions)), else: items
   end
 
   defp workspace_id(%{current_workspace: %{id: id}}), do: id
