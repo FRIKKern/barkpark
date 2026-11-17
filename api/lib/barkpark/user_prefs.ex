@@ -22,13 +22,15 @@ defmodule Barkpark.UserPrefs do
   def get(user_id, workspace_id, dataset, key)
       when is_binary(user_id) and is_binary(workspace_id) and is_binary(dataset) and
              is_binary(key) do
-    Repo.one(
-      from p in UserPref,
-        where:
-          p.user_id == ^user_id and p.workspace_id == ^workspace_id and p.dataset == ^dataset and
-            p.key == ^key,
-        select: p.value
-    )
+    if UserPref.storable_name?(dataset, key) do
+      Repo.one(
+        from p in UserPref,
+          where:
+            p.user_id == ^user_id and p.workspace_id == ^workspace_id and p.dataset == ^dataset and
+              p.key == ^key,
+          select: p.value
+      )
+    end
   end
 
   @doc """
@@ -84,6 +86,13 @@ defmodule Barkpark.UserPrefs do
   def apply_list_op(user_id, workspace_id, dataset, key, {op, field, item, max}) do
     scope = %{user_id: user_id, workspace_id: workspace_id, dataset: dataset, key: key}
 
+    # A remove never inserts, so its locked read would be the first to raise.
+    if UserPref.storable_name?(dataset, key),
+      do: locked_op(scope, op, field, item, max),
+      else: {:error, UserPref.changeset(%UserPref{}, Map.put(scope, :value, %{}))}
+  end
+
+  defp locked_op(scope, op, field, item, max) do
     Repo.transaction(fn ->
       with {:ok, pref} <- locked_row(scope, op != :remove),
            {:ok, value} <- change(pref, op, field, item, max) do
@@ -171,6 +180,12 @@ defmodule Barkpark.UserPrefs do
   """
   @spec delete(binary(), binary(), String.t(), String.t()) :: {:ok, non_neg_integer()}
   def delete(user_id, workspace_id, dataset, key) do
+    if UserPref.storable_name?(dataset, key),
+      do: delete_row(user_id, workspace_id, dataset, key),
+      else: {:ok, 0}
+  end
+
+  defp delete_row(user_id, workspace_id, dataset, key) do
     {count, _} =
       Repo.delete_all(
         from p in UserPref,
