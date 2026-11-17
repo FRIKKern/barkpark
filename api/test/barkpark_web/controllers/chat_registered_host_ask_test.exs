@@ -236,6 +236,105 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
     end
   end
 
+  # task-dc4980982da790c9, rev26731 on #26937: "no local Recorder" and "the
+  # Recorder did not answer" are not "no runtime". The host's turn is still
+  # blocked on the ask, so an answer must leave it pending (503), never cancel it.
+  describe "an answer while the host's lease is live but no Recorder answers" do
+    test "after a restart (no Recorder, lease live) both routes 503 and keep the asks; after a send they deliver once",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.lease_live?(turn_lease)
+
+      send_resp =
+        json_conn(raw)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "still there?"}))
+
+      assert send_resp.status == 202
+      assert_delivered_once(raw, host, sid)
+    end
+
+    test "a Recorder that does not answer in time is a 503 on both routes; after it resumes they deliver once",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      recorder = Recorder.whereis(sid)
+      :ok = :sys.suspend(recorder)
+
+      try do
+        assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+        assert_unavailable(answer(raw, sid, "ask-b1q"))
+      after
+        :sys.resume(recorder)
+      end
+
+      assert_pending_and_unleased(host, sid)
+      assert_delivered_once(raw, host, sid)
+    end
+  end
+
+  defp asks!(host, sid) do
+    post_ask!(host, sid, "ask-b1", "Write", %{"file_path" => "/tmp/b1.txt"})
+    assert_receive {:claude_chat_permission, %{request_id: "ask-b1"}}, 1_000
+    post_ask!(host, sid, "ask-b1q", "AskUserQuestion", @ask_input)
+    assert_receive {:claude_chat_permission, %{request_id: "ask-b1q"}}, 1_000
+  end
+
+  # As on a deploy: the Recorder dies with no teardown, the host's lease lives on.
+  defp kill_recorder!(sid) do
+    recorder = Recorder.whereis(sid)
+    ref = Process.monitor(recorder)
+    Process.exit(recorder, :kill)
+    assert_receive {:DOWN, ^ref, _, _, _}, 1_000
+    await_unregistered(sid)
+  end
+
+  # A Registry drops a dead owner's name asynchronously.
+  defp await_unregistered(sid, tries \\ 100) do
+    cond do
+      Recorder.whereis(sid) == nil -> :ok
+      tries == 0 -> flunk("the killed Recorder stayed registered")
+      true -> Process.sleep(10) && await_unregistered(sid, tries - 1)
+    end
+  end
+
+  defp assert_unavailable(resp) do
+    assert resp.status == 503, "answered #{resp.status}: #{resp.resp_body}"
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "runtime_unavailable"
+  end
+
+  defp assert_pending_and_unleased(host, sid) do
+    assert host_commands(host, sid, :answer_approval) == []
+    assert [%{metadata: %{"approval_status" => "pending"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "pending"}}] = rows(sid, "question")
+  end
+
+  defp assert_delivered_once(raw, host, sid) do
+    assert approve(raw, sid, "ask-b1", "allow").status == 204
+    assert answer(raw, sid, "ask-b1q").status == 204
+
+    leased = host |> host_commands(sid, :answer_approval) |> Enum.map(& &1.command.approval_id)
+    assert Enum.sort(leased) == ["ask-b1", "ask-b1q"]
+
+    assert [%{metadata: %{"approval_status" => "allowed"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "allowed"}}] = rows(sid, "question")
+  end
+
+  defp answer(raw, sid, request_id) do
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions/#{sid}/answer",
+      Jason.encode!(%{
+        request_id: request_id,
+        answers: %{@question => "Postgres", @multi => ["Auth"]}
+      })
+    )
+  end
+
   defp approve(raw, sid, request_id, decision) do
     json_conn(raw)
     |> post(

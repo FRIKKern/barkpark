@@ -20,9 +20,12 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
       `chat_controller_test.exs`);
     * a delivery that fails or exits: `{:error, _}`, the route answers 503, and
       a resend delivers;
-    * no live runtime (a nil `deliver`): nothing can ever answer the session's
-      asks, so its pending asks are canceled first, as Studio does on reopen
-      (D11, task-dc4980982da790c9), and a pending ask is refused as canceled.
+    * a runtime that cannot be reached now (`deliverer/2` returns
+      `{:error, _}`): nothing is claimed or sent, the route answers 503, and
+      the ask stays pending;
+    * nothing left to answer to (a nil `deliver`): the session's pending asks
+      are canceled first, as Studio does on reopen (D11,
+      task-dc4980982da790c9), and a pending ask is refused as canceled.
 
   The ask stays "pending" until its answer is delivered, so both server
   cancels, which touch only pending rows (`cancel_pending_approvals/1` and
@@ -37,9 +40,10 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
   import Ecto.Query, only: [where: 3, lock: 2]
 
+  alias Barkpark.ChatHosts
   alias Barkpark.Repo
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.Message
+  alias Barkpark.StudioChat.{Message, Recorder}
 
   @claim "answer_claimed_at"
   @claim_ttl_s 60
@@ -47,11 +51,42 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
   @type outcome :: :delivered | :noop | {:refused, String.t()} | {:error, term()}
 
   @doc """
-  Claim a pending ask, run `deliver`, then flip it to `status`; any other ask
-  is not delivered. A nil `deliver` (no live runtime) cancels the session's
-  pending asks (D11), so the store never holds an answer nothing received.
+  The `deliver` for `settle/4`, from who can still answer the session's asks
+  (task-dc4980982da790c9, rev26731 on #26937):
+
+    * a Recorder hands over its runtime: a deliver that calls `send` with it;
+    * a Recorder that does not answer (busy past the call timeout, or exiting),
+      or no local Recorder while the session holds a live execution lease (a
+      registered host's turn after a restart, still blocked on its ask):
+      `{:error, _}`. The ask must stay pending, and a send brings a Recorder
+      back to deliver it;
+    * no Recorder and no live lease: nil, so `settle/4` cancels (D11).
   """
-  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil) :: outcome()
+  @spec deliverer(String.t(), (term() -> any())) :: (-> any()) | nil | {:error, term()}
+  def deliverer(session_id, send) when is_function(send, 1) do
+    case Recorder.whereis(session_id) do
+      pid when is_pid(pid) ->
+        case Recorder.session_pid(pid) do
+          {:ok, runtime} -> fn -> send.(runtime) end
+          {:error, reason} -> {:error, {:runtime_unavailable, reason}}
+        end
+
+      nil ->
+        if ChatHosts.live_report_fence(session_id),
+          do: {:error, {:runtime_unavailable, :no_recorder}}
+    end
+  end
+
+  @doc """
+  Claim a pending ask, run `deliver`, then flip it to `status`; any other ask
+  is not delivered. A nil `deliver` (nothing left to answer to) cancels the
+  session's pending asks (D11), so the store never holds an answer nothing
+  received. An `{:error, _}` from `deliverer/2` touches nothing.
+  """
+  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil | {:error, term()}) ::
+          outcome()
+  def settle(_session_id, _request_id, _status, {:error, _} = unavailable), do: unavailable
+
   def settle(session_id, request_id, _status, nil) do
     StudioChat.cancel_pending_approvals(session_id)
     check(session_id, request_id)
