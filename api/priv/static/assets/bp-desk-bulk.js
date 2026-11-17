@@ -19,6 +19,9 @@
 //   - The summary ("Published 2 of 3") is a toast on the page's body
 //     (`desk:bulk-toast`), up 8 s as TanStack's.
 //
+//   - "Select documents" shows the ticks in the same click, before the
+//     server has answered.
+//
 // Loaded by bp-desk.js from the address the page gives (`data-desk-bulk`).
 (function () {
   "use strict";
@@ -59,8 +62,21 @@
     return row ? row.querySelector(".bulk-check input") : null;
   }
 
+  // "Select documents" shows the ticks at once, before the server's answer
+  // (which draws the same): a Tab pressed right after it finds them.
+  function startNow(item) {
+    var pane = item.closest("[data-pane-index]");
+    var list = pane && pane.querySelector(".list-rows");
+    if (!list) return;
+    list.setAttribute("data-selecting", "");
+    var ticks = list.querySelectorAll(".bulk-check[inert]");
+    for (var i = 0; i < ticks.length; i++) ticks[i].removeAttribute("inert");
+  }
+
   // A modified click on a row, not on its tick: the tick is pressed for it.
   function onClick(e) {
+    var start = e.target && e.target.closest ? e.target.closest('.dk-list-menu [phx-click="bulk-select"][phx-value-on="true"]') : null;
+    if (start) return startNow(start);
     if (!(e.metaKey || e.ctrlKey || e.shiftKey) || e.button !== 0) return;
     var target = e.target;
     var row = target && target.closest ? target.closest(".dk .bulk-row") : null;
