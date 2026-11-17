@@ -13,7 +13,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
     * concurrent pending    → 409 `idempotency_key_in_use`, handler never runs
 
   First-time responses with status < 500 are cached; a 5xx or crashed request
-  releases the claim so a retry can re-claim. Requires `RequireToken` to have
+  releases the claim so a retry can re-claim, unless the write already
+  committed (`Barkpark.Idempotency`, "A write that committed and then answered
+  a fault"): then the 5xx is cached and replayed. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
   `bind_request: true` (every mount today: the chat send in ChatController and
@@ -110,7 +112,7 @@ defmodule BarkparkWeb.Plugs.Idempotency do
         hash = Idempotency.hash_key(raw_key, token.id, conn.method, path)
 
         case Idempotency.claim(hash, scope) do
-          :claimed -> register_complete(conn, hash, scope)
+          :claimed -> hold_and_register_complete(conn, hash, scope)
           {:replay, cached} -> replay(conn, cached)
           :in_progress -> refuse(conn, :idempotency_key_in_use)
           :mismatch -> refuse(conn, :idempotency_key_reused)
@@ -167,11 +169,20 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   # claim row is the dedup anchor — it already blocks concurrent duplicates — so
   # a failed cache write is surfaced to telemetry, never swallowed into a silent
   # dedup gap.
+  # The claimed hash is held for this request so the write's transaction can
+  # mark it committed; before_send forgets it on every send.
+  defp hold_and_register_complete(conn, hash, scope) do
+    Idempotency.hold(hash)
+    register_complete(conn, hash, scope)
+  end
+
   defp register_complete(conn, hash, scope) do
     register_before_send(conn, fn sent ->
+      Idempotency.forget_held_key()
+
       cond do
         is_nil(sent.status) ->
-          safe_release(hash)
+          settle_fault(hash, scope, sent)
 
         sent.state != :set ->
           refuse_bodyless_send(hash, sent)
@@ -182,11 +193,20 @@ defmodule BarkparkWeb.Plugs.Idempotency do
           cache_response(hash, scope, sent.status, body, headers)
 
         true ->
-          safe_release(hash)
+          settle_fault(hash, scope, sent)
       end
 
       sent
     end)
+  end
+
+  # A 5xx (or no answer): released so the retry runs, unless the write
+  # committed, in which case the answer is recorded and replayed.
+  defp settle_fault(hash, scope, sent) do
+    body = IO.iodata_to_binary(sent.resp_body || "")
+    Idempotency.settle_fault(hash, scope, sent.status, body, sent.resp_headers || [])
+  rescue
+    error -> emit_store_error(hash, error)
   end
 
   # THE `:set` ALLOWLIST — an idempotency receipt is only meaningful when the
