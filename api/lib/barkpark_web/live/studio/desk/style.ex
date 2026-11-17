@@ -63,8 +63,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
     <style>
       /* studio-literal-check: skip-begin (the desk's own look: the TanStack Studio's
          measured values, barkpark-studio app/src/styles.css, light and dark; main's ruling 11-13) */
-      .dk div.dk-edit-footer { --dk-foot-meta: rgb(106 110 125); --dk-foot-icon: rgb(106 110 125); --dk-foot-hover: rgb(246 246 248); --dk-publish-bg: rgb(31 34 48); --dk-publish-fg: rgb(255 255 255); --dk-publish-off-bg: rgb(187 189 201); --dk-publish-off-fg: rgb(236 237 243); }
-      html[data-theme="dark"] .dk div.dk-edit-footer { --dk-foot-meta: rgb(147 148 159); --dk-foot-icon: rgb(147 148 159); --dk-foot-hover: rgb(33 35 47); --dk-publish-bg: rgb(228 229 233); --dk-publish-fg: rgb(19 20 27); --dk-publish-off-bg: rgb(85 92 117); --dk-publish-off-fg: rgb(33 38 57); }
+      .dk div.dk-edit-footer, .dk .bulk-bar, .dk .bulk-check { --dk-foot-meta: rgb(106 110 125); --dk-foot-icon: rgb(106 110 125); --dk-foot-hover: rgb(246 246 248); --dk-publish-bg: rgb(31 34 48); --dk-publish-fg: rgb(255 255 255); --dk-publish-off-bg: rgb(187 189 201); --dk-publish-off-fg: rgb(236 237 243); }
+      html[data-theme="dark"] .dk div.dk-edit-footer, html[data-theme="dark"] .dk .bulk-bar, html[data-theme="dark"] .dk .bulk-check { --dk-foot-meta: rgb(147 148 159); --dk-foot-icon: rgb(147 148 159); --dk-foot-hover: rgb(33 35 47); --dk-publish-bg: rgb(228 229 233); --dk-publish-fg: rgb(19 20 27); --dk-publish-off-bg: rgb(85 92 117); --dk-publish-off-fg: rgb(33 38 57); }
       .dk { --dk-fg: #252837; --dk-muted: #515870; --dk-border: #e3e4e8; --dk-bg: #fff; --dk-icon-muted: #6a6e7d; --dk-card-hover: #f6f6f8; --dk-row-hover-fg: #363b4f; --dk-row-hover-muted: #666a79; --dk-hover-strong: #e9eaee; --dk-row-chain-bg: #eeeef1; --dk-row-chain-fg: #353a4d; --dk-selected: #465be8; --dk-on-selected: #fff; --dk-on-selected-soft: rgba(255, 255, 255, 0.9); --dk-dot-on-selected: #55d8fd; --dk-published: #0db770; --dk-caution-dot: #d08412; --dk-fg-header: #383d51; --dk-icon-btn-hover: #f6f6f8; --dk-icon-btn-hover-fg: #636570; --dk-placeholder: #9499ad; --dk-focus-ring: #556bfc; }
       html[data-theme="dark"] .dk { --dk-fg: #e4e5e9; --dk-muted: #979cb0; --dk-border: #2a2d3f; --dk-bg: #13141b; --dk-icon-muted: #93949f; --dk-card-hover: #191a24; --dk-row-hover-fg: #bec0cd; --dk-row-hover-muted: #9597a3; --dk-hover-strong: #2a2d3f; --dk-row-chain-bg: #21232f; --dk-row-chain-fg: #c1c3d0; --dk-selected: #7898ff; --dk-on-selected: #0d0e12; --dk-on-selected-soft: rgba(19, 20, 27, 0.8); --dk-dot-on-selected: #0d6e70; --dk-published: #13c184; --dk-caution-dot: #d8931b; --dk-fg-header: #bdbfcb; --dk-icon-btn-hover: #21232f; --dk-icon-btn-hover-fg: #9193a0; --dk-placeholder: #555c75; --dk-focus-ring: #596ffc; }
       .dk section.dk-doc { --dk-avatar-fg: rgb(255 255 255); --dk-head-fg: rgb(56 61 81); --dk-head-icon: rgb(106 110 125); --dk-head-hover: rgb(246 246 248); --dk-head-hover-fg: rgb(99 101 112); --dk-chip-ring: rgb(227 228 232); --dk-chip-selected-fg: rgb(35 38 53); --dk-chip-active-bg: rgb(253 243 200); --dk-chip-positive-fg: rgb(13 81 51); --dk-chip-off-fg: rgb(143 148 168); --dk-chip-off-bg: rgb(246 246 248); --dk-chip-off-ring: rgb(230 230 234); --dk-published: rgb(13 183 112); --dk-caution-dot: rgb(208 132 18); --dk-line-strong: rgb(199 202 211); }
@@ -376,6 +376,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav .dk-nav-tab { display: none; }
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.BulkBar.css()) %>
     </style>
     """
   end

@@ -19,6 +19,8 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias Barkpark.Content.TitleDerivation
   alias Barkpark.Structure
   alias BarkparkWeb.PreviewDay
+  alias BarkparkWeb.Studio.Desk.Bulk
+  alias BarkparkWeb.Studio.Desk.BulkBar
   alias BarkparkWeb.Studio.Desk.DocFooter
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FieldText
@@ -62,6 +64,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     end
   end
 
+  # A bulk action under way says how far it is (`Bulk`).
+  def update(%{bulk_at: at}, socket), do: {:ok, assign(socket, :bulk_at, at)}
+
   # Typing in the list's search box paused (`ListSearch`).
   def update(%{list_search_due: due}, socket), do: {:ok, ListSearch.due(socket, due, &load/1)}
 
@@ -71,9 +76,12 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus bulk bulk_confirm)a
         )
       )
+      |> assign_new(:bulk, fn -> nil end)
+      |> assign_new(:bulk_confirm, fn -> nil end)
+      |> assign_new(:bulk_at, fn -> 1 end)
       |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:hint, fn -> nil end)
       |> assign_new(:focus, fn -> nil end)
@@ -165,6 +173,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       {:noreply, socket |> assign(:sort, sort) |> load()}
     end
   end
+
+  # A row's tick, or a Shift-click on a row (`Bulk`): the page keeps the selection.
+  def handle_event("bulk-pick", params, socket), do: Bulk.pick(socket, params)
 
   # The list's own search box (`ListSearch`): typing, its keys, Enter, Clear.
   def handle_event("list-search" <> _ = event, params, socket),
@@ -332,6 +343,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           default={ListMenu.default(@default, @node)}
           orderings={@orderings}
           named={(@data.ok? && @data.result[:sorts]) || []}
+          selecting={if Bulk.selectable?(@pane, @node), do: Bulk.active?(@bulk)}
           myself={@myself}
         />
         <FocusMode.button :if={@focus} id={"#{@id}-focus"} index={@index} on={@focus.on} />
@@ -352,7 +364,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
         searching={ListSearch.searching?(assigns)}
         myself={@myself}
       />
-      <div class={["pane-body", @pane.kind == :list && "list-rows"]}>
+      <div
+        class={["pane-body", @pane.kind == :list && "list-rows"]}
+        data-selecting={Bulk.active?(@bulk)}
+        data-bulk-stop={Bulk.active?(@bulk) && BulkBar.stop(@id)}
+      >
         <div :if={@data.loading && !@data.ok?} class="dk-skeleton" aria-hidden="true">
           <div :for={_ <- 1..6} class="pane-item"><span class="dk-bone"></span></div>
         </div>
@@ -387,14 +403,23 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               <div
                 :if={is_map(entry)}
                 id={@pane.kind == :list && ListSearch.item_id(@id, pos - 1)}
-                class={["dk-row", ListSearch.lit?(assigns, pos - 1) && "dk-lit"]}
+                class={["dk-row", ListSearch.lit?(assigns, pos - 1) && "dk-lit", tick?(assigns, entry) && "bulk-row"]}
                 data-lit={ListSearch.lit?(assigns, pos - 1)}
+                data-picked={tick?(assigns, entry) && Bulk.picked?(@bulk, entry.next.id)}
                 role={@pane.kind == :list && "listitem"}
                 aria-posinset={@pane.kind == :list && pos}
               >
                 <div :if={is_nil(entry.next)} class="pane-item">
                   <span class="pane-item-label">{entry.title}</span>
                 </div>
+                <BulkBar.tick
+                  :if={tick?(assigns, entry)}
+                  id={entry.next.id}
+                  title={entry.title}
+                  checked={Bulk.picked?(@bulk, entry.next.id)}
+                  active={Bulk.active?(@bulk)}
+                  target={@myself}
+                />
                 <.link
                   :if={entry.next}
                   patch={Panes.open_after(@panes, @index, entry.next, @base)}
@@ -513,6 +538,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
           </div>
         <% end %>
       </div>
+      <BulkBar.bar
+        :if={@bulk && @bulk.ids != []}
+        pane={@id}
+        count={length(@bulk.ids)}
+        running={@bulk.running}
+        at={@bulk_at}
+        confirm={@bulk_confirm}
+        base={@base}
+      />
       <%!-- The edit pane's footer words (`DocFooter`), with no Publish: this
             document is read here, not edited. --%>
       <div
@@ -594,6 +628,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp ref_pane(ref, path), do: %{kind: :doc, id: ref.id, type: ref.type, parent_ref_path: path}
 
   defp selected?(panes, index, next), do: same?(Enum.at(panes, index + 1), next)
+
+  # A row with a tick (`Bulk`): a document's row in a plain document list.
+  defp tick?(%{pane: pane, node: node}, entry),
+    do: match?(%{next: %{kind: :doc}}, entry) and Bulk.selectable?(pane, node)
 
   # Each row with its place among the rows (a divider has none).
   defp placed(entries) do

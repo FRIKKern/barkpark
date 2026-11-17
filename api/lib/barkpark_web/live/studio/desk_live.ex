@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Desk.Bulk
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -96,6 +97,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      |> Bulk.init()
       # The search's hits: up to 50, as the TanStack Studio's text search,
       # the first 40 drawn, then more as the list's end scrolls near (`Search`).
       |> assign(desk_search_limit: Search.limit(), desk_search_drawn: Search.step())
@@ -176,8 +178,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
     # Focus mode is for the panes it was turned on over (`FocusMode`).
     socket = FocusMode.follow(socket, splat)
 
-    # Focus mode is for the panes it was turned on over (`FocusMode`).
-    socket = FocusMode.follow(socket, splat)
+    # A list's selection lives as long as its pane (`Bulk`).
+    socket = Bulk.follow(socket, views)
 
     socket =
       socket
@@ -330,6 +332,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-field-" <> _ = event, params, socket),
     do: FieldActions.handle_event(event, params, socket)
 
+  # A list's selection and its bulk publish and unpublish (`Bulk`). They are
+  # the page's events, so the Studio's capability gate has passed them.
+  def handle_event("bulk-" <> _ = event, params, socket),
+    do: Bulk.handle_event(event, params, socket)
+
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
   # The lit hit's index from the form: one of the hits, else the first.
@@ -367,6 +374,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   def handle_async({:warm, key}, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, :warm, Map.delete(socket.assigns.warm, key))}
+
+  # A bulk publish or unpublish is back (`Bulk`).
+  def handle_async({:desk_bulk, pane}, result, socket),
+    do: Bulk.handle_async(pane, result, socket)
 
   defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
@@ -419,6 +430,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
     known = if map_size(known) > @doc_titles_cap, do: titles, else: known
     {:noreply, assign(socket, :doc_titles, known)}
   end
+
+  # A list pane says which rows a tick or a Shift-click names (`Bulk.pick/2`).
+  # Nothing is written: the page keeps the selection.
+  def handle_info({:desk_bulk_pick, pane, mode, ids, last}, socket),
+    do: {:noreply, Bulk.picked(socket, pane, mode, ids, last)}
 
   def handle_info({:desk_list_sort, type, sort}, socket) when is_binary(type) do
     # Only a sort the type offers is kept (the pane checked it too).
@@ -477,6 +493,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-resize={gettext("Resize pane")}
       data-desk-field-actions={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
+      data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
@@ -509,6 +526,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         sorts={menu(@desk, view).sorts}
         default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
+        bulk={@desk_bulk[view.id]}
+        bulk_confirm={@desk_bulk_confirm && @desk_bulk_confirm.pane == view.id && @desk_bulk_confirm}
       />
       <% end %>
     </div>
