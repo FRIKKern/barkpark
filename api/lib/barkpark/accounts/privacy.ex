@@ -32,7 +32,7 @@ defmodule Barkpark.Accounts.Privacy do
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken, WebauthnCredential}
   alias Barkpark.Sso.SocialIdentity
-  alias Barkpark.Tenancy.{Invitation, Membership}
+  alias Barkpark.Tenancy.{AccessRequest, Invitation, Membership}
   alias Barkpark.UserPrefs.UserPref
   alias Barkpark.Audit.Event
 
@@ -402,6 +402,13 @@ defmodule Barkpark.Accounts.Privacy do
     # below it.
     {invitations, _} = Repo.delete_all(from i in Invitation, where: i.user_id == ^user.id)
 
+    # The same for an access request (task-1b99ba8512bb758e): erase keeps the
+    # users row, so nothing cascades. Left alone, a pending row still shows
+    # the note to the workspace's admins, and approving it would seat the
+    # erased account. Decided rows carry the note too. Deleted outright.
+    {access_requests, _} =
+      Repo.delete_all(from r in AccessRequest, where: r.user_id == ^user.id)
+
     erased_email = "erased-#{user.id}@#{@erased_domain}"
 
     Repo.update_all(from(t in ApiToken, where: t.created_by == ^user.email),
@@ -459,7 +466,8 @@ defmodule Barkpark.Accounts.Privacy do
         "grants_pseudonymised" => grants_pseudonymised,
         "memberships_deleted" => memberships,
         "user_prefs_deleted" => user_prefs,
-        "invitations_deleted" => invitations
+        "invitations_deleted" => invitations,
+        "access_requests_deleted" => access_requests
       }
     })
 
@@ -473,6 +481,7 @@ defmodule Barkpark.Accounts.Privacy do
       memberships_deleted: memberships,
       user_prefs_deleted: user_prefs,
       invitations_deleted: invitations,
+      access_requests_deleted: access_requests,
       revoked_token_ids: revoked_token_ids
     }
   end
