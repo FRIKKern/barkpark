@@ -49,13 +49,22 @@ defmodule BarkparkWeb.UserPrefController do
         no_user_error(conn)
 
       {:error, {:precondition_failed, actual}} ->
+        precondition_failed(conn, actual)
+
+      {:error, :bad_if_none_match} ->
         ErrorResponse.emit_custom(
           conn,
-          412,
-          "precondition_failed",
-          "the stored pref is not one the If-Match names",
-          %{expected: Enum.join(get_req_header(conn, "if-match"), ", "), actual: actual},
-          "GET the key again, apply your change to that value, and PUT it with the new ETag"
+          422,
+          "bad_request",
+          "If-None-Match takes only *: create the key only if it is unset"
+        )
+
+      {:error, :both_preconditions} ->
+        ErrorResponse.emit_custom(
+          conn,
+          422,
+          "bad_request",
+          "send If-Match or If-None-Match, not both"
         )
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -75,14 +84,49 @@ defmodule BarkparkWeb.UserPrefController do
   end
 
   # A PUT with If-Match writes only over the value a tag names
-  # (task-f88365602c49be57); without one it is the plain upsert it always was.
-  # The header's presence decides: one that holds no tag names no value, so it
-  # is refused like a stale one, never read as "no header".
+  # (task-f88365602c49be57); with If-None-Match: * only when the key is unset
+  # (task-c1f9452e1b8216ee); without either it is the plain upsert it always
+  # was. A header's presence decides: one that holds no tag names no value, so
+  # it is refused, never read as "no header". Any If-None-Match but `*`, or
+  # both headers, is refused rather than a precondition left unchecked.
   defp write(conn, {user_id, ws_id, dataset, key}, value) do
-    case get_req_header(conn, "if-match") do
-      [] -> UserPrefs.put(user_id, ws_id, dataset, key, value)
-      headers -> UserPrefs.put_if_match(user_id, ws_id, dataset, key, value, tags(headers))
+    case {get_req_header(conn, "if-match"), get_req_header(conn, "if-none-match")} do
+      {[], []} ->
+        UserPrefs.put(user_id, ws_id, dataset, key, value)
+
+      {headers, []} ->
+        UserPrefs.put_if_match(user_id, ws_id, dataset, key, value, tags(headers))
+
+      {[], headers} ->
+        if tags(headers) == ["*"],
+          do: UserPrefs.put_if_absent(user_id, ws_id, dataset, key, value),
+          else: {:error, :bad_if_none_match}
+
+      {_, _} ->
+        {:error, :both_preconditions}
     end
+  end
+
+  defp precondition_failed(conn, actual) do
+    {message, expected, hint} =
+      case get_req_header(conn, "if-match") do
+        [] ->
+          {"the key already holds a value; If-None-Match: * creates only an unset key", nil,
+           "GET the key to see the value another writer made"}
+
+        headers ->
+          {"the stored pref is not one the If-Match names", Enum.join(headers, ", "),
+           "GET the key again, apply your change to that value, and PUT it with the new ETag"}
+      end
+
+    ErrorResponse.emit_custom(
+      conn,
+      412,
+      "precondition_failed",
+      message,
+      %{expected: expected, actual: actual},
+      hint
+    )
   end
 
   defp tags(headers) do

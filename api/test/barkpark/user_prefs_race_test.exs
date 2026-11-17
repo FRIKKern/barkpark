@@ -125,6 +125,42 @@ defmodule Barkpark.UserPrefsRaceTest do
     end)
   end
 
+  # task-c1f9452e1b8216ee: two creates of one unset key. A holder's insert,
+  # uncommitted, makes both wait on the key; it then rolls back, so both find
+  # the key unset and race the insert. Exactly one writes; the other sees the
+  # winner's row and is refused, never written over it.
+  test "two concurrent creates (If-None-Match: *) of one unset key: one writes, the other is refused" do
+    with_user(fn user, ws ->
+      holder =
+        hold(
+          fn -> UserPrefs.put(user.id, ws.id, @dataset, @key, %{"name" => "holder"}) end,
+          fn -> Repo.rollback(:undo) end
+        )
+
+      creators =
+        for name <- ["a", "b"] do
+          Task.async(fn ->
+            unboxed(fn ->
+              UserPrefs.put_if_absent(user.id, ws.id, @dataset, @key, %{"name" => name})
+            end)
+          end)
+        end
+
+      await_lock_waiters(2)
+      send(holder.pid, :release)
+      assert {:error, :undo} = Task.await(holder, 10_000)
+
+      results = Enum.map(creators, &Task.await(&1, 10_000))
+      assert [{:ok, written}] = Enum.filter(results, &match?({:ok, _}, &1))
+
+      assert [{:error, {:precondition_failed, actual}}] =
+               Enum.reject(results, &match?({:ok, _}, &1))
+
+      assert actual == UserPrefs.etag(written.value)
+      assert UserPrefs.get(user.id, ws.id, @dataset, @key) == written.value
+    end)
+  end
+
   defp with_user(fun) do
     unboxed(fn ->
       n = System.unique_integer([:positive])
