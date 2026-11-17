@@ -577,7 +577,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
   def handle_call({:project_runtime_event, %Event{} = event, lease_id}, _from, state) do
-    state = state |> lease_boundary(event, lease_id) |> ingest_runtime_event(event, false)
+    state = project_host_event(state, event, lease_id)
     {:reply, :ok, touch(state)}
   end
 
@@ -662,7 +662,7 @@ defmodule Barkpark.StudioChat.Recorder do
       |> Barkpark.ChatHosts.replay_unprojected_by_lease()
       |> Enum.reduce(state, fn
         {event_id, %Event{} = event, lease_id}, acc ->
-          acc = acc |> lease_boundary(event, lease_id) |> ingest_runtime_event(event, false)
+          acc = project_host_event(acc, event, lease_id)
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
 
@@ -1670,9 +1670,14 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp persist_runtime_text(_state, _event), do: :ok
 
-  # Two leases' replies are never one row (TurnOwner, task-b0cbddc9d0f2e2aa).
-  defp lease_boundary(state, event, lease_id),
-    do: TurnOwner.take(state, event, lease_id, &persist_runtime_text/2, &stable_settle/2)
+  # Two leases' replies are never one row, and only the turn's own lease ends
+  # it (TurnOwner, task-b0cbddc9d0f2e2aa, task-5d1f639852927c4e).
+  defp project_host_event(state, event, lease_id) do
+    case TurnOwner.take(state, event, lease_id, &persist_runtime_text/2, &stable_settle/2) do
+      {:ignore, state} -> state
+      state -> ingest_runtime_event(state, event, false)
+    end
+  end
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
   # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the

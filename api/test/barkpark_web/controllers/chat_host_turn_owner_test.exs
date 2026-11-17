@@ -41,6 +41,14 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     "error" => %{"message" => "claude exited before turn completion"}
   }
 
+  # The Go host's answer to a Stop when it runs no turn for the session
+  # (internal/chathost/local_handler.go).
+  @no_active_turn %{
+    "kind" => "terminal",
+    "terminal_state" => "error",
+    "error" => %{"message" => "registered-host session has no active turn"}
+  }
+
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -141,6 +149,83 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     refute StudioChat.get_session(sid).status == "working"
   end
 
+  # ── only the turn's own lease ends it (task-5d1f639852927c4e) ──────────
+
+  # The superseded? race: the older close reaches the Recorder just after the
+  # newer turn_started (projected here straight to the Recorder, which is what
+  # the race delivers).
+  test "an older lease's close projected after the newer turn_started does not end it",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    new = lease!(ctx, "new")
+    project(sid, old, :turn_started)
+    project(sid, new, :turn_started)
+    project(sid, old, :turn_completed, terminal_state: :completed)
+    project(sid, old, :error, terminal_state: :failed, error: %{"message" => "gone"})
+
+    assert StudioChat.get_session(sid).status == "working"
+
+    project(sid, new, :text_delta, native: %{"params" => %{"delta" => "Newer."}})
+    project(sid, new, :turn_completed, terminal_state: :completed)
+
+    assert replies(sid) == ["Newer."]
+    assert StudioChat.get_session(sid).status == "active"
+  end
+
+  # The owner is gone (expired, unswept): nothing else will end the turn, so
+  # the older close is taken.
+  test "an older lease's close ends the turn when the owner's lease has expired",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    new = lease!(ctx, "new")
+    project(sid, old, :turn_started)
+    project(sid, new, :turn_started)
+    expire!(new)
+    project(sid, old, :turn_completed, terminal_state: :completed)
+
+    refute StudioChat.get_session(sid).status == "working"
+  end
+
+  # P1: lease B fails before its turn_started (provider will not start, cwd
+  # not approved, ...), so its first event is its close. B never owned a turn.
+  test "P1: a turn whose lease closes before its turn_started ends", %{sid: sid} = ctx do
+    finished_turn!(ctx)
+    StudioChat.update_status(sid, "working")
+
+    accept!(ctx, lease!(ctx, "b"), 1, @dead_close)
+
+    refute StudioChat.get_session(sid).status == "working",
+           "lease B's close was its only event; nothing else will end this turn"
+  end
+
+  test "P1, then a Stop: the Stop's answer ends the turn", %{sid: sid} = ctx do
+    finished_turn!(ctx)
+    StudioChat.update_status(sid, "working")
+    accept!(ctx, lease!(ctx, "b"), 1, @dead_close)
+
+    stop = lease!(ctx, "stop", :interrupt)
+    Recorder.note_interrupt_requested(sid)
+    accept!(ctx, stop, 1, @no_active_turn)
+
+    refute StudioChat.get_session(sid).status == "working"
+  end
+
+  # P2: the owner's run is gone, but its lease stays `running`: a host built
+  # before #26823 sends no held_leases, so every heartbeat renews it and the
+  # sweep never ends it. The host's answer to a Stop is the only close.
+  test "P2: a Stop on a dead owner ends the turn at once, with no sweep", %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Half"})
+
+    stop = lease!(ctx, "stop", :interrupt)
+    Recorder.note_interrupt_requested(sid)
+    accept!(ctx, stop, 1, @no_active_turn)
+
+    assert Repo.get!(ExecutionLease, old.lease_id).status in ["leased", "running"]
+    refute StudioChat.get_session(sid).status == "working"
+  end
+
   # A managed runtime's events carry no lease: the projection without one is
   # the Recorder path it always was, including a second turn_started.
   test "events projected without a lease keep the turn they were in", %{sid: sid} do
@@ -158,6 +243,33 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     end
 
     assert replies(sid) == ["A.\n\nB."]
+  end
+
+  # Turn 1 by lease A, from turn_started to its own close.
+  defp finished_turn!(ctx) do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, %{"kind" => "text_delta", "delta" => "One."})
+    accept!(ctx, a, 3, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+    refute StudioChat.get_session(ctx.sid).status == "working"
+  end
+
+  defp project(sid, fence, kind, fields \\ []) do
+    event = struct(%Event{provider: "claude", session_id: sid, kind: kind}, fields)
+
+    assert :ok =
+             GenServer.call(
+               Recorder.whereis(sid),
+               {:project_runtime_event, event, fence.lease_id}
+             )
+  end
+
+  defp expire!(fence) do
+    past = DateTime.add(DateTime.utc_now(), -600)
+
+    Repo.update_all(from(l in ExecutionLease, where: l.id == ^fence.lease_id),
+      set: [expires_at: past]
+    )
   end
 
   defp accept!(%{host: host}, fence, cursor, event) do
