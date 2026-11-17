@@ -148,7 +148,7 @@ fire() {
     # Done when the BEAM is gone or the dump is complete (its last line is =end).
     for _ in $(seq 1 150); do
       gone "$beam" && break
-      tail -c 16 "$ERL_CRASH_DUMP" 2>/dev/null | grep -q '^=end' && break
+      case "$(tail -c 16 "$ERL_CRASH_DUMP" 2>/dev/null)" in *"=end"*) break ;; esac
       sleep 1
     done
   fi
