@@ -40,14 +40,20 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   @doc """
   Reads the revision the last pane names, when it is the edited document;
-  `nil` otherwise. The one already read is kept.
+  `nil` when the URL names none or the document itself was not found. The
+  one already read is kept.
   """
   def load(%{assigns: %{editing: {dataset, type, id}, chain: [_ | _] = chain}} = socket) do
     rev = List.last(chain)[:rev]
+    found? = is_map(socket.assigns[:editor_doc])
 
     case socket.assigns[:desk_revision] do
       %{id: ^rev} when is_binary(rev) ->
         socket
+
+      # No document (not found): the Studio's own note says so, not this.
+      _ when is_binary(rev) and not found? ->
+        assign(socket, :desk_revision, nil)
 
       _ when is_binary(rev) ->
         assign(socket, :desk_revision, read(socket, rev, dataset, type, id))
