@@ -15032,6 +15032,16 @@ msgstr "Dokumentet finnes ikke lenger"
 msgid "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
 msgstr "dette tokenet er bundet til ett datasett og kan ikke endre medlemmer, tilgang, tokener eller hemmeligheter i arbeidsområdet"
 
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{tag}"
+msgstr "Fjern %{tag}"
+
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Enter tag and press ENTER…"
+msgstr "Skriv en etikett og trykk ENTER…"
+
 #: lib/barkpark_web/components/fields/array_item_menu.ex
 #, elixir-autogen, elixir-format
 msgid "Item actions"

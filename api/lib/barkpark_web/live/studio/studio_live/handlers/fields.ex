@@ -656,6 +656,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {:noreply, assign(socket, editor_mode: next)}
   end
 
+  # A tags field's Enter and × (`TagsField`, `Handlers.Tags`).
+  def array_op(%{"action" => action} = params, socket) when action in ~w(add_tag remove_tag),
+    do: BarkparkWeb.Studio.StudioLive.Handlers.Tags.array_op(params, socket)
+
   def array_op(%{"action" => action} = params, socket) do
     path = StudioLive.parse_path(params["path"] || "")
 
@@ -786,7 +790,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   #
   # A landed save also takes down the "Updated by another user" banner: what
   # it said was kept is now saved (#25880 review).
-  defp settle_dirty(socket, keys) do
+  @doc false
+  def settle_dirty(socket, keys) do
     if socket.assigns[:save_status] == "Saved" do
       # A field the store refused earlier is still not saved (`RefusedSave`).
       held = MapSet.new(RefusedSave.keys(socket))
