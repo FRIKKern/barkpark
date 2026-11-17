@@ -168,6 +168,50 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
            "the Stop belongs to the split-off turn, never to the next one"
   end
 
+  # R1 (rev26735): a Stop asked after the newer lease was leased is aimed at
+  # the newer run (the host routes control by session to its latest run), even
+  # when the newer turn_started reaches the Recorder after it.
+  test "R1: a Stop after the newer lease was leased does not mark the older split row",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Half"})
+    new = lease!(ctx, "new")
+    stop!(ctx)
+    accept!(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+    accept!(ctx, new, 2, %{"kind" => "text_delta", "delta" => "Next."})
+    accept!(ctx, new, 3, %{"kind" => "turn_completed", "terminal_state" => "interrupted"})
+
+    assert outcomes(sid) == [{"Half", nil}, {"Next.", "interrupted"}]
+  end
+
+  test "R2: a Stop after the newer turn_started does not mark the older split row",
+       %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Half"})
+    new = lease!(ctx, "new")
+    accept!(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+    stop!(ctx)
+    accept!(ctx, new, 2, %{"kind" => "text_delta", "delta" => "Next."})
+    accept!(ctx, new, 3, %{"kind" => "turn_completed", "terminal_state" => "interrupted"})
+
+    assert outcomes(sid) == [{"Half", nil}, {"Next.", "interrupted"}]
+  end
+
+  test "R3: a Stop during the older turn, split by the newer lease's text, marks that row",
+       %{sid: sid} = ctx do
+    new = lease!(ctx, "new")
+    accept!(ctx, new, 1, %{"kind" => "turn_started", "turn_id" => "t-new"})
+    accept!(ctx, new, 2, %{"kind" => "text_delta", "delta" => "Half"})
+    stop!(ctx)
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "text_delta", "delta" => "Next."})
+    accept!(ctx, old, 2, %{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert outcomes(sid) == [{"Half", "interrupted"}, {"Next.", nil}]
+  end
+
   test "a split with no Stop stores no turn_outcome", %{sid: sid} = ctx do
     old = lease!(ctx, "old")
     accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
@@ -351,6 +395,13 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
 
     {:ok, fence} = ChatHosts.lease_and_enqueue(host, command, [])
     fence
+  end
+
+  # A Stop as Studio sends it: the interrupt lease, the Recorder's note, the ack.
+  defp stop!(%{sid: sid} = ctx) do
+    stop = lease!(ctx, "stop", :interrupt)
+    Recorder.note_interrupt_requested(sid)
+    accept!(ctx, stop, 1, %{"kind" => "control_completed", "operation" => "interrupt"})
   end
 
   defp outcomes(sid) do

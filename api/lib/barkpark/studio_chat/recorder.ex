@@ -628,9 +628,9 @@ defmodule Barkpark.StudioChat.Recorder do
   # a duplicate Stop, or one that lands after the result frame already consumed
   # the flag, sets a boolean that the next `system/init` clears.
   @impl true
-  def handle_cast(:interrupt_requested, state) do
-    {:noreply, %{state | turn_interrupted?: true}}
-  end
+  # The time orders a Stop against a host lease (Recorder.TurnOwner).
+  def handle_cast(:interrupt_requested, state),
+    do: {:noreply, Map.put(%{state | turn_interrupted?: true}, :stop_at, DateTime.utc_now())}
 
   def handle_cast({:reported_state, _agent_state, %DateTime{} = expires_at}, state) do
     if state.reported_fence_timer, do: Process.cancel_timer(state.reported_fence_timer)
@@ -1417,8 +1417,7 @@ defmodule Barkpark.StudioChat.Recorder do
           |> Map.merge(%{
             runtime_turn_open?: true,
             runtime_break?: false,
-            runtime_status_sent?: false,
-            turn_interrupted?: false
+            runtime_status_sent?: false
           })
           |> stable_start()
           |> clear_pending_asks()
