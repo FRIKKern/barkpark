@@ -73,14 +73,11 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     host = Repo.get!(RegisteredHost, host_id)
     assert length(send_turns(host, sid)) == 1, "the first send did not land in the queue"
 
-    # ONE enqueue: the host queue is armed to exit, so a resend that called it
-    # again would end the first turn (it is still unstarted) and answer 503.
-    stub = exit_next_transport_call!()
+    # One lease, one queued command: the resend puts the unstarted lease back
+    # on the queue, which is keyed by lease id (task-b1e2f61ca03df99b).
     resend = send_message(raw, sid, "once", key)
 
     assert resend.status == 202, resend.resp_body
-    assert Process.whereis(@transport) == stub, "the resend called the host queue again"
-    disarm_transport_stub!(stub)
     assert length(send_turns(host, sid)) == 1, "the resend enqueued the turn a second time"
     assert length(leases(sid)) == 1, "the resend made a second lease"
 
@@ -303,6 +300,66 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     assert_resend_runs_nothing!(raw, sid, "expired", key)
   end
 
+  # The queue is in memory: a restart between a send and its resend empties
+  # it. The resend reuses the lease, so it must put it back or the turn never
+  # runs (task-b1e2f61ca03df99b).
+  test "a resend after a server restart puts the reused lease back on the queue",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "restart", key).status == 202
+    host = Repo.get!(RegisteredHost, host_id)
+    restart_transport!()
+    assert send_turns(host, sid) == []
+
+    reopen_completed_claims!()
+    assert send_message(raw, sid, "restart", key).status == 202
+    assert length(send_turns(host, sid)) == 1, "the restart left the turn off the queue"
+    assert length(leases(sid)) == 1, "the resend made a second lease"
+    assert length(StudioChat.list_messages(sid, :global)) == 1
+  end
+
+  # A host that was handed the lease may have run it, then forgotten it when
+  # the restarted server's listing went empty (rev26739 on #26901). The resend
+  # must leave it off the queue: stuck at worst, never run twice.
+  test "a resend after a restart leaves a lease a host was handed off the queue",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "handed", key).status == 202
+    host = Repo.get!(RegisteredHost, host_id)
+    assert length(send_turns(host, sid)) == 1, "the host's poll was not handed the lease"
+    restart_transport!()
+
+    reopen_completed_claims!()
+    assert send_message(raw, sid, "handed", key).status == 202
+    assert send_turns(host, sid) == [], "a lease a host was handed went back on the queue"
+    assert length(leases(sid)) == 1, "the resend made a second lease"
+  end
+
+  # A host may hold the lease the first send queued, so a requeue that exits
+  # must not end it as "not sent": the next resend would run it on link :2.
+  test "a requeue that exits leaves the lease live, and the next resend queues it",
+       %{host_id: host_id, raw: raw} do
+    sid = create_host_session!(raw, host_id)
+    key = "ssk-#{System.unique_integer([:positive])}"
+    assert send_message(raw, sid, "requeue", key).status == 202
+    restart_transport!()
+    reopen_completed_claims!()
+    exit_next_transport_call!()
+
+    capture_log(fn ->
+      assert_error_sent(500, fn -> send_message(raw, sid, "requeue", key) end)
+    end)
+
+    assert [%{status: "leased", last_cursor: 0}] = leases(sid)
+    age_pending_claims!()
+    assert send_message(raw, sid, "requeue", key).status == 202
+    host = Repo.get!(RegisteredHost, host_id)
+    assert length(send_turns(host, sid)) == 1, "the turn is not back on the queue"
+    assert length(leases(sid)) == 1, "the resend made a second lease"
+  end
+
   test "a send with no key is unchanged: one lease, one enqueue", %{host_id: host_id, raw: raw} do
     sid = create_host_session!(raw, host_id)
     assert send_message(raw, sid, "plain", nil).status == 202
@@ -406,6 +463,13 @@ defmodule BarkparkWeb.ChatSendResendSameKeyTest do
     name = "ssk_fail_#{table}"
     Repo.query!("DROP TRIGGER #{name} ON #{table}")
     Repo.query!("DROP FUNCTION #{name}()")
+  end
+
+  # A server restart, as the queue sees it: the process and every command in
+  # it are gone, and the next call starts an empty one.
+  defp restart_transport! do
+    _ = Barkpark.ChatHosts.Transport.commands(Ecto.UUID.generate())
+    GenServer.stop(@transport)
   end
 
   # The next queue call exits the way a timed-out GenServer.call does, without
