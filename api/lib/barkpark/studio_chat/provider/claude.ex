@@ -1340,7 +1340,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       |> Enum.flat_map(fn line ->
         case Jason.decode(line) do
           {:ok, event} when is_map(event) ->
-            [event]
+            [Barkpark.ChatHosts.EventText.replace_nul(event)]
 
           _ ->
             Logger.debug("claude chat: ignoring non-JSON stdout line (#{byte_size(line)} bytes)")

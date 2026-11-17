@@ -1926,7 +1926,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist(session_id, attrs, kind) do
-    case StudioChat.append_message(session_id, attrs) do
+    case StudioChat.append_message(session_id, Barkpark.ChatHosts.EventText.replace_nul(attrs)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist #{kind}: #{inspect(reason)}")
 

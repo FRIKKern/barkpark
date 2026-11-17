@@ -56,7 +56,8 @@ def main():
                 send({"method": "turn/started", "params": {
                     "threadId": "thread-1", "turn": {"id": "turn-1", "items": [], "status": "inProgress"}}})
                 send({"method": "item/agentMessage/delta", "params": {
-                    "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1", "delta": "hello"}})
+                    "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1",
+                    "delta": "a\x00b" if args.scenario == "nul_delta" else "hello"}})
                 approvals = [
                     (91, "item/commandExecution/requestApproval", "cmd-1", {"command": "printf ok"}),
                     (92, "item/fileChange/requestApproval", "patch-1", {}),

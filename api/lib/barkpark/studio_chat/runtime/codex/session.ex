@@ -313,8 +313,10 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   defp consume_line(line, state) do
     case Jason.decode(line) do
+      # U+0000 is stored as U+FFFD, as a registered host's events are
+      # (ChatHosts.EventText, task-75c44878c20cec3f).
       {:ok, message} ->
-        consume_message(message, state)
+        consume_message(Barkpark.ChatHosts.EventText.replace_nul(message), state)
 
       {:error, _reason} ->
         state

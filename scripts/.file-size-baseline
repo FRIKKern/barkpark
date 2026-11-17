@@ -28,7 +28,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 17641 scripts/pds-elixir-receipt-census.exs
 14925 cloud/priv/static/__preview__/overflow-guard.mjs
 12892 cloud/lib/barkpark_cloud/registry.ex
-8604 api/lib/barkpark_web/live/studio/chat_live.ex
+8609 api/lib/barkpark_web/live/studio/chat_live.ex
 7962 cloud/priv/static/__preview__/scenarios.mjs
 7668 cloud/priv/static/__preview__/smoke.mjs
 7566 cloud/priv/static/app.css

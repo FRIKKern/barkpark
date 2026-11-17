@@ -187,6 +187,27 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     assert :ok = Codex.close(runtime)
   end
 
+  # task-75c44878c20cec3f: a managed app-server's text holding U+0000 reaches
+  # the Recorder as U+FFFD, as a registered host's events do (ChatHosts.EventText).
+  test "a delta holding U+0000 arrives with U+FFFD in its place" do
+    {binary, args, _log} = fake_app_server(:nul_delta)
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: binary,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               cwd: "/tmp",
+               timeout_ms: :infinity
+             })
+
+    assert :ok = Codex.send_turn(runtime, "hello")
+    assert_receive {:studio_chat_runtime_event, %Event{kind: :text_delta, native: native}}
+    assert get_in(native, ["params", "delta"]) == "a�b"
+    assert :ok = Codex.close(runtime)
+  end
+
   test "request timeout and process death fail closed without hanging" do
     {malformed, malformed_args, _log} = fake_app_server(:malformed)
 
