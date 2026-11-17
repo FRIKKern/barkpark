@@ -2345,23 +2345,27 @@ defmodule Barkpark.StudioChat do
   session's denormalised `pending_approvals` (guarded ≥ 0) in the same
   transaction.
 
+  `extra` merges into the row's metadata (a cancel's `"cancel_reason"`).
   Returns `{:ok, %Message{}}`, `{:error, :not_found}` (no such pending/known
   approval), or `{:error, :bad_status}` for an unknown terminal state.
   """
-  @spec update_approval_status(String.t(), String.t(), String.t()) ::
+  @spec update_approval_status(String.t(), String.t(), String.t(), map()) ::
           {:ok, Message.t()} | {:error, :not_found | :bad_status}
-  def update_approval_status(_session_id, _request_id, status)
+  def update_approval_status(session_id, request_id, status, extra \\ %{})
+
+  def update_approval_status(_session_id, _request_id, status, _extra)
       when status not in @approval_terminal,
       do: {:error, :bad_status}
 
-  def update_approval_status(session_id, request_id, status) do
+  def update_approval_status(session_id, request_id, status, extra) do
     Repo.transaction(fn ->
       case find_pending_approval(session_id, request_id) do
         nil ->
           Repo.rollback(:not_found)
 
         %Message{} = message ->
-          meta = Map.put(message.metadata || %{}, "approval_status", status)
+          meta =
+            (message.metadata || %{}) |> Map.merge(extra) |> Map.put("approval_status", status)
 
           {:ok, updated} =
             message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()

@@ -77,7 +77,7 @@ var taskCreateAmbiguityClasses = map[string]string{
 	residuePublishResultUnreadable:      "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
 	residuePublishResendKeyRefused:      "a resend of the publish was refused over its own Idempotency-Key, after an earlier attempt that may have published",
 	residuePublishResendRefused:         "a resend of the publish was refused, after an earlier attempt that may have published",
-	ambiguityPublishDiscardFoundNothing: "the publish was refused, but the follow-up discard found no draft, so the row may be published",
+	ambiguityPublishDiscardFoundNothing: "the publish was refused, and the follow-up discard found no draft: another writer may have published or deleted it",
 }
 
 // ambiguityPublishDiscardFoundNothing: the publish was refused and the discard
@@ -99,6 +99,10 @@ type ambiguousWrite struct {
 	// leg names which request was in flight ("create" / "publish"), for the
 	// human line.
 	leg string
+	// headline replaces "the <leg> request WAS SENT and may have landed" when
+	// that sentence is false, e.g. a publish that was REFUSED and whose discard
+	// then found no draft.
+	headline string
 }
 
 // checkCommand is the ONE command the operator should run next. An id beats a
@@ -133,6 +137,9 @@ func renderAmbiguousWrite(out *writer, a ambiguousWrite) int {
 	check := a.checkCommand()
 
 	msg := fmt.Sprintf("task create: the %s request WAS SENT and may have landed — %s", leg, why)
+	if a.headline != "" {
+		msg = "task create: " + a.headline
+	}
 
 	// stderr, unconditionally. The stdout envelope below is the machine
 	// channel; this is the one a person reads, and a write that may have

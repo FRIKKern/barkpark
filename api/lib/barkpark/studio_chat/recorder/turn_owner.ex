@@ -21,6 +21,9 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
     * a `text_delta` goes on in the same open turn for its lease
       (`{:split, true}`).
 
+  Either way the displaced lease's pending asks are canceled
+  (`DisplacedAsks`, task-bc312d78041663a8): its run can no longer be answered.
+
   Only a `turn_started` or a `text_delta` makes its lease the owner (or any
   event when there is none yet): a Stop's lease is newer too but starts no
   turn, so its ack leaves the stopped turn's owner in place.
@@ -49,6 +52,7 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
   (an older claude host sends one per message) is `:same` too.
   """
 
+  alias Barkpark.StudioChat.Recorder.DisplacedAsks
   alias Barkpark.StudioChat.Runtime.Event
 
   @doc """
@@ -80,6 +84,7 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
 
         state
         |> settle.(state.runtime_text)
+        |> DisplacedAsks.cancel()
         |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
         |> spend_stop(stopped?)
         |> adopt(event, lease_id)
