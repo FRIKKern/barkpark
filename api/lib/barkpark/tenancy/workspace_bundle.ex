@@ -267,12 +267,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Catalog,
     DatasetRemap,
     ExportScopeError,
-    ImportConfinement,
     ImportLockError,
     InvalidBundleError
   }
 
-  alias Barkpark.Tenancy.WorkspaceBundle.Janitor
+  alias Barkpark.Tenancy.WorkspaceBundle.{ImportConfinement, Janitor}
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -528,9 +527,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # Everything the import needs from its caller BESIDES the mode, validated at
   # the door for the same reason `grant_admin_to!/1` is: a fumbled shape is an
   # ArgumentError before the tar is touched, never a surprise an hour into a
-  # restore. One map rather than two more positional arguments, so `run_import`
-  # keeps its arity (it is named as `run_import/4` in `Barkpark.Repo`'s
-  # statement-timeout docs).
+  # restore. One map, not more positional arguments, so `run_import/4` (named in
+  # `Barkpark.Repo`'s statement-timeout docs) keeps its arity.
   defp import_ctx!(opts) do
     ctx = %{
       grant: grant_admin_to!(opts),
@@ -776,12 +774,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # Reserved-slug seat guard (task-545166efceb1bc91) — BEFORE the PDS-D9
         # pre-flight, so a bundle aimed at a vacant reserved seat never reaches
         # the adopt branch's delete. The snapshot it returns is re-read after
-        # the members land; see the section comment on
-        # assert_root_slug_not_vacant_reserved!/2.
+        # the members land; see assert_root_slug_not_vacant_reserved!/2.
         vacant_reserved = vacant_reserved_slugs()
         assert_root_slug_not_vacant_reserved!(manifest, vacant_reserved)
-        # Non-operator import: before the adopt delete and the FK drop.
-        confined = ImportConfinement.begin!(ctx.confine, manifest, mode, ctx.grant)
+        confined = ImportConfinement.begin!(ctx, manifest, mode)
 
         # PDS-D9 pre-flight runs FIRST among the import's own writes, before
         # any trigger/constraint DDL, so the empty-shell delete's FK cascades
@@ -822,9 +818,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         stats =
           manifest["tables"]
           |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
-            n =
-              ImportConfinement.import!(confined, entry, dumps, mode, manifest, &import_member/3)
-
+            n = ImportConfinement.import!(confined, entry, dumps, mode, &import_member/3)
             # ROW-COPY TIME, deliberately: see
             # assert_no_foreign_blob_path_collision!/3 for why a push-time
             # refusal reproduces the very state it is meant to prevent.
@@ -832,17 +826,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             {Map.put(acc, entry["name"], n), total + n}
           end)
           |> then(fn {tables, total} ->
-            # The manifest rides back out so the caller can stamp pull
-            # provenance without unpacking (and re-inflating) the tar twice.
+            # The manifest rides back out: provenance needs no second unpack.
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
+          |> ImportConfinement.settle!(confined)
 
         with_ddl_lock_timeout(:restore_member_fks, fn ->
           alter_user_triggers!(live, "ENABLE")
           restore_member_fks!(member_fks)
         end)
-
-        stats = ImportConfinement.settle!(confined, stats, manifest)
 
         # The manifest's declared root slug is a CLAIM; the workspaces COPY
         # member carries the actual slug. Re-read the seats that were vacant at

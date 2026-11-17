@@ -67,6 +67,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError
+  alias Barkpark.Tenancy.WorkspaceBundle.ImportConfinement
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
   alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
@@ -956,6 +957,7 @@ defmodule BarkparkWeb.WorkspaceController do
           })
           |> put_withheld(stats)
         )
+        |> tap(fn _ -> ImportConfinement.record_observed(stats, conn.assigns[:api_token]) end)
 
       {:error, {:blob_path_conflict, info}} ->
         blob_path_conflict(conn, info)
@@ -987,6 +989,7 @@ defmodule BarkparkWeb.WorkspaceController do
           })
           |> put_withheld(stats)
         )
+        |> tap(fn _ -> ImportConfinement.record_observed(stats, conn.assigns[:api_token]) end)
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn

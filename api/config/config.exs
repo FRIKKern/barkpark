@@ -756,4 +756,11 @@ config :barkpark, :authoring_wall, false
 # BARKPARK_DATASET_BOUND_ADMIN_READS=enforce|observe, read per request, wins.
 config :barkpark, :dataset_bound_admin_reads, :observe
 
+# A workspace bundle import by a caller the operator allowlist does not name
+# (`Barkpark.Tenancy.WorkspaceBundle.ImportConfinement`): `:observe` lets the
+# target-admin rule and the withholding of seats, tokens and secrets through
+# and records what `:enforce` would do; `:enforce` refuses or withholds. The
+# env var BARKPARK_IMPORT_CONFINEMENT=enforce|observe, read per import, wins.
+config :barkpark, :import_confinement, :observe
+
 import_config "#{config_env()}.exs"

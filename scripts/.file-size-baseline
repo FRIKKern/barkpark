@@ -68,7 +68,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 3334 api/lib/barkpark_web/layouts/bulldocs.html.heex
 3252 cloud/priv/static/__preview__/breakpoint-sweep.mjs
 3229 internal/agent/report.go
-3019 api/lib/barkpark/studio_chat.ex
+3022 api/lib/barkpark/studio_chat.ex
 2991 cloud/priv/static/__preview__/seal-predicate.mjs
 2945 tooling/grip/screen.mjs
 2944 scripts/required-checks-verify.sh
@@ -78,7 +78,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2816 scripts/check-deployyml-filters.sh
 2809 api/lib/barkpark_web/controllers/query_controller.ex
 2761 api/lib/barkpark/groq/document_source.ex
-2734 api/lib/barkpark/tenancy/workspace_bundle.ex
+2726 api/lib/barkpark/tenancy/workspace_bundle.ex
 2723 api/priv/static/assets/bp-paper-editor-shell.css
 2717 api/lib/barkpark/content/writer.ex
 2629 api/lib/barkpark/content/mutations.ex
@@ -91,7 +91,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2575 api/lib/barkpark/studio_chat/provider/claude.ex
 2562 api/lib/barkpark/tenancy.ex
 2557 api/lib/barkpark/auth.ex
-2552 api/lib/barkpark/studio_chat/recorder.ex
+2554 api/lib/barkpark/studio_chat/recorder.ex
 2540 api/priv/static/assets/bp-sheet-grid.js
 2527 api/lib/barkpark/plugins/tasks.ex
 2486 api/assets/paper-surface/paper-surface.css

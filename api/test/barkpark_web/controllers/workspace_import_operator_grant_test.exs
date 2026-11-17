@@ -188,11 +188,6 @@ defmodule BarkparkWeb.WorkspaceImportOperatorGrantTest do
       %{bundle: bundle, ws_slug: slug, ws_id: ws_id, src_membership: src} = source_bundle!()
       {raw_op, op, _op_ws} = operator_token("op-additive")
 
-      # A LISTED operator: a non-operator import is confined and withholds
-      # seats (task-1a6cde75b0adae76); this pins the operator path.
-      Application.put_env(:barkpark, :operator_token_ids, [op.id])
-      on_exit(fn -> Application.delete_env(:barkpark, :operator_token_ids) end)
-
       assert import_bundle(conn, raw_op, slug, bundle).status == 200
 
       restored = Repo.get(Membership, src.id)

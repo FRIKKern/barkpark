@@ -1,16 +1,14 @@
 defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   @moduledoc """
   A workspace bundle import by a caller the operator allowlist does not name
-  may not carry `organization_id` from the bundle, must not add a workspace to
-  an organization the caller does not administer, and withholds every row that
-  names something outside the workspace (task-1a6cde75b0adae76).
+  stays inside the bundle's own workspace (task-1a6cde75b0adae76,
+  `WorkspaceBundle.ImportConfinement`).
 
-  The hole, reproduced: `POST /api/workspaces/:slug/import` restored the root
-  `workspaces` row by raw COPY, `organization_id` included, and seated the
-  importer as admin — so a non-operator could create an organization, import a
-  bundle naming it, and administer it in full; aimed at a FOREIGN org id, the
-  import added a workspace to it and broke its real admin's org-wide authority
-  (the "admin of EVERY workspace of the org" rule, `OrgScope`).
+  In every mode: a new workspace lands in no organization, an existing one keeps
+  its own, every row stays in the workspace, and rows that name a user are not
+  written. Observe first (`BARKPARK_IMPORT_CONFINEMENT`, default observe): the
+  target-admin rule and the withholding of seats, tokens and secrets. A listed
+  operator's import is unchanged.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -19,6 +17,7 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
   alias Barkpark.Tenancy.Membership
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
+  alias Barkpark.AccountsFixtures
 
   import Ecto.Query
 
@@ -42,15 +41,19 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
 
   # Export a workspace (optionally placed in `org_id` first), then delete it so
   # the import lands in a clean target — the bundle still CARRIES the org id.
-  defp source_bundle!(org_id) do
+  # `seated_user`, when given, holds a member seat in the source workspace.
+  defp source_bundle!(org_id, seated_user \\ nil) do
     n = System.unique_integer([:positive])
     raw_src = "org-conf-source-#{n}"
-    {:ok, _src} = Auth.create_token(raw_src, "source owner", "test", ["read", "write", "admin"])
+    {:ok, src} = Auth.create_token(raw_src, "source owner", "test", ["read", "write", "admin"])
 
     {:ok, target} =
       Tenancy.create_workspace_with_owner(%{name: "Imported WS #{n}"}, verified(raw_src))
 
     if org_id, do: {:ok, _} = Tenancy.assign_workspace_to_organization(target, org_id)
+
+    if seated_user,
+      do: {:ok, _} = TenancyAuth.create_membership(target.id, seated_user.id, "member", "user")
 
     project = Tenancy.get_project(target.slug, "default")
     {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
@@ -65,7 +68,7 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
     purge_fkless_audit!(ws_bin)
     refute Tenancy.get_workspace_by_slug(ws_slug)
 
-    %{bundle: bundle, ws_id: ws_id, ws_slug: ws_slug}
+    %{bundle: bundle, ws_id: ws_id, ws_slug: ws_slug, src_principal: src.id}
   end
 
   defp purge_fkless_audit!(ws_bin) do
@@ -139,6 +142,19 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
     ]).rows
     |> hd()
     |> hd()
+  end
+
+  defp enforce! do
+    Application.put_env(:barkpark, :import_confinement, :enforce)
+    on_exit(fn -> Application.delete_env(:barkpark, :import_confinement) end)
+  end
+
+  defp observed_rows(ws_id) do
+    Repo.query!(
+      "SELECT metadata FROM audit_events WHERE action = $1 AND workspace_id = $2::uuid",
+      ["workspace_import.confinement_observed", Ecto.UUID.dump!(ws_id)]
+    ).rows
+    |> List.flatten()
   end
 
   defp org!(label) do
@@ -250,7 +266,17 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert org_of(ws.id) == nil
     end
 
-    test "a merge into an existing workspace the importer does not administer is refused 422" do
+    test "observe: a non-admin's merge into an existing workspace goes through, keeps its org, and is recorded" do
+      {raw_op, _op, _} = operator_token("non-admin-observe")
+      {ws, bundle} = resident!(nil, org!("bundle-org"), resident = org!("resident-org"))
+
+      assert merge_import(raw_op, ws.slug, bundle).status == 200
+      assert org_of(ws.id) == resident.id
+      assert [%{"would_refuse" => [%{"verb" => "import into"}]}] = observed_rows(ws.id)
+    end
+
+    test "enforce: a merge into an existing workspace the importer does not administer is refused 422" do
+      enforce!()
       {raw_op, _op, _} = operator_token("non-admin")
       {ws, bundle} = resident!(nil, org!("bundle-org"), resident = org!("resident-org"))
 
@@ -258,13 +284,24 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert org_of(ws.id) == resident.id
     end
 
-    test "replacing an empty same-slug shell needs the shell's admin" do
+    test "enforce: replacing an empty same-slug shell needs the shell's admin" do
+      enforce!()
       %{bundle: bundle, ws_slug: slug} = source_bundle!(nil)
       {raw_op, _op, _} = operator_token("shell")
       {:ok, shell} = Tenancy.create_workspace(%{slug: slug, name: "Shell #{slug}"})
 
       assert merge_import(raw_op, slug, bundle).status == 422
       assert Tenancy.get_workspace_by_slug(slug).id == shell.id
+    end
+
+    test "observe: replacing an empty same-slug shell goes through and is recorded" do
+      %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
+      {raw_op, _op, _} = operator_token("shell-observe")
+      {:ok, _shell} = Tenancy.create_workspace(%{slug: slug, name: "Shell #{slug}"})
+
+      assert merge_import(raw_op, slug, bundle).status == 200
+      assert Tenancy.get_workspace_by_slug(slug).id == ws_id
+      assert [%{"would_refuse" => [%{"verb" => "replace"}]}] = observed_rows(ws_id)
     end
   end
 
@@ -308,30 +345,54 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
     end
   end
 
-  describe "seats and credentials do not travel" do
-    test "no api_tokens or extra memberships are written for a non-operator import",
+  describe "seats, tokens and secrets" do
+    test "observe: token seats travel as today; what enforce would withhold is recorded",
          %{conn: conn} do
+      %{bundle: bundle, ws_slug: slug, ws_id: ws_id, src_principal: src} = source_bundle!(nil)
+      {raw_op, op, _} = operator_token("seats-observe")
+
+      resp = import_bundle(conn, raw_op, slug, bundle)
+      assert resp.status == 200
+      refute Map.has_key?(Jason.decode!(resp.resp_body), "withheld")
+
+      ids =
+        Repo.all(from m in Membership, where: m.workspace_id == ^ws_id, select: m.principal_id)
+
+      assert Enum.sort(ids) == Enum.sort([src, op.id])
+
+      assert [%{"would_withhold" => %{"workspace_memberships" => 1}}] = observed_rows(ws_id)
+    end
+
+    test "enforce: only the importer's seat is written, and the receipt names what was withheld",
+         %{conn: conn} do
+      enforce!()
       %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
-      {raw_op, op, _} = operator_token("no-seats")
+      {raw_op, op, _} = operator_token("seats-enforce")
 
       resp = import_bundle(conn, raw_op, slug, bundle)
       assert resp.status == 200
       assert Jason.decode!(resp.resp_body)["withheld"]["workspace_memberships"] == 1
 
-      # The only membership on the imported workspace is the importer's grant.
       rows = Repo.all(from m in Membership, where: m.workspace_id == ^ws_id)
-      assert Enum.map(rows, & &1.principal_id) == [op.id]
-      assert hd(rows).role == "admin"
+      assert Enum.map(rows, &{&1.principal_id, &1.role}) == [{op.id, "admin"}]
+      assert observed_rows(ws_id) == []
+    end
 
-      # No bundle-carried api_token landed for this workspace.
-      token_count =
-        Repo.query!("SELECT count(*) FROM api_tokens WHERE workspace_id = $1::uuid", [
-          Ecto.UUID.dump!(ws_id)
-        ]).rows
-        |> hd()
-        |> hd()
+    test "every mode: a seat naming a USER is not written", %{conn: conn} do
+      user =
+        AccountsFixtures.register_user("seated-#{System.unique_integer([:positive])}@example.com")
 
-      assert token_count == 0
+      %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil, user)
+      {raw_op, _op, _} = operator_token("user-seat")
+
+      resp = import_bundle(conn, raw_op, slug, bundle)
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["withheld"]["workspace_memberships"] == 1
+
+      refute Repo.exists?(
+               from m in Membership,
+                 where: m.workspace_id == ^ws_id and m.principal_id == ^user.id
+             )
     end
   end
 end
