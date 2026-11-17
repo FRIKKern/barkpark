@@ -795,7 +795,10 @@ defmodule Barkpark.ChatHosts do
   # event as before: `error` (codex app-server forwards a retrying error as
   # `error` and the turn goes on, internal/chathost/local_handler.go) and
   # `control_completed` (a Stop's ack, followed by the turn's own close). Only
-  # a `completed` lease pays the read.
+  # a `completed` lease pays the read. Even those are refused once the session
+  # has a newer lease (task-1eefeeb52ed19e73): Claude's `error` result is
+  # followed by the host's terminal when the provider exits, a person can send
+  # again in that gap, and the Recorder would end the newer turn.
   @continuing_kinds ["error", "control_completed"]
   defp takes_new_event?(%ExecutionLease{status: "cancelled", last_cursor: current}, cursor)
        when is_integer(cursor) and cursor > current,
@@ -812,10 +815,18 @@ defmodule Barkpark.ChatHosts do
       |> select([e], e.kind)
       |> Repo.one()
 
-    last_kind in @continuing_kinds
+    last_kind in @continuing_kinds and not newer_lease?(lease)
   end
 
   defp takes_new_event?(_lease, _cursor), do: true
+
+  # On the (workspace_id, session_id) index.
+  defp newer_lease?(%ExecutionLease{} = lease) do
+    ExecutionLease
+    |> where([l], l.workspace_id == ^lease.workspace_id and l.session_id == ^lease.session_id)
+    |> where([l], l.inserted_at > ^lease.inserted_at)
+    |> Repo.exists?()
+  end
 
   defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)
        when cursor == current + 1 do
