@@ -1680,7 +1680,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
-  # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the
+  # (charter D169). Truncate-with-marker at a grapheme boundary — NEVER abort the
   # turn (W22/D131). Idempotent under re-application: capped text re-caps to
   # itself, so accumulation past the cap freezes the content and keeps the
   # marker at the tail rather than growing without bound.
@@ -1692,21 +1692,8 @@ defmodule Barkpark.StudioChat.Recorder do
     else
       marker = @runtime_text_truncation_marker
       keep = max(cap - byte_size(marker), 0)
-      truncate_to_valid_utf8(text, keep) <> marker
+      Barkpark.ByteCut.prefix(text, keep) <> marker
     end
-  end
-
-  # The largest valid-UTF-8 prefix of `text` no longer than `max_bytes`. Backs
-  # off up to 3 bytes so a truncation never splits a multi-byte grapheme.
-  defp truncate_to_valid_utf8(text, max_bytes) when byte_size(text) <= max_bytes, do: text
-  defp truncate_to_valid_utf8(_text, max_bytes) when max_bytes <= 0, do: ""
-
-  defp truncate_to_valid_utf8(text, max_bytes) do
-    prefix = binary_part(text, 0, max_bytes)
-
-    if String.valid?(prefix),
-      do: prefix,
-      else: truncate_to_valid_utf8(text, max_bytes - 1)
   end
 
   defp max_runtime_text_bytes do
