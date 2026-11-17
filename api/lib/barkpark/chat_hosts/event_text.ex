@@ -21,16 +21,20 @@ defmodule Barkpark.ChatHosts.EventText do
   @replacement "�"
 
   @doc "The event with U+0000 replaced by U+FFFD in every string, at any depth."
-  def replace_nul(value) when is_binary(value) do
-    if :binary.match(value, <<0>>) == :nomatch,
-      do: value,
-      else: :binary.replace(value, <<0>>, @replacement, [:global])
+  # Almost no event holds U+0000. Reading for one first costs about a quarter
+  # of rebuilding every map (107 ms against 30 ms on a 5 MB event), so the
+  # rebuild runs only when there is something to replace.
+  def replace_nul(value) do
+    if Barkpark.StudioChat.NulText.check(value) == :ok, do: value, else: replace(value)
   end
 
-  def replace_nul(value) when is_map(value) and not is_struct(value),
-    do: Map.new(value, fn {key, item} -> {replace_nul(key), replace_nul(item)} end)
+  defp replace(value) when is_binary(value),
+    do: :binary.replace(value, <<0>>, @replacement, [:global])
 
-  def replace_nul(value) when is_list(value), do: Enum.map(value, &replace_nul/1)
+  defp replace(value) when is_map(value) and not is_struct(value),
+    do: Map.new(value, fn {key, item} -> {replace(key), replace(item)} end)
 
-  def replace_nul(value), do: value
+  defp replace(value) when is_list(value), do: Enum.map(value, &replace/1)
+
+  defp replace(value), do: value
 end
