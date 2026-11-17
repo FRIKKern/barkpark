@@ -21,6 +21,10 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
     * a `text_delta` goes on in the same open turn for its lease
       (`{:split, true}`).
 
+  Only a `turn_started` or a `text_delta` makes its lease the owner (or any
+  event when there is none yet): a Stop's lease is newer too but starts no
+  turn, so its ack leaves the stopped turn's owner in place.
+
   Anything else is `:same`. An event with no lease (a managed runtime, or a
   caller that passes `nil`) is always `:same` and changes no owner, so the
   managed path is the path it was. One lease's own repeated `turn_started`
@@ -51,7 +55,7 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
         |> settle.(state.runtime_text)
         |> Map.merge(%{runtime_text: "", runtime_break?: false, runtime_turn_open?: open?})
     end
-    |> adopt(lease_id)
+    |> adopt(event, lease_id)
   end
 
   @spec boundary(map(), Event.t(), String.t() | nil) :: :same | {:split, boolean()}
@@ -67,6 +71,13 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
 
   def boundary(_state, _event, _lease_id), do: :same
 
-  defp adopt(state, nil), do: state
-  defp adopt(state, lease_id), do: Map.put(state, :runtime_lease, lease_id)
+  # Only a lease's own turn takes the turn over: its turn_started or its text.
+  # A Stop's lease is newer too but starts no turn, so its ack leaves the owner.
+  defp adopt(state, _event, nil), do: state
+
+  defp adopt(state, %Event{kind: kind}, lease_id) do
+    if kind in [:turn_started, :text_delta] or not is_binary(Map.get(state, :runtime_lease)),
+      do: Map.put(state, :runtime_lease, lease_id),
+      else: state
+  end
 end

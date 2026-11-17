@@ -125,6 +125,22 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert replies(sid) == ["First.\n\nSecond."]
   end
 
+  # A Stop's lease is newer but starts no turn: its ack does not take the turn
+  # over, so the stopped turn's late text stays in the same row.
+  test "a Stop's ack mid-turn does not split the stopped turn's reply", %{sid: sid} = ctx do
+    old = lease!(ctx, "old")
+    accept!(ctx, old, 1, %{"kind" => "turn_started", "turn_id" => "t-old"})
+    accept!(ctx, old, 2, %{"kind" => "text_delta", "delta" => "Half"})
+    stop = lease!(ctx, "stop", :interrupt)
+    Recorder.note_interrupt_requested(sid)
+    accept!(ctx, stop, 1, %{"kind" => "control_completed", "operation" => "interrupt"})
+    accept!(ctx, old, 3, %{"kind" => "text_delta", "delta" => " and late"})
+    accept!(ctx, old, 4, %{"kind" => "turn_completed", "terminal_state" => "interrupted"})
+
+    assert replies(sid) == ["Half and late"]
+    refute StudioChat.get_session(sid).status == "working"
+  end
+
   # A managed runtime's events carry no lease: the projection without one is
   # the Recorder path it always was, including a second turn_started.
   test "events projected without a lease keep the turn they were in", %{sid: sid} do
