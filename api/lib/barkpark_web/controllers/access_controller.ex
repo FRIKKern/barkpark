@@ -426,4 +426,13 @@ defmodule BarkparkWeb.AccessController do
     |> put_resp_header("cache-control", "no-store")
     |> put_resp_header("referrer-policy", "no-referrer")
   end
+
+  # A dataset-bound admin token revoking another principal's grant: observed or
+  # refused (`DatasetBoundAdminWrites`). Declared at the end so no line above
+  # moves. The mint is not gated: `Access.mint/2` confines a bound token's grant
+  # to its own dataset.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "members_write"] when action in [:revoke]
+  )
 end

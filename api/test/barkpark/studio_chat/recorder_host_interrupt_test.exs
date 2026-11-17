@@ -5,7 +5,8 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
   "interrupted"` instead of kind `error`. These tests send the host's own event
   payloads through `ChatHosts.accept_event/2` — the fenced ingress a real host
   posts to, which projects into the session's live Recorder — and read back what
-  the Recorder stored.
+  the Recorder stored. Also a codex `error` that says `willRetry`, which is not
+  the end of the turn (task-7d3afdffa1fd4473).
   """
   use Barkpark.DataCase, async: false
 
@@ -93,10 +94,72 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
     assert StudioChat.get_session(sid).status == "exited"
   end
 
-  # One registered-host Claude session with a live Recorder and a leased
+  # The Go host forwards a codex app-server `error` notification's params as
+  # the event's `error` (internal/chathost/local_handler.go).
+  defp codex_error(will_retry) do
+    %{
+      "kind" => "error",
+      "turn_id" => "t-1",
+      "error" => %{
+        "error" => %{"message" => "Reconnecting... 1/5"},
+        "willRetry" => will_retry,
+        "threadId" => "th-1",
+        "turnId" => "t-1"
+      }
+    }
+  end
+
+  test "a codex host turn goes on after a retrying error: the session stays working and the reply is one row" do
+    {sid, post} = host_turn("codex")
+
+    post.(%{"kind" => "turn_started", "turn_id" => "t-1"})
+    post.(%{"kind" => "text_delta", "delta" => "Before the drop. "})
+    post.(codex_error(true))
+
+    assert StudioChat.get_session(sid).status == "working"
+    assert assistant_rows(sid) == []
+
+    post.(%{"kind" => "text_delta", "delta" => "After the retry."})
+    post.(%{"kind" => "turn_completed", "terminal_state" => "completed"})
+
+    assert ["Before the drop. After the retry."] =
+             Enum.map(assistant_rows(sid), & &1.source_markdown)
+
+    assert StudioChat.get_session(sid).status == "active"
+  end
+
+  test "a codex host error that will not retry still ends the turn" do
+    {sid, post} = host_turn("codex")
+
+    post.(%{"kind" => "turn_started", "turn_id" => "t-1"})
+    post.(%{"kind" => "text_delta", "delta" => "Partial"})
+    post.(codex_error(false))
+
+    assert ["Partial"] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    assert StudioChat.get_session(sid).status == "exited"
+  end
+
+  test "a host turn that fails and is then closed by the host keeps one partial reply" do
+    {sid, post} = host_turn()
+
+    post.(%{"kind" => "turn_started"})
+    post.(%{"kind" => "text_delta", "delta" => "Partial before a crash"})
+    post.(%{"kind" => "error", "terminal_state" => "failed", "error" => %{"is_error" => true}})
+    # The Runner's own close on the same lease is a second error-kind projection.
+    post.(%{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "exit 1"}
+    })
+
+    assert ["Partial before a crash"] = Enum.map(assistant_rows(sid), & &1.source_markdown)
+    assert StudioChat.get_session(sid).status == "exited"
+  end
+
+  # One registered-host session with a live Recorder and a leased
   # send_turn; returns the session id and a function that posts one host event
   # on that lease, the way the Go host's Runner does (cursor by cursor).
-  defp host_turn do
+  defp host_turn(provider \\ "claude") do
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "host-stop-#{suffix}", name: "Stop"})
     root = System.tmp_dir!()
@@ -118,7 +181,7 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
         %{
           id: sid,
           mode: "plan",
-          provider: "claude",
+          provider: provider,
           execution_target: "registered_host",
           execution_host_id: host.id
         },
@@ -129,7 +192,7 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
 
     command = %Command{
       operation: :start,
-      provider: "claude",
+      provider: provider,
       session_id: sid,
       idempotency_key: "stop-#{suffix}",
       payload: %{cwd: root, content: "write a lot"}
@@ -161,7 +224,10 @@ defmodule Barkpark.StudioChat.RecorderHostInterruptTest do
   defp capabilities do
     %{
       "protocol_version" => 1,
-      "providers" => %{"claude" => %{"installed" => true, "auth_ready" => true}}
+      "providers" => %{
+        "claude" => %{"installed" => true, "auth_ready" => true},
+        "codex" => %{"installed" => true, "auth_ready" => true}
+      }
     }
   end
 end

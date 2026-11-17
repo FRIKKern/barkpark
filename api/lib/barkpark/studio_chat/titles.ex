@@ -200,7 +200,13 @@ defmodule Barkpark.StudioChat.Titles do
   @spec kick_title(term(), String.t()) :: DynamicSupervisor.on_start_child()
   def kick_title(session_id, first_message) when is_binary(first_message) do
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-      title = generate(first_message, host_cli: host_cli_allowed?(session_id))
+      # A model's title can hold U+0000, which Postgres refuses (22021) and the
+      # rescue below would swallow, so it is stored as U+FFFD instead
+      # (task-44045d0606044e13).
+      title =
+        first_message
+        |> generate(host_cli: host_cli_allowed?(session_id))
+        |> Barkpark.ChatHosts.EventText.replace_nul()
 
       try do
         # Accepted-write shapes: the canonical store returns {:ok, %Session{}}

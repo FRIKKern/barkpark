@@ -495,6 +495,70 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     assert Repo.aggregate(Receipt, :count) == 2
   end
 
+  test "a managed codex retrying error is not the turn's usage boundary, and the turn stays working",
+       ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    # The app-server's own notification, through the managed adapter's normalizer.
+    retrying =
+      Runtime.Codex.Protocol.normalize(
+        %{
+          "method" => "error",
+          "params" => %{
+            "error" => %{"message" => "Reconnecting... 1/5"},
+            "willRetry" => true,
+            "threadId" => "provider-thread-1",
+            "turnId" => "retry-turn"
+          }
+        },
+        %{session_id: ctx.session_id, thread_id: "provider-thread-1", turn_id: nil, sequence: 1}
+      )
+
+    project(recorder, event(ctx.session_id, "previous-turn", 100))
+    project(recorder, lifecycle(ctx.session_id, "retry-turn", :turn_started))
+    project(recorder, event(ctx.session_id, "retry-turn", 120))
+    project(recorder, retrying)
+    assert StudioChat.get_session(ctx.session_id).status == "working"
+
+    project(recorder, event(ctx.session_id, "retry-turn", 145))
+    project(recorder, lifecycle(ctx.session_id, "retry-turn", :turn_completed))
+
+    assert %{"token_count" => %{"state" => "observed", "value" => 45}} =
+             RuntimeUsage.reduce(identity(ctx, "retry-turn"))
+  end
+
+  test "a managed codex turn whose app-server dies after a retrying error still ends", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    context = %{session_id: ctx.session_id, thread_id: "provider-thread-1", turn_id: "t-1"}
+
+    retrying =
+      Runtime.Codex.Protocol.normalize(
+        %{"method" => "error", "params" => %{"error" => %{}, "willRetry" => true}},
+        Map.put(context, :sequence, 1)
+      )
+
+    project(recorder, lifecycle(ctx.session_id, "t-1", :turn_started))
+    project(recorder, retrying)
+    assert StudioChat.get_session(ctx.session_id).status == "working"
+
+    # The managed Session emits this on the port's exit status (codex/session.ex).
+    project(recorder, Runtime.Codex.Protocol.process_failed(Map.put(context, :sequence, 2), 17))
+    assert StudioChat.get_session(ctx.session_id).status == "exited"
+  end
+
   test "Recorder keeps an unavailable first-turn baseline typed missing", ctx do
     {:ok, recorder} =
       Recorder.ensure(%{

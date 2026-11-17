@@ -224,4 +224,12 @@ defmodule BarkparkWeb.ChatHostController do
       message: inspect(reason)
     })
   end
+
+  # A dataset-bound admin token enrolling or revoking a workspace chat host:
+  # observed or refused (`DatasetBoundAdminWrites`). Declared at the end so no
+  # line above moves.
+  plug(
+    BarkparkWeb.Plugs.DatasetBoundAdminWrites,
+    [surface: "tokens_write"] when action in [:create_enrollment, :revoke]
+  )
 end

@@ -24,7 +24,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   alias Barkpark.Content.Broadcast
   alias Barkpark.Plugins.Enablement
-  alias Barkpark.{CycleFleet, StudioChat}
+  alias Barkpark.{ChatHosts.EventText, CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
@@ -1164,7 +1164,7 @@ defmodule Barkpark.StudioChat.Recorder do
           # Only a TOP-LEVEL TodoWrite is the turn's living checklist (D39) —
           # a sub-agent's todo list must never hijack the main turn's card, so
           # a child frame's TodoWrite persists as a plain (indented) tool row.
-          persist_todo_block(st, name, block)
+          persist_todo_block(st, name, EventText.replace_nul(block))
         else
           persist(
             st.session_id,
@@ -1385,14 +1385,18 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       end
 
+    # A codex error that will retry is not the end of the turn: no usage
+    # boundary, no persist, no status change (task-7d3afdffa1fd4473).
+    retrying? = Event.retrying_error?(event)
+
     state =
-      if trusted_source? and trusted_runtime_usage_identity?(state, event) do
+      if trusted_source? and not retrying? and trusted_runtime_usage_identity?(state, event) do
         capture_runtime_usage(state, event)
       else
         state
       end
 
-    case event.kind do
+    case if(retrying?, do: :retrying_error, else: event.kind) do
       :session_started ->
         state
 
@@ -1466,11 +1470,11 @@ defmodule Barkpark.StudioChat.Recorder do
       kind when kind in [:error, :process_failed, :protocol_error] ->
         persist_runtime_text(state, event)
         StudioChat.update_status(state.session_id, "exited")
-        # Clear AFTER the offline publish: the D39 prior-state mapping must
-        # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
-        # the offline rule untouched).
+        # Asks clear AFTER the offline publish: D39's prior-state map must still
+        # see :needs_you (a mid-ask death maps to "unknown"; D56h). The text is
+        # stored, so a host's later close must not store it again (task-a326a7a270909052).
         state
-        |> Map.merge(%{runtime_turn_open?: false, runtime_break?: false})
+        |> Map.merge(%{runtime_text: "", runtime_turn_open?: false, runtime_break?: false})
         |> stable_settle(state.runtime_text)
         |> publish_activity(%{state: :offline, line: nil})
         |> clear_pending_asks()
@@ -1566,6 +1570,9 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp maybe_capture_event_provider_session_id(session_id, provider_session_id)
        when is_binary(provider_session_id) and provider_session_id != "" do
+    # A runtime's own id (a Codex thread id) comes back raw; the store refuses U+0000.
+    provider_session_id = EventText.replace_nul(provider_session_id)
+
     case StudioChat.set_provider_session_id(session_id, provider_session_id) do
       {:ok, _session} ->
         :ok
@@ -1812,6 +1819,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # Merge a lifecycle patch onto the spawn row (never clobbering its input, D45).
   defp stamp_task(session_id, tool_use_id, patch) do
+    [tool_use_id, patch] = EventText.replace_nul([tool_use_id, patch])
+
     case StudioChat.merge_tool_metadata(session_id, tool_use_id, patch) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to stamp task metadata: #{inspect(reason)}")
@@ -1916,7 +1925,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_rail(session_id, rail) do
-    case StudioChat.set_rail_snapshot(session_id, rail) do
+    case StudioChat.set_rail_snapshot(session_id, EventText.replace_nul(rail)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist rail: #{inspect(reason)}")
 
@@ -1926,7 +1935,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist(session_id, attrs, kind) do
-    case StudioChat.append_message(session_id, Barkpark.ChatHosts.EventText.replace_nul(attrs)) do
+    case StudioChat.append_message(session_id, EventText.replace_nul(attrs)) do
       {:error, reason} ->
         Logger.warning("studio chat recorder: failed to persist #{kind}: #{inspect(reason)}")
 
@@ -2465,7 +2474,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # would leave the replayed row falsely neutral); a plain empty result is still
   # ignored, exactly as before.
   defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
-    content
+    EventText.replace_nul(content)
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
     |> Enum.map(fn b ->
       # `result_text/1` answers nil for a contentless block — normalize to ""

@@ -19,8 +19,8 @@ package cli
 // The Anthropic credential the Studio chat title pass and the task judge need
 // is read from the ENVIRONMENT, never from that store:
 //
-//	api/lib/barkpark/studio_chat/titles.ex:427  Application.get_env(:barkpark, :anthropic_api_key)
-//	                                     :428     || System.get_env("ANTHROPIC_API_KEY")
+//	api/lib/barkpark/studio_chat/titles.ex:key/0  Application.get_env(:barkpark, :anthropic_api_key)
+//	                                                || System.get_env("ANTHROPIC_API_KEY")
 //	api/lib/barkpark/tasks/judge.ex:226         Application.get_env(:barkpark, :anthropic_api_key)
 //	                                     :227     || System.get_env("ANTHROPIC_API_KEY")
 //
