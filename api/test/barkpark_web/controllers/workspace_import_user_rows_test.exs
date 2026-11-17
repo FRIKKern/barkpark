@@ -166,4 +166,22 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
              "api_tokens" => %{"rows" => 1, "user_ids" => [outsider.id]}
            }
   end
+
+  test "an importer who does not administer the target gets no seated exception" do
+    Application.put_env(:barkpark, :allow_bundle_import, true)
+    on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+    owner = user!("victim-owner")
+    ws = workspace!("not-mine")
+    {:ok, _} = TenancyAuth.create_membership(ws.id, owner.id, "owner", "user")
+    owner_pat = user_token!(ws, owner)
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    Repo.query!("DELETE FROM api_tokens WHERE id = $1::uuid", [Ecto.UUID.dump!(owner_pat.id)])
+    {raw, _} = importer("not-admin")
+
+    receipt = import!(raw, ws.slug, bundle, "?mode=merge")
+
+    refute token_exists?(owner_pat.id)
+    assert receipt["withheld_user_rows"]["api_tokens"] == %{"rows" => 1, "user_ids" => [owner.id]}
+  end
 end

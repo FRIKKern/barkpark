@@ -15,10 +15,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       exists keeps its current `organization_id` and the other operator
       columns (`@operator_columns`). Joining an organization goes only through
       the guarded attach route.
-    * Every row stays in the bundle's workspace (`ImportConfinement.Rows`).
+    * Every row stays in the bundle's workspace (`ImportConfinement.Rows`),
+      and a `webhooks` row carries no audit subscription.
     * User-bound rows (a user-owned token, its sessions, a user seat) travel
       only for a user already seated in the existing target, read from the
-      database before the import. The rest are withheld, and the receipt, the
+      database before the import, and only when the importer administers it. The rest are withheld, and the receipt, the
       log line and the audit row list them: rows per table and the user ids.
 
   ## Observe first (`mode/0`)
@@ -88,13 +89,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
     enforce? = mode() == :enforce
     ws_id = Rows.ws_id!(manifest)
     prior = read_operator_columns(ws_id)
-
-    issues =
-      [
-        shell_issue(manifest, ws_id, mode, grant),
-        prior && admin_issue(grant, ws_id, "import into")
-      ]
-      |> Enum.reject(&is_nil/1)
+    target_issue = prior && admin_issue(grant, ws_id, "import into")
+    issues = Enum.reject([shell_issue(manifest, ws_id, mode, grant), target_issue], &is_nil/1)
 
     if enforce? and issues != [], do: refuse_target!(hd(issues))
     Rows.reset_user_rows()
@@ -104,7 +100,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement do
       enforce?: enforce?,
       prior: prior,
       issues: issues,
-      seated: if(prior, do: seated_users(ws_id), else: []),
+      # Seats count only for an importer who administers the existing target.
+      seated: if(prior && is_nil(target_issue), do: seated_users(ws_id), else: []),
       catalog: Rows.catalog()
     }
   end

@@ -338,6 +338,36 @@ defmodule BarkparkWeb.WorkspaceImportOrgConfinementTest do
       assert import_bundle(conn, raw_op, slug, crafted).status == 422
       refute Tenancy.get_workspace_by_slug(slug)
     end
+
+    test "a webhook carrying an audit subscription refuses 422", %{conn: conn} do
+      org = org!("audited-org")
+      %{bundle: bundle, ws_slug: slug, ws_id: ws_id} = source_bundle!(nil)
+      {raw_op, _op, _} = operator_token("rows-webhook")
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      cols =
+        ~w(id workspace_id name url dataset events types secret active audit_categories audit_actions organization_id inserted_at updated_at)
+
+      row =
+        [Ecto.UUID.generate(), ws_id, "h", "https://example.invalid/h", "production", "{}"] ++
+          ["{}", "s", "t", "{access}", "{}", org.id, "2026-11-17 00:00:00", "2026-11-17 00:00:00"]
+
+      tables =
+        Enum.map(manifest["tables"], fn
+          %{"name" => "webhooks"} = e -> %{e | "columns" => cols, "row_count" => 1}
+          e -> e
+        end)
+
+      crafted =
+        repack(
+          %{manifest | "tables" => tables},
+          Map.put(dumps, "webhooks", Enum.join(row, "\t") <> "\n")
+        )
+
+      assert import_bundle(conn, raw_op, slug, crafted).status == 422
+      assert Barkpark.Webhooks.audit_webhooks_for("access", "anything", org.id) == []
+      refute Tenancy.get_workspace_by_slug(slug)
+    end
   end
 
   describe "seats, tokens and secrets" do

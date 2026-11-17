@@ -13,6 +13,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
     * Merge: an `ON CONFLICT` key never names another workspace's row.
     * `session_id` (into `chat_sessions`, which no bundle carries) never names
       another workspace's session.
+    * A `webhooks` row carries no audit subscription (`audit_categories`,
+      `audit_actions`, `organization_id`): as on the HTTP route
+      (`WebhookController`), that is not a tenant feature.
 
   A row that breaks one refuses the whole import (`InvalidBundleError`, 422).
 
@@ -130,6 +133,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
         scoped when scoped in [:root, :e1, :e2] ->
           refuse_out_of_scope!(table, tmp, scoped, ws)
           refuse_foreign_session!(table, tmp, cols, ws)
+          refuse_audit_subscription!(table, tmp)
           refuse_foreign_references!(table, tmp, Map.get(catalog.fks, table, []), catalog, ws)
           drop_user_rows!(table, tmp, state.seated)
           write_scoped!(table, col_list, cols, tmp, mode, scoped, ws)
@@ -257,15 +261,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ImportConfinement.Rows do
   defp user_bound("workspace_memberships", seated),
     do: {"t.principal_id", "t.principal_type = 'user' AND #{unseated("t.principal_id", seated)}"}
 
-  # A session travels only with a token already written that may travel.
+  # A session travels only with a token already written that may travel. Its
+  # user is the token's owner when that token exists; a session of a token
+  # withheld here is listed under `api_tokens`.
   defp user_bound("token_sessions", seated) do
-    {"NULL::uuid",
+    {"(SELECT a.owner_user_id FROM api_tokens a WHERE a.id = t.api_token_id)",
      "NOT EXISTS (SELECT 1 FROM api_tokens a WHERE a.id = t.api_token_id AND " <>
        "(a.owner_user_id IS NULL OR NOT #{unseated("a.owner_user_id", seated)}))"}
   end
 
   defp unseated(col, seated),
     do: "NOT COALESCE(#{col}::text = ANY(#{Catalog.text_array_literal(seated)}), false)"
+
+  defp refuse_audit_subscription!(table, tmp) do
+    if table == "webhooks" do
+      sql =
+        "SELECT count(*) FROM #{qi(tmp)} t WHERE cardinality(t.audit_categories) > 0 " <>
+          "OR cardinality(t.audit_actions) > 0 OR t.organization_id IS NOT NULL"
+
+      refuse_if!(table, sql, "an audit subscription, which only an operator sets")
+    end
+  end
 
   defp drop_user_rows!(table, tmp, seated) do
     if table in @user_tables, do: drop_bound!(table, tmp, seated)

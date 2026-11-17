@@ -1399,8 +1399,9 @@ defmodule BarkparkWeb.WorkspaceController do
   # deliberately does not spell the annotation token literally, so it cannot be
   # mistaken for one by a scanner or miscounted by a census grep.
   # A caller the operator allowlist does not NAME imports confined to the
-  # bundle's own workspace: no organization, no seats or credentials, no row
-  # outside it (task-1a6cde75b0adae76, `WorkspaceBundle.ImportConfinement`).
+  # bundle's own workspace: no organization, no row outside it, no user-bound
+  # row for someone not already seated there (task-1a6cde75b0adae76,
+  # `WorkspaceBundle.ImportConfinement`).
   defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
 
   defp put_withheld(receipt, stats),
