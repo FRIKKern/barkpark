@@ -87,6 +87,16 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
     refute html =~ "retrying"
   end
 
+  # task-455b5309ba76bb14: a host's reason is not scrubbed upstream.
+  test "a 10,000-character host reason is cut to 2,000 characters" do
+    long = String.duplicate("x", 10_000)
+    event = %Event{kind: :error, error: %{"error" => %{"message" => long}, "willRetry" => false}}
+
+    line = BarkparkWeb.Studio.CodexFailureLine.line(event)
+    assert line == "The codex turn ended with an error — " <> String.duplicate("x", 2_000) <> "."
+    assert byte_size(line) <= 2_100
+  end
+
   test "the other failure kinds keep their lines", %{view: view} do
     assert line(view, %Event{kind: :process_failed, error: %{"code" => "process_exit"}}) =~
              "The codex process exited unexpectedly — process_exit."
