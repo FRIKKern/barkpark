@@ -71,6 +71,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
   alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.Plugs.RequirePlatformOperator
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -942,7 +943,8 @@ defmodule BarkparkWeb.WorkspaceController do
   defp clean_import(conn, path, receipt) do
     case WorkspaceBundle.import_bundle_file(path,
            grant_admin_to: operator_grant(conn),
-           expected_root_slug: expected_root_slug(conn)
+           expected_root_slug: expected_root_slug(conn),
+           confine: confine?(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -952,6 +954,7 @@ defmodule BarkparkWeb.WorkspaceController do
             total_rows: stats.total_rows,
             provenance: stamp_provenance(stats.manifest)
           })
+          |> put_withheld(stats)
         )
 
       {:error, {:blob_path_conflict, info}} ->
@@ -970,7 +973,8 @@ defmodule BarkparkWeb.WorkspaceController do
     case WorkspaceBundle.import_bundle_file(path,
            mode: :merge,
            grant_admin_to: operator_grant(conn),
-           expected_root_slug: expected_root_slug(conn)
+           expected_root_slug: expected_root_slug(conn),
+           confine: confine?(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -981,6 +985,7 @@ defmodule BarkparkWeb.WorkspaceController do
             mode: "merge",
             provenance: stamp_provenance(stats.manifest)
           })
+          |> put_withheld(stats)
         )
 
       {:error, {:workspace_slug_conflict, info}} ->
@@ -1390,6 +1395,14 @@ defmodule BarkparkWeb.WorkspaceController do
   # capability:` markers and credo disable-for-next-line alike. This paragraph
   # deliberately does not spell the annotation token literally, so it cannot be
   # mistaken for one by a scanner or miscounted by a census grep.
+  # A caller the operator allowlist does not NAME imports confined to the
+  # bundle's own workspace: no organization, no seats or credentials, no row
+  # outside it (task-1a6cde75b0adae76, `WorkspaceBundle.ImportConfinement`).
+  defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
+
+  defp put_withheld(receipt, %{withheld: withheld}), do: Map.put(receipt, :withheld, withheld)
+  defp put_withheld(receipt, _stats), do: receipt
+
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do
       %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
