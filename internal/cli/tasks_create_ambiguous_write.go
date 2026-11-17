@@ -57,6 +57,11 @@ const (
 	// ambiguityCreateResultUnreadable: the CREATE answered 2xx and echoed no
 	// usable id. The row is on the server; this process cannot name it.
 	ambiguityCreateResultUnreadable = "create_result_unreadable"
+	// ambiguityCreateResendKeyRefused: a RESEND of the create was refused over
+	// the leg's own Idempotency-Key (422 idempotency_key_reused, or 409
+	// idempotency_key_in_use after every resend). An earlier attempt of this
+	// invocation went out first, so it may have committed (task-f98d2eb6ff29781c).
+	ambiguityCreateResendKeyRefused = "create_resend_key_refused"
 )
 
 // taskCreateAmbiguityClasses maps each class to the sentence that says what is
@@ -66,6 +71,7 @@ var taskCreateAmbiguityClasses = map[string]string{
 	ambiguityCreateAnswerLost:          "the create request was sent and no response came back — it may have committed",
 	ambiguityCreateServerFault:         "the create answered a server fault, which can hide a write that committed before the failure",
 	ambiguityCreateResultUnreadable:    "the create answered 2xx but echoed no id — the row exists and this process cannot name it",
+	ambiguityCreateResendKeyRefused:    "a resend of the create was refused over its own Idempotency-Key, after an earlier attempt that may have committed",
 	residuePublishAmbiguousTransport:   "the publish request was sent and no response came back — it may have committed",
 	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
 	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",

@@ -140,6 +140,24 @@ type keyedMutationSender func(manifest.Context, []map[string]any, string) (int, 
 // connection we stopped listening to.
 const idempotencyInUseCode = "idempotency_key_in_use"
 
+// idempotencyReusedCode is the plug's answer when the key was first used with a
+// different request (plugs/idempotency.ex → 422).
+const idempotencyReusedCode = "idempotency_key_reused"
+
+// resendRefusedOwnKey reports whether the LAST attempt of a leg was a resend
+// the server refused over the leg's own key: 422 idempotency_key_reused, or the
+// 409 idempotency_key_in_use that is still there after every resend. Either way
+// an earlier attempt of this invocation went out first and may have committed,
+// so the outcome is ambiguous, not a refusal. On the first send the key is
+// fresh, no earlier attempt exists, and the refusal is an ordinary answer.
+func resendRefusedOwnKey(attempts int, body []byte) bool {
+	if attempts < 2 {
+		return false
+	}
+	env, ok := apierr.Parse(body)
+	return ok && (env.Code == idempotencyReusedCode || env.Code == idempotencyInUseCode)
+}
+
 // resendableMutateOutcome answers "should this leg be sent again?" for one
 // attempt.
 //
