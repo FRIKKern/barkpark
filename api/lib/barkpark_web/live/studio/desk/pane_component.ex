@@ -367,7 +367,6 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       <div
         class={["pane-body", @pane.kind == :list && "list-rows"]}
         data-selecting={Bulk.active?(@bulk)}
-        data-bulk-stop={Bulk.active?(@bulk) && BulkBar.stop(@id)}
       >
         <div :if={@data.loading && !@data.ok?} class="dk-skeleton" aria-hidden="true">
           <div :for={_ <- 1..6} class="pane-item"><span class="dk-bone"></span></div>

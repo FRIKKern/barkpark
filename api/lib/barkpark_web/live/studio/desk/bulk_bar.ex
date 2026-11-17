@@ -20,7 +20,6 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.UnpublishDialog
-  alias Phoenix.LiveView.JS
 
   attr :id, :string, required: true, doc: "the row's document"
   attr :title, :string, required: true
@@ -43,9 +42,6 @@ defmodule BarkparkWeb.Studio.Desk.BulkBar do
     </label>
     """
   end
-
-  @doc "Escape in a list that is selecting (`bp-desk-bulk.js` runs it): selecting stops."
-  def stop(pane), do: JS.push("bulk-clear", value: %{pane: pane})
 
   attr :pane, :string, required: true, doc: "the list pane's id"
   attr :count, :integer, required: true

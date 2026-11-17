@@ -7,8 +7,8 @@
 //     Shift-click ticks every row from the last tick to it. Both press the
 //     row's own tick, so the server hears one event either way (`bulk-pick`,
 //     with `range` for the Shift-click).
-//   - Escape in a list that is selecting stops it (the list's
-//     `data-bulk-stop`, the page's `bulk-clear`).
+//   - Escape in a list that is selecting stops it: the list menu's "Stop
+//     selecting" is pressed (the page's `bulk-select`).
 //   - A tick shows what the server holds. A box the editor pressed keeps its
 //     own state through a patch, so after each patch every box is set from
 //     its `checked` attribute.
@@ -74,16 +74,19 @@
     box.removeAttribute("phx-value-range");
   }
 
+  // Escape in a list that is selecting: the list menu's own "Stop selecting"
+  // is pressed for it.
   function onKey(e) {
-    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if (e.key !== "Escape" || e.metaKey || e.ctrlKey || e.altKey) return;
     var list = e.target && e.target.closest ? e.target.closest(".dk .list-rows[data-selecting]") : null;
-    var stop = list && list.getAttribute("data-bulk-stop");
-    if (!stop || !window.liveSocket) return;
+    var pane = list && list.closest("[data-pane-index]");
+    var stop = pane && pane.querySelector('.dk-list-menu [phx-click="bulk-select"][phx-value-on="false"]');
+    if (!stop) return;
     // The tick with the focus goes out of reach: its row takes the focus.
     var box = e.target.closest(".bulk-check");
     var link = box && box.parentNode.querySelector("a[href]");
     if (link) link.focus({ preventScroll: true });
-    window.liveSocket.execJS(list, stop);
+    stop.click();
   }
 
   function sync() {
@@ -115,7 +118,7 @@
   }
 
   doc.addEventListener("click", onClick, true);
-  doc.addEventListener("keydown", onKey);
+  doc.addEventListener("keydown", onKey, true);
   doc.addEventListener("phx:update", sync);
   window.addEventListener("phx:desk:bulk", onBulk);
   window.addEventListener("phx:desk:bulk-toast", function (e) {
