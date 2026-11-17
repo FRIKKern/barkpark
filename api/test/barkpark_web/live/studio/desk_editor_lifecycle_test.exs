@@ -112,9 +112,10 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
       view = open(ctx)
       view |> form("#editor-form") |> render_change(%{"doc" => %{"title" => "Life to publish"}})
 
-      view
-      |> element(~s([data-pane-editing] .pane-header button[aria-label="Publish"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s([data-pane-editing] .pane-header button[aria-label="Publish"]))
+      )
 
       assert flash?(view, "Published")
       assert badge?(view, "published")
@@ -123,9 +124,10 @@ defmodule BarkparkWeb.Studio.DeskEditorLifecycleTest do
       assert published?
       refute draft?
 
-      view
-      |> element(~s([data-pane-editing] .pane-header button[aria-label="Unpublish"]))
-      |> render_click()
+      BarkparkWeb.EditorPost.press_on(
+        view,
+        element(view, ~s([data-pane-editing] .pane-header button[aria-label="Unpublish"]))
+      )
 
       # The desk asks first, also when nobody refers to the document.
       BarkparkWeb.EditorPost.press_on(
