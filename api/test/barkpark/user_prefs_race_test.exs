@@ -93,6 +93,38 @@ defmodule Barkpark.UserPrefsRaceTest do
     end)
   end
 
+  # task-f88365602c49be57: two PUTs made from one read both carry its tag.
+  # The compare and the write are one step under the row lock, so the second
+  # sees the first's value and is refused; without the lock both would write.
+  test "two concurrent PUTs with the same If-Match: one writes, the other is refused" do
+    with_user(fn user, ws ->
+      {:ok, pref} = UserPrefs.put(user.id, ws.id, @dataset, @key, %{"name" => "old"})
+      tag = UserPrefs.etag(pref.value)
+      holder = hold(lock_row(pref), fn -> :ok end)
+
+      putters =
+        for name <- ["a", "b"] do
+          Task.async(fn ->
+            unboxed(fn ->
+              UserPrefs.put_if_match(user.id, ws.id, @dataset, @key, %{"name" => name}, [tag])
+            end)
+          end)
+        end
+
+      await_lock_waiters(2)
+      release(holder)
+
+      results = Enum.map(putters, &Task.await(&1, 10_000))
+      assert [{:ok, written}] = Enum.filter(results, &match?({:ok, _}, &1))
+
+      assert [{:error, {:precondition_failed, actual}}] =
+               Enum.reject(results, &match?({:ok, _}, &1))
+
+      assert actual == UserPrefs.etag(written.value)
+      assert UserPrefs.get(user.id, ws.id, @dataset, @key) == written.value
+    end)
+  end
+
   defp with_user(fun) do
     unboxed(fn ->
       n = System.unique_integer([:positive])
