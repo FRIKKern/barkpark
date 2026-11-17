@@ -111,11 +111,11 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
         )
 
       # Open the modal
-      html = render_click(view, "discard-draft", %{})
+      html = BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
       assert html =~ ~s(data-test-id="discard-draft-modal")
 
       # Confirm
-      _html = render_click(view, "confirm-discard", %{})
+      _html = BarkparkWeb.EditorPost.press(view, "confirm-discard", %{})
 
       # Draft row must be gone
       assert {:error, _} = Content.get_document(Content.draft_id("dd-p1"), @schema_name, @dataset)
@@ -132,8 +132,8 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
           scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
-      _ = render_click(view, "discard-draft", %{})
-      html = render_click(view, "confirm-discard", %{})
+      _ = BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
+      html = BarkparkWeb.EditorPost.press(view, "confirm-discard", %{})
 
       assert html =~ "Draft discarded"
     end
@@ -145,7 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDiscardDraftTest do
           scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/#{Content.draft_id("dd-p1")}")
         )
 
-      _ = render_click(view, "discard-draft", %{})
+      _ = BarkparkWeb.EditorPost.press(view, "discard-draft", %{})
       html = render_click(view, "close-discard", %{})
 
       # Modal closed

@@ -120,4 +120,25 @@ assert.equal(press("title", "KeyP"), false, "nothing to publish: not handled");
 await wait(250);
 assert.deepEqual(seen, []);
 
+// task-176bd529276ff8b3: the key asked to publish the document the pane
+// showed. When the pane comes to show another one inside the wait, the
+// wait ends: that document's Publish is not pressed.
+for (const [next, clicks] of [["doc-a", ["blur title", "click head-publish"]], ["doc-b", ["blur title"]]]) {
+  let shown = "doc-a";
+  window.BarkparkDocMark = () => shown;
+  title.focus();
+  title.dispatchEvent(new window.Event("input", { bubbles: true }));
+  seen.length = 0;
+  assert.equal(press("title", "KeyP"), true);
+  shown = next;
+  doc.getElementById("head").insertAdjacentHTML("afterbegin", item("head", "publish", "Publish"));
+  doc.getElementById("head-publish").addEventListener("click", () => seen.push("click head-publish"));
+  form.setAttribute("data-phx-ref-loading", ""); // the save goes out,
+  await wait(20);
+  form.removeAttribute("data-phx-ref-loading"); // and is answered
+  await wait(400);
+  assert.deepEqual(seen, clicks, `the pane shows ${next} when Publish arrives`);
+  doc.getElementById("head-publish").remove();
+}
+
 console.log("desk slice doc keys: ok");

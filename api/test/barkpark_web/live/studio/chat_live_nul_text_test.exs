@@ -156,6 +156,26 @@ defmodule BarkparkWeb.Studio.ChatLiveNulTextTest do
       assert StudioChat.get_session(sid).draft == "kept draft"
     end
 
+    # task-75c44878c20cec3f: every keystroke is a composer-change, so a note per
+    # change stacked one identical line per key. Note on the change to NUL only.
+    test "keystrokes while the composer holds NUL add one note, a fresh NUL after clean text another",
+         %{conn: conn} do
+      sid = seed_session("Typing")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      form = element(view, "form[phx-submit=send]")
+      notes = fn -> length(String.split(render(view), @error)) - 1 end
+
+      render_change(form, %{"message" => @nul})
+      render_change(form, %{"message" => @nul <> "x"})
+      render_change(form, %{"message" => @nul <> "xy"})
+      assert notes.() == 1
+
+      render_change(form, %{"message" => "clean"})
+      assert notes.() == 1
+      render_change(form, %{"message" => "clean" <> @nul})
+      assert notes.() == 2
+    end
+
     test "a send holding NUL leaves the view alive with a plain error, dispatching and storing nothing",
          %{conn: conn} do
       sid = seed_session("Sending")

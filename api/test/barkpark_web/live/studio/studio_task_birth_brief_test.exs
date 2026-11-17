@@ -87,7 +87,7 @@ defmodule BarkparkWeb.Studio.StudioTaskBirthBriefTest do
       )
 
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/#{pub_id}"))
-    html = render_click(view, "publish")
+    html = BarkparkWeb.EditorPost.press(view, "publish")
 
     refute html =~ "task brief is required", "Studio could not publish the task it made"
     assert {:ok, published} = Content.get_document(pub_id, "task", @dataset)

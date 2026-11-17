@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.ReadOnlySeatWriteGateTest do
   defp fire(view, "autosave"),
     do: BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "After"}})
 
-  defp fire(view, event), do: render_click(view, event)
+  defp fire(view, event), do: BarkparkWeb.EditorPost.press(view, event)
 
   # Every write event, fired by a read-only custom role (refused, nothing
   # changes) and by a `member` (the change lands). The member half is what

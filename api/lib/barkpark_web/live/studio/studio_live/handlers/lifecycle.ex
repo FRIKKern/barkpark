@@ -50,6 +50,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
       )
+      # A dialog a document action opened goes with its document.
+      |> BarkparkWeb.Studio.StudioLive.PostIdentity.leave(shown)
       |> BarkparkWeb.Studio.StudioLive.DocSwap.start(shown)
 
     # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display

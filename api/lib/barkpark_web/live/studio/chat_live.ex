@@ -500,11 +500,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Keep the server-bound composer draft in step with what the user types
   # (charter D24). Without this, `value={@composer_draft}` would fight the DOM:
   # a restore-on-failure could never be SEEN and a clear-on-send could never
-  # stick. Enter still submits via the form's `phx-submit="send"`.
+  # stick. Enter still submits via the form's `phx-submit="send"`. A NUL draft is
+  # noted once per change to NUL in a session, not per key (task-75c44878c20cec3f).
   def handle_event("composer-change", %{"message" => text}, socket) do
-    if String.contains?(text, <<0>>),
-      do: {:noreply, nul_note(socket, "A draft")},
-      else: {:noreply, assign(socket, composer_draft: text)}
+    nul = String.contains?(text, <<0>>) and {:nul, socket.assigns.store_session_id}
+
+    cond do
+      !nul -> {:noreply, assign(socket, composer_draft: text, composer_nul: false)}
+      nul == socket.assigns[:composer_nul] -> {:noreply, socket}
+      true -> {:noreply, socket |> nul_note("A draft") |> assign(composer_nul: nul)}
+    end
   end
 
   # Two-phase send (charter D24). PHASE 1 is instant and pure UI: echo the user

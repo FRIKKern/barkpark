@@ -24,6 +24,10 @@ defmodule BarkparkWeb.SessionIssuer do
     audit_session_mint(user, opts)
     audit_breakglass(user, Keyword.get(opts, :method))
 
+    # A path /login kept for the Cloud ticket or magic link is spent by any
+    # sign-in (BarkparkWeb.LoginReturn).
+    conn = BarkparkWeb.LoginReturn.forget(conn)
+
     conn
     |> configure_session(renew: true)
     |> put_session("user_session", token)

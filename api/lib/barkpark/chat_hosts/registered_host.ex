@@ -5,6 +5,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
   import Ecto.Changeset
 
   alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.NulText
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -41,6 +42,7 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
       message: "must not be null"
     )
     |> validate_length(:name, min: 1, max: 120)
+    |> validate_change(:name, &nul_free/2)
     |> validate_protocol_version()
     |> validate_roots()
     |> validate_capabilities()
@@ -125,6 +127,9 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
         not is_list(roots) ->
           [approved_roots: "must be a list"]
 
+        nul_free(:approved_roots, roots) != [] ->
+          nul_free(:approved_roots, roots)
+
         Enum.any?(roots, &(not is_binary(&1) or Path.type(&1) != :absolute)) ->
           [approved_roots: "must be absolute"]
 
@@ -137,11 +142,28 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     end)
   end
 
+  # Postgres refuses U+0000 in text (22021) and jsonb (22P05): a name, root,
+  # version or operations item holding it was a 500 (task-214ecfd6ffe27b56,
+  # task-164da10964d8a38b).
+  defp nul_free(field, value),
+    do:
+      if(NulText.check(value) == :ok,
+        do: [],
+        else: [{field, "must not contain a NUL character (U+0000)"}]
+      )
+
   defp validate_capabilities(changeset) do
     validate_change(changeset, :capabilities, fn :capabilities, value ->
-      if safe_capabilities?(value),
-        do: [],
-        else: [capabilities: "must contain only non-secret readiness metadata"]
+      cond do
+        nul_free(:capabilities, value) != [] ->
+          nul_free(:capabilities, value)
+
+        safe_capabilities?(value) ->
+          []
+
+        true ->
+          [capabilities: "must contain only non-secret readiness metadata"]
+      end
     end)
   end
 

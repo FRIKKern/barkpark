@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.StudioPublishButtonSwapTest do
     assert has_element?(view, ~s(button#doc-action-publish[phx-click="publish"]))
     refute has_element?(view, "#doc-action-unpublish")
 
-    view |> element("#doc-action-publish") |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, "#doc-action-publish"))
 
     assert {:ok, _published} = Content.get_document("pubswap-1", "pubswap", @dataset)
     assert has_element?(view, ~s(button#doc-action-unpublish[phx-click="unpublish"]))
@@ -62,7 +62,7 @@ defmodule BarkparkWeb.Studio.StudioPublishButtonSwapTest do
   test "Classic: a publish that lands sends the focus to the document header", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/pubswap/pubswap-1"))
 
-    view |> element("#doc-action-publish") |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, "#doc-action-publish"))
 
     assert_push_event(view, "bp:focus-doc-header", %{})
     assert has_element?(view, ~s(.pane-header.editor-header[tabindex="-1"]))
@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioPublishButtonSwapTest do
 
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/pubswap/pubswap-1"))
 
-    html = view |> element("#doc-action-publish") |> render_click()
+    html = BarkparkWeb.EditorPost.press_on(view, element(view, "#doc-action-publish"))
 
     assert html =~ "Fix validation errors before publishing"
     assert has_element?(view, "#doc-action-publish")
@@ -106,7 +106,7 @@ defmodule BarkparkWeb.Studio.StudioPublishButtonSwapTest do
              ~s([data-test-id="studio-beta-doc-actions"] button#doc-action-publish)
            )
 
-    view |> element("#doc-action-publish") |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, "#doc-action-publish"))
 
     assert has_element?(
              view,

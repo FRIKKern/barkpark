@@ -181,4 +181,48 @@ defmodule Barkpark.PdsCensusMutantGateTest do
     assert decision in [:run, :skip]
     assert is_binary(line) and line != ""
   end
+
+  test "run_arms/2 runs two arms at a time, never all six, and returns every result by name" do
+    # task-6d4727b7cff1f2bd: all six arms at once put four full-corpus VMs on a
+    # 16 GB runner and took it down. Each fake arm records how many arms are live.
+    {:ok, live} = Agent.start_link(fn -> {0, 0} end)
+
+    arm = fn name ->
+      {name,
+       fn ->
+         Agent.update(live, fn {n, peak} -> {n + 1, max(peak, n + 1)} end)
+         Process.sleep(40)
+         Agent.update(live, fn {n, peak} -> {n - 1, peak} end)
+         {"out #{name}", 0}
+       end}
+    end
+
+    names = [:plain, :unknown_flag, :routed_rows, :routed_rows_typo, :classification, :baseline]
+
+    me = self()
+    say = &send(me, {:said, &1})
+
+    assert Gate.run_arms(Enum.map(names, arm), say: say) ==
+             Map.new(names, &{&1, {"out #{&1}", 0}})
+
+    assert Agent.get(live, & &1) == {0, 2}, "peak live arms must be exactly 2"
+
+    # One line per finished arm, so the CI log is never silent for a whole
+    # round of walks (the test watchdog fails a step that goes quiet).
+    said = for _ <- names, do: receive(do: ({:said, line} -> line), after: (0 -> nil))
+    assert_received {:said, done}
+
+    assert done =~
+             ~r/^\[PdsCensusMutantGate\] 6 arms done in \d+ ms; lowest MemAvailable (\d+ MB|n\/a)/
+
+    refute_received {:said, _}
+
+    for name <- names do
+      assert Enum.any?(
+               said,
+               &(&1 =~ ~r/^\[PdsCensusMutantGate\] arm #{name} finished in \d+ ms \(one of 6\)$/)
+             ),
+             "no finish line for #{name}: #{inspect(said)}"
+    end
+  end
 end

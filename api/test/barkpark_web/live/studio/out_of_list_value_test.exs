@@ -140,7 +140,7 @@ defmodule BarkparkWeb.Studio.OutOfListValueTest do
       assert [warning] = Map.get(assigns(view).validation_warnings, key)
       assert render(view) =~ Phoenix.HTML.html_escape(warning) |> Phoenix.HTML.safe_to_string()
 
-      render_click(view, "publish", %{})
+      BarkparkWeb.EditorPost.press(view, "publish", %{})
 
       assert published(c)[key] == "NOPE"
       refute render(view) =~ "Fix validation errors before publishing"
@@ -157,7 +157,7 @@ defmodule BarkparkWeb.Studio.OutOfListValueTest do
     assert Map.take(assigns(view).validation_errors, ["stage", "flat", "subject"]) == %{}
     assert Map.take(assigns(view).validation_warnings, ["stage", "flat", "subject"]) == %{}
 
-    render_click(view, "publish", %{})
+    BarkparkWeb.EditorPost.press(view, "publish", %{})
 
     assert Map.take(published(c), ["stage", "flat", "subject"]) == %{
              "stage" => "review",

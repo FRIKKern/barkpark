@@ -120,7 +120,7 @@ defmodule BarkparkWeb.Studio.StudioAuthorCreatableTest do
 
       refute has_element?(view, ~s([phx-click="duplicate-doc"]))
 
-      render_hook(view, "duplicate-doc", %{})
+      BarkparkWeb.EditorPost.press(view, "duplicate-doc", %{})
 
       assert count("intake_log") == 1
     end
