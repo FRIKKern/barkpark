@@ -271,9 +271,17 @@ defmodule Barkpark.Api.OpenApi do
       do:
         " On this route the key is also bound to the request (query string and " <>
           "body): the same key with a different request is refused 422 " <>
-          "`idempotency_key_reused`, and a " <>
-          "5xx answer is not remembered, so its retry runs.",
+          "`idempotency_key_reused`, and a " <> fault_note(template),
       else: ""
+  end
+
+  # Only the mutate batch marks its key committed (Barkpark.Idempotency).
+  defp fault_note(template) do
+    if String.ends_with?(template, "/v1/data/mutate/:dataset"),
+      do:
+        "5xx answer is not remembered, so its retry runs, unless the write had " <>
+          "already committed: then that 5xx is replayed and nothing runs twice.",
+      else: "5xx answer is not remembered, so its retry runs."
   end
 
   defp path_placeholders(template) do

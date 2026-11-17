@@ -31,7 +31,8 @@ package cli
 // idempotency_key_reused; a completed request under a key replays its recorded
 // response byte-identically with `Idempotency-Replay: true`; a concurrent one
 // answers 409 idempotency_key_in_use without running the
-// handler; a 5xx or a crash RELEASES the claim so a retry re-runs. That is
+// handler; a 5xx or a crash RELEASES the claim so a retry re-runs, unless the
+// batch had already committed, in which case that 5xx is replayed. That is
 // exactly the safety precondition tasks_write_retry buys with a per-verb
 // read-back — and create is the ONE ledger write with no server-assigned id to
 // read back, which is why the header is the only way it can ever be retried.

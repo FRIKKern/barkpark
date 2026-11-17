@@ -171,25 +171,6 @@ defmodule Barkpark.Content.Mutations do
       "Re-read the ids you sent before resending the identical batch."
   end
 
-  # Test-only fault seam, the same `:writer_fault` config `Content.Writer`
-  # reads (site `:batch_transaction`): the SQL sandbox cannot produce a real
-  # pool shed, so the test raises the exception the live run carried, inside
-  # the batch transaction. `nil` outside tests.
-  defp inject_batch_fault! do
-    case Application.get_env(:barkpark, :writer_fault) do
-      {:batch_transaction, module, message} when is_atom(module) and is_binary(message) ->
-        raise module, message
-
-      # The RETURNED form (task-61dbf8a21cd155d1): the batch rolls back with the
-      # exception struct as its reason, so the controller gets it as a value.
-      {:batch_rollback, %DBConnection.ConnectionError{} = e} ->
-        Repo.rollback(e)
-
-      _ ->
-        :ok
-    end
-  end
-
   defp apply_with_stale_retry(mutations, dataset, opts) do
     warnings = Barkpark.Content.Warnings.snapshot()
 
@@ -306,7 +287,7 @@ defmodule Barkpark.Content.Mutations do
     try do
       result =
         Repo.transaction(fn ->
-          inject_batch_fault!()
+          Barkpark.Content.BatchFault.before_write!()
           :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
@@ -324,6 +305,10 @@ defmodule Barkpark.Content.Mutations do
           results = apply_all(mutations, dataset, opts, caller)
 
           if audit_owner? and not dry_run?, do: Barkpark.Audit.flush_deferred!()
+          # Last statement: the caller's `:in_transaction` hook commits or
+          # rolls back with this batch (the mutate door marks its key with it).
+          hook = Keyword.get(opts, :in_transaction)
+          if is_function(hook, 0) and not dry_run?, do: hook.()
 
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
@@ -333,6 +318,7 @@ defmodule Barkpark.Content.Mutations do
 
       case result do
         {:ok, _} ->
+          Barkpark.Content.BatchFault.after_commit!()
           if audit_owner?, do: Barkpark.Audit.finish_deferred(:committed)
           Broadcast.flush_deferred_broadcasts(visibility: Keyword.get(opts, :visibility, :sync))
           result

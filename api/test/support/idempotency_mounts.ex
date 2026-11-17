@@ -107,6 +107,17 @@ defmodule Barkpark.Test.IdempotencyMounts do
     end
   end
 
+  @doc """
+  The module a written name (`__aliases__` segments) means under `aliases`, or
+  nil when the name, or the alias it goes through, is built from `__MODULE__`
+  or another expression (`alias __MODULE__.Inner`, then `Inner.go/1`).
+  """
+  @spec module(list(), %{atom() => list()}) :: module() | nil
+  def module(segments, aliases) do
+    expanded = expand(segments, aliases)
+    if Enum.all?(expanded, &is_atom/1), do: Module.concat(expanded)
+  end
+
   # Elixir expands only the FIRST segment of a module name through an alias.
   defp expand([head | tail] = segments, aliases) do
     case Map.fetch(aliases, head) do
