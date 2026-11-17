@@ -55,7 +55,7 @@ defmodule Barkpark.LockWaiterTest do
     assert committed_workspaces(slug) == 0, "the caller's cleanup rolled back: residue committed"
   end
 
-  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
 
   defp lock_row(id),
     do: Repo.one!(from w in Barkpark.Tenancy.Workspace, where: w.id == ^id, lock: "FOR UPDATE")

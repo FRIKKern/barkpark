@@ -1186,7 +1186,7 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
   # teardown via Tenancy.delete_workspace/1; the 55P03 rollback leaves no receipt row,
   # so the append-only receipt ledger never blocks the teardown.
   test "observe FOR SHARE serializes against a concurrent assignment-row lock (55P03)" do
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!(unique("usage-lock-ws"))
       project = TenancyFixtures.create_project!(workspace, unique("usage-lock-p"))
 
@@ -1204,7 +1204,7 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         # row and rendezvous-signals the parent BEFORE releasing (holder-first).
         holder =
           Task.async(fn ->
-            Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+            Barkpark.Unboxed.run(Repo, fn ->
               Repo.transaction(fn ->
                 Repo.query!("SELECT id FROM epic_assignments WHERE id = $1 FOR UPDATE", [
                   Ecto.UUID.dump!(authority.assignment.id)

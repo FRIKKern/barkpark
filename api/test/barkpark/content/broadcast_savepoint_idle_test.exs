@@ -169,7 +169,7 @@ defmodule Barkpark.Content.BroadcastSavepointIdleTest do
   # transaction. A fresh process is required: this test's own process already
   # owns a sandboxed connection, and `unboxed_run/2` checks one out itself.
   defp unboxed(fun) do
-    Task.async(fn -> Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun) end)
+    Task.async(fn -> Barkpark.Unboxed.run(Repo, fun) end)
     |> Task.await(30_000)
   end
 end

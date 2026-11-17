@@ -172,7 +172,7 @@ defmodule Barkpark.SharedTestDbTest do
 
   describe "REAL: the residue census, controlled by one committed row" do
     setup do
-      Sandbox.unboxed_run(Barkpark.Repo, fn ->
+      Barkpark.Unboxed.run(Barkpark.Repo, fn ->
         Ecto.Adapters.SQL.query!(
           Barkpark.Repo,
           "CREATE TABLE IF NOT EXISTS \"#{@probe_table}\" (id serial primary key)",
@@ -181,7 +181,7 @@ defmodule Barkpark.SharedTestDbTest do
       end)
 
       on_exit(fn ->
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           Ecto.Adapters.SQL.query!(Barkpark.Repo, "DROP TABLE IF EXISTS \"#{@probe_table}\"", [])
         end)
       end)
@@ -191,7 +191,7 @@ defmodule Barkpark.SharedTestDbTest do
 
     test "empty table -> the census RAN, returned a count, and the banner is silent" do
       obs =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           SharedTestDb.observe(Barkpark.Repo, tables: [@probe_table])
         end)
 
@@ -208,7 +208,7 @@ defmodule Barkpark.SharedTestDbTest do
 
     test "one committed row -> the SAME census fires, naming the table" do
       obs =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           Ecto.Adapters.SQL.query!(
             Barkpark.Repo,
             "INSERT INTO \"#{@probe_table}\" DEFAULT VALUES",
@@ -228,7 +228,7 @@ defmodule Barkpark.SharedTestDbTest do
 
   describe "REAL: the migration-set diff against the live database" do
     test "the live applied set and the checkout set are both non-empty and equal" do
-      obs = Sandbox.unboxed_run(Barkpark.Repo, fn -> SharedTestDb.observe(Barkpark.Repo) end)
+      obs = Barkpark.Unboxed.run(Barkpark.Repo, fn -> SharedTestDb.observe(Barkpark.Repo) end)
 
       # NON-VACUITY, both sides. Two empty lists also diff to no findings.
       assert is_list(obs.applied_versions) and obs.applied_versions != [],
@@ -287,7 +287,7 @@ defmodule Barkpark.SharedTestDbTest do
 
     test "CONTROL: the fake version never reached any other connection" do
       applied =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           %{rows: rows} =
             Ecto.Adapters.SQL.query!(
               Barkpark.Repo,
@@ -368,7 +368,7 @@ defmodule Barkpark.SharedTestDbTest do
 
     test "loud/quiet on the SAME statement: the reference instant is the only difference" do
       {loud, quiet} =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           {SharedTestDb.observe(Barkpark.Repo, runtime_uptime_ms: 0),
            SharedTestDb.observe(Barkpark.Repo)}
         end)
@@ -391,7 +391,7 @@ defmodule Barkpark.SharedTestDbTest do
       uptime_ms = :erlang.statistics(:wall_clock) |> elem(0)
 
       {old_from_pool, new_from_pool} =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           %{rows: [[old_n]]} = Ecto.Adapters.SQL.query!(Barkpark.Repo, @old_age_shape, [0])
 
           %{rows: [[new_n]]} =
@@ -428,7 +428,7 @@ defmodule Barkpark.SharedTestDbTest do
       # The defect this replaces was duration-DEPENDENT, so the property to
       # prove is duration-INDEPENDENCE, on the shipped expression itself.
       read = fn ->
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           %{rows: [[now_s, ref_s]]} =
             Ecto.Adapters.SQL.query!(
               Barkpark.Repo,
@@ -462,7 +462,7 @@ defmodule Barkpark.SharedTestDbTest do
       # be counted. Without this the quiet arms could be a statement that never
       # fires.
       n =
-        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+        Barkpark.Unboxed.run(Barkpark.Repo, fn ->
           %{rows: [[n]]} =
             Ecto.Adapters.SQL.query!(Barkpark.Repo, SharedTestDb.concurrent_backends_sql(), [0])
 
