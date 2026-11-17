@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.AgentTaskJoin
+  alias Barkpark.StudioChat.ApprovalAnswer
   alias Barkpark.StudioChat.ManagedSessionTarget
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
@@ -6821,29 +6822,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
             &1.approval_status == :pending)
       )
 
-    # A co-viewing tab holds a pid it never spawned: gate the allow itself.
-    with true <- pending? and socket.assigns.session != nil,
-         :ok <- ChatHostGate.authorize(socket.assigns, decision) do
-      Runtime.answer_approval(
-        socket.assigns.provider,
-        socket.assigns.session,
-        request_id,
-        decision
-      )
+    status = if match?({:deny, _}, decision), do: :denied, else: :allowed
+    %{session: session, store_session_id: store_id} = socket.assigns
 
-      status =
-        case decision do
-          {:deny, _} -> :denied
-          _ -> :allowed
-        end
+    deliver = fn ->
+      Runtime.answer_approval(socket.assigns.provider, session, request_id, decision)
+    end
 
+    # A co-viewing tab holds a pid it never spawned: gate the allow itself. The
+    # store decides last: a card this tab still shows pending, for an ask the
+    # store canceled or answered, delivers nothing and shows the stored status.
+    # A delivery persists the decision (D11) and drops the pending count.
+    with true <- pending? and session != nil,
+         :ok <- ChatHostGate.authorize(socket.assigns, decision),
+         {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, to_string(status), deliver) do
       messages = flip_card(socket.assigns.messages, request_id, status)
-
-      # Persist the decision (D11) and drop the pending count so the sidebar
-      # "needs you" pill clears on the next sidebar refresh.
-      if store_id = socket.assigns[:store_session_id],
-        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
-
       broadcast_resolution(socket, request_id, status)
 
       # D49: an APPROVED ExitPlanMode plan grows up into a real published Paper.
@@ -6858,8 +6851,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
       |> clear_question_form(request_id)
       |> refresh_sessions()
     else
-      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
-      _ -> socket
+      {:settled, now} ->
+        flipped = flip_card(socket.assigns.messages, request_id, String.to_existing_atom(now))
+        socket |> assign_messages(flipped) |> clear_question_form(request_id)
+
+      {:error, reason} ->
+        append_message(socket, :system, spawn_error_text(reason))
+
+      _ ->
+        socket
     end
   end
 

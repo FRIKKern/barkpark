@@ -526,20 +526,20 @@ defmodule BarkparkWeb.ChatController do
          {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
       updated = QuestionAnswer.updated_input(server_input, answers)
 
-      with recorder when is_pid(recorder) <- Recorder.whereis(id),
-           {:ok, session} <- Recorder.session_pid(recorder) do
-        # Soft-matched for the same reason approval/2 soft-matches (D32 seal): a
-        # non-:ok return means the ask is already gone upstream, which must not
-        # MatchError -> 500 where the claude cast path cleanly 204s.
-        _ = Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+      # Claimed before it is sent (task-52de5429fbdcb68c): an ask settled since the read
+      # above is a 404, never sent. Soft-matched (D32): no runtime or any return 204s.
+      deliver = fn ->
+        with recorder when is_pid(recorder) <- Recorder.whereis(id),
+             {:ok, session} <- Recorder.session_pid(recorder),
+             do: Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+
+        :sent
       end
 
-      case StudioChat.update_approval_status(id, request_id, "allowed") do
-        {:ok, _message} -> :ok
-        {:error, :not_found} -> :ok
+      case ApprovalAnswer.settle(id, request_id, "allowed", deliver) do
+        :delivered -> send_resp(conn, :no_content, "")
+        _not_pending -> not_found(conn)
       end
-
-      send_resp(conn, :no_content, "")
     else
       nil -> not_found(conn)
       {:error, :host_execution_not_permitted} -> host_refused(conn)
