@@ -102,6 +102,31 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
     end
   end
 
+  # The publish leg of `bp task create --publish` (#26844 review): a publish
+  # that committed and then answered 500 used to run again on the resend, and
+  # the second run found no draft (not_found), so the client discarded and
+  # told the caller to re-file: a duplicate task.
+  describe "a publish that committed and then answered a fault" do
+    test "the resend replays the 500; it does not run the publish again into not_found" do
+      id = unique("pub")
+      draft = %{"mutations" => [%{"create" => %{"_id" => id, "_type" => "post", "title" => id}}]}
+      assert post_keyed(unique("k"), Jason.encode!(draft)).status == 200
+
+      key = unique("k")
+      publish = Jason.encode!(%{"mutations" => [%{"publish" => %{"id" => id, "type" => "post"}}]})
+      fault!(:after_commit, RuntimeError, "boom after publish")
+      assert_error_sent(500, fn -> post_keyed(key, publish) end)
+      clear_fault!()
+
+      resend = post_keyed(key, publish)
+
+      refute resend.resp_body =~ "not_found", "the resend ran the publish again"
+      assert resend.status == 500
+      assert get_resp_header(resend, "idempotency-replay") == ["true"]
+      assert Repo.aggregate(from(d in Document, where: d.doc_id == ^id), :count) == 1
+    end
+  end
+
   describe "nothing committed" do
     test "a fault before the write (503) still releases the key, and the resend writes",
          %{token: token} do
