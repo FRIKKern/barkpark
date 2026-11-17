@@ -216,15 +216,18 @@ defmodule BarkparkWeb.Studio.DeskIncomingRefsTest do
     refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
   end
 
-  test "the open inspector is not said to be left out; a revision beside it still is", c do
+  # A revision the URL names is shown in the form's place (`RevisionView`);
+  # one that cannot be found says so there, as TanStack's does.
+  test "the open inspector is not said to be left out; a revision that is not found says so", c do
     view = open(c, "#{c.author};#{c.ada},#{@inspect_param}")
     assert has_element?(view, @panel)
     refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
 
-    view = open(c, "#{c.author};#{c.ada},#{@inspect_param},rev=abc123")
+    {:ok, view, _} = live(c.conn, "#{c.base}/#{c.author};#{c.ada},#{@inspect_param},rev=abc123")
+    render_async(view, 5_000)
     assert has_element?(view, @panel)
-    assert has_element?(view, "[data-pane-editing] [data-desk-left-out]", "abc123")
-    refute has_element?(view, "[data-pane-editing] [data-desk-left-out]", "inspectors")
+    assert has_element?(view, "[data-pane-editing] [data-desk-revision-missing]")
+    refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
   end
 
   test "opening focuses the close button; Escape inside closes it and hands the focus back", c do
