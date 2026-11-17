@@ -3168,17 +3168,12 @@ defmodule PDS.Census do
             "BarkparkWeb.UserPrefController.update/2", "43197058", "131868978"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "AUTHORED, not inherited: PUT /v1/prefs/:dataset/:key is the first door on the new " <>
-        "Barkpark.UserPrefs.put/5 primitive. The cited tests " <>
-        "(user_pref_controller_test.exs, several PUT-then-GET round-trip cases) drive the " <>
-        "route, then certify the post-condition through a SECOND route (GET on the same " <>
-        "key), never a direct Repo read — same honest limit as AuthController." <>
-        "update_display_name/2 above, same reason: unjudged_other, not a weaker test. " <>
-        "RE-KEYED off expr_fp 40851440 on task-f88365602c49be57 (If-Match), by its author, " <>
-        "after re-reading the body: the receipt's `value` is now the request's value (the " <>
-        "bytes it always answered), and the ETag header carries the hash of the STORED value " <>
-        "(put/5 and put_if_match/6 write with returning: [:value]). Still UNJUDGED: no " <>
-        "verdict was bought on the old key, so none is re-adopted."},
+        "AUTHORED, not inherited: PUT /v1/prefs/:dataset/:key is the first door on the new Barkpark.UserPrefs.put/5 primitive. The cited tests " <>
+        "(user_pref_controller_test.exs, several PUT-then-GET round-trip cases) drive the route, then certify the post-condition through a SECOND " <>
+        "route (GET on the same key), never a direct Repo read — same honest limit as AuthController.update_display_name/2 above, same reason: " <>
+        "unjudged_other, not a weaker test. RE-KEYED off expr_fp 40851440 on task-f88365602c49be57 (If-Match) by its author after re-reading " <>
+        "the body: the receipt's `value` is the request's value (the bytes it always answered); the ETag header hashes the STORED value " <>
+        "(put/5 and put_if_match/6 write with returning: [:value]). Still UNJUDGED: no verdict was bought on the old key, so none is re-adopted."},
     %{key: {"api/lib/barkpark_web/controllers/user_pref_controller.ex",
             "BarkparkWeb.UserPrefController.delete/2", "133250656", "17468236"},
       verdict: "UNJUDGED", basis: :unjudged_other,
