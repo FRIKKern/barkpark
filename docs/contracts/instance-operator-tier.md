@@ -1,12 +1,11 @@
 <!-- doc-tier: agent | canonical-for: instance-operator-tier | budget: 600tok -->
 # Instance operator tier (Tier 0)
 
-Owner of the fourth authorization tier that `docs/auth.md` §Hierarchy names and
-delegates here. Landed by PR #14990 (`BarkparkWeb.Plugs.RequirePlatformOperator`,
-pipeline `:require_platform_operator`).
+The tier `docs/auth.md` §Hierarchy delegates here. PR #14990
+(`BarkparkWeb.Plugs.RequirePlatformOperator`, `:require_platform_operator`).
 
 **Tier 0 — instance operator (`RequirePlatformOperator`).** Above the three
-tiers above sits a config-backed allowlist for the seven INSTANCE-GLOBAL
+tiers sits a config-backed allowlist for the seven INSTANCE-GLOBAL
 routes that have no tenant row to confine them to: `/v1/admin/self-update|
 rollback|site-deploy`, `GET /v1/plugins`, `/v1/plugins/settings/:plugin_name`
 CRUD, the flat `/v1/secrets` tier, `POST /v1/status/incidents[/:id/resolve]`,
@@ -32,7 +31,8 @@ Default or no workspace, or a Default admin seat (host turns: or a Default
 `chat` token); no other (#26234).
 
 **Operator runbook.** On the instance host set `BARKPARK_OPERATOR_EMAILS` and/or
-`BARKPARK_OPERATOR_TOKEN_IDS` in the service env, then restart. Until then the
-node keeps legacy behaviour and logs the boot warning.
+`BARKPARK_OPERATOR_TOKEN_IDS` in the service env, then restart.
+`/v1/admin/orgs/:org_slug/*` adds `RequireOrgAdmin`: off the list, only orgs
+you admin in full (`OrgScope`); empty ones are the operator's.
 The router's `:instance_global` tripwire test enumerates the seven groups and
 reds if one leaves the pipeline.
