@@ -196,6 +196,28 @@ defmodule BarkparkWeb.MutateIdempotencyCommittedFaultTest do
       assert Repo.get(Key, stale).state == "pending", "the stale key was marked committed"
     end
 
+    # Only the mutate door passes the `:in_transaction` mark. Content knows
+    # nothing about Idempotency, so an in-process batch (a plugin, a job) run
+    # while a stale hash is held marks nothing.
+    test "apply_mutations with no hook marks nothing, even with a stale hash held", %{
+      token: token
+    } do
+      stale = Idempotency.hash_key(unique("in-process"), token.id, "POST", "/v1/data/mutate/x")
+      :claimed = Idempotency.claim(stale, "mutation:in-process")
+      Idempotency.hold(stale)
+
+      batch = [%{"create" => %{"_type" => "post", "title" => unique("in-process")}}]
+
+      found =
+        Barkpark.Content.apply_mutations(batch, @dataset,
+          workspace_id: TenancyFixtures.default_workspace_id!()
+        )
+
+      assert {:ok, _} = found
+      assert Repo.get(Key, stale).state == "pending", "an in-process batch marked a held key"
+      Idempotency.forget_held_key()
+    end
+
     test "with no key held, mark_committed is a no-op" do
       Idempotency.forget_held_key()
       assert Idempotency.mark_committed() == :none

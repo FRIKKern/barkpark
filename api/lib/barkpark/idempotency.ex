@@ -36,8 +36,9 @@ defmodule Barkpark.Idempotency do
   lost at commit (503), or a raise after the transaction returned (500).
   Releasing then lets the retry run the write a second time
   (task-717c91a6e9b6758b). So the plug HOLDS its claimed hash in the request
-  process (`hold/1`), and the mutate batch calls `mark_committed/0` as the
-  last statement inside its own transaction: the row becomes `"committed"`
+  process (`hold/1`), and the mutate door hands `mark_committed/0` to the
+  batch as its `:in_transaction` hook, which the batch runs as the last
+  statement inside its own transaction: the row becomes `"committed"`
   if and only if the write committed. `release/1` deletes only `"pending"`
   rows, so a committed row survives the 5xx, which is then recorded and
   replayed (`settle_fault/5`). A committed row with no recorded answer (the
@@ -50,7 +51,9 @@ defmodule Barkpark.Idempotency do
       ANOTHER process (a Task, a GenServer call) does not see it,
       `mark_committed/0` is a no-op there, and a 5xx after that write
       releases the key as before.
-    * Only the mutate batch marks today. The other doors behind the plug
+    * Only the mutate door marks today: `Content` knows nothing about
+      this module, and an in-process `Content.apply_mutations/3` with no hook
+      marks nothing, whatever key is held. The other doors behind the plug
       (document and field ops, disconnect, the chat send) release on 5xx as
       before.
     * Dry runs and batches that roll back never mark: the mark is skipped

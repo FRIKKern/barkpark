@@ -305,8 +305,10 @@ defmodule Barkpark.Content.Mutations do
           results = apply_all(mutations, dataset, opts, caller)
 
           if audit_owner? and not dry_run?, do: Barkpark.Audit.flush_deferred!()
-          # Last statement: the held Idempotency key commits with this batch.
-          unless dry_run?, do: Barkpark.Idempotency.mark_committed()
+          # Last statement: the caller's `:in_transaction` hook commits or
+          # rolls back with this batch (the mutate door marks its key with it).
+          hook = Keyword.get(opts, :in_transaction)
+          if is_function(hook, 0) and not dry_run?, do: hook.()
 
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
