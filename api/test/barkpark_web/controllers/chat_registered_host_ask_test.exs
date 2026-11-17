@@ -16,6 +16,8 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
 
   @moduletag :requires_plugins
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Auth
   alias Barkpark.ChatHosts
   alias Barkpark.ChatHosts.RegisteredHost
@@ -275,6 +277,50 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
       assert_pending_and_unleased(host, sid)
       assert_delivered_once(raw, host, sid)
     end
+
+    # rev26731 round 2, H3: past `expires_at` but inside `end_expired_turns`'
+    # grace the lease is still `running`, and the host's next heartbeat renews
+    # it. The turn is still blocked on the ask, so it must not be canceled.
+    test "a lease past expires_at but inside the sweep's grace keeps the asks: both routes 503",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -30)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.end_expired_turns() == 0
+    end
+
+    test "a lease past the sweep's grace no longer holds the turn: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -120)
+
+      assert approve(raw, sid, "ask-b1", "allow").status == 409
+      assert answer(raw, sid, "ask-b1q").status == 404
+      assert host_commands(host, sid, :answer_approval) == []
+      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
+      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "question")
+    end
+  end
+
+  # Move the lease's expiry `seconds` from now, as a host that stopped
+  # heartbeating would leave it; its status stays `leased`/`running`.
+  defp expire!(lease_id, seconds) do
+    at = DateTime.add(DateTime.utc_now(), seconds)
+
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease_id),
+        set: [expires_at: at]
+      )
+
+    refute ChatHosts.lease_live?(lease_id)
   end
 
   defp asks!(host, sid) do

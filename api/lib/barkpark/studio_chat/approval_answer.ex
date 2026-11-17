@@ -56,11 +56,13 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
     * a Recorder hands over its runtime: a deliver that calls `send` with it;
     * a Recorder that does not answer (busy past the call timeout, or exiting),
-      or no local Recorder while the session holds a live execution lease (a
+      or no local Recorder while a host still holds the session's turn (a
       registered host's turn after a restart, still blocked on its ask):
       `{:error, _}`. The ask must stay pending, and a send brings a Recorder
-      back to deliver it;
-    * no Recorder and no live lease: nil, so `settle/4` cancels (D11).
+      back to deliver it. "Holds the turn" is `ChatHosts.turn_held?/2`: a lease
+      the expiry sweep has not ended, including one past `expires_at` but
+      inside the sweep's grace, which the host's next heartbeat renews;
+    * no Recorder and no held turn: nil, so `settle/4` cancels (D11).
   """
   @spec deliverer(String.t(), (term() -> any())) :: (-> any()) | nil | {:error, term()}
   def deliverer(session_id, send) when is_function(send, 1) do
@@ -72,7 +74,7 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
         end
 
       nil ->
-        if ChatHosts.live_report_fence(session_id),
+        if ChatHosts.turn_held?(session_id),
           do: {:error, {:runtime_unavailable, :no_recorder}}
     end
   end

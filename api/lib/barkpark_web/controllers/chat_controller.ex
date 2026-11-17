@@ -423,7 +423,7 @@ defmodule BarkparkWeb.ChatController do
   a caller-supplied `updatedInput` (D22): `allow` echoes the server-held original
   ask, `deny` carries a fixed server message. A no-op (204) when the ask is
   already answered or unknown. A canceled ask, and a pending one when no Recorder
-  and no live lease is left to answer it (D11), is a 409 `conflict` with
+  and no held turn is left to answer it (D11), is a 409 `conflict` with
   `details.approval_status`; nothing reaches the runtime (`ApprovalAnswer`,
   task-035d3495dae536cf). A runtime not reachable now is a 503; it stays pending.
   """
@@ -440,7 +440,7 @@ defmodule BarkparkWeb.ChatController do
            ) do
       status = if decision == :allow, do: "allowed", else: "denied"
 
-      # nil with no Recorder and no live lease: settle/4 cancels (D11) → 409.
+      # nil with no Recorder and no held turn: settle/4 cancels (D11) → 409.
       # Soft-match the delivery (D31 seal): codex returns {:error, :unknown_approval}
       # on the double-answer race and {:error, {:app_server_exit, _}} on a dead
       # app-server, and a RemoteRef host can leak its own {:error, _} tail. A
@@ -509,7 +509,7 @@ defmodule BarkparkWeb.ChatController do
   missing session, another tenant's (`fetch_scoped`), a request_id naming an
   approval or plan row, and a question already answered are indistinguishable
   `nil`s, so a replay is a 404 and is never re-sent; so is an answer with no
-  Recorder and no live lease, which cancels the question (D11). A runtime not
+  Recorder and no held turn, which cancels the question (D11). A runtime not
   reachable now, or a send that fails or exits, is a 503 `runtime_unavailable`,
   and the question stays pending for a resend.
   """
