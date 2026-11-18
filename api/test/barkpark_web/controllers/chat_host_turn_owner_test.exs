@@ -372,6 +372,53 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  # task-f6cca686b392c900: pins TurnOwner's `owner != lease_id` guard. The
+  # asker's own text after a refused close is not a newer lease's turn.
+  test "the asking run's own text after a refused close keeps its ask for its own close",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-own-text"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "text_delta", "delta" => "still A"})
+    assert ask_status(sid) == "pending"
+    accept!(ctx, a, 4, @dead_close)
+
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
+  # task-c7adbda933510941 (rev26735's probe 114-b1 on #27114): after a refused
+  # close the turn is closed, so the asker's own turn_started (an older claude
+  # host sends one per message_start) hit the fresh-turn arm, which untracked
+  # the ask, and the asker's close then canceled nothing.
+  test "the asking run's own turn_started after a refused close keeps its ask for its own close",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-own-turn"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    assert ask_status(sid) == "pending"
+    accept!(ctx, a, 4, @dead_close)
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
   test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
