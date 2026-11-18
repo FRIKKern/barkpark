@@ -17,7 +17,9 @@ defmodule Barkpark.Content.StrengthenOnPublish do
     * an object holding `_strengthenOnPublish` whose `_ref` names a document
       with a published version, in the same dataset and tenant, loses `_weak`
       and `_strengthenOnPublish`. Its other keys stay. When the marker names
-      a `type`, the published target must be of that type;
+      a `type`, the published target must be of that type. A marker with
+      `weak: true` (the field is declared weak) loses only itself; `_weak`
+      stays;
     * when the target has no published version, the object is left exactly
       as it was;
     * an object without `_strengthenOnPublish` is never touched, even when it
@@ -86,9 +88,11 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
   defp strong(%{@marker => marker, "_ref" => ref} = node, published) when is_binary(ref) do
     node =
-      if published?(published, ref, marker),
-        do: Map.drop(node, @dropped),
-        else: node
+      cond do
+        not published?(published, ref, marker) -> node
+        declared_weak?(marker) -> Map.delete(node, @marker)
+        true -> Map.drop(node, @dropped)
+      end
 
     Map.new(node, fn {key, value} -> {key, strong(value, published)} end)
   end
@@ -104,6 +108,9 @@ defmodule Barkpark.Content.StrengthenOnPublish do
     do: type in Map.get(published, ref, [])
 
   defp published?(published, ref, _marker), do: Map.has_key?(published, ref)
+
+  defp declared_weak?(%{"weak" => true}), do: true
+  defp declared_weak?(_marker), do: false
 
   # The published rows among `refs`, in the publish's dataset and tenant, as
   # `%{doc_id => [type]}`. A row whose id has no `drafts.` prefix IS the

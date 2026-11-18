@@ -167,6 +167,16 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
     assert published_content("sop-wrong-type", opts)["editor"] == waiting("pat")
   end
 
+  test "a marker with weak: true drops only itself and the reference stays weak",
+       %{opts: opts} do
+    declared = put_in(waiting("ann"), ["_strengthenOnPublish", "weak"], true)
+    draft!("sop-declared-weak", %{"editor" => declared}, opts)
+    {:ok, _} = Content.publish_document("sop-declared-weak", @post, @ds, opts)
+
+    assert published_content("sop-declared-weak", opts)["editor"] ==
+             Map.put(strong("ann"), "_weak", true)
+  end
+
   test "a weak reference without _strengthenOnPublish stays weak", %{opts: opts} do
     chosen = %{"_type" => "reference", "_ref" => "ann", "_weak" => true}
     draft!("sop-chosen", %{"editor" => chosen}, opts)
