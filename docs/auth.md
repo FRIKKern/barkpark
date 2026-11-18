@@ -22,7 +22,7 @@ Requests carry both in the path
 seat → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
 
-Mutate needs `write` after tenancy (else `403`). A token bound to a
+Mutate and any `:scoped_admin` write need `write` after tenancy (or 403). A token bound to a
 `dataset` (`dataset_bound`; old `bp` mints: re-mint) gets `403 dataset_not_bound`
 elsewhere, on workspace/project create, playground, import. Admin reads/writes (audit,
 export, seats, grants, shares, tokens, chat hosts, secrets, workspace
@@ -49,8 +49,8 @@ delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 `ops` ⊃ `read`+`write`; `:ops` is separate so Bokbasen operators never see
 `client_secret`) and confers **no membership anywhere**.
 
-Three tiers (ruling #2, 2026-10-03):
-`RequireAdmin`: `admin` permission, plus admin authority in the token's
+Three tiers (ruling #2):
+`RequireAdmin`: `admin` permission plus admin authority in the token's
 workspace (bound token) or its owner's (workspace-less PAT); a workspace-less
 machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
 `permissions` AND the seat role (and a PAT owner's role) allow the action. `workspace_admin?/2`: the membership ROLE alone.
@@ -96,8 +96,8 @@ all halt: flash + redirect to `/studio`.
 on `[:api, :require_admin]` (instance-global only).
 
 Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
-*replaces* `:api`: `[:api, :require_admin]` is where the convergence above
-bites. `DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
+*replaces* `:api`: `[:api, :require_admin]` hits the bug class above.
+`DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
 `AssignDefaultScope` does nothing; `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token

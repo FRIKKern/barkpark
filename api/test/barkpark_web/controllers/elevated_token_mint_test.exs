@@ -77,7 +77,9 @@ defmodule BarkparkWeb.ElevatedTokenMintTest do
       assert labelled("from-write") == 0
     end
 
-    test "a read token with an admin seat is refused 403 admin_required", %{
+    # The scoped-admin gate refuses a read-only token on any write before the
+    # controller's own admin_required check runs (task-2617573f7e9fea79).
+    test "a read token with an admin seat is refused 403 at the scoped-admin gate", %{
       ws: ws,
       project: project
     } do
@@ -86,7 +88,7 @@ defmodule BarkparkWeb.ElevatedTokenMintTest do
       resp = mint(raw, ws, project, %{label: "from-read", permissions: ["read"]})
 
       assert resp.status == 403
-      assert error(resp)["reason"] == "admin_required"
+      assert error(resp)["reason"] == "token_write_permission_required"
       assert labelled("from-read") == 0
     end
 

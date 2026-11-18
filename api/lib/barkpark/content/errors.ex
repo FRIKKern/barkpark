@@ -575,6 +575,19 @@ defmodule Barkpark.Content.Errors do
         "This route needs the owner or admin role in this workspace, a membership role, not a token permission: a token's write or admin permission does not grant it. Ask a workspace owner to raise this principal's role, or call with a credential belonging to an owner or admin of this workspace."
     }
 
+  # The same gate admitted the ROLE but the request writes, and the token's own
+  # permissions do not permit `:write` (task-2617573f7e9fea79): a read-only
+  # token on an admin seat. The seat is not the problem, the token is.
+  defp build({:error, :forbidden_token_write}),
+    do: %{
+      code: "forbidden",
+      message: "this token's permissions do not allow writes",
+      status: 403,
+      reason: "token_write_permission_required",
+      hint:
+        "The principal holds the owner or admin role here, so do NOT change its seat. What is missing is the token's `write` permission: this token is read-only, and a read-only token can read admin routes but never write through them. Call with a token that carries `write` (or `admin`)."
+    }
+
   # A draft-only seat (`contributor`, task-348a4fbe24feede6) asked to change
   # the published row: publish, unpublish, or delete a published document.
   # `Tenancy.Auth.publish_refused?/2` decides it in `Content.Lifecycle`.
