@@ -12,10 +12,13 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
 
   @moduletag :requires_plugins
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.ChatHosts
   alias Barkpark.ChatHosts.RemoteDispatch
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{ApprovalAnswer, Recorder}
+  alias Barkpark.StudioChat.{ApprovalAnswer, Message, Recorder}
   alias Barkpark.StudioChat.Runtime.Command
   alias Barkpark.Tenancy
 
@@ -219,6 +222,30 @@ defmodule Barkpark.ChatHosts.RefusedAnswerTest do
     accept!(ctx, answer, 1, refused("ap-7", a.lease_id))
 
     assert Enum.map(asks(sid), & &1.metadata["approval_status"]) == ["pending", "allowed"]
+  end
+
+  # rev26739's probe R2 on #26949 (task-63d14c981fbbad87): the row RefusedAnswer
+  # read goes stale because another writer canceled it first. The status check
+  # under the row lock in `cancel_answered` keeps that cancel and its reason.
+  test "a refusal holding a stale answered row keeps another writer's cancel",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("0"))
+    assert :delivered = ApprovalAnswer.settle(sid, "0", "allowed", fn -> :ok end)
+    [stale] = asks(sid)
+
+    canceled =
+      stale.metadata
+      |> Map.put("approval_status", "canceled")
+      |> Map.put("cancel_reason", "other")
+
+    {1, _} =
+      Repo.update_all(from(m in Message, where: m.id == ^stale.id), set: [metadata: canceled])
+
+    assert :unchanged = ApprovalAnswer.refused_by_host(sid, stale)
+    assert [%{metadata: %{"cancel_reason" => "other"}}] = asks(sid)
+    refute_received {:chat_permission_resolved, "0", :canceled}
   end
 
   # The ack exactly as the Go host sends it (answer_lease.go).
