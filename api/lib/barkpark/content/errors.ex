@@ -559,6 +559,22 @@ defmodule Barkpark.Content.Errors do
         "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
     }
 
+  # The `scoped_admin` gate (`RequireWorkspaceRole`) refused: the caller's
+  # MEMBERSHIP ROLE in the URL's workspace is not owner or admin
+  # (task-18861daee04d1328). The generic `forbidden` hint ("use a token with
+  # write/admin permission that is a member of this workspace") is already
+  # true of a write member, so it sent that caller to re-mint a credential the
+  # route refuses again. The remedy is the role, never a token permission.
+  defp build({:error, :forbidden_workspace_role}),
+    do: %{
+      code: "forbidden",
+      message: "this route needs the owner or admin role in this workspace",
+      status: 403,
+      reason: "workspace_role_required",
+      hint:
+        "This route needs the owner or admin role in this workspace, a membership role, not a token permission: a token's write or admin permission does not grant it. Ask a workspace owner to raise this principal's role, or call with a credential belonging to an owner or admin of this workspace."
+    }
+
   # A draft-only seat (`contributor`, task-348a4fbe24feede6) asked to change
   # the published row: publish, unpublish, or delete a published document.
   # `Tenancy.Auth.publish_refused?/2` decides it in `Content.Lifecycle`.

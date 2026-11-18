@@ -31,7 +31,7 @@ defmodule BarkparkWeb.Plugs.RequireWorkspaceRole do
       conn
     else
       _ ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
+        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden_workspace_role}, conn)
 
         conn
         |> put_status(env.status)
