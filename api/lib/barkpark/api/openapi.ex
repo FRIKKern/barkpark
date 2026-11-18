@@ -213,10 +213,11 @@ defmodule Barkpark.Api.OpenApi do
   #
   # DECLARED, because an undeclared dedup door is a door nobody uses. The
   # `Idempotency-Key` header is server-honoured ONLY where
-  # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
-  # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
-  # (router.ex), and the chat send, via a `plug ... when action ==
-  # :create_message` in ChatController. Every mount binds the request.
+  # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the data writes in
+  # `pipe_through(... :idempotent)` (router.ex `scope "/v1/data"`) and every
+  # route under `pipe_through(:scoped_mutate)`, and the chat send, via a
+  # `plug ... when action == :create_message` in ChatController. Every mount
+  # binds the request.
   # Advertising it on every write would be a LIE: a POST to a route
   # without the plug accepts the header and silently dedups nothing, which is
   # strictly worse than not offering it, because the caller then trusts a retry
@@ -227,17 +228,37 @@ defmodule Barkpark.Api.OpenApi do
   # from one, remove the template, or the spec starts promising dedup the server
   # does not do. `openapi_idempotent_routes_test.exs` re-derives this list from
   # router.ex and reds on either drift.
-  @idempotent_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
+  #
+  # A template matches as a SUFFIX. The data writes are listed flat, because
+  # both spellings run the plug. The papers writes are routed ONLY under
+  # `:scoped_mutate`, so they are listed with the scoped prefix: the manifest
+  # also documents a flat spelling of them, and no route serves it.
+  @scoped "/w/:workspace_slug/p/:project_slug"
+  @idempotent_templates [
+    "/v1/data/mutate/:dataset",
+    # @sanity/client's spelling of the scoped mutate (no flat route serves it).
+    "/v:api_version/data/mutate/:dataset",
+    "/v1/data/doc/:dataset/:type/:doc_id/ops",
+    "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
+    "/v1/data/disconnect/:dataset/:doc_id",
+    @scoped <> "/v1/papers/:slug/masters",
+    @scoped <> "/v1/papers/:slug/masters/:master_id/insert",
+    @scoped <> "/v1/papers/:slug/masters/blocks/:block_id/pin",
+    @scoped <> "/v1/papers/:slug/masters/blocks/:block_id/detach",
+    @scoped <> "/v1/papers/:slug/ops",
+    "/v1/chat/sessions/:id/messages"
+  ]
 
   # Templates whose mount binds the request (query and body) into the key
-  # (`bind_request: true`), so the spec also states the 422.
-  @request_bound_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
+  # (`bind_request: true`), so the spec also states the 422. Every mount binds
+  # today; a mount without `bind_request` lists its templates apart.
+  @request_bound_templates @idempotent_templates
 
   @doc """
   Does the spec declare `Idempotency-Key` on a write to this router path
-  template? The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
-  template) rides `:scoped_mutate`, which mounts the same plug, so both
-  spellings of an allowlisted route count.
+  template? A data write's scoped mirror (`/w/:workspace_slug/p/:project_slug`
+  + the flat template) rides `:scoped_mutate`, which mounts the same plug, so
+  both spellings of an allowlisted data route count.
   """
   @spec idempotent?(String.t()) :: boolean()
   def idempotent?(template),
