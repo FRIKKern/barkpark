@@ -167,6 +167,13 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 		headers["Authorization"] = "Bearer " + ctx.Token
 	}
 
+	// --dry-run prints the mint request and stops (task-7dc7985e5b44b9a6). Before
+	// this check the built-in sent the request anyway, so a dry run minted a
+	// real token and printed its secret.
+	if g.dryRun {
+		return dryRun(out, manifest.Command{Noun: "token", Verb: "create", HTTP: manifest.HTTP{Method: "POST"}}, u, headers, body)
+	}
+
 	status, respBody, rerr := doRequest("POST", u, headers, body)
 	if rerr != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+rerr.Error(), "", "") {
