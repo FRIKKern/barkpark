@@ -15096,3 +15096,143 @@ msgstr "Slug er allerede i bruk et annet sted, og må være unik"
 #, elixir-autogen, elixir-format
 msgid "Validation error: %{message}"
 msgstr "Valideringsfeil: %{message}"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Built %{date}"
+msgstr "Bygget %{date}"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Changelog"
+msgstr "Endringslogg"
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Could not open that place. It does not exist, or you do not have access to it."
+msgstr "Kunne ikke åpne det stedet. Det finnes ikke, eller du har ikke tilgang til det."
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Dark"
+msgstr "Mørk"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Documentation"
+msgstr "Dokumentasjon"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Full changelog on GitHub"
+msgstr "Full endringslogg på GitHub"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Help and resources"
+msgstr "Hjelp og ressurser"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Light"
+msgstr "Lys"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "New version available"
+msgstr "Ny versjon tilgjengelig"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No changes are listed in this build."
+msgstr "Ingen endringer er oppført i denne versjonen."
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "OK"
+msgstr "OK"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open commit %{commit} on GitHub"
+msgstr "Åpne commit %{commit} på GitHub"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open user menu"
+msgstr "Åpne brukermenyen"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update to %{version}"
+msgstr "Last inn på nytt for å oppdatere til %{version}"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update"
+msgstr "Last inn på nytt for å oppdatere"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Report a problem"
+msgstr "Rapporter et problem"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Saving, then reloading…"
+msgstr "Lagrer, og laster så inn på nytt …"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Studio version"
+msgstr "Studio-versjon"
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Switch workspace, project or dataset"
+msgstr "Bytt arbeidsområde, prosjekt eller datasett"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "System"
+msgstr "System"
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "This token can only open the dataset %{dataset}."
+msgstr "Denne tokenen kan bare åpne datasettet %{dataset}."
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Up to date"
+msgstr "Oppdatert"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use dark appearance"
+msgstr "Bruk mørkt utseende"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use light appearance"
+msgstr "Bruk lyst utseende"
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use system appearance"
+msgstr "Bruk systemets utseende"
+
+#: lib/barkpark_web/live/studio/desk/navbar.ex
+#, elixir-autogen, elixir-format
+msgid "Vision"
+msgstr "Vision"
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "What's new"
+msgstr "Hva er nytt"
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch"
+msgstr "Arbeidsområde %{workspace}, prosjekt %{project}, datasett %{dataset}. Bytt"

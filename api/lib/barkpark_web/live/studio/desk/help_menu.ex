@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.HelpMenu do
   def menu(assigns) do
     assigns =
       assigns
-      |> assign_new(:build, fn -> BuildInfo.commit() end)
+      |> assign(:build, assigns.build || BuildInfo.commit())
       |> assign_new(:script, fn -> BarkparkWeb.StaticAssets.path("bp-desk-navbar.js") end)
       |> assign(:repo, @repo)
       |> assign(:built, built())
