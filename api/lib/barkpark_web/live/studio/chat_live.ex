@@ -52,7 +52,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.ChatSendFailure
-  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatSteer, CodexFailureLine}
+  alias BarkparkWeb.Studio.{ChatAttachmentChip, ChatHostGate, ChatReopen, ChatSteer}
+  alias BarkparkWeb.Studio.CodexFailureLine
   alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
@@ -5127,26 +5128,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # D28): its Recorder owns the runtime; we only stop listening to it.
     socket = socket |> unsubscribe_session() |> subscribe_session(session.id)
 
-    {session_pid, status, live?} =
-      case live_runtime(session) do
-        nil ->
-          # No live runtime: a still-"pending" approval can never be answered,
-          # so persist its cancellation BEFORE replay — the store then agrees
-          # with the canceled cards on screen and the sidebar "needs you" pill
-          # drops (D11). Replay is display-only (status :resumable).
+    # Who can still answer the asks: `ChatReopen.runtime/1` (task-e281).
+    {session_pid, status, live?, keep_pending?} =
+      case ChatReopen.runtime(session.id) do
+        :none ->
+          # Nothing can answer: persist the cancellation BEFORE replay — the
+          # store then agrees with the canceled cards on screen and the sidebar
+          # "needs you" pill drops (D11). Replay is display-only (:resumable).
           StudioChat.cancel_pending_approvals(session.id)
-          {nil, :resumable, false}
+          {nil, :resumable, false, false}
 
-        session_pid ->
+        :held ->
+          {nil, :resumable, false, true}
+
+        {:live, session_pid} ->
           # Live: the Recorder keeps driving; this tab co-views via PubSub
           # (already subscribed above) and the replayed pending approval cards
           # stay answerable through the running session pid. A mid-turn reopen
           # shows a brief gap until the next frame (accepted gap: the Session
           # never snapshots streaming/turn state).
-          {session_pid, :ready, true}
+          {session_pid, :ready, true, true}
       end
 
-    messages = replay_messages(session.id, live?)
+    messages = replay_messages(session.id, keep_pending?)
 
     assign(socket,
       session: session_pid,
@@ -5269,21 +5273,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # never survives a reopen, so the panel tells the user to re-run the ceremony.
   defp reopened_bypass?(%{mode: "bypassPermissions"}), do: true
   defp reopened_bypass?(_), do: false
-
-  # The live SESSION pid for a store id, reached through its Recorder — or nil.
-  # Charter D22/D28: consulted BEFORE any store write so a reopen of a session
-  # whose runtime is still running keeps its pending approvals answerable
-  # instead of cancelling them. A recorder that dies between lookup and the
-  # session_pid call is treated as no runtime.
-  defp live_runtime(session) do
-    with recorder when is_pid(recorder) <- Recorder.whereis(session.id),
-         {:ok, runtime_ref} <- Recorder.session_pid(recorder),
-         true <- Runtime.alive?(runtime_ref) do
-      runtime_ref
-    else
-      _ -> nil
-    end
-  end
 
   # The advertised slash commands a session's live Recorder is holding (charter
   # D36a) — the vocabulary a reopened LIVE session already knows. `[]` for a dead
@@ -6196,11 +6185,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # An approval row rebuilds its card from metadata (request_id + tool_name +
   # lifecycle). `live?` decides the fate of a still-"pending" row: on a display-
-  # only reopen (no live owner) it can NEVER be resolved, so it renders as the
-  # honest terminal state, canceled (the persisted flip already ran in
+  # only reopen (nothing can answer) it renders as the honest terminal state,
+  # canceled (the persisted flip already ran in
   # load_stored_session so the store agrees with the screen). On a reopen that
-  # ADOPTED a live owner (charter D22) the ask stays answerable — the card keeps
-  # its :pending status and resolve_permission holds the adopted pid.
+  # ADOPTED a live owner (charter D22), or a held one, the card keeps :pending.
   defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}, live?) do
     meta = meta || %{}
 
@@ -6833,7 +6821,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # store decides last: a card this tab still shows pending, for an ask the
     # store canceled or answered, delivers nothing and shows the stored status.
     # A delivery persists the decision (D11) and drops the pending count.
-    with true <- pending? and session != nil,
+    # A held card with no runtime here says so and delivers nothing (task-e281).
+    with true <- pending?,
+         :ok <- if(session, do: :ok, else: {:error, {:runtime_unavailable, :no_recorder}}),
          :ok <- ChatHostGate.authorize(socket.assigns, decision),
          {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, to_string(status), deliver) do
       messages = flip_card(socket.assigns.messages, request_id, status)
@@ -8467,6 +8457,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp spawn_error_text(:binary_not_found),
     do:
       "The `claude` binary is not installed on this host. Install Claude Code and run `claude auth login`."
+
+  defp spawn_error_text({:runtime_unavailable, _}), do: ChatReopen.unavailable_text()
 
   defp spawn_error_text(_),
     do: "Failed to start the Claude session."
