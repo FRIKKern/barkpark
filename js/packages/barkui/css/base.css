@@ -1,0 +1,42 @@
+/* BarkUI base: plain HTML looks right with no class and no script.
+   Everything reads UI SDK's --ui-* names and the sheet's --bark-* names.
+   Layers, first to last: ui-sdk (UI SDK's own sheet), bark-base, bark-parts.
+   The tokens sheet is unlayered, so its values win over every layer. */
+@layer bark-base {
+  /* Shape and type the tokens sheet does not set yet. UI SDK's default radius
+     is 0; these are BarkUI's until the sheet carries them (it wins when it does). */
+  :root {
+    --ui-radius: 0.375rem;
+    --ui-font-size: 0.8125rem;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  :where(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  :where(body) {
+    margin: 0;
+    background: var(--ui-background);
+    color: var(--ui-foreground);
+    font-family: var(--ui-font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Element defaults skip anything that is a part: a part's look belongs to its own sheet. */
+  :where(:not([data-slot])) {
+    &:where(p, ul, ol, dl, figure, blockquote, pre, table) { margin: 0; }
+    &:where(p) { text-wrap: pretty; }
+    &:where(strong, b) { font-weight: 600; }
+    &:where(small) { font-size: 0.8125rem; }
+    &:where(a) { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 0.2em; text-decoration-color: var(--ui-input); }
+    &:where(a:hover) { text-decoration-color: currentColor; }
+  }
+
+  :where(::selection) { background: var(--bark-selected); color: var(--ui-foreground); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}

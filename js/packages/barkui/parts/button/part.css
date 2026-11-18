@@ -1,0 +1,114 @@
+/* Button: UI SDK's <ui-button> around a native <button data-slot="button">.
+   Variant by data-variant: none = secondary, "solid" = primary, "ghost" = quiet,
+   "destructive". Size by data-size: "sm", none, "lg" (28, 36, 44px on a 4px grid).
+   States come in pairs: a state that changes the ground names its text colour too.
+   One focus ring: the pale --ui-ring halo outside, the --ui-ring-border edge on the border. */
+[data-slot="button"] {
+  --bark-button-height: calc(var(--ui-spacing) * 9);
+  --bark-button-pad: calc(var(--ui-spacing) * 3.5);
+  --bark-button-text: 0.875rem;
+
+  --bark-button-bg: var(--ui-background);
+  --bark-button-fg: var(--ui-foreground);
+  --bark-button-edge: var(--ui-input);
+  --bark-button-hover-bg: var(--ui-muted);
+  --bark-button-hover-fg: var(--ui-foreground);
+  --bark-button-hover-edge: var(--ui-input);
+  --bark-button-press-bg: var(--bark-selected);
+  --bark-button-press-fg: var(--ui-foreground);
+
+  height: var(--bark-button-height);
+  min-width: var(--bark-button-height);
+  padding-inline: var(--bark-button-pad);
+  gap: calc(var(--ui-spacing) * 2);
+  border: 1px solid var(--bark-button-edge);
+  border-radius: var(--ui-radius);
+  background: var(--bark-button-bg);
+  color: var(--bark-button-fg);
+  font-size: var(--bark-button-text);
+  font-weight: 500;
+  line-height: 1;
+  transition-property: background-color, border-color, color;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+
+  &[data-size="sm"] {
+    --bark-button-height: calc(var(--ui-spacing) * 7);
+    --bark-button-pad: calc(var(--ui-spacing) * 2.5);
+    --bark-button-text: 0.8125rem;
+  }
+  &[data-size="lg"] {
+    --bark-button-height: calc(var(--ui-spacing) * 11);
+    --bark-button-pad: calc(var(--ui-spacing) * 5);
+    --bark-button-text: 0.9375rem;
+  }
+
+  &[data-variant="solid"] {
+    --bark-button-bg: var(--ui-primary);
+    --bark-button-fg: var(--ui-primary-foreground);
+    --bark-button-edge: var(--ui-primary);
+    --bark-button-hover-bg: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground));
+    --bark-button-hover-fg: var(--ui-primary-foreground);
+    --bark-button-hover-edge: var(--bark-button-hover-bg);
+    --bark-button-press-bg: color-mix(in oklab, var(--ui-primary) 78%, var(--ui-foreground));
+    --bark-button-press-fg: var(--ui-primary-foreground);
+  }
+  &[data-variant="ghost"] {
+    --bark-button-bg: transparent;
+    --bark-button-edge: transparent;
+    --bark-button-hover-edge: transparent;
+  }
+  &[data-variant="destructive"] {
+    --bark-button-bg: color-mix(in oklab, var(--ui-destructive) 7%, var(--ui-background));
+    --bark-button-fg: var(--bark-danger-text);
+    --bark-button-edge: color-mix(in oklab, var(--ui-destructive) 35%, var(--ui-background));
+    --bark-button-hover-bg: color-mix(in oklab, var(--ui-destructive) 13%, var(--ui-background));
+    --bark-button-hover-fg: var(--bark-danger-text);
+    --bark-button-hover-edge: color-mix(in oklab, var(--ui-destructive) 50%, var(--ui-background));
+    --bark-button-press-bg: color-mix(in oklab, var(--ui-destructive) 19%, var(--ui-background));
+    --bark-button-press-fg: var(--bark-danger-text);
+  }
+
+  &:hover:not([data-disabled]) {
+    border-color: var(--bark-button-hover-edge);
+    background: var(--bark-button-hover-bg);
+    color: var(--bark-button-hover-fg);
+  }
+  &:active:not([data-disabled], [data-pending]) {
+    background: var(--bark-button-press-bg);
+    color: var(--bark-button-press-fg);
+  }
+
+  &:focus-visible {
+    border-color: var(--ui-ring-border);
+    outline: 4px solid var(--ui-ring);
+    outline-offset: 0;
+  }
+
+  &[data-disabled] {
+    border-color: transparent;
+    background: var(--ui-muted);
+    color: var(--ui-muted-foreground);
+    opacity: 1;
+    cursor: not-allowed;
+  }
+  &[data-variant="ghost"][data-disabled] { background: transparent; }
+
+  /* Pending: the label stays, a spinner takes the icon's place, presses are refused. */
+  &[data-pending] { filter: none; cursor: progress; }
+  &:not([data-pending]) [data-show="pending"],
+  &[data-pending] [data-show="idle"] { display: none; }
+
+  & > svg { width: 1rem; height: 1rem; }
+  & > [data-slot="spinner"] {
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: bark-button-spin 0.7s linear infinite;
+  }
+  &[aria-label]:has(> svg:only-child) { width: var(--bark-button-height); padding: 0; }
+}
+
+@keyframes bark-button-spin { to { rotate: 1turn; } }
