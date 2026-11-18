@@ -236,6 +236,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk :is(.dk-menu .dk-menu-item:hover, .dk-menu:not(:hover) .dk-menu-item:focus-visible):not(:disabled, [aria-disabled="true"])::after { color: inherit; }
       .dk :is(.dk-menu .dk-menu-item.danger:hover, .dk-menu:not(:hover) .dk-menu-item.danger:focus-visible):not(:disabled, [aria-disabled="true"]) { background: var(--dk-menu-danger-hover); }
       .dk :is(.dk-menu .dk-menu-item.danger:hover, .dk-menu:not(:hover) .dk-menu-item.danger:focus-visible):not(:disabled, [aria-disabled="true"]) .dk-menu-icon { color: var(--dk-menu-danger-hover-icon); }
+      .dk .dk-new-doc { position-anchor: --dk-new-doc; inset: auto; top: anchor(bottom); left: anchor(center); margin: 4px 0 0; width: 320px; max-width: calc(100vw - 32px); max-height: 420px; padding: 0; overflow: hidden; translate: -50% 0; font-weight: 400; }
+      .dk .dk-new-doc-head { display: none; }
+      .dk .dk-new-doc-list { display: flex; flex-direction: column; gap: 4px; padding: 4px; overflow: auto; }
+      .dk .dk-new-doc .dk-menu-item { min-height: 33px; color: var(--dk-fg); font-weight: 400; }
+      @media (max-width: 599px) { .dk .dk-new-doc { inset: 12px 12px auto; margin: 0; width: auto; max-width: none; max-height: calc(100dvh - 24px); translate: none; padding: 0 20px 16px; border-radius: 9px; } .dk .dk-new-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0 8px; } .dk .dk-new-doc-head h2 { margin: 0; font-size: 15px; line-height: 21px; font-weight: 600; } }
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }

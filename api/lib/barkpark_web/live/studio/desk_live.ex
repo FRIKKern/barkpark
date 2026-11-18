@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
+  alias BarkparkWeb.Studio.Desk.NewDocMenu
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Rows
@@ -483,6 +484,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
       />
     </dialog>
+    <%!-- The navbar's Create new (J37): its button is the layout's. --%>
+    <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
     <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
@@ -530,6 +533,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         scope={@scope}
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
+        choices={@desk.new[view.pane[:type]] || []}
         sorts={menu(@desk, view).sorts}
         default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
@@ -560,6 +564,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       root: root,
       nodes: Tree.index(root),
       menus: ListMenu.menus(dataset, scope),
+      new: NewDocMenu.all(dataset, scope),
       targets: LiveRefresh.targets(dataset, scope)
     }
   end
