@@ -211,7 +211,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
           words = match_on.(base, :words)
           {count, facets} = if relaxed, do: {0, %{}}, else: count_fun.(words)
           text_count = text_probe.(count, fn -> match_on.(text_base, :words) end)
-          ids_only? = IdOnlyHits.ids_only?(count, groups, match, fn -> match_on.(base, :text) end)
+
+          ids_only? =
+            IdOnlyHits.ids_only?(count, groups, match, suggest?, fn -> match_on.(base, :text) end)
 
           if count > 0 or (is_integer(text_count) and text_count > 0) do
             {words, count, facets, false, text_count, :words, ids_only?}

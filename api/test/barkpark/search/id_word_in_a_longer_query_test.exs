@@ -99,6 +99,34 @@ defmodule Barkpark.Search.IdWordInALongerQueryTest do
     assert recovery == nil
   end
 
+  test "the type-ahead never pays for the ids-only check" do
+    # "zebra fi": two words, and "zebra" finds its document by id alone, so a
+    # full search reads `IdOnlyHits`. A suggestion runs no recovery, so it must
+    # not run that read either: a keystroke never pays for recovery.
+    test_pid = self()
+    handler = "id-only-exists-#{System.unique_integer()}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, %{query: sql}, _ ->
+        if self() == test_pid and sql =~ "SELECT TRUE", do: send(test_pid, {:exists_query, sql})
+      end,
+      nil
+    )
+
+    try do
+      search("zebra fi", suggest: true)
+      refute_received {:exists_query, _}, "the type-ahead ran the ids-only exists? read"
+
+      # CONTROL: the full search does run it, so the counter sees the read.
+      search("zebra fi")
+      assert_received {:exists_query, _}
+    after
+      :telemetry.detach(handler)
+    end
+  end
+
   test "CONTROL: a query that IS a document's id still finds that document by its id" do
     # "zebra" is in no field of the document, only in its id.
     assert search("zebra") == {["zebra"], nil}

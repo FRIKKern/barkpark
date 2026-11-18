@@ -21,9 +21,18 @@ defmodule Barkpark.Search.IdOnlyHits do
   True when a multi-word, every-word search counted `count` hits and none of
   them holds the words: `text_query` is the words step without the id arm, and
   is read only when the id arm could have supplied every hit.
+
+  Always false for a suggestion (`suggest?`): the type-ahead runs no recovery,
+  so it never pays for this read.
+
+  Known limit: the bound counts #{@id_forms_per_word} ids per word, but a
+  document id is unique per (doc_id, type, dataset), so one id held by more
+  types than that can exceed it. The check is then skipped and the search
+  answers as before this module.
   """
-  @spec ids_only?(non_neg_integer(), [map()], :all | :any, (-> Ecto.Queryable.t())) :: boolean()
-  def ids_only?(count, [_, _ | _] = groups, :all, text_query) when count > 0 do
+  @spec ids_only?(non_neg_integer(), [map()], :all | :any, boolean(), (-> Ecto.Queryable.t())) ::
+          boolean()
+  def ids_only?(count, [_, _ | _] = groups, :all, false, text_query) when count > 0 do
     members = Enum.flat_map(groups, & &1.members)
 
     # A word with a dot also matches ids that start with it, so no count rules
@@ -35,5 +44,5 @@ defmodule Barkpark.Search.IdOnlyHits do
     reachable? and not Barkpark.Repo.exists?(text_query.())
   end
 
-  def ids_only?(_count, _groups, _match, _text_query), do: false
+  def ids_only?(_count, _groups, _match, _suggest?, _text_query), do: false
 end
