@@ -246,7 +246,7 @@ function bpIsAssetRefValue(o) {
 }
 
 function bpParseMediaValue(raw) {
-  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, hotspot: null, crop: null };
+  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
@@ -263,7 +263,8 @@ function bpParseMediaValue(raw) {
           focalY: bpFocalCoord(hs.y),
           width: size.width,
           height: size.height,
-          hotspot: bpImagePart(o.hotspot, BP_HOTSPOT_KEYS),
+          // The hotspot stays on `source` (focalX / focalY move its centre);
+          // the dialog reads it there.
           crop: bpImagePart(o.crop, BP_CROP_KEYS),
           // The stored object itself: every key the picker does not edit
           // (`_type`, `crop`, `caption`, a DAM status) is written back as is.
@@ -279,8 +280,9 @@ function bpParseMediaValue(raw) {
         width: bpDimension(o.width),
         height: bpDimension(o.height),
         lqip: bpLqip(o.lqip),
-        hotspot: bpImagePart(o.hotspot, BP_HOTSPOT_KEYS),
-        crop: bpImagePart(o.crop, BP_CROP_KEYS)
+        // Only when set: a value without them reads as it always did.
+        ...(bpImagePart(o.hotspot, BP_HOTSPOT_KEYS) ? { hotspot: o.hotspot } : {}),
+        ...(bpImagePart(o.crop, BP_CROP_KEYS) ? { crop: o.crop } : {})
       };
     } catch (_e) {
       return Object.assign({}, empty, { url: trimmed });
@@ -404,8 +406,8 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
-      this._meta.hotspot = parsed.hotspot;
-      this._meta.crop = parsed.crop;
+      this._meta.hotspot = parsed.hotspot || null;
+      this._meta.crop = parsed.crop || null;
       this._takeAssetRef(parsed);
     }
 
@@ -569,8 +571,8 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
-      this._meta.hotspot = parsed.hotspot;
-      this._meta.crop = parsed.crop;
+      this._meta.hotspot = parsed.hotspot || null;
+      this._meta.crop = parsed.crop || null;
       this._takeAssetRef(parsed);
     }
     this._renderPreview();
@@ -593,7 +595,12 @@ class BpMediaPicker extends HTMLElement {
 
   // The hotspot and crop the dialog starts from (Sanity's defaults when unset).
   hotspotCrop() {
-    const h = bpImagePart(this._meta.hotspot, BP_HOTSPOT_KEYS);
+    const src = this._meta.source || {};
+    const fx = bpFocalCoord(this._meta.focalX);
+    const fy = bpFocalCoord(this._meta.focalY);
+    let h = bpImagePart(this._meta.hotspot, BP_HOTSPOT_KEYS);
+    if (!h && bpImagePart(src.hotspot, BP_HOTSPOT_KEYS))
+      h = Object.assign({}, src.hotspot, fx != null && fy != null ? { x: fx, y: fy } : {});
     const c = bpImagePart(this._meta.crop, BP_CROP_KEYS);
     return {
       hotspot: h ? { x: h.x, y: h.y, width: h.width, height: h.height } : { x: 0.5, y: 0.5, width: 1, height: 1 },

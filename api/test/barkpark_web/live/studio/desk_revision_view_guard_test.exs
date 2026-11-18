@@ -253,6 +253,53 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
     end
   end
 
+  describe "the image's hotspot and crop dialog while a revision is shown" do
+    test "its write (the form's autosave) is refused: the draft's image stays", c do
+      image = %{
+        "_type" => "image",
+        "alt" => "Draft alt",
+        "hotspot" => %{"x" => 0.5, "y" => 0.5, "width" => 1, "height" => 1}
+      }
+
+      d =
+        doc!(
+          [
+            %{
+              "name" => "mainImage",
+              "title" => "Main image",
+              "type" => "image",
+              "options" => %{"hotspot" => true},
+              "fields" => [%{"name" => "alt", "title" => "Alternative text", "type" => "string"}]
+            }
+          ],
+          %{"title" => "Img published"},
+          %{"title" => "Img draft", "mainImage" => image}
+        )
+
+      view = open(c, d, @history <> ",rev=#{d.rev}")
+
+      assert BarkparkWeb.Studio.Desk.RevisionView.refuses?("autosave", %{
+               desk_revision: %{form: %{}}
+             })
+
+      framed =
+        Map.merge(image, %{
+          "alt" => "Typed in the revision",
+          "hotspot" => %{"x" => 0.2, "y" => 0.3, "width" => 0.4, "height" => 0.4},
+          "crop" => %{"top" => 0.1, "bottom" => 0, "left" => 0, "right" => 0}
+        })
+
+      render_click(
+        view,
+        "autosave",
+        Map.merge(own_mark(d), %{"doc" => %{"mainImage" => Jason.encode!(framed)}})
+      )
+
+      render_async(view, 5_000)
+      assert draft(d).content["mainImage"] == image
+    end
+  end
+
   describe "the header menu while a revision is shown" do
     test "offers no write, and Publish or Discard pressed anyway does nothing", c do
       d =
