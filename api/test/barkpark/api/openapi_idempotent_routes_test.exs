@@ -17,35 +17,26 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
       `Idempotency-Key` is DRIVEN over real HTTP, twice with one key, and must
       answer `Idempotency-Replay: true`. A route that lost the plug reds here
       even though the spec still says it dedups.
-    * UNDER-DECLARATION, STRUCTURALLY — the set of router pipelines that mount
-      the plug is pinned. Mounting it on a THIRD pipeline reds, which is the
-      moment `@idempotent_templates` needs a new entry.
-
-  `Phoenix.Router.__routes__/0` does not expose `pipe_through` in this Phoenix
-  version, so the structural half reads the router source directly rather than
-  pretending to a derivation it cannot make.
+    * UNDER-DECLARATION, STRUCTURALLY — every mutating route the plug covers
+      is derived, and each must be one `OpenApi.idempotent?/1` declares. The
+      derivation is `Barkpark.Test.IdempotencyMounts`, shared with the
+      streaming tripwire: a route's pipelines come from
+      `Phoenix.Router.route_info/4`, so a route `plugin_routes(scope: ...)`
+      emits into an Idempotency scope counts; and every file under `lib/` that
+      names the plug is read, so a plugin controller under
+      `lib/barkpark/plugins/*/web/` that mounts it counts
+      (task-d909ad1c50dd5a1a). The pins this replaces named pipelines and read
+      only `lib/barkpark_web/controllers/`, so neither moved for those.
   """
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, TenancyFixtures}
+  alias Barkpark.Api.OpenApi
   alias Barkpark.Test.IdempotencyMounts
 
-  @router_source Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
+  @lib_dir Path.expand("../../../lib", __DIR__)
   @token "barkpark-test-openapi-idem"
   @dataset "production"
-
-  # Every pipeline that mounts the dedup plug today. Adding one is not a
-  # failure — it is a PROMPT: the new pipeline's routes now dedup, so their path
-  # templates belong in `@idempotent_templates` (lib/barkpark/api/openapi.ex)
-  # and this list.
-  @mounted_on [:scoped_mutate, :idempotent]
-
-  # Controllers that mount the plug themselves for one action, because
-  # router.ex may not grow (scripts/file-size-ratchet.py). Pinned the same way:
-  # a new controller mount is a PROMPT to add its template to
-  # `@idempotent_templates`.
-  @controllers_dir Path.expand("../../../lib/barkpark_web/controllers", __DIR__)
-  @controller_mounts ["chat_controller.ex"]
 
   # Spec operations whose replay is driven in their own test file, because a
   # 2xx needs more than a mutate body (a chat send needs a session and a
@@ -70,25 +61,29 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     %{ws: ws, project: project}
   end
 
-  # Read from the router's AST by the shared reader, so a mount by alias, with
-  # or without options or parentheses, is a mount too.
-  defp idempotent_pipelines do
-    ast = @router_source |> File.read!() |> Code.string_to_quoted!()
-    aliases = IdempotencyMounts.aliases(ast)
-
-    {_, names} =
-      Macro.prewalk(ast, [], fn
-        {:pipeline, _, [name, [do: body]]} = node, acc when is_atom(name) ->
-          if IdempotencyMounts.mounts(body, aliases) != [],
-            do: {node, [name | acc]},
-            else: {node, acc}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    Enum.sort(names)
+  # A plugin-shaped router (`IdempotencyMounts.compile_plugin_fixture!/2`),
+  # compiled once under its own module names.
+  setup_all do
+    dir = Path.join(System.tmp_dir!(), "bp-openapi-idem-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+    %{fixture: IdempotencyMounts.compile_plugin_fixture!(dir, "OpenApiPlugin")}
   end
+
+  # `{verb, path}` for every mutating route the dedup plug covers: through a
+  # pipeline or a scope piping the plug, or through its controller's own mount.
+  defp covered(router, lib_root) do
+    by_pipeline =
+      for {verb, path, _, _} <- IdempotencyMounts.pipeline_routes(router), do: {verb, path}
+
+    by_controller =
+      for {verb, path, _, _, _} <- IdempotencyMounts.controller_routes(router, lib_root),
+          do: {verb, path}
+
+    Enum.sort(Enum.uniq(by_pipeline ++ by_controller))
+  end
+
+  defp undeclared(router, lib_root),
+    do: Enum.reject(covered(router, lib_root), fn {_verb, path} -> OpenApi.idempotent?(path) end)
 
   # {METHOD, openapi path} for every spec operation declaring the header.
   defp spec_ops do
@@ -102,33 +97,70 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     |> Enum.sort()
   end
 
-  test "the source scan still finds a mount — otherwise the structural half is vacuous" do
-    refute Enum.empty?(idempotent_pipelines()),
-           "no router pipeline mounts BarkparkWeb.Plugs.Idempotency — either the plug moved " <>
-             "or this test's scan stopped seeing it; both make the comparison below vacuous"
+  test "CONTROL: the derived set holds the mutate route, its scoped mirror and the chat send" do
+    covered = covered(BarkparkWeb.Router, @lib_dir)
+
+    for route <- [
+          {:post, "/v1/data/mutate/:dataset"},
+          {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset"},
+          {:post, "/v1/chat/sessions/:id/messages"}
+        ] do
+      assert route in covered,
+             "the derivation lost #{inspect(route)}, so the check below measures less. " <>
+               "Covered: #{inspect(covered)}"
+    end
   end
 
-  test "the dedup plug is mounted on exactly the pipelines the spec was written against" do
-    assert idempotent_pipelines() == Enum.sort(@mounted_on),
-           "the set of pipelines running BarkparkWeb.Plugs.Idempotency changed. Their routes " <>
-             "now dedup (or stopped): update `@idempotent_templates` in " <>
-             "lib/barkpark/api/openapi.ex, re-run `mix barkpark.openapi`, and update " <>
-             "@mounted_on here."
+  # Routes that ran the plug, but were not declared, when this pin was first
+  # derived. The old pins named pipelines, so a route added to an existing
+  # pipeline never moved them. Declaring these is task-e3c146574ea3e8bf. A
+  # RATCHET: a route declared since must leave this list, and a new covered
+  # route is declared, never added here.
+  @undeclared_today [
+    {:post, "/v1/data/disconnect/:dataset/:doc_id"},
+    {:post, "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops"},
+    {:post, "/v1/data/doc/:dataset/:type/:doc_id/ops"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/disconnect/:dataset/:doc_id"},
+    {:post,
+     "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/:master_id/insert"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/detach"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/pin"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/ops"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v:api_version/data/mutate/:dataset"}
+  ]
+
+  test "every route the dedup plug covers is declared idempotent in the spec" do
+    undeclared = undeclared(BarkparkWeb.Router, @lib_dir)
+
+    assert undeclared -- @undeclared_today == [],
+           "these routes run BarkparkWeb.Plugs.Idempotency, but the spec does not offer " <>
+             "Idempotency-Key on them: add their templates to `@idempotent_templates` in " <>
+             "lib/barkpark/api/openapi.ex and re-run `mix barkpark.openapi`. " <>
+             inspect(undeclared -- @undeclared_today)
+
+    assert @undeclared_today -- undeclared == [],
+           "these are declared now (or no longer run the plug): remove them from " <>
+             "@undeclared_today. #{inspect(@undeclared_today -- undeclared)}"
   end
 
-  test "the dedup plug is mounted in exactly the controllers the spec was written against" do
-    mounted =
-      Path.wildcard(Path.join(@controllers_dir, "**/*.ex"))
-      |> Enum.filter(
-        &(IdempotencyMounts.mounts(&1 |> File.read!() |> Code.string_to_quoted!()) != [])
-      )
-      |> Enum.map(&Path.relative_to(&1, @controllers_dir))
-      |> Enum.sort()
+  # task-d909ad1c50dd5a1a: the two doors the old pins could not see.
+  test "MUTANT: a plugin route in an Idempotency scope and a plugin controller's own mount red",
+       %{fixture: fixture} do
+    undeclared = undeclared(fixture.router, fixture.lib_root)
 
-    assert mounted == Enum.sort(@controller_mounts),
-           "the set of controllers mounting BarkparkWeb.Plugs.Idempotency changed. Update " <>
-             "`@idempotent_templates` in lib/barkpark/api/openapi.ex, re-run " <>
-             "`mix barkpark.openapi`, and update @controller_mounts here."
+    assert {:post, "/v1/plugins/calm"} in undeclared,
+           "plugin_routes(scope: ...) emitted a route into an :idempotent scope; a pin that " <>
+             "names pipelines does not move for it. Got: #{inspect(undeclared)}"
+
+    assert {:post, "/v1/open/self"} in undeclared,
+           "a controller under barkpark/plugins/*/web/ mounts the plug; a pin that reads " <>
+             "only barkpark_web/controllers/ does not see it. Got: #{inspect(undeclared)}"
+
+    assert {:post, "/v1/direct/stream"} in undeclared
+    refute {:post, "/v1/open/stream"} in undeclared, "a route with no mount is not covered"
   end
 
   test "the spec declares the header on at least one operation" do
