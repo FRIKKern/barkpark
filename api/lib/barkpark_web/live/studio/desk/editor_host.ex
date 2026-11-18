@@ -285,9 +285,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 
-  # Those, and the presses inside the form that write a field.
-  @revision_writes @form_writes ++ ~w(array_op slug-generate upload-image paper-publish)
-
   # The browser has the form that replaced a draft discarded elsewhere
   # (`Discarded`): its saves are the editor's again. `lost`: keys typed in
   # the old form that were never sent went with it.
@@ -301,14 +298,14 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # save still in flight from it is dropped here. So is a save from the form
   # a draft discarded elsewhere had (live.spec:48), until the browser has the
   # new one.
-  # While an old revision is shown in the form's place (`RevisionView`), its
-  # form and fields write nothing: a post from them would write the revision.
+  # While an old revision is shown in the form's place (`RevisionView`), the
+  # page takes only the events that cannot write the open document.
   def handle_event(event, params, socket) do
     cond do
       event in @form_writes and gone?(socket.assigns) ->
         {:noreply, socket}
 
-      event in @revision_writes and RevisionView.shown?(socket.assigns) ->
+      RevisionView.refuses?(event, socket.assigns) ->
         {:noreply, socket}
 
       event in @form_writes and Discarded.drop?(socket.assigns) ->
@@ -331,7 +328,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def write_built(params, socket) do
     cond do
-      gone?(socket.assigns) ->
+      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) ->
         {:noreply, socket}
 
       Discarded.drop?(socket.assigns) ->
@@ -695,6 +692,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
                   @base,
                   Panes.perspective(assigns[:desk_uri])
                 )
+                |> RevisionView.menu(assigns)
           }
         />
         <%!-- Sanity's "Split pane right": the same document again, beside
@@ -931,6 +929,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         :if={RevisionView.shown?(assigns) and !@edit_failed and !gone?(assigns)}
         id={"#{@view.id}-revision-footer"}
         revision={@desk_revision}
+        menu_button={"#{@view.id}-actions-button"}
       />
       <% items =
         if @edit_failed or gone?(assigns) or RevisionView.shown?(assigns),

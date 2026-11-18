@@ -108,6 +108,9 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
             dataset,
             [limit: @limit] ++ ScopeHelpers.scope_opts(socket)
           )
+          # Each actor by name, as the REST history names them: a user's row
+          # stores the id alone.
+          |> Barkpark.Accounts.Privacy.redact_actor_labels()
 
         Phoenix.Component.assign(socket, :desk_history, %{entries: timeline(revisions), key: key})
     end

@@ -8,15 +8,26 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   - The form is the Studio's own, drawn from the revision's title and
     content in a disabled fieldset: nothing in it can be typed in or
-    pressed. The editor keeps the document as it is now. Every write the
-    form or its fields could send is dropped while a revision is shown
-    (`EditorHost`), so no autosave writes the revision.
+    pressed. Every field is drawn locked (`FieldLock`'s display): a text
+    field keeps its input, read-only, and any other field shows its value
+    with no widget. So no rich text, reference or block canvas is mounted
+    for the revision. Such a widget is `phx-update="ignore"`, so one mounted
+    here would carry the revision's value into the live form after it
+    (or the live value into this one). The editor keeps the document as it
+    is now.
+  - While a revision is shown, the page takes only the events that cannot
+    write the open document (`refuses?/2`): a form post, a field's press, a
+    document action or a plugin's event is dropped (`EditorHost`). The
+    header menu keeps only what opens or links (`menu/2`), so neither it nor
+    its keys (Ctrl+Alt+P, Ctrl+Alt+D) can publish, discard or delete.
   - The footer says when the revision is from and offers "Revert to
     revision". It asks first ("Are you sure you want to restore this
     document?"); Confirm sends the Studio's own `restore-revision`, which
     writes the revision back as the draft through `PostIdentity.pressed/3`
     and the Studio's own check that the revision is the open document's
-    (`Handlers.History`). Once it is written the URL drops `rev`.
+    (`Handlers.History`). Once it is written the URL drops `rev`. Confirm
+    gives the focus to the header's "…" button, since the footer it sits in
+    goes with the revision.
   - A revision that is not the open document's, or that cannot be read,
     is not shown: the pane says so, as TanStack's does.
 
@@ -31,6 +42,8 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
+
+  alias Phoenix.LiveView.JS
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
@@ -92,6 +105,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
     |> assign(
       editor_doc: doc,
       editor_form: form,
+      editor_schema: locked(assigns[:editor_schema]),
       editor_mode: :classic,
       validation_errors: %{},
       validation_warnings: %{},
@@ -100,6 +114,46 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
       show_unpublish_guard: false
     )
     |> HistoryPanel.waiting()
+  end
+
+  # Every field as `FieldLock` draws one its condition locks: a text field
+  # keeps its input (`readonly`), any other is display-only.
+  @text_types ~w(string text url email slug number)
+
+  defp locked(%{fields: fields} = schema) when is_list(fields),
+    do: %{schema | fields: Enum.map(fields, &lock/1)}
+
+  defp locked(schema), do: schema
+
+  defp lock(%{"type" => type} = field),
+    do: Map.merge(field, %{"lockedByRule" => true, "readOnly" => type not in @text_types})
+
+  defp lock(field), do: field
+
+  # The page's events that write nothing of the open document. While a
+  # revision is shown every other event is refused: the revision's own
+  # Restore is the one write it offers.
+  @reads ~w(select select-group select-view view-more select-desk switch-workspace
+            switch-project switch-dataset toggle-create create-workspace create-project
+            expand-pane desk-search desk-search-clear desk-list-more select-sort
+            width-bucket show-profile close-profile preview-profile save-profile
+            jump-to-user backlinks-refresh open-backlink view-graph node-clicked
+            close-delete close-discard close-unpublish-guard close-confirm-modal
+            close-history object-dialog-close close-image-picker close-ref-picker
+            close-secondary-picker close-secondary restore-revision)
+
+  @doc "Whether `event` is refused because a revision is shown in the form's place."
+  def refuses?(event, assigns), do: shown?(assigns) and event not in @reads
+
+  @doc """
+  The header menu's items while a revision is shown: only those that open
+  something or link somewhere (History, Incoming references, the
+  document's links). An item that sends the Studio an event (Publish,
+  Discard draft, Duplicate, Delete, a schema action) is left out, as
+  TanStack's revision view has none.
+  """
+  def menu(items, assigns) do
+    if shown?(assigns), do: Enum.reject(items, &is_binary(&1.event)), else: items
   end
 
   @doc """
@@ -147,6 +201,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   attr :id, :string, required: true
   attr :revision, :map, required: true
+  attr :menu_button, :string, required: true, doc: "the \"…\" button Confirm gives the focus to"
 
   @doc "The footer while a revision is shown: when it is from, and its revert."
   def footer(assigns) do
@@ -189,8 +244,10 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
             <button
               type="button"
               class="btn danger"
-              phx-click="restore-revision"
-              phx-value-id={@revision.id}
+              phx-click={
+                JS.push("restore-revision", value: %{id: @revision.id})
+                |> JS.focus(to: "##{@menu_button}")
+              }
               popovertarget={"#{@id}-confirm"}
               popovertargetaction="hide"
               data-desk-revert-confirm
