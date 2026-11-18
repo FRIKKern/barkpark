@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
   `Panes` as `inspect: "history"` or `"review"`). Its two tabs, History and
   Review changes, are patches between the two, and so are the document
   menu's History and the close button: Back closes or reopens it. Review
-  changes is its second tab; what it shows is not drawn yet.
+  changes is its second tab (`ReviewChanges`), which reads this timeline.
 
   The timeline is `Content.list_revisions/4` under the page's scope, the
   newest 100, read when the inspector opens and again whenever the editor
@@ -23,7 +23,8 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
   collapsed under it until its Expand is pressed.
 
   `EditorHost` owns the `desk_history` assign: `nil` while closed, else
-  `%{entries: entries, key: key}`, `key` naming the version it was read for.
+  `%{entries: entries, revisions: revisions, key: key}`, `key` naming the
+  version it was read for.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -112,7 +113,11 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
           # stores the id alone.
           |> Barkpark.Accounts.Privacy.redact_actor_labels()
 
-        Phoenix.Component.assign(socket, :desk_history, %{entries: timeline(revisions), key: key})
+        Phoenix.Component.assign(socket, :desk_history, %{
+          entries: timeline(revisions),
+          revisions: revisions,
+          key: key
+        })
     end
   end
 
@@ -192,6 +197,7 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
   attr :base, :string, required: true
   attr :menu_button, :string, required: true, doc: "the \"…\" button the close gives the focus to"
   attr :perspective, :atom, default: :drafts
+  attr :review, :map, default: nil, doc: "`desk_review`: what Review changes shows"
 
   @doc """
   The inspector, beside the form. The holder is always in the page (hidden
@@ -282,6 +288,7 @@ defmodule BarkparkWeb.Studio.Desk.HistoryPanel do
               />
             <% end %>
           </ul>
+          <BarkparkWeb.Studio.Desk.ReviewChanges.panel :if={@tab == :review} id={"#{@id}-review"} review={@review} />
         </div>
       <% end %>
     </aside>

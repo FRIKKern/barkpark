@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
       not (field["readOnly"] == true and not Caps.admin_affordance?(caps))
   end
 
-  @doc "The desk's field events: `desk-field-copy` and `desk-field-paste`."
+  @doc "The desk's field events: `desk-field-copy`, `desk-field-paste` and `desk-field-revert`."
   def handle_event("desk-field-copy", %{"field" => name}, socket) when is_binary(name) do
     case copy(socket.assigns, name) do
       nil -> {:noreply, socket}
@@ -184,6 +184,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
       do: paste(name, clip, socket),
       else: {:noreply, socket}
   end
+
+  # Review changes' Revert (`ReviewChanges`), a field's write of its own.
+  def handle_event("desk-field-revert", params, socket),
+    do: BarkparkWeb.Studio.Desk.ReviewChanges.revert(params, socket)
 
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
