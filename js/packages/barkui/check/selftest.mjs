@@ -165,6 +165,42 @@ const CASES = [
     plant: (d) => inDemo(d, "setTimeout(() => { root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000' }, 2500)"),
     expect: failedSay(/after step .*button#button-after carries a style attribute/),
   },
+  // Round 4: the check reads from an isolated world, so patching the page's own globals changes nothing it reads.
+  // (Spelled so that no lint, now or before, refuses them: these prove the reading, not a pattern.)
+  {
+    name: 'a demo that replaces getComputedStyle cannot make a red label read as a skin colour',
+    only: ['skins', 'schemes'],
+    css: '#button-after { color: #ff0000; }',
+    plant: (d) => inDemo(d, "const k = 'getComputed' + 'Style'; const g = window[k]; window[k] = (el, p) => g(el && el.id === 'button-after' ? document.querySelector('#button-secondary') : el, p)"),
+    expect: skinsSay(/button#button-after "Duplicate" color is not one skin variable/),
+  },
+  {
+    name: 'a demo that patches getClientRects cannot hide a red button from the trace',
+    only: ['skins', 'schemes'],
+    css: '#button-after { color: #ff0000; }',
+    plant: (d) => inDemo(d, "const P = Element['proto' + 'type']; const g = P.getClientRects; P.getClientRects = function () { return this.id === 'button-after' ? [] : g.call(this) }"),
+    expect: skinsSay(/button#button-after "Duplicate" color is not one skin variable/),
+  },
+  {
+    name: 'a demo that patches getBoundingClientRect cannot pull a button back inside a phone window',
+    only: ['phone'],
+    css: '#button-after { position: fixed; left: 370px; top: 0; }',
+    plant: (d) => inDemo(d, "const P = Element['proto' + 'type']; const g = P.getBoundingClientRect; P.getBoundingClientRect = function () { const r = g.call(this); return new DOMRect(0, r.y, Math.min(r.width, 1), r.height) }"),
+    expect: (p) => /Duplicate ends past the window/.test(p.parts.button.lights.phone.detail),
+  },
+  {
+    name: 'a demo that patches querySelector cannot point the check at another element',
+    only: ['skins', 'schemes'],
+    css: '#button-after { color: #ff0000; }',
+    plant: (d) => inDemo(d, "const P = Document['proto' + 'type']; const q = P.querySelector; P.querySelector = function (s) { return q.call(this, s === '[data-part=\"button\"]' ? '.sr-title' : s) }"),
+    expect: skinsSay(/button#button-after "Duplicate" color is not one skin variable/),
+  },
+  {
+    name: 'a control edge under 3:1 turns "every skin" off, now the line is hard',
+    only: ['skins', 'schemes'],
+    css: '[data-part="button"] ui-button { --ui-input: var(--ui-muted); }',
+    expect: skinsSay(/control edge [\d.]+:1, needs 3:1/),
+  },
   {
     name: 'a focus ring that cannot be seen against its ground turns the skins off',
     only: ['skins', 'schemes'],
