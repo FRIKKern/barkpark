@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.ImageRefUrl do
   route exists only under `/w/:ws/p/:proj`, so with no scope there is no URL.
   """
 
+  alias Barkpark.Content.PreviewText
   alias Barkpark.Tenancy
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -49,6 +50,22 @@ defmodule BarkparkWeb.Studio.ImageRefUrl do
   end
 
   def prefix(_prefix, _scope), do: ""
+
+  @doc """
+  A list's media pick for its `list_preview.media` `spec`: `{declared?,
+  fun}`, where `fun.(root, deref)` is `PreviewText.media_item/4` with this
+  list's resolver (`for_rows/2`, read once), or `{false, nil}` when the spec
+  names no media.
+  """
+  @spec media(term(), String.t(), keyword()) :: {boolean(), (map(), term() -> term()) | nil}
+  def media(spec, dataset, opts) do
+    if PreviewText.media?(spec) do
+      image = [image_ref: for_rows(dataset, opts)]
+      {true, &PreviewText.media_item(spec, &1, &2, image)}
+    else
+      {false, nil}
+    end
+  end
 
   @doc "The resolver for a list build's `opts` (`:scope_prefix`, `:scope`)."
   @spec for_rows(String.t(), keyword()) :: (String.t() -> String.t() | nil) | nil
