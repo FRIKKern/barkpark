@@ -85,6 +85,7 @@ const RIM_STEP = 1.25; // a sunken well's inset rim off the base ground it is cu
 const SOFT_STEP = 1.1; // a tone's soft fill off its ground: visibly tinted
 const SOFT_CHROMA = 0.06; // a soft fill's OKLCH chroma, where the gamut allows it
 const SOFT_CHROMA_SIDE = 0.025; // a side whose tint keeps this much chroma is taken
+const DARK_GROUND = 0.3; // under this OKLCH lightness a ground has no room below it for a visible tint
 const MUTED_STEP = 1.2; // the primary surface's disabled fill off its ground
 const DEPTH_STEP = { light: { up: 0.02, down: 0.022 }, dark: { up: 0.045, down: 0.02 } };
 const DARK_FLOOR = 0.145;
@@ -167,9 +168,10 @@ function tonesOn(b, ground) {
 
 // A tone's soft fill on `ground`, for the label `text`: the tone's own OKLCH
 // hue at chroma SOFT_CHROMA (less where the gamut ends), at the lightness that
-// stands SOFT_STEP:1 off the ground. It takes the side away from the label if
+// stands SOFT_STEP:1 off the ground. On a dark ground it goes lighter, the only
+// side with room for colour; elsewhere it takes the side away from the label if
 // the tint keeps at least SOFT_CHROMA_SIDE there, else the side where it does
-// (on a white ground only darker keeps any colour); the label is walked after.
+// (on a white ground only darker keeps any colour). The label is walked after.
 function softOn(fill, text, ground) {
   const { h } = srgbToOklch(fill);
   const at = (dir) => {
@@ -179,7 +181,7 @@ function softOn(fill, text, ground) {
     }
     return null;
   };
-  const away = L(text) >= L(ground) ? -1 : 1;
+  const away = L(ground) < DARK_GROUND ? 1 : L(text) >= L(ground) ? -1 : 1;
   const sides = [at(away), at(-away)].filter(Boolean);
   const pick = sides.find((x) => x.c >= SOFT_CHROMA_SIDE) ?? sides.sort((x, y) => y.c - x.c)[0];
   return css(pick.rgb);

@@ -599,20 +599,26 @@ function eachSurface(f) {
 // more; it stands SOFT_STEP off the ground so the control is visibly tinted;
 // and the label reads on it at 4.5:1. SOFT_CHROMA is the most every case can
 // hold: a red tint 1.1:1 below a white ground ends at the sRGB gamut, 0.0167.
-const SOFT_STEP = 1.1, SOFT_HUE = 1, SOFT_CHROMA = 0.016;
+// Chroma near black cannot be seen, so every soft fill also keeps OKLCH
+// lightness SOFT_LIGHTNESS or more.
+const SOFT_STEP = 1.1, SOFT_HUE = 1, SOFT_CHROMA = 0.016, SOFT_LIGHTNESS = 0.15;
 test("BarkUI sheet: every tone's soft fill keeps its tone, is visibly tinted, and its text reads on it", () => {
+  // Every miss is listed, so one failure names every skin, mode and surface it hits.
+  const misses = [];
   eachSurface((at, mode, s, get) => {
     const bg = get("background");
     for (const t of TONES) {
       const soft = get(`${t}-soft`), o = srgbToOklch(soft), tone = srgbToOklch(get(t));
       const dh = Math.min(Math.abs(o.h - tone.h), 360 - Math.abs(o.h - tone.h));
-      assert.ok(o.C >= SOFT_CHROMA, `${at}: ${t}-soft has chroma ${o.C.toFixed(3)}, under ${SOFT_CHROMA}`);
-      assert.ok(dh <= SOFT_HUE, `${at}: ${t}-soft is ${dh.toFixed(1)} degrees off the ${t} hue, over ${SOFT_HUE}`);
       const label = contrast(get(`${t}-text`), soft), step = contrast(soft, bg);
-      assert.ok(label >= 4.5, `${at}: ${t}-text on ${t}-soft is ${label.toFixed(2)}, under 4.5`);
-      assert.ok(step >= SOFT_STEP, `${at}: ${t}-soft is ${step.toFixed(3)}:1 off the ground, under ${SOFT_STEP}`);
+      if (o.C < SOFT_CHROMA) misses.push(`${at}: ${t}-soft has chroma ${o.C.toFixed(3)}, under ${SOFT_CHROMA}`);
+      if (o.L < SOFT_LIGHTNESS) misses.push(`${at}: ${t}-soft has lightness ${o.L.toFixed(3)}, under ${SOFT_LIGHTNESS}`);
+      if (dh > SOFT_HUE) misses.push(`${at}: ${t}-soft is ${dh.toFixed(1)} degrees off the ${t} hue, over ${SOFT_HUE}`);
+      if (label < 4.5) misses.push(`${at}: ${t}-text on ${t}-soft is ${label.toFixed(2)}, under 4.5`);
+      if (step < SOFT_STEP) misses.push(`${at}: ${t}-soft is ${step.toFixed(3)}:1 off the ground, under ${SOFT_STEP}`);
     }
   });
+  assert.deepEqual(misses, []);
 });
 
 // Disabled controls draw on the muted fill with muted-foreground. They read as
