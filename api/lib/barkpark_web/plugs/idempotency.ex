@@ -19,11 +19,11 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   `Idempotency-Committed: true`. Requires `RequireToken` to have
   assigned `:api_token` upstream.
 
-  `bind_request: true` (every mount today: the chat send in ChatController and
-  the router's `:idempotent` and `:scoped_mutate` pipelines) binds the key
-  to the request the action will read, so the same key sent for another
-  request is refused 422 `idempotency_key_reused` instead of replaying an
-  answer to a request the client did not make:
+  Every mount binds the key to the request the action will read (the chat
+  send in ChatController and the router's `:idempotent` and `:scoped_mutate`
+  pipelines spell it `bind_request: true`; it is also the default), so the same
+  key sent for another request is refused 422 `idempotency_key_reused` instead
+  of replaying an answer to a request the client did not make:
 
     * the claim's scope gains a SHA-256 of the params the action reads: query
       string and body together, minus the path params (`conn.params` merges
@@ -32,10 +32,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
       doubled slash) with each UUID segment in its cast, lower-case form, so
       every spelling that reaches one session reaches one key.
 
-  Without the option the scope is the constant `:scope` string and the path is
-  the raw `request_path`. A mutate key stored under the bare `"mutation"` scope
-  before the mutate mounts were bound still replays for a bound retry, for the
-  24 h those rows live (`Barkpark.Idempotency`, `pre_binding_row?/2`).
+  `init/1` refuses `bind_request: false`. An unbound mount stored the bare
+  `:scope` string (`"mutation"`), and such a row now gets 422 like any other
+  row of another scope (task-a87c7261c1aa63c2).
   """
 
   import Plug.Conn
@@ -47,7 +46,11 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   @methods ~w(POST PUT PATCH DELETE)
 
   def init(opts) do
-    opts |> Keyword.put_new(:scope, "mutation") |> Keyword.put_new(:bind_request, false)
+    if Keyword.get(opts, :bind_request, true) != true,
+      do:
+        raise(ArgumentError, "BarkparkWeb.Plugs.Idempotency: every mount sets bind_request: true")
+
+    Keyword.put_new(opts, :scope, "mutation")
   end
 
   @doc """
@@ -122,14 +125,8 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   end
 
   defp claim_identity(conn, opts) do
-    scope = Keyword.fetch!(opts, :scope)
-
-    if opts[:bind_request] do
-      params = Map.drop(conn.params, Map.keys(conn.path_params))
-      {bound_scope(scope, params), bound_path(conn.path_info)}
-    else
-      {scope, conn.request_path}
-    end
+    params = Map.drop(conn.params, Map.keys(conn.path_params))
+    {bound_scope(Keyword.fetch!(opts, :scope), params), bound_path(conn.path_info)}
   end
 
   defp unauthorized(conn) do

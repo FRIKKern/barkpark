@@ -94,3 +94,57 @@ func TestTaskCreateTakesATitleAfterDashDash(t *testing.T) {
 		t.Errorf("title = %q, publish = %v; want --perspective and true", body["title"], publish)
 	}
 }
+
+// A flag that takes a value takes the next argument even when it is "--", as
+// parseGlobals does: "--" ends the flags only where a flag could start
+// (task-27104d204de9620e).
+func TestTaskCreateFlagValueMayBeDashDash(t *testing.T) {
+	body, _, err := parseTaskCreateArgs([]string{"T", "--description", "--"})
+	if err != nil {
+		t.Fatalf("parseTaskCreateArgs: %v", err)
+	}
+	if body["title"] != "T" || body["description"] != "--" {
+		t.Errorf("title = %q, description = %q; want T and --", body["title"], body["description"])
+	}
+}
+
+func TestSplitArgsFlagValueMayBeDashDash(t *testing.T) {
+	pos, flags, err := splitArgs(searchQueryLiveShape(), []string{"q", "--perspective", "--", "--", "--limit"})
+	if err != nil {
+		t.Fatalf("splitArgs: %v", err)
+	}
+	if got := flags["perspective"]; len(got) != 1 || got[0] != "--" {
+		t.Errorf("--perspective = %q, want [--]", got)
+	}
+	if strings.Join(pos, "|") != "q|--limit" {
+		t.Errorf("positional = %q, want [q --limit]: the second -- still ends the flags", pos)
+	}
+}
+
+func TestProseFilesSeeAFlagValueDashDash(t *testing.T) {
+	// "--" is the description, so the --title-file after it is a flag to resolve.
+	p := writeSpecimen(t, "title.txt", "A title from a file")
+	got, err := resolveProseTextFiles([]string{"--description", "--", "--title-file", p}, nil, func(string, ...any) {})
+	if err != nil {
+		t.Fatalf("resolveProseTextFiles: %v", err)
+	}
+	if want := "--description|--|--title=A title from a file"; strings.Join(got, "|") != want {
+		t.Errorf("resolved tail = %q, want %q", strings.Join(got, "|"), want)
+	}
+}
+
+// `bp task create -- --yes` still files the title "--yes": the globals leave
+// it alone, and task create takes it after "--".
+func TestTaskCreateTitleAfterDashDashIsNotAGlobal(t *testing.T) {
+	g, rest, err := parseGlobals([]string{"task", "create", "--", "--yes"})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	body, _, err := parseTaskCreateArgs(rest[2:])
+	if err != nil {
+		t.Fatalf("parseTaskCreateArgs: %v", err)
+	}
+	if g.yes || body["title"] != "--yes" {
+		t.Errorf("yes = %v, title = %q; want false and --yes", g.yes, body["title"])
+	}
+}
