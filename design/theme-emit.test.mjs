@@ -285,7 +285,7 @@ const BARKUI_SOURCES = {
   "--ui-muted": "--muted-surface",
   "--ui-muted-foreground": "--muted-text",
   "--ui-border": "--border",
-  "--ui-input": "--border",
+  "--ui-input": "--fg-dim",
   "--ui-ring-border": "--ring",
   "--ui-primary": "--primary",
   "--ui-primary-foreground": "--primary-fg",
@@ -513,9 +513,22 @@ test("BarkUI sheet: every declared value is a colour pair, a colour or a pointer
 // Pairs whose two colours both come unchanged from the colour source: the
 // status fill and its onStatus foreground. onStatus is warm white for every
 // tone, so on light fills (warning, info in light) and every dark-mode fill it
-// is under 4.5:1. That is the colour source's to fix; here it is held at its
-// measured floor (1.94:1, evergreen dark warning) so it cannot fall further.
-const SOURCE_TONE_FLOOR = 1.9;
+// is under 4.5:1. That is the colour source's to fix; until then each pair is
+// held at its own measured value (rounded down), so no single pair can fall
+// unseen. Generated once from the colour source; task-3daddf3c246e3d19 will
+// replace this table with 4.5.
+const SOURCE_TONE_FLOORS = {
+  "evergreen/light": { success: 4.5, warning: 3.88, danger: 4.5, info: 3.67 },
+  "evergreen/dark": { success: 2.22, warning: 1.93, danger: 3.19, info: 3.67 },
+  "charple/light": { success: 4.5, warning: 4.5, danger: 4.5, info: 4.5 },
+  "charple/dark": { success: 2.37, warning: 2.52, danger: 2.62, info: 2.5 },
+  "ember/light": { success: 4.5, warning: 4.5, danger: 4.5, info: 4.5 },
+  "ember/dark": { success: 2.37, warning: 2.52, danger: 2.62, info: 2.5 },
+  "fjord/light": { success: 4.5, warning: 4.5, danger: 4.5, info: 4.5 },
+  "fjord/dark": { success: 2.39, warning: 2.51, danger: 2.58, info: 2.49 },
+  "iris/light": { success: 4.5, warning: 4.5, danger: 4.5, info: 4.5 },
+  "iris/dark": { success: 2.35, warning: 2.53, danger: 2.64, info: 2.5 },
+};
 
 test("BarkUI sheet: tones and fills read on every surface, in every skin and mode", () => {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
@@ -523,13 +536,16 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
   const themes = loadThemes();
   const rules = cssRules(sheet.build(themes));
   const studio = cssRules(build("layouts/root.html.heex", themes));
-  // Every (status fill, onStatus foreground) pair the colour source writes, as Studio writes them.
-  const sourcePairs = new Set();
+  // Every (status fill, onStatus foreground) pair the colour source writes, as
+  // Studio writes them, with that pair's own floor from the table above.
+  const sourcePairs = new Map();
   for (const { name } of themes)
-    for (const sel of [`html[data-bp-theme="${name}"]`, `html[data-bp-theme="${name}"][data-theme="dark"]`]) {
+    for (const [mode, sel] of [["light", `html[data-bp-theme="${name}"]`], ["dark", `html[data-bp-theme="${name}"][data-theme="dark"]`]]) {
       const sv = ruleFor(studio, sel).vars;
-      for (const role of ["ok", "warn", "danger", "info"])
-        sourcePairs.add(`${resolveStudio(sv, `--${role}`)}|${resolveStudio(sv, `--${role}-fg`)}`);
+      const floors = SOURCE_TONE_FLOORS[`${name}/${mode}`];
+      assert.ok(floors, `${name}/${mode} has no row in SOURCE_TONE_FLOORS`);
+      for (const [role, tone] of [["ok", "success"], ["warn", "warning"], ["danger", "danger"], ["info", "info"]])
+        sourcePairs.set(`${resolveStudio(sv, `--${role}`)}|${resolveStudio(sv, `--${role}-fg`)}`, floors[tone]);
     }
   for (const { name } of themes) {
     const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
@@ -545,7 +561,7 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
           ...TONES.flatMap((t) => [
             [get(s, `${t}-text`), bg, 4.5, `${t}-text`],
             [get(s, t), bg, 3, `${t} fill`],
-            [get(s, `${t}-foreground`), get(s, t), sourcePairs.has(`${get(s, t)}|${get(s, `${t}-foreground`)}`) ? SOURCE_TONE_FLOOR : 4.5, `${t}-foreground on its fill`],
+            [get(s, `${t}-foreground`), get(s, t), sourcePairs.get(`${get(s, t)}|${get(s, `${t}-foreground`)}`) ?? 4.5, `${t}-foreground on its fill`],
           ]),
         ];
         for (const [fg, ground, floor, what] of pairs) {
@@ -555,6 +571,33 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
       }
     }
   }
+});
+
+// The control edge (--ui-input): the edge of anything a person operates, an
+// outlined button, a text field, a select, a checkbox. It must stand at 3:1
+// against the ground it sits on (WCAG 1.4.11), on every surface, and stay
+// clearly quieter than text: the foreground's contrast is at least 1.5 times
+// the edge's, so a field is not drawn in ink. --ui-border stays the hairline.
+test("BarkUI sheet: the control edge stands at 3:1 on every surface and stays quieter than text", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  let checked = 0;
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const mode of ["light", "dark"])
+      for (const s of SURFACES) {
+        const get = (r) => arms(v[`--bark-${s}-${r}`])[mode];
+        const at = `${name}/${mode}/${s}`;
+        const edge = contrast(get("input"), get("background"));
+        const text = contrast(get("foreground"), get("background"));
+        assert.ok(edge >= 3, `${at}: --ui-input is ${edge.toFixed(2)}:1 on its ground, under 3`);
+        assert.ok(text >= 1.5 * edge, `${at}: --ui-input ${edge.toFixed(2)}:1 is too close to the foreground's ${text.toFixed(2)}:1`);
+        checked++;
+      }
+  }
+  assert.equal(checked, themes.length * 2 * SURFACES.length);
 });
 
 test("BarkUI sheet: one rule per skin under both namings, and the scheme attributes set color-scheme", () => {

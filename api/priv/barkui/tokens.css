@@ -9,7 +9,7 @@
   --bark-base-muted: light-dark(hsl(240 4.8% 95.9%), hsl(240 3.7% 12%));
   --bark-base-muted-foreground: light-dark(hsl(240 3.8% 45%), hsl(240 5% 64.9%));
   --bark-base-border: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
-  --bark-base-input: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
+  --bark-base-input: light-dark(hsl(240 4% 47%), hsl(240 5% 51%));
   --bark-base-primary: light-dark(hsl(151.96 71.81% 29.22%), hsl(152.92 60% 52.94%));
   --bark-base-primary-foreground: light-dark(hsl(0 0% 100%), hsl(163 45% 8%));
   --bark-base-ring: light-dark(hsl(163 42% 30% / 0.15), hsl(152.92 60% 52.94% / 0.2));
@@ -39,7 +39,7 @@
   --bark-raised-muted: light-dark(hsl(240 4.8% 95.9%), hsl(240 3.7% 12%));
   --bark-raised-muted-foreground: light-dark(hsl(240 3.8% 45%), hsl(240 5% 64.9%));
   --bark-raised-border: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
-  --bark-raised-input: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
+  --bark-raised-input: light-dark(hsl(240 4% 47%), hsl(240 5% 51%));
   --bark-raised-primary: light-dark(hsl(151.96 71.81% 29.22%), hsl(152.92 60% 52.94%));
   --bark-raised-primary-foreground: light-dark(hsl(0 0% 100%), hsl(163 45% 8%));
   --bark-raised-ring: light-dark(hsl(163 42% 30% / 0.15), hsl(152.92 60% 52.94% / 0.2));
@@ -69,7 +69,7 @@
   --bark-sunken-muted: light-dark(hsl(240 2.52% 92.25%), hsl(240.07 4.62% 9.28%));
   --bark-sunken-muted-foreground: light-dark(hsl(240.02 3.96% 42.73%), hsl(240 5% 64.9%));
   --bark-sunken-border: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
-  --bark-sunken-input: light-dark(hsl(240 5.9% 90%), hsl(240 3.7% 15.9%));
+  --bark-sunken-input: light-dark(hsl(240 4% 47%), hsl(240 5% 51%));
   --bark-sunken-primary: light-dark(hsl(151.96 71.81% 29.22%), hsl(152.92 60% 52.94%));
   --bark-sunken-primary-foreground: light-dark(hsl(0 0% 100%), hsl(163 45% 8%));
   --bark-sunken-ring: light-dark(hsl(163 42% 30% / 0.15), hsl(152.92 60% 52.94% / 0.2));
@@ -99,7 +99,7 @@
   --bark-primary-muted: light-dark(hsl(155.19 100% 23.16%), hsl(158.76 100% 34.63%));
   --bark-primary-muted-foreground: light-dark(hsl(47.49 29.96% 94.84%), hsl(162.61 52.63% 13.92%));
   --bark-primary-border: light-dark(hsl(148.1 46.81% 40.76%), hsl(158.62 100% 31.83%));
-  --bark-primary-input: light-dark(hsl(148.1 46.81% 40.76%), hsl(158.62 100% 31.83%));
+  --bark-primary-input: light-dark(hsl(144.45 59.76% 69.03%), hsl(157.84 100% 21.85%));
   --bark-primary-primary: light-dark(hsl(0 0% 100%), hsl(163 45% 8%));
   --bark-primary-primary-foreground: light-dark(hsl(151.96 71.81% 29.22%), hsl(152.92 60% 52.94%));
   --bark-primary-ring: light-dark(hsl(0 0% 100% / 0.15), hsl(163 45% 8% / 0.2));
@@ -129,7 +129,7 @@
   --bark-inverse-muted: light-dark(hsl(240 3.7% 12%), hsl(240 4.8% 95.9%));
   --bark-inverse-muted-foreground: light-dark(hsl(240 5% 64.9%), hsl(240 3.8% 45%));
   --bark-inverse-border: light-dark(hsl(240 3.7% 15.9%), hsl(240 5.9% 90%));
-  --bark-inverse-input: light-dark(hsl(240 3.7% 15.9%), hsl(240 5.9% 90%));
+  --bark-inverse-input: light-dark(hsl(240 5% 51%), hsl(240 4% 47%));
   --bark-inverse-primary: light-dark(hsl(152.92 60% 52.94%), hsl(151.96 71.81% 29.22%));
   --bark-inverse-primary-foreground: light-dark(hsl(163 45% 8%), hsl(0 0% 100%));
   --bark-inverse-ring: light-dark(hsl(152.92 60% 52.94% / 0.2), hsl(163 42% 30% / 0.15));
@@ -162,7 +162,7 @@
   --bark-base-muted: light-dark(hsl(279.9 15.77% 95.84%), hsl(281.67 8.96% 5.56%));
   --bark-base-muted-foreground: light-dark(hsl(280.01 2.7% 41.61%), hsl(281.55 3.67% 61.01%));
   --bark-base-border: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
-  --bark-base-input: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
+  --bark-base-input: light-dark(hsl(279.98 2.03% 44.89%), hsl(235.39 2.93% 56%));
   --bark-base-primary: light-dark(hsl(282.39 44.23% 40.78%), hsl(282.56 58.11% 70.98%));
   --bark-base-primary-foreground: light-dark(hsl(0 0% 100%), hsl(282.56 45% 8%));
   --bark-base-ring: light-dark(hsl(282.39 44.23% 48.78% / 0.15), hsl(282.56 58.11% 70.98% / 0.2));
@@ -192,7 +192,7 @@
   --bark-raised-muted: light-dark(hsl(279.9 15.77% 95.84%), hsl(281.67 8.96% 5.56%));
   --bark-raised-muted-foreground: light-dark(hsl(280.01 2.7% 41.61%), hsl(281.55 3.67% 61.01%));
   --bark-raised-border: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
-  --bark-raised-input: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
+  --bark-raised-input: light-dark(hsl(279.98 2.03% 44.89%), hsl(235.39 2.93% 56%));
   --bark-raised-primary: light-dark(hsl(282.39 44.23% 40.78%), hsl(282.56 58.11% 70.98%));
   --bark-raised-primary-foreground: light-dark(hsl(0 0% 100%), hsl(282.56 45% 8%));
   --bark-raised-ring: light-dark(hsl(282.39 44.23% 48.78% / 0.15), hsl(282.56 58.11% 70.98% / 0.2));
@@ -222,7 +222,7 @@
   --bark-sunken-muted: light-dark(hsl(279.9 8.33% 92.19%), hsl(280.74 13.15% 3.16%));
   --bark-sunken-muted-foreground: light-dark(hsl(280.01 2.7% 41.61%), hsl(281.55 3.67% 61.01%));
   --bark-sunken-border: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
-  --bark-sunken-input: light-dark(hsl(279.92 7.63% 88.18%), hsl(281.64 6.45% 8.05%));
+  --bark-sunken-input: light-dark(hsl(279.98 2.03% 44.89%), hsl(235.39 2.93% 56%));
   --bark-sunken-primary: light-dark(hsl(282.39 44.23% 40.78%), hsl(282.56 58.11% 70.98%));
   --bark-sunken-primary-foreground: light-dark(hsl(0 0% 100%), hsl(282.56 45% 8%));
   --bark-sunken-ring: light-dark(hsl(282.39 44.23% 48.78% / 0.15), hsl(282.56 58.11% 70.98% / 0.2));
@@ -252,7 +252,7 @@
   --bark-primary-muted: light-dark(hsl(282.29 42.54% 42.5%), hsl(282.72 41.35% 60.21%));
   --bark-primary-muted-foreground: light-dark(hsl(28.98 47.1% 86.7%), hsl(282.49 34.12% 14.9%));
   --bark-primary-border: light-dark(hsl(281.96 36.78% 49.78%), hsl(282.66 45.84% 63.8%));
-  --bark-primary-input: light-dark(hsl(281.96 36.78% 49.78%), hsl(282.66 45.84% 63.8%));
+  --bark-primary-input: light-dark(hsl(281.35 76.33% 74.74%), hsl(283.38 41.29% 37.86%));
   --bark-primary-primary: light-dark(hsl(0 0% 100%), hsl(282.56 45% 8%));
   --bark-primary-primary-foreground: light-dark(hsl(282.39 44.23% 40.78%), hsl(282.56 58.11% 70.98%));
   --bark-primary-ring: light-dark(hsl(0 0% 100% / 0.15), hsl(282.56 45% 8% / 0.2));
@@ -282,7 +282,7 @@
   --bark-inverse-muted: light-dark(hsl(281.67 8.96% 5.56%), hsl(279.9 15.77% 95.84%));
   --bark-inverse-muted-foreground: light-dark(hsl(281.55 3.67% 61.01%), hsl(280.01 2.7% 41.61%));
   --bark-inverse-border: light-dark(hsl(281.64 6.45% 8.05%), hsl(279.92 7.63% 88.18%));
-  --bark-inverse-input: light-dark(hsl(281.64 6.45% 8.05%), hsl(279.92 7.63% 88.18%));
+  --bark-inverse-input: light-dark(hsl(235.39 2.93% 56%), hsl(279.98 2.03% 44.89%));
   --bark-inverse-primary: light-dark(hsl(282.56 58.11% 70.98%), hsl(282.39 44.23% 40.78%));
   --bark-inverse-primary-foreground: light-dark(hsl(282.56 45% 8%), hsl(0 0% 100%));
   --bark-inverse-ring: light-dark(hsl(282.56 58.11% 70.98% / 0.2), hsl(282.39 44.23% 48.78% / 0.15));
@@ -315,7 +315,7 @@
   --bark-base-muted: light-dark(hsl(16.91 26.32% 95.67%), hsl(18.16 16.09% 5.41%));
   --bark-base-muted-foreground: light-dark(hsl(16.98 4.69% 41.3%), hsl(18.07 6.38% 60.58%));
   --bark-base-border: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
-  --bark-base-input: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
+  --bark-base-input: light-dark(hsl(16.96 3.53% 44.65%), hsl(18.06 4.14% 50.97%));
   --bark-base-primary: light-dark(hsl(19.33 71.29% 40.98%), hsl(19.01 75.53% 63.14%));
   --bark-base-primary-foreground: light-dark(hsl(0 0% 100%), hsl(19.01 45% 8%));
   --bark-base-ring: light-dark(hsl(19.33 71.29% 48.98% / 0.15), hsl(19.01 75.53% 63.14% / 0.2));
@@ -345,7 +345,7 @@
   --bark-raised-muted: light-dark(hsl(16.91 26.32% 95.67%), hsl(18.16 16.09% 5.41%));
   --bark-raised-muted-foreground: light-dark(hsl(16.98 4.69% 41.3%), hsl(18.07 6.38% 60.58%));
   --bark-raised-border: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
-  --bark-raised-input: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
+  --bark-raised-input: light-dark(hsl(16.96 3.53% 44.65%), hsl(18.06 4.14% 50.97%));
   --bark-raised-primary: light-dark(hsl(19.33 71.29% 40.98%), hsl(19.01 75.53% 63.14%));
   --bark-raised-primary-foreground: light-dark(hsl(0 0% 100%), hsl(19.01 45% 8%));
   --bark-raised-ring: light-dark(hsl(19.33 71.29% 48.98% / 0.15), hsl(19.01 75.53% 63.14% / 0.2));
@@ -375,7 +375,7 @@
   --bark-sunken-muted: light-dark(hsl(16.91 14.18% 92.02%), hsl(16.48 23.07% 3.07%));
   --bark-sunken-muted-foreground: light-dark(hsl(16.98 4.69% 41.3%), hsl(18.07 6.38% 60.58%));
   --bark-sunken-border: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
-  --bark-sunken-input: light-dark(hsl(16.93 12.99% 87.94%), hsl(18.13 11.51% 7.89%));
+  --bark-sunken-input: light-dark(hsl(16.96 3.53% 44.65%), hsl(18.06 4.14% 50.97%));
   --bark-sunken-primary: light-dark(hsl(19.33 71.29% 40.98%), hsl(19.01 75.53% 63.14%));
   --bark-sunken-primary-foreground: light-dark(hsl(0 0% 100%), hsl(19.01 45% 8%));
   --bark-sunken-ring: light-dark(hsl(19.33 71.29% 48.98% / 0.15), hsl(19.01 75.53% 63.14% / 0.2));
@@ -405,7 +405,7 @@
   --bark-primary-muted: light-dark(hsl(18.82 65.14% 44.66%), hsl(19.12 67.38% 59.02%));
   --bark-primary-muted-foreground: light-dark(hsl(43.09 39.28% 98.55%), hsl(19.12 43.62% 18.59%));
   --bark-primary-border: light-dark(hsl(18.2 61.58% 52.53%), hsl(19.02 74.6% 62.71%));
-  --bark-primary-input: light-dark(hsl(18.2 61.58% 52.53%), hsl(19.02 74.6% 62.71%));
+  --bark-primary-input: light-dark(hsl(17.28 100% 80.08%), hsl(23.52 100% 27.13%));
   --bark-primary-primary: light-dark(hsl(0 0% 100%), hsl(19.01 45% 8%));
   --bark-primary-primary-foreground: light-dark(hsl(19.33 71.29% 40.98%), hsl(19.01 75.53% 63.14%));
   --bark-primary-ring: light-dark(hsl(0 0% 100% / 0.15), hsl(19.01 45% 8% / 0.2));
@@ -435,7 +435,7 @@
   --bark-inverse-muted: light-dark(hsl(18.16 16.09% 5.41%), hsl(16.91 26.32% 95.67%));
   --bark-inverse-muted-foreground: light-dark(hsl(18.07 6.38% 60.58%), hsl(16.98 4.69% 41.3%));
   --bark-inverse-border: light-dark(hsl(18.13 11.51% 7.89%), hsl(16.93 12.99% 87.94%));
-  --bark-inverse-input: light-dark(hsl(18.13 11.51% 7.89%), hsl(16.93 12.99% 87.94%));
+  --bark-inverse-input: light-dark(hsl(18.06 4.14% 50.97%), hsl(16.96 3.53% 44.65%));
   --bark-inverse-primary: light-dark(hsl(19.01 75.53% 63.14%), hsl(19.33 71.29% 40.98%));
   --bark-inverse-primary-foreground: light-dark(hsl(19.01 45% 8%), hsl(0 0% 100%));
   --bark-inverse-ring: light-dark(hsl(19.01 75.53% 63.14% / 0.2), hsl(19.33 71.29% 48.98% / 0.15));
@@ -468,7 +468,7 @@
   --bark-base-muted: light-dark(hsl(195.16 24.3% 95.35%), hsl(194.22 17.11% 5.16%));
   --bark-base-muted-foreground: light-dark(hsl(195.09 4.8% 40.74%), hsl(194.33 6.22% 59.89%));
   --bark-base-border: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
-  --bark-base-input: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
+  --bark-base-input: light-dark(hsl(195.12 3.58% 44.2%), hsl(194.33 4.06% 50.41%));
   --bark-base-primary: light-dark(hsl(191.6 80.95% 28.82%), hsl(193.27 62.43% 64.51%));
   --bark-base-primary-foreground: light-dark(hsl(0 0% 100%), hsl(193.27 45% 8%));
   --bark-base-ring: light-dark(hsl(191.6 80.95% 36.82% / 0.15), hsl(193.27 62.43% 64.51% / 0.2));
@@ -498,7 +498,7 @@
   --bark-raised-muted: light-dark(hsl(195.16 24.3% 95.35%), hsl(194.22 17.11% 5.16%));
   --bark-raised-muted-foreground: light-dark(hsl(195.09 4.8% 40.74%), hsl(194.33 6.22% 59.89%));
   --bark-raised-border: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
-  --bark-raised-input: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
+  --bark-raised-input: light-dark(hsl(195.12 3.58% 44.2%), hsl(194.33 4.06% 50.41%));
   --bark-raised-primary: light-dark(hsl(191.6 80.95% 28.82%), hsl(193.27 62.43% 64.51%));
   --bark-raised-primary-foreground: light-dark(hsl(0 0% 100%), hsl(193.27 45% 8%));
   --bark-raised-ring: light-dark(hsl(191.6 80.95% 36.82% / 0.15), hsl(193.27 62.43% 64.51% / 0.2));
@@ -528,7 +528,7 @@
   --bark-sunken-muted: light-dark(hsl(195.16 13.53% 91.71%), hsl(195.73 24.3% 2.87%));
   --bark-sunken-muted-foreground: light-dark(hsl(195.09 4.8% 40.74%), hsl(194.33 6.22% 59.89%));
   --bark-sunken-border: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
-  --bark-sunken-input: light-dark(hsl(195.15 12.47% 87.49%), hsl(194.26 11.99% 7.63%));
+  --bark-sunken-input: light-dark(hsl(195.12 3.58% 44.2%), hsl(194.33 4.06% 50.41%));
   --bark-sunken-primary: light-dark(hsl(191.6 80.95% 28.82%), hsl(193.27 62.43% 64.51%));
   --bark-sunken-primary-foreground: light-dark(hsl(0 0% 100%), hsl(193.27 45% 8%));
   --bark-sunken-ring: light-dark(hsl(191.6 80.95% 36.82% / 0.15), hsl(193.27 62.43% 64.51% / 0.2));
@@ -558,7 +558,7 @@
   --bark-primary-muted: light-dark(hsl(192.31 67.09% 33.06%), hsl(193.2 57.78% 61.66%));
   --bark-primary-muted-foreground: light-dark(hsl(44.81 22.56% 99.26%), hsl(193.2 36.68% 23.56%));
   --bark-primary-border: light-dark(hsl(193.14 51.36% 41.28%), hsl(193.25 60.93% 63.64%));
-  --bark-primary-input: light-dark(hsl(193.14 51.36% 41.28%), hsl(193.25 60.93% 63.64%));
+  --bark-primary-input: light-dark(hsl(194.15 64.08% 67.38%), hsl(190.19 100% 25.3%));
   --bark-primary-primary: light-dark(hsl(0 0% 100%), hsl(193.27 45% 8%));
   --bark-primary-primary-foreground: light-dark(hsl(191.6 80.95% 28.82%), hsl(193.27 62.43% 64.51%));
   --bark-primary-ring: light-dark(hsl(0 0% 100% / 0.15), hsl(193.27 45% 8% / 0.2));
@@ -588,7 +588,7 @@
   --bark-inverse-muted: light-dark(hsl(194.22 17.11% 5.16%), hsl(195.16 24.3% 95.35%));
   --bark-inverse-muted-foreground: light-dark(hsl(194.33 6.22% 59.89%), hsl(195.09 4.8% 40.74%));
   --bark-inverse-border: light-dark(hsl(194.26 11.99% 7.63%), hsl(195.15 12.47% 87.49%));
-  --bark-inverse-input: light-dark(hsl(194.26 11.99% 7.63%), hsl(195.15 12.47% 87.49%));
+  --bark-inverse-input: light-dark(hsl(194.33 4.06% 50.41%), hsl(195.12 3.58% 44.2%));
   --bark-inverse-primary: light-dark(hsl(193.27 62.43% 64.51%), hsl(191.6 80.95% 28.82%));
   --bark-inverse-primary-foreground: light-dark(hsl(193.27 45% 8%), hsl(0 0% 100%));
   --bark-inverse-ring: light-dark(hsl(193.27 62.43% 64.51% / 0.2), hsl(191.6 80.95% 36.82% / 0.15));
@@ -621,7 +621,7 @@
   --bark-base-muted: light-dark(hsl(235.46 20.43% 96.1%), hsl(243.29 9.75% 5.78%));
   --bark-base-muted-foreground: light-dark(hsl(235.74 3.22% 42.05%), hsl(242.8 4.23% 61.64%));
   --bark-base-border: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
-  --bark-base-input: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
+  --bark-base-input: light-dark(hsl(235.64 2.43% 45.25%), hsl(242.78 2.72% 51.82%));
   --bark-base-primary: light-dark(hsl(248.75 63.72% 55.69%), hsl(248.87 100% 77.45%));
   --bark-base-primary-foreground: light-dark(hsl(0 0% 100%), hsl(248.87 45% 8%));
   --bark-base-ring: light-dark(hsl(248.75 63.72% 62% / 0.15), hsl(248.87 100% 77.45% / 0.2));
@@ -651,7 +651,7 @@
   --bark-raised-muted: light-dark(hsl(235.46 20.43% 96.1%), hsl(243.29 9.75% 5.78%));
   --bark-raised-muted-foreground: light-dark(hsl(235.74 3.22% 42.05%), hsl(242.8 4.23% 61.64%));
   --bark-raised-border: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
-  --bark-raised-input: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
+  --bark-raised-input: light-dark(hsl(235.64 2.43% 45.25%), hsl(242.78 2.72% 51.82%));
   --bark-raised-primary: light-dark(hsl(248.75 63.72% 55.69%), hsl(248.87 100% 77.45%));
   --bark-raised-primary-foreground: light-dark(hsl(0 0% 100%), hsl(248.87 45% 8%));
   --bark-raised-ring: light-dark(hsl(248.75 63.72% 62% / 0.15), hsl(248.87 100% 77.45% / 0.2));
@@ -681,7 +681,7 @@
   --bark-sunken-muted: light-dark(hsl(235.46 10.47% 92.45%), hsl(243.23 14.5% 3.35%));
   --bark-sunken-muted-foreground: light-dark(hsl(235.74 3.22% 42.05%), hsl(242.8 4.23% 61.64%));
   --bark-sunken-border: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
-  --bark-sunken-input: light-dark(hsl(235.51 9.55% 88.53%), hsl(243.15 7.1% 8.28%));
+  --bark-sunken-input: light-dark(hsl(235.64 2.43% 45.25%), hsl(242.78 2.72% 51.82%));
   --bark-sunken-primary: light-dark(hsl(248.75 63.72% 55.69%), hsl(248.87 100% 77.45%));
   --bark-sunken-primary-foreground: light-dark(hsl(0 0% 100%), hsl(248.87 45% 8%));
   --bark-sunken-ring: light-dark(hsl(248.75 63.72% 62% / 0.15), hsl(248.87 100% 77.45% / 0.2));
@@ -711,7 +711,7 @@
   --bark-primary-muted: light-dark(hsl(247.59 71.21% 60.24%), hsl(249.1 88.46% 74.66%));
   --bark-primary-muted-foreground: light-dark(hsl(39.08 54.18% 96.77%), hsl(248.92 33.42% 23%));
   --bark-primary-border: light-dark(hsl(245.96 89.9% 68.22%), hsl(249.44 76.46% 70.92%));
-  --bark-primary-input: light-dark(hsl(245.96 89.9% 68.22%), hsl(249.44 76.46% 70.92%));
+  --bark-primary-input: light-dark(hsl(239 100% 83.45%), hsl(253.87 48.71% 43.18%));
   --bark-primary-primary: light-dark(hsl(0 0% 100%), hsl(248.87 45% 8%));
   --bark-primary-primary-foreground: light-dark(hsl(248.75 63.72% 55.69%), hsl(248.87 100% 77.45%));
   --bark-primary-ring: light-dark(hsl(0 0% 100% / 0.15), hsl(248.87 45% 8% / 0.2));
@@ -741,7 +741,7 @@
   --bark-inverse-muted: light-dark(hsl(243.29 9.75% 5.78%), hsl(235.46 20.43% 96.1%));
   --bark-inverse-muted-foreground: light-dark(hsl(242.8 4.23% 61.64%), hsl(235.74 3.22% 42.05%));
   --bark-inverse-border: light-dark(hsl(243.15 7.1% 8.28%), hsl(235.51 9.55% 88.53%));
-  --bark-inverse-input: light-dark(hsl(243.15 7.1% 8.28%), hsl(235.51 9.55% 88.53%));
+  --bark-inverse-input: light-dark(hsl(242.78 2.72% 51.82%), hsl(235.64 2.43% 45.25%));
   --bark-inverse-primary: light-dark(hsl(248.87 100% 77.45%), hsl(248.75 63.72% 55.69%));
   --bark-inverse-primary-foreground: light-dark(hsl(248.87 45% 8%), hsl(0 0% 100%));
   --bark-inverse-ring: light-dark(hsl(248.87 100% 77.45% / 0.2), hsl(248.75 63.72% 62% / 0.15));
