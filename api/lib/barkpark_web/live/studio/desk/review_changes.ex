@@ -264,6 +264,7 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
   def revert(params, socket) do
     with true <- PostIdentity.ours?(params, socket),
          false <- RevisionView.shown?(socket.assigns),
+         false <- BarkparkWeb.Studio.Desk.PublishedView.active?(socket.assigns),
          %{} <- socket.assigns[:editor_doc],
          [_ | _] = changes <- targets(socket, params) do
       {:noreply, Enum.reduce(changes, socket, &write/2)}

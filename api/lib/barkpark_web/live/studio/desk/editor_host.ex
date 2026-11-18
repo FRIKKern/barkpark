@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.PublishedView
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.ReviewChanges
   alias BarkparkWeb.Studio.Desk.RevisionView
@@ -80,6 +81,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
        desk_gone_latest: nil,
        desk_new: nil,
        desk_published: nil,
+       desk_published_view: nil,
        desk_changes: nil,
        desk_review: nil
      )
@@ -93,7 +95,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # The deleted document's restore reads its newest revision on the same tick.
   defp on_info(message, socket) do
     {:cont, socket} = IncomingRefs.on_info(message, socket)
-    {:cont, RevisionView.on_info(message, socket)}
+    {:cont, message |> RevisionView.on_info(socket) |> then(&PublishedView.on_info(message, &1))}
   end
 
   @doc "What the last pane edits, when it is a document whose type the URL states."
@@ -147,6 +149,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       desk_gone_latest: nil,
       desk_new: nil,
       desk_published: nil,
+      desk_published_view: nil,
       desk_changes: nil,
       desk_review: nil
     )
@@ -205,6 +208,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> HistoryPanel.load()
       |> RevisionView.load()
       |> ReviewChanges.follow()
+      |> PublishedView.follow()
 
   # The document's references, as links that open the next pane: the
   # Studio's reference fields pick a target, they do not follow one. The
@@ -308,6 +312,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   def handle_event(event, params, socket) when is_map_key(@picks, event) do
     with true <- is_map_key(socket.assigns, :editor_form),
          false <- RevisionView.shown?(socket.assigns),
+         false <- PublishedView.active?(socket.assigns),
          true <- Enum.all?(@picks[event], &is_map_key(params, &1)),
          :cont <- NewDoc.guard(event, params, socket) do
       event |> StudioLive.handle_event(params, socket) |> ours()
@@ -343,6 +348,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       RevisionView.refuses?(event, socket.assigns) ->
         {:noreply, socket}
 
+      # The published version is read-only: Unpublish is its one write.
+      PublishedView.refuses?(event, socket.assigns) ->
+        {:noreply, socket}
+
       event in @form_writes and Discarded.drop?(socket.assigns) ->
         {:noreply, Discarded.drop(socket)}
 
@@ -368,7 +377,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   """
   def write_built(params, socket) do
     cond do
-      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) ->
+      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) or
+          PublishedView.active?(socket.assigns) ->
         {:noreply, socket}
 
       Discarded.drop?(socket.assigns) ->
@@ -428,6 +438,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> DocDialog.follow()
       |> HistoryPanel.follow()
       |> ReviewChanges.follow()
+      |> PublishedView.follow()
       |> NewDoc.settle()
       |> SlugInUse.refresh()
       |> assign(:panes, [])
@@ -619,8 +630,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The footer follows the page's perspective (`Panes.perspective/1`):
   # Unpublish in Publish's place at `?perspective=published`. A singleton is
-  # never unpublished (the Studio withholds the action), so its footer stays
-  # as it is. The form is the draft's in either perspective.
+  # never unpublished (the Studio withholds the action): no Unpublish. Over a
+  # form the published version is shown read-only (`PublishedView`); a sheet
+  # or a paper keeps its own editor and this footer.
   defp footer_perspective(assigns) do
     if "unpublish" in DocActions.withheld_action_names(assigns[:editor_schema]),
       do: :drafts,
@@ -670,9 +682,13 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <%!-- The TanStack Studio's Published / Draft pills (`DocStatus`). With
               the form's big title drawn (`Desk.DocStyle`), the title below is
               for screen readers only, unless it holds focus mode's way back. --%>
+        <%!-- They switch the perspective, as TanStack's (`PublishedView`). --%>
         <DocStatus.chips
           :if={!@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc])}
           {DocStatus.state(assigns)}
+          perspective={Panes.perspective(assigns[:desk_uri])}
+          published_href={HistoryPanel.path(@chain, @view.index, @base, :published, %{})}
+          drafts_href={HistoryPanel.path(@chain, @view.index, @base, :drafts, %{})}
         />
         <%!-- In focus mode the title line is the panes it hides, each a way
               back (`FocusMode`). One title element, the same tag, either way:
@@ -751,6 +767,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
                   Panes.perspective(assigns[:desk_uri])
                 )
                 |> RevisionView.menu(assigns)
+                |> PublishedView.menu(assigns)
           }
         />
         <%!-- Sanity's "Split pane right": the same document again, beside
@@ -840,7 +857,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             went would make the patch rebuild the editor below it. --%>
       <div id={"#{@view.id}-title-bar"} class="doc-title-bar dk-title-bar">
         <%= if !@edit_failed and !gone?(assigns) and is_map(assigns[:editor_doc]) do %>
-          <div class="title-row"><span class="title">{@page_title}</span></div>
+          <div class="title-row">
+            <span class="title">
+              {if PublishedView.shown?(assigns), do: PublishedView.title(assigns), else: @page_title}
+            </span>
+          </div>
           <div :if={!document_node?(@view.pane)} class="view-tabs" role="tablist" aria-label={gettext("Views")}>
             <button type="button" role="tab" aria-selected="true" tabindex="0">{gettext("Editor")}</button>
             <button
@@ -894,19 +915,23 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               desk: the desk draws its dialogs below, from the same assigns. --%>
         <%!-- An old revision (`rev`) is the Studio's form over its values, in a
               disabled fieldset (`RevisionView`); one that is not shown says so.
-              The live form sits in the same fieldset, enabled: the holders
-              after it keep their place when a History row is picked, so the
-              row keeps the focus. --%>
+              So is the published version in the published perspective
+              (`PublishedView`). The live form sits in the same fieldset,
+              enabled: the holders after it keep their place when a History
+              row is picked, so the row keeps the focus. --%>
         <fieldset
           id={"#{@view.id}-form-holder"}
           class="dk-revision-form"
-          disabled={RevisionView.shown?(assigns)}
+          disabled={RevisionView.shown?(assigns) or PublishedView.shown?(assigns)}
           data-desk-revision-form={RevisionView.shown?(assigns)}
+          data-desk-published-form={PublishedView.shown?(assigns)}
         >
           <%= cond do %>
             <% @edit_failed or gone?(assigns) -> %>
             <% RevisionView.shown?(assigns) -> %>
               {Components.studio_live_shell(RevisionView.shell_assigns(assigns))}
+            <% PublishedView.shown?(assigns) -> %>
+              {Components.studio_live_shell(PublishedView.shell_assigns(assigns))}
             <% RevisionView.missing?(assigns) -> %>
               <p class="dk-note" role="alert" data-desk-revision-missing>
                 {gettext("This revision can't be found. Pick another entry in the history.")}
@@ -998,10 +1023,27 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         revision={@desk_revision}
         menu_button={"#{@view.id}-actions-button"}
       />
+      <%!-- The published version's footer (`PublishedView`): its words and
+            Unpublish, no "…", as TanStack's `PublishedFooter`. --%>
+      <div
+        :if={PublishedView.shown?(assigns) and !@edit_failed and !gone?(assigns)}
+        id={"#{@view.id}-footer"}
+        class="dk-edit-footer doc-footer"
+      >
+        <BarkparkWeb.Studio.Desk.DocFooter.bar
+          id={"#{@view.id}-footer"}
+          status={PublishedView.status(assigns)}
+          menu_button={"#{@view.id}-actions-button"}
+          perspective={:published}
+          published?={PublishedView.published?(assigns)}
+          unpublish?={footer_perspective(assigns) == :published}
+        />
+      </div>
       <% items =
-        if @edit_failed or gone?(assigns) or RevisionView.shown?(assigns),
-          do: [],
-          else: NewDoc.offered(DocMenu.items(assigns), assigns) %>
+        if @edit_failed or gone?(assigns) or RevisionView.shown?(assigns) or
+             PublishedView.shown?(assigns),
+           do: [],
+           else: NewDoc.offered(DocMenu.items(assigns), assigns) %>
       <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}

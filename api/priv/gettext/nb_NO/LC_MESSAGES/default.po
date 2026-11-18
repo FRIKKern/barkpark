@@ -15407,3 +15407,8 @@ msgstr "Kopier dokument"
 #, elixir-autogen, elixir-format
 msgid "Paste document"
 msgstr "Lim inn dokument"
+
+#: lib/barkpark_web/live/studio/desk/published_view.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{ago}"
+msgstr "Avpublisert %{ago}"

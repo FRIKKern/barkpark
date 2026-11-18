@@ -9,7 +9,8 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
   value, as the three clipboard types (`FieldClip.doc_copy/3`), or `empty`,
   the words that refuse a document with nothing in it. The document copied
   is the one the pane shows: the old revision while one is shown
-  (`RevisionView`), else the open document as the editor holds it (for a
+  (`RevisionView`), the published version in the published perspective
+  (`PublishedView`), else the open document as the editor holds it (for a
   viewer already redacted, as the form is). `bp-desk-doc-clip.js` writes the
   clipboard, since only the browser can.
 
@@ -30,8 +31,9 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
 
   The paste names the document of the form it was pressed in
   (`PostIdentity`): one pressed in another document writes nothing. While an
-  old revision is shown nothing is pasted, and the menu has no Paste
-  (`RevisionView.menu/2`); Copy stays, as a read.
+  old revision or the published version is shown nothing is pasted, and the
+  menu has no Paste (`RevisionView.menu/2`, `PublishedView.menu/2`); Copy
+  stays, as a read.
   """
   use Gettext, backend: BarkparkWeb.Gettext
 
@@ -42,6 +44,7 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FieldClip
+  alias BarkparkWeb.Studio.Desk.PublishedView
   alias BarkparkWeb.Studio.Desk.RevisionView
   alias BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -103,7 +106,8 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
 
   def handle_event("desk-doc-paste", %{"clip" => clip} = params, socket) when is_binary(clip) do
     if PostIdentity.ours?(params, socket) and is_map(socket.assigns[:editor_doc]) and
-         not RevisionView.shown?(socket.assigns),
+         not RevisionView.shown?(socket.assigns) and
+         not PublishedView.active?(socket.assigns),
        do: paste(clip, socket),
        else: {:noreply, socket}
   end
@@ -126,11 +130,13 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
 
   defp copy(_assigns), do: nil
 
-  defp shown_doc(%{desk_revision: %{doc: %{} = doc}} = assigns) do
-    if RevisionView.shown?(assigns), do: doc, else: assigns.editor_doc
+  defp shown_doc(assigns) do
+    cond do
+      RevisionView.shown?(assigns) -> assigns.desk_revision.doc
+      PublishedView.shown?(assigns) -> assigns.desk_published_view.doc
+      true -> assigns.editor_doc
+    end
   end
-
-  defp shown_doc(assigns), do: assigns.editor_doc
 
   # The schema's top-level fields, with the Title the form draws for a
   # `title` the schema need not declare.
