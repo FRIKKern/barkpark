@@ -158,7 +158,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # read and refuses a caller with no workspace outright. Clearing writes
   # nothing at all.
   #
-  # `desk-scope-toggle` / `desk-scope-close` / `desk-scope-go` are the desk
+  # `desk-scope-load` / `desk-scope-go` are the desk
   # navbar's switcher (`Desk.ScopeSwitch`), the `scope-menu-*` / `scope-open`
   # pair's twins: they list the principal's own membership places and go to
   # one after the same reachability gate, and they write nothing.
@@ -166,7 +166,7 @@ defmodule BarkparkWeb.Studio.Caps do
     select select-group select-desk select-pane expand-pane
     switch-workspace switch-project switch-dataset toggle-create
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
-    desk-scope-toggle desk-scope-close desk-scope-go
+    desk-scope-load desk-scope-go
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket

@@ -6,6 +6,12 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
   d. Switch". It opens a card with one row a place, where you are first and
   checked; one click goes there.
 
+  The card is a popover, as the desk's other menus (`Desk.Menu`): the
+  browser opens and closes it at once, on the button, a click outside and
+  Escape, and a patch keeps it open. Opening it also asks the server for the
+  places (`desk-scope-load`), once a page; until they come the card shows
+  its head only. A pick closes it (`bp-desk-navbar.js`).
+
   The places are the workspaces this socket's principal is a member of
   (`Tenancy.list_workspaces_for/1`, the old switcher's list), their projects
   and their datasets, read when the card opens. A dataset-bound token sees
@@ -36,17 +42,15 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
   # Sanity colours each workspace's icon; a steady hue per place.
   @hues [230, 270, 0, 160, 30, 200, 320, 100]
 
-  @doc "The card's events: open or close it, and go to a place."
-  def handle_event("desk-scope-toggle", _params, socket) do
+  @doc "The card's events: read its places (once), and go to a place."
+  def handle_event("desk-scope-load", _params, socket) do
     if socket.assigns[:desk_scope],
-      do: {:noreply, Phoenix.Component.assign(socket, :desk_scope, nil)},
+      do: {:noreply, socket},
       else: {:noreply, Phoenix.Component.assign(socket, :desk_scope, places(socket.assigns))}
   end
 
-  def handle_event("desk-scope-close", _params, socket),
-    do: {:noreply, Phoenix.Component.assign(socket, :desk_scope, nil)}
-
   def handle_event("desk-scope-go", params, socket), do: {:noreply, go(socket, params)}
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   @doc """
   Every place the principal may open, grouped by workspace and project, the
@@ -146,7 +150,7 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
          true <- Enum.any?(Tenancy.list_datasets(project.id), &(&1.slug == ds)),
          true <- bound(assigns) in [nil, ds] do
       if {ws.slug, project.slug, ds} == here(assigns) do
-        Phoenix.Component.assign(socket, :desk_scope, nil)
+        socket
       else
         redirect(socket, to: switched_path(assigns, ws, project, ds))
       end
@@ -160,9 +164,8 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
   # One sentence for not found, not reachable and gone stale, as the old
   # switcher's: a guessed slug must not learn that it exists.
   defp refuse(socket) do
-    socket
-    |> Phoenix.Component.assign(:desk_scope, nil)
-    |> put_flash(
+    put_flash(
+      socket,
       :error,
       gettext("Could not open that place. It does not exist, or you do not have access to it.")
     )
@@ -213,19 +216,21 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
   attr :workspace, :map, required: true
   attr :project, :map, default: nil
   attr :dataset, :string, required: true
-  attr :menu, :map, default: nil, doc: "`places/1` while the card is open, else nil"
+  attr :menu, :map, default: nil, doc: "`places/1` once the card has asked for them, else nil"
 
-  @doc "The brand button and, while open, its card."
+  @doc "The brand button and its card (hidden until the button opens it)."
   def switcher(assigns) do
     assigns = assign(assigns, :name, assigns.workspace.name || assigns.workspace.slug)
 
     ~H"""
-    <div class="menu-wrap scope-switcher dk-scope dk" id="dk-scope" phx-click-away={@menu && "desk-scope-close"}>
+    <div class="menu-wrap scope-switcher dk-scope dk" id="dk-scope">
       <button
+        id="dk-scope-button"
         type="button"
         class="scope-button brand-button"
+        popovertarget="dk-scope-card"
         aria-haspopup="dialog"
-        aria-expanded={if @menu, do: "true", else: "false"}
+        style="anchor-name: --dk-scope"
         aria-label={
           gettext("Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch",
             workspace: @workspace.slug,
@@ -234,18 +239,18 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
           )
         }
         title={"#{@workspace.slug} / #{@dataset}"}
-        phx-click="desk-scope-toggle"
+        phx-click="desk-scope-load"
       >
         <span class="brand-name">{@name}</span>
         <BarkparkWeb.Icons.desk_icon name="chevron-down" size={21} />
       </button>
       <div
-        :if={@menu}
+        id="dk-scope-card"
+        popover
         class="popover scope-popover"
         role="dialog"
         aria-label={gettext("Switch workspace, project or dataset")}
-        phx-window-keydown="desk-scope-close"
-        phx-key="Escape"
+        style="position-anchor: --dk-scope; inset: auto; top: anchor(bottom); left: anchor(left); margin: 6px 0 0 -37px"
       >
         <div class="scope-head">
           <div class="scope-card">
@@ -256,7 +261,7 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
             </span>
           </div>
         </div>
-        <div class="scope-places">
+        <div :if={@menu} class="scope-places">
           <section :for={group <- @menu.groups} aria-label={group.label}>
             <h2 class="scope-places-head">{group.label}</h2>
             <ul class="scope-list">

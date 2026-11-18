@@ -259,15 +259,25 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
 
       assert has_element?(
                view,
-               ~s(.scope-popover[role="dialog"][aria-label="Switch workspace, project or dataset"])
+               ~s(#dk-scope-card.scope-popover[role="dialog"][aria-label="Switch workspace, project or dataset"] .scope-place)
              )
 
       view
     end
 
-    test "it lists where you are first and checked, your own places only, and closes", c do
+    test "it lists where you are first and checked, your own places only, and closes in the browser",
+         c do
       {:ok, view, _html} = live(c.conn, c.base)
-      refute has_element?(view, ".scope-popover")
+
+      # The card is a popover: the browser opens it at once and closes it on a
+      # click outside and on Escape. Its places are read when it first opens.
+      assert has_element?(
+               view,
+               ~s(#dk-scope-button[popovertarget="dk-scope-card"][phx-click="desk-scope-load"])
+             )
+
+      assert has_element?(view, ~s(#dk-scope-card[popover][role="dialog"]))
+      refute has_element?(view, ".scope-place")
       open_switcher(view)
 
       first = ".scope-popover section:first-of-type"
@@ -296,13 +306,18 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
       # A workspace this token is no member of is not offered.
       refute render(view) =~ "secret-#{c.n}"
       refute render(view) =~ c.foreign.slug
-
-      render_click(view, "desk-scope-close", %{})
-      refute has_element?(view, ".scope-popover")
     end
 
     test "a pick opens the same panes there, as far as the target has them", c do
       {:ok, view, _html} = live(c.conn, "#{c.base}/#{c.type};both-#{c.n}")
+      render_async(view, 5_000)
+
+      # A document row is TanStack's `pane-item` (the B02 journey follows one).
+      assert has_element?(
+               view,
+               ~s(a.pane-item[data-testid="pane-item"][href="#{c.base}/#{c.type};here-#{c.n}"])
+             )
+
       open_switcher(view)
 
       target = "/w/#{c.ws.slug}/p/#{c.proj.slug}/d/#{c.other_ds}/studio/_desk"
@@ -338,7 +353,8 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
         })
 
       assert html =~ "Could not open that place"
-      refute has_element?(view, ".scope-popover")
+      # Nothing of that place is shown, and the page stays where it was.
+      refute html =~ "secret-#{c.n}"
 
       # Nor a dataset that is not in the project.
       render_click(view, "desk-scope-go", %{

@@ -1,4 +1,4 @@
-// The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu), as the TanStack
+// The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu, Desk.ScopeSwitch), as the TanStack
 // Studio's Navbar.tsx: the appearance radios, the help menu's two dialogs and
 // its "New version available". The menus open and close as popovers by
 // themselves; this script does what a popover cannot. It runs once a page,
@@ -104,6 +104,15 @@
       setAppearance(doc, radio.getAttribute("data-desk-appearance"));
       var menu = radio.closest("[popover]");
       if (menu && menu.matches(":popover-open")) menu.hidePopover();
+      return;
+    }
+
+    // A place picked in the switcher (Desk.ScopeSwitch): its card closes at
+    // once; the server goes there, or says it cannot.
+    var place = target.closest(".scope-place");
+    if (place) {
+      var card = place.closest("[popover]");
+      if (card && card.matches(":popover-open")) card.hidePopover();
       return;
     }
 

@@ -21,11 +21,12 @@ defmodule BarkparkWeb.Studio.Desk.NavbarStyle do
       .studio-shell:has(.dk) .navbar .logo + .scope-switcher { margin-left: -4px; }
       .studio-shell:has(.dk) .navbar .dk-scope { position: relative; min-width: 0; display: flex; }
       .studio-shell:has(.dk) .navbar .scope-button { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 320px; padding: 3px 6px 3px 8px; border: 0; border-radius: 3px; background: none; font: inherit; font-weight: 500; color: var(--dk-nav-fg); cursor: pointer; }
-      .studio-shell:has(.dk) .navbar .scope-button:hover, .studio-shell:has(.dk) .navbar .scope-button[aria-expanded="true"] { background: var(--dk-nav-hover); color: var(--dk-nav-hover-fg); }
+      .studio-shell:has(.dk) .navbar .scope-button:hover, .studio-shell:has(.dk) .navbar .scope-switcher:has(.scope-popover:popover-open) .scope-button { background: var(--dk-nav-hover); color: var(--dk-nav-hover-fg); }
       .studio-shell:has(.dk) .navbar .scope-button:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-nav-focus); }
       .studio-shell:has(.dk) .navbar .scope-button svg { flex: none; width: 17px; height: 17px; color: var(--fg-muted); }
       .studio-shell:has(.dk) .navbar .brand-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .studio-shell:has(.dk) .navbar .scope-popover { position: absolute; top: calc(100% + 6px); left: -37px; z-index: 40; width: 280px; display: flex; flex-direction: column; border-radius: 6px; background: var(--dk-nav-bg); color: var(--dk-nav-fg); box-shadow: var(--dk-popover-shadow); font-weight: 400; }
+      .studio-shell:has(.dk) .navbar .scope-popover { box-sizing: border-box; width: 280px; padding: 0; border: 0; border-radius: 6px; background: var(--dk-nav-bg); color: var(--dk-nav-fg); box-shadow: var(--dk-popover-shadow); font-weight: 400; }
+      .studio-shell:has(.dk) .navbar .scope-popover:popover-open { display: flex; flex-direction: column; }
       .studio-shell:has(.dk) .navbar .scope-head { display: flex; flex-direction: column; padding: 20px 20px 16px; }
       .studio-shell:has(.dk) .navbar .scope-card { display: flex; align-items: center; gap: 8px; }
       .studio-shell:has(.dk) .navbar .scope-card-logo { width: 41px; height: 41px; font-size: 15px; }
