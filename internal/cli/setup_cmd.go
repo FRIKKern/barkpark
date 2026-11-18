@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/mattn/go-isatty"
@@ -129,7 +131,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 		return exitOK
 	}
 
-	plan, parsed, perr := parseSetupFlags(tail)
+	plan, parsed, tokenFile, perr := parseSetupFlags(tail)
 	if perr != nil {
 		return setupUsageError(out, jsonOut, "usage", perr.Error())
 	}
@@ -154,6 +156,22 @@ func runSetup(out *writer, g globals, tail []string) int {
 	// saved server (otherwise plan.Token stays empty and the entry saves tokenless).
 	if plan.Token == "" {
 		plan.Token = g.token
+	}
+	// --token - reads the token from stdin and --token-file <path> from a file,
+	// so an admin token never has to sit on argv. Only connect saves a token.
+	if parsed["token-file"] && plan.Token != "" {
+		return setupUsageError(out, jsonOut, "usage", "give --token or --token-file, not both")
+	}
+	if parsed["token-file"] || plan.Token == "-" {
+		src := "-"
+		if parsed["token-file"] {
+			src = tokenFile
+		}
+		tok, terr := readSetupToken(src)
+		if terr != nil {
+			return setupUsageError(out, jsonOut, "usage", terr.Error())
+		}
+		plan.Token = tok
 	}
 
 	// CONNECT convenience: when no --server was given anywhere (setup-local nor the
@@ -462,7 +480,8 @@ FLAGS
   --server <url>      server URL for connect (http:// or https://)
   --name <handle>     short name to save this server under (bp use <handle>)
   --keep-active       connect: save the server but keep the active server as it is
-  --token <tok>       bearer token to persist with the connection
+  --token <tok>       bearer token to persist with the connection; - reads it from stdin
+  --token-file <path> read the token from a file, so it stays off the command line
   -w, --workspace <w> workspace scope (default: default)
   -p, --project <p>   project scope (default: default)
   -d, --dataset <ds>  dataset scope (default: production)
@@ -503,18 +522,20 @@ SEE ALSO
 // partially-filled plan plus a set of which flags were seen (so the caller can
 // tell "no --target" from "--target connect"). It is a small hand parser in the
 // same spirit as splitArgs but scoped to setup's known flags.
-func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
+func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, string, error) {
 	plan := setup.SetupPlan{}
 	seen := map[string]bool{}
+	tokenFile := ""
 
 	valueFlag := map[string]*string{
-		"target":    &plan.Target,
-		"server":    &plan.Server,
-		"name":      &plan.Name,
-		"token":     &plan.Token,
-		"workspace": &plan.Workspace,
-		"project":   &plan.Project,
-		"dataset":   &plan.Dataset,
+		"target":     &plan.Target,
+		"server":     &plan.Server,
+		"name":       &plan.Name,
+		"token":      &plan.Token,
+		"token-file": &tokenFile,
+		"workspace":  &plan.Workspace,
+		"project":    &plan.Project,
+		"dataset":    &plan.Dataset,
 		// modes-step fields, accepted now so the flags don't error before the
 		// executors exist:
 		"ssh-host":    &plan.SSHHost,
@@ -530,7 +551,7 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 	for i < len(tail) {
 		a := tail[i]
 		if len(a) < 3 || a[0] != '-' || a[1] != '-' {
-			return plan, nil, fmt.Errorf("unexpected argument %q for setup (use --flag value)", a)
+			return plan, nil, "", fmt.Errorf("unexpected argument %q for setup (use --flag value)", a)
 		}
 		name := a[2:]
 		val := ""
@@ -563,7 +584,7 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 		if name == "plugins" {
 			if !hasInline {
 				if i+1 >= len(tail) {
-					return plan, nil, fmt.Errorf("flag --plugins needs a value (use --plugins \"\" for none)")
+					return plan, nil, "", fmt.Errorf("flag --plugins needs a value (use --plugins \"\" for none)")
 				}
 				val = tail[i+1]
 				i++
@@ -576,11 +597,11 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 
 		dst, ok := valueFlag[name]
 		if !ok {
-			return plan, nil, fmt.Errorf("unknown setup flag --%s", name)
+			return plan, nil, "", fmt.Errorf("unknown setup flag --%s", name)
 		}
 		if !hasInline {
 			if i+1 >= len(tail) {
-				return plan, nil, fmt.Errorf("flag --%s needs a value", name)
+				return plan, nil, "", fmt.Errorf("flag --%s needs a value", name)
 			}
 			val = tail[i+1]
 			i++
@@ -589,7 +610,32 @@ func parseSetupFlags(tail []string) (setup.SetupPlan, map[string]bool, error) {
 		seen[name] = true
 		i++
 	}
-	return plan, seen, nil
+	return plan, seen, tokenFile, nil
+}
+
+// readSetupToken reads a token from stdin ("-") or a file: the first line,
+// without its line ending. An empty token is an error, so a missing redirect
+// never saves a tokenless server.
+func readSetupToken(src string) (string, error) {
+	var r io.Reader = secretStdinReader
+	what := "stdin"
+	if src != "-" {
+		f, err := os.Open(src)
+		if err != nil {
+			return "", fmt.Errorf("--token-file: %v", err)
+		}
+		defer f.Close()
+		r, what = f, src
+	}
+	line, err := bufio.NewReader(io.LimitReader(r, 64<<10)).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("read the token from %s: %v", what, err)
+	}
+	tok := strings.TrimSpace(line)
+	if tok == "" {
+		return "", fmt.Errorf("the token from %s is empty; redirect the file that holds it, such as --token - < ./admin-token", what)
+	}
+	return tok, nil
 }
 
 // parsePluginsCSV turns a --plugins value into the plan's Plugins slice with the

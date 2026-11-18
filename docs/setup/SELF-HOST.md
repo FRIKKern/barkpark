@@ -18,7 +18,7 @@ bp instance up --azure --path vm --resource-group <resource group> --host <dns l
 bp instance up --azure --path containerapps --resource-group <resource group> --region norwayeast --owner <owner upn>
 ```
 
-`--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. On Path A, `--disk-sku` and `--disk-gb` set the OS disk, by default a 30 GiB Premium SSD with 120 IOPS. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
+`--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On Path B, leave out `--host`. On Path A, `--disk-sku` and `--disk-gb` set the OS disk, by default a 30 GiB Premium SSD with 120 IOPS. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
 
 `--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 
@@ -109,7 +109,7 @@ bp instance check --env-file barkpark.env --target <target> --skip database,medi
    ```
 
    `deploy.sh` runs `ghcr.io/frikkern/barkpark` at the latest release, in about 2 minutes. Add `BARKPARK_IMAGE=<ref>` after `sudo` for another image, or `BARKPARK_FROM_SOURCE=<git ref>` to build `api/Dockerfile` on the VM without ghcr.io, in about 5 minutes. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). It ends with `bp instance check`.
-4. <!-- run --> In the same shell, run `bp setup --target connect --server https://<host> --token "$(ssh "${o[@]}" azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`. It becomes the active server.
+4. <!-- run --> In the same shell, run `ssh "${o[@]}" azureuser@<ip> sudo cat /etc/barkpark/admin-token | bp setup --target connect --server https://<host> --token -`. It becomes the active server unless you add `--keep-active`.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. Updates and rollback are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If HTTPS fails and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
@@ -133,7 +133,7 @@ az deployment group create -g "$RG" -n barkpark -p main.bicepparam -p alertEmail
 ```bash
 URL=$(az deployment group show -g <resource group> -n barkpark --query properties.outputs.url.value -o tsv)
 curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$URL/readyz"
-bp setup --target connect --server "$URL" --token "$(sed -n 's/^BARKPARK_SEED_ADMIN_TOKEN=//p' barkpark.env)"
+sed -n 's/^BARKPARK_SEED_ADMIN_TOKEN=//p' barkpark.env | bp setup --target connect --server "$URL" --token -
 ```
 
 <!-- run hook=jobs --> Run `az containerapp job start -g <resource group> -n barkpark-ops` for `bp instance check` in the network, and the same with `barkpark-backup` for a [backup](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill).
