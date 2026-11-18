@@ -71,7 +71,9 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
       const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
       const failed = ctx.errors[0] ?? offs[0]
       for (const [k, l] of Object.entries(lights)) log(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
-      for (const [k, m] of Object.entries(measures)) if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
+      for (const [k, m] of Object.entries(measures))
+        if (m?.againstGround) log(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
+        else if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
       if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
       for (const l of Object.values(lights)) l.surface = PROVED_ON
       proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, steps, ...(failed ? { failed } : {}) }

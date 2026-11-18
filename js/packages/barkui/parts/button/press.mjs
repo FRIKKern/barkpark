@@ -1,6 +1,7 @@
-// Real-key steps for the button. `setup` and each `expect` run inside the page
-// with the part's example element and the check's helpers (`h`), so they may
-// not reach anything else in this file. An expect returns true or a reason.
+// Real-key steps for the button. `setup` and each `expect` run in an isolated
+// world of the page (its DOM, none of its script, and not the check's own
+// world) with the part's example element and a copy of the check's helpers
+// (`h`), so they may not reach anything else in this file. An expect returns true or a reason.
 // `ax` names what the browser hands a screen reader for an element (role,
 // name, states), read after the expect passes. Keys go through the browser's
 // own input pipeline. The check focuses the part's heading first; the first

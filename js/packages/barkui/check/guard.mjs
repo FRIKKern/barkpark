@@ -5,6 +5,7 @@
 // with the same build run without any demo (the baseline): the stylesheets,
 // their rules, adopted sheets, style attributes in a stage, and animations
 // started from script.
+import { source } from './probes.mjs'
 
 // Runs in the isolated world. Rule text is read wherever the world may read it;
 // a linked sheet it may not read counts by its file name.
@@ -19,16 +20,25 @@ const SNAPSHOT = `(() => {
   return { sheets, adopted, styled, animated }
 })()`
 
-/** A reader of the page's styling, bound to an isolated world of its main frame. */
-export async function styleReader(page) {
+/** Runs functions in an isolated world of the page's main frame: it shares the DOM with the page but
+    none of its script, so nothing the page (a demo) does to its globals or prototypes reaches it.
+    `fn` is serialised; it gets one JSON argument and may return a promise. */
+export async function isolate(page, name) {
   const cdp = await page.context().newCDPSession(page)
   const { frameTree } = await cdp.send('Page.getFrameTree')
-  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: 'barkui-guard', grantUniveralAccess: true })
-  return async () => {
-    const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression: SNAPSHOT, contextId: executionContextId, returnByValue: true })
-    if (exceptionDetails) throw new Error(`the style guard could not read the page: ${exceptionDetails.text}`)
+  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: name, grantUniveralAccess: true })
+  return async (fn, arg = null) => {
+    const expression = `(${source(fn)})(${JSON.stringify(arg)})`
+    const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: executionContextId, returnByValue: true, awaitPromise: true })
+    if (exceptionDetails) throw new Error(String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0])
     return result.value
   }
+}
+
+/** A reader of the page's styling, in an isolated world of its own. */
+export async function styleReader(page) {
+  const run = await isolate(page, 'barkui-guard')
+  return () => run(new Function(`return ${SNAPSHOT}`))
 }
 
 /** What changed between the baseline and now, in plain words, or null. */

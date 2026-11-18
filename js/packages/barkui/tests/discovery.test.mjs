@@ -129,9 +129,6 @@ describe('discoverParts', () => {
     ['a class set by name', "root.querySelector('button').className = 'aa-x'"],
     ['a class set as an attribute', "root.querySelector('button').setAttribute('class', 'aa-x')"],
     ['a class from a variable', "root.querySelector('button').classList.toggle(name)"],
-    ['reaching into the check', 'window.__barkCheck = null'],
-    ['patching a prototype', 'Element.prototype.getAttribute = () => null'],
-    ['replacing getComputedStyle', 'window.getComputedStyle = () => ({})'],
   ]) {
     it(`refuses a demo.mjs with ${what}, naming the file and line`, () => {
       expect(() => discoverParts(withDemo(line))).toThrow(/parts\/aa\/demo\.mjs line 2: /)

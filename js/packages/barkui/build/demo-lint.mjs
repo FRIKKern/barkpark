@@ -2,6 +2,8 @@
 // may style what a person sees in a part's stage. This lint names the first line
 // that reaches for a style; the check's run-time guard (check/guard.mjs) catches
 // whatever gets past it, since text can always be spelled to dodge a pattern.
+// Patching the page's globals or prototypes is not refused: the check reads
+// from an isolated world those patches never reach.
 
 const STYLING = [
   [/\.style\b|\[\s*['"`]style['"`]\s*\]/, 'sets an inline style'],
@@ -13,7 +15,6 @@ const STYLING = [
   [/\badoptedStyleSheets\b|\bCSSStyleSheet\b|\bstyleSheets\b/, 'touches the stylesheets'],
   [/\.animate\s*\(|\bnew\s+Animation\b|\bKeyframeEffect\b/, 'runs a script animation'],
   [/\bclassName\b|setAttribute\s*\(\s*['"`]class['"`]|toggleAttribute\s*\(\s*['"`]class/, 'sets classes wholesale; use classList with classes part.css declares'],
-  [/__barkCheck|\bprototype\b|\bdefineProperty\b|\bgetComputedStyle\b|\bReflect\b|\bProxy\b/, 'reaches into the page or the check'],
 ]
 
 /** Classes part.css declares (`.name` in a selector). */

@@ -51,4 +51,10 @@ describe('renderPage proof lights', () => {
     expect(strong).not.toContain('text on primary')
     expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'controlEdge:primary']))
   })
+
+  it('holds the control edge as proof on every surface, now the sheet delivers 3:1', () => {
+    const edges = Object.entries(SHEET_WAITS).filter(([k]) => k.startsWith('controlEdge'))
+    expect(edges.map(([k]) => k).sort()).toEqual(['controlEdge', 'controlEdge:inverse', 'controlEdge:primary', 'controlEdge:raised', 'controlEdge:sunken'])
+    expect(edges.every(([, w]) => w.hard && w.needs === 3)).toBe(true)
+  })
 })

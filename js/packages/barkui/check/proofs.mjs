@@ -3,7 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { PROVED_ON, SHEET_WAITS } from '../build/sheet-waits.mjs'
 import { SURFACES } from '../build/page.mjs'
-import { assertStyles, styleReader } from './guard.mjs'
+import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
 import { installHelpers, source } from './probes.mjs'
 
@@ -24,7 +24,12 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
     page.barkStyles = await styleReader(page)
     await assertStyles(page, ctx.styles, 'once the demo ran')
   }
-  await page.evaluate(installHelpers)
+  // Every reading the lights rest on runs in an isolated world: page script (a demo) cannot see or
+  // patch what the check calls. press.mjs runs in a second one, so it cannot reach the check either.
+  page.barkCheck = await isolate(page, 'barkui-check')
+  await page.barkCheck(installHelpers)
+  page.barkPress = await isolate(page, 'barkui-press')
+  await page.barkPress(installHelpers)
   return page
 }
 
@@ -44,12 +49,16 @@ export async function styleBaseline(browser, url) {
 /** At the end of a page's run: nothing has styled the stage since it opened. */
 const stillStyled = (ctx, page, light) => (page.barkStyles ? assertStyles(page, ctx.styles, `by the end of the ${light} run`) : null)
 
-/** Runs a press.mjs function in the page with the part's root and the helpers, under a time limit. */
-const inPage = (page, fn, name, what, ms = STEP_MS) =>
-  limit(page.evaluate(([src, n]) => (0, eval)(`(${src})`)(document.querySelector(`[data-part="${n}"]`), window.__barkCheck), [source(fn), name]), ms, what)
-const settle = (page) => limit(page.evaluate(() => window.__barkCheck.settle()), STEP_MS, 'settling the page')
+/** Runs a function with the part's root and the helpers in one of the page's isolated worlds, under a time limit. */
+const inWorld = (run, fn, name, what, ms = STEP_MS) =>
+  limit(run(([src, n]) => (0, eval)(`(${src})`)(document.querySelector(`[data-part="${n}"]`), window.__barkCheck), [source(fn), name]), ms, what)
+/** press.mjs code: its own world. */
+const inPage = (page, fn, name, what, ms) => inWorld(page.barkPress, fn, name, what, ms)
+/** The check's own code: the check's world. */
+const inCheck = (page, fn, name, what, ms) => inWorld(page.barkCheck, fn, name, what, ms)
+const settle = (page) => limit(page.barkCheck(() => window.__barkCheck.settle()), STEP_MS, 'settling the page')
 const view = (page, skin, scheme) =>
-  page.evaluate(([k, s]) => {
+  page.barkCheck(([k, s]) => {
     document.documentElement.setAttribute('data-skin', k)
     document.documentElement.setAttribute('data-color-scheme', s)
   }, [skin, scheme])
@@ -76,7 +85,7 @@ export async function pressed(ctx, part) {
   const results = []
   try {
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
-    await page.focus(`#part-${part.name}-title`)
+    await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
     for (const step of steps) {
       let result
       try {
@@ -139,47 +148,54 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const focus = { min: Infinity, max: 0 }
   const edges = []
   const other = {}
+  const disabled = {}
+  const keepDisabled = (surface, list) => {
+    const d = (disabled[surface] ??= { ground: [], primary: [] })
+    for (const x of list) d.ground.push(x.ground), d.primary.push(x.primary)
+  }
   const free = new Map()
   try {
     await page.mouse.move(0, 0)
-    const names = await page.evaluate((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
+    const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
     for (const scheme of ['light', 'dark']) {
       for (const skin of skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         await settle(page)
-        for (const f of await page.evaluate((n) => window.__barkCheck.paintFree(document.querySelector(`[data-part="${n}"]`)), part.name)) {
+        for (const f of await page.barkCheck((n) => window.__barkCheck.paintFree(document.querySelector(`[data-part="${n}"]`)), part.name)) {
           if (f.fail) bad[scheme].push(`${at}: ${f.fail}`)
           else free.set(f.selector, f.why)
         }
-        const r = await page.evaluate(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
+        const r = await page.barkCheck(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
         sig[at] = r.signature
         text[scheme] = Math.min(text[scheme], r.weakest.ratio)
         if (r.wrong.length) bad[scheme].push(`${at}: ${r.wrong[0]}`)
         if (r.weakest.ratio < 4.5) bad[scheme].push(`${at}: text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
-        traces[at] = await page.evaluate(([n, list]) => window.__barkCheck.trace(document.querySelector(`[data-part="${n}"]`), list), [part.name, names])
-        edges.push(...(await page.evaluate((n) => window.__barkCheck.controlEdges(document.querySelector(`[data-part="${n}"]`)), part.name)))
+        traces[at] = await page.barkCheck(([n, list]) => window.__barkCheck.trace(document.querySelector(`[data-part="${n}"]`), list), [part.name, names])
+        edges.push(...(await page.barkCheck((n) => window.__barkCheck.controlEdges(document.querySelector(`[data-part="${n}"]`)), part.name)))
+        keepDisabled(PROVED_ON, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
         // The unproved surfaces: measured, recorded, never a light (see SHEET_WAITS).
         for (const surface of ctx.surfaces === false ? [] : SURFACES.filter((x) => x !== PROVED_ON)) {
-          await page.evaluate(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, surface])
+          await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, surface])
           await settle(page)
-          const m = await page.evaluate(([n, spec]) => {
+          const m = await page.barkCheck(([n, spec]) => {
             const root = document.querySelector(`[data-part="${n}"]`)
-            return { text: window.__barkCheck.paint(root, spec).weakest, edges: window.__barkCheck.controlEdges(root) }
+            return { text: window.__barkCheck.paint(root, spec).weakest, edges: window.__barkCheck.controlEdges(root), disabled: window.__barkCheck.disabledFill(root) }
           }, [part.name, part.json.paint ?? []])
           const o = (other[surface] ??= { text: { min: Infinity, max: 0, at: '' }, edges: [] })
           if (m.text.ratio < o.text.min) Object.assign(o.text, { min: m.text.ratio, at: `${m.text.at} (${at})` })
           o.text.max = Math.max(o.text.max, m.text.ratio)
           o.edges.push(...m.edges)
+          keepDisabled(surface, m.disabled)
         }
-        await page.evaluate(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, PROVED_ON])
+        await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, PROVED_ON])
         await settle(page)
         // Focus: Tab through the part with real keys and measure the ring on each stop.
-        await page.focus(`#part-${part.name}-title`)
+        await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
           await page.keyboard.press('Tab')
-          await limit(page.evaluate(() => window.__barkCheck.frame()), STEP_MS, 'a frame')
-          const r2 = await page.evaluate((n) => {
+          await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')
+          const r2 = await page.barkCheck((n) => {
             const h = window.__barkCheck
             const el = document.activeElement
             if (!el || !document.querySelector(`[data-part="${n}"]`).contains(el)) return { done: true }
@@ -204,6 +220,9 @@ export async function skinsAndSchemes(ctx, part, skins) {
     if (o.text.max) measures[`text:${surface}`] = { min: +fmt(o.text.min), max: +fmt(o.text.max), at: o.text.at }
     if (o.edges.length) measures[`controlEdge:${surface}`] = { min: +fmt(Math.min(...o.edges)), max: +fmt(Math.max(...o.edges)) }
   }
+  // Numbers only, no light and no wait line yet: how far a disabled fill sits from its ground and from the primary fill.
+  const span = (xs) => ({ min: +fmt(Math.min(...xs)), max: +fmt(Math.max(...xs)) })
+  for (const [surface, d] of Object.entries(disabled)) if (d.ground.length) measures[`disabled:${surface}`] = { againstGround: span(d.ground), againstPrimary: span(d.primary) }
   for (const [key, wait] of Object.entries(SHEET_WAITS)) {
     const m = measures[key]
     if (wait.hard && m && m.min < wait.needs) bad.light.push(`${wait.label} ${m.min}:1${m.at ? ` at ${m.at}` : ''}, needs ${wait.needs}:1`)
@@ -231,7 +250,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
 export async function phone(ctx, part) {
   const page = await open(ctx, { width: 390, height: 844, mobile: true })
   try {
-    const r = await inPage(page, (root) => {
+    const r = await inCheck(page, (root) => {
       const doc = document.documentElement
       if (doc.scrollWidth > doc.clientWidth) return `page is ${doc.scrollWidth}px wide in a ${doc.clientWidth}px window`
       if (root.scrollWidth > root.clientWidth) return `the example is ${root.scrollWidth}px wide in ${root.clientWidth}px`
@@ -248,7 +267,7 @@ export async function phone(ctx, part) {
 export async function noscript(ctx, part) {
   const page = await open(ctx, { js: false })
   try {
-    const shown = await inPage(page, (root, h) => {
+    const shown = await inCheck(page, (root, h) => {
       // Every element in the stage that carries text or an icon must be seen (an idle spinner carries neither).
       const carrying = [...root.querySelectorAll('*')].filter((el) => h.carries(el) || (el.matches('[data-slot]') && (el.textContent.trim() || el.querySelector('svg'))))
       if (!carrying.length) return 'no part is printed'
@@ -259,7 +278,7 @@ export async function noscript(ctx, part) {
       return carrying.length
     }, part.name, 'the no-script check')
     if (typeof shown === 'string') return light(false, shown)
-    const r = await page.evaluate(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
+    const r = await page.barkCheck(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
     if (r.wrong.length) return light(false, r.wrong[0])
     if (r.weakest.ratio < 4.5) return light(false, `text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
     return light(true, `${shown} elements printed, seen and painted with no script`)

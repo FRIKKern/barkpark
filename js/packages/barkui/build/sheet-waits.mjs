@@ -5,17 +5,19 @@
 //
 // The lights are proved on the base surface. On the other surfaces the check
 // measures text against its ground and the control edge, and reports them here
-// without turning a light off, until each line is flipped to hard.
+// without turning a light off, until each line is flipped to hard. The control
+// edge holds 3:1 on every surface since the sheet raised --ui-input, so it is
+// hard everywhere: a part whose edge falls short turns "every skin" off.
 export const SHEET_WAITS = {
-  controlEdge: { label: 'control edge', needs: 3, hard: false },
+  controlEdge: { label: 'control edge', needs: 3, hard: true },
   'text:raised': { label: 'text on raised', needs: 4.5, hard: false },
   'text:sunken': { label: 'text on sunken', needs: 4.5, hard: false },
   'text:primary': { label: 'text on primary', needs: 4.5, hard: false },
   'text:inverse': { label: 'text on inverse', needs: 4.5, hard: false },
-  'controlEdge:raised': { label: 'control edge on raised', needs: 3, hard: false },
-  'controlEdge:sunken': { label: 'control edge on sunken', needs: 3, hard: false },
-  'controlEdge:primary': { label: 'control edge on primary', needs: 3, hard: false },
-  'controlEdge:inverse': { label: 'control edge on inverse', needs: 3, hard: false },
+  'controlEdge:raised': { label: 'control edge on raised', needs: 3, hard: true },
+  'controlEdge:sunken': { label: 'control edge on sunken', needs: 3, hard: true },
+  'controlEdge:primary': { label: 'control edge on primary', needs: 3, hard: true },
+  'controlEdge:inverse': { label: 'control edge on inverse', needs: 3, hard: true },
 }
 
 /** The surface every light is proved on; the others are measured only. */
