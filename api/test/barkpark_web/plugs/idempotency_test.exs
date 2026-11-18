@@ -1,6 +1,8 @@
 defmodule BarkparkWeb.Plugs.IdempotencyTest do
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias BarkparkWeb.Plugs.Idempotency, as: Plug
   alias Barkpark.{Auth, Idempotency, Repo}
   alias Barkpark.Repo.IdempotencyStore
@@ -163,20 +165,15 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
   test "a stale (crashed) pending reservation is reclaimed, not wedged", %{token: token} do
     hash = Idempotency.hash_key("stale-key", token.id, "POST", "/v1/data/mutate/production")
 
-    # Simulate a crashed reservation: a pending row older than the pending TTL.
+    # Simulate a crashed reservation: the plug's own pending row (its scope),
+    # aged past the pending TTL.
+    refute Plug.call(build_mutate_conn(token, "stale-key"), Plug.init([])).halted
     old = DateTime.add(DateTime.utc_now(), -1 * (pending_ttl() + 5), :second)
 
-    Repo.insert_all(IdempotencyStore.Key, [
-      %{
-        key_hash: hash,
-        scope: "mutation",
-        state: "pending",
-        status_code: nil,
-        response_body: nil,
-        response_headers: %{},
-        inserted_at: old
-      }
-    ])
+    {1, _} =
+      Repo.update_all(from(k in IdempotencyStore.Key, where: k.key_hash == ^hash),
+        set: [inserted_at: old]
+      )
 
     # A fresh request reclaims the stale reservation instead of 409-ing forever.
     conn = build_mutate_conn(token, "stale-key")
@@ -187,22 +184,39 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
   test "a FRESH pending reservation is NOT reclaimed (still 409)", %{token: token} do
     hash = Idempotency.hash_key("fresh-pending", token.id, "POST", "/v1/data/mutate/production")
 
-    Repo.insert_all(IdempotencyStore.Key, [
-      %{
-        key_hash: hash,
-        scope: "mutation",
-        state: "pending",
-        status_code: nil,
-        response_body: nil,
-        response_headers: %{},
-        inserted_at: DateTime.utc_now()
-      }
-    ])
+    # The plug's own pending row (its scope), inserted just now.
+    refute Plug.call(build_mutate_conn(token, "fresh-pending"), Plug.init([])).halted
+    assert %IdempotencyStore.Key{state: "pending"} = Repo.get(IdempotencyStore.Key, hash)
 
     conn = build_mutate_conn(token, "fresh-pending")
     c = Plug.call(conn, Plug.init([]))
     assert c.halted
     assert c.status == 409
+  end
+
+  # task-a87c7261c1aa63c2: an unbound mount stored the bare "mutation" scope, the
+  # row #26786's transition rule existed for. No mount may store one again.
+  test "a mount configured with only scope \"mutation\" binds the request", %{token: token} do
+    opts = Plug.init(scope: "mutation")
+
+    first = token |> build_mutate_conn("bound-key") |> with_params([1]) |> Plug.call(opts)
+    refute first.halted
+    _ = first |> put_resp_content_type("application/json") |> send_resp(200, ~s({"n":1}))
+
+    second = token |> build_mutate_conn("bound-key") |> with_params([2]) |> Plug.call(opts)
+
+    assert second.halted
+    assert second.status == 422, "#{second.status} #{second.resp_body}"
+    assert %{"error" => %{"code" => "idempotency_key_reused"}} = json_body(second)
+  end
+
+  test "Plug.init/1 refuses an unbound mount" do
+    assert_raise ArgumentError, ~r/bind_request/, fn -> Plug.init(bind_request: false) end
+  end
+
+  defp with_params(conn, mutations) do
+    params = %{"mutations" => mutations}
+    %{conn | params: params, body_params: params, path_params: %{}}
   end
 
   defp pending_ttl do

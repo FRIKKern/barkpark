@@ -201,8 +201,14 @@ func resolveProseTextFiles(tail []string, only map[string]bool, warn func(string
 	inScope := func(name string) bool { return only == nil || only[name] }
 
 	// After "--" every argument is positional: a title spelled "--title-file"
-	// is a title, not a file to read (task-379127ebdf341017).
-	tail, afterFlags := cutAtEndOfFlags(tail)
+	// is a title, not a file to read (task-379127ebdf341017). A "--" right
+	// after --title or --description (no "=") is that flag's value, not the end.
+	end := endOfFlags(tail, func(a string) bool {
+		name, _, inline := splitFlagToken(a)
+		_, prose := proseFieldByInlineFlag(name)
+		return prose && !inline
+	})
+	tail, afterFlags := tail[:end], afterEndOfFlags(tail, end)
 
 	out := make([]string, 0, len(tail))
 	fromFile := map[string]bool{}

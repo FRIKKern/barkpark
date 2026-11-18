@@ -1997,8 +1997,8 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 		byName[f.Name] = f
 	}
 
-	tail, afterFlags := cutAtEndOfFlags(tail)
-	for i := 0; i < len(tail); {
+	i := 0
+	for i < len(tail) && tail[i] != "--" {
 		a := tail[i]
 
 		// Long flag: --name or --name=value.
@@ -2081,7 +2081,7 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 		pos = append(pos, a)
 		i++
 	}
-	return append(pos, afterFlags...), flags, nil
+	return append(pos, afterEndOfFlags(tail, i)...), flags, nil
 }
 
 // setBodyFlagName is the CLI's key=value body-merge flag. It is repeatable BY
