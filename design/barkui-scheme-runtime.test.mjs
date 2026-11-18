@@ -109,6 +109,11 @@ for (const c of JSON.parse(document.getElementById("cases").textContent)) {
     const el = c.paintOf === "root" ? root : stage.firstElementChild;
     Object.assign(row, { gotPaint: getComputedStyle(el).backgroundColor, wantPaint: getComputedStyle(ref).backgroundColor });
   }
+  if (c.wantRim) {
+    // The element's own inset rim, against the reference colour.
+    ref.style.color = c.wantRim;
+    Object.assign(row, { gotRim: getComputedStyle(stage.firstElementChild).boxShadow, wantRim: getComputedStyle(ref).color + " 0px 0px 0px 1px inset" + (c.rimTail || "") });
+  }
   rows.push(row);
 }
 document.getElementById("out").textContent = JSON.stringify({ systemDark: matchMedia("(prefers-color-scheme: dark)").matches, rows });
@@ -220,6 +225,15 @@ test("BarkUI sheet: surfaces and depth nest inside skin, scheme and each other",
       html: `<div data-bp-theme="${x}">${P}</div>`, want: bg(x, "base", "light"), wantPaint: "transparent" },
     { id: "data-skin on the root is painted", root: { "data-skin": x },
       html: P, want: bg(x, "base", "light"), paintOf: "root", wantPaint: bg(x, "base", "light") },
+    // A sunken well carries an inset 1px rim in both modes, also with a depth.
+    { id: "sunken well has its rim (dark)", root: { "data-color-scheme": "dark", "data-skin": x },
+      html: `<div data-surface="sunken">${P}</div>`, want: bg(x, "sunken", "dark"), wantRim: sheetValue(x, "--bark-sunken-rim", "dark") },
+    { id: "sunken well with a depth keeps its rim (light)", root: { "data-color-scheme": "light", "data-skin": x },
+      html: `<div data-surface="sunken" data-depth="-1">${P}</div>`, want: sheetValue(x, "--bark-sunken-depth-m1", "light"), wantRim: sheetValue(x, "--bark-sunken-rim", "light") },
+    // Depth 1 to 3 adds the depth shadow; a sunken well keeps its rim with it.
+    { id: "sunken well with depth 2 keeps its rim and takes the shadow (dark)", root: { "data-color-scheme": "dark", "data-skin": x },
+      html: `<div data-surface="sunken" data-depth="2" style="--ui-shadow: 0 1px 2px rgb(0, 0, 0)">${P}</div>`,
+      want: sheetValue(x, "--bark-sunken-depth-2", "dark"), wantRim: sheetValue(x, "--bark-sunken-rim", "dark"), rimTail: ", rgb(0, 0, 0) 0px 1px 2px 0px" },
   );
   const dir = mkdtempSync(join(tmpdir(), "barkui-surface-page-"));
   try {
@@ -231,8 +245,10 @@ test("BarkUI sheet: surfaces and depth nest inside skin, scheme and each other",
       assert.equal(r.got, r.want, r.id);
       if (r.wantFg) assert.equal(r.gotFg, r.wantFg, `${r.id} (text)`);
       if (r.wantPaint) assert.equal(r.gotPaint, r.wantPaint, `${r.id} (own paint)`);
+      if (r.wantRim) assert.equal(r.gotRim, r.wantRim, `${r.id} (rim)`);
     }
     assert.equal(result.rows.filter((r) => r.wantPaint).length, 3, "the paint cases did not run");
+    assert.equal(result.rows.filter((r) => r.wantRim).length, 3, "the rim cases did not run");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
