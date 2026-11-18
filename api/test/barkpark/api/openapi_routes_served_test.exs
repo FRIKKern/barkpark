@@ -14,19 +14,10 @@ defmodule Barkpark.Api.OpenApiRoutesServedTest do
 
   alias Barkpark.Api.OpenApi
 
-  # Operations documented but not served when this pin was first derived, all
-  # outside the scoped-tier rule. A RATCHET: an entry that becomes served leaves
-  # this list, and a new unserved operation is fixed, never added here.
-  # Filed as task-8990a6a0377d7021.
-  @unserved_today [
-    {"DELETE", "/v1/prefs/{dataset}/{key}"},
-    {"GET", "/v1/codelists/{codelist_id}"},
-    {"GET", "/v1/data/doc/{dataset}/{type}/{doc_id}/actions"},
-    {"GET", "/v1/prefs/{dataset}/{key}"},
-    {"PATCH", "/v1/prefs/{dataset}/{key}"},
-    {"POST", "/v1/data/doc/{dataset}/{type}/{doc_id}/actions/{name}"},
-    {"PUT", "/v1/prefs/{dataset}/{key}"}
-  ]
+  # A RATCHET, now empty: task-8990a6a0377d7021 moved the last seven (prefs,
+  # codelist.show, doc actions; each served only under the scoped prefix) onto
+  # scoped tiers. A new unserved operation is fixed, never added here.
+  @unserved_today []
 
   defp operations do
     for {path, ops} <- OpenApi.spec()["paths"], {method, _op} <- ops do
