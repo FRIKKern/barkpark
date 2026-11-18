@@ -928,13 +928,16 @@ defmodule Barkpark.Content.Writer do
   caller that passes it also gets an untitled source copied as untitled,
   instead of the English `"Untitled (copy)"`. Without it the title is
   exactly as before.
+
+  `:doc_id` names the copy's id (the desk mints a uuid, as the TanStack
+  Studio's Duplicate does). Without it the id is `generate_id/1`'s.
   """
   @spec clone_document(map(), String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
   def clone_document(doc, type, dataset, opts \\ [])
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
     {suffix, opts} = Keyword.pop(opts, :title_suffix)
-    new_id = generate_id(type)
+    {new_id, opts} = Keyword.pop_lazy(opts, :doc_id, fn -> generate_id(type) end)
     {src_title, new_title} = copy_title(Map.get(doc, :title), suffix)
     src_content = doc |> clone_content(type, dataset) |> retitle_copy(src_title, new_title)
 

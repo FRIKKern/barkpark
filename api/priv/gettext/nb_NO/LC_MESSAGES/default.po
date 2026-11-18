@@ -15081,3 +15081,18 @@ msgstr "sorterbar"
 #, elixir-autogen, elixir-format
 msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
 msgstr "For å plukke opp et element, trykk Mellomrom eller Enter på håndtaket. Bruk piltastene for å flytte det, Mellomrom eller Enter for å slippe det, Escape for å avbryte."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex
+#, elixir-autogen, elixir-format
+msgid "The document was successfully duplicated"
+msgstr "Dokumentet ble duplisert"
+
+#: lib/barkpark_web/live/studio/desk/slug_in_use.ex
+#, elixir-autogen, elixir-format
+msgid "Slug is already in use"
+msgstr "Slug er allerede i bruk et annet sted, og må være unik"
+
+#: lib/barkpark_web/live/studio/desk/slug_in_use.ex
+#, elixir-autogen, elixir-format
+msgid "Validation error: %{message}"
+msgstr "Valideringsfeil: %{message}"

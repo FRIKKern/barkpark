@@ -10,6 +10,9 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
     is what the shared wrapper is handed: the field and the editor's
     capabilities in one value.
 
+  And in the field's label, `mark/1`: the mark of a slug already in use
+  (`SlugInUse`), TanStack's `ProblemMark` beside the title.
+
   The form's field wrapper is shared with the old Studio and the plugin
   editors (`StudioComponents.Editor.editor_field/1`); it draws these in the
   desk only.
@@ -17,12 +20,15 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
   use Phoenix.Component
 
   alias BarkparkWeb.Studio.Desk.FieldActions
+  alias BarkparkWeb.Studio.Desk.SlugInUse
 
   attr :field, :any, default: nil, doc: "the schema field the menu is for; none draws no menu"
 
   attr :caps, :any,
     default: nil,
     doc: "the editor's capabilities: who may paste into a read-only field"
+
+  attr :problem, :map, default: nil, doc: "the field's taken slug (`SlugInUse.problem/2`)"
 
   @doc "The change bar's place and the Field actions menu, as children of a `.field`."
   def slots(assigns) do
@@ -34,9 +40,22 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
     """
   end
 
+  attr :field, :any, default: nil
+  attr :caps, :any, default: nil
+  attr :problem, :map, default: nil
+
+  @doc "The mark in the field's label, when its slug is in use."
+  def mark(assigns), do: SlugInUse.mark(assigns)
+
   @doc "The field with the editor's capabilities on it, for `editor_field/1`'s `slots`."
   @spec of(map(), map()) :: map()
-  def of(field, parent_assigns), do: %{field: field, caps: Map.get(parent_assigns, :caps)}
+  def of(field, parent_assigns) do
+    %{
+      field: field,
+      caps: Map.get(parent_assigns, :caps),
+      problem: SlugInUse.problem(parent_assigns, name(field))
+    }
+  end
 
   defp name(%{"name" => name}) when is_binary(name) and name != "", do: name
   defp name(_field), do: nil

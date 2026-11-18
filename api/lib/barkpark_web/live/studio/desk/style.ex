@@ -384,6 +384,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.BulkBar.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.SlugInUse.css()) %>
     </style>
     """
   end
