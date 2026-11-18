@@ -47,6 +47,7 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
   @claim "answer_claimed_at"
   @claim_ttl_s 60
+  @refused %{"cancel_reason" => "asking_run_gone"}
 
   @type outcome :: :delivered | :noop | {:refused, String.t()} | {:error, term()}
 
@@ -128,6 +129,75 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
         deliver.()
         {:ok, status}
     end
+  end
+
+  @doc """
+  The host refused a delivered answer (task-746c02d760f26ce7): the ask was
+  asked by a run that is no longer the session's active run on the host
+  (`asked_lease_id`, internal/chathost/answer_lease.go), so the answer reached
+  no one. `ask` is that ask's own row (`ChatHosts.RefusedAnswer` finds it from
+  the answer's lease), never the newest row with its id: another run can ask
+  under the same id. The row is canceled (`cancel_reason: "asking_run_gone"`)
+  whether it already reads "allowed"/"denied" or is still pending, and live
+  viewers flip its card. An ask already canceled keeps its reason and is not
+  broadcast again. Returns `:canceled` or `:unchanged`.
+  """
+  @spec refused_by_host(String.t(), Message.t()) :: :canceled | :unchanged
+  def refused_by_host(session_id, %Message{id: id, metadata: %{"request_id" => request_id}} = ask) do
+    result =
+      case ask.metadata["approval_status"] do
+        "pending" -> cancel_pending(session_id, request_id, id)
+        status when status in ~w(allowed denied) -> cancel_answered(id)
+        _canceled -> {:error, :not_open}
+      end
+
+    case result do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          Barkpark.StudioChat.Recorder.topic(session_id),
+          {:chat_permission_resolved, request_id, :canceled}
+        )
+
+        :canceled
+
+      _ ->
+        :unchanged
+    end
+  end
+
+  # A pending ask is canceled through `update_approval_status/4` (its count
+  # and blocked state), which takes the NEWEST pending row with the id. If that
+  # is not this row, nothing is written.
+  defp cancel_pending(session_id, request_id, id) do
+    Repo.transaction(fn ->
+      case StudioChat.update_approval_status(session_id, request_id, "canceled", @refused) do
+        {:ok, %Message{id: ^id} = row} -> row
+        _other_row -> Repo.rollback(:not_this_ask)
+      end
+    end)
+  end
+
+  # An answered ask flips to canceled under its row lock; the pending count
+  # already dropped when it was answered, so it is not touched.
+  defp cancel_answered(id) do
+    Repo.transaction(fn ->
+      Message
+      |> where([m], m.id == ^id)
+      |> where([m], fragment("?->>'approval_status' IN ('allowed', 'denied')", m.metadata))
+      |> lock("FOR UPDATE")
+      |> Repo.one()
+      |> case do
+        nil ->
+          Repo.rollback(:not_answered)
+
+        row ->
+          write!(
+            row,
+            row.metadata |> Map.merge(@refused) |> Map.put("approval_status", "canceled")
+          )
+      end
+    end)
   end
 
   defp stored(session_id, request_id) do
