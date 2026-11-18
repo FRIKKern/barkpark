@@ -7,8 +7,8 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
       {"_ref": "a", "_weak": true, "_strengthenOnPublish": {"type": "author"}}
 
-  Sanity's Content Lake strengthens such a reference on every publish, and so
-  does this module, for every publish the server runs
+  Sanity Studio's publish strengthens such a reference before it writes the
+  published document, and so does this module, for every publish the server runs
   (`Content.Lifecycle.publish_draft/5`): the mutate `publish` action, the
   direct publish, the bp CLI, Studio's buttons and scheduled publishes.
 

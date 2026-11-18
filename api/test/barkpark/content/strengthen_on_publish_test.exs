@@ -4,7 +4,7 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
   waits as `{_ref, _weak: true, _strengthenOnPublish: {...}}`. Every publish
   the server runs (scheduled, the mutate `publish` action, the direct
   publish) turns it strong once the target has a published version in the
-  same dataset and tenant, as Sanity's Content Lake does. A target with no
+  same dataset and tenant, as Sanity Studio's publish does. A target with no
   published version, and a weak reference the author chose, stay as they are.
   """
   use Barkpark.DataCase, async: false
