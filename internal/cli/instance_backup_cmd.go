@@ -175,6 +175,9 @@ func readInstanceEnvFile(path string) (map[string]string, error) {
 }
 
 func runInstanceBackup(out *writer, args []string) int {
+	if len(args) > 0 && args[0] == "fetch" {
+		return runInstanceBackupFetch(out, args[1:])
+	}
 	const usage = "bp instance backup [--database-url <url> --media-dir <dir> | --env-file <file>] --out <dir>"
 	a, err := parseHzArgs(args, []string{"database-url", "media-dir", "env-file", "out"}, nil, usage)
 	if err != nil {
