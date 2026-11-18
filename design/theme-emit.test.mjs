@@ -339,6 +339,8 @@ test("BarkUI sheet: every skin x {light, dark} carries every --ui-* and tone nam
       assert.ok(rule, `${name}/${mode}: no rule for ${selector}`);
       const studioRule = ruleFor(studio, studioSelector);
       assert.ok(studioRule, `${name}/${mode}: Studio has no ${studioSelector} block to compare against`);
+      assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys(BARKUI_SOURCES).sort(),
+        `${name}/${mode}: the rule declares names outside the table, or lacks some`);
       for (const [barkui, source] of Object.entries(BARKUI_SOURCES)) {
         assert.ok(barkui in rule.vars, `${name}/${mode}: ${barkui} missing`);
         assert.equal(rule.vars[barkui], resolveStudio(studioRule.vars, source),
