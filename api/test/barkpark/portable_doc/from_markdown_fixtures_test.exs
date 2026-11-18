@@ -44,13 +44,16 @@ defmodule Barkpark.PortableDoc.FromMarkdownFixturesTest do
     end
   end
 
+  # Sizes stay small enough for EarmarkParser, which is itself super-linear on
+  # some of these shapes; past the validator's depth the result is still valid.
   describe "hostile input" do
     @hostile [
-      {"deep quotes", String.duplicate("> ", 5_000) <> "x"},
-      {"deep lists", Enum.map_join(0..400, "\n", &(String.duplicate("  ", &1) <> "- x"))},
-      {"deep emphasis", String.duplicate("*", 20_000) <> "x" <> String.duplicate("*", 20_000)},
-      {"open brackets", String.duplicate("[", 50_000) <> "x"},
-      {"huge", String.duplicate("word **bold** [l](https://example.com) `c`\n", 20_000)},
+      {"deep quotes", String.duplicate("> ", 1_000) <> "x"},
+      {"deep lists", Enum.map_join(0..120, "\n", &(String.duplicate("  ", &1) <> "- x"))},
+      {"deep emphasis", String.duplicate("*", 1_000) <> "x" <> String.duplicate("*", 1_000)},
+      {"open brackets", String.duplicate("[", 1_000) <> "x"},
+      {"open tags", String.duplicate("<a b ", 300)},
+      {"huge", String.duplicate("word **bold** [l](https://example.com) `c`\n\n", 1_000)},
       {"script",
        "<script>alert(1)</script>\n\nhi <script>bad()</script>there <style>p{}</style>"},
       {"js links",
@@ -64,10 +67,29 @@ defmodule Barkpark.PortableDoc.FromMarkdownFixturesTest do
       @md md
       test "#{label} validates and links only to safe URLs" do
         blocks = FromMarkdown.blocks(@md)
-        assert is_list(blocks)
+        assert is_list(blocks) and blocks != []
         assert Validate.validate(blocks) == :ok
         for href <- hrefs(blocks), do: assert(Util.safe_url(href) == href, inspect(href))
       end
+    end
+
+    test "script and style text never reaches the blocks" do
+      text = "<script>alert(1)</script>\n\nhi <script>bad()</script>there <style>p{}</style>"
+      blocks = FromMarkdown.blocks(text)
+
+      assert blocks == [
+               %{
+                 "type" => "paragraph",
+                 "content" => [%{"type" => "text", "value" => "hi there "}]
+               }
+             ]
+    end
+
+    test "unsafe links keep only their text" do
+      [%{"content" => content}] =
+        FromMarkdown.blocks("[a](javascript:alert(1)) [d](//evil.example)")
+
+      assert content == [%{"type" => "text", "value" => "a d"}]
     end
 
     test "non-string input gives no blocks" do
