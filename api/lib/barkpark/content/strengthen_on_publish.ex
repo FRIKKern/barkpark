@@ -17,11 +17,13 @@ defmodule Barkpark.Content.StrengthenOnPublish do
     * an object holding `_strengthenOnPublish` whose `_ref` names a document
       with a published version, in the same dataset and tenant, loses `_weak`
       and `_strengthenOnPublish`. Its other keys stay. When the marker names
-      a `type`, the published target must be of that type. A marker with
-      `weak: true` (the field is declared weak) loses only itself; `_weak`
-      stays;
+      a `type`, the published target must be of that type;
     * when the target has no published version, the object is left exactly
       as it was;
+    * a marker with `weak: true` (the field is declared weak) is removed on
+      every publish, published target or not, and `_weak` stays. This is what
+      Sanity Studio's own publish does
+      (`src/core/store/document/document-pair/operations/publish.ts`);
     * an object without `_strengthenOnPublish` is never touched, even when it
       is `_weak: true`: a weak reference the author chose stays weak.
 
@@ -55,27 +57,28 @@ defmodule Barkpark.Content.StrengthenOnPublish do
   @spec strengthen(Document.t(), String.t(), keyword()) :: Document.t()
   def strengthen(%Document{content: content} = draft, dataset, opts)
       when is_map(content) and is_binary(dataset) do
-    case content |> waiting_refs([]) |> Enum.uniq() do
+    case waiting_refs(content, []) do
       [] ->
         draft
 
-      refs ->
-        published = published_types(refs, dataset, opts)
-
-        if map_size(published) == 0,
-          do: draft,
-          else: %{draft | content: strong(content, published)}
+      waiting ->
+        refs = waiting |> Enum.filter(&is_binary/1) |> Enum.uniq()
+        %{draft | content: strong(content, published_types(refs, dataset, opts))}
     end
   end
 
   def strengthen(%Document{} = draft, _dataset, _opts), do: draft
 
-  # Every `_ref` of an object that carries the marker, at any depth.
+  # Every object that carries the marker, at any depth: its `_ref`, or
+  # `:declared_weak` for a marker that needs no lookup.
   defp waiting_refs(%{} = node, acc) do
     acc =
       case node do
-        %{@marker => _, "_ref" => ref} when is_binary(ref) and ref != "" -> [ref | acc]
-        _ -> acc
+        %{@marker => marker, "_ref" => ref} when is_binary(ref) and ref != "" ->
+          if declared_weak?(marker), do: [:declared_weak | acc], else: [ref | acc]
+
+        _ ->
+          acc
       end
 
     Enum.reduce(node, acc, fn {_key, value}, acc -> waiting_refs(value, acc) end)
@@ -86,12 +89,13 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
   defp waiting_refs(_leaf, acc), do: acc
 
-  defp strong(%{@marker => marker, "_ref" => ref} = node, published) when is_binary(ref) do
+  defp strong(%{@marker => marker, "_ref" => ref} = node, published)
+       when is_binary(ref) and ref != "" do
     node =
       cond do
-        not published?(published, ref, marker) -> node
         declared_weak?(marker) -> Map.delete(node, @marker)
-        true -> Map.drop(node, @dropped)
+        published?(published, ref, marker) -> Map.drop(node, @dropped)
+        true -> node
       end
 
     Map.new(node, fn {key, value} -> {key, strong(value, published)} end)
