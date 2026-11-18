@@ -30,6 +30,11 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
     goes with the revision.
   - A revision that is not the open document's, or that cannot be read,
     is not shown: the pane says so, as TanStack's does.
+  - Only a document the form edits shows one. A sheet's grid and a paper's
+    canvas are their own editors (LiveComponents, whose events never pass
+    the page's guard): for those the revision is not shown, the pane's note
+    says so over the live editor, and the old Studio's history dialog
+    restores one.
 
   The deleted document's "Restore most recent revision" (J32) is here too:
   `latest/1` reads the newest revision that is the document itself, and
@@ -53,12 +58,13 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   @doc """
   Reads the revision the last pane names, when it is the edited document;
-  `nil` when the URL names none or the document itself was not found. The
-  one already read is kept.
+  `nil` when the URL names none, the document itself was not found, or the
+  form is not its editor (a sheet, a paper). The one already read is kept.
   """
   def load(%{assigns: %{editing: {dataset, type, id}, chain: [_ | _] = chain}} = socket) do
     rev = List.last(chain)[:rev]
     found? = is_map(socket.assigns[:editor_doc])
+    form? = socket.assigns[:editor_view] in [nil, :form]
 
     case socket.assigns[:desk_revision] do
       %{id: ^rev} when is_binary(rev) ->
@@ -66,6 +72,12 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
       # No document (not found): the Studio's own note says so, not this.
       _ when is_binary(rev) and not found? ->
+        assign(socket, :desk_revision, nil)
+
+      # A sheet's grid or a paper's canvas is its own editor, which a locked
+      # form cannot stand in for: its revision is not shown here, and the
+      # pane says so over the live editor (`PaneComponent.left_out/1`).
+      _ when is_binary(rev) and not form? ->
         assign(socket, :desk_revision, nil)
 
       _ when is_binary(rev) ->

@@ -876,24 +876,32 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         <%!-- The Studio's own delete and unpublish modals are kept out of the
               desk: the desk draws its dialogs below, from the same assigns. --%>
         <%!-- An old revision (`rev`) is the Studio's form over its values, in a
-              disabled fieldset (`RevisionView`); one that is not shown says so. --%>
-        <%= cond do %>
-          <% @edit_failed or gone?(assigns) -> %>
-          <% RevisionView.shown?(assigns) -> %>
-            <fieldset disabled class="dk-revision-form" data-desk-revision-form>
+              disabled fieldset (`RevisionView`); one that is not shown says so.
+              The live form sits in the same fieldset, enabled: the holders
+              after it keep their place when a History row is picked, so the
+              row keeps the focus. --%>
+        <fieldset
+          id={"#{@view.id}-form-holder"}
+          class="dk-revision-form"
+          disabled={RevisionView.shown?(assigns)}
+          data-desk-revision-form={RevisionView.shown?(assigns)}
+        >
+          <%= cond do %>
+            <% @edit_failed or gone?(assigns) -> %>
+            <% RevisionView.shown?(assigns) -> %>
               {Components.studio_live_shell(RevisionView.shell_assigns(assigns))}
-            </fieldset>
-          <% RevisionView.missing?(assigns) -> %>
-            <p class="dk-note" role="alert" data-desk-revision-missing>
-              {gettext("This revision can't be found. Pick another entry in the history.")}
-            </p>
-          <% true -> %>
-            {Components.studio_live_shell(
-              assigns
-              |> assign(show_delete: false, show_unpublish_guard: false)
-              |> HistoryPanel.waiting()
-            )}
-        <% end %>
+            <% RevisionView.missing?(assigns) -> %>
+              <p class="dk-note" role="alert" data-desk-revision-missing>
+                {gettext("This revision can't be found. Pick another entry in the history.")}
+              </p>
+            <% true -> %>
+              {Components.studio_live_shell(
+                assigns
+                |> assign(show_delete: false, show_unpublish_guard: false)
+                |> HistoryPanel.waiting()
+              )}
+          <% end %>
+        </fieldset>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Hidden until an
               inspector fills it; `data-inspect` is the pane's `inspect` from
