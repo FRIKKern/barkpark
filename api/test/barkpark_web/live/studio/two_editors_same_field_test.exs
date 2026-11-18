@@ -196,7 +196,9 @@ defmodule BarkparkWeb.Studio.TwoEditorsSameFieldTest do
       assert stored(c)["title"] == "Fixture post B3 A7"
     end
 
-    test "a page that reports nothing for the field is not merged (as before)", c do
+    # task-f18af43e26e46ff4: no number means the post left before B's push
+    # reached the page, so it was typed from the value that push names as `was`.
+    test "a page that reports nothing for the field is merged from what it showed", c do
       a = open(c)
       b = open(c)
 
@@ -204,7 +206,7 @@ defmodule BarkparkWeb.Studio.TwoEditorsSameFieldTest do
       told(a)
       send_post(a, "title", %{"title" => "Fixture post A7"})
 
-      assert stored(c)["title"] == "Fixture post A7"
+      assert stored(c)["title"] == "Fixture post B3 A7"
     end
   end
 

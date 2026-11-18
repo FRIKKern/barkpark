@@ -36,8 +36,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   numbers start from the clock at the first one, so a page that rejoins a new
   socket and still reports the old socket's numbers matches nothing either.
 
-  A field the page reports nothing for is not merged: the post stands, as
-  before this module. So is any field that is not free text: a date or a
+  A post that names no number for a field (task-f18af43e26e46ff4) left the
+  page before the first push it would have numbered: two people's posts
+  cross, and the second to land was sent before the first's push arrived.
+  It was typed from what the page showed before any push it has not taken:
+  its own landed post, or the value the first push says it showed
+  (`:origin`), which is what the page reports for it once that push
+  arrives. Once the kept history has dropped that entry, nothing tells, and
+  the post stands. A change the server built itself (no `_bp_seen` at all)
+  is never merged. Nor is any field that is not free text: a date or a
   select is a choice, not text two people type into.
   """
 
@@ -92,7 +99,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   value). `Forms.upsert_draft/6` merges the post onto the stored value from
   it (`Barkpark.Content.TextRebase.rebase/3`).
   """
-  def put_bases(socket, keys, seen) do
+  def put_bases(socket, keys, seen) when is_binary(seen) do
     seen = decode_seen(seen)
     history = history(socket)
     schema = socket.assigns[:editor_schema]
@@ -100,8 +107,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     bases =
       for key <- keys,
           free_text?(schema, key),
-          n = Map.get(seen, "doc[#{key}]"),
-          is_integer(n),
+          # A generator, not `n = ...`: a nil filter would drop the field.
+          n <- [Map.get(seen, "doc[#{key}]")],
+          is_integer(n) or is_nil(n),
           {_seq, value, _kind} <- List.wrap(base_entry(Map.get(history, key, []), n)),
           into: %{},
           do: {key, value}
@@ -109,9 +117,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     assign(socket, :editor_field_bases, bases)
   end
 
+  def put_bases(socket, _keys, _seen), do: assign(socket, :editor_field_bases, %{})
+
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
-  # values the page showed up to `n` and the page's own landed post.
+  # values the page showed up to `n` and the page's own landed post. With no
+  # number, the page took no push yet: its own post or the first push's `was`.
+  def base_entry(entries, nil) do
+    entries
+    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin] end)
+    |> latest()
+  end
+
   def base_entry(entries, n) do
     entries
     |> Enum.filter(fn {seq, _value, kind} -> kind == :own or seq <= n end)
@@ -199,6 +216,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
       case latest(entries) do
         {seq, ^old, _kind} ->
           {socket, entries, seq}
+
+        # The first value the server says this page showed.
+        nil ->
+          {socket, seq} = next_seq(socket)
+          {socket, [{seq, old, :origin}], seq}
 
         _ ->
           {socket, seq} = next_seq(socket)
