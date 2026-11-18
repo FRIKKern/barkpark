@@ -23,6 +23,8 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
 
   Either way the displaced lease's pending asks are canceled
   (`DisplacedAsks`, task-bc312d78041663a8): its run can no longer be answered.
+  So are asks a refused close left tracked while the turn is closed, when
+  another lease's own turn starts (task-e09b1a6507c8f232).
 
   Only a `turn_started` or a `text_delta` makes its lease the owner (or any
   event when there is none yet): a Stop's lease is newer too but starts no
@@ -74,6 +76,7 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
       :same ->
         state
         |> drop_stale_stop(event, lease_id)
+        |> displace_kept_asks(event, lease_id)
         |> adopt(event, lease_id)
         |> mark_asks_closer(event, lease_id)
 
@@ -149,6 +152,24 @@ defmodule Barkpark.StudioChat.Recorder.TurnOwner do
   end
 
   defp mark_asks_closer(state, _event, _lease_id), do: state
+
+  # A refused newer close ends the Recorder's turn but keeps the owner's asks
+  # tracked (`DisplacedAsks.cancel_ended/1`), its run still waiting on them. So
+  # the turn is closed while asks are tracked, and another lease's own turn is
+  # no split: it would only untrack them (the `turn_started` arm), and the
+  # owner's later close is ignored once that lease took the turn. That lease's
+  # turn displaces them, as a split does (task-e09b1a6507c8f232).
+  defp displace_kept_asks(state, %Event{kind: kind}, lease_id)
+       when kind in [:turn_started, :text_delta] and is_binary(lease_id) do
+    owner = Map.get(state, :runtime_lease)
+
+    if is_binary(owner) and owner != lease_id and not Map.get(state, :runtime_turn_open?, false) and
+         MapSet.size(Map.get(state, :pending_asks, MapSet.new())) > 0,
+       do: DisplacedAsks.cancel(state),
+       else: state
+  end
+
+  defp displace_kept_asks(state, _event, _lease_id), do: state
 
   # Was a Stop asked before `lease_id` was leased? The host routes a Stop by
   # session to its latest run, so a Stop asked after a lease exists is that
