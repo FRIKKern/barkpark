@@ -221,22 +221,62 @@
     return String(text).replace(/\r\n?/g, "\n");
   }
 
-  function recordSeen(values, seqs) {
-    var form = document.getElementById("editor-form");
-    var input = form && form.querySelector('input[name="_bp_seen"]');
-    if (!input) return;
+  function readSeen(input) {
     var seen;
     try {
       seen = JSON.parse(input.value || "{}");
     } catch (_) {
       seen = {};
     }
-    if (!seen || typeof seen !== "object") seen = {};
+    return seen && typeof seen === "object" ? seen : {};
+  }
+
+  // task-f18af43e26e46ff4: `v` says this page numbers every value it shows,
+  // a field not drawn included, so a post with no number for a field left
+  // before that field's push arrived and the server may merge it. A tab still
+  // running an older copy of this file never writes it, and its posts are
+  // not merged without a number. Written by this file only, never drawn.
+  var SEEN_VERSION = 2;
+
+  function markSeen(form) {
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    if (seen.v === SEEN_VERSION) return;
+    seen.v = SEEN_VERSION;
+    input.value = JSON.stringify(seen);
+  }
+
+  // Before LiveView reads the form for the post (capture, on window).
+  window.addEventListener(
+    "input",
+    function (e) {
+      var form = e.target && e.target.form;
+      if (form && form.id === "editor-form") markSeen(form);
+    },
+    true,
+  );
+
+  function recordSeen(values, seqs) {
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    seen.v = SEEN_VERSION;
     Object.keys(seqs).forEach(function (name) {
       var pair = seqs[name];
       var change = values[name];
       var field = form.elements.namedItem(name);
-      if (!Array.isArray(pair) || !change || !field || typeof field.value !== "string") return;
+      if (!Array.isArray(pair) || !change) return;
+      // A field not drawn now (another group tab, hidden by visibleWhen) is
+      // drawn later from the server's form, which holds the new value.
+      // task-f18af43e26e46ff4: left unnumbered, its next post was merged
+      // from an older value than the one the person saw.
+      if (!field) {
+        seen[name] = pair[1];
+        return;
+      }
+      if (typeof field.value !== "string") return;
       // A textarea's value has its line breaks as "\n" only.
       if (lf(field.value) === lf(change.value)) seen[name] = pair[1];
       else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];

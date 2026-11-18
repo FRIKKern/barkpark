@@ -37,7 +37,7 @@ func TestTaskCreateAmbiguousHintFindsADraftOnlyRow(t *testing.T) {
 	}
 	check := env.Error.Details.CheckCommand
 
-	// The command, parsed by a shell: bp search query '<title>' flags…
+	// The command, parsed by a shell: bp search query flags… -- '<title>'
 	rest, ok := strings.CutPrefix(check, "bp search query ")
 	if !ok {
 		t.Fatalf("check command %q is not a bp search query", check)

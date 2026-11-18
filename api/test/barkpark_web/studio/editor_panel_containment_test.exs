@@ -232,6 +232,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # cell_menu_style/1 — viewport coords from clientX/clientY, re-clamped by the
     # JS hook. UNDER a panel root; the carve-out exists for exactly this.
     "live/studio/sheet_grid.ex" => 1,
+    # The desk image field's "Edit hotspot and crop" layer (`.dk.dk-crop-layer`).
+    # The rule is drawn with the field, but bp-desk-image.js appends the layer
+    # itself to `document.body`, so no panel containing block can reach it.
+    "live/studio/desk/image_parts.ex" => 1,
     # ConnectorsLive is its own full-page route (router.ex:1259) — it renders no
     # `.pane-layout` and no `.editor-panel`, so containment cannot reach it.
     "live/studio/connectors_live.ex" => 2,

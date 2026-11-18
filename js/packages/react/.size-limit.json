@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-11-02 (#25101, task-9226090856ff8b2b, client readers answer the server renderer's limits: the depth cap and its notice, table span support, the record-table cap, plus the chart/heatmap number range and whole-number digits): 26401 B -> 27644 B (+1243); limit raised to the measured size plus about 0.2 kB, 206 B headroom",
+  "name": "PortableDoc client — 2026-11-18 (task-f5d63db9de4b082d, BarkparkImage and core imageUrl read the reference image shape {asset:{_ref}}): 27.67 kB -> 27961 B (about +290 B); limit raised by 0.3 kB, 189 B headroom kept",
   "path": "dist/index.mjs",
-  "limit": "27.85 KB",
+  "limit": "28.15 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-11-02 (#25101, task-9226090856ff8b2b, client readers answer the server renderer's limits: the depth cap and its notice, table span support, the record-table cap, plus the chart/heatmap number range and whole-number digits): 25403 B -> 26650 B (+1247); limit raised to the measured size plus about 0.2 kB, 200 B headroom",
+  "name": "RSC server — 2026-11-18 (task-f5d63db9de4b082d, BarkparkImage and core imageUrl read the reference image shape {asset:{_ref}}): 26.67 kB -> 26965 B (about +290 B); limit raised by 0.3 kB, 185 B headroom kept",
   "path": "dist/server.mjs",
-  "limit": "26.85 KB",
+  "limit": "27.15 KB",
   "gzip": true
  },
  {

@@ -200,6 +200,10 @@ func proseFieldByInlineFlag(flag string) (proseField, bool) {
 func resolveProseTextFiles(tail []string, only map[string]bool, warn func(string, ...any)) ([]string, error) {
 	inScope := func(name string) bool { return only == nil || only[name] }
 
+	// After "--" every argument is positional: a title spelled "--title-file"
+	// is a title, not a file to read (task-379127ebdf341017).
+	tail, afterFlags := cutAtEndOfFlags(tail)
+
 	out := make([]string, 0, len(tail))
 	fromFile := map[string]bool{}
 	seenInline := map[string]bool{}
@@ -257,6 +261,9 @@ func resolveProseTextFiles(tail []string, only map[string]bool, warn func(string
 	// THE PLAUSIBILITY SCREEN, on the FINISHED tail, so it covers both doors.
 	if err := screenProseSizes(out, fromFile, only, warn); err != nil {
 		return nil, err
+	}
+	if afterFlags != nil {
+		out = append(append(out, "--"), afterFlags...)
 	}
 	return out, nil
 }

@@ -12,6 +12,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,7 +62,7 @@ type exportMeta struct {
 // NDJSON body, not the single JSON the generic command path decodes.
 func runExport(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if g.help {
-		out.outf("usage: bp export [--type <t>[,<t>...]] [--perspective <p>] [--out <file>] [--media <dir>] [--schemas <file>]")
+		out.outf("usage: bp export [--type <t>[,<t>...]] [--id <id>[,<id>...]] [--follow-refs[=N]] [--perspective <p>] [--out <file>] [--media <dir>] [--schemas <file>]")
 		out.outf("       bp export --verify <file>")
 		out.outf("")
 		out.outf("Stream the active dataset as NDJSON (one document per line) for backup:")
@@ -102,14 +104,34 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("")
 		out.outf("--type <t> exports only documents of type <t>. Name several types with a")
 		out.outf("comma list or a repeated --type: bp export --type post,author. Each type is")
-		out.outf("one request, written in the order named. --schemas then writes only the")
-		out.outf("schemas of those types. The filter does not follow references into other")
-		out.outf("types, so name every type the copied documents point at. --media still")
-		out.outf("writes every media file of the dataset.")
+		out.outf("one request, written in the order named. --schemas then writes the schemas")
+		out.outf("of those types and every schema they use: the object types their fields")
+		out.outf("name and the document types their references point at, followed until")
+		out.outf("nothing new turns up. --type alone does not follow references into other")
+		out.outf("types; --follow-refs does. With --type or --follow-refs, --media writes only")
+		out.outf("the files the exported documents use: their own mediaAsset rows, asset-<id>")
+		out.outf("references and /media/files/<path> URLs.")
+		out.outf("")
+		out.outf("--follow-refs exports the seed documents and every document their references")
+		out.outf("reach, until nothing new turns up. --follow-refs=N stops after N hops. The")
+		out.outf("seeds are the documents of the --type types and the --id ids. A type that")
+		out.outf("ends in * is a prefix: --type 'pensum*' takes every type starting with")
+		out.outf("pensum. A reference is a _ref value, an asset-<id> in any string, or a")
+		out.outf("/media/files/<path> URL. A document's draft and published rows go together.")
+		out.outf("The export reads the whole dataset once into a temporary file next to")
+		out.outf("--out, or in the system temp directory, and writes the kept rows in the")
+		out.outf("order the dataset gave them. stderr names how many documents were seeds,")
+		out.outf("how many were reached, and the references to ids the dataset does not hold.")
+		out.outf("--schemas then writes the schemas of every type exported and what they use.")
+		out.outf("--id or a * type without --follow-refs exports only the seeds.")
+		out.outf("")
+		out.outf("  bp export --type 'pensum*',product --id deskStructure.pensum --follow-refs \\")
+		out.outf("    --out set.ndjson --media media --schemas schemas.json")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts
-	var types []string
+	var types, seedIDs []string
+	followDepth := 0 // 0 follows nothing; -1 follows until nothing new turns up
 	var outPath, verifyPath, mediaDir, schemasPath string
 	i := 0
 	for i < len(args) {
@@ -159,6 +181,31 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 				}
 			}
 			i = ni
+		case "--id":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--id")
+			if err != nil {
+				return usageErrf(out, nil, "%v", err)
+			}
+			for _, id := range strings.Split(v, ",") {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					return usageErrf(out, nil, "--id %q names an empty id", v)
+				}
+				if !containsString(seedIDs, id) {
+					seedIDs = append(seedIDs, id)
+				}
+			}
+			i = ni
+		case "--follow-refs":
+			followDepth = -1
+			if hasInline {
+				n, err := strconv.Atoi(inlineVal)
+				if err != nil || n < 1 {
+					return usageErrf(out, nil, "invalid --follow-refs=%q (want a hop count, 1 or more, or no value to follow every reference)", inlineVal)
+				}
+				followDepth = n
+			}
+			i++
 		case "--perspective":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
 			if err != nil {
@@ -170,7 +217,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			i = ni
 		default:
-			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective / --out / --media / --schemas / --verify)", a)
+			return usageErrf(out, nil, "unknown export flag %q (want --type / --id / --follow-refs / --perspective / --out / --media / --schemas / --verify)", a)
 		}
 	}
 
@@ -178,21 +225,53 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// it with the streaming flags would silently ignore one half of the command,
 	// so say so instead.
 	if verifyPath != "" {
-		if outPath != "" || len(types) > 0 || opts.Perspective != "" || mediaDir != "" || schemasPath != "" {
-			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective / --media / --schemas")
+		if outPath != "" || len(types) > 0 || len(seedIDs) > 0 || followDepth != 0 || opts.Perspective != "" || mediaDir != "" || schemasPath != "" {
+			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --id / --follow-refs / --perspective / --media / --schemas")
 		}
 		return runExportVerify(out, verifyPath)
 	}
 
+	// A subset export picks its documents from one read of the whole dataset:
+	// it follows references, takes seed ids, or matches type prefixes, none of
+	// which the server's one-type filter does.
+	pattern := false
+	for _, t := range types {
+		pattern = pattern || strings.HasSuffix(t, "*")
+	}
+	subset := followDepth != 0 || len(seedIDs) > 0 || pattern
+	if followDepth != 0 && len(types) == 0 && len(seedIDs) == 0 {
+		return usageErrf(out, nil, "--follow-refs needs seed documents: name them with --type and/or --id")
+	}
+	dataset := ctx.Dataset
+	if dataset == "" {
+		dataset = "production"
+	}
+
 	// The schemas are read first: the request is small, and a refusal here
-	// stops the run before the long document stream.
-	if schemasPath != "" {
-		dataset := ctx.Dataset
-		if dataset == "" {
-			dataset = "production"
-		}
+	// stops the run before the long document stream. A subset export knows
+	// its types only after the stream, so it writes them at the end.
+	if schemasPath != "" && !subset {
 		if code := exportSchemas(out, ctx, dataset, schemasPath, types); code != exitOK {
 			return code
+		}
+	}
+
+	// The media list maps a /media/files/<path> URL to its asset document, so
+	// a subset export reads it before the stream.
+	var pathToAsset map[string]string
+	if subset && followDepth != 0 {
+		assets, status, body, err := listDatasetMedia(ctx, dataset)
+		if err == nil && (status < 200 || status >= 300) {
+			err = fmt.Errorf("%s", classifyError(status, body).errorMessage())
+		}
+		if err != nil {
+			return useError(out, "request_failed", fmt.Sprintf("export --follow-refs: listing the media of %s: %v", exportScope(ctx), err), exitGeneric)
+		}
+		pathToAsset = make(map[string]string, len(assets))
+		for _, a := range assets {
+			if a.Path != "" {
+				pathToAsset[a.Path] = "asset-" + a.ID
+			}
 		}
 	}
 
@@ -266,24 +345,47 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		target = partialPath
 	}
 
-	// One request per named type, in the order named. The server filter takes
-	// one type. Without --type the one request covers the whole dataset.
-	streams := types
-	if len(streams) == 0 {
-		streams = []string{""}
+	// A filtered export writes only the media its documents use. An export of
+	// the whole dataset writes every file.
+	var wanted *mediaWanted
+	if len(types) > 0 || subset {
+		wanted = newMediaWanted()
 	}
 	var err error
-	for _, t := range streams {
-		opts.Type = t
-		err = client.Export(sigCtx, opts, func(line string) error {
-			if err := writeLine(line); err != nil {
-				return err
+	var sub exportSubsetResult
+	if subset {
+		tmpDir := ""
+		if outPath != "" {
+			tmpDir = filepath.Dir(outPath)
+		}
+		plan := exportSubset{types: types, ids: seedIDs, depth: followDepth}
+		sub, err = plan.run(sigCtx, client, opts, tmpDir, pathToAsset, writeLine)
+		docs, wanted = sub.docs, sub.media
+	} else {
+		// One request per named type, in the order named. The server filter
+		// takes one type. Without --type the one request covers the whole
+		// dataset.
+		streams := types
+		if len(streams) == 0 {
+			streams = []string{""}
+		}
+		for _, t := range streams {
+			opts.Type = t
+			err = client.Export(sigCtx, opts, func(line string) error {
+				if wanted != nil {
+					if id, _, refs, herr := exportDocHead(line); herr == nil {
+						wanted.add(id, refs)
+					}
+				}
+				if err := writeLine(line); err != nil {
+					return err
+				}
+				docs++
+				return nil
+			})
+			if err != nil {
+				break
 			}
-			docs++
-			return nil
-		})
-		if err != nil {
-			break
 		}
 	}
 
@@ -340,7 +442,21 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
-	if len(types) > 0 {
+	if subset {
+		out.errf("exported %d documents (%d bytes) in %d type(s) from %s: %d seed id(s), %d more reached by references",
+			docs, byteCount, len(sub.types), exportScope(ctx), sub.seeds, sub.reached)
+		if len(sub.missingID) > 0 {
+			out.errf("export: %s holds no document with id %s", exportScope(ctx), strings.Join(sub.missingID, ", "))
+		}
+		if len(sub.dangling) > 0 {
+			shown := sub.dangling
+			if len(shown) > 10 {
+				shown = shown[:10]
+			}
+			out.errf("export: %d referenced id(s) are not in %s, so they were not exported (dangling): %s",
+				len(sub.dangling), exportScope(ctx), strings.Join(shown, ", "))
+		}
+	} else if len(types) > 0 {
 		out.errf("exported %d documents (%d bytes) of type %s from %s", docs, byteCount, strings.Join(types, ", "), exportScope(ctx))
 	} else {
 		out.errf("exported %d documents (%d bytes) from %s", docs, byteCount, exportScope(ctx))
@@ -349,12 +465,13 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.errf("wrote %s and its sidecar %s — verify it later with: bp export --verify %s",
 			outPath, outPath+exportMetaSuffix, outPath)
 	}
-	if mediaDir != "" {
-		dataset := ctx.Dataset
-		if dataset == "" {
-			dataset = "production"
+	if schemasPath != "" && subset {
+		if code := exportSchemas(out, ctx, dataset, schemasPath, sub.types); code != exitOK {
+			return code
 		}
-		return exportMedia(out, ctx, dataset, mediaDir)
+	}
+	if mediaDir != "" {
+		return exportMedia(out, ctx, dataset, mediaDir, wanted)
 	}
 	return exitOK
 }

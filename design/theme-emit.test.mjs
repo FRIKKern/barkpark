@@ -271,6 +271,109 @@ test("templates: every SHIPPED theme has an on-disk identity block in every temp
   }
 });
 
+// ── the BarkUI sheet: today's skins under UI SDK's variable names ────────────
+// api/priv/barkui/tokens.css is one more whole generated file. It must carry
+// every shipped skin x {light, dark} under BarkUI's names, and each value must be
+// the same string the Studio region writes for the slot it comes from, so the two
+// can never drift. The names and their Studio sources are written out here, not
+// read from the module, so a rename on either side reds this test.
+const BARKUI_PATH = "api/priv/barkui/tokens.css";
+const BARKUI_SOURCES = {
+  "--ui-background": "--bg",
+  "--ui-foreground": "--text",
+  "--ui-muted": "--muted-surface",
+  "--ui-muted-foreground": "--muted-text",
+  "--ui-border": "--border",
+  "--ui-input": "--border",
+  "--ui-ring": "--ring",
+  "--ui-ring-border": "--ring",
+  "--ui-primary": "--primary",
+  "--ui-primary-foreground": "--primary-fg",
+  "--ui-destructive": "--danger",
+  "--bark-accent": "--primary-text",
+  "--bark-selected": "--bg-accent",
+  ...Object.fromEntries(
+    [["success", "ok"], ["warning", "warn"], ["danger", "danger"], ["info", "info"]].flatMap(([tone, role]) => [
+      [`--bark-${tone}`, `--${role}`],
+      [`--bark-${tone}-foreground`, `--${role}-fg`],
+      [`--bark-${tone}-text`, `--${role}-text`],
+    ]),
+  ),
+};
+
+// Every `selectors { body }` rule in a stylesheet, comments stripped, as
+// { selectors: [...], vars: { name: value } }.
+function cssRules(text) {
+  const bare = text.replace(/\/\*[\s\S]*?\*\//g, "");
+  return [...bare.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel, body]) => ({
+    selectors: sel.split(",").map((s) => s.trim()).filter(Boolean),
+    vars: Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()])),
+  }));
+}
+const ruleFor = (rules, selector) => rules.find((r) => r.selectors.includes(selector));
+
+// Studio writes some roles as var() of another var in the same block
+// (`--ok: hsl(var(--ok-hsl))`); resolve those to the plain string they stand for.
+function resolveStudio(vars, name) {
+  const v = vars[name];
+  assert.ok(v !== undefined, `Studio block has no ${name}`);
+  return v.replace(/var\((--[\w-]+)\)/g, (_, inner) => resolveStudio(vars, inner));
+}
+
+test("BarkUI sheet: every skin x {light, dark} carries every --ui-* and tone name, valued as Studio writes its source slot", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  assert.ok(themes.length > 1, "loadThemes() returned too few skins for this check to mean anything");
+
+  const rules = cssRules(sheet.build(themes));
+  const studio = cssRules(build("layouts/root.html.heex", themes));
+  let compared = 0;
+  for (const { name } of themes) {
+    const scopes = [
+      ["light", `[data-skin="${name}"]`, `html[data-bp-theme="${name}"]`],
+      ["dark", `[data-skin="${name}"][data-color-scheme="dark"]`, `html[data-bp-theme="${name}"][data-theme="dark"]`],
+    ];
+    for (const [mode, selector, studioSelector] of scopes) {
+      const rule = ruleFor(rules, selector);
+      assert.ok(rule, `${name}/${mode}: no rule for ${selector}`);
+      const studioRule = ruleFor(studio, studioSelector);
+      assert.ok(studioRule, `${name}/${mode}: Studio has no ${studioSelector} block to compare against`);
+      assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys(BARKUI_SOURCES).sort(),
+        `${name}/${mode}: the rule declares names outside the table, or lacks some`);
+      for (const [barkui, source] of Object.entries(BARKUI_SOURCES)) {
+        assert.ok(barkui in rule.vars, `${name}/${mode}: ${barkui} missing`);
+        assert.equal(rule.vars[barkui], resolveStudio(studioRule.vars, source),
+          `${name}/${mode}: ${barkui} differs from Studio's ${source}`);
+        compared++;
+      }
+    }
+  }
+  assert.equal(compared, themes.length * 2 * Object.keys(BARKUI_SOURCES).length);
+});
+
+test("BarkUI sheet: both selector namings reach every skin and mode, and the default skin needs no attribute", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  for (const { name } of themes) {
+    const light = ruleFor(rules, `[data-skin="${name}"]`);
+    assert.ok(light && light.selectors.includes(`[data-bp-theme="${name}"]`), `${name}: light rule lacks [data-bp-theme]`);
+    const dark = ruleFor(rules, `[data-skin="${name}"][data-color-scheme="dark"]`);
+    assert.ok(dark && dark.selectors.includes(`[data-bp-theme="${name}"][data-theme="dark"]`),
+      `${name}: dark rule lacks [data-bp-theme][data-theme="dark"]`);
+  }
+  // No attribute at all: the default skin, light on :root and dark on the scheme alone.
+  const [first] = themes;
+  assert.ok(ruleFor(rules, ":root") === ruleFor(rules, `[data-skin="${first.name}"]`), ":root does not carry the default skin");
+  const dark = ruleFor(rules, `[data-skin="${first.name}"][data-color-scheme="dark"]`);
+  for (const s of [':root[data-color-scheme="dark"]', ':root[data-theme="dark"]'])
+    assert.ok(dark.selectors.includes(s), `default dark rule lacks ${s}`);
+  // A skin design/themes/ does not ship must be absent.
+  assert.equal(ruleFor(rules, '[data-skin="__no_such_theme__"]'), undefined);
+});
+
 test("templates: the artifact DERIVES its theme blocks — an injected theme appears, unnamed by any literal", () => {
   // The mutation arm. webBlock() is the shared builder, so this proves the
   // template region grows from the THEME LIST rather than from a pasted snapshot:

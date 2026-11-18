@@ -48,6 +48,10 @@ type importFakeServer struct {
 	slowStatus int
 	// slowBody, when set, replaces the slow answer's body.
 	slowBody string
+	// hang makes the first hang mutate requests wait until the client gives
+	// up, as a request on a stalled connection does.
+	hang int
+	hung int
 }
 
 type importFakeRequest struct {
@@ -128,6 +132,16 @@ func (f *importFakeServer) export(w http.ResponseWriter, typ string) {
 
 func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	f.mu.Lock()
+	hang := f.hung < f.hang
+	if hang {
+		f.hung++
+	}
+	f.mu.Unlock()
+	if hang {
+		<-r.Context().Done()
+		return
+	}
 	var req struct {
 		Mutations []map[string]map[string]json.RawMessage `json:"mutations"`
 	}

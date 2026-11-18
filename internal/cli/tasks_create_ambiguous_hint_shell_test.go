@@ -34,7 +34,7 @@ func TestTaskCreateAmbiguousHintIsShellSafe(t *testing.T) {
 			t.Fatalf("check command %q is not a bp search query", check)
 		}
 		got := shellWords(t, rest)
-		want := []string{title, "--perspective", "drafts"}
+		want := []string{"--perspective", "drafts", "--", title}
 		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 			t.Errorf("pasted into a shell, %q gives argv %q, want %q", check, got, want)
 		}

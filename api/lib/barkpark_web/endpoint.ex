@@ -280,6 +280,27 @@ defmodule BarkparkWeb.Endpoint do
     end
   end
 
+  # Bandit reads a body in 1 MB pieces and gives each piece `read_timeout`
+  # to arrive, 15 s by default. A /v1/data body can be 30 MB (three documents
+  # at the cap), and on 2026-11-18 the first 30 MB import batch to a new Azure
+  # box failed with "Body read timeout" after 16 s (task-1e302921c7545cb0).
+  # The document data routes wait 60 s per piece, the same as Thousand
+  # Island's wait for the next request on an idle connection. Every other
+  # route keeps the default.
+  @data_read_timeout 60_000
+
+  @doc """
+  The per-read timeout `parse_body` gives the body of this request, in
+  milliseconds: #{@data_read_timeout} on the document data routes and Plug's
+  15_000 elsewhere. Public so it can be asserted in tests.
+  """
+  def body_read_timeout(%Plug.Conn{path_info: ["v1", "data" | _]}), do: @data_read_timeout
+
+  def body_read_timeout(%Plug.Conn{path_info: ["w", _ws, "p", _proj, "v1", "data" | _]}),
+    do: @data_read_timeout
+
+  def body_read_timeout(_conn), do: 15_000
+
   defp parse_body(conn, _opts) do
     try do
       Plug.Parsers.call(
@@ -289,6 +310,7 @@ defmodule BarkparkWeb.Endpoint do
           pass: ["*/*"],
           json_decoder: Phoenix.json_library(),
           length: body_length(conn),
+          read_timeout: body_read_timeout(conn),
           # Tee the RAW body into conn.assigns[:raw_body] ONLY on the GitHub
           # webhook path, so BarkparkWeb.Plugs.GithubWebhookSignature can verify
           # the HMAC over the exact bytes GitHub signed. Every other path reads
