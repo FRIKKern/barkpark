@@ -395,14 +395,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
   defp duplicated_message(_doc, pub_id), do: gettext("Duplicated as %{id}", id: pub_id)
 
+  # The desk's copy is the TanStack Studio's (`DocumentPane.tsx` `duplicate`):
+  # a uuid id and the source's title as it is. Elsewhere the copy keeps
+  # `<type>-<hex>` and the suffix in the Studio language
+  # (task-141c0bba8070ef02): it is stored in the title, so the English
+  # " (copy)" read English everywhere.
+  defp copy_opts(socket) do
+    if desk?(socket),
+      do: [doc_id: BarkparkWeb.Studio.Desk.NewDoc.mint(), title_suffix: ""],
+      else: [title_suffix: gettext(" (copy)")]
+  end
+
+  defp copied_message(socket, new_doc, pub_id) do
+    if desk?(socket),
+      do: gettext("The document was successfully duplicated"),
+      else: duplicated_message(new_doc, pub_id)
+  end
+
   def duplicate_doc(socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      # The copy's suffix in the Studio language (task-141c0bba8070ef02): it is
-      # stored in the title, so the English " (copy)" read English everywhere.
-      opts = Shared.hook_opts(socket) ++ [title_suffix: gettext(" (copy)")]
+      opts = Shared.hook_opts(socket) ++ copy_opts(socket)
 
       case Content.clone_document(doc, type, socket.assigns.dataset, opts) do
         {:ok, new_doc} ->
@@ -412,7 +427,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
           {:noreply,
            socket
-           |> put_flash(:info, duplicated_message(new_doc, pub_id))
+           |> put_flash(:info, copied_message(socket, new_doc, pub_id))
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, {:halted, reason}} ->

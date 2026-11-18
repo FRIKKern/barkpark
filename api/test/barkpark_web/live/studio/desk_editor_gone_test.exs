@@ -115,11 +115,13 @@ defmodule BarkparkWeb.Studio.DeskEditorGoneTest do
   # "This is the current document". There is none once it is deleted.
   test "no revision note over a document that was deleted", ctx do
     render_patch(ctx.view, "#{ctx.base}/#{ctx.type};#{ctx.id},rev=abc123")
-    note = "[data-pane-editing] [data-desk-left-out]"
-    assert eventually(fn -> has_element?(ctx.view, note, "abc123") end)
+    # A revision that is not found says so in the form's place (`RevisionView`).
+    missing = "[data-pane-editing] [data-desk-revision-missing]"
+    assert eventually(fn -> has_element?(ctx.view, missing) end)
 
     delete_elsewhere(ctx)
     assert eventually(fn -> has_element?(ctx.view, "[data-desk-edit-gone]") end)
-    refute has_element?(ctx.view, note)
+    refute has_element?(ctx.view, missing)
+    refute has_element?(ctx.view, "[data-pane-editing] [data-desk-left-out]")
   end
 end

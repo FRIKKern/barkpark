@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     AccessPanel,
     Airdrop,
+    ArrayItems,
     Bulk,
     Delete,
     DeskSearch,
@@ -558,7 +559,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
 
   def handle_event("array_op", params, socket),
-    do: PostIdentity.pressed(params, socket, &Fields.array_op/2)
+    do: PostIdentity.pressed(params, socket, &ArrayItems.array_op/2)
 
   # The Classic rich-text editor's block dialog (task-19392d1e6fc661e6).
   def handle_event("pt-block-open", params, socket), do: ObjectBlocks.open(params, socket)

@@ -175,11 +175,12 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     a: a,
     b: b
   } do
-    # The last document of the chain: the editor, on the current document.
+    # The last document of the chain: the editor shows a revision it names in
+    # the form's place (`RevisionView`); one not found, it says so.
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},rev=abc123")
     settle(view)
-    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]), "abc123")
-    assert doc_shows?(view, 2, "About Alpha note")
+    assert has_element?(view, ~s([data-pane-index="2"] [data-desk-revision-missing]))
+    refute has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out]))
 
     # A document further left: a read-only pane.
     chain = "#{@type_name};#{a},rev=abc123;#{b},type=#{@type_name}"
@@ -189,7 +190,7 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     assert doc_shows?(view, 2, "About Alpha note")
     refute has_element?(view, ~s([data-pane-index="3"] [data-desk-left-out]))
 
-    for param <- ["view=json", "inspect=sanity%2Fstructure%2Fhistory"] do
+    for param <- ["view=json", "inspect=sanity%2Fcomments"] do
       {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a},#{param}")
       settle(view)
       assert has_element?(view, ~s([data-pane-index="2"] [data-desk-left-out])), param
@@ -276,9 +277,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
     assert has_element?(view, holder)
     refute has_element?(view, holder <> " [data-desk-left-out]")
 
-    render_patch(view, "#{base}/#{@type_name};#{a},rev=abc123")
+    render_patch(view, "#{base}/#{@type_name};#{a},view=json")
     settle(view)
-    assert has_element?(view, holder <> " [data-desk-left-out]", "abc123")
+    assert has_element?(view, holder <> " [data-desk-left-out]")
 
     render_patch(view, "#{base}/#{@type_name};#{a}")
     settle(view)

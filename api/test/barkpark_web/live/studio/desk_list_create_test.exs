@@ -67,7 +67,8 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
     assert has_element?(
              view,
              @button <>
-               ~s([phx-click="new-document"][phx-value-type="#{@post}"][phx-value-desk-pane="1"])
+               ~s([phx-click="new-document"][phx-value-type="#{@post}"][phx-value-desk-pane="1"]) <>
+               ~s([phx-value-template="#{@post}"])
            )
 
     refute has_element?(view, @button <> "[phx-target]")
@@ -75,7 +76,8 @@ defmodule BarkparkWeb.Studio.DeskListCreateTest do
     view |> element(@button) |> render_click()
     landed = assert_patch(view, 2_000)
 
-    assert landed =~ ~r"^#{Regex.escape(base)}/#{@post};#{@post}-[0-9a-f]+$",
+    # A new document, not stored yet (`Desk.NewDoc`): a uuid and the way it was started.
+    assert landed =~ ~r"^#{Regex.escape(base)}/#{@post};[0-9a-f-]{36},template=#{@post}$",
            "the new document landed on #{landed}"
 
     # It opens in the editor, as the pane after the list.

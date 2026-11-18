@@ -17,7 +17,8 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   with a bad value lists it before any edit, and a typed value is listed once
   its autosave has landed. Nothing is validated here that the save does not
   validate: a rule the server does not have (TanStack checks a `url` field's
-  shape in the browser) is not listed.
+  shape in the browser) is not listed. A slug another document has
+  (`SlugInUse`) is listed with them.
 
   Errors block Publish (`DocFooter`); warnings are listed and never block.
   The server reads an `info` rule as a warning, so it is listed as one.
@@ -31,6 +32,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   alias Barkpark.Content.Validation
   alias BarkparkWeb.Studio.Desk.FieldGroups
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.SlugInUse
   alias Phoenix.LiveView.JS
 
   @typedoc """
@@ -53,7 +55,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
 
   @doc "The open document's problems in the form's order, a field's errors first."
   @spec problems(map()) :: [problem()]
-  def problems(%{editor_doc: %{} = doc, editor_schema: %{} = schema}) do
+  def problems(%{editor_doc: %{} = doc, editor_schema: %{} = schema} = assigns) do
     content = Map.get(doc, :content) || %{}
     fields = fields(schema)
     %{errors: errors, warnings: warnings} = Validation.check_findings(content, doc.title, schema)
@@ -62,6 +64,8 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
       for {level, findings} <- [{"error", errors}, {"warning", warnings}],
           finding <- findings,
           do: problem(finding, level, fields, content)
+
+    found = found ++ SlugInUse.problems(assigns)
 
     order = fields |> Enum.with_index() |> Map.new(fn {f, i} -> {f["name"], i} end)
     Enum.sort_by(found, &Map.get(order, top(&1.path), map_size(order)))

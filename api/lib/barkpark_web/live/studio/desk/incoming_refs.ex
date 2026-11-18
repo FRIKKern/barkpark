@@ -249,7 +249,8 @@ defmodule BarkparkWeb.Studio.Desk.IncomingRefs do
   # room with padding, because the Studio's shell is several elements in a
   # column and cannot share a row. Under 600 px the inspector covers the form,
   # as TanStack's. Drawn with the panel, so a closed inspector costs nothing.
-  defp sheet(assigns) do
+  @doc "The inspector's place beside the form, for every inspector the edit pane draws."
+  def sheet(assigns) do
     ~H"""
     <style>
       .dk .dk-edit-body:has(> .dk-inspector:not([hidden])) { position: relative; padding-right: max(320px, 33.333%) !important; }

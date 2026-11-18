@@ -73,6 +73,13 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       html[data-theme="dark"] .dk { --dk-menu-fg: #bdbfcb; --dk-menu-hover-fg: #0d0e12; --dk-menu-hover-icon: #303c7a; --dk-menu-danger: #fdafa8; --dk-menu-danger-icon: #c38885; --dk-menu-danger-hover: #f77a6f; --dk-menu-danger-hover-icon: #6c312f; --dk-popover-shadow: 0 0 0 0.5px rgba(117, 123, 150, 0.4), 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); }
       .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); --dk-fill-soft: #eeeef1; --dk-badge-fg: #4c536a; --dk-badge-lit-bg: #e6e6ea; --dk-badge-lit-fg: #4a5068; }
       html[data-theme="dark"] .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(121, 127, 154, 0.4), 0 3px 5px -2px rgba(0, 0, 0, 0.2), 0 6px 10px 0 rgba(0, 0, 0, 0.14), 0 1px 18px 1px rgba(0, 0, 0, 0.12); --dk-fill-soft: #21232f; --dk-badge-fg: #9da2b7; --dk-badge-lit-bg: #262837; --dk-badge-lit-fg: #9fa4ba; }
+      /* The History inspector's avatars and badges, and an old revision's footer (TanStack's tokens). */
+      .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; --dk-diff-bg: #fde6d8; --dk-diff-fg: #8a3a12; }
+      html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; --dk-diff-bg: #4a2a17; --dk-diff-fg: #ffc9a8; }
+      .dk fieldset.dk-revision-form { display: contents; margin: 0; padding: 0; border: 0; min-width: 0; }
+      /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
+      .dk { --dk-critical-icon: #ef3d2f; }
+      html[data-theme="dark"] .dk { --dk-critical-icon: #f3503e; }
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
@@ -236,6 +243,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk :is(.dk-menu .dk-menu-item:hover, .dk-menu:not(:hover) .dk-menu-item:focus-visible):not(:disabled, [aria-disabled="true"])::after { color: inherit; }
       .dk :is(.dk-menu .dk-menu-item.danger:hover, .dk-menu:not(:hover) .dk-menu-item.danger:focus-visible):not(:disabled, [aria-disabled="true"]) { background: var(--dk-menu-danger-hover); }
       .dk :is(.dk-menu .dk-menu-item.danger:hover, .dk-menu:not(:hover) .dk-menu-item.danger:focus-visible):not(:disabled, [aria-disabled="true"]) .dk-menu-icon { color: var(--dk-menu-danger-hover-icon); }
+      .dk .dk-new-doc { position-anchor: --dk-new-doc; inset: auto; top: anchor(bottom); left: anchor(center); margin: 4px 0 0; width: 320px; max-width: calc(100vw - 32px); max-height: 420px; padding: 0; overflow: hidden; translate: -50% 0; font-weight: 400; }
+      .dk .dk-new-doc-head { display: none; }
+      .dk .dk-new-doc-list { display: flex; flex-direction: column; gap: 4px; padding: 4px; overflow: auto; }
+      .dk .dk-new-doc .dk-menu-item { min-height: 33px; color: var(--dk-fg); font-weight: 400; }
+      @media (max-width: 599px) { .dk .dk-new-doc { inset: 12px 12px auto; margin: 0; width: auto; max-width: none; max-height: calc(100dvh - 24px); translate: none; padding: 0 20px 16px; border-radius: 9px; } .dk .dk-new-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0 8px; } .dk .dk-new-doc-head h2 { margin: 0; font-size: 15px; line-height: 21px; font-weight: 600; } }
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
@@ -379,6 +391,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.BulkBar.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.SlugInUse.css()) %>
     </style>
     """
   end

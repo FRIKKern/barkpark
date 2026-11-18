@@ -113,9 +113,16 @@ defmodule BarkparkWeb.Studio.DeskFieldActionsTest do
     end
 
     # One menu, not one per field. bp-desk.js gives a `dk-doc-menu-list`
-    # popover its keys.
+    # popover its keys. An array item's own "…" menu (a string row of
+    # `tags`, `ArrayItemMenu`) is the item's, not a field's.
     html = view |> element(@form) |> render()
-    assert length(Regex.scan(~r/\srole="menu"/, html)) == 1
+
+    field_menus =
+      ~r/<[a-z]+[^>]*\srole="menu"[^>]*>/
+      |> Regex.scan(html)
+      |> Enum.reject(fn [tag] -> tag =~ "data-desk-item-menu" end)
+
+    assert length(field_menus) == 1
 
     assert has_element?(
              view,

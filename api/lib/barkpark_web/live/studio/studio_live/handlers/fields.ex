@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
+  alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -655,6 +656,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {:noreply, assign(socket, editor_mode: next)}
   end
 
+  # A tags field's Enter and × (`TagsField`, `Handlers.Tags`).
+  def array_op(%{"action" => action} = params, socket) when action in ~w(add_tag remove_tag),
+    do: BarkparkWeb.Studio.StudioLive.Handlers.Tags.array_op(params, socket)
+
   def array_op(%{"action" => action} = params, socket) do
     path = StudioLive.parse_path(params["path"] || "")
 
@@ -679,11 +684,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
       new_list =
         case action do
-          "add_row" -> add_row(current, field, params["member"], keyed_parent?(form, key_path))
-          "remove_row" -> ArrayField.remove_row(current, idx)
-          "move_up" -> ArrayField.move_up(current, idx)
-          "move_down" -> ArrayField.move_down(current, idx)
-          _ -> current
+          "add_row" ->
+            add_row(current, field, params["member"], keyed_parent?(form, key_path))
+
+          "remove_row" ->
+            ArrayField.remove_row(current, idx)
+
+          "move_up" ->
+            ArrayField.move_up(current, idx)
+
+          "move_down" ->
+            ArrayField.move_down(current, idx)
+
+          other ->
+            ArrayItems.apply_op(other, current, idx, field, params, keyed_parent?(form, key_path))
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
@@ -776,7 +790,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   #
   # A landed save also takes down the "Updated by another user" banner: what
   # it said was kept is now saved (#25880 review).
-  defp settle_dirty(socket, keys) do
+  @doc false
+  def settle_dirty(socket, keys) do
     if socket.assigns[:save_status] == "Saved" do
       # A field the store refused earlier is still not saved (`RefusedSave`).
       held = MapSet.new(RefusedSave.keys(socket))

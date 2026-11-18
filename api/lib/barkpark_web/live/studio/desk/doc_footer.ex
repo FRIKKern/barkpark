@@ -5,7 +5,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   on the left, then a Publish button and the "…" on the right.
 
   - The left is a button named by its words, with TanStack's class names
-    (`.save-state`, `.save-state-text`). It opens nothing yet and is disabled.
+    (`.save-state`, `.save-state-text`). As Sanity's, it opens the History
+    inspector on Review changes (`review`, a patch); with no words it is
+    disabled.
   - The left says "Edited 5m ago" while there are edits not yet published,
     "Last published 2h ago" when there are none, and the save's own words
     when a save went wrong ("Save failed", "Updated by another user"). A
@@ -60,10 +62,14 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     default: 0,
     doc: "how many validation errors the document has; Publish is greyed out over any"
 
+  attr :review, :string,
+    default: nil,
+    doc: "the path that opens History on Review changes; nil leaves the words a disabled button"
+
   @doc "The left's words and the Publish button, or Unpublish in the published perspective."
   def bar(%{perspective: :published} = assigns) do
     ~H"""
-    <.words status={@status} />
+    <.words status={@status} review={@review} />
     <%!-- TanStack's `button.publish.danger`, named "Unpublish". The dialog it
           opens gives the focus back to it on Cancel (`ModalFocus`). --%>
     <style>
@@ -87,7 +93,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
 
   def bar(assigns) do
     ~H"""
-    <.words status={@status} />
+    <.words status={@status} review={@review} />
     <button
       type="button"
       id={"#{@id}-publish"}
@@ -109,13 +115,21 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   end
 
   attr :status, :string, required: true
+  attr :review, :string, default: nil
 
   defp words(assigns) do
     ~H"""
     <%!-- The TanStack Studio's names (`DocumentPane.tsx` `.save-state-btn`,
-          `.save-state`, `.save-state-text`): a button named by its words. It
-          opens nothing yet, so it is disabled and out of the tab order. --%>
-    <button type="button" class="dk-footer-status save-state-btn" data-desk-footer-status disabled>
+          `.save-state`, `.save-state-text`): a button named by its words,
+          which opens History on Review changes. --%>
+    <button
+      type="button"
+      class="dk-footer-status save-state-btn"
+      data-desk-footer-status
+      aria-label={@status != "" && @status}
+      disabled={@status == "" or is_nil(@review)}
+      phx-click={@review && @status != "" && JS.patch(@review)}
+    >
       <span class="save-state"><span class="save-state-text">{@status}</span></span>
     </button>
     """
@@ -145,8 +159,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     end
   end
 
-  # The desk's list rows say "Updated 5m ago" with the same words.
-  defp ago(%DateTime{} = at, now) do
+  @doc "How long ago `at` was, in the words the footer and the list rows use (\"5m ago\")."
+  def ago(%DateTime{} = at, now) do
     secs = max(DateTime.diff(now, at, :second), 0)
 
     cond do

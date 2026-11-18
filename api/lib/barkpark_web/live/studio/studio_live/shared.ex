@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
-  alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
+  alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -1749,7 +1749,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path, build_opts)
       end)
 
-    editor = redact_editor_for_viewer(editor, socket)
+    editor = editor |> NewDoc.editor(socket) |> redact_editor_for_viewer(socket)
 
     # A content plugin's schema chrome reads in the Studio language
     # (task-0ded99e28e620ba5), and a list of one plain member reads as it.

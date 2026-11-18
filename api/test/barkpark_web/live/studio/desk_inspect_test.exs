@@ -218,7 +218,7 @@ defmodule BarkparkWeb.Studio.DeskInspectTest do
 
   test "control: another inspector in the URL is still one the desk does not draw", c do
     {:ok, view, _html} =
-      live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=sanity%2Fstructure%2Fhistory")
+      live(c.conn, "#{c.base}/#{c.type};#{c.id},inspect=sanity%2Fcomments")
 
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, "[data-pane-editing] #editor-form") end)

@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias BarkparkWeb.Studio.Desk.FocusMode
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.ListSearch
+  alias BarkparkWeb.Studio.Desk.NewDocMenu
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Rows
@@ -76,7 +77,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus bulk bulk_confirm)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus bulk bulk_confirm choices)a
         )
       )
       |> assign_new(:bulk, fn -> nil end)
@@ -86,6 +87,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign_new(:hint, fn -> nil end)
       |> assign_new(:focus, fn -> nil end)
       |> assign_new(:orderings, fn -> [] end)
+      |> assign_new(:choices, fn -> [] end)
       |> assign_new(:sorts, fn -> [] end)
       |> assign_new(:default, fn -> "updated" end)
       |> assign_new(:limit, fn -> Rows.page() end)
@@ -319,29 +321,17 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             {title(assigns)}
           <% end %>
         </div>
-        <%!-- J18: the Studio's own "+" event, which the page hands to the
-              Studio (`EditorHost`); the new document opens after this pane.
-              The button is in the header from the first render, hidden until
-              the read says the type can be created: a button that arrived
-              with the read made the browser move "List options" and its menu,
-              which closed an open menu and dropped the focus. --%>
-        <button
+        <%!-- J18: Create new, its ways to start (`NewDocMenu`); the new
+              document opens after this pane. --%>
+        <NewDocMenu.button
           :if={@pane.kind == :list}
-          type="button"
-          class="dk-create-new dk-doc-menu-button icon-btn"
-          hidden={!creatable?(assigns)}
-          disabled={!creatable?(assigns)}
-          phx-click={creatable?(assigns) && "new-document"}
-          phx-value-type={creatable?(assigns) && @pane.type}
-          phx-value-desk-pane={creatable?(assigns) && @index}
-          aria-label={
-            creatable?(assigns) &&
-              gettext("Create new %{type}", type: @data.result[:type_title] || @pane.type)
-          }
-          data-tip={creatable?(assigns) && gettext("Create new document")}
-        >
-          <BarkparkWeb.Studio.Desk.Glyph.glyph name="add" />
-        </button>
+          id={@id}
+          index={@index}
+          type={@pane.type}
+          label={gettext("Create new %{type}", type: (@data.ok? && @data.result[:type_title]) || @pane.type)}
+          choices={@choices}
+          creatable={creatable?(assigns)}
+        />
         <ListMenu.menu
           :if={@pane.kind == :list}
           id={@id}
@@ -434,6 +424,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                   data-selected={selected?(@panes, @index, entry.next)}
                   data-desk-row
               data-desk-opens={entry.next.kind}
+              data-testid={@pane.kind == :list && entry.next.kind == :doc && "pane-item"}
             >
               <%!-- The title is an element of its own, as the TanStack row's
                    `.t`: a spec finds a row by its title alone. --%>

@@ -916,12 +916,10 @@ defmodule Barkpark.Content.Writer do
 
   @doc """
   Clone a document into a fresh draft. Copies `title` (with " (copy)"
-  suffix) and the full `content` map verbatim, assigns a new generated
-  id, and inserts via `create_document/3` so the draft prefix, status,
-  and PubSub broadcast all go through the canonical write path.
-
-  Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
-  insert failure. Used by the Studio's "Duplicate" header action.
+  suffix) and the full `content` map verbatim, assigns a new id (`:doc_id`,
+  else `generate_id/1`'s), and inserts via `create_document/3` so the draft
+  prefix, status, and PubSub broadcast all go through the canonical write path.
+  Returns `{:ok, new_doc}` or `{:error, changeset}`. Used by "Duplicate".
 
   `:title_suffix` (task-141c0bba8070ef02) replaces the English `" (copy)"`
   with the caller's own (the Studio passes it in the workspace language). A
@@ -934,7 +932,7 @@ defmodule Barkpark.Content.Writer do
   def clone_document(doc, type, dataset, opts \\ [])
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
     {suffix, opts} = Keyword.pop(opts, :title_suffix)
-    new_id = generate_id(type)
+    {new_id, opts} = Keyword.pop_lazy(opts, :doc_id, fn -> generate_id(type) end)
     {src_title, new_title} = copy_title(Map.get(doc, :title), suffix)
     src_content = doc |> clone_content(type, dataset) |> retitle_copy(src_title, new_title)
 
