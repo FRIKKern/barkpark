@@ -344,7 +344,7 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
         expected = Map.put(expected, name, pub[name])
         now = draft(c)
 
-        for key <- Map.keys(expected) ++ Map.keys(now), uniq: true do
+        for key <- Enum.uniq(Map.keys(expected) ++ Map.keys(now)) do
           assert now[key] == expected[key],
                  "after reverting #{name}, #{key} is #{inspect(now[key])}, not #{inspect(expected[key])}"
         end

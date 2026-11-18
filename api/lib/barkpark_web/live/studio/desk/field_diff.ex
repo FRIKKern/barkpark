@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
 
   The other functions take one change apart for drawing it:
 
-  - `text_diff/2`: a word diff (Sanity's diff-match-patch over words):
+  - `text_diff/2`: a word diff with diff-match-patch's semantic cleanup:
     runs of words kept, removed and added.
   - `array_diff/2`: each item of the list after the change, added, moved or
     kept, then each removed one. Items are matched by `_key` (objects,
@@ -29,9 +29,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   @typedoc "One changed top-level field."
   @type change :: %{field: map(), name: String.t(), before: term(), after: term()}
 
-  # The most words a text diff compares; past it a value is drawn as removed
-  # then added, whole.
-  @max_tokens 20_000
+  # The most words a text diff compares once the words both sides start and
+  # end with are set aside (the engine's grid is one cell per pair); past
+  # it the middle is drawn as removed then added, whole.
+  @max_tokens 1_500
 
   @doc "The values of a document (or a revision): its content and its title."
   @spec values(map() | nil) :: map()
@@ -150,23 +151,23 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   @spec text_diff(String.t(), String.t()) :: [segment()]
   def text_diff(before, after_) when is_binary(before) and is_binary(after_) do
     {b, a} = {tokens(before), tokens(after_)}
+    {head, b, a} = common(b, a, [])
+    {tail, b, a} = common(Enum.reverse(b), Enum.reverse(a), [])
+    {b, a} = {Enum.reverse(b), Enum.reverse(a)}
 
-    if length(b) + length(a) > @max_tokens do
-      Enum.reject([{:removed, before}, {:added, after_}], &(elem(&1, 1) == ""))
-    else
-      b
-      |> List.myers_difference(a)
-      |> Enum.map(fn {op, words} -> {kind(op), Enum.join(words)} end)
-      |> semantic()
-    end
+    middle =
+      if length(b) + length(a) > @max_tokens,
+        do: [{:removed, Enum.join(b)}, {:added, Enum.join(a)}],
+        else: lcs(b, a)
+
+    semantic([{:same, Enum.join(head)}] ++ middle ++ [{:same, Enum.join(Enum.reverse(tail))}])
   end
+
+  defp common([x | b], [x | a], kept), do: common(b, a, [x | kept])
+  defp common(b, a, kept), do: {Enum.reverse(kept), b, a}
 
   defp tokens(text),
     do: Regex.scan(~r/\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/u, text) |> List.flatten()
-
-  defp kind(:eq), do: :same
-  defp kind(:del), do: :removed
-  defp kind(:ins), do: :added
 
   # diff-match-patch's semantic cleanup, as TanStack's textDiff runs it: a
   # kept run no longer than the edits on both sides of it becomes part of
@@ -280,13 +281,21 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
 
   # The keys of the longest common subsequence of two key lists.
   defp stay(kb, ka) do
-    kb
-    |> List.myers_difference(ka)
-    |> Enum.flat_map(fn
-      {:eq, k} -> k
-      _ -> []
-    end)
-    |> MapSet.new()
+    for {:same, k} <- lcs(kb, ka), into: MapSet.new(), do: k
+  end
+
+  # The one diff engine (`Barkpark.PortableDoc.TextDiff`, a line LCS) over
+  # two lists of strings: each item stands on a line of its own, by its
+  # number, so an item may hold a line break. `{:same | :removed | :added,
+  # item}` in order; past the engine's size cap, all removed then all added.
+  defp lcs(before, after_) do
+    ids = (before ++ after_) |> Enum.uniq() |> Enum.with_index() |> Map.new()
+    item = Map.new(ids, fn {s, i} -> {Integer.to_string(i), s} end)
+    lines = &Enum.map_join(&1, "\n", fn s -> Integer.to_string(ids[s]) end)
+
+    for %{op: op, text: id} <-
+          Barkpark.PortableDoc.TextDiff.diff_lines(lines.(before), lines.(after_)),
+        do: {%{"=" => :same, "-" => :removed, "+" => :added}[op], item[id]}
   end
 
   # ── Rich text ───────────────────────────────────────────────────────────
