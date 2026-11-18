@@ -141,7 +141,9 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
     assert %{path: "author", id: ^ada, title: "Ada Lovelace"} =
              Enum.find(targets, &(&1.path == "author"))
 
-    assert Enum.find_index(names, &(&1 == "delete-doc")) == at + 1
+    # After it, Copy and Paste document (`DocClip`), then Delete.
+    assert Enum.slice(names, (at + 1)..(at + 3)) ==
+             ["copy-document", "paste-document", "delete-doc"]
 
     # The footer's menu is the document's actions only.
     refute has_element?(
