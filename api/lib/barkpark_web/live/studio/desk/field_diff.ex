@@ -75,6 +75,25 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   defp norm(""), do: nil
   defp norm([]), do: nil
 
+  # A slug or a reference is stored either way: as its text, or as the
+  # object the form writes ({"_type": "slug", "current": …}, {"_ref": …}).
+  defp norm(%{"current" => c} = slug)
+       when is_binary(c) and map_size(slug) <= 2 and
+              (map_size(slug) == 1 or
+                 :erlang.map_get("_type", slug) == "slug"),
+       do: norm(c)
+
+  defp norm(%{"_ref" => r} = ref)
+       when is_binary(r) and map_size(ref) <= 2 and
+              (map_size(ref) == 1 or
+                 :erlang.map_get("_type", ref) == "reference"),
+       do: norm(r)
+
+  # Rich text is its blocks; the html beside them is drawn from them (a doc
+  # written through the API may have none until the form saves it).
+  defp norm(%{"blocks" => blocks, "html" => _} = rich) when is_list(blocks),
+    do: norm(Map.delete(rich, "html"))
+
   defp norm(%{} = map) do
     kept =
       Enum.reduce(map, %{}, fn {k, v}, acc ->
@@ -149,26 +168,53 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   defp kind(:del), do: :removed
   defp kind(:ins), do: :added
 
-  # As diff-match-patch's semantic cleanup does for words: a kept run of
-  # spaces alone between two changes is part of both, so "a b" → "c d"
-  # reads as one removal and one addition, not word by word.
+  # diff-match-patch's semantic cleanup, as TanStack's textDiff runs it: a
+  # kept run no longer than the edits on both sides of it becomes part of
+  # them, so "Short excerpt for post 24." to "Changed for review." reads as
+  # one removal and one addition, not word by word. Repeated until nothing
+  # more folds; each pass removes a kept run, so it ends.
   defp semantic(segments) do
-    at = List.to_tuple(segments)
-    last = tuple_size(at) - 1
-    changed? = fn i -> i >= 0 and i <= last and elem(elem(at, i), 0) != :same end
+    segments = merge(segments)
 
-    segments
-    |> Enum.with_index()
-    |> Enum.flat_map(fn
-      {{:same, s}, i} = {seg, _} ->
-        if String.trim(s) == "" and changed?.(i - 1) and changed?.(i + 1),
-          do: [{:removed, s}, {:added, s}],
-          else: [seg]
+    case fold(segments) do
+      ^segments -> segments
+      folded -> semantic(folded)
+    end
+  end
 
-      {seg, _i} ->
-        [seg]
-    end)
-    |> merge()
+  defp fold(segments) do
+    groups = Enum.chunk_by(segments, &(elem(&1, 0) == :same)) |> List.to_tuple()
+    last = tuple_size(groups) - 1
+    edits = fn i -> if i < 0 or i > last, do: 0, else: edit_size(elem(groups, i)) end
+
+    hit =
+      Enum.find(0..last//1, fn i ->
+        case elem(groups, i) do
+          [{:same, s}] -> String.length(s) <= min(edits.(i - 1), edits.(i + 1))
+          _ -> false
+        end
+      end)
+
+    case hit do
+      nil ->
+        segments
+
+      i ->
+        [{:same, s}] = elem(groups, i)
+
+        groups
+        |> put_elem(i, [{:removed, s}, {:added, s}])
+        |> Tuple.to_list()
+        |> Enum.concat()
+    end
+  end
+
+  # The larger of a group's removed and added text; 0 for a kept run.
+  defp edit_size([{:same, _}]), do: 0
+
+  defp edit_size(group) do
+    {r, a} = split(group)
+    max(String.length(r), String.length(a))
   end
 
   defp split(segs) do

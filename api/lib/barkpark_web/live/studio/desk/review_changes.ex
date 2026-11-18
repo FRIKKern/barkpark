@@ -364,7 +364,7 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
                 aria-label={gettext("Revert changes to %{field}", field: c.field["title"] || c.name)}
                 title={gettext("Revert change")}
                 popovertarget={"#{@id}-confirm-one"}
-                style={"anchor-name: --#{@id}-revert-#{c.name}"}
+                style={"anchor-name: --#{anchor(@id, c.name)}"}
                 phx-click={ask(@id, c.name)}
               >
                 <BarkparkWeb.Icons.desk_icon name="undo" size={21} />
@@ -381,7 +381,7 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
               class="revert-all"
               aria-label={gettext("Revert all")}
               popovertarget={"#{@id}-confirm-all"}
-              style={"anchor-name: --#{@id}-revert-all"}
+              style={"anchor-name: --#{anchor(@id, "all")}"}
             >
               <BarkparkWeb.Icons.desk_icon name="undo" size={17} />
               <span>{gettext("Revert all")}</span>
@@ -389,7 +389,7 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
           </span>
           <.confirm
             id={"#{@id}-confirm-all"}
-            anchor={"#{@id}-revert-all"}
+            anchor={anchor(@id, "all")}
             question={gettext("Are you sure you want to revert all %{count} changes?", count: length(@review.changes))}
             action={gettext("Revert all")}
             all
@@ -420,15 +420,22 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
   # A field's revert opens the one confirm the list has, named for it: the
   # confirm's button reverts that field, and the confirm sits under it.
   defp ask(id, name) do
-    JS.set_attribute({"phx-value-field", name},
-      to: "##{id}-confirm-one [data-desk-review-revert]"
-    )
-    |> JS.set_attribute({"style", anchored("#{id}-revert-#{name}")}, to: "##{id}-confirm-one")
+    confirm = ~s([id="#{id}-confirm-one"])
+
+    JS.set_attribute({"phx-value-field", name}, to: confirm <> " [data-desk-review-revert]")
+    |> JS.set_attribute({"style", anchored(anchor(id, name))}, to: confirm)
   end
 
+  # A pane's id carries the document's (with a colon), which is not a CSS
+  # name: the anchor's name keeps letters, digits, - and _ only.
+  defp anchor(id, name),
+    do: String.replace("#{id}-revert-#{name}", ~r/[^A-Za-z0-9_-]/, "-")
+
+  # Under the button, its right edge on the button's (the field's revert
+  # sits at the panel's right); flipped where the window has no room.
   defp anchored(anchor),
     do:
-      "position-anchor: --#{anchor}; inset: auto; top: anchor(bottom); left: anchor(left); margin: 4px 0 0"
+      "position-anchor: --#{anchor}; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0; position-try-fallbacks: flip-inline, flip-block"
 
   attr :id, :string, required: true
   attr :question, :string, required: true

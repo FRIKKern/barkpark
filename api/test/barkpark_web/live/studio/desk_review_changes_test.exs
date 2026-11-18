@@ -276,6 +276,30 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
                2
     end
 
+    # A pane's id has a colon: "#<id>" picked nothing in Chrome, so the
+    # confirm reverted no field and sat at the window's corner.
+    test "a field's revert names that field on the confirm, by a selector that finds it", c do
+      view = open(c, @review)
+
+      [ops] =
+        view
+        |> element(~s(#{@panel} button[aria-label="Revert changes to Title"]))
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("button")
+        |> LazyHTML.attribute("phx-click")
+
+      sets =
+        for ["set_attr", %{"to" => to, "attr" => [k, v]}] <- Jason.decode!(ops), do: {to, k, v}
+
+      assert [{field_to, "phx-value-field", "title"}, {box_to, "style", style}] = sets
+      assert has_element?(view, field_to, "Revert change")
+      assert has_element?(view, box_to)
+      [anchor] = Regex.run(~r/position-anchor: --([^;]+);/, style, capture: :all_but_first)
+      assert anchor =~ ~r/^[A-Za-z0-9_-]+$/
+      assert render(view) =~ "anchor-name: --#{anchor}"
+    end
+
     test "with one change there is no Revert all; with none it says so", c do
       Content.upsert_document(
         c.type,
@@ -386,6 +410,67 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
       revert(view, %{"field" => "title"})
       revert(view, %{"all" => "true"})
       assert draft(c) == before
+    end
+  end
+
+  describe "reads" do
+    # The published version is read once per draft, and the diff is made in
+    # memory: an edit costs the same reads with twelve changed fields as with
+    # one.
+    test "an edit with Review changes open reads nothing per changed field", c do
+      view = open(c, @review)
+      edit = fn title -> EditorPost.change(view, %{"doc" => %{"title" => title}}) end
+
+      {_, many} =
+        Barkpark.QueryCounter.census(fn ->
+          Barkpark.QueryCounter.own(view.pid) && edit.("Edit one")
+        end)
+
+      for name <- ~w(slug excerpt count flag choice reviewer cover cta tags links body),
+          do: revert(view, %{"field" => name})
+
+      assert [_] = :sys.get_state(view.pid).socket.assigns.desk_review.changes
+
+      {_, one} =
+        Barkpark.QueryCounter.census(fn ->
+          Barkpark.QueryCounter.own(view.pid) && edit.("Edit two")
+        end)
+
+      assert many == one, "with 12 changes: #{inspect(many)}; with 1: #{inspect(one)}"
+    end
+  end
+
+  describe "the word diff" do
+    alias BarkparkWeb.Studio.Desk.FieldDiff
+
+    # TanStack's textDiff runs diff-match-patch's semantic cleanup: a short
+    # kept word between two edits is part of them.
+    test "folds short kept words between edits into one removal and one addition" do
+      assert FieldDiff.text_diff("Short excerpt for post 24.", "Changed for review.") ==
+               [removed: "Short excerpt for post 24", added: "Changed for review", same: "."]
+
+      assert FieldDiff.text_diff("the quick brown fox", "the quick red fox") ==
+               [same: "the quick ", removed: "brown", added: "red", same: " fox"]
+    end
+
+    # A doc written through the API keeps a slug as its text; the form
+    # writes the slug object. The same slug is no change.
+    test "a slug or a reference is the same as text or as its object; rich text is its blocks" do
+      assert FieldDiff.same?("post-24", %{"_type" => "slug", "current" => "post-24"})
+      assert FieldDiff.same?(%{"_ref" => "ada", "_type" => "reference"}, "ada")
+      refute FieldDiff.same?("post-24", %{"_type" => "slug", "current" => "post-25"})
+      refute FieldDiff.same?(%{"_ref" => "ada", "_weak" => true}, "ada")
+
+      blocks = [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Hi"}]
+        }
+      ]
+
+      assert FieldDiff.same?(%{"blocks" => blocks}, %{"blocks" => blocks, "html" => "<p>Hi</p>"})
+      refute FieldDiff.same?(%{"blocks" => []}, %{"blocks" => blocks, "html" => "<p>Hi</p>"})
     end
   end
 end
