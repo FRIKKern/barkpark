@@ -217,7 +217,14 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
             {"paper.pin-master", "scoped_write"},
             {"paper.detach-master", "scoped_write"},
             {"paper.apply-ops", "scoped_write"},
-            {"workspace.locale", "scoped_read"}
+            {"workspace.locale", "scoped_read"},
+            {"codelist.show", "scoped_read"},
+            {"pref.get", "scoped_read"},
+            {"pref.set", "scoped_write"},
+            {"pref.patch", "scoped_write"},
+            {"pref.rm", "scoped_write"},
+            {"doc.actions", "scoped_admin"},
+            {"doc.run-action", "scoped_admin"}
           ] do
         assert by_id[id]["auth_tier"] == tier,
                "#{id} is served only under /w/:ws/p/:proj; on tier " <>

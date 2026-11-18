@@ -1739,7 +1739,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       },
       "get": {
         "operationId": "pref.get.scoped",
@@ -1810,7 +1810,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       },
       "patch": {
         "operationId": "pref.patch.scoped",
@@ -1901,7 +1901,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       },
       "put": {
         "operationId": "pref.set.scoped",
@@ -1993,7 +1993,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/v1/media/{dataset}/{id}/undo-checkout": {
@@ -2313,278 +2313,6 @@
           "webhook"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/prefs/{dataset}/{key}": {
-      "delete": {
-        "operationId": "pref.rm",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete one named per-account pref (task-7d2a48dbf7e4bf34). Idempotent — deleting an absent key is still ok.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
-      },
-      "get": {
-        "operationId": "pref.get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read one named per-account pref (task-7d2a48dbf7e4bf34) in the active --workspace/--dataset. value is null when unset. Identity is the caller's account session or a personal access token's owner.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "read"
-      },
-      "patch": {
-        "operationId": "pref.patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: op, field, item, max.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Edit value[field] of one per-account pref in one locked write, so two tabs, devices or servers never overwrite each other. set puts item at the top-level field, whatever it held; push_front moves item to the front of a list, dedupes and keeps the first max; add appends item unless present; remove drops it and writes nothing on an absent key. Applying an op twice in a row changes nothing; a replay after other ops re-applies it. 422 invalid_pref when a list op's value[field] is not a list.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
-      },
-      "put": {
-        "operationId": "pref.set",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Set one named per-account pref (task-7d2a48dbf7e4bf34) — an upsert, never an append. Capped at 16KB.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
       }
     },
     "/v1/admin/orgs/{org_slug}/auth-methods": {
@@ -3917,99 +3645,6 @@
           "workspace"
         ],
         "x-barkpark-scope": "scoped_admin"
-      }
-    },
-    "/v1/data/doc/{dataset}/{type}/{doc_id}/actions/{name}": {
-      "post": {
-        "operationId": "doc.run-action",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "doc_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: mode.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Run one of a document's resolved actions by name, dry-run or real.",
-        "tags": [
-          "doc"
-        ],
-        "x-barkpark-scope": "admin"
       }
     },
     "/v1/media/{dataset}/search/suggestions": {
@@ -9510,71 +9145,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/data/doc/{dataset}/{type}/{doc_id}/actions": {
-      "get": {
-        "operationId": "doc.actions",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "doc_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List a document's resolved actions (built-in + schema-declared, plugin-filtered by live state).",
-        "tags": [
-          "doc"
-        ],
-        "x-barkpark-scope": "admin"
-      }
-    },
     "/w/{workspace_slug}/p/{project_slug}/v1/papers/{slug}/masters": {
       "get": {
         "operationId": "paper.masters.scoped",
@@ -11948,64 +11518,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/codelists/{codelist_id}": {
-      "get": {
-        "operationId": "codelist.show",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "codelist_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Comma-separated language preference order for labels (default nob,eng).",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
-        "tags": [
-          "codelist"
-        ],
-        "x-barkpark-scope": "read"
-      }
-    },
     "/v1/webhooks/{dataset}/{id}/test-send": {
       "post": {
         "operationId": "webhook.test-send",
@@ -14133,7 +13645,7 @@
         "tags": [
           "doc"
         ],
-        "x-barkpark-scope": "admin"
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/data/search/{dataset}/synonyms": {
@@ -14780,7 +14292,7 @@
         "tags": [
           "doc"
         ],
-        "x-barkpark-scope": "admin"
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/rollback": {
@@ -20211,7 +19723,7 @@
         "tags": [
           "codelist"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       }
     },
     "/v1/auth/mfa/disable": {
