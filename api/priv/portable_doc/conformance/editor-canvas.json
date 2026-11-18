@@ -1,8 +1,8 @@
 {
   "renderer": "editor-canvas",
   "compare": "dom",
-  "pack_stamp": "6b94e60c6fff8309c39a33c1dab0f0a9962d6b72f8cb7d67920f4d815fc33c5d",
-  "ran_at_sha": "a19a7cb18d23099eca99952e6664368f06651333",
+  "pack_stamp": "15ed2ebf27563694801945e15fe4945d9764da77a4c7b11361812d65eb7ad1f3",
+  "ran_at_sha": "bef857c165dac433e26d9038ac2b58ffddd132ef",
   "rows": [
     {
       "type": "action",
