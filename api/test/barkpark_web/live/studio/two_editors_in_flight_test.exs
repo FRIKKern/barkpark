@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   @dataset "production"
 
@@ -237,6 +238,24 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
       send_post(a2, "title", %{"title" => "Fixture post 14 A aaa"}, %{"doc[title]" => 1})
 
       assert stored(c) == %{"title" => "Fixture post 14 A aaa", "excerpt" => "Short. B"}
+    end
+
+    # The desk's Paste field writes a value the server built: no `_bp_seen`.
+    test "a change the server built (no _bp_seen at all) takes no base", c do
+      a = open(c, c.desk)
+      b = open(c, c.desk)
+
+      send_post(a, "title", %{"title" => "Fixture post 14 A"})
+      send_post(b, "title", %{"title" => "bbb Fixture post 14 A"})
+      render(a)
+
+      socket = :sys.get_state(a.pid).socket
+
+      assert RemoteValues.put_bases(socket, ["title"], "{}").assigns.editor_field_bases == %{
+               "title" => "Fixture post 14 A"
+             }
+
+      assert RemoteValues.put_bases(socket, ["title"], nil).assigns.editor_field_bases == %{}
     end
   end
 end
