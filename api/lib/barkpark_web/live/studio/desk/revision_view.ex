@@ -246,7 +246,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
               class="btn danger"
               phx-click={
                 JS.push("restore-revision", value: %{id: @revision.id})
-                |> JS.focus(to: "##{@menu_button}")
+                |> JS.focus(to: ~s([id="#{@menu_button}"]))
               }
               popovertarget={"#{@id}-confirm"}
               popovertargetaction="hide"

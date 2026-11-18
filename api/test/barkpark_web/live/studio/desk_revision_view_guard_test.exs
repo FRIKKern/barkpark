@@ -284,7 +284,8 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       d = doc!([], %{"title" => "Post published"}, %{"title" => "Post draft"})
       view = open(c, d, @history <> ",rev=#{d.rev}")
       confirm = view |> element("[data-desk-revert-confirm]") |> render()
-      assert confirm =~ ~r/phx-click="[^"]*restore-revision[^"]*focus[^"]*-editor-actions-button/
+      # An attribute selector: the id has a colon, which a `#id` selector refuses.
+      assert confirm =~ ~r/restore-revision.*focus.*\[id=.*-editor-actions-button/
     end
   end
 
