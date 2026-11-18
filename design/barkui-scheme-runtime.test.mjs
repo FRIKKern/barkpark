@@ -102,7 +102,14 @@ for (const c of JSON.parse(document.getElementById("cases").textContent)) {
   ref.style.backgroundColor = c.want;
   ref.style.color = c.wantFg || "";
   const probe = getComputedStyle(stage.querySelector(".probe")), r = getComputedStyle(ref);
-  rows.push({ id: c.id, got: probe.backgroundColor, want: r.backgroundColor, ...(c.wantFg ? { gotFg: probe.color, wantFg: r.color } : {}) });
+  const row = { id: c.id, got: probe.backgroundColor, want: r.backgroundColor, ...(c.wantFg ? { gotFg: probe.color, wantFg: r.color } : {}) };
+  if (c.wantPaint) {
+    // The element's own painted ground: the root, or the stage's first child.
+    ref.style.backgroundColor = c.wantPaint;
+    const el = c.paintOf === "root" ? root : stage.firstElementChild;
+    Object.assign(row, { gotPaint: getComputedStyle(el).backgroundColor, wantPaint: getComputedStyle(ref).backgroundColor });
+  }
+  rows.push(row);
 }
 document.getElementById("out").textContent = JSON.stringify({ systemDark: matchMedia("(prefers-color-scheme: dark)").matches, rows });
 </script></body></html>`;
@@ -204,6 +211,16 @@ test("BarkUI sheet: surfaces and depth nest inside skin, scheme and each other",
     ["scheme island inside a surface", { "data-color-scheme": "dark", "data-skin": x },
       `<div data-surface="raised"><section data-color-scheme="light">${P}</section></div>`, bg(x, "raised", "light")],
   ].map(([id, root, html, want, wantFg]) => ({ id, root, html, want, ...(wantFg ? { wantFg } : {}) }));
+  // data-bp-theme (today's Studio pages) gets the variables but no paint;
+  // data-skin gets both. The second pair shows the paint check can see paint.
+  list.push(
+    { id: "data-bp-theme alone on the root: variables, no paint", root: { "data-bp-theme": x },
+      html: P, want: bg(x, "base", "light"), paintOf: "root", wantPaint: "transparent" },
+    { id: "data-bp-theme alone on an element: variables, no paint", root: {},
+      html: `<div data-bp-theme="${x}">${P}</div>`, want: bg(x, "base", "light"), wantPaint: "transparent" },
+    { id: "data-skin on the root is painted", root: { "data-skin": x },
+      html: P, want: bg(x, "base", "light"), paintOf: "root", wantPaint: bg(x, "base", "light") },
+  );
   const dir = mkdtempSync(join(tmpdir(), "barkui-surface-page-"));
   try {
     const file = join(dir, "page.html");
@@ -213,7 +230,9 @@ test("BarkUI sheet: surfaces and depth nest inside skin, scheme and each other",
     for (const r of result.rows) {
       assert.equal(r.got, r.want, r.id);
       if (r.wantFg) assert.equal(r.gotFg, r.wantFg, `${r.id} (text)`);
+      if (r.wantPaint) assert.equal(r.gotPaint, r.wantPaint, `${r.id} (own paint)`);
     }
+    assert.equal(result.rows.filter((r) => r.wantPaint).length, 3, "the paint cases did not run");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
