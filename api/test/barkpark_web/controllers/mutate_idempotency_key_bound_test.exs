@@ -12,9 +12,8 @@ defmodule BarkparkWeb.MutateIdempotencyKeyBoundTest do
       `idempotency_key_reused`, and the second body is not written;
     * an exact retry still replays the first answer byte-for-byte, and the
       key order a client happens to serialize does not count as a difference;
-    * a key stored before the binding (bare scope `"mutation"`, at most 24 h
-      old at deploy) is still honoured: its retry replays the stored answer,
-      and a retry while it is pending gets 409, not 422.
+    * a row under the bare `"mutation"` scope (what the unbound plug stored)
+      is refused 422 like any other row of another scope.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -107,52 +106,26 @@ defmodule BarkparkWeb.MutateIdempotencyKeyBoundTest do
     end
   end
 
-  describe "a key stored before the binding (bare scope \"mutation\")" do
-    # What the unbound plug stored: scope "mutation", hash over the raw path.
-    defp pre_binding_row!(token, key, url, state) do
-      hash = Idempotency.hash_key(key, token.id, "POST", url)
-      :claimed = Idempotency.claim(hash, "mutation")
+  # #26786's transition rule replayed a bare "mutation" row for a bound mutate
+  # retry. It went live on both hosts 2026-11-17 11:25Z; rows live 24 h, so the
+  # rule matched nothing after 2026-11-18 11:25Z and is gone (task-a87c7261c1aa63c2).
+  test "a row stored under the bare \"mutation\" scope gets 422 like any other unbound row",
+       %{token: token} do
+    url = "/v1/data/mutate/#{@dataset}"
+    key = unique("bare")
+    id = unique("bare-doc")
+    hash = Idempotency.hash_key(key, token.id, "POST", url)
+    :claimed = Idempotency.claim(hash, "mutation")
+    Idempotency.complete(hash, "mutation", 200, ~s({"transactionId":"bare"}), [])
 
-      if state == :completed,
-        do: Idempotency.complete(hash, "mutation", 200, ~s({"transactionId":"pre-deploy"}), [])
+    assert Idempotency.claim(hash, "mutation:" <> String.duplicate("0", 64)) == :mismatch
 
-      hash
-    end
+    retry = post(conn_with(key), url, create_body(id))
 
-    test "its retry after the deploy replays the stored answer, not 422", %{token: token} do
-      url = "/v1/data/mutate/#{@dataset}"
-      key = unique("pre-completed")
-      id = unique("pre-doc")
-      pre_binding_row!(token, key, url, :completed)
-
-      retry = post(conn_with(key), url, create_body(id))
-
-      assert retry.status == 200, "#{retry.status} #{retry.resp_body}"
-      assert get_resp_header(retry, "idempotency-replay") == ["true"]
-      assert retry.resp_body == ~s({"transactionId":"pre-deploy"})
-      refute written?(id), "the handler ran a second time"
-    end
-
-    test "a retry while it is still pending is 409 idempotency_key_in_use, not 422",
-         %{token: token} do
-      url = "/v1/data/mutate/#{@dataset}"
-      key = unique("pre-pending")
-      pre_binding_row!(token, key, url, :pending)
-
-      retry = post(conn_with(key), url, create_body(unique("pre-doc")))
-
-      assert retry.status == 409, "#{retry.status} #{retry.resp_body}"
-      assert Jason.decode!(retry.resp_body)["error"]["code"] == "idempotency_key_in_use"
-    end
-
-    test "it is honoured only by a bound mutate scope, never by another mount's scope" do
-      hash = Idempotency.hash_key(unique("pre-other"), Ecto.UUID.generate(), "POST", "/x")
-      :claimed = Idempotency.claim(hash, "mutation")
-      Idempotency.complete(hash, "mutation", 200, "{}", [])
-
-      assert Idempotency.claim(hash, "chat_send:" <> String.duplicate("0", 64)) == :mismatch
-      assert {:replay, _} = Idempotency.claim(hash, "mutation:" <> String.duplicate("0", 64))
-    end
+    assert retry.status == 422, "#{retry.status} #{retry.resp_body}"
+    assert Jason.decode!(retry.resp_body)["error"]["code"] == "idempotency_key_reused"
+    assert get_resp_header(retry, "idempotency-replay") == []
+    refute written?(id)
   end
 
   defp create_body(id),
