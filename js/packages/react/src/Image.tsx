@@ -46,13 +46,28 @@ export interface ImageFieldValue {
   focalY?: number | null
 }
 
-/** Either unresolved (`_ref`) or expanded (`_id` + optional `url`/`metadata`). */
+/**
+ * The reference shape an image field is written in under
+ * `BARKPARK_CANONICAL_SHAPE_WRITES` (docs/contracts/schema-v2.md):
+ * `{asset: {_ref: "image-<sha1>-<w>x<h>-<ext>"}, hotspot, crop}`. `asset` may
+ * also arrive expanded, carrying its `url`.
+ */
+export interface ImageReferenceValue {
+  _type?: string
+  asset?: { _ref?: string; _id?: string; _type?: string; _dataset?: string; url?: string } | null
+  hotspot?: { x: number; y: number; height: number; width: number }
+  crop?: { top: number; bottom: number; left: number; right: number }
+  alt?: string
+}
+
 /**
  * Either an unresolved reference (`_ref`), an expanded asset document, the
- * Studio's stored `{url, assetId, width, height, lqip}` value, or a bare URL
- * string, e.g. `"/media/files/2026/04/cover.jpg"`.
+ * Studio's stored `{url, assetId, width, height, lqip}` value, the reference
+ * shape `{asset: {_ref}}`, or a bare URL string, e.g.
+ * `"/media/files/2026/04/cover.jpg"`.
  */
-export type ImageAsset = ImageAssetRef | ImageAssetExpanded | ImageFieldValue | string
+export type ImageAsset =
+  ImageAssetRef | ImageAssetExpanded | ImageFieldValue | ImageReferenceValue | string
 
 /** Props for {@link BarkparkImage}. Extra props (`...rest`) are forwarded to the underlying element. */
 export interface BarkparkImageProps {
@@ -80,6 +95,14 @@ export interface BarkparkImageProps {
    * a non-Default workspace, whose renditions are only reachable via the scoped route.
    */
   pathPrefix?: string
+  /**
+   * The dataset an image in the reference shape (`{asset: {_ref}}`) is served
+   * from — see core `imageUrl`'s `dataset`. Without it such an image renders
+   * nothing (unless its `asset` is expanded with a `url`). With `baseUrl` (or
+   * `pathPrefix`) it must name the scope the dataset lives in: the route is
+   * `<baseUrl><pathPrefix>/images/barkpark/<dataset>/<sha1>-<w>x<h>.<ext>`.
+   */
+  dataset?: string
   /** Override the rendered component/tag. Defaults to `'img'`. Use `next/image` for framework-aware rendering. */
   as?: ComponentType<any> | string
   /** Explicit width; falls back to `asset.metadata.dimensions.width`. */
@@ -102,6 +125,12 @@ function getAssetId(asset: ImageAsset): string | undefined {
   // canonical spelling (see ImageFieldValue). First non-empty wins.
   const a = asset as { _ref?: string; _id?: string; assetId?: string }
   return a._ref || a._id || a.assetId || undefined
+}
+
+// True for the reference shape with a `_ref` under `asset`: a preset applies
+// to it (core turns the preset into transform params on its image route).
+function hasImageRef(asset: ImageAsset): boolean {
+  return typeof asset !== 'string' && 'asset' in asset && !!asset.asset?._ref
 }
 
 function getAssetUrl(asset: ImageAsset): string | undefined {
@@ -140,29 +169,36 @@ function computeImageSrc(
   baseUrl: string | undefined,
   preset: RenditionPreset | undefined,
   pathPrefix: string | undefined,
+  dataset: string | undefined,
 ): { src?: string; missAsset?: ImageAsset } {
   // An unset optional image field (`null`/`undefined`) renders nothing — guard
   // before the getAsset* helpers, which use `in` and would throw on a nullish asset.
   if (asset == null) return {}
 
   let src: string | undefined
+  // Include baseUrl/pathPrefix/dataset only when set — an unset prop never widens the path.
+  const imgOpts: {
+    preset?: RenditionPreset
+    baseUrl?: string
+    pathPrefix?: string
+    dataset?: string
+  } = {}
+  if (baseUrl) imgOpts.baseUrl = baseUrl
+  if (pathPrefix) imgOpts.pathPrefix = pathPrefix
+  if (dataset) imgOpts.dataset = dataset
   // A `preset` requests a server rendition — prefer it over the inline url, using
   // the same core helper as the SDK.
   if (preset) {
     // A preset only applies to an asset with a resolvable id — core's imageUrl
     // returns a bare URL string / id-less asset unchanged, silently serving the
     // full-size original. Warn once so that invisible fallback isn't a mystery.
-    if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
+    if (getAssetId(asset) === undefined && !hasImageRef(asset) && !warnedPresetWithoutId) {
       warnedPresetWithoutId = true
       console.warn(
         `[BarkparkImage] preset '${preset}' requested but the asset has no resolvable id (bare URL string or missing _ref/_id); serving the full-size original instead of the rendition.`,
       )
     }
-    // Include baseUrl/pathPrefix only when set — an unset prop never widens the path.
-    const imgOpts: { preset: RenditionPreset; baseUrl?: string; pathPrefix?: string } = { preset }
-    if (baseUrl) imgOpts.baseUrl = baseUrl
-    if (pathPrefix) imgOpts.pathPrefix = pathPrefix
-    src = imageUrl(asset, imgOpts) ?? undefined
+    src = imageUrl(asset, { ...imgOpts, preset }) ?? undefined
   }
   if (!src) {
     if (typeof asset === 'string') {
@@ -195,7 +231,10 @@ function computeImageSrc(
         return { missAsset: asset }
       }
     } else {
-      return {}
+      // The reference shape {asset: {_ref}}: core resolves its expanded url or
+      // the dataset's image route (null without a dataset — nothing to render).
+      src = imageUrl(asset, imgOpts) ?? undefined
+      if (!src) return {}
     }
   }
   return { src }
@@ -204,7 +243,9 @@ function computeImageSrc(
 /**
  * Renders a Barkpark image asset as an `<img>` (or a custom component
  * passed via `as`). Prefers `asset.url` when present; otherwise builds
- * `${baseUrl}/images/${assetId}` from `asset._ref` or `asset._id`.
+ * `${baseUrl}/images/${assetId}` from `asset._ref` or `asset._id`. The
+ * reference shape `{asset: {_ref}}` renders its expanded `asset.url`, else the
+ * `dataset`'s image route (core `imageUrl`); without `dataset` it renders nothing.
  *
  * Forwards metadata `dimensions` to `width`/`height` when those props
  * are omitted. When rendering through a custom component (e.g.
@@ -242,6 +283,7 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     onMissingBaseUrl,
     preset,
     pathPrefix,
+    dataset,
     ...rest
   } = props
 
@@ -249,7 +291,7 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
   // from the effect below. Doing the callback/logging in an effect means it fires
   // once per COMMITTED render — never twice within a StrictMode/concurrent commit,
   // and never for a render that React starts then throws away.
-  const { src, missAsset } = computeImageSrc(asset, baseUrl, preset, pathPrefix)
+  const { src, missAsset } = computeImageSrc(asset, baseUrl, preset, pathPrefix, dataset)
 
   useEffect(() => {
     if (missAsset === undefined) return

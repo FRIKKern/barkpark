@@ -3,10 +3,11 @@
 // Barkpark serves a curated set of named renditions (mirroring the server's
 // `Barkpark.Media.Renditions` presets) at `/media/renditions/<id>/<preset>`,
 // rather than arbitrary on-the-fly transforms. `imageUrl` turns a stored image
-// field — a `{_ref}` reference, an expanded `{_id, url}` asset, or a bare URL
-// string — into the URL for an `<img src>`. Renditions are fixed-size named
-// presets, not width-parametric transforms, so there is no `srcSet` / `w=`
-// (responsive-width) support.
+// field — a `{_ref}` reference, an expanded `{_id, url}` asset, the reference
+// shape `{asset: {_ref: "image-<sha1>-<w>x<h>-<ext>"}}`, or a bare URL string —
+// into the URL for an `<img src>`. Renditions are fixed-size named presets, not
+// width-parametric transforms, so there is no `srcSet` / `w=` (responsive-width)
+// support.
 
 import { isHttpUrl } from './util/guards'
 
@@ -21,11 +22,21 @@ export type RenditionPreset = 'thumb' | 'preview' | 'hero' | 'og' | (string & {}
 
 /**
  * A stored image field: an unresolved reference (`{_ref}`), an expanded asset
- * (`{_id, url}`), the Studio media picker's value (`{url, assetId, …}`), or a
- * bare URL string. Loose by design so it accepts the core `MediaAsset`, the
- * react `ImageAsset` and the Studio's stored shape without coupling.
+ * (`{_id, url}`), the Studio media picker's value (`{url, assetId, …}`), the
+ * reference shape (`{asset: {_ref}}`, docs/contracts/schema-v2.md; `asset` may
+ * also be expanded to carry its `url`), or a bare URL string. Loose by design
+ * so it accepts the core `MediaAsset`, the react `ImageAsset` and the Studio's
+ * stored shapes without coupling.
  */
-export type ImageRef = string | { _ref?: string; _id?: string; assetId?: string; url?: string }
+export type ImageRef =
+  | string
+  | {
+      _ref?: string
+      _id?: string
+      assetId?: string
+      url?: string
+      asset?: { _ref?: string; _id?: string; _dataset?: string; url?: string } | null
+    }
 
 export interface ImageUrlOptions {
   /** A named server rendition (`thumb`/`preview`/`hero`/`og`). Omit for the original. */
@@ -38,6 +49,21 @@ export interface ImageUrlOptions {
    * an inline url.
    */
   pathPrefix?: string
+  /**
+   * The dataset an image in the reference shape (`{asset: {_ref}}`) is served
+   * from: `<pathPrefix>/images/barkpark/<dataset>/<sha1>-<w>x<h>.<ext>`. Without
+   * it such an image has no URL. The client's `imageUrl` always sets its own.
+   */
+  dataset?: string
+}
+
+// A preset on a reference-shape image: the rendition route reads Barkpark file
+// ids only, so the preset's bounds go to the Sanity route as transform params.
+const PRESET_BOUNDS: Record<string, string> = {
+  thumb: 'w=320&h=320&fit=max',
+  preview: 'w=1600&h=1600&fit=max',
+  hero: 'w=1920&h=1080&fit=max',
+  og: 'w=1200&h=630&fit=crop',
 }
 
 function assetId(asset: ImageRef): string | undefined {
@@ -65,6 +91,11 @@ function assetUrl(asset: ImageRef): string | undefined {
  *   `<baseUrl>/media/renditions/<id>/<preset>`.
  * - Otherwise → the original: an inline `url` if the asset carries one, else
  *   `<baseUrl>/images/<id>`.
+ * - The reference shape `{asset: {_ref}}` (no top-level id or url) → its
+ *   expanded `asset.url`, else `<baseUrl><pathPrefix>/images/barkpark/<dataset>/
+ *   <sha1>-<w>x<h>.<ext>` for `opts.dataset`, with a known `preset`'s bounds as
+ *   `w`/`h`/`fit`. No `dataset`, a `_ref` that is not an image id, or a
+ *   `_dataset` other than `opts.dataset` → `null`.
  *
  * Returns `null` when the asset is nullish, when no id/url can be resolved, or
  * when the stored url is not an absolute http(s) URL. That last case is a real
@@ -101,5 +132,29 @@ export function imageUrl(
     return isHttpUrl(inline) ? inline : null
   }
   if (id) return `${base}${prefix}/images/${encodeURIComponent(id)}`
-  return null
+  return typeof asset === 'object' ? refUrl(asset.asset, base, prefix, opts) : null
+}
+
+// The reference shape: an expanded `asset.url` as any inline url, else the
+// Sanity image route of `opts.dataset`, whose file is `<sha1>-<w>x<h>.<ext>` of
+// the id `image-<sha1>-<w>x<h>-<ext>` (the server's rule:
+// FieldInputs.sanity_image_url/4). A ref that names another dataset
+// (`_dataset`) has no URL here.
+function refUrl(
+  a: { _ref?: string; _id?: string; _dataset?: string; url?: string } | null | undefined,
+  base: string,
+  prefix: string,
+  opts?: ImageUrlOptions,
+): string | null {
+  if (!a || typeof a !== 'object') return null
+  if (typeof a.url === 'string' && a.url) return imageUrl(a.url, opts)
+  const m = /^image-([0-9a-f]{40}-[1-9]\d*x[1-9]\d*)-([a-z0-9]+)$/.exec(
+    String(a._ref || a._id || '').toLowerCase(),
+  )
+  const ds = opts?.dataset
+  // `typeof` keeps an inherited key (`constructor`, `__proto__`) out of the query.
+  const q = PRESET_BOUNDS[opts?.preset as string]
+  return m && ds && (!a._dataset || a._dataset === ds)
+    ? `${base}${prefix}/images/barkpark/${encodeURIComponent(ds)}/${m[1]}.${m[2]}${typeof q === 'string' ? `?${q}` : ''}`
+    : null
 }
