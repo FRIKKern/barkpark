@@ -8,6 +8,10 @@ import { partsDir } from '../build/parts.mjs'
 import { runCheck } from './check.mjs'
 
 const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
+// Runs `code` at the start of the part's demo, with `root` in scope (example.html holds markup only).
+const inDemo = (d, code) => edit(join(d, 'demo.mjs'), (s) => s.replace('export default function demo(root) {', `export default function demo(root) {\n${code}`))
+const mark = (d) => edit(join(d, 'example.html'), (s) => s.replace('id="button-after"', 'id="button-after" data-paint-free'))
+const skinsSay = (re) => (p) => re.test(p.parts.button.lights.skins.detail)
 const CASES = [
   {
     name: 'a press step that never settles fails by name within its time limit',
@@ -18,13 +22,63 @@ const CASES = [
   {
     name: 'one element frozen across skins turns "every skin" off',
     only: ['skins', 'schemes'],
-    plant: (d) => edit(join(d, 'example.html'), (s) => s.replace('id="button-after"', 'id="button-after" style="background-color: #ffffff; color: #111111"')),
-    expect: (p) => /button#button-after .* is not one skin variable/.test(p.parts.button.lights.skins.detail),
+    plant: (d) => inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #111111'"),
+    expect: skinsSay(/button#button-after .* is not one skin variable/),
+  },
+  {
+    name: 'a paint-free element with its own fill and text turns "every skin" off, by name',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      mark(d)
+      inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #eeeeee'")
+    },
+    expect: skinsSay(/paint-free button#button-after .* carries its own background/),
+  },
+  {
+    name: 'a paint-free wrapper does not hide the button inside it',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      edit(join(d, 'example.html'), (s) => s.replace('<ui-button><button id="button-after"', '<ui-button data-paint-free><button id="button-after"'))
+      inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #eeeeee'")
+    },
+    expect: skinsSay(/button#button-after .* is not one skin variable/),
+  },
+  {
+    name: 'a paint-free element hidden with no script turns "printed with no script" off',
+    only: ['noscript'],
+    plant: (d) => {
+      mark(d)
+      appendFileSync(join(d, 'part.css'), '\nui-button:not(:defined) > [data-paint-free] { visibility: hidden; }\n')
+    },
+    expect: (p) => /button#button-after .* is hidden/.test(p.parts.button.lights.noscript.detail),
+  },
+  ...[
+    ['a gradient', "style.backgroundImage = 'linear-gradient(#ff0000, #ff0000)'", /background-image #1 is not one skin variable/],
+    ['a shadow colour', "style.boxShadow = '0 0 0 3px #ff0000'", /box-shadow #1 is not one skin variable/],
+    ['a bitmap image', "style.backgroundImage = 'url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)'", /shows an image that is not a data: SVG/],
+    ['a right border colour', "style.borderRightColor = '#ff0000'", /border-right-color is not one skin variable/],
+  ].map(([what, code, re]) => ({
+    name: `${what} set on a button turns "every skin" off`,
+    only: ['skins', 'schemes'],
+    plant: (d) => inDemo(d, `root.querySelector('#button-after').${code}`),
+    expect: skinsSay(re),
+  })),
+  {
+    name: 'an icon drawn in its own fill turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => inDemo(d, "root.querySelector('#button-more svg').style.fill = '#ff0000'"),
+    expect: skinsSay(/svg .* fill is not one skin variable/),
+  },
+  {
+    name: 'a <style> in example.html fails the run',
+    only: ['phone'],
+    plant: (d) => edit(join(d, 'example.html'), (s) => `<style>button { background-image: linear-gradient(#ff0000, #ff0000) }</style>\n${s}`),
+    expect: (p, html, ok) => !ok && p === null,
   },
   {
     name: 'a focus ring that cannot be seen against its ground turns the skins off',
     only: ['skins', 'schemes'],
-    plant: (d) => edit(join(d, 'example.html'), (s) => s.replace(/(<ui-button><button id="button-primary"[^]*?<\/ui-button>)/, '<span style="padding: 12px; background: var(--ui-primary)">$1</span>')),
+    plant: (d) => inDemo(d, "const b = root.querySelector('#button-primary').parentElement; const w = document.createElement('span'); w.style.cssText = 'padding: 12px; background: var(--ui-primary)'; b.before(w); w.append(b)"),
     expect: (p) => /focus on button#button-primary.*edge [\d.]+:1 against the ground/.test(p.parts.button.lights.skins.detail),
   },
   ...[

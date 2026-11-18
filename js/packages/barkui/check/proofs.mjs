@@ -100,7 +100,8 @@ function frozen(traces) {
         const here = names.filter((n) => v.vars[n] === seen.v)
         fits = fits ? fits.filter((n) => here.includes(n)) : here
       }
-      if (fits && !fits.length) out.push(`${el.at} ${prop} is not one skin variable in every skin and scheme`)
+      if (views.some((v) => v.els[i]?.props[prop]?.image)) out.push(`${el.at} shows an image that is not a data: SVG in currentColor`)
+      else if (fits && !fits.length) out.push(`${el.at} ${prop} is not one skin variable in every skin and scheme`)
     }
   })
   return out
@@ -114,6 +115,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const text = { light: Infinity, dark: Infinity }
   const focus = { min: Infinity, max: 0 }
   const edges = []
+  const free = new Map()
   try {
     await page.mouse.move(0, 0)
     const names = await page.evaluate((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
@@ -122,6 +124,10 @@ export async function skinsAndSchemes(ctx, part, skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         await settle(page)
+        for (const f of await page.evaluate((n) => window.__barkCheck.paintFree(document.querySelector(`[data-part="${n}"]`)), part.name)) {
+          if (f.fail) bad[scheme].push(`${at}: ${f.fail}`)
+          else free.set(f.selector, f.why)
+        }
         const r = await page.evaluate(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
         sig[at] = r.signature
         text[scheme] = Math.min(text[scheme], r.weakest.ratio)
@@ -174,7 +180,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
       : sameAcross.length
         ? light(false, `light and dark paint the same in ${sameAcross.join(', ')}`)
         : light(true, `dark paints its own values in every skin; weakest text ${fmt(text.dark)}:1${focusNote}`)
-  return { skins: skinsLight, schemes: schemesLight, measures }
+  return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })) }
 }
 
 export async function phone(ctx, part) {

@@ -34,12 +34,25 @@ focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `
 - `pnpm run check:selftest` plants one break per case in a scratch copy of a part and fails unless the
   check turns the right light off.
 - In CI (`js-tests.yml`) the fast tests and the showroom check run on every js-tests run; the selftest
-  runs only when a change touches `js/packages/barkui/**`, `api/priv/barkui/**` or that workflow, and
-  also whenever the changed files cannot be worked out.
+  runs only when a change touches `js/packages/barkui/**` (either side of a move), `api/priv/barkui/**`,
+  that workflow, `js/pnpm-lock.yaml`, `js/pnpm-workspace.yaml` or `js/package.json`, and whenever the
+  changed files cannot be worked out.
 - `build/sheet-waits.mjs` lists values the tokens sheet does not deliver yet. The check records each
   measure; the page prints "waiting on the sheet: ..." while it is short, and `hard: true` makes it fail.
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css colour lint.
 - `node check/shots.mjs <dir>` writes light and dark shots of the built page.
 
 In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing,
-and `data-paint-free` marks an element that is meant to take no skin colour.
+and `data-paint-free` marks an element that carries no paint of its own. It excuses that element (never
+its children) from the "takes the skin's values" comparison only. It must truly carry none: transparent
+background, no border, shadow, outline or image, and its parent's text colour; otherwise the light
+fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
+light applies to it.
+
+`example.html` is markup only: no `<style>`, `<script>`, `style=` or `on*=` (looks go in part.css,
+behaviour in demo.mjs). The check reads every paint an element can show: text, background colour and
+gradients, all four borders, outline, shadows, SVG fill and stroke, decoration, caret and accent colour.
+
+The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage, so
+every part can be seen on every surface. The check proves the base surface today; it will run every
+surface.

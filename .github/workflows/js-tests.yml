@@ -415,17 +415,19 @@ jobs:
       # Whether this change touches BarkUI: the selftest below costs about 90 s,
       # so it runs only then. PR: the diff from the merge base (fetch-depth 0).
       # Push: the diff from the previous head, fetched here (the clone is
-      # shallow). Any failure to work out the diff RUNS the selftest.
+      # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
+      # out counts; the lockfile and workspace manifests count too (a UI SDK or
+      # Playwright bump). Any failure to work out the diff RUNS the selftest.
       - name: "BarkUI: did this change touch it?"
         id: barkui
         run: |
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            files=$(git -C .. diff --name-only "origin/${{ github.base_ref }}...HEAD")
+            files=$(git -C .. diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD")
             status=$?
           elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
             git -C .. fetch --quiet --depth=1 origin "${{ github.event.before }}" &&
-              files=$(git -C .. diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+              files=$(git -C .. diff --name-only --no-renames "${{ github.event.before }}" "${{ github.sha }}")
             status=$?
           else
             status=1
@@ -434,7 +436,7 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the selftest"; exit 0
           fi
-          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|\.github/workflows/js-tests\.yml$)'; then
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|\.github/workflows/js-tests\.yml$|js/pnpm-lock\.yaml$|js/pnpm-workspace\.yaml$|js/package\.json$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the selftest"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the selftest"

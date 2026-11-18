@@ -43,7 +43,35 @@ export function installHelpers() {
   const describe = (el) => (el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"` : 'nothing')
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   const carries = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || !!el.querySelector(':scope > svg')
-  const painted = (root) => [...root.querySelectorAll('[data-slot]')].filter((el) => el.getClientRects().length && !el.closest('[data-paint-free]'))
+  /** Every part element with a box. data-paint-free never hides one from any light. */
+  const painted = (root) => [...root.querySelectorAll('[data-slot]')].filter((el) => el.getClientRects().length)
+  const selectorOf = (el, root) => {
+    if (el.id) return `#${el.id}`
+    const path = []
+    for (let n = el; n && n !== root; n = n.parentElement) path.unshift(`${n.localName}:nth-of-type(${[...n.parentElement.children].filter((c) => c.localName === n.localName).indexOf(n) + 1})`)
+    return path.join(' > ')
+  }
+
+  /** An element marked data-paint-free must carry no paint of its own; it is only excused from the skin comparison. */
+  const paintFree = (root) =>
+    [...root.querySelectorAll('[data-paint-free]')].map((el) => {
+      const s = getComputedStyle(el)
+      const selector = selectorOf(el, root)
+      const fail = (why) => ({ selector, fail: `paint-free ${describe(el)} ${why}` })
+      if (rgba(s.backgroundColor)[3] > 0) return fail(`carries its own background ${s.backgroundColor}`)
+      if (s.backgroundImage !== 'none') return fail(`carries a background image`)
+      for (const side of ['Top', 'Right', 'Bottom', 'Left'])
+        if (parseFloat(s[`border${side}Width`]) > 0 && s[`border${side}Style`] !== 'none') return fail(`has a ${side.toLowerCase()} border`)
+      if (s.boxShadow !== 'none') return fail(`casts a shadow ${s.boxShadow.slice(0, 60)}`)
+      if (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0 && rgba(s.outlineColor)[3] > 0) return fail('draws an outline')
+      const from = getComputedStyle(el.parentElement).color
+      if (s.color !== from) return fail(`sets its own text colour ${s.color} (its parent has ${from})`)
+      return { selector, why: 'no background, border, shadow, outline or image; text colour inherited' }
+    })
+
+  // Every property through which an element can show a colour.
+  const COLOUR_PROPS = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color', 'caret-color', 'accent-color', 'fill', 'stroke']
+  const COLOUR_IN = /(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)/g
 
   /** Names that hold a colour (an invalid colour falls back to the parent's, whatever it is). */
   const colourVars = (names) => {
@@ -60,18 +88,30 @@ export function installHelpers() {
     return keep
   }
 
-  /** This view's value of every colour variable, and every painted element's colours. */
+  /** This view's value of every colour variable, and every colour each element shows. A value that is
+      transparent, or the element's own currentColor (for anything but text), takes no paint of its own. */
   const trace = (root, names) => {
     const vars = Object.fromEntries(names.map((n) => [n, resolve(n, root)]))
-    const els = painted(root).map((el) => {
+    const els = [...painted(root).filter((el) => !el.hasAttribute('data-paint-free')), ...root.querySelectorAll('[data-slot] svg, [data-slot] svg *')]
+    return { vars, els: els.map((el) => {
       const s = getComputedStyle(el)
-      const props = { 'background-color': s.backgroundColor }
-      if (carries(el)) props.color = s.color
-      if (parseFloat(s.borderTopWidth) > 0) props['border-top-color'] = s.borderTopColor
-      const seen = Object.fromEntries(Object.entries(props).map(([k, v]) => [k, { v, clear: rgba(v)[3] === 0 }]))
-      return { at: describe(el), props: seen }
-    })
-    return { vars, els }
+      const props = {}
+      const put = (key, v, prop) => (props[key] = { v, clear: rgba(v)[3] === 0 || (prop !== 'color' && v === s.color) })
+      for (const prop of COLOUR_PROPS) {
+        if (prop.startsWith('border-') && !(parseFloat(s.getPropertyValue(prop.replace('-color', '-width'))) > 0)) continue
+        if (prop === 'outline-color' && s.outlineStyle === 'none') continue
+        if (prop === 'color' && !carries(el)) continue
+        if ((prop === 'fill' || prop === 'stroke') && !(el instanceof SVGElement)) continue
+        put(prop, s.getPropertyValue(prop), prop)
+      }
+      ;(s.boxShadow.match(COLOUR_IN) ?? []).forEach((v, i) => put(`box-shadow #${i + 1}`, v))
+      ;(s.backgroundImage.match(COLOUR_IN) ?? []).forEach((v, i) => put(`background-image #${i + 1}`, v))
+      for (const [, url] of s.backgroundImage.matchAll(/url\("?([^")]*)"?\)/g)) {
+        const svg = decodeURIComponent(url)
+        if (!/^data:image\/svg\+xml/.test(svg) || !/currentColor/i.test(svg)) props['background-image url'] = { v: 'image', image: true }
+      }
+      return { at: describe(el), props }
+    }) }
   }
 
   /** Colours named in part.json, and the weakest readable text. */
@@ -184,7 +224,7 @@ export function installHelpers() {
     }
   }
 
-  window.__barkCheck = { settle, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, controlEdges, ring, seen, state: {} }
+  window.__barkCheck = { settle, paintFree, selectorOf, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, controlEdges, ring, seen, state: {} }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */
