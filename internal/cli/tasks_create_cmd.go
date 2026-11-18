@@ -1194,9 +1194,8 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 
 	// After "--" every argument is positional, so a title may start with "--"
 	// (task-379127ebdf341017).
-	tail, afterFlags := cutAtEndOfFlags(tail)
-
-	for i := 0; i < len(tail); i++ {
+	i := 0
+	for ; i < len(tail) && tail[i] != "--"; i++ {
 		a := tail[i]
 		key, inline, hasInline := a, "", false
 		if eq := strings.IndexByte(a, '='); eq >= 0 && strings.HasPrefix(a, "--") {
@@ -1271,7 +1270,7 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 		}
 	}
 
-	for _, a := range afterFlags {
+	for _, a := range afterEndOfFlags(tail, i) {
 		if err := title(a); err != nil {
 			return nil, false, err
 		}
