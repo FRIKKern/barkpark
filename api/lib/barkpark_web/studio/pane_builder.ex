@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
   alias Barkpark.Content.PreviewText
-  alias BarkparkWeb.Studio.StructureCopy
+  alias BarkparkWeb.Studio.{ImageRefUrl, StructureCopy}
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   @doc """
@@ -1015,7 +1015,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_spec = Map.get(preview, "media")
-    media_declared? = PreviewText.media?(media_spec)
+    {media_declared?, media_at} = ImageRefUrl.media(media_spec, dataset, opts)
     subtitle = Map.get(preview, "subtitle")
     description = Map.get(preview, "description")
     title_spec = title_spec(preview)
@@ -1032,7 +1032,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       {media, row_icon} =
         if media_declared?,
-          do: row_media(PreviewText.media_item(media_spec, preview_root(doc), deref), type_icon),
+          do: row_media(media_at.(preview_root(doc), deref), type_icon),
           else: {nil, type_icon}
 
       %{

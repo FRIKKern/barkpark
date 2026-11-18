@@ -184,6 +184,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
           node ../paper-editor-host-tests/__desk_focus_mode.test.mjs
           node ../paper-editor-host-tests/__desk_host_tests_listed.test.mjs
+          node ../paper-editor-host-tests/__desk_image_field.test.mjs
           node ../paper-editor-host-tests/__desk_list_menu_keys.test.mjs
           node ../paper-editor-host-tests/__desk_open_focus.test.mjs
           node ../paper-editor-host-tests/__desk_reference_card.test.mjs

@@ -15402,3 +15402,65 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Paste document"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Open image edit dialog"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Edit hotspot and crop"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Hotspot & Crop"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Adjust the rectangle to crop image. Adjust the circle to specify the area that should always be visible."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "%{title}: hotspot and crop"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Hotspot: arrow keys move it"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "centre %{x} across, %{y} down; %{width} wide, %{height} high"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Crop: arrow keys move it"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "left %{left}, top %{top}, right %{right}, bottom %{bottom}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Cropped image size: %{size} pixels"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgctxt "crop preview"
+msgid "Square"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgctxt "crop preview"
+msgid "Panorama"
+msgstr ""
