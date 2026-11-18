@@ -51,6 +51,7 @@ const BP_MP_ICONS = {
   image: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M5.5 15.5L8.79289 12.2071C9.18342 11.8166 9.81658 11.8166 10.2071 12.2071L12.8867 14.8867C13.2386 15.2386 13.7957 15.2782 14.1938 14.9796L15.1192 14.2856C15.3601 14.1049 15.6696 14.0424 15.9618 14.1154L19.5 15M5.5 6.5H19.5V18.5H5.5V6.5ZM15.5 10.5C15.5 11.0523 15.0523 11.5 14.5 11.5C13.9477 11.5 13.5 11.0523 13.5 10.5C13.5 9.94772 13.9477 9.5 14.5 9.5C15.0523 9.5 15.5 9.94772 15.5 10.5Z"/></svg>',
   upload: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M12.5 6V15.5M5.5 15.5H19.5V19.5H5.5V15.5Z"/><path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M7.5 11L12.5 6L17.5 11"/></svg>',
   search: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M15.0355 15.0355L20 20M16.5 11.5C16.5 14.2614 14.2614 16.5 11.5 16.5C8.73858 16.5 6.5 14.2614 6.5 11.5C6.5 8.73858 8.73858 6.5 11.5 6.5C14.2614 6.5 16.5 8.73858 16.5 11.5Z"/></svg>',
+  crop: BP_MP_SVG + '<path stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M8.5 5V16.5H20M5 8.5H16.5V20"/></svg>',
   ellipsis: BP_MP_SVG + '<path fill="currentColor" d="M6.5 11C7.32843 11 8 11.6716 8 12.5C8 13.3284 7.32843 14 6.5 14C5.67157 14 5 13.3284 5 12.5C5 11.6716 5.67157 11 6.5 11Z"/><path fill="currentColor" d="M12.5 11C13.3284 11 14 11.6716 14 12.5C14 13.3284 13.3284 14 12.5 14C11.6716 14 11 13.3284 11 12.5C11 11.6716 11.6716 11 12.5 11Z"/><path fill="currentColor" d="M18.5 11C19.3284 11 20 11.6716 20 12.5C20 13.3284 19.3284 14 18.5 14C17.6716 14 17 13.3284 17 12.5C17 11.6716 17.6716 11 18.5 11Z"/></svg>'
 };
 
@@ -159,6 +160,43 @@ function bpLqip(v) {
   return typeof v === "string" && v !== "" ? v : null;
 }
 
+// Sanity's hotspot {x, y, width, height} and crop {top, bottom, left, right}
+// on the image object, fractions of the image (the desk's "Edit hotspot and
+// crop" dialog, bp-desk-image.js). Anything else reads as unset and is never
+// written.
+const BP_HOTSPOT_KEYS = ["x", "y", "width", "height"];
+const BP_CROP_KEYS = ["top", "bottom", "left", "right"];
+function bpImagePart(v, keys) {
+  if (!v || typeof v !== "object") return null;
+  for (const k of keys) if (typeof v[k] !== "number" || !Number.isFinite(v[k])) return null;
+  return v;
+}
+
+// The image's own fields (alt aside) and its hotspot and crop, onto `o`. An
+// empty field's key goes.
+function bpApplyImageParts(o, m, src) {
+  const parts = (m && m.parts) || {};
+  for (const k of Object.keys(parts)) {
+    if (typeof parts[k] === "string" && parts[k] !== "") o[k] = parts[k];
+    else delete o[k];
+  }
+  const s = src && typeof src === "object" ? src : {};
+  const h = bpImagePart(m && m.hotspot, BP_HOTSPOT_KEYS);
+  const c = bpImagePart(m && m.crop, BP_CROP_KEYS);
+  if (h) o.hotspot = Object.assign({}, s.hotspot && typeof s.hotspot === "object" ? s.hotspot : {}, BP_HOTSPOT_KEYS.reduce((a, k) => ((a[k] = h[k]), a), {}));
+  if (c) o.crop = Object.assign({}, s.crop && typeof s.crop === "object" ? s.crop : {}, BP_CROP_KEYS.reduce((a, k) => ((a[k] = c[k]), a), {}));
+  return o;
+}
+
+// Sanity's extension for an image's mime type, as the save path writes its id
+// (Barkpark.Media.ImageMetadata): "jpg" for JPEG.
+function bpSanityExt(mime) {
+  const sub = typeof mime === "string" && mime.indexOf("image/") === 0 ? mime.slice(6) : "";
+  if (sub === "jpeg") return "jpg";
+  if (sub === "svg+xml") return "svg";
+  return /^[a-z0-9]+$/.test(sub) ? sub : "";
+}
+
 // The CANONICAL assetId spelling is the bare blob id (Gyldendal friction 78):
 // the migration wrote every cover that way, `Barkpark.Media.get_file/2` and the
 // rendition URLs take it, and the asset document is `asset-<blob id>`. The
@@ -208,7 +246,7 @@ function bpIsAssetRefValue(o) {
 }
 
 function bpParseMediaValue(raw) {
-  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
+  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, hotspot: null, crop: null };
   if (!raw || typeof raw !== "string") return empty;
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
@@ -225,6 +263,8 @@ function bpParseMediaValue(raw) {
           focalY: bpFocalCoord(hs.y),
           width: size.width,
           height: size.height,
+          hotspot: bpImagePart(o.hotspot, BP_HOTSPOT_KEYS),
+          crop: bpImagePart(o.crop, BP_CROP_KEYS),
           // The stored object itself: every key the picker does not edit
           // (`_type`, `crop`, `caption`, a DAM status) is written back as is.
           source: o
@@ -238,7 +278,9 @@ function bpParseMediaValue(raw) {
         focalY: bpFocalCoord(o.focalY),
         width: bpDimension(o.width),
         height: bpDimension(o.height),
-        lqip: bpLqip(o.lqip)
+        lqip: bpLqip(o.lqip),
+        hotspot: bpImagePart(o.hotspot, BP_HOTSPOT_KEYS),
+        crop: bpImagePart(o.crop, BP_CROP_KEYS)
       };
     } catch (_e) {
       return Object.assign({}, empty, { url: trimmed });
@@ -264,7 +306,8 @@ function bpSerializeMediaValue(url, assetId, extra) {
   const w = bpDimension(e.width);
   const h = bpDimension(e.height);
   const lqip = bpLqip(e.lqip);
-  const rich = alt !== "" || fx != null || fy != null || w != null || h != null || lqip != null;
+  const parts = bpApplyImageParts({}, e, null);
+  const rich = alt !== "" || fx != null || fy != null || w != null || h != null || lqip != null || Object.keys(parts).length > 0;
   if (!assetId && !rich) return url || "";
   const o = { url: url || "", assetId: assetId || "" };
   if (alt !== "") o.alt = alt;
@@ -273,7 +316,7 @@ function bpSerializeMediaValue(url, assetId, extra) {
   if (w != null) o.width = w;
   if (h != null) o.height = h;
   if (lqip != null) o.lqip = lqip;
-  return JSON.stringify(o);
+  return JSON.stringify(Object.assign(o, parts));
 }
 
 // Sanity's hotspot when only the focal point is known: the whole image is
@@ -312,7 +355,9 @@ function bpSerializeAssetRefValue(meta) {
   } else {
     delete o.hotspot;
   }
-  return JSON.stringify(o);
+  // The dialog's hotspot and crop, and the image's other fields, on top (a
+  // new image has none: they belong to the old pixels).
+  return JSON.stringify(bpApplyImageParts(o, same ? m : { parts: m.parts }, same ? src : null));
 }
 
 class BpMediaPicker extends HTMLElement {
@@ -321,7 +366,7 @@ class BpMediaPicker extends HTMLElement {
     this._mounted = false;
     this._value = "";
     this._busy = false;
-    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null, hotspot: null, crop: null, parts: {} };
     // Set once the field holds (or is declared to hold) the reference shape,
     // so a Remove then a new pick keeps writing it.
     this._assetRefShape = false;
@@ -332,8 +377,13 @@ class BpMediaPicker extends HTMLElement {
     if (this._mounted) return;
     this._mounted = true;
 
-    const parsed = bpParseMediaValue(this.getAttribute("value") || "");
     const raw = this.getAttribute("value") || "";
+    // A move in the page (a patch that re-inserts the field) connects it
+    // again: what the editor picked since is kept, not read back from the
+    // `value` the element was drawn with (the image went empty under them).
+    if (this._seenValue === raw) return this._render();
+    this._seenValue = raw;
+    const parsed = bpParseMediaValue(raw);
 
     if (this._isReferenceMode()) {
       this._value = raw;
@@ -354,6 +404,8 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
+      this._meta.hotspot = parsed.hotspot;
+      this._meta.crop = parsed.crop;
       this._takeAssetRef(parsed);
     }
 
@@ -384,7 +436,7 @@ class BpMediaPicker extends HTMLElement {
   // `hotspot`: click the preview to set a focal point (a marker shows it);
   // `alt`: an alt-text input under the preview. Absent → byte-identical render.
   _wantsHotspot() {
-    return this.hasAttribute("hotspot") && !this._isGhost() && !this._isReferenceMode();
+    return this.hasAttribute("hotspot") && !this._isGhost() && !this._isBar() && !this._isReferenceMode();
   }
 
   _wantsAlt() {
@@ -517,6 +569,8 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
+      this._meta.hotspot = parsed.hotspot;
+      this._meta.crop = parsed.crop;
       this._takeAssetRef(parsed);
     }
     this._renderPreview();
@@ -524,6 +578,44 @@ class BpMediaPicker extends HTMLElement {
 
   get meta() {
     return Object.assign({}, this._meta);
+  }
+
+  // ── the desk's image parts (bp-desk-image.js) ─────────────────────────────
+  // A field of the image object (`alt`, a caption) as typed in its input.
+  setPart(name, value) {
+    if (typeof name !== "string" || name === "") return;
+    const v = typeof value === "string" ? value : "";
+    if (name === "alt") this._meta.alt = v;
+    else this._meta.parts = Object.assign({}, this._meta.parts, { [name]: v });
+    this._commitValue();
+    this._emit();
+  }
+
+  // The hotspot and crop the dialog starts from (Sanity's defaults when unset).
+  hotspotCrop() {
+    const h = bpImagePart(this._meta.hotspot, BP_HOTSPOT_KEYS);
+    const c = bpImagePart(this._meta.crop, BP_CROP_KEYS);
+    return {
+      hotspot: h ? { x: h.x, y: h.y, width: h.width, height: h.height } : { x: 0.5, y: 0.5, width: 1, height: 1 },
+      crop: c ? { top: c.top, bottom: c.bottom, left: c.left, right: c.right } : { top: 0, bottom: 0, left: 0, right: 0 }
+    };
+  }
+
+  // The dialog's write: both, as Sanity stores them on the image object.
+  setHotspotCrop(hotspot, crop) {
+    if (!bpImagePart(hotspot, BP_HOTSPOT_KEYS) || !bpImagePart(crop, BP_CROP_KEYS)) return;
+    this._meta.hotspot = hotspot;
+    this._meta.crop = crop;
+    this._meta.focalX = hotspot.x;
+    this._meta.focalY = hotspot.y;
+    this._commitValue();
+    this._emit();
+  }
+
+  // The image the dialog draws: the preview's, larger where the route can.
+  dialogImageUrl() {
+    const url = this._meta.url || "";
+    return url.replace(/\?w=800&fit=max$/, "?w=1600&fit=max");
   }
 
   _dataset() {
@@ -549,6 +641,9 @@ class BpMediaPicker extends HTMLElement {
       this._value = this._meta.assetId || "";
     } else if (this._isAssetRefShape()) {
       this._value = bpSerializeAssetRefValue(this._meta);
+      // What was written is the stored object from now on (its hotspot and
+      // crop belong to this asset).
+      if (this._value) this._meta.source = JSON.parse(this._value);
     } else {
       this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId, {
         alt: this._meta.alt,
@@ -556,7 +651,10 @@ class BpMediaPicker extends HTMLElement {
         focalY: this._meta.focalY,
         width: this._meta.width,
         height: this._meta.height,
-        lqip: this._meta.lqip
+        lqip: this._meta.lqip,
+        hotspot: this._meta.hotspot,
+        crop: this._meta.crop,
+        parts: this._meta.parts
       });
     }
   }
@@ -669,6 +767,12 @@ class BpMediaPicker extends HTMLElement {
         if (!this._openBrowser()) this._fileInput.click();
         return;
       }
+      const crop = e.target.closest(".bp-mp-crop");
+      if (crop) {
+        const dialog = window.BarkparkDeskImage;
+        if (dialog && typeof dialog.open === "function") dialog.open(this, crop);
+        return;
+      }
       // The frame's "…": a toggle for the image's menu, under the button.
       const options = e.target.closest(".bp-mp-options");
       if (options) {
@@ -685,6 +789,7 @@ class BpMediaPicker extends HTMLElement {
         if (!focal) return;
         this._meta.focalX = focal.x;
         this._meta.focalY = focal.y;
+        this._meta.hotspot = null;
         this._commitValue();
         this._renderFocalMarker();
         this._emit();
@@ -777,7 +882,7 @@ class BpMediaPicker extends HTMLElement {
   _clearValue() {
     this._value = "";
     // The stored object goes with the image; the shape stays (_assetRefShape).
-    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null, hotspot: null, crop: null, parts: {} };
     this._renderPreview();
     this._emit();
   }
@@ -1115,7 +1220,13 @@ class BpMediaPicker extends HTMLElement {
       this._previewEl.innerHTML = this._bar
         ? '<div class="bp-mp-frame" role="group" tabindex="0" aria-label="' +
           this._attr(this._t("replace_label", "Drop or paste an image to replace it")) + '">' + inner +
-          '<div class="bp-mp-frame-actions"><button type="button" class="bp-mp-options" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+          '<div class="bp-mp-frame-actions">' +
+          // `hotspot`: TanStack's "Edit hotspot and crop" button (its dialog: bp-desk-image.js).
+          (this.hasAttribute("hotspot")
+            ? '<button type="button" class="bp-mp-crop" aria-label="' + this._attr(this._t("crop_open", "Open image edit dialog")) +
+              '" title="' + this._attr(this._t("crop_title", "Edit hotspot and crop")) + '">' + BP_MP_ICONS.crop + "</button>"
+            : "") +
+          '<button type="button" class="bp-mp-options" aria-haspopup="menu" aria-expanded="false" aria-label="' +
           this._attr(this._t("options_menu", "Open image options menu")) + '">' + BP_MP_ICONS.ellipsis + "</button></div></div>"
         : inner;
       if (this._bar) this.setAttribute("data-bar-filled", "");
@@ -1195,10 +1306,23 @@ class BpMediaPicker extends HTMLElement {
     // docs/contracts/schema-v2.md); the save path turns it into the Sanity
     // image id when the media file has one (Barkpark.Media.ImageMetadata).
     const keptSource = this._meta.source;
+    const keptParts = this._meta.parts || {};
+    const refShape = this._isAssetRefShape() && blobId;
+    // The desk's preview of a new upload: the dataset's own Sanity-shaped
+    // image route (the id the save writes), not the media file's path.
+    const ext = bpSanityExt(file.mime || file.mimeType);
+    const w = bpDimension(file.width);
+    const h = bpDimension(file.height);
+    const scoped = this._bar && refShape && /^[0-9a-f]{40}$/.test(file.sha1 || "") && ext && w && h
+      ? bpSanityImageUrl("image-" + file.sha1 + "-" + w + "x" + h + "-" + ext, this._scopePrefix(), this._dataset(), 800)
+      : null;
     this._meta = {
-      assetRef: this._isAssetRefShape() && blobId ? "asset-" + blobId : "",
+      assetRef: refShape ? "asset-" + blobId : "",
       source: keptSource,
-      url: file.url || "",
+      parts: keptParts,
+      hotspot: null,
+      crop: null,
+      url: scoped || file.url || "",
       assetId: bpCanonicalAssetId(file.assetId || ""),
       alt: keptAlt,
       focalX: null,
@@ -1328,6 +1452,7 @@ class BpMediaPicker extends HTMLElement {
         // The upload receipt names the asset DOCUMENT; store the canonical blob id.
         assetId: bpCanonicalAssetId(data.assetDocId || ""),
         alt: "",
+        sha1: data.sha1,
         width: fi.width || data.width,
         height: fi.height || data.height
       });
