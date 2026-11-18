@@ -678,8 +678,8 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
 // 4.5:1 on every state; a state keeps its fill's OKLCH hue within 1 degree
 // (a fill under chroma 0.02 has no hue to keep and its states stay under 0.02
 // too); and a fill that stands 3:1 off its ground at rest still does.
-// STATE_STEP is the most every case holds: a soft fill under its own label on a
-// white ground, which has about 1.135:1 of room for two steps.
+// STATE_STEP sits under the most every case holds, about 1.07:1, set by
+// evergreen's light raised info soft fill, whose label reads 5.18:1 on it.
 // The direction: states deepen a fill (move it further from its ground) and
 // move back toward the ground only where deepening has no room for two steps:
 // the range ends, the fill's hue does not hold, or its label would drop under 4.5.

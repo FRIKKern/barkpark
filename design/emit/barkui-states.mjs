@@ -17,9 +17,9 @@
 //     the sRGB gamut ends); only lightness moves. A step whose written colour
 //     drifts off the hue (near black or white) does not fit.
 //
-// STATE_STEP is the most every case can hold. The tightest is a soft fill under
-// its own label on a white ground: the label reads at about 5.1:1 on white and
-// the soft fill already takes 1.1:1 of that, leaving about 1.135:1 for two steps.
+// STATE_STEP sits under the most every case can hold, about 1.07:1. That limit is
+// set by evergreen's light raised info soft fill: its label reads 5.18:1 on it,
+// and a soft fill deepens toward its label, so two steps get 5.18 / 4.5 of room.
 
 import { contrast, oklchToSrgb, srgbToOklch, toHslTriplet } from "../derive.mjs";
 
