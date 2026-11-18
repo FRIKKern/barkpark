@@ -189,7 +189,7 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
     kept = asked |> Enum.take_while(&there?(&1, ds, opts)) |> length()
     path = Panes.to_path(Enum.take(chain, 1 + kept), base)
 
-    if kept == length(chain) - 1, do: path <> query(assigns[:desk_uri]), else: path
+    if kept == length(chain) - 1, do: path <> uri_query(assigns[:desk_uri]), else: path
   end
 
   defp there?(%{kind: :list, type: type}, ds, opts) when is_binary(type),
@@ -204,14 +204,14 @@ defmodule BarkparkWeb.Studio.Desk.ScopeSwitch do
 
   defp there?(_pane, _ds, _opts), do: false
 
-  defp query(uri) when is_binary(uri) do
+  defp uri_query(uri) when is_binary(uri) do
     case URI.parse(uri).query do
       q when is_binary(q) and q != "" -> "?" <> q
       _ -> ""
     end
   end
 
-  defp query(_uri), do: ""
+  defp uri_query(_uri), do: ""
 
   attr :workspace, :map, required: true
   attr :project, :map, default: nil

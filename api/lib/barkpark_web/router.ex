@@ -2390,12 +2390,9 @@ defmodule BarkparkWeb.Router do
     get("/embed/canvas", EmbedController, :canvas)
   end
 
-  # The desk navbar's "New version available" (`Desk.HelpMenu`) asks which
-  # build the server runs, at the TanStack Studio's `GET /api/version`: the
-  # commit `/v1/version` already publishes, as `build`. Same posture as it.
+  # Desk.HelpMenu's update check (TanStack's GET /api/version): the build only.
   scope "/api", BarkparkWeb do
     pipe_through(:api_unlimited)
-
     get("/version", VersionController, :build)
   end
 
