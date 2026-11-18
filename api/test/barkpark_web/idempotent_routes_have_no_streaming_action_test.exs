@@ -56,7 +56,9 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   captured or qualified (`Plug.Conn.send_chunked/2`).
 
   Only mutating verbs are scanned, because `Idempotency.call/2` returns the conn
-  untouched for anything outside `POST/PUT/PATCH/DELETE`.
+  untouched for anything outside `POST/PUT/PATCH/DELETE`. A `forward` or a
+  `match :*` takes every verb, so it is scanned too; a forward has no action,
+  so a controller-mounted one is read module-wide.
 
   Reads `router.ex`; never writes it.
   """
@@ -91,12 +93,16 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
         with true <- File.exists?(path),
              {:ok, ast} <- path |> File.read!() |> Code.string_to_quoted() do
-          calls_streaming?(ast) or helpers_stream?([ast], ast, local_defs(ast))
+          module_streams?(ast)
         else
           _ -> false
         end
     end
   end
+
+  # Does the file `ast` stream anywhere, itself or one level into a helper?
+  defp module_streams?(ast),
+    do: calls_streaming?(ast) or helpers_stream?([ast], ast, local_defs(ast))
 
   defp calls_streaming?(body), do: IdempotencyMounts.streams?(body)
 
@@ -659,6 +665,25 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
              "a mount scan that reads only barkpark_web/controllers/ passes it"
   end
 
+  # A `forward` or a `match :*` takes every verb, POST included, so the plug
+  # runs on it; its verb is `:*`, and a forward has plug options, not an
+  # action. A scan that keeps only post/put/patch/delete with an action atom
+  # drops both silently.
+  test "MUTANT: a forward or a match :* in an Idempotency scope to a streaming plug reds",
+       %{mutant_plugin: {router, lib_root}, fixture: fixture} do
+    offenders = offenders(router, lib_root)
+
+    assert {:*, "/v1/plugins/fwd", fixture.stream, []} in offenders,
+           "a forward in an :idempotent scope reaches a streaming plug. Got: #{inspect(offenders)}"
+
+    assert {:*, "/v1/plugins/any", fixture.stream, :create} in offenders,
+           "a match :* in an :idempotent scope reaches a streaming action. Got: #{inspect(offenders)}"
+
+    assert {:*, "/v1/open/selffwd", fixture.self_mount, []} in offenders,
+           "a forward to a plug that mounts Idempotency itself and streams; it has no " <>
+             "action to walk, so the whole module is read. Got: #{inspect(offenders)}"
+  end
+
   # ── the assertion ───────────────────────────────────────────────────────
 
   test "no chunked or file-sending controller sits under an Idempotency mount" do
@@ -668,7 +693,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
            """
            A streaming action is mounted under BarkparkWeb.Plugs.Idempotency.
 
-           #{Enum.map_join(offenders, "\n", fn {verb, path, m, a} -> "  #{String.upcase(to_string(verb))} #{path} -> #{inspect(m)}.#{a}/2" end)}
+           #{Enum.map_join(offenders, "\n", fn {verb, path, m, a} -> "  #{String.upcase(to_string(verb))} #{path} -> #{inspect(m)} #{inspect(a)}" end)}
 
            `send_chunked/2` and `send_file/3..5` nil `resp_body` BEFORE running the
            before_send callbacks, so the Idempotency plug has no body to cache. It now
@@ -683,7 +708,8 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
   # Routes under an Idempotency mount whose controller streams: through a
   # pipeline (the whole controller module is read), or through the
-  # controller's own mount (per action).
+  # controller's own mount (per action; a forward or a route to a plain plug
+  # has no action, so its whole module is read).
   defp offenders(router, lib_root) do
     by_pipeline =
       router
@@ -692,7 +718,7 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
     by_pipeline ++
       for {verb, path, module, action, ast} <- controller_covered_routes(router, lib_root),
-          action_streams?(ast, action),
+          if(is_atom(action), do: action_streams?(ast, action), else: module_streams?(ast)),
           do: {verb, path, module, action}
   end
 

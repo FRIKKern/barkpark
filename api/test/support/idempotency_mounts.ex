@@ -82,12 +82,15 @@ defmodule Barkpark.Test.IdempotencyMounts do
     end
   end
 
-  @doc "The router's mutating routes with an action atom (Idempotency passes other verbs)."
+  @doc """
+  Every route a mutating request can reach (Idempotency passes other verbs):
+  a POST/PUT/PATCH/DELETE route, and a `match :*` or `forward` route, whose
+  verb is `:*` because it takes every verb. A route to a plain plug, and every
+  `forward`, carries that plug's options in `plug_opts`, not an action atom.
+  """
   @spec mutating_routes(module()) :: [map()]
   def mutating_routes(router) do
-    for route <- router.__routes__(),
-        route.verb in @mutating_verbs and is_atom(route.plug_opts),
-        do: route
+    for route <- router.__routes__(), route.verb in [:* | @mutating_verbs], do: route
   end
 
   @doc """
@@ -111,12 +114,12 @@ defmodule Barkpark.Test.IdempotencyMounts do
   end
 
   @doc """
-  The `route_info/4` of `route`, asked at a path made from its own pattern, or
-  nil when that path resolves to another route.
+  The `route_info/4` of `route`, asked at a path made from its own pattern (a
+  `:*` route as a POST), or nil when that path resolves to another route.
   """
   @spec route_info(module(), map()) :: map() | nil
   def route_info(router, route) do
-    method = route.verb |> to_string() |> String.upcase()
+    method = if route.verb == :*, do: "POST", else: route.verb |> to_string() |> String.upcase()
 
     case Phoenix.Router.route_info(router, method, concrete_path(route.path), "localhost") do
       %{route: path, plug: plug, plug_opts: opts} = info
@@ -191,9 +194,12 @@ defmodule Barkpark.Test.IdempotencyMounts do
 
       POST /v1/plugins/stream  stream     (plugin route, :idempotent scope)
       POST /v1/plugins/calm    calm       (plugin route, :idempotent scope)
+      *    /v1/plugins/fwd     stream     (a forward, :idempotent scope)
+      *    /v1/plugins/any     stream     (a match :*, :idempotent scope)
       POST /v1/direct/stream   stream     (scope pipes the plug module)
       POST /v1/open/stream     stream     (no mount)
       POST /v1/open/self       self_mount (its controller mounts the plug)
+      *    /v1/open/selffwd    self_mount (a forward to that controller)
 
   Returns the modules and the lib root to scan.
   """
@@ -248,6 +254,8 @@ defmodule Barkpark.Test.IdempotencyMounts do
          scope "/v1/plugins" do
            pipe_through(:idempotent)
            plugin_routes(scope: :token)
+           forward "/fwd", #{m.("StreamController")}
+           match :*, "/any", #{m.("StreamController")}, :create
          end
 
          scope "/v1/direct" do
@@ -258,6 +266,7 @@ defmodule Barkpark.Test.IdempotencyMounts do
          scope "/v1/open" do
            post "/stream", #{m.("StreamController")}, :create
            post "/self", #{m.("SelfMountController")}, :create
+           forward "/selffwd", #{m.("SelfMountController")}
          end
        end
        """}
