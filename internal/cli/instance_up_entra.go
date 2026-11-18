@@ -289,7 +289,7 @@ func (u *instanceUp) entraExistingApp() error {
 	if secret == "" {
 		return fmt.Errorf("az ad app credential reset gave no secret. Remove the client secret %s from the app %s in the portal, then run again", name, st.EntraAppID)
 	}
-	write := "sudo install -d -m 700 /etc/barkpark && sudo sh -c 'umask 077 && cat > " + instanceUpVMSecret + ".new && mv -f " +
+	write := "sudo mkdir -p /etc/barkpark && sudo sh -c 'umask 077 && cat > " + instanceUpVMSecret + ".new && mv -f " +
 		instanceUpVMSecret + ".new " + instanceUpVMSecret + "'"
 	if _, err := u.ssh(write, []byte(secret+"\n"), false); err != nil {
 		return fmt.Errorf("the VM did not take the new client secret, which is now lost. Remove the client secret %s from the app %s in the portal, then run again.\n%v", name, st.EntraAppID, err)
