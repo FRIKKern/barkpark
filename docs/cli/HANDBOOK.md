@@ -46,7 +46,7 @@ Source: `manifest.Resolve` + `internal/cli/repofile.go`. Active context is persi
 |---|---|
 | `none` | nothing |
 | `read` | bearer only when path is scoped |
-| `write`/`admin`/`scoped_admin` | `Authorization: Bearer <token>` |
+| `write`/`admin`/`scoped_*` | `Authorization: Bearer <token>` |
 | `ingest` | `Authorization: Bearer <secret>` (reads `BARKPARK_INGEST_TOKEN` → bearer fallback) |
 
 **`scoped_admin` is never client-refused** (M0 contract rule #2) — the server's 403 is surfaced cleanly.

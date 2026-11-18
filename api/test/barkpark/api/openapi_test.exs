@@ -109,7 +109,8 @@ defmodule Barkpark.Api.OpenApiTest do
            "operation count #{op_count} != distinct manifest routes #{MapSet.size(manifest_routes)}"
   end
 
-  # {method, openapi_path} for every command's flat route + scoped mirror.
+  # {method, openapi_path} for every command's flat route + scoped mirror (the
+  # scoped spelling alone for a scoped_* tier).
   defp manifest_route_set(commands) do
     commands
     |> Enum.flat_map(fn cmd ->
@@ -119,7 +120,11 @@ defmodule Barkpark.Api.OpenApiTest do
 
       case Map.get(cmd, "scoped_prefix") do
         prefix when is_binary(prefix) and prefix != "" ->
-          [flat, {method, to_openapi_path(prefix <> template)}]
+          scoped = {method, to_openapi_path(prefix <> template)}
+          # A scoped tier is mounted only under its prefix: no flat route.
+          if String.starts_with?(cmd["auth_tier"], "scoped_"),
+            do: [scoped],
+            else: [flat, scoped]
 
         _ ->
           [flat]
