@@ -916,21 +916,16 @@ defmodule Barkpark.Content.Writer do
 
   @doc """
   Clone a document into a fresh draft. Copies `title` (with " (copy)"
-  suffix) and the full `content` map verbatim, assigns a new generated
-  id, and inserts via `create_document/3` so the draft prefix, status,
-  and PubSub broadcast all go through the canonical write path.
-
-  Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
-  insert failure. Used by the Studio's "Duplicate" header action.
+  suffix) and the full `content` map verbatim, assigns a new id (`:doc_id`,
+  else `generate_id/1`'s), and inserts via `create_document/3` so the draft
+  prefix, status, and PubSub broadcast all go through the canonical write path.
+  Returns `{:ok, new_doc}` or `{:error, changeset}`. Used by "Duplicate".
 
   `:title_suffix` (task-141c0bba8070ef02) replaces the English `" (copy)"`
   with the caller's own (the Studio passes it in the workspace language). A
   caller that passes it also gets an untitled source copied as untitled,
   instead of the English `"Untitled (copy)"`. Without it the title is
   exactly as before.
-
-  `:doc_id` names the copy's id (the desk mints a uuid, as the TanStack
-  Studio's Duplicate does). Without it the id is `generate_id/1`'s.
   """
   @spec clone_document(map(), String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
