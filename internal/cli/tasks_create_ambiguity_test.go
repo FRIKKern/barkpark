@@ -127,7 +127,7 @@ func assertAmbiguityCaveat(t *testing.T, stderr, title string) {
 	if !strings.Contains(stderr, "may or may not have been filed") {
 		t.Errorf("stderr does not name the ambiguity — no caveat that the write might have landed:\n%s", stderr)
 	}
-	wantRemedy := "bp search query " + shQuote(title)
+	wantRemedy := "bp search query --perspective drafts -- " + shQuote(title)
 	if !strings.Contains(stderr, wantRemedy) {
 		t.Errorf("stderr does not carry a copy-pasteable remedy with the supplied title (want %q):\n%s", wantRemedy, stderr)
 	}
