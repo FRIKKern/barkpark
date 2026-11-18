@@ -65,7 +65,8 @@ export function installHelpers() {
     let f = 1
     for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
       const s = getComputedStyle(n)
-      f *= parseFloat(s.opacity)
+      // A box-less element (display: contents) draws no opacity of its own.
+      if (s.display !== 'contents') f *= parseFloat(s.opacity)
       if (rgba(s.backgroundColor)[3] >= 1) break
     }
     return f

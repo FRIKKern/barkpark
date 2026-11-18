@@ -111,7 +111,7 @@ export function installDrawn() {
     for (let n = el.parentElement; n && n.nodeType === 1; n = n.parentElement) {
       const s = getComputedStyle(n)
       if (h.rgba(s.backgroundColor)[3] >= 1) break
-      f *= parseFloat(s.opacity)
+      if (s.display !== 'contents') f *= parseFloat(s.opacity)
     }
     return f
   }

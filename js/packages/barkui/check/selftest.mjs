@@ -211,7 +211,7 @@ const CASES = [
     ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', /drawn text [\d.]+:1 at button "Hover"/],
     ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', /(text does not draw|drawn text [\d.]+:1) at button/],
     ['font-size: 0 on a size', '[data-slot="button"][data-size="sm"] { font-size: 0; }', /text does not draw at button "Small"/],
-    ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { opacity: 0.15; }', /drawn text [\d.]+:1 at button#button-secondary/],
+    ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }', /drawn text [\d.]+:1 at button#button-secondary/],
     ['a clip-path that hides the label', '[data-slot="button"][data-size="lg"] { clip-path: inset(50%); }', /text does not draw at button "Large"/],
     ['a mask that hides the label', '#button-quiet { mask-image: linear-gradient(transparent, transparent); }', /text does not draw at button#button-quiet/],
     ['a control with no edge and no fill', '#button-after { --bark-button-edge: transparent; --bark-button-bg: transparent; }', /control boundary 1(\.00)?:1 at button#button-after/],
