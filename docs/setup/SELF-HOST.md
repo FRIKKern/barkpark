@@ -18,9 +18,9 @@ bp instance up --azure --path vm --resource-group <resource group> --host <dns l
 bp instance up --azure --path containerapps --resource-group <resource group> --region norwayeast --owner <owner upn>
 ```
 
-`--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On Path B, leave out `--host`. On Path A, `--disk-sku` and `--disk-gb` set the OS disk, by default a 30 GiB Premium SSD with 120 IOPS. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
+`--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On Path B, leave out `--host`. On Path A, `--disk-sku` and `--disk-gb` set the OS disk, by default a 30 GiB Premium SSD with 120 IOPS. `--image <ref>` picks another image, and `--from-source <git ref>` builds one. `bp instance resize --size <size> --yes` changes the VM size later. For a subscription IT manages, see [SELF-HOST-IT-MANAGED.md](SELF-HOST-IT-MANAGED.md).
 
-`--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
+`--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 
 up writes `barkpark.env` with mode 600 and prints no secret. On Path A it also writes `entra-client-secret` with mode 600. On Path B the client secret stays in Key Vault and up writes no such file. A rerun resumes from `.bp-instance-up.json`. The Entra app and owners group sit outside the resource group. `--org` defaults to `pensum`.
 
@@ -83,7 +83,7 @@ bp instance check --env-file barkpark.env --target <target> --skip database,medi
 
 ## Path A: a single VM
 
-1. Create a resource group, an ssh key and an Ubuntu 22.04 or later VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443:
+1. Create a resource group, an ssh key and an Ubuntu 24.04 VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443:
 
    <!-- run -->
    ```bash
@@ -91,7 +91,7 @@ bp instance check --env-file barkpark.env --target <target> --skip database,medi
    az group create -n "$RG" -l swedencentral
    mkdir -p -m 700 ~/.ssh
    test -f ~/.ssh/barkpark || ssh-keygen -t ed25519 -N '' -f ~/.ssh/barkpark
-   az vm create -g "$RG" -n barkpark --image Ubuntu2204 --size Standard_D2als_v7 \
+   az vm create -g "$RG" -n barkpark --image Ubuntu2404 --size Standard_D2als_v7 \
      --location swedencentral --admin-username azureuser --ssh-key-values ~/.ssh/barkpark.pub \
      --public-ip-address-dns-name <dns label>
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900

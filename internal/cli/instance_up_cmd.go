@@ -6,6 +6,15 @@ package cli
 //	bp instance up --azure --path vm|containerapps --resource-group <rg>
 //	               --owner <upn> [--host <dns label or host>] [--breakglass <email>]
 //	               [--image <ref> | --from-source <git ref>] [--region <r>] [--use]
+//	               [--subnet-id <id>] [--public-ip <name>] [--vm-name <name>]
+//	               [--entra-app-id <appId>] [--assign-identity] [--entra-ssh]
+//
+// The last line is for a subscription where IT owns the network and the app
+// registration (docs/setup/SELF-HOST-IT-MANAGED.md). --subnet-id puts the VM's
+// NIC in that subnet with no NIC NSG, so the subnet's NSG decides which ports
+// are open and up opens none. --entra-app-id uses an app registration that
+// exists: up adds a client secret to it and pipes the secret to the VM over
+// ssh, so it never reaches the operator's disk or any argv.
 //
 // It runs the steps docs/setup/SELF-HOST.md and docs/setup/ENTRA.md describe:
 // preflight, resource group, settings file, check, deploy (a VM through the
@@ -40,6 +49,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +70,12 @@ const (
 	instanceUpAzureDir    = "barkpark-azure"
 	instanceUpRepoURL     = "https://github.com/FRIKKern/barkpark.git"
 	instanceUpLatestImage = "ghcr.io/frikkern/barkpark:latest"
+	// instanceUpVMImage is Ubuntu 24.04 LTS. The URN works on every az
+	// version, unlike the Ubuntu2404 alias.
+	instanceUpVMImage = "Canonical:ubuntu-24_04-lts:server:latest"
+	// instanceUpVMSecret holds the client secret on the VM when up uses an
+	// existing app registration (--entra-app-id).
+	instanceUpVMSecret = "/etc/barkpark/entra-client-secret"
 )
 
 // instanceUpState is the state file. It never holds a secret.
@@ -83,6 +99,12 @@ type instanceUpState struct {
 	DiskGB        string            `json:"disk_gb,omitempty"`
 	AlertEmail    string            `json:"alert_email,omitempty"`
 	SSHKey        string            `json:"ssh_key,omitempty"`
+	VMName        string            `json:"vm_name,omitempty"`
+	SubnetID      string            `json:"subnet_id,omitempty"`
+	PublicIP      string            `json:"public_ip,omitempty"`
+	EntraAppID    string            `json:"entra_app_id,omitempty"`
+	AssignID      bool              `json:"assign_identity,omitempty"`
+	EntraSSH      bool              `json:"entra_ssh,omitempty"`
 	Subscription  string            `json:"subscription,omitempty"`
 	Tenant        string            `json:"tenant,omitempty"`
 	Done          map[string]string `json:"done"`
@@ -273,12 +295,12 @@ type instanceUpStep struct {
 }
 
 func runInstanceUp(out *writer, g globals, args []string) int {
-	const usage = "bp instance up --azure --path vm|containerapps --resource-group <rg> --owner <upn> [--host <dns label or host>] [--breakglass <email>] [--image <ref> | --from-source <git ref>] [--region <r>] [--org <slug>] [--state <file>] [--use]"
+	const usage = "bp instance up --azure --path vm|containerapps --resource-group <rg> --owner <upn> [--host <dns label or host>] [--breakglass <email>] [--image <ref> | --from-source <git ref>] [--region <r>] [--org <slug>] [--state <file>] [--use] [--size <vm size>] [--disk-sku <sku>] [--disk-gb <n>] [--vm-name <name>] [--subnet-id <id>] [--public-ip <name>] [--entra-app-id <appId>] [--assign-identity] [--entra-ssh]"
 	a, err := parseHzArgs(args, []string{
 		"path", "resource-group", "host", "owner", "breakglass", "image", "from-source", "region",
 		"org", "org-name", "env-file", "state", "studio-origin", "size", "postgres-sku",
-		"disk-sku", "disk-gb", "alert-email", "ssh-key",
-	}, []string{"azure", "use"}, usage)
+		"disk-sku", "disk-gb", "alert-email", "ssh-key", "vm-name", "subnet-id", "public-ip", "entra-app-id",
+	}, []string{"azure", "use", "assign-identity", "entra-ssh"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -310,7 +332,7 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	if err := u.save(); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	steps := instanceUpSteps(st.Path)
+	steps := instanceUpSteps(st)
 	for i, s := range steps {
 		// A title names the host once up knows it.
 		title := s.title
@@ -348,8 +370,17 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
-// instanceUpSteps lists the steps for a path, in order.
-func instanceUpSteps(path string) []instanceUpStep {
+// instanceUpSteps lists the steps for a run, in order.
+func instanceUpSteps(st *instanceUpState) []instanceUpStep {
+	path := st.Path
+	vmTitle := "create the VM and open ports 80 and 443"
+	if st.SubnetID != "" {
+		vmTitle = "create the VM in the given subnet; its network security group decides the ports"
+	}
+	entraTitle := "register the Entra app and owners group"
+	if st.EntraAppID != "" {
+		entraTitle = "add a client secret to the Entra app " + st.EntraAppID + " and put it on the VM"
+	}
 	steps := []instanceUpStep{
 		{"preflight", "check az, the subscription, resource providers and quota", stepUpPreflight},
 		{"group", "create the resource group", stepUpGroup},
@@ -359,7 +390,7 @@ func instanceUpSteps(path string) []instanceUpStep {
 	if path == instanceTargetVM {
 		steps = append(steps,
 			instanceUpStep{"ssh-key", "make the ssh key", stepUpSSHKey},
-			instanceUpStep{"vm", "create the VM and open ports 80 and 443", stepUpVM},
+			instanceUpStep{"vm", vmTitle, stepUpVM},
 			instanceUpStep{"deploy", "run deploy.sh on the VM", stepUpDeployVM},
 		)
 	} else {
@@ -370,7 +401,7 @@ func instanceUpSteps(path string) []instanceUpStep {
 	}
 	return append(steps,
 		instanceUpStep{"ready", "wait for https://<host>/readyz", stepUpReady},
-		instanceUpStep{"entra", "register the Entra app and owners group", stepUpEntra},
+		instanceUpStep{"entra", entraTitle, stepUpEntra},
 		instanceUpStep{"connect", "connect bp and the organization's Entra sign-in", stepUpConnect},
 		instanceUpStep{"verify", "check the running instance", stepUpVerify},
 	)
@@ -402,11 +433,16 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 		{&st.StudioOrigin, "studio-origin", false}, {&st.Size, "size", false}, {&st.PostgresSku, "postgres-sku", false},
 		{&st.DiskSku, "disk-sku", false}, {&st.DiskGB, "disk-gb", false},
 		{&st.AlertEmail, "alert-email", false}, {&st.SSHKey, "ssh-key", false},
+		{&st.VMName, "vm-name", true}, {&st.SubnetID, "subnet-id", true}, {&st.PublicIP, "public-ip", true},
+		{&st.EntraAppID, "entra-app-id", true},
 	} {
 		if err := set(f.field, f.flag, f.identity); err != nil {
 			return err
 		}
 	}
+	// A bool flag stays on for the reruns of a run that set it.
+	st.AssignID = st.AssignID || a.bools["assign-identity"]
+	st.EntraSSH = st.EntraSSH || a.bools["entra-ssh"]
 	switch st.Path {
 	case instanceTargetVM, instanceTargetContainerApps:
 	case "":
@@ -422,6 +458,26 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 	}
 	if (st.DiskSku != "" || st.DiskGB != "") && st.Path != instanceTargetVM {
 		return fmt.Errorf("--disk-sku and --disk-gb set the VM's OS disk and need --path vm")
+	}
+	if st.Path != instanceTargetVM {
+		for flag, set := range map[string]bool{"--subnet-id": st.SubnetID != "", "--public-ip": st.PublicIP != "",
+			"--vm-name": st.VMName != "", "--entra-app-id": st.EntraAppID != "", "--assign-identity": st.AssignID, "--entra-ssh": st.EntraSSH} {
+			if set {
+				return fmt.Errorf("%s needs --path vm. On Container Apps, main.bicep makes the network and the Entra app", flag)
+			}
+		}
+	}
+	if st.SubnetID != "" && !instanceUpSubnetID.MatchString(st.SubnetID) {
+		return fmt.Errorf("--subnet-id is %q; give the subnet's full resource id, /subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>", st.SubnetID)
+	}
+	if st.PublicIP != "" && !instanceUpAzureName.MatchString(st.PublicIP) {
+		return fmt.Errorf("--public-ip is %q; give the name of a public IP address resource in the resource group", st.PublicIP)
+	}
+	if st.VMName != "" && !instanceUpAzureName.MatchString(st.VMName) {
+		return fmt.Errorf("--vm-name is %q; use letters, digits, dots, dashes and underscores", st.VMName)
+	}
+	if st.EntraAppID != "" && !instanceUpGUID.MatchString(st.EntraAppID) {
+		return fmt.Errorf("--entra-app-id is %q; give the app registration's application (client) id, a GUID", st.EntraAppID)
 	}
 	if st.DiskGB != "" {
 		if n, err := strconv.Atoi(st.DiskGB); err != nil || n < 30 || n > 4095 {
@@ -441,7 +497,9 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 	if st.Path == instanceTargetContainerApps && h != "" && !strings.Contains(h, ".") {
 		return fmt.Errorf("--host on --path containerapps is your own domain, such as cms.example.com; leave it out for the Container Apps address")
 	}
-	if st.Region == "" {
+	// With --subnet-id the region comes from the subnet's VNet in preflight,
+	// since a NIC must be in its VNet's region.
+	if st.Region == "" && st.SubnetID == "" {
 		st.Region = instanceUpVMRegion
 		if st.Path == instanceTargetContainerApps {
 			st.Region = instanceUpACARegion
@@ -461,6 +519,9 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 	}
 	if st.Path == instanceTargetVM && st.Size == "" {
 		st.Size = instanceUpDefaultVM
+	}
+	if st.Path == instanceTargetVM && st.VMName == "" {
+		st.VMName = instanceUpVMName
 	}
 	if st.Path == instanceTargetVM && st.SSHKey == "" {
 		home, err := os.UserHomeDir()
@@ -491,6 +552,21 @@ func (st *instanceUpState) host() string {
 		return l + "." + st.Region + ".cloudapp.azure.com"
 	}
 	return st.HostArg
+}
+
+var (
+	instanceUpSubnetID  = regexp.MustCompile(`(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+/subnets/[^/]+$`)
+	instanceUpAzureName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
+	instanceUpGUID      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
+
+// vmName is the VM's name: --vm-name, or barkpark for a state file from
+// before the flag.
+func (st *instanceUpState) vmName() string {
+	if st.VMName != "" {
+		return st.VMName
+	}
+	return instanceUpVMName
 }
 
 func loadInstanceUpState(path string) (*instanceUpState, error) {
@@ -584,6 +660,11 @@ func (u *instanceUp) printNext() {
 	}
 	o.outf("3. Then allow only SSO: bp org auth-methods %s sso --yes", st.Org)
 	o.outf("4. Remove BARKPARK_BOOTSTRAP_OWNER_EMAIL from %s once the owner has signed in.", st.EnvFile)
+	if st.EntraAppID != "" {
+		o.outf("Keep %s in your password manager. The client secret is only in %s on the VM and in Barkpark.", st.EnvFile, instanceUpVMSecret)
+		o.outf("%s records the run without secrets.", u.statePath)
+		return
+	}
 	o.outf("Keep %s and %s in your password manager. %s records the run without secrets.",
 		st.EnvFile, filepath.Join(filepath.Dir(st.EnvFile), instanceUpSecretFile), u.statePath)
 }

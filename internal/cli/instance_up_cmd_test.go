@@ -290,7 +290,7 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 		}
 	}
 	st := readUpState(t)
-	if len(st.Done) != len(instanceUpSteps("vm")) || st.Out.IP != "20.1.2.3" || st.Out.AppID != "app-1" {
+	if len(st.Done) != len(instanceUpSteps(&instanceUpState{Path: "vm"})) || st.Out.IP != "20.1.2.3" || st.Out.AppID != "app-1" {
 		t.Errorf("state = %+v", st)
 	}
 	raw, _ := os.ReadFile(instanceUpStateFile)
