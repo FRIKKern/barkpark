@@ -183,6 +183,13 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
     assert content["seo"] == %{"by" => strong("bea")}
   end
 
+  test "a publish whose scope names no workspace strengthens nothing", %{opts: opts} do
+    draft!("sop-noscope", %{"editor" => waiting("ann")}, opts)
+    {:ok, _} = Content.publish_document("sop-noscope", @post, @ds, [])
+
+    assert published_content("sop-noscope", opts)["editor"] == waiting("ann")
+  end
+
   test "a published target with the same id in another workspace does not count",
        %{opts: opts} do
     other_ws = TenancyFixtures.create_workspace!()

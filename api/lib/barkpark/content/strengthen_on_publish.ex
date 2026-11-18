@@ -24,6 +24,25 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
   All targets in one document are looked up in ONE query. A document with no
   waiting reference runs no query at all.
+
+  ## Whose targets count
+
+  The tenant scope is the one `ReferenceIntegrity` reads with, so the two
+  answers about one reference never disagree: a request workspace (and its
+  project, when the request names one) scopes the read; `:shared_only` reads
+  the shared layer (`workspace_id IS NULL`); a publish whose opts name no
+  workspace strengthens nothing. Failing closed leaves the reference weak,
+  which is what it was before this module existed.
+
+  ## When the target is read
+
+  Once, at the publish door, before the publish transaction opens, next to
+  the other door gates. The read takes no lock. A concurrent unpublish or
+  delete of the target can commit after it, and the publish then stores a
+  strong reference to a target that has no published version. That is the
+  state an unpublish of a strongly referenced target already produces (the
+  unpublish door does not check referrers), and the delete door's referrer
+  check reads unlocked in the same way.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -37,8 +56,7 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
   @doc """
   `draft` with every waiting reference whose target is published made strong.
-  `opts` carries the publish's scope (`:workspace_id`, `:project_id`); when it
-  names no workspace, the draft's own workspace is used.
+  `opts` carries the publish's scope (`:workspace_id`, `:project_id`).
   """
   @spec strengthen(Document.t(), String.t(), keyword()) :: Document.t()
   def strengthen(%Document{content: content} = draft, dataset, opts)
@@ -48,7 +66,7 @@ defmodule Barkpark.Content.StrengthenOnPublish do
         draft
 
       refs ->
-        published = published_ids(refs, dataset, scope(draft, opts))
+        published = published_ids(refs, dataset, opts)
 
         if MapSet.size(published) == 0,
           do: draft,
@@ -92,35 +110,36 @@ defmodule Barkpark.Content.StrengthenOnPublish do
   # The published rows among `refs`, in the publish's dataset and tenant. A row
   # whose id has no `drafts.` prefix IS the published version, so a `drafts.`
   # ref is never looked up.
-  defp published_ids(refs, dataset, {workspace_id, project_id}) do
+  defp published_ids(refs, dataset, opts) do
     ids = Enum.reject(refs, &String.starts_with?(&1, "drafts."))
 
-    if ids == [] do
-      MapSet.new()
-    else
-      from(d in Document,
-        where: d.dataset == ^dataset and d.doc_id in ^ids,
-        select: d.doc_id
-      )
-      |> scope_to_workspace(workspace_id, project_id)
-      |> Repo.all()
-      |> MapSet.new()
+    case {ids, scope(opts)} do
+      {[], _} ->
+        MapSet.new()
+
+      {_, :none} ->
+        MapSet.new()
+
+      {ids, {workspace_id, project_id}} ->
+        from(d in Document,
+          where: d.dataset == ^dataset and d.doc_id in ^ids,
+          select: d.doc_id
+        )
+        |> scope_to_workspace(workspace_id, project_id)
+        |> Repo.all()
+        |> MapSet.new()
     end
   end
 
-  # The tenant the published row lands in. The request scope first; a caller
-  # with no workspace (an internal publish) uses the draft's own. A document
-  # with neither lives in the shared layer, and so must its targets:
-  # `:shared_only` reads `workspace_id IS NULL`, never every tenant.
-  defp scope(%Document{workspace_id: draft_ws}, opts) do
+  # `ReferenceIntegrity.referrers/3`'s scope: fail closed with no workspace.
+  defp scope(opts) do
     project_id = Keyword.get(opts, :project_id)
 
     case Keyword.get(opts, :workspace_id) do
       ws when is_binary(ws) and is_binary(project_id) -> {ws, project_id}
       ws when is_binary(ws) -> {ws, nil}
       :shared_only -> {:shared_only, nil}
-      _ when is_binary(draft_ws) -> {draft_ws, nil}
-      _ -> {:shared_only, nil}
+      _ -> :none
     end
   end
 end
