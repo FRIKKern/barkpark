@@ -412,7 +412,7 @@ defmodule Barkpark.StudioChat.Recorder do
          cloud_sandbox_id,
          owner_workspace_id
        ) do
-    %{
+    Barkpark.StudioChat.Recorder.RestoredAsks.restore(%{
       session_id: id,
       provider: provider,
       session: session,
@@ -547,7 +547,7 @@ defmodule Barkpark.StudioChat.Recorder do
       # Doing strip, seeds from that existing read.)
       touched_tasks: MapSet.new(),
       seen_task_events: MapSet.new()
-    }
+    })
   end
 
   # Seed the rail from the persisted column (charter D47) so a Recorder that
@@ -659,7 +659,7 @@ defmodule Barkpark.StudioChat.Recorder do
     state =
       state.session_id
       |> Barkpark.ChatHosts.replay_unprojected_by_lease()
-      |> Enum.reduce(Barkpark.StudioChat.Recorder.RestoredAsks.restore(state), fn
+      |> Enum.reduce(state, fn
         {event_id, %Event{} = event, lease_id}, acc ->
           acc = project_host_event(acc, event, lease_id)
           Barkpark.ChatHosts.mark_projected(event_id)

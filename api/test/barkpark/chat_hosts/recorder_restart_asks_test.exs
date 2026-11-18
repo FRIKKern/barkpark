@@ -15,7 +15,7 @@ defmodule Barkpark.ChatHosts.RecorderRestartAsksTest do
   alias Barkpark.ChatHosts
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
-  alias Barkpark.StudioChat.Runtime.Command
+  alias Barkpark.StudioChat.Runtime.{Command, Event}
   alias Barkpark.Tenancy
 
   @fixture Path.expand("../../support/fixtures/chat_host_go_capabilities.json", __DIR__)
@@ -112,6 +112,35 @@ defmodule Barkpark.ChatHosts.RecorderRestartAsksTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  # task-e1502531570f43a8: the Recorder's `:via` name is registered before its
+  # init/1 runs, so ChatHosts can project a live close to it during init, and
+  # that call is handled before the replay message init sends itself. The
+  # callbacks are driven here in that mailbox order.
+  test "a close projected before the restart replay is handled still cancels the restored ask",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-5"))
+    stop_recorder(sid)
+
+    {:ok, state} = Recorder.init(recorder_opts(ctx))
+    on_exit(fn -> Barkpark.StudioChat.RuntimeAdmission.release(state.admission) end)
+
+    close = %Event{provider: "claude", session_id: sid, kind: :turn_completed}
+    from = {self(), make_ref()}
+
+    {:reply, :ok, state} =
+      Recorder.handle_call({:project_runtime_event, close, a.lease_id}, from, state)
+
+    {:noreply, state} = Recorder.handle_info(:replay_registered_host_events, state)
+
+    meta = ask_meta(sid)
+    assert meta["approval_status"] == "canceled", "the asking run's close came; its card is done"
+    assert meta["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+    refute state.runtime_turn_open?, "the ended turn must not be restored as open"
+  end
+
   defp restart_recorder(%{sid: sid} = ctx) do
     stop_recorder(sid)
     start_recorder(ctx)
@@ -127,20 +156,22 @@ defmodule Barkpark.ChatHosts.RecorderRestartAsksTest do
   # The Recorder a registered-host send starts (ChatController), so its
   # runtime is the host's, not a local process. A synchronous call after
   # `ensure` waits out the init-time replay.
-  defp start_recorder(%{sid: sid, host: host, ws: ws}) do
-    {:ok, pid} =
-      Recorder.ensure(%{
-        session_id: sid,
-        provider: "claude",
-        execution_target: "registered_host",
-        execution_host_id: host.id,
-        workspace_id: ws.id,
-        cwd: System.tmp_dir!(),
-        mode: "plan",
-        resume: false
-      })
-
+  defp start_recorder(ctx) do
+    {:ok, pid} = Recorder.ensure(recorder_opts(ctx))
     :sys.get_state(pid)
+  end
+
+  defp recorder_opts(%{sid: sid, host: host, ws: ws}) do
+    %{
+      session_id: sid,
+      provider: "claude",
+      execution_target: "registered_host",
+      execution_host_id: host.id,
+      workspace_id: ws.id,
+      cwd: System.tmp_dir!(),
+      mode: "plan",
+      resume: false
+    }
   end
 
   defp ask_meta(sid) do
