@@ -59,10 +59,17 @@ and the base styles can style it.**
   outline, column rule, shadows (box, text, drop), decoration, emphasis, text stroke, caret, accent,
   scrollbar, SVG fill, stroke, stop, flood and lighting colours. Each run of text is measured in the
   colour it is filled with, at the opacity it is drawn at, against the ground actually behind it.
+- Read where the page cannot reach: every reading the lights rest on (computed styles, boxes, text,
+  pseudo-elements, the paint trace, contrast, focus, the phone width) runs in an isolated world over
+  CDP. It shares the DOM with the page but none of its script, so a demo that patches
+  `getComputedStyle`, a prototype or `querySelector` changes nothing the check reads. press.mjs runs
+  in a second isolated world with its own copy of the helpers, so it cannot reach the check either.
+  Keys, clicks and the screen-reader tree go through the browser's own CDP domains.
 - Styled only by part.css: `example.html` is markup only (no `<style>`, `<script>`, `style=` or
   `on*=`), and `demo.mjs` wires behaviour only. Its lint refuses inline styles, style attributes, new
-  `<style>`/`<link>`, stylesheet edits, adopted sheets, script animations, classes part.css does not
-  declare, and reaching into the page or the check, naming the line. At run time a guard, reading from
+  `<style>`/`<link>`, stylesheet edits, adopted sheets, script animations and classes part.css does
+  not declare, naming the line. (Patching the page's globals is not refused: the check never reads
+  through them.) At run time a guard, reading from
   an isolated world the page cannot touch, compares the page with the same build run without any demo:
   after the demo has run, after every press step and at the end of each light's run, no element in a
   stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
@@ -72,4 +79,7 @@ The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) 
 The lights are proved on base and say so; on any other surface they show grey, "not proved on
 <surface>", never on. The check also measures text and the control edge on the other four surfaces
 and records them per surface in `proof.json`; a short one prints as a "waiting on the sheet" line and
-turns no light off until its `hard` switch is set. It will prove every surface.
+turns no light off until its `hard` switch is set. The control edge is hard on every surface (the
+sheet holds `--ui-input` at 3:1 or more), so an edge under 3:1 anywhere turns "every skin" off. Text on
+the other surfaces still waits. For each surface the check also records, as numbers only, a disabled
+control's fill against its ground and against the primary fill. It will prove every surface.
