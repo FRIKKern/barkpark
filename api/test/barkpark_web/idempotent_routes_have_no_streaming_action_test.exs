@@ -34,13 +34,19 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
       alias, or bare to a name an `import`ed module defines) is followed ONE
       level: the called function and that module's own local calls from it.
       An import's `only:`/`except:` is respected, and a variable is never a
-      call.
+      call, though a bare name piped into (`conn |> reply`) is one.
 
-  Known greens, a streaming call this scan does not see:
+  Known greens, a streaming call this scan does not see (each pinned by a
+  `KNOWN GREEN` test below where a fixture can show it):
 
     * a helper's own call into a third module (one level only);
     * `apply/3`, or any call whose module or function is a runtime value;
-    * a `defdelegate` in a helper: its target is not followed;
+    * a helper reached through an alias built from `__MODULE__`
+      (`alias __MODULE__.Inner`, then `Inner.go(conn)`): the name resolves to
+      no module, so the call is skipped;
+    * a `defdelegate`, in a helper or in the controller itself (an action
+      written as `defdelegate create(conn), to: Helper`): its target is not
+      followed;
     * a function a `use` injects (`use BarkparkWeb, :controller`): only what
       the file itself writes is read.
 
@@ -277,6 +283,10 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
         when is_atom(name) and is_atom(ctx) and is_integer(arity) ->
           {node, imported(name, imports, defs) ++ acc}
 
+        # `conn |> reply`: the pipe makes a call of a variable-shaped name.
+        {:|>, _, [_piped, {name, _, ctx}]} = node, acc when is_atom(name) and is_atom(ctx) ->
+          {node, imported(name, imports, defs) ++ acc}
+
         {name, _, args} = node, acc when is_atom(name) and is_list(args) ->
           {node, imported(name, imports, defs) ++ acc}
 
@@ -505,6 +515,41 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     assert action_streams?(ast, :create_message)
   end
 
+  # `conn |> reply` with no parens is a call to `reply/1`: the pipe makes it
+  # one. The AST holds a variable-shaped `{:reply, _, nil}` on the pipe's
+  # right, so a walk that never counts a variable as a call passes it.
+  @tag :tmp_dir
+  test "MUTANT: an IMPORTED streaming helper piped into with no parens reds",
+       %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantBarePipeHelper")
+
+    assert action_streams?(
+             chat_controller_with("import #{inspect(helper)}", "conn |> reply"),
+             :create_message
+           ),
+           "create_message pipes into the imported reply/1 with no parens; it streams"
+
+    path = Path.join(dir, "mutant_bare_pipe_controller.ex")
+
+    File.write!(path, """
+    defmodule Barkpark.Test.MutantBarePipeController do
+      import #{inspect(helper)}
+      def create(conn, _params), do: conn |> reply
+    end
+    """)
+
+    Code.compile_file(path)
+
+    assert streaming_module?(Barkpark.Test.MutantBarePipeController),
+           "a router-mounted controller that pipes into an imported streaming helper streams"
+
+    refute action_streams?(
+             chat_controller_with("import #{inspect(helper)}", "conn |> harmless"),
+             :create_message
+           ),
+           "a bare pipe into the helper's harmless/1 does not stream"
+  end
+
   @tag :tmp_dir
   test "MUTANT: a helper function that does not stream stays green", %{tmp_dir: dir} do
     helper = compile_mutant_helper!(dir, "MutantHarmlessHelper")
@@ -549,24 +594,67 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   end
 
   # `alias __MODULE__.Inner` resolves to no module the scan can name: it is
-  # skipped, never a crash that reds an unrelated PR.
+  # skipped, never a crash that reds an unrelated PR. That makes it a KNOWN
+  # GREEN, listed in the moduledoc: `Inner.go/1` streams here and the scan
+  # does not see it. If the scan learns to resolve it, this test reds; move
+  # the moduledoc line then.
   @tag :tmp_dir
-  test "a controller that aliases __MODULE__.Inner scans without crashing", %{tmp_dir: dir} do
-    path = Path.join(dir, "mutant_inner_alias_controller.ex")
+  test "KNOWN GREEN: a helper reached through alias __MODULE__.Inner is skipped",
+       %{tmp_dir: dir} do
+    # Inner lives in a file of its own: a nested `defmodule Inner` in the
+    # controller's file would put its send_chunked/2 in the file the
+    # module-level read takes whole.
+    for {file, source} <- [
+          {"mutant_inner_alias_inner.ex",
+           """
+           defmodule Barkpark.Test.MutantInnerAliasController.Inner do
+             def go(conn), do: Plug.Conn.send_chunked(conn, 200)
+           end
+           """},
+          {"mutant_inner_alias_controller.ex",
+           """
+           defmodule Barkpark.Test.MutantInnerAliasController do
+             alias __MODULE__.Inner
+             def create(conn, _params), do: Inner.go(conn)
+           end
+           """}
+        ] do
+      path = Path.join(dir, file)
+      File.write!(path, source)
+      Code.compile_file(path)
+    end
+
+    refute streaming_module?(Barkpark.Test.MutantInnerAliasController)
+
+    {:ok, ast} =
+      dir
+      |> Path.join("mutant_inner_alias_controller.ex")
+      |> File.read!()
+      |> Code.string_to_quoted()
+
+    refute action_streams?(ast, :create)
+  end
+
+  # A controller whose action is its own `defdelegate` has no body to walk, and
+  # the delegate's target is not followed: a KNOWN GREEN, listed in the
+  # moduledoc. If the scan learns to follow it, this test reds; move the line.
+  @tag :tmp_dir
+  test "KNOWN GREEN: a controller action written as defdelegate is not followed",
+       %{tmp_dir: dir} do
+    helper = compile_mutant_helper!(dir, "MutantDelegateTargetHelper")
+    path = Path.join(dir, "mutant_delegate_controller.ex")
 
     File.write!(path, """
-    defmodule Barkpark.Test.MutantInnerAliasController do
-      defmodule Inner do
-        def go(conn), do: conn
-      end
-
-      alias __MODULE__.Inner
-      def create(conn, _params), do: Inner.go(conn)
+    defmodule Barkpark.Test.MutantDelegateController do
+      defdelegate create(conn), to: #{inspect(helper)}, as: :reply
     end
     """)
 
     Code.compile_file(path)
-    refute streaming_module?(Barkpark.Test.MutantInnerAliasController)
+    refute streaming_module?(Barkpark.Test.MutantDelegateController)
+
+    {:ok, ast} = path |> File.read!() |> Code.string_to_quoted()
+    refute action_streams?(ast, :create)
   end
 
   @tag :tmp_dir
