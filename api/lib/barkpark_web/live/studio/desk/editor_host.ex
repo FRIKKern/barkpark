@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
+  alias BarkparkWeb.Studio.Desk.ReviewChanges
   alias BarkparkWeb.Studio.Desk.RevisionView
   alias BarkparkWeb.Studio.Desk.ShareMenu
   alias BarkparkWeb.Studio.Desk.SlugInUse
@@ -76,7 +77,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
        desk_history: nil,
        desk_revision: nil,
        desk_gone_latest: nil,
-       desk_new: nil
+       desk_new: nil,
+       desk_published: nil,
+       desk_changes: nil,
+       desk_review: nil
      )
      # The open Incoming references panel reads again when someone saves.
      |> attach_hook(:desk_incoming_refs, :handle_info, &on_info/2)
@@ -140,7 +144,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       desk_history: nil,
       desk_revision: nil,
       desk_gone_latest: nil,
-      desk_new: nil
+      desk_new: nil,
+      desk_published: nil,
+      desk_changes: nil,
+      desk_review: nil
     )
     |> PostIdentity.close_dialogs()
     |> DocDialog.follow()
@@ -188,9 +195,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   def edit(socket, _stale_target), do: {:noreply, socket}
 
   # What the URL opens beside the form or in its place: the Incoming
-  # references and History inspectors, and an old revision (`rev`).
+  # references and History inspectors, an old revision (`rev`), and what
+  # the draft changed (`ReviewChanges`: its change bars and its tab).
   defp load_inspectors(socket),
-    do: socket |> IncomingRefs.load() |> HistoryPanel.load() |> RevisionView.load()
+    do:
+      socket
+      |> IncomingRefs.load()
+      |> HistoryPanel.load()
+      |> RevisionView.load()
+      |> ReviewChanges.follow()
 
   # The document's references, as links that open the next pane: the
   # Studio's reference fields pick a target, they do not follow one. The
@@ -413,6 +426,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> form_only()
       |> DocDialog.follow()
       |> HistoryPanel.follow()
+      |> ReviewChanges.follow()
       |> NewDoc.settle()
       |> SlugInUse.refresh()
       |> assign(:panes, [])
@@ -929,6 +943,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           base={@base}
           menu_button={"#{@view.id}-actions-button"}
           perspective={Panes.perspective(assigns[:desk_uri])}
+          review={assigns[:desk_review]}
         />
         <%!-- The Validation inspector, in the same place beside the form
               (`ValidationPanel`): one `inspect` in the URL, so one of the

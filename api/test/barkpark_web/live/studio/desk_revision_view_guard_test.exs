@@ -206,7 +206,7 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       assert revision =~ "Seed published"
     end
 
-    test "Paste field, a label, the editor mode and Duplicate write nothing", c do
+    test "Paste field, Revert, a label, the editor mode and Duplicate write nothing", c do
       d =
         doc!(
           [%{"name" => "summary", "title" => "Summary", "type" => "text"}],
@@ -232,6 +232,10 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
         "desk-field-paste",
         Map.merge(own_mark(d), %{"field" => "title", "clip" => clip})
       )
+
+      # Review changes' Revert of one field, and of all.
+      for params <- [%{"field" => "title"}, %{"field" => "summary"}, %{"all" => "true"}],
+          do: render_hook(view, "desk-field-revert", Map.merge(own_mark(d), params))
 
       for {event, params} <- [
             {"sidebar-label-add", %{"value" => "x"}},
