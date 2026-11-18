@@ -907,6 +907,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   screen reader jumps to them like any other region (task-6e6de3764438c5cf).
   Studio renders no other banner.
   """
+  attr :class, :any, default: nil, doc: "a class beside `studio-bar` (the desk's `navbar`)"
   slot :brand
   slot :tabs
   slot :actions
@@ -914,7 +915,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def studio_topbar(assigns) do
     ~H"""
     <div
-      class="studio-bar"
+      class={if @class, do: "studio-bar #{@class}", else: "studio-bar"}
       id="studio-bar"
       role="banner"
       phx-hook="PressAnswer"

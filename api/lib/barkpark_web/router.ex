@@ -2390,6 +2390,15 @@ defmodule BarkparkWeb.Router do
     get("/embed/canvas", EmbedController, :canvas)
   end
 
+  # The desk navbar's "New version available" (`Desk.HelpMenu`) asks which
+  # build the server runs, at the TanStack Studio's `GET /api/version`: the
+  # commit `/v1/version` already publishes, as `build`. Same posture as it.
+  scope "/api", BarkparkWeb do
+    pipe_through(:api_unlimited)
+
+    get("/version", VersionController, :build)
+  end
+
   # ── Anonymous account creation — its OWN, tighter bucket ────────────────
   # POST /v1/auth/register is an UNAUTHENTICATED write that mails a third party
   # (a fresh address gets a confirmation mail; an existing one re-mails the

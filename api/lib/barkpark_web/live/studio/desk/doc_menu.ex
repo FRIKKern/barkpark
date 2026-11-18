@@ -164,8 +164,9 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   # Two places draw it, with Sanity's two names: the header's "Show document
   # actions" (DocHeaderMenu) and the footer's "Open document actions"
   # (DocumentPane). `icon-btn` and `data-tip` are the names Sanity's specs
-  # count header icon buttons by (previews-tips J57), so only the header's
-  # carries `icon-btn`; no style rides it here. One edit pane is open at a
+  # count icon buttons by (previews-tips J57 counts the header's); the
+  # footer's sits in TanStack's `.menu-wrap` as `.icon-btn` too (J46 measures
+  # it). No style rides either class here. One edit pane is open at a
   # time, so one anchor name per place will do; a pane id
   # (`desk-pane-2-doc:post;x`) is not a CSS name. The footer's menu opens
   # upwards.
@@ -178,7 +179,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
     assigns = assign(assigns, place(assigns.place))
 
     ~H"""
-    <div :if={@items != []} class="dk-doc-menu">
+    <div :if={@items != []} class={["dk-doc-menu", @wrap_class]}>
       <button
         type="button"
         id={"#{@id}-button"}
@@ -270,6 +271,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp place(:header),
     do: %{
       label: gettext("Show document actions"),
+      wrap_class: nil,
       button_class: "dk-doc-menu-button icon-btn",
       anchor: "--dk-doc-menu",
       at: "top: anchor(bottom)",
@@ -279,7 +281,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp place(:footer),
     do: %{
       label: gettext("Open document actions"),
-      button_class: "dk-doc-menu-button",
+      wrap_class: "menu-wrap",
+      button_class: "dk-doc-menu-button icon-btn",
       anchor: "--dk-doc-menu-footer",
       at: "bottom: anchor(top)",
       margin: "margin: 0 0 4px"

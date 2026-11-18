@@ -65,4 +65,15 @@ defmodule BarkparkWeb.VersionController do
   def index(conn, _params) do
     json(conn, %{version: BuildInfo.version(), commit: BuildInfo.commit()})
   end
+
+  @doc """
+  `GET /api/version`: the same commit as `build`, the one key the desk
+  navbar's "New version available" reads (`Desk.HelpMenu`, as the TanStack
+  Studio's). It discloses nothing `index/2` does not.
+  """
+  def build(conn, _params) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> json(%{build: BuildInfo.commit()})
+  end
 end
